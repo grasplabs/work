@@ -46,7 +46,7 @@ import {
 import type { Episode } from "./attention.ts";
 import { InventoryError } from "./inventory.ts";
 import {
-  newestFittingRelease,
+  newestRelease,
   ProvisionOperationError,
   provisionOf,
 } from "./operation.ts";
@@ -84,12 +84,11 @@ const isDue = ({ attempts, lastAttemptAt }: Episode, now: Date): boolean => {
 };
 
 /**
- * The newest release that fits client `clientId` among those built after
- * its operation's recorded one (`newestFittingRelease`, the one ordering
- * of releases: when built, then id); null when none newer fits, or it has
- * no operation.
+ * The newest release built after client `clientId`'s operation's recorded
+ * one (`newestRelease`, the one ordering of releases: when built, then
+ * id); null when there is none, or it has no operation.
  */
-const newerFittingRelease = async (
+const newerRelease = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<string | null> => {
@@ -102,16 +101,14 @@ const newerFittingRelease = async (
     .from(releases)
     .where(eq(releases.id, operation.releaseId))
     .get();
-  return recorded === undefined
-    ? null
-    : await newestFittingRelease(db, clientId, recorded);
+  return recorded === undefined ? null : await newestRelease(db, recorded);
 };
 
 /**
  * Resumes client `clientId`'s provisioning as `actor`, as staff resume it
  * from Setup: where it is placed or in the automatic
- * destination, on the newest release that fits it (or the one its
- * operation runs, when none newer does). Returns the attempt's id;
+ * destination, on the newest release (or the one its operation runs,
+ * when none is newer). Returns the attempt's id;
  * refused as `placeAndProvision` refuses, `already_running` while an
  * attempt is still going.
  */
@@ -122,7 +119,7 @@ export const resumeProvisioning = async (
 ): Promise<string> =>
   await placeAndProvision(env, actor, {
     clientId,
-    // The newest release that fits, else the one it runs: as a retry
+    // The newest release, else the one it runs: as a retry
     // from Setup picks it (src/hosting/placement.ts).
     releaseId: null,
     destinationId: null,
@@ -165,9 +162,7 @@ const causeOf = async (
   if (cause !== "release") {
     return cause;
   }
-  return (await newerFittingRelease(db, clientId)) === null
-    ? "release"
-    : "retry";
+  return (await newerRelease(db, clientId)) === null ? "release" : "retry";
 };
 
 /** Looks at client `clientId` once at `now`, and resumes it or tells staff as it needs. */

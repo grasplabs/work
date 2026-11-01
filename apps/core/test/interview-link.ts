@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import {
   factRevision,
@@ -13,23 +12,25 @@ import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // What the tests of an interview's endpoints share (interview-turn.test.ts,
 // interview-story.test.ts): someone's link, opened on a device, and the
-// deployment's gateway with Stephen's two models, faked behind the AI
-// binding.
+// organization's provider with Stephen's two models, faked behind connect
+// (test/model-provider.ts).
 
+/** The organization's default: both roles resolve to it while the rules let them. */
 export const quick = "anthropic/claude-sonnet-4-5";
+/** Its fallback. */
 export const careful = "anthropic/claude-opus-4-8";
 
-/** The deployment's gateway: Stephen's two models, both let take sensitive data. */
-export const gatewayConfig = {
-  gateway: "grasp-os-test",
-  models: [quick, careful],
-  roles: { quick, careful },
+/** The models the organization chose for these tests: its default first. */
+export const interviewModels = [quick, careful] as const;
+
+/** The deployment's rules: Stephen's two models, both let take sensitive data. */
+export const interviewRules = {
   sensitive: { models: [quick, careful], connections: [] },
 };
 
@@ -159,46 +160,40 @@ export const opened = async () => {
 };
 
 /** The model a request went to, by its id in pi's catalog. */
-export const modelOf = ({ body }: GatewayRequest): unknown =>
+export const modelOf = ({ body }: SentRequest): unknown =>
   requestModel.safeParse(body).data?.model;
 
-/** What `run` returns while the gateway answers each request as `respond` says, from those so far. */
+/**
+ * What `run` returns while the organization's provider answers each
+ * request as `respond` says, from those so far, under the interview's
+ * rules; once `run` is done, it answers none.
+ */
 export const answeringWith = async <T>(
   respond: (
-    requests: readonly GatewayRequest[]
-  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>,
+    requests: readonly SentRequest[]
+  ) => ProviderReply | undefined | Promise<ProviderReply | undefined>,
   run: () => Promise<T>
 ) => {
   const before = env.MODEL_GATEWAY;
-  const fake = answeringGateway(respond);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
+  let done = false;
+  const fake = await answeringProvider(
+    async (requests) => (done ? undefined : await respond(requests)),
+    { models: interviewModels }
+  );
+  env.MODEL_GATEWAY = interviewRules;
   try {
     return { requests: fake.requests, result: await run() };
   } finally {
+    done = true;
     env.MODEL_GATEWAY = before;
-    spy.mockRestore();
   }
 };
 
-/** What `run` returns while the gateway answers with `replies`. */
+/** What `run` returns while the organization's provider answers with `replies`. */
 export const answering = async <T>(
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   run: () => Promise<T>
-) => {
-  const before = env.MODEL_GATEWAY;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
-};
+) => await answeringWith(() => replies.shift(), run);
 
 /** What the onboarding counted of interviews for `model`: calls and tokens read. */
 export const countedFor = async (model: string) => {
@@ -217,8 +212,8 @@ export const countedFor = async (model: string) => {
  * a team to the brain itself, step by step, as the alarm would (`drawNext`,
  * `intakeNext`). Agreeing, deleting or drawing sets the alarm half a second
  * on, and on a slow runner it got there first: it drew outside the test's
- * faked gateway, so the drawing failed and waited a minute to be tried
- * again, or it took a gateway reply queued for the test's own drawing, or
+ * faked provider, so the drawing failed and waited a minute to be tried
+ * again, or it took a provider reply queued for the test's own drawing, or
  * its `model.call` landed amid the test's audit events, or it
  * gave the team to the brain before the test did. Deleting the alarm isn't
  * enough: the next agreement or drawing sets it again, and one already

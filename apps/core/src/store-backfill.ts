@@ -364,15 +364,14 @@ export const defineSchemaOnStore = async (
  * its defaulted fields are being filled in, `migration.backfill_failed`
  * (naming the record) while the backfill stays failed,
  * `migration.abandoned` once an admin abandoned it. A release without a
- * store passes. Answers whether its store switched to the release's
- * contract just now (`activate`, a ready migration taking over).
+ * store passes.
  */
 export const requireStoreSchemaActive = async (
   env: Env,
   app: AppId,
   version: number,
   { activate = false }: { activate?: boolean } = {}
-): Promise<boolean> => {
+): Promise<void> => {
   const bound = await drizzle(env.DB)
     .select({
       store: sdkResourceBindings.targetId,
@@ -388,7 +387,7 @@ export const requireStoreSchemaActive = async (
     )
     .get();
   if (bound === undefined) {
-    return false;
+    return;
   }
   const storeId = storeIdSchema.parse(bound.store);
   const consumer = { resourceId: app, resourceVersion: version };
@@ -396,10 +395,9 @@ export const requireStoreSchemaActive = async (
   if (status.state === "ready" && !activate) {
     // Its explicit migration is done: it may be made current, and takes
     // over only as it is (`activate`), once every other gate passed.
-    return false;
+    return;
   }
-  const switching = status.state === "ready";
-  if (switching) {
+  if (status.state === "ready") {
     // It takes over now, unless a write queued work meanwhile.
     status = await storeObject(env, storeId).activateReady(
       storeId,
@@ -408,7 +406,7 @@ export const requireStoreSchemaActive = async (
     );
   }
   if (status.state === "active") {
-    return switching;
+    return;
   }
   if (status.state === "abandoned") {
     throw migrationErrors.create("migration.abandoned");
@@ -432,7 +430,7 @@ export const requireStoreSchemaActive = async (
   // schema's own state refuses its release.
   const after = await schemaStatus(env, storeId, bound.schemaHash, consumer);
   if (after.state === "active") {
-    return false;
+    return;
   }
   if (after.state === "abandoned") {
     throw migrationErrors.create("migration.abandoned");

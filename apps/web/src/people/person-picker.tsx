@@ -17,7 +17,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
-import { OwnerAvatar } from "../landscape/owner.tsx";
+import { initials } from "../frame/person-menu.tsx";
 
 // Who owns a thing, and the people it can be handed to, as the prototype
 // draws it (`components/owner-picker.tsx`): the owner's portrait, and
@@ -33,6 +33,13 @@ export interface Pickable {
   name: string;
   email?: string;
 }
+
+/** Someone's portrait: their initials. */
+const PersonAvatar = ({ name }: { name: string }) => (
+  <Avatar size="sm">
+    <AvatarFallback>{initials(name)}</AvatarFallback>
+  </Avatar>
+);
 
 /**
  * One person in a list of people to pick from: their portrait and name,
@@ -52,7 +59,7 @@ export const PersonOption = ({
     onSelect={onSelect}
     value={`${person.name} ${person.email ?? ""}`}
   >
-    <OwnerAvatar name={person.name} />
+    <PersonAvatar name={person.name} />
     <span className="flex-1 truncate">{person.name}</span>
   </CommandItem>
 );
@@ -118,7 +125,7 @@ export const PersonPicker = ({
             <AvatarFallback>?</AvatarFallback>
           </Avatar>
         ) : (
-          <OwnerAvatar name={owner} />
+          <PersonAvatar name={owner} />
         )}
         {compact ? null : (owner ?? t`No owner yet`)}
         {compact || disabled ? null : (

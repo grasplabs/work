@@ -593,7 +593,6 @@ export const recordProviderId = async (
 
 /** Binding kinds that name no resource of the client's: nothing to map. */
 const unmappedBindings = new Set([
-  "ai",
   "assets",
   "send_email",
   "version_metadata",

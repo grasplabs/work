@@ -1659,7 +1659,7 @@ export class Onboarding extends DurableObject<Env> {
     const gone =
       said === null
         ? []
-        : await spokenKeysOf(this.env, {
+        : await spokenKeysOf({
             ...said,
             texts: said.texts.filter((text) => !kept.has(text)),
           });
@@ -7305,7 +7305,7 @@ export class Onboarding extends DurableObject<Env> {
       const said = this.#saidIn(person);
       if (said !== null) {
         // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-        keys.set(person, await spokenKeysOf(this.env, said));
+        keys.set(person, await spokenKeysOf(said));
       }
     }
     return keys;
@@ -7335,7 +7335,7 @@ export class Onboarding extends DurableObject<Env> {
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
     const each = await Promise.all(
       said.map(async (lines) =>
-        lines === null ? [] : await spokenKeysOf(this.env, lines)
+        lines === null ? [] : await spokenKeysOf(lines)
       )
     );
     const keys = each.flat();
@@ -7366,17 +7366,24 @@ export class Onboarding extends DurableObject<Env> {
     await this.#armDrawing();
   }
 
-  /** Most stored lines one try takes out of the cache. */
-  static readonly #linesPerTry = 1000;
+  /**
+   * Most stored lines one try takes out of the cache: each is a line's
+   * folder, listed before its objects go (speech-cache.ts).
+   */
+  static readonly #linesPerTry = 100;
+
+  /** Most tries one call makes; the alarm takes the rest. */
+  static readonly #triesPerCall = 5;
 
   /**
    * Takes the voice's lines still waiting (`linesToForget`) out of the
    * cache, a page at a time, each forgotten here once the cache confirms
-   * it. What fails waits for the alarm. Returns how many went.
+   * it. What fails, or is left past this call's tries, waits for the
+   * alarm. Returns how many went.
    */
   async forgetLinesNow(): Promise<number> {
     let gone = 0;
-    for (;;) {
+    for (let tries = 0; tries < Onboarding.#triesPerCall; tries += 1) {
       const page = this.#db
         .select({ key: linesToForget.key })
         .from(linesToForget)
@@ -7402,6 +7409,7 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       gone += page.length;
     }
+    return gone;
   }
 
   /**

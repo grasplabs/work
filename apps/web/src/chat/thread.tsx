@@ -7,7 +7,19 @@ import type {
   ChatReasoning,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@grasp-os/ui/components/message";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
   Trace,
@@ -45,11 +57,15 @@ import {
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
+import { useCanReplaceKey } from "../frame/ai-key-banner.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
+import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
   ThinkingLine,
   useAnswerThinking,
 } from "./answer-thinking.tsx";
+import { AskedLine } from "./asked-questions.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -57,13 +73,6 @@ import {
 } from "./conversation.tsx";
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageResponse,
-} from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
@@ -90,8 +99,8 @@ const ThinkingCard = lazy(async () => {
 // stands under its newest answer and each new word fades in where it
 // lands; once it is done, the answer has its actions in a quiet row under
 // it. It follows the answer as it streams, unless the person scrolls
-// up to read (`Conversation`); each message is the prototype's AI Elements
-// message (`Message`).
+// up to read (`Conversation`); each message is the kit's (`Message`), a
+// question in its `Bubble`, an answer's words set for reading.
 
 type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
@@ -418,7 +427,7 @@ const ReplyText = ({
   /** Still being written: each new word fades in. */
   written: boolean;
 }) => (
-  <MessageResponse
+  <AnswerMarkdown
     cited={citations?.map(({ documentId }) => documentId)}
     sources={useCitedDocuments()}
     text={text}
@@ -503,6 +512,123 @@ const ReplySteps = ({
   );
 };
 
+type Asked = Extract<ChatMessage, { role: "user" }>;
+
+/** A question, or the replies that answer it: one item of the thread. */
+type ThreadItem =
+  | { kind: "question"; message: Asked }
+  | { kind: "answer"; replies: Answer[] };
+
+/**
+ * The thread's items, in one pass: each question, and the replies to it
+ * together, a step's result between them being no message of the
+ * thread's. Grasp may answer in several replies (its steps, then its
+ * words); they read as one answer, its words right under its steps, as in
+ * the prototype.
+ */
+const threadItemsOf = (messages: readonly ChatMessage[]): ThreadItem[] => {
+  const items: ThreadItem[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      items.push({ kind: "question", message });
+    } else if (message.role === "assistant") {
+      const last = items.at(-1);
+      if (last?.kind === "answer") {
+        last.replies.push(message);
+      } else {
+        items.push({ kind: "answer", replies: [message] });
+      }
+    }
+  }
+  return items;
+};
+
+/**
+ * The codes that mean no model can be reached until an AI provider is
+ * connected: models not set up at all, or none connected yet.
+ */
+const needsProvider: ReadonlySet<unknown> = new Set([
+  "model.no_provider",
+  "model.unconfigured",
+]);
+
+/**
+ * An answer that failed because the organization's AI provider refuses
+ * its key: its admins get the way to check or replace it, everyone else
+ * who to ask.
+ */
+const KeyFailed = () => {
+  const { i18n } = useLingui();
+  if (!useCanReplaceKey()) {
+    return failureMessage("model.provider_key_failed", i18n);
+  }
+  return (
+    <>
+      <Trans>Your AI provider is refusing your key.</Trans>{" "}
+      <Link
+        className="underline underline-offset-4"
+        to="/settings/ai-providers"
+      >
+        <Trans>Check or replace it in Settings › AI providers</Trans>
+      </Link>
+    </>
+  );
+};
+
+/** Asking a failed answer's question again, without typing it again. */
+const TryAgain = ({ onRetry }: { onRetry: (() => void) | undefined }) =>
+  onRetry === undefined ? null : (
+    <Button onClick={onRetry} size="sm" variant="outline">
+      <RefreshCcwIcon data-icon="inline-start" />
+      <Trans>Try again</Trans>
+    </Button>
+  );
+
+/**
+ * Why an answer failed, in people's words, and the way to ask again; with
+ * no AI provider to call, the way to connect one (to Settings › AI
+ * providers for the organization's admins), never an error, and still the
+ * way to ask again once one is.
+ */
+const Failed = ({
+  failure,
+  onRetry,
+}: {
+  failure: Answer["failure"];
+  onRetry: (() => void) | undefined;
+}) => {
+  const { i18n } = useLingui();
+  if (needsProvider.has(failure)) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ConnectAiProvider size="xs" />
+        <TryAgain onRetry={onRetry} />
+      </div>
+    );
+  }
+  return (
+    // As the prototype says a failed answer: the kit's alert, with the way
+    // to ask again under what went wrong.
+    <Alert variant="destructive">
+      <TriangleAlertIcon />
+      <AlertTitle>
+        {failure === "model.provider_key_failed" ? (
+          <KeyFailed />
+        ) : (
+          failureMessage(failure, i18n)
+        )}
+      </AlertTitle>
+      {onRetry === undefined ? null : (
+        <AlertDescription>
+          <div className="pt-2">
+            <TryAgain onRetry={onRetry} />
+          </div>
+        </AlertDescription>
+      )}
+    </Alert>
+  );
+};
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -515,6 +641,7 @@ const Reply = ({
   sign,
   onRetry,
   cited,
+  compact,
 }: {
   reply: Omit<ChatPartial, "reasoning"> & {
     /** What the model thought before it, when it thought. */
@@ -539,56 +666,46 @@ const Reply = ({
   onRetry?: () => void;
   /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
   cited?: { chatId: string; messageId: number };
+  /** In the chat dock: its answer at the dock's size. */
+  compact: boolean;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   const shown = (
-    <div className="flex w-full min-w-0 flex-col gap-3">
-      <Message from="assistant">
-        <MessageContent>
-          <ReplySteps
-            output={output}
-            reply={reply}
-            results={results}
-            running={running}
-            thinking={writing && answer === "" && reply.code.length === 0}
-            top={top}
-            writing={writing}
+    <Message>
+      {/* Its words set for reading; in the dock, at the dock's size. */}
+      <MessageContent size={compact ? "default" : "reading"}>
+        <ReplySteps
+          output={output}
+          reply={reply}
+          results={results}
+          running={running}
+          thinking={writing && answer === "" && reply.code.length === 0}
+          top={top}
+          writing={writing}
+        />
+        {card}
+        {answer === "" ? null : (
+          <ReplyText
+            citations={reply.citations}
+            text={reply.text}
+            written={writing}
           />
-          {card}
-          {answer === "" ? null : (
-            <ReplyText
-              citations={reply.citations}
-              text={reply.text}
-              written={writing}
-            />
-          )}
-          {reply.end === "cancelled" ? (
-            <p className="text-muted-foreground">
-              <Trans>Stopped.</Trans>
-            </p>
-          ) : null}
-          {reply.end === "cut_off" ? (
-            <p className="text-muted-foreground">
-              <Trans>The answer was cut off at the model&apos;s limit.</Trans>
-            </p>
-          ) : null}
-          {reply.end === "failed" ? (
-            <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
-              <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
-              <p className="flex-1" role="alert">
-                {failureMessage(reply.failure, i18n)}
-              </p>
-              {onRetry === undefined ? null : (
-                <Button onClick={onRetry} size="sm" variant="outline">
-                  <RefreshCcwIcon data-icon="inline-start" />
-                  <Trans>Try again</Trans>
-                </Button>
-              )}
-            </div>
-          ) : null}
-        </MessageContent>
+        )}
+        {reply.end === "cancelled" ? (
+          <p className="text-muted-foreground">
+            <Trans>Stopped.</Trans>
+          </p>
+        ) : null}
+        {reply.end === "cut_off" ? (
+          <p className="text-muted-foreground">
+            <Trans>The answer was cut off at the model&apos;s limit.</Trans>
+          </p>
+        ) : null}
+        {reply.end === "failed" ? (
+          <Failed failure={reply.failure} onRetry={onRetry} />
+        ) : null}
         {sign === undefined ? null : (
           <GraspSign said={reply.text.length} state={sign} />
         )}
@@ -602,8 +719,8 @@ const Reply = ({
             )}
           </ReplyActions>
         )}
-      </Message>
-    </div>
+      </MessageContent>
+    </Message>
   );
   // Only an answer that cites documents asks core what it cites.
   return cited === undefined ? (
@@ -761,6 +878,33 @@ export const ChatThread = ({
       <FinishedTop chatId={chatId} seconds={seconds} thinking={again} />
     );
   };
+  const items = threadItemsOf(messages);
+  // The answer being written, once it shows something; it joins the
+  // replies its question already has, or stands as an answer of its own.
+  const written =
+    shown === null ? null : (
+      <Reply
+        compact={compact}
+        output={output}
+        reply={{
+          ...shown,
+          reasoning:
+            shown.reasoning === ""
+              ? undefined
+              : { text: shown.reasoning, ms: null },
+        }}
+        results={results}
+        running={running}
+        sign={doing}
+        top={
+          doing !== undefined && replies.length === 0 ? (
+            <Working doing={doing} />
+          ) : undefined
+        }
+        writing
+      />
+    );
+  const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   return (
     <ChatTools value={tools}>
       <Conversation>
@@ -778,70 +922,65 @@ export const ChatThread = ({
                 <Spinner aria-label={t`Loading…`} />
               </li>
             )}
-            {messages.map((message) => {
-              if (message.role === "user") {
+            {items.map((item, at) => {
+              if (item.kind === "question") {
                 return (
-                  <li key={message.id}>
-                    <Message from="user">
-                      <MessageContent>{message.text}</MessageContent>
+                  <li key={item.message.id}>
+                    <Message align="end">
+                      <Bubble variant="muted">
+                        <BubbleContent>{item.message.text}</BubbleContent>
+                      </Bubble>
                     </Message>
                   </li>
                 );
               }
-              if (message.role === "assistant") {
-                return (
-                  <li key={message.id}>
-                    <Reply
-                      onRetry={
-                        !running && message === lastAnswer && answersLast
-                          ? onRetry
-                          : undefined
-                      }
-                      output={output}
-                      reply={message}
-                      results={results}
-                      running={running}
-                      sign={
-                        shown === null && message === replies.at(-1)
-                          ? doing
-                          : undefined
-                      }
-                      cited={
-                        message.citations.length === 0
-                          ? undefined
-                          : { chatId, messageId: message.id }
-                      }
-                      card={cardOf(message.id)}
-                      top={topOf(message.id)}
-                      writing={false}
-                    />
-                  </li>
-                );
-              }
-              return null;
+              // The answer being written goes on the last one, when the
+              // question already has replies.
+              const goesOn = writtenGoesOn && at === items.length - 1;
+              return (
+                <li
+                  aria-busy={goesOn ? true : undefined}
+                  className="flex flex-col gap-3"
+                  key={item.replies[0]?.id}
+                >
+                  {item.replies.map((message) => (
+                    <Fragment key={message.id}>
+                      <Reply
+                        compact={compact}
+                        onRetry={
+                          !running && message === lastAnswer && answersLast
+                            ? onRetry
+                            : undefined
+                        }
+                        output={output}
+                        reply={message}
+                        results={results}
+                        running={running}
+                        sign={
+                          shown === null && message === replies.at(-1)
+                            ? doing
+                            : undefined
+                        }
+                        cited={
+                          message.citations.length === 0
+                            ? undefined
+                            : { chatId, messageId: message.id }
+                        }
+                        card={cardOf(message.id)}
+                        top={topOf(message.id)}
+                        writing={false}
+                      />
+                      {message.asked === undefined ? null : (
+                        <AskedLine asked={message.asked} />
+                      )}
+                    </Fragment>
+                  ))}
+                  {goesOn ? written : null}
+                </li>
+              );
             })}
-            {shown === null ? null : (
-              <li aria-busy="true">
-                <Reply
-                  output={output}
-                  reply={{
-                    ...shown,
-                    reasoning:
-                      shown.reasoning === ""
-                        ? undefined
-                        : { text: shown.reasoning, ms: null },
-                  }}
-                  results={results}
-                  running={running}
-                  sign={doing}
-                  top={
-                    doing !== undefined && replies.length === 0 ? (
-                      <Working doing={doing} />
-                    ) : undefined
-                  }
-                  writing
-                />
-              </li>
+            {written === null || writtenGoesOn ? null : (
+              <li aria-busy="true">{written}</li>
             )}
             {doing === "reading" ? (
               <li aria-busy="true">

@@ -76,7 +76,7 @@ export const runToFix = async (
   ) {
     throw notFound();
   }
-  if (detailsRemoved(env, row)) {
+  if (detailsRemoved(row)) {
     throw workflowErrors.create("workflow.run_details_removed");
   }
   const [sources, restricted] = await Promise.all([

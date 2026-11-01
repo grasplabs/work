@@ -10,6 +10,7 @@ import type { WorkContext } from "../src/restricted.ts";
 import { release } from "./apps.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { withLoweredLimit } from "./memory-limits.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Memory: the files an agent always has in its context. These tests start
@@ -351,11 +352,10 @@ describe("memory for a context", setUpTime, () => {
     await saveOver(admin, memory, "MEMORY.md", "After");
     const afterCompany = await read(asFirst);
     // A lower limit cuts a file saved within the old one.
-    const lowered = await forContext(
-      { ...env, MEMORY_LIMITS: { "MEMORY.md": 1 } },
-      asFirst,
-      work,
-      own
+    const lowered = await withLoweredLimit(
+      "MEMORY.md",
+      1,
+      async () => await read(asFirst)
     );
     expect({
       again: again.key === initial.key && again.text === initial.text,
@@ -516,8 +516,7 @@ describe("memory limits", setUpTime, () => {
       access: "me",
     });
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
-    // AGENTS.md and MEMORY.md at their default, 2,000 tokens (8,000
-    // characters); USER.md set to 500 (2,000 characters, vite.config.ts).
+    // Each at its limit of 2,000 tokens (8,000 characters).
     const saves = {
       companyAgents: await outcome(
         saveOver(admin, memory, "AGENTS.md", sized(8001))
@@ -528,7 +527,7 @@ describe("memory limits", setUpTime, () => {
       agent: await outcome(
         saveOver(admin, memory, `agents/${unique()}/AGENTS.md`, sized(8001))
       ),
-      user: await outcome(saveOver(admin, personal, "USER.md", sized(2001))),
+      user: await outcome(saveOver(admin, personal, "USER.md", sized(8001))),
       appCode: await outcome(
         builder.api.apps.files.commit(
           appId,
@@ -538,7 +537,7 @@ describe("memory limits", setUpTime, () => {
       ),
       atLimit: await outcome(saveOver(admin, memory, "MEMORY.md", sized(8000))),
       userAtLimit: await outcome(
-        saveOver(admin, personal, "USER.md", sized(2000))
+        saveOver(admin, personal, "USER.md", sized(8000))
       ),
       appCodeAtLimit: await outcome(
         builder.api.apps.files.commit(
@@ -564,7 +563,7 @@ describe("memory limits", setUpTime, () => {
       .saveDocument({
         collectionId: personal,
         path: "USER.md",
-        text: sized(2001),
+        text: sized(8001),
         ifVersion: 1,
       })
       .then(
@@ -593,9 +592,9 @@ describe("memory limits", setUpTime, () => {
       },
       details: {
         file: "USER.md",
-        tokens: 501,
-        maxTokens: 500,
-        maxCharacters: 2000,
+        tokens: 2001,
+        maxTokens: 2000,
+        maxCharacters: 8000,
       },
     });
   });
@@ -607,8 +606,8 @@ describe("memory limits", setUpTime, () => {
     const work = await newChat(agent);
     await expect(
       Promise.all([
-        outcome(userMemory(asAgent, work, sized(2001))),
-        outcome(userMemory(asAgent, work, sized(2000))),
+        outcome(userMemory(asAgent, work, sized(8001))),
+        outcome(userMemory(asAgent, work, sized(8000))),
       ])
     ).resolves.toStrictEqual(["knowledge.memory_too_large", "ok"]);
   });

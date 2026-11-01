@@ -7,9 +7,6 @@
  * secrets as they are now: a rollback never brings back a key that was
  * rotated or replaced, so no check of what the previous versions ran is
  * needed. What does stop it, before it claims the client:
- * - the release before's code doesn't work with what the client runs, or
- *   with its databases as the rollout's migrations left them
- *   (`incompatible`, `schema_incompatible`, src/deploy/compatibility.ts);
  * - the rollout's release added a Durable Object migration, which a script
  *   never goes back past (`rollback_past_migration`);
  * - something other than the rollout's release or the one before runs
@@ -43,18 +40,12 @@ import {
   rolloutTargets,
 } from "../db/schema.ts";
 import {
-  appliedSchema,
-  currentReleases,
-  incompatibility,
-} from "../deploy/compatibility.ts";
-import {
   activityKeys,
   clientDomain,
   deployContext,
 } from "../deploy/context.ts";
-import { DeployError, errorCode } from "../deploy/errors.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { deployOrder } from "../deploy/versions.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   assertCanRollBack,
@@ -64,7 +55,6 @@ import {
   startClientRelease,
   startedAs,
 } from "../hosting/operation.ts";
-import { assertLimitEvidence } from "../releases/limits.ts";
 import {
   claimRun,
   currentRun,
@@ -102,28 +92,16 @@ const newRollbackId = (): string =>
   `rollback-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 /**
- * Throws unless release `back`'s code works with client `clientId` as the
- * rollout's release `from` left it: with what it runs, its Workers taken
- * back one at a time in the order its operation uploads them (connect,
- * then core, which binds it), and on its databases' schemas
- * (src/deploy/compatibility.ts); and unless a script of it ran a Durable
- * Object migration `back` doesn't have, as each was seen
- * (`assertCanRollBack`). Refused too as a deploy refuses `back`: recording
- * no limits (`release_without_limits`), raising one without evidence
- * (`limit_evidence_missing`), or past a release not imported
- * (`release_history_incomplete`, src/releases/limits.ts).
+ * Throws unless release `back` is imported, and unless a script of client
+ * `clientId` ran a Durable Object migration `back` doesn't have, as each
+ * was seen (`assertCanRollBack`).
  */
 const assertCanGoBack = async (
   db: AdminDatabase,
   clientId: string,
-  from: string,
   back: string
 ): Promise<void> => {
-  const [before, rolledOut] = await Promise.all([
-    importedManifest(db, back),
-    importedManifest(db, from),
-  ]);
-  if (before === null) {
+  if ((await importedManifest(db, back)) === null) {
     throw new RolloutError(
       "release_not_imported",
       `Release ${back} isn't imported`
@@ -137,40 +115,6 @@ const assertCanGoBack = async (
       error.code === "rollback_past_migration"
     ) {
       throw new RolloutError("rollback_past_migration", error.message);
-    }
-    throw error;
-  }
-  const current = await currentReleases(db, clientId);
-  const apps = deployOrder(before.workers);
-  for (const app of apps) {
-    current.set(app, rolledOut);
-  }
-  const refused = incompatibility(
-    current,
-    before,
-    apps,
-    await appliedSchema(db, clientId)
-  );
-  if (refused !== null) {
-    throw new RolloutError(
-      refused.code === "schema_incompatible"
-        ? "schema_incompatible"
-        : "incompatible",
-      `${clientId} can't go back to ${back}: ${refused.message}`
-    );
-  }
-  // Made live again as any release is: not one from before limits were
-  // recorded, nor one raising a limit without evidence.
-  try {
-    await assertLimitEvidence(db, clientId, back);
-  } catch (error) {
-    if (
-      error instanceof DeployError &&
-      (error.code === "limit_evidence_missing" ||
-        error.code === "release_without_limits" ||
-        error.code === "release_history_incomplete")
-    ) {
-      throw new RolloutError(error.code, error.message);
     }
     throw error;
   }
@@ -246,7 +190,7 @@ const check = async (
       `${clientId} changed after rollout ${rolloutId}`
     );
   }
-  await assertCanGoBack(db, clientId, rolledOut, back);
+  await assertCanGoBack(db, clientId, back);
   return back;
 };
 

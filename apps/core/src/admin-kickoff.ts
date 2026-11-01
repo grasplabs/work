@@ -15,6 +15,7 @@ import {
 } from "@grasp-os/shared/kickoff";
 import type { KickoffInput, KickoffView } from "@grasp-os/shared/kickoff";
 import { log } from "@grasp-os/shared/log";
+import { modelErrors } from "@grasp-os/shared/models";
 import { onboardingErrors } from "@grasp-os/shared/onboarding";
 import type { z } from "zod";
 
@@ -187,6 +188,15 @@ export const adminKickoffResponse = async (
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
+    // No AI provider connected yet: the kickoff can't be read until one is.
+    if (modelErrors.codeOf(error) === "model.no_provider") {
+      log.info("admin.kickoff.refused", { reason: "model.no_provider" });
+      return errorResponse(
+        503,
+        modelErrors.create("model.no_provider"),
+        requestId
+      );
+    }
     const code = kickoffErrors.codeOf(error);
     if (code === undefined) {
       throw error;

@@ -11,12 +11,6 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "No active client past Alpha is in that scope, so it would reach only our own deployments: pick a ring or client that has one.",
   too_large:
     "That's more clients than one rollout takes: roll out one ring or client at a time.",
-  release_without_limits:
-    "That release was built before platform limits were recorded, so it isn't made live: roll out a newer one.",
-  release_history_incomplete:
-    "A release between what a client runs and that one isn't imported, so its evidence can't be read: import the missing release first.",
-  limit_evidence_missing:
-    "That release raises a platform limit for a client it would reach without capacity and security evidence for its profile: publish a release with the evidence first.",
   rollout_running:
     "Another rollout is running or waiting for approval: finish or cancel it first.",
   not_waiting: "It isn't waiting for approval or a retry.",
@@ -29,10 +23,6 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "The rollout didn't reach that client, so there's nothing to roll back.",
   superseded:
     "Something newer was deployed to that client since: roll out the release you want instead.",
-  incompatible:
-    "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
-  schema_incompatible:
-    "What that client ran before doesn't run on its databases since this rollout's migrations: roll out a release that does instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
   rollback_past_migration:

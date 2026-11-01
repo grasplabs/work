@@ -56,7 +56,14 @@ export const keepText = (file: string, text: string): string => {
   return file;
 };
 
-/** What was kept at `file`, held to `schema`; `undefined` when there is nothing, or it doesn't fit. */
+/**
+ * What was kept at `file`, held to `schema`; `undefined` when there is
+ * nothing, or it doesn't fit. One that doesn't fit is left out, never
+ * read another way (nothing kept is carried over from an older shape),
+ * but said out loud, naming it: it was kept before what the lab keeps
+ * changed, such as a run reached through AI Gateway, and is re-run or
+ * deleted rather than quietly missing from every comparison.
+ */
 export const keptJson = <T>(
   file: string,
   schema: z.ZodType<T>
@@ -64,8 +71,20 @@ export const keptJson = <T>(
   if (!existsSync(file)) {
     return undefined;
   }
-  const parsed = schema.safeParse(JSON.parse(readFileSync(file, "utf-8")));
-  return parsed.success ? parsed.data : undefined;
+  let kept: unknown = undefined;
+  try {
+    kept = JSON.parse(readFileSync(file, "utf-8"));
+  } catch {
+    // Not JSON: left out, and said, as one of an older shape.
+  }
+  const parsed = schema.safeParse(kept);
+  if (!parsed.success) {
+    console.warn(
+      `Left out ${file}: it doesn't fit what the lab keeps now, so it predates a change to it. Run it again, or delete it.`
+    );
+    return undefined;
+  }
+  return parsed.data;
 };
 
 /** Every JSON file kept in `folder`, held to `schema`, by name. */

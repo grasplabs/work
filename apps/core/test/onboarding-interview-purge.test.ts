@@ -15,9 +15,9 @@ import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { staffTextErasure } from "../src/onboarding/staff-text-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
@@ -31,6 +31,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // the record it keeps; the device's older copy saving them back; the
 // audit log naming them.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 /** An interview in which `term` was said, marked and read back. */
@@ -105,9 +107,10 @@ const talking = async (term: string, does = "") => {
 
 /** A line as Stephen says it in English, as the speech cache keeps it. */
 const spokenKey = (text: string): SpokenKey => ({
+  text,
   spoken: `[warm] ${text}`,
-  voice: speakerVoices.stephen,
-  model: voiceModels.said,
+  voice: platformAi.speech.voices.stephen,
+  model: speechModel,
   language: "en",
 });
 

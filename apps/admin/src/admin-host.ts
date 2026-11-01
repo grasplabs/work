@@ -5,8 +5,7 @@
  * answers what isn't a page (server functions, the admin's MCP server,
  * Discord's interactions) and what changes something. Every hostname sits
  * behind the same Access application, so the Access check (src/access.ts)
- * is the same on each. Old addresses move to where their page is now
- * (src/moved-pages.ts) first, on any hostname.
+ * is the same on each.
  *
  * Without `ADMIN_HOST` nothing moves here: the admin is served at the root
  * of whatever hostname it's asked on.

@@ -383,7 +383,7 @@ const DetailRows = ({
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
-  // A tool's AI, as Grasp sees it, belongs with the Landscape, which is parked: it is left out for now.
+  // A tool's AI, as Grasp sees it, is left out: the Landscape it belonged with was removed.
   const shown = new Set([
     t`They told us`,
     t`What was said`,

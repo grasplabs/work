@@ -14,14 +14,15 @@ import type {
 } from "@earendil-works/pi-ai";
 import { toToolDeclaration } from "@earendil-works/pi-ai/utils/transcript";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { chatAskLimits, chatAskSchema } from "@grasp-os/shared/chat";
 import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import { memoryCharactersPerToken } from "@grasp-os/shared/memory";
 import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
+import { isMessage, showThinkingName } from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { showThinkingName } from "./agent-thinking.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
@@ -161,6 +162,65 @@ const readApi = (
       details: undefined,
     });
   },
+});
+
+const askParameters = Type.Object(
+  {
+    questions: Type.Array(
+      Type.Object(
+        {
+          question: Type.String({
+            description: `The question, one line of plain text, at most ${chatAskLimits.questionLength} characters.`,
+          }),
+          choices: Type.Array(Type.String(), {
+            minItems: chatAskLimits.choicesMin,
+            maxItems: chatAskLimits.choices,
+            description: `${chatAskLimits.choicesMin} to ${chatAskLimits.choices} answers to choose from, each one line of plain text, at most ${chatAskLimits.choiceLength} characters.`,
+          }),
+        },
+        { additionalProperties: false }
+      ),
+      { minItems: 1, maxItems: chatAskLimits.questions }
+    ),
+  },
+  { additionalProperties: false }
+);
+
+/**
+ * The tool that asks the person a few questions with choices (GRA-1001),
+ * in place of the composer, in Grasp's own chat. It ends the turn
+ * (`terminate`): the person's answers are their next message. A choice is
+ * only an answer the person may give, never a command: picking one sends
+ * their message and nothing else, and a change the agent then makes still
+ * waits for them to confirm it. Out of bounds is refused, never trimmed.
+ */
+const askQuestions = (): AgentTool<typeof askParameters> => ({
+  name: "askQuestions",
+  label: "Ask the person",
+  description: `Asks the person up to ${chatAskLimits.questions} questions, each with ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} short answers to choose from, shown in place of their message box; they can also answer in their own words. Use it when you need them to choose between a few clear options before you go on. Call it on its own, as the last thing in your response: their answers come as their next message, each after the question it answers when you asked more than one. A choice only answers your question: it confirms nothing, and a change still waits for them to confirm it in Grasp.`,
+  parameters: askParameters,
+  prepareArguments: (args) => {
+    const ask = chatAskSchema.safeParse(args);
+    if (!ask.success) {
+      throw new Error(
+        `askQuestions takes \`questions\`: 1 to ${chatAskLimits.questions}, each a \`question\` (one line, at most ${chatAskLimits.questionLength} characters) and ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} different \`choices\` (one line each, at most ${chatAskLimits.choiceLength} characters), with no control or invisible formatting characters. Nothing else.`
+      );
+    }
+    return ask.data;
+  },
+  executionMode: "sequential",
+  execute: async () =>
+    await Promise.resolve({
+      content: [
+        {
+          type: "text",
+          text: "Asked. The person's answers come as their next message, each after the question it answers.",
+        },
+      ],
+      details: undefined,
+      // The person answers next: the turn ends here.
+      terminate: true,
+    }),
 });
 
 /**
@@ -723,18 +783,6 @@ export interface Turn {
   withheld?: () => Promise<ReadonlySet<string>>;
 }
 
-const messageRoles = new Set<unknown>([
-  "system",
-  "user",
-  "assistant",
-  "toolResult",
-]);
-
-/** One of pi's own messages, the only kind this loop makes and keeps. */
-export const isMessage = (
-  message: AgentMessage | { role?: unknown }
-): message is Message => messageRoles.has(message.role);
-
 /**
  * Characters of a transcript's JSON to a token, for sizing without a
  * tokenizer: on the low side (prose is nearer 4), so that code and data,
@@ -1243,6 +1291,9 @@ export const runTurn = async ({
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
     ...(thinkingTool === undefined ? [] : [thinkingTool]),
+    // Only in Grasp's own chat, where the questions take the composer's
+    // place; a chat app's chat asks in words.
+    ...(ownWords ? [] : [askQuestions()]),
   ];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
@@ -1311,10 +1362,13 @@ export const runTurn = async ({
         }
       },
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
-        // Reading a declaration runs no code: only the turn's steps bound it.
-        // Showing thinking runs none either, but leaves the answer room.
+        // Reading a declaration, or asking the person, runs no code: only
+        // the turn's steps bound them. Showing thinking runs none either,
+        // but leaves the answer room.
         const runsCode =
-          toolCall.name !== "readApi" && toolCall.name !== showThinkingName;
+          toolCall.name !== "readApi" &&
+          toolCall.name !== showThinkingName &&
+          toolCall.name !== "askQuestions";
         const reason = runsCode
           ? refusal(progress, assistantMessage)
           : thinkingRefusalOf(toolCall.name, progress);

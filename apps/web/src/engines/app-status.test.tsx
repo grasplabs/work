@@ -21,6 +21,8 @@ import { StatusActions, StatusBadge } from "./app-status.tsx";
 // over RPC (the boundary from the web app), faked: each control moves the
 // domain only along what core allows from where it is, the page reads it
 // again afterwards, archiving asks first, and what core refuses is said.
+// Publish and Restore stand on the bar; Unpublish and Archive are under
+// its "…" menu.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -144,15 +146,27 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The buttons shown, by their text, the dialog's included. */
+/** The "…" menu's button, by its label. */
+const more = "More for this domain";
+
+/** What a button or menu item is called: its text, or its label without one. */
+const nameOf = (element: HTMLElement): string => {
+  const text = element.textContent?.trim() ?? "";
+  return text === "" ? (element.getAttribute("aria-label") ?? "") : text;
+};
+
+/** The buttons shown, by their name, the dialog's included. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")].map(
-    (each) => each.textContent?.trim() ?? ""
-  );
+  [...document.querySelectorAll("button")].map(nameOf);
+
+/** The items of the open "…" menu, by their text. */
+const items = (): HTMLElement[] => [
+  ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+];
 
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) => nameOf(each) === name
   );
   if (found === undefined) {
     throw new Error(`No button ${name}`);
@@ -160,12 +174,34 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-const click = async (name: string): Promise<void> => {
+const press = async (element: HTMLElement): Promise<void> => {
   await act(async () => {
-    button(name).click();
+    element.click();
     await Promise.resolve();
   });
   await settled();
+};
+
+const click = async (name: string): Promise<void> => {
+  await press(button(name));
+};
+
+/** Opens the "…" menu and says what it holds. */
+const openMenu = async (): Promise<string[]> => {
+  if (button(more).getAttribute("aria-expanded") !== "true") {
+    await click(more);
+  }
+  return items().map(nameOf);
+};
+
+/** Chooses `name` from the "…" menu. */
+const choose = async (name: string): Promise<void> => {
+  await openMenu();
+  const found = items().find((each) => nameOf(each) === name);
+  if (found === undefined) {
+    throw new Error(`No menu item ${name}`);
+  }
+  await press(found);
 };
 
 /** What the page shows: the status badge, the buttons, and any refusal. */
@@ -187,22 +223,31 @@ describe("a domain's status controls", () => {
   it("publishes a draft, and offers to take it back once the page reads it published", async () => {
     const { calls, apps } = fakeApps("draft");
     await opened(apps);
-    const draft = shown();
+    const draft = { ...shown(), menu: await openMenu() };
 
     await click("Publish");
+    const published = { ...shown(), menu: await openMenu() };
+    await choose("Unpublish");
 
-    expect({ draft, published: shown(), calls }).toStrictEqual({
+    expect({ draft, published, unpublished: shown(), calls }).toStrictEqual({
       draft: {
         status: "Draft",
-        buttons: ["Publish", "Archive"],
+        buttons: ["Publish", more],
         refused: null,
+        menu: ["Archive"],
       },
       published: {
         status: "Published",
-        buttons: ["Unpublish", "Archive"],
+        buttons: [more],
+        refused: null,
+        menu: ["Unpublish", "Archive"],
+      },
+      unpublished: {
+        status: "Draft",
+        buttons: ["Publish", more],
         refused: null,
       },
-      calls: ["publish"],
+      calls: ["publish", "unpublish"],
     });
   });
 
@@ -210,19 +255,12 @@ describe("a domain's status controls", () => {
     const { calls, apps } = fakeApps("published");
     await opened(apps);
 
-    await click("Archive");
+    await choose("Archive");
     const asked = buttons();
     await click("Cancel");
     const afterCancel = { ...shown(), calls: [...calls] };
+    await choose("Archive");
     await click("Archive");
-    // The dialog's own Archive, after the bar's.
-    await act(async () => {
-      [...document.querySelectorAll("button")]
-        .findLast((each) => each.textContent?.trim() === "Archive")
-        ?.click();
-      await Promise.resolve();
-    });
-    await settled();
     const archived = shown();
     await click("Restore");
 
@@ -233,17 +271,17 @@ describe("a domain's status controls", () => {
       restored: shown(),
       calls,
     }).toStrictEqual({
-      asked: ["Unpublish", "Archive", "Cancel", "Archive"],
+      asked: [more, "Cancel", "Archive"],
       afterCancel: {
         status: "Published",
-        buttons: ["Unpublish", "Archive"],
+        buttons: [more],
         refused: null,
         calls: [],
       },
       archived: { status: "Archived", buttons: ["Restore"], refused: null },
       restored: {
         status: "Draft",
-        buttons: ["Publish", "Archive"],
+        buttons: ["Publish", more],
         refused: null,
       },
       calls: ["archive", "restore"],
@@ -258,7 +296,7 @@ describe("a domain's status controls", () => {
 
     expect(shown()).toStrictEqual({
       status: "Draft",
-      buttons: ["Publish", "Archive"],
+      buttons: ["Publish", more],
       refused: "Only the domain's builders can do that.",
     });
   });

@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
@@ -18,13 +19,13 @@ import {
   channelLinks,
 } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { configureObject, says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
-  member,
+  memberAnsweredBy,
   messageFrom as teamsMessageFrom,
   post as postToTeams,
   reached,
@@ -83,6 +84,11 @@ const signature = async (
 };
 
 interface Sent {
+  /**
+   * How the body goes: as JSON, as Slack sends events (the default), or
+   * form-encoded as `payload=`, as Slack sends a press on a button.
+   */
+  form?: boolean;
   /** Slack's headers, or none of them (`null`). */
   signed?: { timestamp?: number; secret?: string; body?: string } | null;
   doorEnv?: Env;
@@ -97,10 +103,16 @@ interface Sent {
  */
 const post = async (
   payload: unknown,
-  { signed = {}, doorEnv = env, caught = true }: Sent = {}
+  { form = false, signed = {}, doorEnv = env, caught = true }: Sent = {}
 ) => {
-  const body = JSON.stringify(payload);
-  const headers = new Headers({ "content-type": "application/json" });
+  const body = form
+    ? new URLSearchParams({ payload: JSON.stringify(payload) }).toString()
+    : JSON.stringify(payload);
+  const headers = new Headers({
+    "content-type": form
+      ? "application/x-www-form-urlencoded"
+      : "application/json",
+  });
   if (signed !== null) {
     const timestamp = signed.timestamp ?? Math.floor(Date.now() / 1000);
     headers.set("x-slack-request-timestamp", String(timestamp));
@@ -164,6 +176,46 @@ const messageFrom = (
     ...extra,
   },
 });
+
+/**
+ * A press by `user` on button `actionId` of a message the bot sent in
+ * `channel`, carrying `value`, as Slack posts one (`block_actions`).
+ */
+const pressFrom = (
+  user: string,
+  {
+    channel = `D${unique().toUpperCase()}`,
+    actionId = confirmAction,
+    value,
+  }: { channel?: string; actionId?: string; value: string }
+) => {
+  const ts = `${Math.floor(Date.now() / 1000)}.000100`;
+  return {
+    type: "block_actions",
+    team: { id: "TACME", domain: "acme" },
+    api_app_id: "ASTEPHEN",
+    user: { id: user, username: "ben", name: "ben", team_id: "TACME" },
+    channel: { id: channel, name: "directmessage" },
+    container: {
+      type: "message",
+      message_ts: ts,
+      channel_id: channel,
+      is_ephemeral: false,
+    },
+    message: { type: "message", ts, user: "UBOT", text: "Card" },
+    trigger_id: `trigger-${unique()}`,
+    response_url: "https://hooks.slack.test/actions/T/1/x",
+    actions: [
+      {
+        type: "button",
+        block_id: "actions",
+        action_id: actionId,
+        value,
+        action_ts: ts,
+      },
+    ],
+  };
+};
 
 /** Someone with a Slack account linked to their Grasp person. */
 const linkedPerson = async () => {
@@ -359,20 +411,78 @@ describe("who gets in from Slack", () => {
   });
 });
 
+describe("a press on a card in Slack", () => {
+  it("reaches the card's handler for a linked person in their own direct message, as a press in Teams does", async () => {
+    const { slackUser } = await linkedPerson();
+    // Writes that aren't held: the card's handler says it changed since.
+    const confirm = pressFrom(slackUser, {
+      value: JSON.stringify([
+        { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
+      ]),
+    });
+    const confirmed = await post(confirm, { form: true });
+    // An offer that isn't there: Start's handler says it is gone.
+    const start = pressFrom(slackUser, {
+      actionId: startAction,
+      value: crypto.randomUUID(),
+    });
+    const started = await post(start, { form: true });
+
+    const said = async (channel: string) => {
+      const calls = await slackSawIn(channel);
+      return calls.map(({ method, fields }) => [method, fields.text]);
+    };
+    expect({
+      confirmed: confirmed.status,
+      confirmSaid: await said(confirm.channel.id),
+      started: started.status,
+      startSaid: await said(start.channel.id),
+    }).toStrictEqual({
+      confirmed: 200,
+      confirmSaid: [["chat.postMessage", say("changedSince", "en")]],
+      started: 200,
+      startSaid: [["chat.postMessage", say("startGone", "en")]],
+    });
+  });
+
+  it("is refused unsigned, and runs nothing for someone who hasn't linked their Slack account, or outside a direct message", async () => {
+    const { slackUser } = await linkedPerson();
+    const value = JSON.stringify([
+      { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
+    ]);
+    const unsigned = await post(pressFrom(slackUser, { value }), {
+      form: true,
+      signed: null,
+    });
+    const stranger = pressFrom(`U${unique()}`, { value });
+    const inChannel = pressFrom(slackUser, {
+      channel: `C${unique().toUpperCase()}`,
+      value,
+    });
+    await post(stranger, { form: true });
+    await post(inChannel, { form: true });
+
+    expect({
+      unsigned: unsigned.status,
+      stranger: await slackSawIn(stranger.channel.id),
+      inChannel: await slackSawIn(inChannel.channel.id),
+    }).toStrictEqual({ unsigned: 401, stranger: [], inChannel: [] });
+  });
+});
+
 describe("a linked person's question in Slack", () => {
   it("gets the same answer as the same question in Teams, in their own Slack chat", async () => {
     const answer = "Parental leave lasts sixteen weeks.";
     const { userId, slackUser } = await linkedPerson();
-    await pointAtGateway(
-      workspace(env, personalWorkspaceId(userId)),
-      fakeGateway(says(answer))
-    );
+    // One provider for the organization: it answers both chats.
+    const provider = await fakeProvider(says(answer), says(answer));
+    await configureObject(workspace(env, personalWorkspaceId(userId)));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
     await post(fromSlack, { caught: false });
 
-    const inTeams = await member(idp, says(answer));
+    const inTeams = await memberAnsweredBy(idp, provider);
     await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
 
     const slackPosts = await slackSawIn(fromSlack.event.channel);
@@ -381,9 +491,10 @@ describe("a linked person's question in Slack", () => {
       activities.filter(({ type }) => type === "message")
     );
     expect({
+      // Posted whole, or streamed: a first post, then updated as it comes.
       slack: slackPosts.some(
         ({ method, fields, authorized }) =>
-          method === "chat.postMessage" &&
+          ["chat.postMessage", "chat.update"].includes(method) &&
           authorized &&
           JSON.stringify(fields).includes(answer)
       ),

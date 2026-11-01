@@ -10,6 +10,8 @@ import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { VersionRef } from "@grasp-os/brain/recall-store";
 import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
+import { providerTroubles } from "@grasp-os/shared/ai-providers";
+import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -28,6 +30,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
+import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -95,11 +98,13 @@ import { tokensOfBound } from "../resource-model.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
 import { askAgainMs } from "./admission.ts";
 import type { Share } from "./admission.ts";
+import { aiWaitEnded, aiWaitStarted, aiWakeType } from "./ai-waits.ts";
+import type { AiWait } from "./ai-waits.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import {
   citedVersions,
@@ -242,9 +247,8 @@ interface StepAttempt {
   /** The generation of the activation that claimed it. */
   generation: number;
   /**
-   * When the engine gives up on it, by the step's timeout: an App call it
-   * makes waits for the App no longer (`callApp`), and none of its calls
-   * acts after it.
+   * When the engine gives up on it, by the step's timeout: none of its
+   * calls acts after it.
    */
   deadline: number;
   /** Whether its function has returned: its host acts no more. */
@@ -253,6 +257,13 @@ interface StepAttempt {
   staleAudited?: boolean;
   step: string;
   held: boolean;
+  /**
+   * What its model call's provider showed when the call failed on the
+   * organization's own key (`aiWaitOf`): it refused the key, isn't
+   * answering, or is limiting requests. The step then waits for it
+   * (`keyMarkerOf`), whatever its code made of the failure.
+   */
+  aiTrouble?: AiWait;
   /**
    * Whether it was held because a call of it under the step's key came
    * back of unknown outcome, for its person to resolve (`heldNoted`): its
@@ -297,11 +308,14 @@ interface StepAttempt {
  * actions); or its step queued for a share of the client's attempts
  * running at once (admission.ts), with the share and the seconds until it
  * comes free at the latest, as the refusal said: the step asks again after
- * its backoff all the same (admission.ts, `askAgainMs`).
+ * its backoff all the same (admission.ts, `askAgainMs`); or its model call
+ * failed on the organization's own AI provider key
+ * (`ai_provider`, `keyRound`).
  */
 export type WaitReason =
   | { reason: "held" }
   | { reason: "outcome_unknown" }
+  | ({ reason: "ai_provider" } & AiWait)
   | { reason: "queued"; waitingFor: Share; retryAfterSeconds: number };
 
 /** The code a held side effect answers a run's call with (connect). */
@@ -380,7 +394,7 @@ export const busyMarker = ({
 /**
  * An attempt refused for now: the seconds to wait, the share it was
  * queued for, when it was (`workflow.queued`), not its lineage busy, and
- * how long a step may wait in all, as the quota policy said then.
+ * how long a step may wait in all, as the quota limits said then.
  */
 export interface Busy {
   busyFor: number;
@@ -392,12 +406,60 @@ export interface Busy {
 
 const shareSchema = z.enum(["client", "person", "app"]);
 
+/** The field of a step's result that says its AI provider failed it (`keyMarkerOf`). */
+const keyField = `${coreStepPrefix}aiWait`;
+
+/** What a step waiting for its AI provider recorded (`keyMarkerOf`). */
+const aiWaitRecordSchema = z.object({
+  at: z.number(),
+  provider: z.string(),
+  trouble: z.enum(providerTroubles),
+});
+
+/**
+ * What an attempt of a step answers when its model call failed on the
+ * organization's own key for what its provider showed (`AiWait`), with
+ * when: recorded as the step's result, so the run waits durably, holding
+ * no compute, and runs the step again once calls work (`keyRound`),
+ * rather than spend the step's retries, or fail the run, on a provider
+ * that refuses the key, isn't answering or limits requests. Workflow code
+ * can't return it (`do` refuses it).
+ */
+export const keyMarkerOf = (at: number, { provider, trouble }: AiWait) => ({
+  [keyField]: { at, provider, trouble },
+});
+
+/** The schema of what the gateway tells of a provider's trouble (models.ts, `troubleError`). */
+const aiWaitSchema = z.object({
+  provider: z.string(),
+  trouble: z.enum(providerTroubles),
+});
+
+/**
+ * What a model call's failure tells of its provider, when it failed on
+ * the organization's own key for what the provider showed; none else.
+ */
+const aiWaitOf = (error: unknown): AiWait | undefined =>
+  isExpectedError(error) && modelErrors.codeOf(error) !== undefined
+    ? aiWaitSchema.safeParse(error.details).data
+    : undefined;
+
+/**
+ * `aiWaitOf`, for a call tried once: only when the gateway saw that it
+ * provably billed nothing (models.ts, `provablyUnbilled`), so running it
+ * again can't send anything twice that may have been taken on.
+ */
+export const unbilledAiWaitOf = (error: unknown): AiWait | undefined =>
+  isExpectedError(error) && error.details?.unbilled === true
+    ? aiWaitOf(error)
+    : undefined;
+
 /** Whether `value` is one of core's markers, which workflow code can't return. */
 export const isCoreMarker = (value: unknown): boolean =>
   isHeldMarker(value) ||
   (typeof value === "object" &&
     value !== null &&
-    Object.hasOwn(value, busyField));
+    (Object.hasOwn(value, busyField) || Object.hasOwn(value, keyField)));
 
 const busyRecordSchema = z.object({
   busyFor: z.number(),
@@ -411,10 +473,12 @@ const busyRecordSchema = z.object({
  * for its person (`heldMarkerOf`), on an unknown outcome or not, with the
  * keys it waits on; or refused for load (`busyMarker`), with the seconds
  * to wait, when it was refused, how long a step may wait in all, and the
- * share it was queued for and whether it joined the queue then.
+ * share it was queued for and whether it joined the queue then; or its
+ * model call failed for what its AI provider showed (`keyMarkerOf`), and when.
  */
 export type CoreMarker =
   | { kind: "held"; keys: string[]; unknown: boolean }
+  | ({ kind: "key" } & z.infer<typeof aiWaitRecordSchema>)
   | ({ kind: "busy" } & z.infer<typeof busyRecordSchema>);
 
 /**
@@ -435,6 +499,9 @@ export const markerOf = (value: unknown): CoreMarker | undefined => {
         : [],
       unknown: field(unknownField) === true,
     };
+  }
+  if (Object.hasOwn(value, keyField)) {
+    return { kind: "key", ...aiWaitRecordSchema.parse(field(keyField)) };
   }
   return {
     kind: "busy",
@@ -535,13 +602,13 @@ export const loadWaitStart: LoadWait = {
 
 /**
  * The step's wait for load once its attempt answered `marker`: after a
- * hold, none (an attempt was admitted); after a refusal for load, one
+ * hold or a refused key, none (an attempt was admitted); after a refusal for load, one
  * round more, sleeping as long as `askAgainMs` says, added to what its
  * rounds wait in all. A round left nothing to sleep (`sleepMs` 0) has
  * waited as long as a step may.
  */
 export const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
-  if (marker.kind === "held") {
+  if (marker.kind === "held" || marker.kind === "key") {
     return loadWaitStart;
   }
   const sleepMs = askAgainMs({
@@ -566,7 +633,7 @@ interface WaitRound {
 
 /**
  * The failure of step `step`, which waited for load as long as a step may
- * (`maxWaitMs`, the quota policy's `workflowQueuedStepMs`): no retry of
+ * (`maxWaitMs`, the quota limits' `workflowQueuedStepMs`): no retry of
  * its own is spent, and none tried.
  */
 export const queueTimedOut = (step: string, maxWaitMs: number): StepError => ({
@@ -955,7 +1022,7 @@ export const maxWaits = 15;
 const maxUnknownWaits = 60;
 
 /** What a round of a step's wait waits for (`#waitBefore`). */
-type WaitKind = "busy" | "held" | "unknown";
+type WaitKind = "busy" | "held" | "unknown" | "key";
 
 /**
  * The prefix of the steps of round `round` of the wait of the step keyed
@@ -978,20 +1045,24 @@ export const waitStep = (key: string, kind: WaitKind, round: number): string =>
  *   step's run again, bounded by its deadline (`unknownHoldMsOf`) and the
  *   run lineage's age, not by the steps the run's code takes, as a run
  *   waits on its person;
+ * - a wait for its AI provider (`key`): its record, its wait,
+ *   the step's run again and its end, bounded by its hold
+ *   (`aiKeyHoldMsOf`) and the timed tries between (`keyRound`): the key is
+ *   the organization's to replace, not the run's code;
  * - a decision's wait again, and its look, after a wake that answered
  *   nothing (`again:<round>`, `woken:<round>`, `waitForDecision`): an
  *   event of its type sent by someone else causes them, not the run's
  *   code, bounded by the engine's inbox (`maxInboxEvents`).
  */
 const uncountedWaitStep =
-  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
+  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|key:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
 
 /**
  * A wait's step that runs the step it holds again (`#waitBefore`), of any
  * kind: its key names that step (`waitKeyOf`).
  */
 const waitRunStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:busy|held|unknown):\d+:run$/u;
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:busy|held|unknown|key):\d+:run$/u;
 
 /**
  * Tries of one check whether a held side effect still waits, after the
@@ -1034,6 +1105,116 @@ const unknownHoldMsOf = (env: Env): number => {
 };
 
 /**
+ * How long a step waits, from its model call's first refusal for the
+ * organization's AI provider key, for a key that works: 7 days, then it
+ * fails with `model.provider_key_failed`. Tests shorten it.
+ */
+const aiKeyHoldMs = 7 * 24 * 60 * 60 * 1000;
+
+const aiKeyHoldMsOf = (env: Env): number => {
+  const set = Number(env.WORKFLOW_AI_KEY_HOLD_MS);
+  return Number.isInteger(set) && set > 0 && set < aiKeyHoldMs
+    ? set
+    : aiKeyHoldMs;
+};
+
+/** A step's wait for its AI provider, over its rounds in a row. */
+export interface KeyWait {
+  /** When its call first failed so; none while it isn't held. */
+  since: number | undefined;
+  /** What the provider showed last round, recorded; none before. */
+  last: ProviderTrouble | undefined;
+  /** Its rounds in a row so far. */
+  rounds: number;
+  /** The last round's prefix (`waitStep`), which its end is named after. */
+  prefix: string;
+}
+
+/** No wait for a key yet. */
+export const keyWaitStart = (): KeyWait => ({
+  since: undefined,
+  last: undefined,
+  rounds: 0,
+  prefix: "",
+});
+
+/** The code a step fails with once it waited as long as it may, by what its provider showed. */
+const troubleCodes = {
+  refused: "model.provider_key_failed",
+  not_answering: "model.provider_unavailable",
+  limiting: "model.rate_limited",
+} as const satisfies Record<ProviderTrouble, ModelErrorCode>;
+
+/**
+ * The failure of step `step`, which waited for its AI provider as long as
+ * a step may (`aiKeyHoldMsOf`), by what the provider showed last.
+ */
+export const keyTimedOut = (
+  step: string,
+  trouble: ProviderTrouble
+): StepError => {
+  const code = troubleCodes[trouble];
+  return {
+    name: "Error",
+    code,
+    message: `Step "${step}" waited for its AI provider as long as a step may. ${modelErrors.create(code).message}`,
+  };
+};
+
+/**
+ * Round `prefix` of a step's wait for its AI provider, its
+ * attempt having answered `marker`: past its hold (`aiKeyHoldMsOf`, from
+ * the first failure, as the markers recorded it), `"timed_out"`; else the
+ * wait recorded on its first round and whenever what the provider shows
+ * changes (`started`, in a step of its own), then a durable wait that
+ * replacing a key ends (`aiWakeType`, ai-waits.ts), or else the next timed
+ * try: a minute first (`waitMsOf`), doubling up to 15 minutes, for a
+ * provider that answers again or lifts its limit. Read off the recorded
+ * markers alone, so every replay waits the same.
+ */
+export const keyRound = async (
+  run: Pick<RunStep, "do" | "waitForEvent">,
+  env: Env,
+  prefix: string,
+  marker: { at: number } & AiWait,
+  wait: KeyWait,
+  started: (since: number, aiWait: AiWait) => Promise<void>
+): Promise<"timed_out" | undefined> => {
+  wait.since ??= marker.at;
+  const { since } = wait;
+  wait.rounds += 1;
+  wait.prefix = prefix;
+  const ends = since + aiKeyHoldMsOf(env);
+  if (marker.at >= ends) {
+    return "timed_out";
+  }
+  if (wait.last !== marker.trouble) {
+    wait.last = marker.trouble;
+    const { provider, trouble } = marker;
+    await run.do(`${prefix}:waiting`, {}, async () => {
+      await started(since, { provider, trouble });
+      return null;
+    });
+  }
+  const first = waitMsOf(env);
+  try {
+    await run.waitForEvent(prefix, {
+      type: aiWakeType,
+      timeout: Math.min(
+        first * 2 ** (wait.rounds - 1),
+        first * maxWaits,
+        ends - marker.at
+      ),
+    });
+  } catch (error) {
+    if (!isTimeout(error)) {
+      throw error;
+    }
+  }
+  return undefined;
+};
+
+/**
  * The least an AI step waits after the model budget turned it away while
  * other calls under way hold it (`model.budget_busy`), before its attempt
  * fails and the engine retries it at the step's own delay: so a step with
@@ -1071,7 +1252,7 @@ const keptStatistics = (attempt: StepAttempt): boolean =>
  * `context` says, else `tries`, the attempts this execution made (fewer,
  * if an earlier execution made some: never the last too soon), against
  * its retries as the engine says, else `configured`, else the default.
- * The attempts the quota policy admits are its admission's to say
+ * The attempts the quota limits admit are its admission's to say
  * (`RunHost.#admit`).
  */
 const isLastAttempt = (
@@ -1169,69 +1350,29 @@ export const newAiCalls = (): AiCalls => ({
   unclaimed: new Map(),
 });
 
-/** The step limit this isolate last read from the quota policy. */
-let lastStepLimit: number | undefined;
-
 /**
  * The steps a run may take (spec 18.1's logical steps, 1000 a run), as
- * the deployment's quota policy has it now: so a run whose code loops on
- * steps without end can't journal without bound. Counted over each
- * activation's replay of the run's journal (`countedStep`), so a restart,
- * a retry or a new activation counts every step the run took before.
- *
- * Read before any of the run's steps, where a throw would end the run for
- * good, so a policy that can't be read (the database failing for a
- * moment) is logged, and the limit this isolate last read applies, else
- * the platform's: the run goes on. It admits nothing more: every attempt
- * of a step reads the policy again as it is admitted (quotas.ts,
- * `admitAttempt`), and one that can't is refused as the platform's
- * unexpected error, which the engine retries. The limit only bounds what
- * the run journals, and the next activation reads it again.
+ * the quota limits have them: so a run whose code loops on steps without
+ * end can't journal without bound. Counted over each activation's replay
+ * of the run's journal (`countedStep`), so a restart, a retry or a new
+ * activation counts every step the run took before. Every attempt of a
+ * step is held to them again as it is admitted (quotas.ts,
+ * `admitAttempt`).
  */
-export const stepLimitOf = async (env: Env): Promise<number> => {
-  try {
-    const { limits } = await quotaPolicy(env);
-    lastStepLimit = limits.workflowSteps;
-    return lastStepLimit;
-  } catch (error) {
-    log.warn("workflow.quota_policy_unread", errorFields(error));
-    return lastStepLimit ?? platformLimits.workflowSteps;
-  }
-};
-
-/** The model call limit this isolate last read from the quota policy. */
-let lastModelCallLimit: number | undefined;
+export const stepLimitOf = (env: Env): number => quotaLimits(env).workflowSteps;
 
 /**
- * The model calls a run's lineage may make, as the deployment's quota
- * policy has it now (`lineageModelRequests`): the ceiling a run's host
- * holds its model calls to (`maxModelCalls`).
- *
- * Read as a run loads, before any of its steps, where a throw would end
- * the run for good (GRA-1091), so a policy that can't be read for a moment
- * is logged, and the limit this isolate last read applies, else the
- * platform's own: never no limit at all. It admits nothing more: every
- * model request of a run's lineage reads the policy again as it is sent
- * (models.ts, `scopesNowOf`), and one that can't is held back, so a
- * lowered limit holds through the moment.
+ * The model calls a run's lineage may make, as the quota limits have them
+ * (`lineageModelRequests`): the ceiling a run's host holds its model calls
+ * to (`maxModelCalls`). Every model request of a run's lineage is held to
+ * them again as it is sent (models.ts, `scopesNowOf`).
  */
-export const modelCallLimitOf = async (env: Env): Promise<number> => {
-  try {
-    const { limits } = await quotaPolicy(env);
-    lastModelCallLimit = limits.lineageModelRequests;
-    return lastModelCallLimit;
-  } catch (error) {
-    log.warn("workflow.quota_policy_unread", {
-      ...errorFields(error),
-      limit: "lineageModelRequests",
-    });
-    return lastModelCallLimit ?? platformLimits.lineageModelRequests;
-  }
-};
+export const modelCallLimitOf = (env: Env): number =>
+  quotaLimits(env).lineageModelRequests;
 
 /**
- * `step`, counting the run's own steps (`stepLimit` is the operator's
- * allowance of them) and refusing one past it, as a failure of that step.
+ * `step`, counting the run's own steps (`stepLimit` is the allowance
+ * of them) and refusing one past it, as a failure of that step.
  * Core's own steps (`$grasp:…`, but for a wait's, which the run's code
  * causes without bound: {@link waitStepPrefix}) and the SDK's first
  * `$params` step are outside the allowance: a run of one step fits an
@@ -1296,8 +1437,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
         return await step.do(name, config, fn);
       }
       // Each attempt is told its step's place, for its admission against
-      // the policy as it is then (quotas.ts, `admitAttempt`): the limit
-      // this activation counts by may be a fallback (`stepLimitOf`).
+      // the limits as they are then (quotas.ts, `admitAttempt`).
       return await step.do(
         name,
         config,
@@ -1808,6 +1948,35 @@ export class RunHost extends RpcTarget {
     return waiting.includes(true);
   }
 
+  /**
+   * Records, once in a step named after its last round, that step `step`
+   * waits for its AI provider no more (ai-waits.ts).
+   */
+  async #keyWaitEnded(step: string, wait: KeyWait): Promise<void> {
+    await this.#step.do(`${wait.prefix}:ended`, {}, async () => {
+      await aiWaitEnded(this.#env, this.#run.runId, step);
+      return null;
+    });
+  }
+
+  /**
+   * `#keyWaitEnded` for a step that is ending in a throw, when it waited:
+   * never in the way of the step's own error, which is what the run sees.
+   */
+  async #keyWaitEndedQuietly(step: string, wait: KeyWait): Promise<void> {
+    if (wait.since === undefined) {
+      return;
+    }
+    try {
+      await this.#keyWaitEnded(step, wait);
+    } catch (error) {
+      log.error("workflow.ai_wait_end_failed", {
+        runId: this.#run.runId,
+        ...errorFields(error),
+      });
+    }
+  }
+
   /** Records, once in step `step`, that the run waits, and why. */
   async #recordWaiting(step: string, why: WaitReason): Promise<void> {
     try {
@@ -1885,7 +2054,7 @@ export class RunHost extends RpcTarget {
    */
   async #waitBefore(
     step: string,
-    marker: CoreMarker,
+    marker: Exclude<CoreMarker, { kind: "key" }>,
     { round, sleepMs }: WaitRound,
     unknown: { since?: number }
   ): Promise<string> {
@@ -1977,6 +2146,9 @@ export class RunHost extends RpcTarget {
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
+    // Its wait for its AI provider, over its rounds in a row: ended however
+    // the step ends, a throw included, so no run reads as waiting on.
+    let keyWait = keyWaitStart();
     const stepDone = Promise.withResolvers<null>();
     try {
       this.#requireUntampered();
@@ -2083,6 +2255,12 @@ export class RunHost extends RpcTarget {
         if (held) {
           return heldMarkerOf(attempt.heldKeys, attempt.unknown);
         }
+        // Its model call was refused for the organization's AI provider
+        // key: the step waits for a working one, not failed, using no
+        // retry, whatever the workflow code made of the refusal.
+        if (current && attempt.aiTrouble !== undefined) {
+          return keyMarkerOf(Date.now(), attempt.aiTrouble);
+        }
         if (!result.ok) {
           failed = result.error;
           throw toStepError(result.error);
@@ -2137,6 +2315,19 @@ export class RunHost extends RpcTarget {
       // same steps.
       // When the step was first held on its current unknown outcome.
       const unknown: { since?: number } = {};
+      const keyWaitStarted = async (
+        since: number,
+        aiWait: AiWait
+      ): Promise<void> => {
+        await aiWaitStarted(
+          this.#env,
+          { kind: "app", runId: this.#run.runId },
+          step,
+          aiWait,
+          since
+        );
+        await this.#hooks.waiting({ reason: "ai_provider", ...aiWait });
+      };
       let round = 0;
       for (
         let marker = markerOf(value);
@@ -2144,12 +2335,45 @@ export class RunHost extends RpcTarget {
         marker = markerOf(value)
       ) {
         round += 1;
+        if (marker.kind !== "key" && keyWait.since !== undefined) {
+          // oxlint-disable-next-line no-await-in-loop -- once per wait
+          await this.#keyWaitEnded(step, keyWait);
+          keyWait = keyWaitStart();
+        }
         // Read off the markers alone, journaled as the step's results, so
         // every replay counts the same.
         load = loadWaitAfter(load, marker);
         if (marker.kind === "busy" && load.sleepMs <= 0) {
           failed = queueTimedOut(step, marker.maxWaitMs);
           throw toStepError(failed);
+        }
+        if (marker.kind === "key") {
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          const prefix = waitStep(await waitKeyOf(step), "key", round);
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          const ended = await keyRound(
+            this.#step,
+            this.#env,
+            prefix,
+            marker,
+            keyWait,
+            keyWaitStarted
+          );
+          if (ended === "timed_out") {
+            // oxlint-disable-next-line no-await-in-loop -- once
+            await this.#keyWaitEnded(step, keyWait);
+            keyWait = keyWaitStart();
+            failed = keyTimedOut(step, marker.trouble);
+            throw toStepError(failed);
+          }
+          tries = 0;
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          value = await this.#step.do(
+            `${prefix}:run`,
+            stepConfig(parsed),
+            attemptStep
+          );
+          continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         const prefix = await this.#waitBefore(
@@ -2166,8 +2390,14 @@ export class RunHost extends RpcTarget {
           attemptStep
         );
       }
+      if (keyWait.since !== undefined) {
+        await this.#keyWaitEnded(step, keyWait);
+        keyWait = keyWaitStart();
+      }
       return { ok: true, value };
     } catch (error) {
+      // The step ran again after its wait and threw: it waits no more.
+      await this.#keyWaitEndedQuietly(step, keyWait);
       const reported = failed ?? forIsolate(error);
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
@@ -2284,9 +2514,12 @@ export class RunHost extends RpcTarget {
       // rate: the attempt waits the wait core computed, as long as its
       // timeout lets it and no longer than a busy budget's, before it
       // fails, unless it is the last.
+      // One its provider limits on the organization's key holds the run
+      // instead (`keyMarkerOf`): no wait here.
       const throttled = modelErrors.codeOf(error);
       if (
         (throttled === "model.queued" || throttled === "model.rate_limited") &&
+        aiWaitOf(error) === undefined &&
         !attempt.last
       ) {
         const wait = isExpectedError(error)
@@ -2418,7 +2651,6 @@ export class RunHost extends RpcTarget {
                 schema,
                 purpose: "workflow.step",
                 trigger: this.#actor,
-                runStep: { runId: this.#run.runId, step: attempt.step },
                 // Whose share it takes: who started the run, never the
                 // owner it acts for when nobody did.
                 shareSubject: this.#run.shareSubject,
@@ -2462,6 +2694,7 @@ export class RunHost extends RpcTarget {
               // Stopped before it was sent, as the engine gave up on the
               // attempt: said so, whatever the gateway made of the stop.
               await this.#requireCurrent(attempt, "model");
+              attempt.aiTrouble = aiWaitOf(error) ?? attempt.aiTrouble;
               throw error;
             }
           },

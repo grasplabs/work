@@ -1,6 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -13,21 +12,14 @@ import type { AgentScope } from "../agent-scope.ts";
 import { activeMember } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
 import { memberOf } from "../auth/identity.ts";
-import {
-  chatWorkflowOffers,
-  workflowResources,
-  workflowResourceVersions,
-} from "../db/core/schema.ts";
-import { inList, notNullFailed } from "../db/d1.ts";
+import { chatWorkflowOffers, workflowResources } from "../db/core/schema.ts";
+import { notNullFailed } from "../db/d1.ts";
 import { isRestricted } from "../restricted.ts";
-import {
-  listWorkflowResources,
-  requireWorkflowRole,
-} from "../workflow-resources.ts";
+import { requireWorkflowRole } from "../workflow-resources.ts";
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
-import { pressedStart } from "./stephen-requests.ts";
+import { keepCardsOf, pressedStart } from "./stephen-requests.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
 // Workflows people start by asking Stephen in a chat app. A workflow's
@@ -39,7 +31,7 @@ import type { ChannelLocale, LineName } from "./words.ts";
 // Threat model, and how each is closed:
 //
 // - A workflow its owner didn't open to asking: never listed nor offered
-//   (`askableFor`, `offerStart`), and a press after the owner closed it
+//   (`askableFor` in askable-workflows.ts, `offerStart`), and a press after the owner closed it
 //   again is refused in the statement that admits the start (`stillAskable`).
 // - The agent starting something on its own: it only offers. Nothing
 //   starts until the person it acts for presses Start, and the start is
@@ -70,78 +62,11 @@ const maxOfferValues = 10;
 /** The most text an offer's values may hold together, in characters. */
 const maxOfferChars = 8000;
 
-/** A workflow the person may ask for, as the chat's code reads it. */
-export interface AskableWorkflow {
-  id: string;
-  name: string;
-  /** The version a start of it would run now. */
-  version: number;
-  /** The JSON Schema its input must match, as published. */
-  input: Json | null;
-}
-
 /** The person as a start of theirs acts: through the chat app. */
 const actingIn = (person: Member, platform: string) => ({
   ...person,
   actor: actorOf({ userId: person.userId, staff: false }, platform),
 });
-
-const contractSchema = z.looseObject({ input: z.json().optional() });
-
-/** The input schema of `contract`, a version's canonical JSON contract. */
-const inputOf = (contract: string): Json | null => {
-  try {
-    return contractSchema.parse(JSON.parse(contract)).input ?? null;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * The workflows `person` could start themselves whose owners let people
- * ask for them, each at its current version, with the input it takes.
- */
-export const askableFor = async (
-  env: Env,
-  person: Member
-): Promise<AskableWorkflow[]> => {
-  const listed = await listWorkflowResources(env, person);
-  const theirs = listed.filter(({ currentVersion }) => currentVersion !== null);
-  if (theirs.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB)
-    .select({
-      id: workflowResources.id,
-      version: workflowResources.currentVersion,
-      contract: workflowResourceVersions.contract,
-    })
-    .from(workflowResources)
-    .innerJoin(
-      workflowResourceVersions,
-      and(
-        eq(workflowResourceVersions.workflowResourceId, workflowResources.id),
-        eq(workflowResourceVersions.version, workflowResources.currentVersion)
-      )
-    )
-    .where(
-      and(
-        inList(
-          workflowResources.id,
-          theirs.map(({ id }) => id)
-        ),
-        eq(workflowResources.askable, true),
-        isNull(workflowResources.deletedAt)
-      )
-    );
-  const found = new Map(rows.map((row) => [row.id, row]));
-  return theirs.flatMap(({ id, name }) => {
-    const row = found.get(id);
-    return row?.version === null || row === undefined
-      ? []
-      : [{ id, name, version: row.version, input: inputOf(row.contract) }];
-  });
-};
 
 /** Whether workflow `id` is live and open to asking, as a statement runs. */
 const stillAskable = (id: string) =>
@@ -244,7 +169,11 @@ export const offerStart = async (
 export const postOffers = async (
   env: Env,
   thread: Pick<Conversation, "post">,
-  { chatId, userId }: { chatId: string; userId: string },
+  {
+    chatId,
+    userId,
+    requestId,
+  }: { chatId: string; userId: string; requestId: string | null },
   locale: ChannelLocale
 ): Promise<void> => {
   const now = new Date();
@@ -260,6 +189,12 @@ export const postOffers = async (
       )
     )
     .returning();
+  // Kept with the request whose answer posts them, so a press is its.
+  await keepCardsOf(
+    env,
+    requestId,
+    offers.map(({ id }) => `offer:${id}`)
+  );
   for (const offer of offers.toSorted(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
   )) {
@@ -357,7 +292,7 @@ export const pressOffer = async (
     // The press is part of the request that offered it, never one of its own.
     await pressedStart(env, {
       userId: offer.userId,
-      chatId: offer.chatId,
+      offerId: offer.id,
       workflowId: offer.workflowId,
       started: true,
     });
@@ -372,7 +307,7 @@ export const pressOffer = async (
     });
     await pressedStart(env, {
       userId: offer.userId,
-      chatId: offer.chatId,
+      offerId: offer.id,
       workflowId: offer.workflowId,
       started: false,
     });

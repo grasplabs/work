@@ -1,12 +1,10 @@
-import { deploymentConfig } from "@grasp-os/shared/config";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import {
   memoryCharactersPerToken,
-  memoryDefaultLimits,
-  memoryLimitsSchema,
+  memoryLimits,
   memoryTokens,
 } from "@grasp-os/shared/memory";
 import type { MemoryFileName } from "@grasp-os/shared/memory";
@@ -64,14 +62,8 @@ export const memoryFileOf = async (
   return undefined;
 };
 
-/**
- * The size limit of `name`, in tokens: the deployment's `MEMORY_LIMITS`,
- * else the default. A var that doesn't parse is logged and counts as unset.
- */
-export const memoryLimit = (env: Env, name: MemoryFileName): number =>
-  deploymentConfig(memoryLimitsSchema, "MEMORY_LIMITS", env.MEMORY_LIMITS)?.[
-    name
-  ] ?? memoryDefaultLimits[name];
+/** The size limit of `name`, in tokens. */
+export const memoryLimit = (name: MemoryFileName): number => memoryLimits[name];
 
 /**
  * Refuses `text` for the memory file `name` when it is over its limit, with
@@ -79,11 +71,10 @@ export const memoryLimit = (env: Env, name: MemoryFileName): number =>
  * about as many characters.
  */
 export const requireWithinLimit = (
-  env: Env,
   name: MemoryFileName,
   text: string
 ): void => {
-  const maxTokens = memoryLimit(env, name);
+  const maxTokens = memoryLimit(name);
   const tokens = memoryTokens(text);
   if (tokens > maxTokens) {
     throw knowledgeErrors.create("knowledge.memory_too_large", {

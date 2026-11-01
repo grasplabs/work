@@ -6,12 +6,12 @@
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldLabel,
   FieldLegend,
   FieldSet,
 } from "@grasp-os/ui/components/field";
-import { Label } from "@grasp-os/ui/components/label";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -53,24 +53,24 @@ export const HostingChoice = ({
         </Field>
       </RadioGroup>
       {value.hosting === "grasp_cloud" ? (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              checked={keepInEu}
-              id={`${id}-eu`}
-              name="keepInEu"
-              onCheckedChange={(checked) => {
-                onChange({ ...value, jurisdiction: checked ? "eu" : "none" });
-              }}
-            />
-            <Label htmlFor={`${id}-eu`}>Keep data in the EU</Label>
-          </div>
-          <FieldDescription>
-            {keepInEu
-              ? "Its databases, files and Durable Objects are created in the EU. This can't change later."
-              : "Data can be stored anywhere in Cloudflare's network. This can't change later."}
-          </FieldDescription>
-        </div>
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={keepInEu}
+            id={`${id}-eu`}
+            name="keepInEu"
+            onCheckedChange={(checked) => {
+              onChange({ ...value, jurisdiction: checked ? "eu" : "none" });
+            }}
+          />
+          <FieldContent>
+            <FieldLabel htmlFor={`${id}-eu`}>Keep data in the EU</FieldLabel>
+            <FieldDescription>
+              {keepInEu
+                ? "Its databases, files and Durable Objects are created in the EU. This can't change later."
+                : "Data can be stored anywhere in Cloudflare's network. This can't change later."}
+            </FieldDescription>
+          </FieldContent>
+        </Field>
       ) : (
         <FieldDescription>
           Grasp runs on the organization&apos;s own servers. On-prem setup

@@ -213,6 +213,23 @@ export interface AppContents {
   workflows: string[];
 }
 
+/** An App as `AppsApi.list` gives it, with its current version's contents. */
+export interface AppOverview {
+  app: ViewedApp;
+  contents: AppContents;
+}
+
+/**
+ * One screen of an App's current version (`AppsApi.screens`), with what
+ * a list of screens shows of its App: its name, where it stands and the
+ * business process it serves.
+ */
+export interface ListedScreen {
+  app: Pick<App, "id" | "name" | "status" | "process">;
+  /** The screen's name, as `AppContents.screens` gives it. */
+  screen: string;
+}
+
 /**
  * What an App's current version offers other Apps: its exports
  * (`appExportsPath`). None while it has no current version.
@@ -452,6 +469,48 @@ export interface AppFilesApi {
   ) => Promise<CommittedVersion>;
 }
 
+/** Why an admin revokes a release or holds it: kept in the audit log. */
+const releaseReasonSchema = z.string().trim().min(1).max(500);
+
+/** Revoking an App's release (`AppVersionsApi.revoke`): why. */
+export const releaseRevocationSchema = z.strictObject({
+  reason: releaseReasonSchema,
+});
+export type ReleaseRevocation = z.input<typeof releaseRevocationSchema>;
+
+/**
+ * A legal hold on an App's release (`AppVersionsApi.placeHold`): its name,
+ * such as a case reference, which lifting it names again, and why.
+ */
+export const releaseHoldSchema = z.strictObject({
+  hold: identifierSchema,
+  reason: releaseReasonSchema,
+});
+export type ReleaseHold = z.input<typeof releaseHoldSchema>;
+
+/** A legal hold that keeps a release, until an admin lifts it. */
+export interface AppReleaseHold {
+  hold: string;
+  placedAt: string;
+}
+
+/**
+ * A sealed release of one of an App's versions (spec 16.3), as its admins
+ * keep it: whether it was revoked, so it runs no more, and the legal
+ * holds that keep it.
+ */
+export interface AppRelease {
+  app: AppId;
+  version: number;
+  /** SHA-256 of its manifest, which names its code exactly. */
+  manifestHash: string;
+  sealedAt: string;
+  /** When an admin revoked it; null while it may run. */
+  revokedAt: string | null;
+  /** Its legal holds, oldest first. */
+  holds: AppReleaseHold[];
+}
+
 /** An App's versions and which of them runs. */
 export interface AppVersionsApi {
   /** The App's versions, newest first, at most 100 from before `before`. */
@@ -491,6 +550,34 @@ export interface AppVersionsApi {
      */
     expected?: number | null
   ) => Promise<App>;
+  /**
+   * The App's sealed releases, newest first, at most 100 from before
+   * `before`, with whether each was revoked and its legal holds. For the
+   * organization's own admins, never Grasp staff, as is each call below.
+   */
+  releases: (app: string, before?: number) => Promise<AppRelease[]>;
+  /**
+   * Revokes a sealed release (`releaseRevocationSchema`): it runs no more,
+   * calls already running included, and is kept for good. Audited, with
+   * why; revoking it again changes nothing.
+   */
+  revoke: (app: string, version: number, input: unknown) => Promise<AppRelease>;
+  /**
+   * Places a legal hold on a sealed release (`releaseHoldSchema`): it is
+   * kept until the hold is lifted, however old. Audited, with why; placing
+   * the same hold again changes nothing.
+   */
+  placeHold: (
+    app: string,
+    version: number,
+    input: unknown
+  ) => Promise<AppRelease>;
+  /** Lifts legal hold `hold` from a release. Audited. */
+  releaseHold: (
+    app: string,
+    version: number,
+    hold: string
+  ) => Promise<AppRelease>;
 }
 
 /**
@@ -543,6 +630,12 @@ export interface AppMember extends AppMemberRef {
   /** Who shared it with them, or last changed their role. */
   addedBy: string;
   addedAt: string;
+}
+
+/** Someone who may answer for an App (`AppsApi.answerers`). */
+export interface AppAnswerer {
+  id: string;
+  name: string;
 }
 
 /**
@@ -691,6 +784,17 @@ export interface AppsApi {
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**
+   * Every screen of the current version of each App the person has a role
+   * in, as `list` finds the Apps and `contents` names the screens, in one
+   * read: the newest App first, its screens by name.
+   */
+  screens: () => Promise<ListedScreen[]>;
+  /**
+   * The Apps `list` gives, each with what `contents` says of it, in one
+   * read: the Domains page's cards.
+   */
+  overview: () => Promise<AppOverview[]>;
+  /**
    * What the App's current version exports to other Apps: read from its
    * version alone, for anyone with a role in the App.
    */
@@ -741,6 +845,13 @@ export interface AppsApi {
    * and bindings end. Afterwards it is answered as an App that isn't there.
    */
   remove: (app: string) => Promise<void>;
+  /**
+   * Who may answer for the App now, by ID and name (no email): each current
+   * member of the organization core would accept as `responsible`, those
+   * it is shared with through a team too. For whoever may name them: its
+   * builders, never Grasp staff.
+   */
+  answerers: (app: string) => Promise<AppAnswerer[]>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;

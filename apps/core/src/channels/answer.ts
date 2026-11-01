@@ -22,7 +22,12 @@ import { checkOf, turnHeldWrites } from "./held.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
-import { settleRequest, takeRequest } from "./stephen-requests.ts";
+import {
+  heardRequest,
+  keepCardsOf,
+  settleRequest,
+  takeRequest,
+} from "./stephen-requests.ts";
 import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
@@ -130,8 +135,22 @@ const takenIn = async (
   };
   const rate =
     requestId !== null && platform === "teams" ? requestId : undefined;
-  return { settle, rate };
+  return { settle, rate, requestId };
 };
+
+/**
+ * `post`, which posts something after an answer, never throwing: what
+ * couldn't be posted is logged, and what comes after it still goes, the
+ * answer's own record among it.
+ */
+const quietly =
+  (what: string, post: () => Promise<void>) => async (): Promise<void> => {
+    try {
+      await post();
+    } catch (error) {
+      log.warn("channel.after_answer_failed", { what, ...errorFields(error) });
+    }
+  };
 
 /** How a request whose turn ended without an answer ended. */
 const endOfTurn = (outcome: string): "stopped" | "failed" =>
@@ -223,6 +242,28 @@ const textFeed = () => {
 };
 
 /**
+ * How long a stream may take to end once the answer is in. One the
+ * platform refused may never end: Teams' adapter waits for an
+ * acknowledgement of its first words that a refused stream never gets
+ * (@chat-adapter/teams, `streamViaEmit`). Past this, the stream counts as
+ * refused, and the answer is posted whole.
+ */
+const streamEndMs = 5000;
+
+/** Settles once `posting` has, or throws once `ms` passed first. */
+const endedWithin = async (posting: Promise<unknown>, ms: number) => {
+  const late = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    late.reject(new Error("The stream didn't end"));
+  }, ms);
+  try {
+    await Promise.race([posting, late.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * An answer streamed into `thread` as the model writes it, where the
  * platform streams (Teams, in a private chat): `onText` takes the text so
  * far; `finish` adds what the last update missed of `final` and waits for
@@ -265,11 +306,41 @@ const streamInto = (thread: Thread, onFirst: () => void) => {
       if (posting === undefined) {
         return false;
       }
-      await posting;
+      await endedWithin(posting, streamEndMs);
       return true;
     },
   };
 };
+
+/**
+ * What goes under a streamed answer's last words, which Teams gets once
+ * the turn returns: its sources and the thumbs for it, or the thumbs
+ * alone for an answer without sources, as the stream carries none of its
+ * own; nothing when there is neither.
+ */
+const underStream =
+  (thread: Conversation, card: Parameters<typeof sourcesCard>[0]) =>
+  async (): Promise<void> => {
+    if (card.sources.length === 0 && card.rate === undefined) {
+      return;
+    }
+    await quietly("sources", async () => {
+      await thread.post(sourcesCard(card));
+    })();
+  };
+
+/**
+ * The stream an answer goes into, when it is to stream: only in a direct
+ * message the platform's SDK handed over.
+ */
+const streamingIn = (
+  thread: Thread | Conversation,
+  stream: boolean,
+  onFirst: () => void
+) =>
+  stream && "isDM" in thread && thread.isDM
+    ? streamInto(thread, onFirst)
+    : undefined;
 
 /** The answer as a chat app shows it: no links to Grasp's own notes. */
 const shownText = (text: string): string =>
@@ -299,21 +370,19 @@ const answerOne = async (
     messageId?: string;
   },
   text: string,
-  locale: ChannelLocale
+  locale: ChannelLocale,
+  /** Whether it streams where the platform streams; posted whole if not. */
+  stream: boolean
 ): Promise<void> => {
   const startedAt = Date.now();
-  const { settle, rate } = await takenIn(env, {
+  const { settle, rate, requestId } = await takenIn(env, {
     platform,
     userId,
     messageId,
     text,
   });
   const stopTyping = typingIn(thread);
-  // Streamed only in a direct message the platform's SDK handed over.
-  const streaming =
-    "isDM" in thread && thread.isDM
-      ? streamInto(thread, stopTyping)
-      : undefined;
+  const streaming = streamingIn(thread, stream, stopTyping);
   // Held writes are this turn's from here on: connect stamps each when
   // it holds it, by the same clock.
   const since = Date.now();
@@ -372,15 +441,22 @@ const answerOne = async (
     await postIn(env, platform, thread, say("failed", locale));
     return;
   }
-  // Sorted and settled once the person has the answer, as it takes a
-  // model call of its own.
+  // What the turn did is kept now, before any card of the answer can be
+  // pressed, so a press finds the tools it changes. Sorted and settled
+  // once the person has the answer, as that takes a model call of its
+  // own; never kept from it by a card after the answer that couldn't be
+  // posted (`quietly`).
+  if (requestId !== null) {
+    await heardRequest(env, requestId, { calls, cited });
+  }
   const recorded = async () => {
     await settle({ chatId, ended: "answered", calls, cited }, final);
   };
-  // The starts the turn offered, each on its card, under the answer.
-  const offers = async () => {
-    await postOffers(env, thread, { chatId, userId }, locale);
-  };
+  // The starts the turn offered, each on its card, under the answer, each
+  // kept with this request so a press on it is this request's.
+  const offers = quietly("offers", async () => {
+    await postOffers(env, thread, { chatId, userId, requestId }, locale);
+  });
   // Timed to the answer the person has, as they wait for it: its stream's
   // last words, or the post of it whole.
   const timed = async () => {
@@ -409,21 +485,27 @@ const answerOne = async (
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it.
-  const offer = async () => {
+  const offer = quietly("connect_own", async () => {
     await offerConnectOwn(env, thread, {
       userId,
       platform,
       question: text,
       locale,
     });
-  };
+  });
   // The turn's held writes, on one card after the answer: nothing changes
-  // until the person presses Confirm on it (held.ts).
-  const held = async () => {
+  // until the person presses Confirm on it (held.ts). Each is kept with
+  // this request, so a press on it is this request's.
+  const held = quietly("held", async () => {
     const writes = await turnHeldWrites(env, userId, chatId, since);
     if (writes.length === 0) {
       return;
     }
+    await keepCardsOf(
+      env,
+      requestId,
+      writes.map(({ id }) => `write:${id}`)
+    );
     const check = checkOf(answer.provenance.sources);
     await thread.post(
       heldWritesCard({
@@ -433,7 +515,7 @@ const answerOne = async (
         openUrl: chatUrl,
       })
     );
-  };
+  });
   if (!streamed) {
     await postIn(
       env,
@@ -454,21 +536,7 @@ const answerOne = async (
     await recorded();
     return;
   }
-  // Under the answer's last words, which Teams gets once this returns,
-  // with the thumbs for it.
-  if (sources.length > 0) {
-    afterward(
-      async () =>
-        await thread.post(
-          sourcesCard({
-            locale,
-            sources,
-            chatUrl,
-            rate,
-          })
-        )
-    );
-  }
+  afterward(underStream(thread, { locale, sources, chatUrl, rate }));
   afterward(held);
   afterward(offers);
   afterward(offer);
@@ -516,7 +584,8 @@ export const carryOnAfterConnecting = async (
         },
       },
       kept.question,
-      kept.locale
+      kept.locale,
+      true
     );
     for (const send of later) {
       // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
@@ -538,13 +607,16 @@ export const answerInChat =
   async (accepted) => {
     const { message, thread, kept } = accepted;
     const fallback = appLocale(message.raw);
+    // Posted whole: Teams streams one answer per message it hands over,
+    // and this message's own answer, after it, streams.
     if (kept !== undefined) {
       // What they asked before Grasp knew them: a message of its own.
       await answerOne(
         env,
         { ...accepted, messageId: `${message.id}:kept` },
         kept,
-        languageOf(kept, fallback)
+        languageOf(kept, fallback),
+        false
       );
     }
     const text = message.text.trim();
@@ -556,5 +628,11 @@ export const answerInChat =
       }
       return;
     }
-    await answerOne(env, { ...accepted, messageId: message.id }, text, locale);
+    await answerOne(
+      env,
+      { ...accepted, messageId: message.id },
+      text,
+      locale,
+      true
+    );
   };

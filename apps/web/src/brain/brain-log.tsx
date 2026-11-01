@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import {
   Tooltip,
@@ -8,7 +9,6 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
-  ActivityIcon,
   AudioLinesIcon,
   CircleDashedIcon,
   FileTextIcon,
@@ -23,6 +23,7 @@ import { brainLog, logColumns, logTabs, tabOf } from "./brain-log.ts";
 import type { LogDay, LogDot, LogEntry, LogKind, LogTab } from "./brain-log.ts";
 import { useLessMotion } from "./less-motion.ts";
 import { Mark } from "./region-marks.tsx";
+import { SinceLastLook } from "./since-last-look.tsx";
 
 /** What each kind of line looks like. */
 const icons: Record<LogKind, LucideIcon> = {
@@ -240,7 +241,7 @@ const Days = ({ days, today }: { days: LogDay[]; today: string }) => {
     <ol className="relative flex flex-col">
       <span
         aria-hidden="true"
-        className="bg-border absolute top-2 bottom-0 left-3 w-px"
+        className="dots-down dots-down-wide text-muted-foreground/40 absolute top-2 bottom-0 left-2.5 w-1"
       />
       {days.map(({ day, entries }) => (
         <li
@@ -301,11 +302,11 @@ export const BrainLog = () => {
   };
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 pb-16 sm:px-6 md:px-12">
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <ActivityIcon className="size-5" />
+      <div className="pb-chat mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 sm:px-6 md:px-12">
+        <PageHeaderTitle>
           <Trans context="the brain's log">Activity</Trans>
-        </h1>
+        </PageHeaderTitle>
+        <SinceLastLook />
         <Tabs
           onValueChange={(value: LogTab) => {
             setTab(value);

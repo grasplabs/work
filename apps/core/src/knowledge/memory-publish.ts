@@ -1,8 +1,10 @@
 import { brainErrors, brainSourceRefSchema } from "@grasp-os/brain/contract";
 import type { BrainSourceRef } from "@grasp-os/brain/contract";
 import { brainMemories, collections } from "@grasp-os/brain/schema";
+import { sharedChatsMax } from "@grasp-os/shared/knowledge";
+import type { SharedChat } from "@grasp-os/shared/knowledge";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -13,6 +15,7 @@ import {
   members,
   teamMembers,
   teams,
+  users,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { mayRead } from "./access.ts";
@@ -303,4 +306,65 @@ export const mayRetire = async (
     throw brainErrors.create("brain.not_found");
   }
   await Promise.resolve();
+};
+
+/**
+ * The chats others share that `reader` is in now and could publish a
+ * record into (`mayPublish` for a session): those whose audience Grasp
+ * knows whole, most recently seen first, each named by the organization's
+ * other members in it. Only for a person, never Grasp's staff: as
+ * `mayPublish`, which refuses either a publication, this refuses them
+ * (`brain.denied`).
+ */
+export const sharedChatsOf = async (
+  env: Env,
+  reader: Reader
+): Promise<SharedChat[]> => {
+  if (reader.type !== "person" || reader.person.staff) {
+    throw brainErrors.create("brain.denied");
+  }
+  const { userId } = reader.person;
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      chatId: chatAudiences.chatId,
+      members: chatAudiences.members,
+      updatedAt: chatAudiences.updatedAt,
+    })
+    .from(chatAudiences)
+    .where(
+      and(
+        eq(chatAudiences.outsiders, false),
+        sql`EXISTS (SELECT 1 FROM json_each(${chatAudiences.members}) WHERE json_each.value = ${userId})`
+      )
+    )
+    .orderBy(desc(chatAudiences.updatedAt), desc(chatAudiences.chatId))
+    .limit(sharedChatsMax);
+  const others = [...new Set(rows.flatMap((row) => row.members))].filter(
+    (id) => id !== userId
+  );
+  // Their names, as the organization's members now: one who left isn't
+  // named.
+  const named =
+    others.length === 0
+      ? []
+      : await db
+          .select({ userId: users.id, name: users.name })
+          .from(users)
+          .innerJoin(members, eq(members.userId, users.id))
+          .where(
+            and(
+              eq(members.organizationId, organizationId),
+              inList(users.id, others)
+            )
+          );
+  const nameOf = new Map(named.map(({ userId: id, name }) => [id, name]));
+  return rows.map((row) => ({
+    chatId: row.chatId,
+    others: row.members.flatMap((id) => {
+      const name = id === userId ? undefined : nameOf.get(id);
+      return name === undefined ? [] : [name];
+    }),
+    updatedAt: row.updatedAt.toISOString(),
+  }));
 };

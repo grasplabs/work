@@ -1,6 +1,5 @@
 import {
   clientsNamespace,
-  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -29,7 +28,6 @@ import {
   clients,
   releases,
 } from "../src/db/schema.ts";
-import { appliedSchema } from "../src/deploy/compatibility.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import {
   clientMailDomain,
@@ -72,7 +70,7 @@ import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
-import { buildRelease, evidenceFor, putBlobs, testLimits } from "./releases.ts";
+import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 import {
   deliverAlarm,
@@ -96,7 +94,13 @@ const api = cloudflareApi({ token, retryDelayMs: 0 });
 const secrets: DeploySecrets = {
   routerKey: "test-router-key",
   clientKey: "test-client-key",
-  shared: { connect: { COMPOSIO_API_KEY: "composio" } },
+  shared: {
+    connect: {
+      COMPOSIO_API_KEY: "composio",
+      // Grasp's OpenAI key, which the platform AI's defaults use.
+      OPENAI_API_KEY: "grasp-openai-key",
+    },
+  },
 };
 const domain = "grasp.test";
 const context = {
@@ -181,7 +185,6 @@ const importRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -227,7 +230,6 @@ const importRealRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -708,57 +710,11 @@ const probeFailures: ProbeFailure[] = [
 interface Refusal {
   name: string;
   kind: Kind;
-  spec?: Partial<ReleaseSpec>;
   adjust?: (core: WorkerEntry) => WorkerEntry;
-  /** Its `previousRelease` names a release imported just before it. */
-  follows?: true;
   code: string;
 }
 
 const refusals: Refusal[] = [
-  {
-    name: "a release that declares nothing of what it works with",
-    kind: "dedicated",
-    spec: { compatibility: null },
-    code: "release_undeclared",
-  },
-  {
-    name: "a release built before platform limits were recorded",
-    kind: "dedicated",
-    spec: { platformLimits: null },
-    code: "release_without_limits",
-  },
-  {
-    name: "a release raising a platform limit with evidence for on-premises only",
-    kind: "dedicated",
-    spec: {
-      platformLimits: { ...testLimits, workflowSteps: 2000 },
-      previousRelease: {
-        releaseId: "26.01.1",
-        platformLimits: testLimits,
-      },
-      limitEvidence: (release) => [
-        evidenceFor(release, "workflowSteps", 2000, "workerd"),
-      ],
-    },
-    follows: true,
-    code: "limit_evidence_missing",
-  },
-  {
-    name: "a release whose core calls a connect it doesn't ship",
-    kind: "dedicated",
-    spec: {
-      compatibility: {
-        interfaces: {
-          connect: { serves: 1, calls: {} },
-          core: { calls: { connect: { min: 2, max: 2 } } },
-        },
-        workflowJournal: { min: 8, max: 9 },
-        sdkProtocols: { min: 2, max: 2 },
-      },
-    },
-    code: "release_incompatible",
-  },
   {
     name: "a release with a binding Workers for Platforms doesn't document",
     kind: "workers_for_platforms",
@@ -1268,17 +1224,8 @@ describe("provisioning a placed client", () => {
 
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
-    async ({ kind, spec, adjust, follows, code }) => {
-      const before = follows === true ? await importRelease(kind) : null;
-      const previous =
-        before !== null && spec?.previousRelease
-          ? { ...spec.previousRelease, releaseId: before.releaseId }
-          : spec?.previousRelease;
-      const manifest = await importRelease(
-        kind,
-        spec === undefined ? spec : { ...spec, previousRelease: previous },
-        adjust
-      );
+    async ({ kind, adjust, code }) => {
+      const manifest = await importRelease(kind, {}, adjust);
       const { account, clientId, held } = await setUp(kind, manifest);
 
       await expect(failing(held)).resolves.toMatchObject({ code });
@@ -1297,6 +1244,22 @@ describe("provisioning a placed client", () => {
       });
     }
   );
+
+  it("delivers nothing to an on-prem (workerd) destination, which its operator runs: no Worker, no secret, never Grasp's AI keys", async () => {
+    const manifest = await importRelease("dedicated");
+    const destinationId = await destination({
+      kind: "workerd",
+      accountId: null,
+      namespace: null,
+    });
+    const { held } = await placedOperation(destinationId, manifest);
+    const before = cloudflare.calls.length;
+
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "destination_unsupported",
+    });
+    expect(cloudflare.calls.slice(before)).toStrictEqual([]);
+  });
 
   it("probes a core in the namespace the router binds through that binding, its connect through the gateway, and routes its hostname to its script", async () => {
     // Core binds its connect, as the real one does: through the gateway.
@@ -1916,7 +1879,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("takes the real release live in Workers for Platforms, its model calls through the destination's gateway held to the client's ceiling, and without mail", async () => {
+  it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
       "workers_for_platforms",
@@ -1939,26 +1902,30 @@ describe("provisioning a placed client", () => {
       held
     );
 
-    const { core } = await scriptsOf(clientId);
+    const { core, connect } = await scriptsOf(clientId);
+    const scripts = account.namespaces.get(clientDispatchNamespace);
     const coreBindings = z
       .array(z.object({ type: z.string(), name: z.string() }).loose())
-      .parse(
-        account.namespaces
-          .get(clientDispatchNamespace)
-          ?.get(core)
-          ?.versions.at(-1)?.metadata.bindings ?? []
-      );
-    const gateway = coreBindings.find(({ name }) => name === "MODEL_GATEWAY");
+      .parse(scripts?.get(core)?.versions.at(-1)?.metadata.bindings ?? []);
+    const aiKeys = (script: string) =>
+      [...(scripts?.get(script)?.versions.at(-1)?.secrets.keys() ?? [])]
+        .filter(
+          (name) => name.endsWith("_API_KEY") && name !== "COMPOSIO_API_KEY"
+        )
+        .toSorted();
     expect({
       operation: await operationOf(clientId),
-      // Workers AI bound, as the real core binds it.
+      // No AI binding: the real core reaches models through connect only.
       ai: coreBindings
         .filter(({ type }) => type === "ai")
         .map(({ name }) => name),
-      // Through the destination's shared gateway, ensured before core went
-      // live, at the client's ceiling: €250 a month unless staff set another.
-      gateways: account.gateways.map(({ id }) => id),
-      gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
+      // No AI Gateway is made or read, and core is given no model allowlist.
+      gatewayCalls: cloudflare.calls.filter(({ path }) =>
+        path.includes("/gateways")
+      ).length,
+      modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
+      // Grasp's key goes to connect, which makes every provider call, never core.
+      keys: { core: aiKeys(core), connect: aiKeys(connect) },
       // Its core goes live without `EMAIL`, so it sends nothing and says
       // so, and no sending domain is set up for it.
       mail: coreBindings.filter(
@@ -1968,64 +1935,63 @@ describe("provisioning a placed client", () => {
       routed: await routed(clientId),
     }).toMatchObject({
       operation: { status: "done" },
-      ai: ["AI"],
-      gateways: [placedModelGateway("production")],
-      gateway: {
-        gateway: placedModelGateway("production"),
-        budgets: { deployment: { limit: 250, alertAt: 80 } },
-      },
+      ai: [],
+      gatewayCalls: 0,
+      modelGateway: false,
+      keys: { core: [], connect: ["OPENAI_API_KEY"] },
       mail: [],
       zones: 0,
       routed: true,
     });
   });
 
-  it("takes two clients first provisioned into one shared account at once live, through the one gateway either of them made", async () => {
+  it("takes the real release live with no AI provider key of Grasp's at all, its connect given none", async () => {
     const real = await importRealRelease();
-    const first = await setUp(
+    const { account, clientId, held } = await setUp(
       "workers_for_platforms",
       real,
       clientDispatchNamespace
     );
-    const second = await placedOperation(first.destinationId, real);
-    const wfp = {
-      ...context,
-      router: {
-        ...context.router,
-        namespace: clientDispatchNamespace,
-        dispatcher: cloudflare.dispatcher(
-          first.account.id,
-          clientDispatchNamespace
-        ),
+
+    // Secrets Store holds no provider key: the platform AI's defaults name
+    // OpenAI all the same, and only those features wait for the key.
+    await runClientProvision(
+      {
+        ...context,
+        secrets: {
+          ...secrets,
+          shared: { connect: { COMPOSIO_API_KEY: "composio" } },
+        },
+        router: {
+          ...context.router,
+          namespace: clientDispatchNamespace,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
       },
-    };
-    const gateway = placedModelGateway("production");
-    // The first finds no gateway, and before it creates one the second
-    // provisions all the way, making it: the first's create is refused.
-    let secondRan: Promise<unknown> = Promise.resolve();
-    cloudflare.afterAnswering(
-      ({ method, path }) =>
-        method === "GET" && path.endsWith(`/ai-gateway/gateways/${gateway}`),
-      async () => {
-        secondRan = runClientProvision(wfp, second.held);
-        await secondRan;
-      }
+      held
     );
 
-    await runClientProvision(wfp, first.held);
-    await secondRan;
-
+    const { core, connect } = await scriptsOf(clientId);
+    const scripts = account.namespaces.get(clientDispatchNamespace);
+    const aiKeys = (script: string) =>
+      [...(scripts?.get(script)?.versions.at(-1)?.secrets.keys() ?? [])].filter(
+        (name) => name.endsWith("_API_KEY") && name !== "COMPOSIO_API_KEY"
+      );
     expect({
-      first: await operationOf(first.clientId),
-      second: await operationOf(second.clientId),
-      gateways: first.account.gateways.map(({ id, authentication }) => ({
-        id,
-        authentication,
-      })),
+      operation: await operationOf(clientId),
+      gatewayCalls: cloudflare.calls.filter(({ path }) =>
+        path.includes("/gateways")
+      ).length,
+      keys: { core: aiKeys(core), connect: aiKeys(connect) },
+      routed: await routed(clientId),
     }).toMatchObject({
-      first: { status: "done" },
-      second: { status: "done" },
-      gateways: [{ id: gateway, authentication: true }],
+      operation: { status: "done" },
+      gatewayCalls: 0,
+      keys: { core: [], connect: [] },
+      routed: true,
     });
   });
 
@@ -3094,13 +3060,12 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("rolls back a release that stopped before any script ran its new Durable Object migration, and keeps the schema a stopped release migrated to", async () => {
+  it("rolls back a release that stopped before any script ran its new Durable Object migration", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
-    // Declares a new class and a migration of its databases; stops at
-    // connect's upload, after its databases migrated and before any
-    // script ran the class's migration.
+    // Declares a new class; stops at connect's upload, before any script
+    // ran the class's migration.
     const later = await importRelease(
       "dedicated",
       {
@@ -3127,13 +3092,8 @@ describe("provisioning a placed client", () => {
     const back = await codeOf(
       startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
-    const schema = await appliedSchema(db, clientId);
 
-    expect({ back, schema: schema?.releaseId }).toStrictEqual({
-      back: "started",
-      // Back on the release before, its databases stay at the later one's.
-      schema: later.releaseId,
-    });
+    expect(back).toBe("started");
   });
 
   it("never lowers what a script ran on a stale read: an upload whose answer was lost still keeps a rollback from going back past its migration", async () => {
@@ -3967,7 +3927,6 @@ describe("a release's runner crashing, and another action on the client after", 
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
     async ({ action, ...point }) => {
-      const { started } = point;
       const { clientId, dead, a, b, c } = await crashedAt(point);
 
       // The next action, as a new holder.
@@ -3996,18 +3955,12 @@ describe("a release's runner crashing, and another action on the client after", 
         b: b.releaseId,
         c: c.releaseId,
       });
-      const schema = await appliedSchema(db, clientId);
 
       expect({
         startedAs,
         operation: settled,
         runs: await runs(clientId),
         staleWrote,
-        // Never behind what any run migrated its databases to.
-        schemaAtLeastB:
-          started && action !== "rollback"
-            ? schema?.releaseId === (action === "resume" ? b : c).releaseId
-            : true,
       }).toMatchObject({
         startedAs: expected.startedAs,
         ...(expected.releaseId === undefined
@@ -4023,7 +3976,6 @@ describe("a release's runner crashing, and another action on the client after", 
               runs: { core: expected.releaseId, connect: expected.releaseId },
             }),
         staleWrote: false,
-        schemaAtLeastB: true,
       });
     }
   );

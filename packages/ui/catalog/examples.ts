@@ -1,13 +1,12 @@
 /**
- * The examples in the inventory (`examples` in inventory.ts), each loaded by
- * name and only when asked for: nothing here imports an example until its
- * loader runs. The source is at `catalog/examples/<name>.tsx`.
+ * Short examples of composing the kit's components into common screens,
+ * each loaded by name and only when asked for: nothing here imports an
+ * example until its loader runs. The source is at
+ * `catalog/examples/<name>.tsx`.
  */
 import type { ComponentType } from "react";
 
-import type { ExampleName } from "./inventory.ts";
-
-export const loadExample: Record<ExampleName, () => Promise<ComponentType>> = {
+export const loadExample = {
   list: async () => {
     const { ListExample } = await import("./examples/list.tsx");
     return ListExample;
@@ -34,4 +33,7 @@ export const loadExample: Record<ExampleName, () => Promise<ComponentType>> = {
       await import("./examples/specialised-panel.tsx");
     return SpecialisedPanelExample;
   },
-};
+} satisfies Record<string, () => Promise<ComponentType>>;
+
+/** An example, by name. */
+export type ExampleName = keyof typeof loadExample;

@@ -14,7 +14,6 @@ import type {
   WorkflowVersionRecord,
 } from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
 import type { WorkKnowledge } from "./work-knowledge.ts";
@@ -177,7 +176,7 @@ export interface Tool {
   name: string;
   teamIds: string[];
   sourceId: string;
-  /** As the team said it; a sighting in the landscape wins. Empty is unknown. */
+  /** As the team said it. Empty is unknown. */
   ai?: AiKind;
 }
 
@@ -232,8 +231,6 @@ export interface Source {
   connection?: "directory" | "signIn" | "pulse";
   /** For an interview: a team's stakeholder, or any other employee. */
   interviewee?: "stakeholder" | "employee";
-  /** For a document: the policy it became in the policy manager. */
-  policyId?: string;
   /** The teams this source speaks for: what makes a team interviewed. */
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
@@ -376,48 +373,6 @@ export interface Connection {
   matches: string[];
 }
 
-/** How Grasp knows an application is in use. */
-export type SeenThrough = "microsoftSso" | "googleSso" | "pulse";
-
-/** One application in the client's landscape. */
-export interface LandscapeApp {
-  id: string;
-  name: string;
-  vendor: string;
-  category: string;
-  /** A file name in /logos, or none. */
-  logo?: string;
-  /** Its logo as the Landscape table shows it, as a full path. */
-  logoSrc?: string;
-  ai: AiKind;
-  /** People seen using it in the last 30 days. */
-  people: number;
-  seenThrough: SeenThrough[];
-  /** The team that owns it, or null when nobody does. */
-  owner: string | null;
-  /** Tool names that mean this application. */
-  matches: string[];
-  /** The OAuth permissions people granted it, in plain words. Empty when seen only by Pulse. */
-  permissions: string[];
-}
-
-/** A policy the company uploaded to the policy manager. */
-export interface PolicyDocument {
-  id: string;
-  title: string;
-  /** ISO minute. */
-  uploadedAt: string;
-  status: "reading" | "review" | "published" | "failed";
-  /** What the policy covers, in a sentence or two. */
-  summary?: string;
-  /** The rules proposed from it, each with the passage it comes from. */
-  proposals: { excerpt: string; decision: "open" | "accepted" | "rejected" }[];
-  /** Requirements no rule can check yet, each with its passage. */
-  unchecked: { excerpt: string }[];
-  /** ISO minute. */
-  publishedAt?: string;
-}
-
 /** Everything the brain is built from. */
 export interface Workspace {
   company: Company;
@@ -439,8 +394,6 @@ export interface Workspace {
   gaps: Gap[];
   workflows: Workflow[];
   connections: Connection[];
-  landscape: LandscapeApp[];
-  policies: PolicyDocument[];
 }
 
 /** Most statements one call takes out of the brain. */
@@ -517,11 +470,6 @@ export interface BrainApi {
    * first, a page at a time, as the person may read it.
    */
   changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
-  /**
-   * Every note in the brain with its links (`brain.notes`), a page at a
-   * time, as the person may read them.
-   */
-  notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
   /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
@@ -645,60 +593,6 @@ export type BrainChange =
 /** A page of the brain's changes, newest first. */
 export interface BrainChangePage {
   changes: BrainChange[];
-  /** Where the next page starts; null when this is the last. */
-  next: string | null;
-}
-
-/**
- * Most notes one page holds: they, and as many collections, fit in the
- * audit event that records the read (`auditProvenanceMaxItems`).
- */
-export const brainNotesMaxLimit = 50;
-
-/** Most links of a note one page carries; the rest are counted (`moreLinks`). */
-export const brainNoteMaxLinks = 50;
-
-/** What a call for the brain's notes asks for. */
-export const brainNotesOptionsSchema = z
-  .strictObject({
-    /** Where the page before ended (`BrainNotePage.next`); none for the first. */
-    cursor: documentIdSchema.optional(),
-    limit: z.int().min(1).max(brainNotesMaxLimit).default(brainNotesMaxLimit),
-  })
-  .default({ limit: brainNotesMaxLimit });
-export type BrainNotesOptions = z.input<typeof brainNotesOptionsSchema>;
-
-/** A link in a note, to the path it names in the note's collection. */
-export interface BrainNoteLink {
-  path: string;
-  label: string | null;
-  /** The document at that path, when the person may read it; null otherwise. */
-  documentId: DocumentId | null;
-}
-
-/**
- * One note of the brain: what core records today, a Knowledge document,
- * what a listing shows of it (never its text) and its links. A union on
- * `kind` once core keeps other records.
- */
-export interface BrainNote {
-  kind: "document";
-  id: DocumentId;
-  collectionId: CollectionId;
-  path: string;
-  title: string;
-  type: DocumentType;
-  /** ISO 8601. */
-  updatedAt: string;
-  /** Its first `brainNoteMaxLinks` links, by the path each names. */
-  links: BrainNoteLink[];
-  /** How many links it has past those. */
-  moreLinks: number;
-}
-
-/** A page of the brain's notes. */
-export interface BrainNotePage {
-  notes: BrainNote[];
   /** Where the next page starts; null when this is the last. */
   next: string | null;
 }

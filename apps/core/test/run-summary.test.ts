@@ -509,8 +509,8 @@ export default workflowTests(definition, [
       swept: swept.error,
       revised: swept.revision > expired.revision,
     }).toStrictEqual({
-      expired: { code: "invoice.missing", message: removedText(env) },
-      swept: { code: "invoice.missing", message: removedText(env) },
+      expired: { code: "invoice.missing", message: removedText },
+      swept: { code: "invoice.missing", message: removedText },
       revised: true,
     });
   });
