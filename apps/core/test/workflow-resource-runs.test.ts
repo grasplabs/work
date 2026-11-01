@@ -1136,14 +1136,25 @@ describe("an activation's share of core's CPU", () => {
     const first = activation(1, 2 ** 27);
     const ranFirst = [
       await attempted(first, "greet", 0),
-      await attempted(first, "again", 0),
+      await attempted(first, "again", 1),
     ];
-    // The next activation: the engine's second attempt at `again`.
-    const ranRetry = await attempted(activation(2, 2 ** 28), "again", 0);
+    // The next activation: the engine's second attempt at `again`, which
+    // runs its expression to the end.
+    let retried: unknown;
+    await activation(2, 2 ** 28).do(
+      "task:again",
+      adaCaptured,
+      async (attempt) => {
+        retried = settledCode(
+          await attempt.evaluate(1, { input: { who: "Ada" }, output: null })
+        );
+        return null;
+      }
+    );
 
-    expect({ ranFirst, ranRetry, admitted }).toStrictEqual({
+    expect({ ranFirst, retried, admitted }).toStrictEqual({
       ranFirst: [true, false],
-      ranRetry: true,
+      retried: { ok: "Hi, Ada" },
       // The cut-off attempt holds nothing of the lineage and records no
       // receipt: the receipts skip its number, as CI saw attempt 3 follow
       // 1 after a CPU kill (GRA-1096). It did spend one of the engine's
