@@ -31,6 +31,10 @@ const shown = () => {
 const kindsOf = (of: ReturnType<typeof adminOrgOf>) =>
   adminViewOf(of.org, of.state, "2026-10-14").needs.map((need) => need.kind);
 
+/** Euros to a billionth, so sums worked out two ways compare equal. */
+const euros = (spend: number | undefined): number =>
+  Math.round((spend ?? 0) * 1e9) / 1e9;
+
 /** A view as text, its maps and sets spelled out, to look for words in. */
 const text = (value: unknown): string =>
   JSON.stringify(value, (_key: string, each: unknown): unknown => {
@@ -367,6 +371,37 @@ describe("an organization from core's admin snapshot", () => {
       drawing: 5000,
     });
     expect(total.spend).toBeGreaterThan(0);
+  });
+
+  it("works out the interviews before core first counted, and takes core's count from that day on", () => {
+    // Core counted only from Tom's day: Lisa's interview, before it, is
+    // worked out from its 40 minutes; Tom's, on it, is what core counted.
+    const late = adminOrgOf(
+      { ...snapshot, usage: snapshot.usage.slice(1) },
+      client
+    );
+    const { days } = adminViewOf(late.org, late.state, "2026-10-14").usage;
+    const [lisa, tom] = days;
+
+    expect({
+      day: lisa?.day,
+      sonnet: euros(lisa?.models.sonnet),
+      opus: euros(lisa?.models.opus),
+      voice: euros(lisa?.models.voice),
+      ears: euros(lisa?.models.ears),
+    }).toStrictEqual({
+      day: "2026-10-05",
+      // 40 minutes: both models read 8000 tokens a minute; the quick one
+      // writes 120, the careful one 200 and then draws her team's map.
+      sonnet: euros((40 * 8000 * 3 + 40 * 120 * 15) / 1e6),
+      opus: euros((40 * 8000 * 5 + 40 * 200 * 25 + 5000 * 5 + 1400 * 25) / 1e6),
+      // He speaks a fifth of the time and listens to the rest.
+      voice: euros(40 * 0.2 * 0.15),
+      ears: euros(40 * 0.8 * 0.006),
+    });
+    // Tom's day is core's count alone: nothing worked out on top of it.
+    expect(tom).toStrictEqual(shown().view.usage.days[1]);
+    expect(days).toHaveLength(2);
   });
 
   it("counts no chat nobody had, once the company is in", () => {
