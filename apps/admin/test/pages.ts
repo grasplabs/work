@@ -8,6 +8,48 @@ const origin = "https://ops.grasp.test";
 
 const scripts = /<script\b[^>]*>[\s\S]*?<\/script>/gu;
 
+/** A part of a page streamed in after the rest, and the placeholder it replaces: React's `$RC("B:n","S:n")`. */
+const streamedPart = /\$RC\("(?<boundary>B:[^"]+)","(?<segment>S:[^"]+)"\)/u;
+/** Where a streamed placeholder opens or closes: React's Suspense boundary comments. */
+const boundaryMarks = /<!--\$[?!]?-->|<!--\/\$-->/gu;
+
+/**
+ * `html` as the browser ends up showing it: each part a page streamed in
+ * after the rest (a read it didn't wait for) put in place of what held
+ * its place, as React's own script does once it arrives.
+ */
+const settled = (html: string): string => {
+  let page = html;
+  let part = streamedPart.exec(page);
+  while (part !== null) {
+    const { boundary = "", segment = "" } = part.groups ?? {};
+    const script = page.lastIndexOf("<script", part.index);
+    const segmentOpen = `<div hidden id="${segment}">`;
+    const segmentStart = page.indexOf(segmentOpen);
+    const segmentEnd = page.lastIndexOf("</div>", script);
+    const content = page.slice(segmentStart + segmentOpen.length, segmentEnd);
+    const scriptEnd =
+      page.indexOf("</script>", part.index) + "</script>".length;
+    // The streamed part and its script leave; its content takes the placeholder's place.
+    page = page.slice(0, segmentStart) + page.slice(scriptEnd);
+    const template = `<template id="${boundary}"></template>`;
+    const placeholder = page.indexOf(template);
+    let depth = 1;
+    let close = -1;
+    for (const mark of page.slice(placeholder).matchAll(boundaryMarks)) {
+      depth += mark[0] === "<!--/$-->" ? -1 : 1;
+      if (depth === 0) {
+        close = placeholder + mark.index;
+        break;
+      }
+    }
+    const open = page.lastIndexOf("<!--$?-->", placeholder);
+    page = `${page.slice(0, open)}<!--$-->${content}${page.slice(close)}`;
+    part = streamedPart.exec(page);
+  }
+  return page;
+};
+
 interface Page {
   status: number;
   html: string;
@@ -28,15 +70,18 @@ const renderAfter = async (
     // The test that asked for it sees why it failed.
   }
   const response = await exports.default.fetch(`${origin}${path}`, {
-    headers: { "cf-access-jwt-assertion": await accessJwt(email) },
+    headers: {
+      "cf-access-jwt-assertion": await accessJwt(email),
+    },
   });
-  const html = await response.text();
+  const html = settled(await response.text());
   return { status: response.status, html: html.replaceAll(scripts, "") };
 };
 
 /**
- * The page at `path`, as `email` (a staff member) sees it: its markup without
- * its scripts, so the data sent along for hydration doesn't count as shown.
+ * The page at `path`, as `email` (a staff member) sees it once everything
+ * it reads is in (`settled`): its markup without its scripts, so the data
+ * sent along for hydration doesn't count as shown.
  *
  * Pages render one at a time, even when a test asks for several at once. In
  * the test pool, the Worker loads the app's modules on demand, over I/O owned

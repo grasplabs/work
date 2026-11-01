@@ -2,13 +2,12 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import {
-  adminReader,
-  clientAdmins,
-  defaultAdminReadOptions,
-} from "../src/clients/admin.ts";
+import { clientAdmins, defaultAdminReadOptions } from "../src/clients/admin.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
-import { fetchClientAdmins } from "../src/clients/functions.ts";
+import {
+  fetchClientAdmin,
+  fetchClientAdmins,
+} from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
@@ -280,18 +279,38 @@ describe("every client's admin snapshot", () => {
     }).toStrictEqual({ state: "answered", readers: ["ada@grasp.test"] });
   });
 
-  it("asks each core once for everything one request reads", async () => {
-    const release = await importedRelease("feat(core): read once");
+  it("reads one client alone for its page, and every other client without it", async () => {
+    const release = await importedRelease("feat(core): one page");
     const acme = await liveClient(release);
-    const read = adminReader(env, staff);
+    const globex = await liveClient(release);
 
-    const [sections, chat] = await Promise.all([read(), read()]);
-    const again = await read();
+    const one = await callServerFn(fetchClientAdmin, {
+      clientId: acme.clientId,
+    });
+    const rest = await callServerFn(fetchClientAdmins, {
+      except: [acme.clientId],
+    });
+    const unknown = await callServerFn(fetchClientAdmin, {
+      clientId: "no-such-client",
+    });
 
     expect({
-      same: sections === chat && chat === again,
-      asked: acme.account.adminReaders.length,
-    }).toStrictEqual({ same: true, asked: 1 });
+      one: one === null ? null : [one.client.id, one.state],
+      rest: {
+        acme: entryOf(rest, acme.clientId)?.state,
+        globex: entryOf(rest, globex.clientId)?.state,
+      },
+      unknown,
+      asked: {
+        acme: acme.account.adminReaders.length,
+        globex: globex.account.adminReaders.length,
+      },
+    }).toStrictEqual({
+      one: [acme.clientId, "answered"],
+      rest: { acme: undefined, globex: "answered" },
+      unknown: null,
+      asked: { acme: 1, globex: 1 },
+    });
   });
 
   it("refuses the read for anyone Access doesn't vouch for, or sent from another site's page, asking no core and keeping nothing", async () => {

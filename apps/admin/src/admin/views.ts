@@ -100,6 +100,11 @@ const whyWords: Record<
   no_answer: "the request to it failed",
 };
 
+/** Why a core wasn't read, as the rest of a sentence. */
+export const whyUnread = (
+  error: Extract<ClientAdmin, { state: "unreachable" }>["error"]
+): string => (error === "not_deployed" ? "it isn’t deployed" : whyWords[error]);
+
 /**
  * Why a client's core isn't read now, in a sentence or two: not deployed
  * yet, or not answering and why, with when it last did.
