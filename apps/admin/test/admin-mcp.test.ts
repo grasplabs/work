@@ -1,6 +1,6 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { env, exports } from "cloudflare:workers";
-import { and, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -132,7 +132,9 @@ const mcpCalls = async () => {
       detail: auditEvents.detail,
     })
     .from(auditEvents)
-    .where(eq(auditEvents.action, "admin.mcp.call"));
+    .where(eq(auditEvents.action, "admin.mcp.call"))
+    // In the order they were written: a read by action follows its index.
+    .orderBy(asc(auditEvents.at), asc(sql`rowid`));
   return rows.map(({ actor, target, detail }) => ({
     actor,
     target,
