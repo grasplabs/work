@@ -135,6 +135,49 @@ describe("an App a chat creates", slow, () => {
     }).toStrictEqual({ abandoned: "app.not_found", drafting: "ok" });
   });
 
+  it("is kept when a person commits to it after the reaper picked it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const chat = await chatOf(builder.userId);
+    const app = await createApp(
+      env,
+      acting(builder.userId),
+      { name: `Saved in time ${unique()}` },
+      undefined,
+      { workspaceId: chat.id, chatId: chat.chat.id }
+    );
+    await createdAt(app.id, longAgo());
+    // The database as the reaper sees it: its removal's batch comes only
+    // once the person's commit landed.
+    let committed = false;
+    const database = new Proxy(env.DB, {
+      get: (target, key): unknown => {
+        const value: unknown = Reflect.get(target, key);
+        if (key === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!committed) {
+              committed = true;
+              await builder.api.apps.files.commit(
+                app.id,
+                { "AGENTS.md": "# Mine now\n" },
+                "Mine now"
+              );
+            }
+            return await target.batch(statements);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    await reapAbandonedApps({ ...env, DB: database }, new Date());
+
+    expect({
+      committed,
+      kept: await outcome(builder.api.apps.get(app.id)),
+    }).toStrictEqual({ committed: true, kept: "ok" });
+  });
+
   it("is kept while a person commits to it outside its chat", async () => {
     const builder = await signedInApi(idp, "builder");
     const chat = await chatOf(builder.userId);

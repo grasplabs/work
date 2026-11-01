@@ -293,6 +293,20 @@ const draftWrittenAt = async (
  * Reaps `app` unless its chat's draft was written since `before` or can't
  * be read: whether it was.
  */
+/**
+ * No version of the App the statement is on committed at `before` or
+ * since, through `apps.files.commit` or a chat: nobody works on it.
+ */
+const notCommittedSince = (db: DrizzleD1Database, before: Date) =>
+  notExists(
+    db
+      .select({ one: sql`1` })
+      .from(appVersions)
+      .where(
+        and(eq(appVersions.appId, apps.id), gte(appVersions.createdAt, before))
+      )
+  );
+
 const reapIfAbandoned = async (
   env: Env,
   db: DrizzleD1Database & { $client: D1Database },
@@ -338,7 +352,11 @@ const reapIfAbandoned = async (
           eq(apps.id, app.id),
           isNotNull(apps.provisionalChatId),
           isNull(apps.currentVersion),
-          isNull(apps.removedAt)
+          isNull(apps.removedAt),
+          // No version committed since, in the same statement: a commit
+          // after this App was picked keeps it, and the rest of the batch
+          // goes with the removal (`removedSql`).
+          notCommittedSince(db, before)
         )
       )
       .returning({ id: apps.id }),
@@ -364,9 +382,12 @@ const reapIfAbandoned = async (
  * gone), and no version committed since (`apps.files.commit`). Each is
  * removed as `removeApp` removes one, by the platform,
  * recorded as `app.removed` with reason `provisional_abandoned`, in one
- * batch that requires it still provisional, never made current and not
- * removed: an acceptance meanwhile keeps it. Run by the cron trigger,
- * a few at a time.
+ * batch that requires it still provisional, never made current, not
+ * removed and no version committed since: an acceptance or a commit
+ * meanwhile keeps it. Its draft is read right before that batch; a draft
+ * lives in its chat's object, outside that batch. Run by the cron
+ * trigger: at most `reapedPerRun` reaped and `examinedPerRun` looked at
+ * a run.
  */
 export const reapAbandonedApps = async (env: Env, at: Date): Promise<void> => {
   const db = drizzle(env.DB);
@@ -392,17 +413,7 @@ export const reapAbandonedApps = async (env: Env, at: Date): Promise<void> => {
           lt(apps.createdAt, before),
           // A version committed since, through `apps.files.commit` or a
           // chat: someone works on it.
-          notExists(
-            db
-              .select({ one: sql`1` })
-              .from(appVersions)
-              .where(
-                and(
-                  eq(appVersions.appId, apps.id),
-                  gte(appVersions.createdAt, before)
-                )
-              )
-          ),
+          notCommittedSince(db, before),
           after === undefined
             ? undefined
             : or(
