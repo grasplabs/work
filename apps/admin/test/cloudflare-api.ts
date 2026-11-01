@@ -29,6 +29,15 @@ import {
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import {
+  aiStatusReportPath,
+  aiStatusReportPurpose,
+  aiStatusReportRequestSchema,
+} from "@grasp-os/shared/ai-status-report";
+import type {
+  AiStatusReport,
+  PlatformSpendRow,
+} from "@grasp-os/shared/ai-status-report";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -58,16 +67,6 @@ import {
   provisionProbeRequestSchema,
 } from "@grasp-os/shared/provision-probe";
 import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
-import {
-  quotaLimitsHash,
-  quotaLimitsSchema,
-} from "@grasp-os/shared/quota-policy";
-import {
-  quotaPolicyReportPath,
-  quotaPolicyReportPurpose,
-  quotaPolicyReportRequestSchema,
-} from "@grasp-os/shared/quota-policy-report";
-import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { z } from "zod";
 
 import {
@@ -88,6 +87,7 @@ import type {
 } from "./cloudflare-api-kit.ts";
 import {
   dispatchRoutes,
+  forgetDatabase,
   forgetDatabases,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
@@ -382,65 +382,63 @@ const answerSummary = async (
   return Response.json(account.onboarding ?? noOnboarding);
 };
 
-/** The `QUOTA_LIMITS` a version was deployed with, if one core takes. */
-const quotaLimitsOf = (version: VersionState) => {
-  const bindings = z
-    .array(
-      z
-        .object({
-          type: z.string(),
-          name: z.string(),
-          json: z.unknown().optional(),
-        })
-        .loose()
-    )
-    .safeParse(version.metadata.bindings);
-  const binding = bindings.success
-    ? bindings.data.find(
-        ({ type, name }) => type === "json" && name === "QUOTA_LIMITS"
-      )
-    : undefined;
-  const parsed = quotaLimitsSchema.safeParse(binding?.json);
-  return parsed.success ? parsed.data : undefined;
+/** The UTC month `monthsBack` before this one, such as `2026-09`. */
+export const monthBack = (monthsBack: number): string => {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1)
+  )
+    .toISOString()
+    .slice(0, 7);
 };
 
 /**
- * What a client's core answers the console's quota policy report request
- * with, as core does (core's src/workflows/quota-report.ts): the policy it
- * applies, the highest generation any of its versions was deployed with,
- * since core records each and refuses a lower one; the platform's own
- * (generation 0) when none set one. 403 unless the signature, with the key
- * its live version's auth secret gives, checks out and the request parses;
- * 404 from a core from before the report.
+ * A core's AI status report: `providers`, and what Grasp's own features
+ * cost on its keys this month and last (none unless given), or no spend
+ * at all (`unreported`), as a core on a release before it was reported
+ * answers.
  */
-const answerQuotaPolicy = async (
+export const aiStatusOf = (
+  providers: AiStatusReport["providers"] = [],
+  spend:
+    | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
+    | "unreported" = {}
+): AiStatusReport =>
+  spend === "unreported"
+    ? { providers }
+    : {
+        providers,
+        platformSpend: {
+          thisMonth: { period: monthBack(0), rows: spend.thisMonth ?? [] },
+          lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
+        },
+      };
+
+/**
+ * What a client's core answers the admin's AI status request with, as
+ * core does (core's src/ai-status-report.ts): the account's report once
+ * the signature checks out, with the key its live version's auth secret
+ * gives, and the request parses; 403 otherwise.
+ */
+const answerAiStatus = async (
   account: AccountState,
-  script: ScriptState,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  if (account.quotaPolicy === "absent") {
-    return new Response("Not found", { status: 404 });
-  }
-  if (account.quotaPolicy === "redirect") {
+  if (account.aiRedirect === true) {
     // As fetch does: a request that follows redirects gets what the other
-    // end answers, here a policy that matches anything none is set for.
+    // end answers, here a report that reads as working.
     return request.redirect === "manual"
       ? new Response(null, {
           status: 302,
-          headers: { location: "https://elsewhere.test/quota" },
+          headers: { location: "https://elsewhere.test/ai" },
         })
-      : Response.json({
-          generation: 0,
-          lowered: {},
-          limitsHash: null,
-          recordedAt: null,
-        } satisfies QuotaPolicyReport);
+      : Response.json(account.ai ?? aiStatusOf());
   }
   const body = await request.text();
   const key = await hkdfHmacKey(
     live.secrets.get("BETTER_AUTH_SECRET") ?? "",
-    quotaPolicyReportPurpose,
+    aiStatusReportPurpose,
     ["sign"]
   );
   const expected = toHex(
@@ -448,41 +446,14 @@ const answerQuotaPolicy = async (
       await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
     )
   );
-  const asked = quotaPolicyReportRequestSchema.safeParse(JSON.parse(body));
+  const asked = aiStatusReportRequestSchema.safeParse(JSON.parse(body));
   if (
     request.headers.get(platformUpdateSignatureHeader) !== expected ||
     !asked.success
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  // Only the versions that went live: core records a generation as it
-  // runs under it, never one uploaded and left without traffic. Each
-  // generation keeps the limits it first went live with, as core records
-  // them; a later version under it with other limits changes nothing.
-  const ranLive = new Set(
-    script.deployments.flatMap(({ versions }) =>
-      versions.map(({ version_id: id }) => id)
-    )
-  );
-  let highest: QuotaPolicyReport = {
-    generation: 0,
-    lowered: {},
-    limitsHash: null,
-    recordedAt: null,
-  };
-  for (const version of script.versions.filter(({ id }) => ranLive.has(id))) {
-    const limits = quotaLimitsOf(version);
-    if (limits !== undefined && limits.generation > highest.generation) {
-      highest = {
-        generation: limits.generation,
-        lowered: limits.limits,
-        // oxlint-disable-next-line no-await-in-loop -- versions in order
-        limitsHash: await quotaLimitsHash(limits.limits),
-        recordedAt: new Date().toISOString(),
-      };
-    }
-  }
-  return Response.json(highest);
+  return Response.json(account.ai ?? aiStatusOf());
 };
 
 /** Two hex characters at a time. */
@@ -678,6 +649,7 @@ const signedPosts: ReadonlyMap<
   [connectVersionPath, answerConnectVersion],
   [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
+  [aiStatusReportPath, answerAiStatus],
 ]);
 
 /**
@@ -777,6 +749,8 @@ const accountRoutes: Route[] = [
         return notFound();
       }
       account.d1.splice(index, 1);
+      // Its real database is free for the next one the fake makes.
+      forgetDatabase(params.uuid ?? "");
       return envelope(null);
     },
   },
@@ -815,41 +789,6 @@ const accountRoutes: Route[] = [
       }
       account.lifecycles.set(bucket.name, json);
       return envelope(null);
-    },
-  },
-  {
-    method: "GET",
-    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
-    answer: ({ account, params }) => {
-      const gateway = account.gateways.find(({ id }) => id === params.id);
-      return gateway === undefined ? notFound() : envelope(gateway);
-    },
-  },
-  {
-    method: "POST",
-    path: /^\/ai-gateway\/gateways$/u,
-    answer: ({ account, json }) => {
-      const gateway = { authentication: false, ...json };
-      // One id per account: a second create of it is refused, as the API does.
-      if (account.gateways.some((each) => each.id === json?.id)) {
-        return refusal(400, 7001, "A gateway with this id already exists");
-      }
-      account.gateways.push(gateway);
-      return envelope(gateway);
-    },
-  },
-  {
-    method: "PUT",
-    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
-    answer: ({ account, params, json }) => {
-      const index = account.gateways.findIndex(({ id }) => id === params.id);
-      if (index === -1) {
-        return notFound();
-      }
-      // An update replaces the gateway's settings, as the API does.
-      const gateway = { id: params.id, authentication: false, ...json };
-      account.gateways[index] = gateway;
-      return envelope(gateway);
     },
   },
 ];
@@ -1031,11 +970,9 @@ export const fakeCloudflareApi = (token: string) => {
       buckets: [],
       fullBuckets: new Set(),
       lifecycles: new Map(),
-      gateways: [],
       zones: [],
       scripts: new Map(),
       namespaces: new Map(),
-      workflows: new Map(),
       assets: new Set(),
       sessions: new Map(),
       completions: new Set(),
@@ -1287,7 +1224,7 @@ export const fakeCloudflareApi = (token: string) => {
   const workerAnswer = async (
     request: Request,
     url: URL,
-    { account, script, live }: NonNullable<ReturnType<typeof workerAt>>
+    { account, live }: NonNullable<ReturnType<typeof workerAt>>
   ): Promise<Response> => {
     if (account.unhealthy !== undefined && account.unhealthy > 0) {
       account.unhealthy -= 1;
@@ -1304,9 +1241,6 @@ export const fakeCloudflareApi = (token: string) => {
       request.method === "POST" ? signedPosts.get(url.pathname) : undefined;
     if (signed !== undefined) {
       return await signed(account, live, request);
-    }
-    if (url.pathname === quotaPolicyReportPath && request.method === "POST") {
-      return await answerQuotaPolicy(account, script, live, request);
     }
     if (url.pathname === adminSnapshotPath && request.method === "POST") {
       adminReads.now += 1;

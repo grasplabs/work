@@ -22,14 +22,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
-import {
-  limitEvidenceFile,
-  limitEvidenceKey,
-  manifestKey,
-} from "@grasp-os/shared/release";
+import { manifestKey } from "@grasp-os/shared/release";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { limitEvidenceFor } from "./evidence-lib.ts";
 import { builds, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
@@ -91,10 +86,6 @@ describe("promoting a release from staging's bucket to production's", () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-promote-test-"));
     const built = path.join(dir, "built");
     writeRelease(built, manifest, fixture);
-    writeFileSync(
-      path.join(built, limitEvidenceFile),
-      `${JSON.stringify(limitEvidenceFor(manifest, null))}\n`
-    );
     buckets = new Map([
       [STAGING, new Map()],
       [PRODUCTION, new Map()],
@@ -163,14 +154,11 @@ describe("promoting a release from staging's bucket to production's", () => {
       )
     );
 
-  it("publishes to production exactly what staging holds: every blob, the limit evidence and the manifest", async () => {
+  it("publishes to production exactly what staging holds: every blob and the manifest", async () => {
     await promote();
     expect(contents(PRODUCTION)).toStrictEqual(contents(STAGING));
     expect(Object.keys(contents(PRODUCTION))).toStrictEqual(
-      expect.arrayContaining([
-        manifestKey(manifest.releaseId),
-        limitEvidenceKey(manifest.releaseId),
-      ])
+      expect.arrayContaining([manifestKey(manifest.releaseId)])
     );
   });
 
@@ -193,7 +181,7 @@ describe("promoting a release from staging's bucket to production's", () => {
   });
 
   it("publishes nothing for a release staging doesn't hold", async () => {
-    await expect(promote("r999999-fffffff")).rejects.toThrow(
+    await expect(promote("26.01.999999")).rejects.toThrow(
       /isn't published in grasp-releases-staging/u
     );
     expect(buckets.get(PRODUCTION)?.size).toBe(0);
@@ -206,12 +194,6 @@ describe("promoting a release from staging's bucket to production's", () => {
     }
     buckets.get(STAGING)?.set(module.r2Key, Buffer.from("tampered"));
     await expect(promote()).rejects.toThrow(/doesn't match its hash/u);
-    expect(buckets.get(PRODUCTION)?.size).toBe(0);
-  });
-
-  it("publishes nothing when staging holds the release without its limit evidence", async () => {
-    buckets.get(STAGING)?.delete(limitEvidenceKey(manifest.releaseId));
-    await expect(promote()).rejects.toThrow(/has no limit-evidence.json/u);
     expect(buckets.get(PRODUCTION)?.size).toBe(0);
   });
 });

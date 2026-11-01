@@ -11,18 +11,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import {
-  chatOf,
-  codeResults,
-  codeStep,
-  pointAtGateway,
-  says,
-} from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // `env.workflowBuild` and `env.workflows`' independent runs in a chat's
@@ -89,7 +83,7 @@ const definitionOf = (name: string, status = "done"): string =>
  * agent's permission to build.
  */
 const setUp = async (
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   role: "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
@@ -156,10 +150,7 @@ describe("the agent building an independent workflow", () => {
         bound: { app: bound.app, alias: bound.alias, version: bound.version },
       };
     };`;
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(codeStep(build), says("Built."))
-    );
+    await fakeProvider(codeStep(build), says("Built."));
     await grant();
 
     await chat.ask("Build me a summary workflow for Ledger");
@@ -223,10 +214,7 @@ describe("the agent building an independent workflow", () => {
     const calls = tryEach({
       publish: `await env.workflowBuild.publish(${JSON.stringify(flow.id)}, { revision: 1, basedOn: null })`,
     });
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(codeStep(calls), says("It was stopped."))
-    );
+    await fakeProvider(codeStep(calls), says("It was stopped."));
     const granted = await grant();
     // The version's build is stored before its row: held there until the
     // grant is revoked, so the write comes after the revocation. Flags,
@@ -293,10 +281,7 @@ describe("the agent building an independent workflow", () => {
     const calls = tryEach({
       bind: `await env.workflowBuild.bind(${JSON.stringify(flow.id)}, { app: ${JSON.stringify(app)}, alias: "summary", version: 1 })`,
     });
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(codeStep(calls), says("It was stopped."))
-    );
+    await fakeProvider(codeStep(calls), says("It was stopped."));
     const granted = await grant();
     // The last read before the binding is saved (the binding it would
     // replace) is held until the grant is revoked, so the save comes after
@@ -499,7 +484,7 @@ describe("the agent building an independent workflow", () => {
       bindToTheirApp: `await env.workflowBuild.bind(${JSON.stringify(mine.id)}, { app: ${JSON.stringify(theirApp)}, alias: "x", version: 1 })`,
       requestTheirs: `await env.workflowBuild.requestPermission(${id}, { object: { type: "workflow", workflowId: ${JSON.stringify(mine.id)} }, actions: ["start"], binding: "CHILD" })`,
     });
-    await pointAtGateway(chat.stub, fakeGateway(codeStep(calls), says("No.")));
+    await fakeProvider(codeStep(calls), says("No."));
     await grant();
 
     await chat.ask("Change their workflow");
@@ -538,10 +523,7 @@ describe("the agent building an independent workflow", () => {
         binding: "CHILD",
       })`,
     });
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(codeStep(calls), says("Asked."))
-    );
+    await fakeProvider(codeStep(calls), says("Asked."));
     await grant();
 
     await chat.ask("Ask for what the workflow needs");
@@ -634,14 +616,11 @@ describe("the agent following independent workflows", () => {
       independent: "(await env.workflows.independent()).map(({ id }) => id)",
       runs: `await env.workflows.independentRuns(${id})`,
     });
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(calls),
-        says("Not yet."),
-        codeStep(calls),
-        says("There.")
-      )
+    await fakeProvider(
+      codeStep(calls),
+      says("Not yet."),
+      codeStep(calls),
+      says("There.")
     );
 
     await chat.ask("How is my workflow doing?");

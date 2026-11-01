@@ -193,9 +193,20 @@ export const readByRun = async (builder: Person, app: string) => {
   return read;
 };
 
-/** Every object in R2, as its key and when it was stored. */
+/**
+ * Every kept message in R2 (workflows/kept-email.ts), as its key and when
+ * it was stored. Kept mail only, not the whole bucket: other parts of core
+ * write there too, on their own schedule. The mail a test delivers arms
+ * the clock (index.ts), which after each file's reset starts empty and
+ * runs every task as soon as it is armed. Its sweeps then write their
+ * cursors (`builds-sweep.json`, `screen-frames-sweep.json`) while the
+ * test is still going.
+ */
 export const storedObjects = async (): Promise<string[]> => {
-  const listed = await env.FILES.list({ limit: 1000 });
+  const listed = await env.FILES.list({
+    prefix: "inbound-email/",
+    limit: 1000,
+  });
   return listed.objects.map(
     ({ key, uploaded }) => `${key}@${uploaded.toISOString()}`
   );

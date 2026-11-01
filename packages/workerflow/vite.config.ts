@@ -13,6 +13,11 @@ export default defineProject({
     // Sleeps and waits in the tests last seconds by design, so no margin
     // depends on how fast the machine is; the polls fail at 10 s first.
     testTimeout: 20_000,
+    // Logs go straight to workerd's output, not to Vitest: a run object
+    // warns from its alarm, another request than the test's, which the
+    // pool holds until the file next sends something, and the file could
+    // wait for it forever (see apps/admin/vite.test.config.ts).
+    disableConsoleIntercept: true,
   },
   plugins: [
     cloudflareTest({

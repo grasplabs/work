@@ -6,6 +6,7 @@ import type {
   DocumentSummary,
   VersionSummary,
 } from "@grasp-os/shared/knowledge";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Empty,
   EmptyDescription,
@@ -20,11 +21,14 @@ import { BookOpenIcon, FileTextIcon, FolderIcon } from "lucide-react";
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
+import { PageHeading } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
+import { NewDocument } from "../knowledge/new-document.tsx";
+import { CollectionAdminMenu } from "../knowledge/purge.tsx";
 import { folderTree } from "../knowledge/tree.ts";
 import type { Folder } from "../knowledge/tree.ts";
 import { Uploads } from "../knowledge/uploads.tsx";
@@ -303,17 +307,25 @@ const CollectionView = () => {
           <CollectionNotLoaded collection={collection} open={open} />
           {collection.state === "ready" ? (
             <>
-              <header className="flex flex-col gap-2.5">
-                <h1 className="text-2xl font-medium tracking-tight">
-                  {collection.data.collection.name}
-                </h1>
-                {collection.data.collection.description === "" ? null : (
-                  <p className="text-muted-foreground text-sm leading-relaxed">
-                    {collection.data.collection.description}
-                  </p>
-                )}
-                <CollectionMarkers collection={collection.data.collection} />
-              </header>
+              <PageHeading
+                action={
+                  isMemberAdmin(identity) ? (
+                    <CollectionAdminMenu
+                      collection={collection.data.collection.name}
+                      documents={collection.data.documents}
+                    />
+                  ) : undefined
+                }
+                description={
+                  collection.data.collection.description === ""
+                    ? undefined
+                    : collection.data.collection.description
+                }
+                meta={
+                  <CollectionMarkers collection={collection.data.collection} />
+                }
+                title={collection.data.collection.name}
+              />
               {writable ? (
                 <Uploads
                   // Another collection starts with no uploads to follow.
@@ -323,9 +335,14 @@ const CollectionView = () => {
                 />
               ) : null}
               <section aria-labelledby="files" className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium" id="files">
-                  <Trans>Files</Trans>
-                </h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-medium" id="files">
+                    <Trans>Files</Trans>
+                  </h2>
+                  {writable ? (
+                    <NewDocument collectionId={collectionId} />
+                  ) : null}
+                </div>
                 <FileList documents={collection.data.documents} />
               </section>
             </>

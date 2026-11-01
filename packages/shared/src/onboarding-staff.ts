@@ -6,13 +6,18 @@ import type { WorkRecord } from "./admin/org-record.ts";
 import type { InterviewProgress } from "./interview-links.ts";
 import type { InterviewPhase } from "./interview-turn.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
+import type { LogActor } from "./onboarding-staff-log.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
 import type {
   Agreements,
+  FailedMail,
   InterviewKind,
   InterviewLocale,
   Interviewer,
 } from "./onboarding.ts";
+
+export { logActors, logFilterSchema } from "./onboarding-staff-log.ts";
+export type { LogActor, LogFilter } from "./onboarding-staff-log.ts";
 
 // Grasp's onboarding area (core's onboarding/staff-area.ts): what a Grasp
 // consultant in a client's deployment sees of its onboarding. Where it
@@ -87,10 +92,6 @@ export interface StaffNote {
   text: string;
 }
 
-/** Who did something in the log. */
-export const logActors = ["staff", "company", "person", "grasp"] as const;
-export type LogActor = (typeof logActors)[number];
-
 /** One thing that happened in the onboarding. */
 export interface StaffLogEntry {
   seq: number;
@@ -102,6 +103,11 @@ export interface StaffLogEntry {
   /** The person it is about, and their team, while they are on the roster. */
   person: { id: string; name: string } | null;
   team: string | null;
+  /**
+   * Whom it names besides, while they are on the roster: the colleague
+   * someone named for work that isn't theirs (`interview.referred`).
+   */
+  named?: { id: string; name: string } | null;
 }
 
 /** The log as one read gives it: its entries, and the teams to narrow it by. */
@@ -110,20 +116,6 @@ export interface StaffLog {
   /** The roster's teams, by id and name. */
   teams: { id: string; name: string }[];
 }
-
-/** What the log can be narrowed to. */
-export const logFilterSchema = z.strictObject({
-  actor: z.enum(logActors).optional(),
-  /** The start of what happened: `interview`, `onboarding.links`. */
-  what: z
-    .string()
-    .regex(/^[a-z_.]{1,64}$/u)
-    .optional(),
-  team: z.string().max(64).optional(),
-  /** An ISO day. */
-  day: z.iso.date().optional(),
-});
-export type LogFilter = z.input<typeof logFilterSchema>;
 
 /** The most log entries one read returns, the newest first. */
 export const logPageMax = 500;
@@ -165,6 +157,8 @@ export interface StaffInterview {
   /** When they agreed to take part, and when they withdrew; null when they didn't. */
   participatedAt: string | null;
   withdrawnAt: string | null;
+  /** Their latest mail, when it failed: to send again. */
+  failedMail: FailedMail | null;
 }
 
 /** The longest note. */

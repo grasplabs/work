@@ -17,9 +17,15 @@
  * admin doesn't keep day by day says so rather than show a number.
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import type { ModelSpendReport } from "@grasp-os/shared/model-spend-report";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import {
   Table,
   TableBody,
@@ -35,7 +41,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowRightIcon,
@@ -49,21 +55,29 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import { QuotaPolicyCard } from "../clients/quota-policy-card.tsx";
-import type { ClientQuotaPolicy } from "../clients/quota-policy.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
+import { retryProvisioningFn } from "../hosting/functions.ts";
 import type { ClientHostingView } from "../hosting/placement.ts";
-import { operationErrorWords } from "../hosting/words.ts";
+import { ProvisioningProgressView } from "../hosting/progress-view.tsx";
+import type { ProvisioningProgress } from "../hosting/progress.ts";
+import {
+  notStartedWords,
+  operationErrorWords,
+  placeRefusals,
+} from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
-import { ringWords } from "./platform-parts.tsx";
+import { thenRefresh, useAction } from "../use-action.ts";
+import { aiStatusLine } from "./ai-status-words.ts";
+import { attentionWords, ringWords } from "./platform-parts.tsx";
+import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -71,7 +85,6 @@ import {
   History,
   LiveNumbers,
   PinRelease,
-  ModelSpendCeilingChange,
   RingChange,
   RollBack,
   RotateSecrets,
@@ -79,12 +92,11 @@ import {
   SealedSecretChange,
   TeamsBotChange,
   TeamsPackageDownload,
-  TestAlert,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
-import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
-import { euros, formatDate } from "./words.ts";
+import { ErrorCode, Facts, Quiet } from "./setup-parts.tsx";
+import { formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
 export const setupTabs = [
@@ -184,11 +196,50 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
 
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 type PlatformNeed =
+  | {
+      kind: "attention";
+      attention: NonNullable<ProvisioningView["needsAttention"]>;
+      view: ProvisioningView;
+    }
   | { kind: "provisioning"; view: ProvisioningView }
+  | { kind: "not_started"; why: ProvisioningView["notStarted"] }
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
   | { kind: "secrets" }
   | { kind: "settings" }
-  | { kind: "behind"; releases: number };
+  | { kind: "behind"; releases: number }
+  | { kind: "teams_bot_secret"; days: number }
+  | { kind: "stephen"; over: number };
+
+/** How many days before its Teams bot's secret expires its Setup says it needs a new one. */
+const botSecretWarnDays = 30;
+
+/** How long until its Teams bot's secret expires, `days` from now, as a sentence. */
+const botSecretWords = (days: number): string => {
+  if (days > 1) {
+    return `Its Teams bot's secret expires in ${days} days.`;
+  }
+  if (days === 1) {
+    return "Its Teams bot's secret expires tomorrow.";
+  }
+  return days === 0
+    ? "Its Teams bot's secret expires today: Stephen stops answering in Teams once it has."
+    : "Its Teams bot's secret has expired: Stephen can't answer in Teams.";
+};
+
+/** What a live company's chat apps need: a new bot secret soon, a look at Stephen. */
+const chatNeedsOf = (setup: ClientSetup): PlatformNeed[] => {
+  const needs: PlatformNeed[] = [];
+  const days = setup.teamsBotSecretDays;
+  if (days !== null && days <= botSecretWarnDays) {
+    needs.push({ kind: "teams_bot_secret", days });
+  }
+  const over =
+    setup.watched === null ? 0 : overBars(setup.watched.signals).size;
+  if (over > 0) {
+    needs.push({ kind: "stephen", over });
+  }
+  return needs;
+};
 
 /** A company this many releases behind the newest, not pinned, needs a look. */
 const behindAt = 2;
@@ -204,7 +255,18 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   const { provisioning, rollout, behind } = setup;
   const needs: PlatformNeed[] = [];
   if (provisioning.phase === "failed") {
-    needs.push({ kind: "provisioning", view: provisioning });
+    needs.push(
+      provisioning.needsAttention === null
+        ? { kind: "provisioning", view: provisioning }
+        : {
+            kind: "attention",
+            attention: provisioning.needsAttention,
+            view: provisioning,
+          }
+    );
+  }
+  if (provisioning.phase === "placing") {
+    needs.push({ kind: "not_started", why: provisioning.notStarted });
   }
   if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
     needs.push({ kind: "rollout", rollout });
@@ -221,22 +283,41 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   if (pinned === null && behind !== null && behind >= behindAt) {
     needs.push({ kind: "behind", releases: behind });
   }
-  return needs;
+  return active ? [...needs, ...chatNeedsOf(setup)] : needs;
 };
 
 /** A need in a sentence. */
 const needWords = (need: PlatformNeed): ReactNode => {
+  if (need.kind === "attention") {
+    const { attention, view } = need;
+    const code = attention.code ?? view.stopped?.error ?? null;
+    return (
+      <>
+        {attentionWords[attention.reason]}
+        {code === null ? null : (
+          <>
+            {" "}
+            <ErrorCode code={code} />
+            {` ${operationErrorWords(code)}`}
+          </>
+        )}
+      </>
+    );
+  }
   if (need.kind === "provisioning") {
     const { view } = need;
     return view.stopped === null ? (
-      "Setting it up stopped, and waits to be started again from Hosting."
+      "Stopped: Grasp is retrying it by itself."
     ) : (
       <>
-        {`Setting it up stopped at its ${view.stopped.step} step: `}
+        {`Stopped after its ${view.stopped.step} step; Grasp is retrying it by itself: `}
         <ErrorCode code={view.stopped.error} />
         {` ${operationErrorWords(view.stopped.error)}`}
       </>
     );
+  }
+  if (need.kind === "not_started") {
+    return notStartedWords(need.why);
   }
   if (need.kind === "rollout") {
     const { rollout } = need;
@@ -260,6 +341,12 @@ const needWords = (need: PlatformNeed): ReactNode => {
   }
   if (need.kind === "settings") {
     return "Changed settings wait to reach it: the next deploy carries them.";
+  }
+  if (need.kind === "teams_bot_secret") {
+    return `${botSecretWords(need.days)} Mint a new client secret for its bot in its own Entra and set it under Its Teams bot, with the day it expires.`;
+  }
+  if (need.kind === "stephen") {
+    return `${need.over === 1 ? "One of Stephen's signals is" : `${need.over} of Stephen's signals are`} over its bar: see Stephen below.`;
   }
   return `${need.releases} releases behind the newest.`;
 };
@@ -363,7 +450,7 @@ const Header = ({
               label="Open its Grasp"
             />
             <OutLink
-              href={`https://${provisioning.hostname}/activity`}
+              href={`https://${provisioning.hostname}/settings/audit`}
               label="Its activity"
             />
           </>
@@ -452,7 +539,6 @@ const HowItRuns = ({
           {resources.buckets.map((name) => (
             <Part does={name} key={`r2-${name}`} name="Files" />
           ))}
-          <Part does={resources.gateway} name="AI Gateway" />
         </div>
       )}
     </div>
@@ -530,8 +616,7 @@ const Checklist = ({
     },
     {
       id: "platform",
-      label:
-        "Its own platform is deployed, in its own Cloudflare account in the EU",
+      label: "Its own platform is deployed, in the EU",
       state: setup.provisioning.client?.status === "active" ? "done" : "todo",
       to: "setup",
     },
@@ -563,7 +648,7 @@ const Checklist = ({
   );
   const done = steps.filter(({ state }) => state === "done").length;
   return (
-    <SetupSection
+    <Section
       description={`${done} of ${steps.length} in place.`}
       title="From contract to go"
     >
@@ -604,7 +689,40 @@ const Checklist = ({
           </li>
         ))}
       </ul>
-    </SetupSection>
+    </Section>
+  );
+};
+
+/**
+ * Retry now: resumes its provisioning as the staff member
+ * (`retryProvisioningFn`), which starts a new episode of automatic
+ * retries and clears what needed attention.
+ */
+const RetryNow = ({ clientId }: { clientId: string }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(placeRefusals);
+  const retry = () => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await retryProvisioningFn({ data: { clientId } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+        Retry now
+      </Button>
+      {failure === null ? null : (
+        <span className="text-destructive text-sm" role="alert">
+          {failure}
+        </span>
+      )}
+    </span>
   );
 };
 
@@ -635,7 +753,8 @@ const NeedAction = ({
       );
     }
     case "secrets":
-    case "settings": {
+    case "settings":
+    case "teams_bot_secret": {
       return (
         <TabLink clientId={clientId} tab="settings">
           Its settings
@@ -649,8 +768,13 @@ const NeedAction = ({
         </TabLink>
       );
     }
-    case "provisioning": {
-      // Setting it up is seen to below, on this tab.
+    case "attention": {
+      return <RetryNow clientId={clientId} />;
+    }
+    case "provisioning":
+    case "not_started":
+    case "stephen": {
+      // Setting it up, and Stephen's signals, are seen to below, on this tab.
       return null;
     }
     default: {
@@ -658,6 +782,14 @@ const NeedAction = ({
     }
   }
 };
+
+/** How long a company's progress stays on its Setup once it is ready. */
+const readyShownMs = 24 * 60 * 60 * 1000;
+
+/** Whether its setting up shows: while it goes or waits, and for a day once ready. */
+const showsProgress = (progress: ProvisioningProgress): boolean =>
+  progress.readyAt === null ||
+  Date.now() - progress.readyAt.getTime() < readyShownMs;
 
 /** Whether a company is in a hosting destination, or being provisioned in one. */
 const placedOf = (hosting: ClientHostingView | null): boolean =>
@@ -681,14 +813,25 @@ const HostingSection = ({
   hosting !== null &&
   (placedOf(hosting) ||
     setup.provisioning.client?.status === "provisioning") ? (
-    <SetupSection
-      description="The hosting policy it is held to, and the destination that meets it."
+    <Section
+      description="Where it runs and where it is placed. Grasp sets it up, and tries again, by itself."
       title="Hosting"
     >
       <div className="border-t px-5 py-4">
-        <ClientHosting releases={releases} view={hosting} />
+        <Collapsible>
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            Show hosting details
+          </CollapsibleTrigger>
+          {/* Kept on the page while folded: found by the page's search, and
+              its state kept between refreshes. */}
+          <CollapsibleContent keepMounted>
+            <div className="mt-4">
+              <ClientHosting releases={releases} view={hosting} />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
-    </SetupSection>
+    </Section>
   ) : null;
 
 /** Milliseconds as seconds, to one decimal. */
@@ -708,8 +851,8 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   const { signals, readAt } = watched;
   const over = overBars(signals);
   return (
-    <SetupSection
-      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. Each signal over its bar was posted to the staff alerts' channel.`}
+    <Section
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. A signal over its bar is marked, and the Setup says it needs a look.`}
       title="Stephen"
     >
       <Facts
@@ -757,66 +900,27 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
           },
         ]}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
-/** List prices in US dollars, to the cent, as the gateway counts them. */
-const dollars = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "USD",
-});
-
 /**
- * This month's spend against the ceiling, as the gateway's ledger counts
- * it, or that it's unknown: never an estimate in its place.
+ * Its AI in one line, as its core reports it from real calls: which
+ * provider its organization connected, and whether it answers. Read only:
+ * the organization's admins connect and change providers in their own
+ * Settings.
  */
-const spendWords = (
-  report: ModelSpendReport | null,
-  ceiling: number
-): string => {
-  if (report === null) {
-    return `Ceiling: ${euros(ceiling)} a month. This month's spend: unknown, as its core couldn't be asked.`;
-  }
-  const share = Math.round((report.spent / ceiling) * 100);
-  return `This month (${report.month}): ${dollars.format(report.spent)} of its ${euros(ceiling)} ceiling (${String(share)}%), as its gateway counts it, at the providers' list prices in US dollars.`;
-};
-
-/**
- * Its model spend: the ceiling its core's gateway holds it to, what this
- * month's use came to as far as its core counted it, and changing the
- * ceiling.
- */
-const ModelSpend = ({
-  clientId,
-  ceiling,
-  spend,
-  refresh,
-}: {
-  clientId: string;
-  ceiling: number;
-  /** What its core's ledger charged its budget this month; null when unknown. */
-  spend: Promise<ModelSpendReport | null>;
-  refresh: Refresh;
-}) => (
-  <SetupSection
-    description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
-    title="Model spend"
+const AiStatus = ({ status }: { status: Promise<AiStatusReport | null> }) => (
+  <Section
+    description="Read from its core now, from its real model calls. Its admins connect a provider in their own Settings."
+    title="AI"
   >
-    <Body>
-      <Await
-        fallback={<p>{`Ceiling: ${euros(ceiling)} a month.`}</p>}
-        promise={spend}
-      >
-        {(report) => <p>{spendWords(report, ceiling)}</p>}
+    <CardContent>
+      <Await fallback={<p>AI: reading its core…</p>} promise={status}>
+        {(report) => <p>{aiStatusLine(report)}</p>}
       </Await>
-      <ModelSpendCeilingChange
-        ceiling={ceiling}
-        clientId={clientId}
-        refresh={refresh}
-      />
-    </Body>
-  </SetupSection>
+    </CardContent>
+  </Section>
 );
 
 const Status = ({
@@ -824,32 +928,29 @@ const Status = ({
   setup,
   needs,
   view,
-  quotaPolicy,
-  modelSpend,
+  aiStatus,
+  progress,
   hosting,
   releases,
-  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
   needs: PlatformNeed[];
   /** What its core answered, worked out; null when it didn't answer. */
   view: AdminView | null;
-  /** Its quota policy, its core read live; null when it couldn't be read. */
-  quotaPolicy: Promise<ClientQuotaPolicy | null>;
-  /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
-  modelSpend: Promise<ModelSpendReport | null>;
+  /** Its AI as its core reports it, read live and not awaited; null when unknown. */
+  aiStatus: Promise<AiStatusReport | null>;
   hosting: ClientHostingView | null;
+  progress: ProvisioningProgress | null;
   releases: readonly { id: string; notes: string }[];
-  refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
+    {progress !== null && showsProgress(progress) ? (
+      <ProvisioningProgressView progress={progress} />
+    ) : null}
     {needs.length > 0 ? (
-      <SetupSection
-        description="The most pressing first."
-        title="What needs a look"
-      >
+      <Section description="The most pressing first." title="What needs a look">
         <ul className="flex flex-col">
           {needs.map((need) => (
             <li
@@ -867,38 +968,24 @@ const Status = ({
             </li>
           ))}
         </ul>
-      </SetupSection>
+      </Section>
     ) : null}
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
-    {setup.account === null ? null : (
-      <ModelSpend
-        ceiling={setup.account.modelSpendCeiling}
-        clientId={clientId}
-        refresh={refresh}
-        spend={modelSpend}
-      />
-    )}
-    <SetupSection
-      description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
+    {setup.provisioning.client?.status === "active" ? (
+      <AiStatus status={aiStatus} />
+    ) : null}
+    <Section
+      description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet."
       title="Its platform in numbers"
     >
       <LiveNumbers
         active={setup.provisioning.client?.status === "active"}
         clientId={clientId}
       />
-    </SetupSection>
-    {setup.provisioning.client?.status === "active" ? (
-      // Its core read live, within the grid's deadline: the Setup shows
-      // without waiting for it, and the section once it answers.
-      <Await fallback={null} promise={quotaPolicy}>
-        {(policy) =>
-          policy === null ? null : <QuotaPolicyCard policy={policy} />
-        }
-      </Await>
-    ) : null}
+    </Section>
     <StephenWatched setup={setup} />
-    <SetupSection
-      description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
+    <Section
+      description="From its address to where its data is. Everything after the router runs in the EU, apart from every other company’s."
       title="How it runs"
     >
       <div className="border-t px-5 py-4">
@@ -910,7 +997,7 @@ const Status = ({
           <HowItRuns clientId={clientId} setup={setup} />
         )}
       </div>
-    </SetupSection>
+    </Section>
     {view === null ? null : (
       <Checklist
         clientId={clientId}
@@ -924,7 +1011,6 @@ const Status = ({
 
 /** What a ring change records besides. */
 const ringSchema = z.object({ ring: z.number() });
-const ceilingChangeSchema = z.object({ to: z.number() });
 
 /** What setting each sealed secret did, for its log. */
 const sealedSecretWords: Record<SealedSecretName, string> = {
@@ -946,15 +1032,6 @@ const plainEventWords: Readonly<Record<string, string>> = {
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
-};
-
-/** A change of its model spend ceiling, in a sentence. */
-const ceilingWords = ({ detail }: ClientSetup["done"][number]): string => {
-  const to = ceilingChangeSchema.safeParse(JSON.parse(detail ?? "null")).data
-    ?.to;
-  return to === undefined
-    ? "Changed its model spend ceiling."
-    : `Set its model spend ceiling to ${euros(to)} a month.`;
 };
 
 /** What staff did by hand, in a sentence. */
@@ -1012,7 +1089,7 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
   return (
     <>
       {done.length > 0 ? (
-        <SetupSection
+        <Section
           description="What someone at Grasp did to its platform by hand, as the admin’s audit log keeps it."
           title="Done here"
         >
@@ -1023,11 +1100,7 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
                 key={event.id}
               >
                 <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>
-                    {event.action === "client.model_spend_ceiling"
-                      ? ceilingWords(event)
-                      : eventWords(event)}
-                  </span>
+                  <span>{eventWords(event)}</span>
                   <span className="text-muted-foreground text-xs">
                     {event.actor}
                   </span>
@@ -1038,14 +1111,14 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
               </li>
             ))}
           </ul>
-        </SetupSection>
+        </Section>
       ) : null}
-      <SetupSection
+      <Section
         description="Everything the admin’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning, deploys and rollouts."
         title="Its history"
       >
         <History history={history} />
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1176,7 +1249,7 @@ const Resources = ({
   const { client } = provisioning;
   return (
     <>
-      <SetupSection
+      <Section
         description="In the hosting destination it is placed in (Hosting, on its Status), in the EU: the company’s data stays in its own resources there."
         title="Its deployment"
       >
@@ -1191,8 +1264,8 @@ const Resources = ({
             { label: "Added (UTC)", value: formatTime(client.createdAt) },
           ]}
         />
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         description="What the admin made live, and what Cloudflare says runs."
         title="Its Workers"
       >
@@ -1255,8 +1328,8 @@ const Resources = ({
           </div>
         )}
         {workers.length === 0 ? null : <WhatRuns clientId={clientId} />}
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         description="Found or made by every deploy, as the release it runs names them, all in the EU."
         title="What it keeps"
       >
@@ -1270,7 +1343,6 @@ const Resources = ({
                 name,
               })),
               ...resources.buckets.map((name) => ({ kind: "Files", name })),
-              { kind: "AI Gateway", name: resources.gateway },
             ].map(({ kind, name }) => (
               <li
                 className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
@@ -1284,7 +1356,7 @@ const Resources = ({
             ))}
           </ul>
         )}
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1320,7 +1392,7 @@ const Releases = ({
   const pinned = client?.pinnedReleaseId ?? null;
   return (
     <>
-      <SetupSection
+      <Section
         description="A release goes out ring by ring, and waits after each for someone at Grasp. A pinned company stays on its release, whatever the rollouts."
         title="Where it gets releases"
       >
@@ -1356,7 +1428,7 @@ const Releases = ({
           ]}
         />
         {client === null ? null : (
-          <Body>
+          <CardContent>
             <RingChange
               clientId={clientId}
               refresh={refresh}
@@ -1371,11 +1443,11 @@ const Releases = ({
                 releases={imported}
               />
             ) : null}
-          </Body>
+          </CardContent>
         )}
         <RollBack clientId={clientId} refresh={refresh} rollout={rollout} />
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         action={
           <Button
             nativeButton={false}
@@ -1427,7 +1499,7 @@ const Releases = ({
             ))}
           </ul>
         )}
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1488,7 +1560,7 @@ const TeamsBotSection = ({
     ({ name }) => name === "TEAMS_BOT_SECRET"
   );
   return (
-    <SetupSection
+    <Section
       description="Its own Teams bot, registered in its own Entra: its connect sends as it and its core answers it, from the next deploy. The secret is kept sealed by the admin and given only to its connect."
       title="Its Teams bot"
     >
@@ -1528,9 +1600,9 @@ const TeamsBotSection = ({
         />
       )}
       {bot === null ? null : (
-        <Body>
+        <CardContent>
           <TeamsPackageDownload clientId={clientId} />
-        </Body>
+        </CardContent>
       )}
       <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
       <SealedSecretChange
@@ -1541,7 +1613,7 @@ const TeamsBotSection = ({
         refresh={refresh}
         set={botSecret !== undefined}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -1592,7 +1664,7 @@ const SlackAppSection = ({
   const token = sealedRow(setup, "SLACK_BOT_TOKEN", "Bot token");
   const signing = sealedRow(setup, "SLACK_SIGNING_SECRET", "Signing secret");
   return (
-    <SetupSection
+    <Section
       description="Its own Slack app, which sends to its core. The bot token is kept sealed and given only to its connect, the signing secret only to its core, with each deploy."
       title="Its Slack app"
     >
@@ -1627,7 +1699,7 @@ const SlackAppSection = ({
         refresh={refresh}
         set={signing !== null}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -1649,7 +1721,7 @@ const Settings = ({
   const waiting = secretsWaiting(account);
   return (
     <>
-      <SetupSection
+      <Section
         description="As someone at Grasp gave it. Every deploy sets it on core."
         title="How its people sign in"
       >
@@ -1669,14 +1741,6 @@ const Settings = ({
                     ? "Not since it was set up"
                     : dayOf(account.configChangedAt),
               },
-              ...(setup.signInOverridden
-                ? [
-                    {
-                      label: "On deploy",
-                      value: "A setting of its own replaces this",
-                    },
-                  ]
-                : []),
               ...(setup.configPending
                 ? [
                     {
@@ -1690,16 +1754,11 @@ const Settings = ({
           />
         )}
         {client === null ? null : (
-          <SignInChange
-            clientId={clientId}
-            overridden={setup.signInOverridden}
-            refresh={refresh}
-            signIn={signIn}
-          />
+          <SignInChange clientId={clientId} refresh={refresh} signIn={signIn} />
         )}
-      </SetupSection>
+      </Section>
       {client === null ? null : (
-        <SetupSection
+        <Section
           description="A change to its settings reaches it with a deploy."
           title="Applying its settings"
         >
@@ -1710,9 +1769,9 @@ const Settings = ({
             pinned={client.pinnedReleaseId}
             refresh={refresh}
           />
-        </SetupSection>
+        </Section>
       )}
-      <SetupSection
+      <Section
         description="Derived for this company alone, never stored. New ones reach it with its next deploy; the old ones keep working a while after."
         title="Its secrets"
       >
@@ -1740,7 +1799,7 @@ const Settings = ({
         {account === null ? null : (
           <RotateSecrets clientId={clientId} refresh={refresh} />
         )}
-      </SetupSection>
+      </Section>
       {client === null ? null : (
         <>
           <TeamsBotSection
@@ -1756,12 +1815,6 @@ const Settings = ({
           />
         </>
       )}
-      <SetupSection
-        description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."
-        title="Staff alerts"
-      >
-        <TestAlert clientId={clientId} />
-      </SetupSection>
     </>
   );
 };
@@ -1810,8 +1863,8 @@ export const OrgSetup = ({
   setup,
   tab,
   view,
-  quotaPolicy,
-  modelSpend,
+  aiStatus,
+  progress,
   releases,
   hosting,
 }: {
@@ -1819,13 +1872,13 @@ export const OrgSetup = ({
   setup: ClientSetup;
   tab: SetupTab;
   view: AdminView | null;
-  /** Its quota policy, read live and not awaited; null when it couldn't be read. */
-  quotaPolicy: Promise<ClientQuotaPolicy | null>;
-  /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
-  modelSpend: Promise<ModelSpendReport | null>;
+  /** Its AI as its core reports it, read live and not awaited; null when unknown. */
+  aiStatus: Promise<AiStatusReport | null>;
   /** Every imported release, newest first. */
   releases: readonly { id: string; notes: string }[];
   hosting: ClientHostingView | null;
+  /** Its setting up, line by line; null when there's no such client. */
+  progress: ProvisioningProgress | null;
 }) => {
   const navigate = useNavigate();
   const refresh = useRefreshSetup();
@@ -1854,10 +1907,9 @@ export const OrgSetup = ({
           <Status
             clientId={clientId}
             hosting={hosting}
+            progress={progress}
             needs={needs}
-            modelSpend={modelSpend}
-            quotaPolicy={quotaPolicy}
-            refresh={refresh}
+            aiStatus={aiStatus}
             releases={releases}
             setup={setup}
             view={view}

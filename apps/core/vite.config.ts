@@ -9,25 +9,28 @@ import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
 import { testComposioKey } from "../connect/test/provider-config.ts";
-import { testBlueprintsModule } from "./build-blueprints.ts";
+import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";
 import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
   connectVersionMetadata,
+  platformAnthropicKey,
+  platformElevenLabsKey,
   directoryClient,
   documentsClient,
   gmailAccount,
   gmailPush,
   googleConnectClient,
-  landscapeClient,
+  platformOpenAiKey,
   slackApp,
   teamsBot,
   telegramBot,
   whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
+import { testAssets } from "./test/test-run.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
 
 // Background compilation off in the tests' workerd (workerd-v8-flags.ts).
@@ -62,11 +65,9 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
  */
 export const screenTests = [
   "test/screen*.test.ts",
-  "test/app-sandbox.test.ts",
   "test/app-releases.test.ts",
   "test/migration-transform.test.ts",
   "test/custom-migration-runs.test.ts",
-  "test/migration-samples.test.ts",
   "test/app-functions.test.ts",
   "test/app-invocation-isolation.test.ts",
   "test/release-retention.test.ts",
@@ -136,7 +137,6 @@ export const coreProject = (
   {
     sandboxSocket,
     bindings = {},
-    remoteBindings = false,
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -146,12 +146,6 @@ export const coreProject = (
     sandboxSocket?: () => string;
     /** Bindings a project adds to the tests' env, such as a run's size. */
     bindings?: Record<string, unknown>;
-    /**
-     * Whether bindings Wrangler marks remote reach Cloudflare: only the
-     * opt-in real-model run (vite.brain-model.config.ts), for the AI
-     * binding, with the developer's Wrangler login.
-     */
-    remoteBindings?: boolean;
   } = {}
 ) =>
   defineProject({
@@ -213,6 +207,10 @@ export const coreProject = (
     resolve: {
       alias: [
         { find: /^#blueprints$/u, replacement: testBlueprintsModule },
+        {
+          find: /^#blueprints-digest$/u,
+          replacement: digestModuleOf(testBlueprintsModule),
+        },
         { find: /^#version$/u, replacement: testVersionModule },
       ],
     },
@@ -221,15 +219,11 @@ export const coreProject = (
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
-        remoteBindings,
         miniflare: {
           bindings: {
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
             CAPABILITY_SIGNING_KEY: capabilitySigningKey,
-            // The audit log works out when to purge archives from its own
-            // env: the shortest archive retention the admin may set.
-            AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
             // The client's Teams bot, so its door is open
             // (src/channels/door.ts).
@@ -251,8 +245,6 @@ export const coreProject = (
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
-            // One memory limit set, the others at their defaults.
-            MEMORY_LIMITS: { "USER.md": 500 },
             // Package limits a test can reach with packages it publishes
             // on the fake npm registry (test/packages.test.ts).
             PACKAGE_LIMITS: {
@@ -268,10 +260,6 @@ export const coreProject = (
               workflowPackageChars: 64 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
-            MODEL_GATEWAY: {
-              gateway: "grasp-os-test",
-              models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
-            },
             // Who core's mail is from (src/mail.ts); tests capture what
             // the EMAIL binding is given (test/mail-capture.ts).
             MAIL_FROM: {
@@ -293,12 +281,9 @@ export const coreProject = (
             SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
-            // The quota policy, its step limit lowered so a test reaches it
+            // The quota limits, the step limit lowered so a test reaches it
             // (src/workflows/quotas.ts); tests of the others set their own.
-            QUOTA_LIMITS: {
-              generation: 1,
-              limits: { workflowSteps: testStepLimit },
-            },
+            TEST_QUOTA_LIMITS: { workflowSteps: testStepLimit },
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
@@ -321,8 +306,8 @@ export const coreProject = (
                 }),
           },
           // A stand-in frontend and the App compiler, written by the
-          // global setup.
-          assets: { directory: "./dist/test-assets" },
+          // global setup into this run's own directory.
+          assets: { directory: testAssets },
           // The real connect Worker behind the CONNECT service binding,
           // bundled by the global setup. Given as a script: a `scriptPath`
           // fails to start in the test pool.
@@ -345,8 +330,6 @@ export const coreProject = (
                 TOKEN_ENCRYPTION_KEY: btoa("test-token-key-of-exactly-32-b!!"),
                 MICROSOFT_CLIENT_ID: connectClient.id,
                 MICROSOFT_CLIENT_SECRET: connectClient.secret,
-                MICROSOFT_LANDSCAPE_CLIENT_ID: landscapeClient.id,
-                MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
                 MICROSOFT_DIRECTORY_CLIENT_ID: directoryClient.id,
                 MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
@@ -366,6 +349,13 @@ export const coreProject = (
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
                 TELEGRAM_BOT_TOKEN: telegramBot.token,
+                // Grasp's own keys at OpenAI, Anthropic and ElevenLabs for
+                // platform features, which the fakes there take once a test
+                // plans for them (OpenAI's transcription and ElevenLabs'
+                // speech answer unplanned).
+                OPENAI_API_KEY: platformOpenAiKey,
+                ANTHROPIC_API_KEY: platformAnthropicKey,
+                ELEVENLABS_API_KEY: platformElevenLabsKey,
                 // Stephen's Gmail mailbox, which the fake Google there knows.
                 GMAIL_MAILBOX: gmailAccount.mailbox,
                 GMAIL_CLIENT_ID: gmailAccount.clientId,
@@ -389,6 +379,10 @@ export const coreProject = (
               modules: true,
               script: connectProvidersScript,
               compatibilityDate: "2026-09-15",
+              // A fake provider sees its sender drop a request: a bridged
+              // one its caller going away, any other connect stopping it
+              // (test/ai-providers-fake.ts).
+              compatibilityFlags: ["enable_request_signal"],
             },
           ],
         },

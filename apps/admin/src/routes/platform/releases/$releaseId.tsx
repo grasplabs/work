@@ -1,4 +1,4 @@
-import { releaseIdSchema } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Table,
@@ -10,8 +10,8 @@ import {
 } from "@grasp-os/ui/components/table";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
+import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
-import { Panel } from "../../../admin/panel.tsx";
 import {
   PlatformNav,
   platformCrumb,
@@ -19,6 +19,7 @@ import {
   startRolloutId,
 } from "../../../admin/platform-nav.tsx";
 import { Facts, listed, Quiet } from "../../../admin/release-parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatBytes, formatTime } from "../../../releases/format.ts";
 import { fetchRelease } from "../../../releases/functions.ts";
 import type { WorkerView } from "../../../releases/queries.ts";
@@ -26,7 +27,7 @@ import { versionWords } from "../../../releases/version.ts";
 
 /** One of the release's Workers: how it runs, its modules and its databases' migrations. */
 const WorkerPanel = ({ worker }: { worker: WorkerView }) => (
-  <Panel description={worker.name} title={worker.app}>
+  <Section description={worker.name} title={worker.app}>
     <Facts
       rows={[
         { label: "Main module", value: worker.mainModule, mono: true },
@@ -107,7 +108,7 @@ const WorkerPanel = ({ worker }: { worker: WorkerView }) => (
         </ul>
       </section>
     ))}
-  </Panel>
+  </Section>
 );
 
 /**
@@ -122,7 +123,7 @@ const ReleasePage = () => {
     <AdminPage
       action={
         <Link
-          className={buttonVariants({ size: "sm" })}
+          className={buttonVariants()}
           hash={startRolloutId}
           to="/platform/rollouts"
         >
@@ -135,7 +136,7 @@ const ReleasePage = () => {
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
-        <Panel title="The release">
+        <Section title="The release">
           <Facts
             rows={[
               { label: "Release", value: release.id, mono: true },
@@ -158,11 +159,11 @@ const ReleasePage = () => {
               { label: "Wrangler", value: release.wranglerVersion, mono: true },
             ]}
           />
-        </Panel>
+        </Section>
         {release.workers.map((worker) => (
           <WorkerPanel key={worker.app} worker={worker} />
         ))}
-        <Panel title="Packages">
+        <Section title="Packages">
           {packages.length === 0 ? (
             <Quiet>None recorded.</Quiet>
           ) : (
@@ -174,7 +175,7 @@ const ReleasePage = () => {
               }))}
             />
           )}
-        </Panel>
+        </Section>
       </div>
     </AdminPage>
   );
@@ -192,4 +193,5 @@ export const Route = createFileRoute("/platform/releases/$releaseId")({
     return release;
   },
   component: ReleasePage,
+  pendingComponent: PageLoading,
 });

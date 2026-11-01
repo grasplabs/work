@@ -24,14 +24,12 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 //
 // They apply whenever they are configured. The rule that keeps the whole
 // deployment in the EU also keeps uploads' text extraction in the Worker,
-// off Workers AI (knowledge/extract.ts): it is what the client agreed to.
+// never sent out to be converted (knowledge/extract.ts): it is what the
+// client agreed to.
 //
-// "Hosted in the EU" is the config's word for a model: the client's
-// provider serves it in the EU (its EU data residency, with the keys AI
-// Gateway stores for it). Every call, one that must stay in the EU too,
-// still goes through AI Gateway, which can't be pinned to the EU: it passes
-// the request on and logs its metadata only (models.ts). A direct EU route
-// comes later, through connect.
+// "Hosted in the EU" is the config's word for a model: its provider serves
+// it in the EU. Every call goes to the provider's own API through connect
+// (model-transport-connect.ts), with nothing in between that keeps it.
 //
 // A call carries sensitive data when its context is in restricted mode
 // (restricted.ts), which is sticky: once a chat or an App has read a
@@ -69,7 +67,9 @@ export interface RulesInput {
           | "brain_upkeep"
           | "dashboard_widgets"
           | "brain_recall"
-          | "policy_reading";
+          | "stephen_requests"
+          | "provider_test"
+          | "document_conversion";
       };
 }
 
@@ -175,6 +175,7 @@ const sensitiveBecause = async (
 /** Why the gateway refused a call: the code, and which rule said so. */
 export interface Refusal {
   code:
+    | "model.no_provider"
     | "model.not_allowed"
     | "model.eu_only"
     | "model.sensitive_data"
@@ -251,7 +252,14 @@ const restrictedWork = async (
 export const judgeCall = async (
   env: RestrictedEnv & Pick<Env, "KNOWLEDGE">,
   rules: ModelRules,
-  input: RulesInput
+  input: RulesInput,
+  /**
+   * Whether it is one of Grasp's own features, on Grasp's own key: always
+   * at its provider's EU data residency host (`platformRouteOf`), which
+   * is Grasp's to keep, so an EU-only call may take it. The deployment's
+   * EU models name the models of its own providers, never these.
+   */
+  platform = false
 ): Promise<{ ok: true; judged: Judged } | ({ ok: false } & Refusal)> => {
   const restricted = await restrictedWork(env, input);
   if (restricted === undefined) {
@@ -259,7 +267,8 @@ export const judgeCall = async (
   }
   const { eu, sensitive: dataRule } = rules;
   const euOnly = eu === undefined ? undefined : euOnlyBecause(eu, input);
-  if (euOnly !== undefined && eu?.models.includes(input.model) !== true) {
+  const staysInEu = platform || eu?.models.includes(input.model) === true;
+  if (euOnly !== undefined && !staysInEu) {
     return { ok: false, code: "model.eu_only", because: euOnly };
   }
   const sensitive =

@@ -5,7 +5,7 @@ import type { RouterTarget } from "@grasp-os/shared/router";
 // (`DISPATCHER`, the namespace the router binds), never over the internet;
 // a core in an account of its own at its workers.dev origin. Every call
 // the admin makes to a core (its health, probe, snapshot, onboarding,
-// kickoff, quota policy, a staff question) goes through one of these.
+// kickoff, AI status, a staff question) goes through one of these.
 
 /** Where a client's core answers, and how to send it a request. */
 export interface CoreAddress {

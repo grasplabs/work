@@ -3,7 +3,8 @@ import type {
   DocumentSummary,
   SearchHit,
 } from "@grasp-os/shared/knowledge";
-import { pageMaxLimit, searchQueryMaxLength } from "@grasp-os/shared/knowledge";
+import { pageMaxLimit } from "@grasp-os/shared/knowledge";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import {
   Empty,
   EmptyDescription,
@@ -15,6 +16,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
 
+import { PageHeading } from "../frame/page.tsx";
 import {
   CollectionDrawing,
   MemoryDrawing,
@@ -24,6 +26,7 @@ import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
+import { NewCollection } from "../knowledge/new-collection.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
 // Knowledge's home, a page to go on from, in the prototype's look
@@ -262,6 +265,7 @@ const Knowledge = () => {
   const { t } = useLingui();
   const { nav, results, firstPages } = Route.useLoaderData();
   const { q } = Route.useSearch();
+  const { identity } = Route.useRouteContext();
   const { collections, memory } = nav;
   const names = new Map(
     collections.state === "ready"
@@ -280,19 +284,17 @@ const Knowledge = () => {
     >
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 md:px-12">
-          <header className="flex flex-col gap-2.5">
-            <h1 className="text-2xl font-medium tracking-tight">
-              <Trans>Knowledge</Trans>
-            </h1>
-            <p className="text-muted-foreground text-sm leading-relaxed">
+          <PageHeading
+            description={
               <Trans>
                 Everything Grasp and its agents may read, in collections: your
                 own, your teams&apos; and your organization&apos;s. Agents read
                 a document when they need it, and always have the memory files
                 in mind.
               </Trans>
-            </p>
-          </header>
+            }
+            title={<Trans>Knowledge</Trans>}
+          />
           {results === undefined ? null : (
             <section aria-labelledby="results" className="flex flex-col gap-3">
               <h2 className="text-sm font-medium" id="results">
@@ -317,9 +319,12 @@ const Knowledge = () => {
             aria-labelledby="collections"
             className="flex flex-col gap-3"
           >
-            <h2 className="text-sm font-medium" id="collections">
-              <Trans>Collections</Trans>
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-medium" id="collections">
+                <Trans>Collections</Trans>
+              </h2>
+              <NewCollection identity={identity} />
+            </div>
             <NotLoaded page={collections} />
             {collections.state === "ready" ? (
               <CollectionBlocks
@@ -337,7 +342,7 @@ const Knowledge = () => {
 export const Route = createFileRoute("/_shell/knowledge/")({
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === "string" && search.q.trim() !== ""
-      ? { q: search.q.slice(0, searchQueryMaxLength) }
+      ? { q: search.q.slice(0, knowledgeSearchMaxLength) }
       : {},
   loaderDeps: ({ search: { q } }) => ({ q }),
   // Each part says on its own why it failed; search runs beside the rest.

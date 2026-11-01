@@ -229,8 +229,10 @@ const macKey = async (secret: string, usage: MacUsage): Promise<CryptoKey> => {
   );
 };
 
-const macInput = (payload: string): Uint8Array<ArrayBuffer> =>
-  new TextEncoder().encode(`${macContext}${payload}`);
+const macInput = (
+  payload: string,
+  context: string = macContext
+): Uint8Array<ArrayBuffer> => new TextEncoder().encode(`${context}${payload}`);
 
 /**
  * Makes the capability for one call, valid for {@link capabilityTtlMs}.
@@ -287,22 +289,27 @@ const invalid = (reason: "malformed" | "mac" | "expired" | "scope") =>
 const madeWithOneOf = async (
   keys: readonly CryptoKey[],
   mac: Uint8Array<ArrayBuffer>,
-  payload: string
+  payload: string,
+  context: string
 ): Promise<boolean> => {
   const checks = await Promise.all(
     keys.map(
       async (key) =>
-        await crypto.subtle.verify("HMAC", key, mac, macInput(payload))
+        await crypto.subtle.verify("HMAC", key, mac, macInput(payload, context))
     )
   );
   return checks.includes(true);
 };
 
-/** The claims, if the MAC over the payload holds; throws otherwise. */
-const readClaims = async (
+/**
+ * The JSON a token made under `context` carries, if the MAC over its
+ * payload holds for one of `secrets`; throws otherwise.
+ */
+const readPayload = async (
   secrets: readonly string[],
-  token: unknown
-): Promise<CapabilityClaims> => {
+  token: unknown,
+  context: string
+): Promise<unknown> => {
   const parts = typeof token === "string" ? tokenPattern.exec(token) : null;
   const payload = parts?.groups?.payload;
   const mac = parts?.groups?.mac;
@@ -328,17 +335,30 @@ const readClaims = async (
   } catch {
     throw invalid("malformed");
   }
-  if (!(await madeWithOneOf(keys, macBytes, payload))) {
+  if (!(await madeWithOneOf(keys, macBytes, payload, context))) {
     throw invalid("mac");
   }
   try {
     const json = new TextDecoder("utf-8", { fatal: true }).decode(
       fromBase64Url(payload)
     );
-    return capabilityClaimsSchema.parse(JSON.parse(json));
+    return JSON.parse(json);
   } catch {
     throw invalid("malformed");
   }
+};
+
+/** The claims, if the MAC over the payload holds; throws otherwise. */
+const readClaims = async (
+  secrets: readonly string[],
+  token: unknown
+): Promise<CapabilityClaims> => {
+  const payload = await readPayload(secrets, token, macContext);
+  const parsed = capabilityClaimsSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw invalid("malformed");
+  }
+  return parsed.data;
 };
 
 /**
@@ -369,6 +389,126 @@ export const verifyCapability = async (
     claims.idempotencyKey === (scope.idempotencyKey ?? null);
   if (!matches) {
     throw invalid("scope");
+  }
+  return claims;
+};
+
+// The model grant: core's capability for one provider request of a model
+// call, which connect makes with a credential it holds (connect's
+// ai-providers.ts). Core signs it only once the model gateway decided the
+// call and the model ledger admitted the request (core's models.ts), for
+// exactly that request: the credential (the organization's or Grasp's),
+// the provider, the host it goes to, the ledger's ID for it and the hash
+// of its body. Made with the same key and scheme as a capability, under a
+// context of its own, so one never passes for the other. A grant isn't
+// kept as used: within its few seconds it could be sent again, but only
+// with the very body core signed for, to the same host on the same
+// credential, and only by someone who read it out of core or connect,
+// which hold the signing key anyway.
+
+/** Keeps a model grant's MAC from ever passing for a capability's. */
+const modelGrantContext = "grasp-os model grant v1\n";
+
+/**
+ * The longest a model request may stream, as its grant bounds it: a
+ * listening's realtime socket (core's models.ts, `listen`), open for up to
+ * an hour, is the longest. A text call's grant ends at its own deadline,
+ * 15 minutes at most, well before.
+ */
+export const modelGrantMaxStreamMs = 61 * 60_000;
+
+/** What a model grant says. Unknown fields make it invalid. */
+export const modelGrantClaimsSchema = z.strictObject({
+  v: z.literal(1),
+  aud: z.literal("connect.model"),
+  jti: z.uuid(),
+  /** Issued and expires (the start of the request), in ms since the epoch. */
+  iat: z.int().nonnegative(),
+  exp: z.int().nonnegative(),
+  /** When connect cuts the request off, its stream too: the call's deadline. */
+  notAfter: z.int().nonnegative(),
+  /** Whose key: the organization's own, or Grasp's for platform features. */
+  credential: z.enum(["organization", "platform"]),
+  provider: z.enum([
+    "anthropic",
+    "openai",
+    "mistral",
+    "openrouter",
+    "openai-compatible",
+    "elevenlabs",
+  ]),
+  /** The host the request goes to, lowercase. */
+  host: z.string().min(1).max(253),
+  /** The model ledger's ID for the request, for connect's log. */
+  request: z.uuid(),
+  /**
+   * The SHA-256 of the request's body, hex: connect sends only the body
+   * core signed for, so a grant taken elsewhere can't carry another
+   * request to the provider within its few seconds.
+   */
+  body: z.string().regex(/^[\da-f]{64}$/u),
+});
+export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
+
+/** What core signs a model grant for. */
+export type ModelGrantScope = Pick<
+  ModelGrantClaims,
+  "credential" | "provider" | "host" | "request" | "notAfter" | "body"
+>;
+
+/** Makes the grant for one provider request, valid to start for {@link capabilityTtlMs}. */
+export const signModelGrant = async (
+  secret: string,
+  scope: ModelGrantScope,
+  now: number = Date.now()
+): Promise<string> => {
+  const claims = modelGrantClaimsSchema.parse({
+    v: 1,
+    aud: "connect.model",
+    jti: crypto.randomUUID(),
+    iat: now,
+    exp: now + capabilityTtlMs,
+    notAfter: Math.min(scope.notAfter, now + modelGrantMaxStreamMs),
+    credential: scope.credential,
+    provider: scope.provider,
+    host: scope.host.toLowerCase(),
+    request: scope.request,
+    body: scope.body,
+  });
+  const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    await macKey(secret, "sign"),
+    macInput(payload, modelGrantContext)
+  );
+  return `${payload}.${toBase64Url(new Uint8Array(mac))}`;
+};
+
+/**
+ * Checks a model grant: made with one of `secrets`, for connect's model
+ * requests, and still valid to start. Returns what it says, which connect
+ * then holds the request to (its credential, provider and host); throws
+ * `capability.invalid` otherwise.
+ */
+export const verifyModelGrant = async (
+  secrets: readonly string[],
+  token: unknown,
+  now: number = Date.now()
+): Promise<ModelGrantClaims> => {
+  const parsed = modelGrantClaimsSchema.safeParse(
+    await readPayload(secrets, token, modelGrantContext)
+  );
+  if (!parsed.success) {
+    throw invalid("malformed");
+  }
+  const claims = parsed.data;
+  const live =
+    claims.iat <= now + capabilityClockSkewMs &&
+    now < claims.exp &&
+    claims.exp - claims.iat <= capabilityMaxTtlMs &&
+    claims.notAfter - claims.iat <= modelGrantMaxStreamMs;
+  if (!live) {
+    throw invalid("expired");
   }
   return claims;
 };

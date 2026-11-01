@@ -290,7 +290,13 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     name: "Move Domains: drag it, or use the arrow keys",
     exact: true,
   });
+  // Once the card has closed and given the focus back to what opened it,
+  // which would otherwise take it off the grip.
+  await expect(page.getByRole("dialog", { name: "Add a widget" })).toHaveCount(
+    0
+  );
   await grip.focus();
+  await expect(grip).toBeFocused();
   await page.keyboard.press("ArrowLeft");
   const moved = [
     "Return a month",

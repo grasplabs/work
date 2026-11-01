@@ -1,6 +1,6 @@
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import type { ReactNode } from "react";
 
-import { GraspMark } from "../grasp-mark.tsx";
 import { LanguageButton } from "../language-picker.tsx";
 
 /**
@@ -30,7 +30,7 @@ export const OnboardingFrame = ({
       </div>
     </main>
     <footer className="bg-background sticky bottom-0 flex h-18 flex-none items-center justify-between px-4 sm:px-10">
-      <GraspMark className="text-foreground size-5" />
+      <GraspMark className="size-5" />
       <LanguageButton />
     </footer>
   </div>

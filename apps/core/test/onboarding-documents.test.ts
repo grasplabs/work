@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
@@ -6,16 +5,16 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider, testModel } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298): kept
 // in Knowledge, in a collection only admins read, and read at once through
-// the model gateway, which is a fake behind the AI binding here. The ways
-// it can fail, tried here:
+// the model gateway; the model provider behind connect is a fake here
+// (test/model-provider.ts). The ways it can fail, tried here:
 //
 // - The document read as instructions, or its question asked when there's
 //   no answer to pick.
@@ -25,13 +24,11 @@ import { wordFile } from "./word-file.ts";
 
 const idp = mockIdp();
 
-const anthropic = "anthropic/claude-sonnet-4-5";
-
-/** The prompt tokens the onboarding counted as read from `anthropic`'s cache. */
+/** The prompt tokens the onboarding counted as read from `testModel`'s cache. */
 const cachedOf = async (): Promise<number> => {
   const rows = await onboardingStore(env).usage();
   return rows
-    .filter(({ model }) => model === anthropic)
+    .filter(({ model }) => model === testModel)
     .reduce((sum, { tokensCached }) => sum + tokensCached, 0);
 };
 
@@ -56,22 +53,19 @@ const reading = {
   options: ["Yes, still current", "No, it changed"],
 };
 
-const answer = (body: unknown): GatewayReply => ({
+const answer = (body: unknown): ProviderReply => ({
   text: JSON.stringify(body),
   inputTokens: 1200,
   outputTokens: 150,
 });
 
-/** What `run` returns while the gateway answers with `replies`. */
-const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    spy.mockRestore();
-  }
+/** What `run` returns while the provider answers with `replies`. */
+const answering = async <T>(
+  replies: ProviderReply[],
+  run: () => Promise<T>
+) => {
+  const provider = await fakeProvider(...replies);
+  return { requests: provider.requests, result: await run() };
 };
 
 /** The onboarding's documents collection, as `api` lists it, if it does. */
@@ -94,6 +88,24 @@ const ended = async (api: SessionApi, uploadId: string): Promise<Upload> =>
   );
 
 describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
+  // First in the file: no test has connected a provider yet.
+  it("are not read, and nothing is kept, while the company connected no AI provider", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const name = `unconnected-${crypto.randomUUID()}.docx`;
+    const refused = await outcome(
+      admin.onboarding.shareDocument({ locale: "en", name, bytes: draft })
+    );
+    const { results: kept } = await env.DB.prepare(
+      "SELECT id FROM uploads WHERE path = ?"
+    )
+      .bind(name)
+      .all();
+    expect({ refused, kept: kept.length }).toStrictEqual({
+      refused: "model.no_provider",
+      kept: 0,
+    });
+  });
+
   it("are read at once, with one question for a 2019 draft, and go into the team's interviews with the admin's answer", async () => {
     const { api: admin } = await signedInApi(idp, "admin");
     const name = `claims-${crypto.randomUUID()}.docx`;
@@ -149,24 +161,18 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
 
   it("count what was read from the provider's prompt cache", async () => {
     const { api: admin } = await signedInApi(idp, "admin");
-    const before = env.MODEL_GATEWAY;
-    env.MODEL_GATEWAY = { gateway: "grasp-os-test", models: [anthropic] };
-    try {
-      const cachedBefore = await cachedOf();
-      const { result } = await answering(
-        [{ ...answer(reading), cache: { read: 900, write: 300 } }],
-        async () =>
-          await admin.onboarding.shareDocument({
-            locale: "en",
-            name: `cached-${crypto.randomUUID()}.docx`,
-            bytes: draft,
-          })
-      );
-      await ended(admin, result.id);
-      expect((await cachedOf()) - cachedBefore).toBe(900);
-    } finally {
-      env.MODEL_GATEWAY = before;
-    }
+    const cachedBefore = await cachedOf();
+    const { result } = await answering(
+      [{ ...answer(reading), cache: { read: 900, write: 300 } }],
+      async () =>
+        await admin.onboarding.shareDocument({
+          locale: "en",
+          name: `cached-${crypto.randomUUID()}.docx`,
+          bytes: draft,
+        })
+    );
+    await ended(admin, result.id);
+    expect((await cachedOf()) - cachedBefore).toBe(900);
   });
 
   it("ask nothing without answers to pick from", async () => {
@@ -219,7 +225,8 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     const { api: admin } = await signedInApi(idp, "admin");
     const name = `unread-${crypto.randomUUID()}.docx`;
     const { result } = await answering(
-      [{ status: 500, errorType: "api_error" }, { status: 500 }],
+      // A provider that failed is not asked again: the call fails.
+      [{ status: 500, errorType: "api_error" }],
       async () => [
         await outcome(
           admin.onboarding.shareDocument({ locale: "en", name, bytes: draft })

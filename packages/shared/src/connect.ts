@@ -1,8 +1,11 @@
 import { z } from "zod";
 
+import type { AiProviderConnectApi } from "./ai-providers.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
+import { oauthProviderSchema } from "./connect-names.ts";
+import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -14,7 +17,6 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
-import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
@@ -22,24 +24,8 @@ import { isAdmin, roleSchema } from "./roles.ts";
 import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
-/**
- * The version of the interface connect serves core over the service
- * binding (its entrypoint's methods, and the calls and answers in this
- * file). A release's core and connect don't switch at once in a client
- * (the admin deploys connect first, and a rollback restores core
- * first), so a change a core of the release before couldn't call
- * correctly, or one that needs a connect of this release, is a new
- * version, with the range below moved to say which cores work with
- * which connects; a release declares both (scripts/release).
- */
-export const connectInterfaceVersion = 2;
-
-/**
- * The versions of connect's interface this core calls correctly. 2: a
- * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
- * strict schema refuses.
- */
-export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
+export { catalogGroups, oauthProviderSchema } from "./connect-names.ts";
+export type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -114,22 +100,14 @@ export interface PendingReference {
 // never leave it (threat model R1).
 
 /**
- * The suites a person connects through OAuth, pinned to the organization's
- * own tenant: the IdPs people sign in with.
- */
-export const oauthProviderSchema = z.enum(["microsoft", "google"]);
-export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
-
-/**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's, the directory's, the documents' and the HR
- * platform's admin connections (`./landscape.ts`, `./directory.ts`,
- * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * itself; the directory's, the documents' and the HR platform's admin
+ * connections (`./directory.ts`, `./document-places.ts`, `./hr.ts`),
+ * which no connector's calls may use;
  * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
-  ...landscapeProviderSchema.options,
   ...directoryProviderSchema.options,
   ...placesProviderSchema.options,
   ...hrProviderSchema.options,
@@ -209,12 +187,11 @@ export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
    * A connector's provider, or a read-only admin connection of a suite
-   * (the landscape's, the directory's, the documents'), which no
+   * (the directory's, the documents'), which no
    * connector's calls use.
    */
   provider: z.union([
     connectorProviderSchema,
-    landscapeProviderSchema,
     directoryProviderSchema,
     placesProviderSchema,
   ]),
@@ -356,8 +333,7 @@ export interface ConnectionSummary {
   /**
    * Those of `tools` on offer: the ones Grasp classed (connect's
    * composio-classes.ts). A tool nobody classed is never offered or run,
-   * whatever the admin allowed. Absent for a native connection, and from
-   * a connect that predates it, which runs every allowed tool.
+   * whatever the admin allowed. Absent for a native connection.
    */
   offeredTools?: string[];
 }
@@ -510,7 +486,7 @@ export const appRequestsListed = 200;
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
  * core's callback, which returns it to `returnTo` (a path on this origin)
- * with `connection=<id>` once it finished, or to the Connections page with
+ * with `connection=<id>` once it finished, or to the Integrations page with
  * `connectionError=<code>` when it didn't. Reconnecting a connection that
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
@@ -666,32 +642,6 @@ export interface CatalogEntry {
  * toolkit is refused (`connection.own_auth_required`).
  */
 export type CatalogAuth = "managed" | "own";
-
-/**
- * Grasp's kinds of app, in the order the Integrations page lists them. Each
- * id is the group's English name, which the web app translates; `Other` is
- * for an app none of the others fits.
- */
-export const catalogGroups = [
-  "Email and calendar",
-  "Files and documents",
-  "Chat",
-  "CRM",
-  "Finance and accounting",
-  "HR",
-  "Signing",
-  "Marketing",
-  "Support",
-  "Projects and tasks",
-  "Forms and surveys",
-  "Data and analytics",
-  "AI",
-  "Commerce",
-  "Design and media",
-  "Developer tools",
-  "Other",
-] as const;
-export type CatalogGroup = (typeof catalogGroups)[number];
 
 /**
  * Which group a category is in, by its words in lower case. The first
@@ -1685,7 +1635,8 @@ export interface ChannelApi {
  * npm registry among the rest (`PackageRegistryApi`), and the chat
  * platforms (`ChannelApi`).
  */
-export interface ConnectApi extends PackageRegistryApi, ChannelApi {
+export interface ConnectApi
+  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;

@@ -1,8 +1,16 @@
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { failureText } from "@grasp-os/shared/errors";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@grasp-os/ui/components/popover";
 import {
   Table,
   TableBody,
@@ -11,23 +19,36 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { EmptyCard } from "../frame/page.tsx";
 import { useCore } from "../use-core.ts";
+import {
+  ProcessGlyph,
+  ProcessHint,
+  processNames,
+} from "./business-process.tsx";
 
 // The organization's independent workflows the person has a role in
 // (platform specification 13), each opening its own page, and, for those
-// who build, a new one by name. Core decides who may create one and which
-// names are free.
+// who build, a new one by name. Each line begins with the icon of the
+// business process it serves, if its builders set one. Core decides who
+// may create one and which names are free; a new one is the page's
+// action, in the bar above it.
 
 /** Creates a workflow named as typed, and opens it. */
-const NewWorkflow = () => {
+const NewWorkflowForm = () => {
   const core = useCore();
   const navigate = useNavigate();
-  const { t } = useLingui();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -49,7 +70,6 @@ const NewWorkflow = () => {
   };
   return (
     <form
-      aria-label={t`New workflow`}
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault();
@@ -59,9 +79,8 @@ const NewWorkflow = () => {
       <Label htmlFor="new-workflow-name">
         <Trans>Name of a new workflow</Trans>
       </Label>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2">
         <Input
-          className="max-w-xs"
           id="new-workflow-name"
           onChange={(event) => {
             setName(event.target.value);
@@ -78,12 +97,54 @@ const NewWorkflow = () => {
   );
 };
 
+/**
+ * The page's one action, in the bar above it as the prototype has it: a
+ * new workflow, named in a popover and opened once created.
+ */
+export const NewWorkflow = () => {
+  const { t } = useLingui();
+  return (
+    <Popover>
+      <PopoverTrigger render={<Button size="sm" />}>
+        <PlusIcon data-icon="inline-start" />
+        <Trans>New workflow</Trans>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80">
+        <PopoverHeader>
+          <PopoverTitle>{t`New workflow`}</PopoverTitle>
+        </PopoverHeader>
+        <NewWorkflowForm />
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/** The process a workflow serves, as its icon, named when pointed at. */
+const ProcessMark = ({ process }: { process: BusinessProcess }) => {
+  const { i18n } = useLingui();
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="relative z-10 flex-none" />}>
+        <ProcessGlyph
+          className="text-muted-foreground size-4"
+          process={process}
+        />
+        <span className="sr-only">{i18n._(processNames[process])}</span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64">
+        <ProcessHint process={process} />
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
 export const IndependentWorkflows = ({
   workflows,
-  canCreate,
+  filtered = false,
 }: {
   workflows: WorkflowResource[];
-  canCreate: boolean;
+  /** Whether a process filters them: none listed then says so. */
+  filtered?: boolean;
 }) => {
   const { t } = useLingui();
   return (
@@ -91,42 +152,64 @@ export const IndependentWorkflows = ({
       aria-labelledby="independent-workflows"
       className="flex flex-col gap-3"
     >
-      <h2 className="font-medium" id="independent-workflows">
+      <h2 className="text-muted-foreground" id="independent-workflows">
         <Trans>Independent workflows</Trans>
       </h2>
       {workflows.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>No independent workflow is shared with you yet.</Trans>
-        </p>
+        <EmptyCard>
+          {filtered ? (
+            <Trans>No independent workflow of yours serves this process.</Trans>
+          ) : (
+            <Trans>No independent workflow is shared with you yet.</Trans>
+          )}
+        </EmptyCard>
       ) : (
-        <Table>
+        <Table variant="card">
           <TableHeader>
             <TableRow>
-              <TableHead>{t`Name`}</TableHead>
-              <TableHead>{t`Current version`}</TableHead>
+              <TableHead variant="card">{t`Workflow`}</TableHead>
+              <TableHead variant="card">{t`Current version`}</TableHead>
+              <TableHead className="w-9" variant="card">
+                <span className="sr-only">
+                  <Trans context="column: a link that opens the workflow">
+                    Open
+                  </Trans>
+                </span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
+            {/* As the lists above: the whole row opens the workflow. */}
             {workflows.map((workflow) => (
-              <TableRow key={workflow.id}>
-                <TableCell>
-                  <Link
-                    className="font-medium hover:underline"
-                    params={{ workflow: workflow.id }}
-                    to="/workflows/$workflow"
-                  >
-                    {workflow.name}
-                  </Link>
+              <TableRow className="relative" key={workflow.id}>
+                <TableCell variant="roomy">
+                  <span className="flex items-center gap-2">
+                    {workflow.process === null ? null : (
+                      <ProcessMark process={workflow.process} />
+                    )}
+                    <Link
+                      className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
+                      params={{ workflow: workflow.id }}
+                      to="/workflows/$workflow"
+                    >
+                      {workflow.name}
+                    </Link>
+                  </span>
+                </TableCell>
+                <TableCell variant="roomy">
+                  {workflow.currentVersion ?? t`Not published`}
                 </TableCell>
                 <TableCell>
-                  {workflow.currentVersion ?? t`Not published`}
+                  <ChevronRightIcon
+                    aria-hidden="true"
+                    className="text-muted-foreground mx-auto size-4"
+                  />
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      {canCreate ? <NewWorkflow /> : null}
     </section>
   );
 };

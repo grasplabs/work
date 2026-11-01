@@ -24,6 +24,10 @@ const scopes = [
   "binding",
   "binding_day",
   "person",
+  // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
+  // counted, never limited, and apart from every scope of the
+  // organization's own.
+  "platform",
 ] as const;
 
 /**
@@ -64,19 +68,10 @@ export const requests = sqliteTable(
     }).notNull(),
     /**
      * How it settled: by its usage, by what it used until it was cut off,
-     * refused, never sent, or in full; or as a person decided a held
-     * request, released or charged.
+     * refused, never sent, or in full.
      */
     settledBy: text("settled_by", {
-      enum: [
-        "usage",
-        "cut",
-        "refused",
-        "unsent",
-        "reconciled",
-        "released",
-        "charged",
-      ],
+      enum: ["usage", "cut", "refused", "unsent", "reconciled"],
     }),
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),
@@ -112,6 +107,23 @@ export const requests = sqliteTable(
      * most. It holds its shares only while `dispatched` and before this.
      */
     leaseEndsAt: integer("lease_ends_at"),
+    /**
+     * The way it went (models.ts): its transport (`connect`), the
+     * provider and the provider's region
+     * (@grasp-os/shared/ai-providers). Metadata only; null for one admitted
+     * before routes were recorded, and for a voice model's.
+     */
+    transport: text(),
+    provider: text(),
+    region: text(),
+    /** Whose key it went with: `organization` or `platform`; null without one. */
+    credential: text(),
+    /**
+     * Which of Grasp's own AI features it was for, on Grasp's key
+     * (@grasp-os/shared/platform-ai): `conversion`, `transcription` or
+     * `speech`; null for any other request.
+     */
+    feature: text(),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -125,6 +137,9 @@ export const requests = sqliteTable(
     index("requests_settled_at").on(table.settledAt),
     // The leases held: requests in flight, by when they end.
     index("requests_leases").on(table.state, table.leaseEndsAt),
+    // Grasp's own features' requests, month by month: what the admin's
+    // spend overview sums (`platformSpend`), never a scan of them all.
+    index("requests_credential_period").on(table.credential, table.period),
   ]
 );
 
@@ -200,12 +215,19 @@ export const requestScopes = sqliteTable(
      * The spend period it reserved against: the request's month, or
      * `lineage` for a run lineage (model-ledger.ts). The request settles,
      * is rebuilt and is summed against exactly this, never one worked out
-     * again later. Null for a request admitted before it was recorded,
-     * which reserved every scope under its own month (`requests.period`).
+     * again later.
      */
-    period: text(),
+    period: text().notNull(),
     /** The most requests its scope may admit, when admitted; null for none. */
     limitRequests: integer("limit_requests"),
+    /**
+     * What the request reserved on this scope when admitted: the whole
+     * reservation, or none where it holds no money (model-ledger.ts,
+     * `holdsMoney`). It settles, is rebuilt and is summed by exactly this,
+     * never by a rule worked out again later, so a change of rule never
+     * strands money.
+     */
+    reservedMicros: integer("reserved_micros").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),
@@ -308,6 +330,37 @@ export const personLimits = sqliteTable(
       sql`${table.messagesAnHour} IS NULL OR ${table.messagesAnHour} > 0`
     ),
   ]
+);
+
+/**
+ * How each provider's requests fared last, by whose key, as they settled
+ * (`ModelLedger.settle`): when one last worked, and when one last failed
+ * and how, never what it carried. What an admin reads as a provider's
+ * status (core's ai-providers.ts).
+ */
+export const providerHealth = sqliteTable(
+  "provider_health",
+  {
+    provider: text().notNull(),
+    /** `organization` or `platform`. */
+    credential: text().notNull(),
+    lastOkAt: integer("last_ok_at"),
+    lastFailedAt: integer("last_failed_at"),
+    /** How it last failed (`TransportFailure`'s kind). */
+    lastFailure: text("last_failure"),
+    /** The HTTP status it last failed with, if it answered. */
+    lastStatus: integer("last_status"),
+    /**
+     * What its failing requests show, by the HTTP class seen: `refused`,
+     * `not_answering` or `limiting` (`ProviderTrouble`); null while the
+     * last one worked, and once the organization replaced the key
+     * (`ModelLedger.keyReplaced`).
+     */
+    failingClass: text("failing_class"),
+    /** Since when: the first failure of that kind after the last that worked. */
+    failingSince: integer("failing_since"),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );
 
 /** Audit events stored with the change they record, until the log has them. */

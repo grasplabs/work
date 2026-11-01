@@ -30,6 +30,7 @@ import type { ChatsRpc } from "./chats-rpc.ts";
 import type { ConnectionsRpc } from "./connections.ts";
 import type { DecisionsRpc } from "./decisions/rpc.ts";
 import type { DependenciesRpc } from "./dependencies/rpc.ts";
+import type { HeldStartsRpc } from "./held-starts-rpc.ts";
 import type { NotificationsRpc } from "./notifications.ts";
 import type { PendingActionsRpc } from "./pending-actions.ts";
 import type { PermissionsRpc } from "./permissions-rpc.ts";
@@ -65,6 +66,7 @@ export interface WaitingSources {
   notifications: NotificationsRpc;
   connections: ConnectionsRpc;
   decisions: DecisionsRpc;
+  heldStarts: HeldStartsRpc;
   chats: ChatsRpc;
   /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
   lifecycles: WorkflowLifecycleRpc;
@@ -378,6 +380,21 @@ const parts: Parts = {
       })),
     };
   },
+  heldStarts: async ({ heldStarts }, { forMe }) => {
+    const held = await heldStarts.list();
+    return {
+      items: held.map((start) => ({
+        kind: "heldStart",
+        id: `heldStart:${start.id}`,
+        at: start.requestedAt,
+        // The chat's agent waits on the answer.
+        urgent: true,
+        waitsOn: forMe,
+        verdicts: ["confirm", "decline"],
+        start,
+      })),
+    };
+  },
 };
 
 /**
@@ -483,6 +500,12 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
         await (verdict.verdict === "approve"
           ? sources.pendingActions.confirm(verdict.id, verdict.inputHash)
           : sources.pendingActions.decline(verdict.id));
+        return { kind: verdict.kind };
+      }
+      case "heldStart": {
+        await (verdict.verdict === "confirm"
+          ? sources.heldStarts.confirm(verdict.id, verdict.inputHash)
+          : sources.heldStarts.decline(verdict.id));
         return { kind: verdict.kind };
       }
       case "unknownOutcome": {

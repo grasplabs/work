@@ -95,83 +95,6 @@ describe("the release manifest", () => {
     expect(() => generateManifest(info, [core])).toThrow(/grasp-os-connect/u);
   });
 
-  it("refuses a build its compatibility doesn't declare", () => {
-    const { interfaces } = info.compatibility;
-    const declaring = (changed: typeof interfaces) => () =>
-      generateManifest(
-        {
-          ...info,
-          compatibility: { ...info.compatibility, interfaces: changed },
-        },
-        fixture
-      );
-    // A Worker it doesn't declare.
-    expect(
-      declaring({ core: { calls: { connect: { min: 1, max: 1 } } } })
-    ).toThrow(/declares core/u);
-    // A service binding without the versions it calls.
-    expect(declaring({ ...interfaces, core: { calls: {} } })).toThrow(
-      /core binds connect/u
-    );
-    // A call of a Worker that serves no version.
-    expect(declaring({ ...interfaces, connect: { calls: {} } })).toThrow(
-      /declares no version it serves/u
-    );
-
-    const [connect, core] = fixture;
-    if (connect === undefined || core === undefined) {
-      throw new Error("expected two builds");
-    }
-    const [migration] = connect.d1Migrations.DB ?? [];
-    if (migration === undefined) {
-      throw new Error("expected a migration");
-    }
-    const withDatabase = (database: Partial<typeof connect>) => () =>
-      generateManifest(info, [{ ...connect, ...database }, core]);
-    // A schema compatible from a migration the release doesn't ship.
-    expect(withDatabase({ d1CompatibleFrom: { DB: 1 } })).toThrow(
-      /compatible from migration 1/u
-    );
-    // A migration out of order, which no schema number describes.
-    expect(
-      withDatabase({
-        d1Migrations: {
-          DB: [migration, { ...migration, name: "0002_skipped.sql" }],
-        },
-      })
-    ).toThrow(/0002_skipped.sql isn't numbered 0001/u);
-  });
-
-  it("declares each database's schema as its newest migration, compatible from the oldest one its schema says", () => {
-    const [connect, core] = fixture;
-    const [migration] = connect?.d1Migrations.DB ?? [];
-    if (
-      connect === undefined ||
-      core === undefined ||
-      migration === undefined
-    ) {
-      throw new Error("expected two builds with a migration");
-    }
-    const migrations = ["0000_a.sql", "0001_b.sql", "0002_c.sql"].map(
-      (name) => ({ ...migration, name })
-    );
-
-    const { compatibility } = generateManifest(info, [
-      {
-        ...connect,
-        d1Migrations: { DB: migrations },
-        d1CompatibleFrom: { DB: 1 },
-      },
-      core,
-    ]);
-
-    expect(compatibility?.databases).toStrictEqual({
-      "grasp-os-connect": { schema: 2, compatibleFrom: 1 },
-      "grasp-os-core": { schema: 0, compatibleFrom: 0 },
-      "grasp-os-knowledge": { schema: 0, compatibleFrom: 0 },
-    });
-  });
-
   it("refuses Workers on different compatibility dates", () => {
     const [connect, core] = fixture;
     if (connect === undefined || core === undefined) {
@@ -188,7 +111,7 @@ describe("the release manifest", () => {
 
   it("refuses a release id that isn't a plain R2 prefix", () => {
     expect(() =>
-      generateManifest({ ...info, releaseId: "../r000001-0000000" }, fixture)
+      generateManifest({ ...info, releaseId: "../26.01.1" }, fixture)
     ).toThrow(/releaseId/u);
   });
 

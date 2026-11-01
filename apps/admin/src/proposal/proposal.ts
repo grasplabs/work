@@ -12,10 +12,9 @@ import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { isNotNull } from "drizzle-orm";
 
-import { ifStored } from "../clients/grid.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
-import { storeSecret } from "../deploy/context.ts";
+import { ifStored, storeSecret } from "../deploy/context.ts";
 import { readRoomsProject } from "./rooms.ts";
 import type { RoomsReadError, RoomsRecords } from "./rooms.ts";
 

@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // `env.build.createFromBlueprint` in a chat's code: the chat's agent
@@ -47,7 +47,7 @@ const tryEach = (calls: Record<string, string>): string =>
  * IDs.
  */
 const setUp = async (
-  replies: (apps: { ledger: string; vault: string }) => GatewayReply[],
+  replies: (apps: { ledger: string; vault: string }) => ProviderReply[],
   role: "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
@@ -186,8 +186,8 @@ describe(
             fourth: `(await env.build.createFromBlueprint(${JSON.stringify(ledger)}, { name: "Four" })).app.name`,
           })
         );
-      // One chat at a time: a Workspace object's env points at the
-      // gateway of the chat set up last.
+      // One chat at a time: the provider answers with the replies of the
+      // chat set up last.
       const builds = await setUp((apps) => [attempts(apps), says("Done.")]);
       await builds.chat.ask("Make the Apps");
       const uses = await setUp(

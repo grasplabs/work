@@ -5,18 +5,26 @@ import { watchRow } from "@grasp-os/ui/lib/row-ends";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
+import type { ComponentProps } from "react";
 
 // The room between the tabs and what they show: `none` where the row of
-// tabs sits in a bar of its own, ruled off from the panel under it.
+// tabs sits in a bar of its own, ruled off from the panel under it. The
+// size of the text in them: the page's (`default`), or `sm` where the
+// tabs and what they show are a record's details, as an integration's.
 const tabsVariants = cva("group/tabs flex data-horizontal:flex-col", {
   variants: {
     spacing: {
       default: "gap-2",
       none: "gap-0",
     },
+    size: {
+      default: "",
+      sm: "text-sm",
+    },
   },
   defaultVariants: {
     spacing: "default",
+    size: "default",
   },
 });
 
@@ -24,6 +32,7 @@ function Tabs({
   className,
   orientation = "horizontal",
   spacing = "default",
+  size = "default",
   ...props
 }: TabsPrimitive.Root.Props & VariantProps<typeof tabsVariants>) {
   return (
@@ -31,8 +40,9 @@ function Tabs({
       data-slot="tabs"
       data-orientation={orientation}
       data-spacing={spacing}
+      data-size={size}
       orientation={orientation}
-      className={cn(tabsVariants({ spacing }), className)}
+      className={cn(tabsVariants({ spacing, size }), className)}
       {...props}
     />
   );
@@ -48,7 +58,8 @@ const tabsListVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-muted",
+        // The brand book's pill bar: a white bar with a hairline round it.
+        default: "bg-card ring-foreground/10 ring-1",
         line: "gap-1 bg-transparent",
       },
       // A row of tabs inside a dashboard block, where every line of height counts.
@@ -68,6 +79,8 @@ const tabsListVariants = cva(
 // (`TabsPrimitive.Indicator`): it slides to the tab that is opened and takes that tab's width on
 // the way, instead of going out under one tab and coming on under another. It stands where each
 // tab's own line stood (5px under the tab), and moves with the row when the row moves sideways.
+// In the pill bar the open tab is one ink thumb in the same way, gliding under the tab's name on
+// the house curve.
 function TabsList({
   className,
   variant = "default",
@@ -88,9 +101,14 @@ function TabsList({
       {variant === "line" ? (
         <TabsPrimitive.Indicator
           data-slot="tabs-indicator"
-          className="bg-foreground ease-sidebar absolute bottom-0.75 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-300 group-data-vertical/tabs:hidden motion-reduce:transition-none"
+          className="bg-foreground ease-sidebar absolute bottom-0.75 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-200 group-data-vertical/tabs:hidden motion-reduce:transition-none"
         />
-      ) : null}
+      ) : (
+        <TabsPrimitive.Indicator
+          data-slot="tabs-thumb"
+          className="bg-primary ease-house absolute top-(--active-tab-top) left-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) rounded-md transition-[translate,width] duration-200 group-data-vertical/tabs:hidden motion-reduce:transition-none"
+        />
+      )}
     </TabsPrimitive.List>
   );
 }
@@ -100,14 +118,40 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "text-foreground/60 hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:text-muted-foreground dark:hover:text-foreground relative inline-flex h-[calc(100%-1px)] flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "text-foreground/60 hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:text-muted-foreground dark:hover:text-foreground relative inline-flex h-[calc(100%-1px)] flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pe-1.5 has-data-[icon=inline-start]:ps-1.5 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
+        // In the pill bar the open tab is ink. Once the thumb has measured the tab it is the
+        // tab's ground and glides between tabs, and the tab itself stays clear, above it; until
+        // then (Base UI keeps the thumb `hidden`) the tab is ink itself, so it never reads as
+        // light text on white. Each holds in dark too, over the tab's dark look above, and in
+        // dark the measured thumb's clear tab outranks the dark ink as it does in light.
+        "group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:z-10 group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:[--muted-foreground:color-mix(in_oklab,var(--primary-foreground)_62%,transparent)] dark:group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent",
         "after:bg-foreground after:absolute after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:-bottom-1.25 group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-vertical/tabs:group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
         className
       )}
       {...props}
     />
+  );
+}
+
+// How many a tab holds, after its name, quiet: "All 14". Read out as `label`
+// ("14 workflows"), in the page's language, since a bare number says little.
+function TabsCount({
+  className,
+  label,
+  children,
+  ...props
+}: ComponentProps<"span"> & { label: string }) {
+  return (
+    <span
+      data-slot="tabs-count"
+      className={cn("text-muted-foreground tabular-nums", className)}
+      {...props}
+    >
+      <span aria-hidden="true">{children}</span>
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
@@ -121,4 +165,11 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants };
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsCount,
+  TabsContent,
+  tabsListVariants,
+};

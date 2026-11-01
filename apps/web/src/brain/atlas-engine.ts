@@ -14,10 +14,11 @@ import {
   WAITING,
 } from "./atlas-map.ts";
 import type { AtlasDots, MapFrame, NeuronMap, Turn } from "./atlas-map.ts";
-import { isRegion, REGION_IDS } from "./brain-atlas.ts";
+import { REGION_IDS } from "./brain-atlas.ts";
 import type { RegionId } from "./brain-atlas.ts";
-import { ALPHAS, HEATS, palette, rgb } from "./dot-ink.ts";
+import { ALPHAS, HEATS, palette, rgb, token } from "./dot-ink.ts";
 import type { BrainDots } from "./dot-ink.ts";
+import { isRegion } from "./region-id.ts";
 import { pairAlongCurve, seeded } from "./reveal-motion.ts";
 
 /**
@@ -132,10 +133,7 @@ const at = (values: ArrayLike<number>, index: number): number =>
 /** Every colour a dot can have: the brain's ink and warmth, and one row in the attention colour. */
 const inks = (element: HTMLElement): string[] => {
   const styles = palette(element);
-  const [r, g, b] = rgb(
-    getComputedStyle(element).getPropertyValue("--status-attention").trim() ||
-      "#d0561c"
-  );
+  const [r, g, b] = rgb(token(element, "--status-attention"));
   for (let a = 0; a < ALPHAS; a += 1) {
     styles.push(`rgba(${r}, ${g}, ${b}, ${(a / (ALPHAS - 1)).toFixed(3)})`);
   }
@@ -816,7 +814,7 @@ export const runAtlas = (
       fired += 1;
       const points = path.map((region) => pulsePoint(region));
       // What a source heard comes up the spine first.
-      if (path[0] === "sources") {
+      if (path[0] === "stem") {
         points.unshift(...SPINE_UP);
       }
       pulses.push({ born: time, points });

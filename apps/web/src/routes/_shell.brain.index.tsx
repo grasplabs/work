@@ -19,26 +19,31 @@ import {
   legendCorner,
 } from "../brain/atlas-overlays.tsx";
 import type { Spot, TrailStep } from "../brain/atlas-overlays.tsx";
-import {
-  atlasOf,
-  isRegion,
-  REGION_IDS,
-  REGIONS,
-  signalPaths,
-} from "../brain/brain-atlas.ts";
+import { atlasOf, REGION_IDS, signalPaths } from "../brain/brain-atlas.ts";
 import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
 import { useBrainData } from "../brain/brain-data.ts";
 import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
-import { dockDrawerWidth, useDockMode } from "../chat/dock-mode.ts";
+import { isRegion } from "../brain/region-id.ts";
+import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
+import { ThinkingDive } from "../brain/thinking/dive.tsx";
+import {
+  dockDrawer,
+  useDockDrawerWidth,
+  useDockMode,
+} from "../chat/dock-mode.ts";
+import type { DockMode } from "../chat/dock-mode.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype
 // (`routes/brain/index.tsx`). The prototype's chat at its foot, which tells
 // a region's story and answers its open questions there, is the app's own
 // chat here (chat/chat-dock.tsx), the same on every page: the atlas keeps
-// its bar clear, and lights nothing until an answer can name notes.
+// its bar clear, and lights nothing until an answer can name notes. While
+// Grasp answers in it and shows its thinking, the brain plays it as a dive
+// over the atlas (brain/thinking/*), the legend stepping aside; "See it in
+// the brain" plays an answer's thinking again (`?think=`).
 
 /** What the brain keeps clear, in pixels: a little along the top and the sides; and the chat's bar along the bottom. The legend's corner, top left, depends on the region's groups. */
 const CLEAR = { top: 12, bottom: 64 };
@@ -50,14 +55,18 @@ const LIT: string[] = [];
 const textOf = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
 
-/** The view in the address: only what reads as one. */
-const validateSearch = (search: Record<string, unknown>): AtlasView => {
+/** The view in the address: only what reads as one; and an answer's thinking to play again. */
+const validateSearch = (
+  search: Record<string, unknown>
+): AtlasView & { think?: string } => {
   const group = textOf(search.group);
   const note = textOf(search.note);
+  const think = textOf(search.think);
   return {
     ...(isRegion(search.region) ? { region: search.region } : {}),
     ...(group === undefined ? {} : { group }),
     ...(note === undefined ? {} : { note }),
+    ...(think === undefined ? {} : { think }),
   };
 };
 
@@ -138,6 +147,59 @@ const trailOf = (
   return steps;
 };
 
+/** The brain with what Grasp's thinking found in it: new links between the teams that said the same. */
+const withLearned = (
+  brain: Brain,
+  learned: readonly [string, string][]
+): Brain =>
+  learned.length === 0
+    ? brain
+    : { ...brain, edges: [...brain.edges, ...learned] };
+
+/** The atlas of `brain`: `readAtlas`, laid out already, while it is still the brain as `read`. */
+const atlasWith = (
+  ws: Workspace,
+  brain: Brain,
+  read: Brain,
+  readAtlas: Atlas
+): Atlas => (brain === read ? readAtlas : atlasOf(ws, brain));
+
+/** While Grasp thinks, its shape keeps clear of the chat: its drawer (as wide as it is), or its frame, where the answer is written beside it. */
+const diveClearOf = (dock: DockMode, drawerWidth: number): number => {
+  if (dock === "drawer") {
+    return drawerWidth;
+  }
+  return dock === "frame" ? dockDrawer.normal : 0;
+};
+
+/** The part of the brain a thinking is about, as the way back names it. */
+const aboutOf = (
+  region: RegionId | undefined,
+  atlas: Atlas
+): { label: string; region: RegionId } | undefined => {
+  const label = atlas.regions.find((each) => each.id === region)?.name;
+  return label === undefined || region === undefined
+    ? undefined
+    : { label, region };
+};
+
+/** Back from a thinking: to the part it is about, or the whole brain. */
+const aboutView = (region: RegionId | undefined): AtlasView =>
+  region === undefined ? {} : { region };
+
+/** The way to a thinking's picture: the brain, the part it is about, and the picture. */
+const thinkingTrail = (
+  brainLabel: string,
+  title: string,
+  about: { label: string; region: RegionId } | undefined
+): TrailStep[] => [
+  { label: brainLabel, view: {} },
+  ...(about === undefined
+    ? []
+    : [{ label: about.label, view: { region: about.region } }]),
+  { label: title, view: {} },
+];
+
 /** Where the keys go from a note in a region: the next or the one before, round and round. */
 const nextNeuron = (
   neurons: Neuron[],
@@ -189,12 +251,26 @@ const keyOnControl = (event: KeyboardEvent): boolean =>
 const AtlasPage = () => {
   // The brain's chat, open as a drawer, takes the right of the canvas.
   const dock = useDockMode();
-  const { t, i18n } = useLingui();
-  const { workspace: ws, brain } = useBrainData();
-  const atlas = atlasOf(ws, brain);
+  const drawerWidth = useDockDrawerWidth();
+  const { t } = useLingui();
+  const { workspace: ws, brain: read } = useBrainData();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/brain/" });
   const reduce = useLessMotion();
+  // Grasp's thinking, played over the atlas; what it found stays as new
+  // nerves. The atlas is laid out once for the brain as read, and again
+  // only once the thinking taught it a link (`learned` is the same array
+  // until then), so the compiler keeps both from render to render.
+  const readAtlas = atlasOf(ws, read);
+  const thinking = useBrainThinking({
+    ws,
+    brain: read,
+    atlas: readAtlas,
+    think: search.think,
+    still: reduce,
+  });
+  const brain = withLearned(read, thinking.learned);
+  const atlas = atlasWith(ws, brain, read, readAtlas);
   const { view, groups } = viewOf(search, atlas, brain);
   const { region, group } = view;
   // The region's neurons, for the keys: as the atlas lays them out in the room it has, where a folder may be folded into one; until it has, as a roomy screen would show them.
@@ -229,16 +305,21 @@ const AtlasPage = () => {
   const [spot, setSpot] = useState<Spot>();
   const { gap, neuron } = inHandOf(ws, neurons, view.note);
 
-  const regionLabel = REGIONS.find((each) => each.id === region)?.label;
-  const trail = trailOf(view, {
-    brain: t`Brain`,
-    region: regionLabel === undefined ? undefined : i18n._(regionLabel),
-    group: groups.find((each) => each.key === group)?.label,
-    inHand: gap?.question ?? neuron?.title ?? neuron?.label,
-  });
+  const regionName = atlas.regions.find((each) => each.id === region)?.name;
+  const trail =
+    thinking.title === undefined
+      ? trailOf(view, {
+          brain: t`Brain`,
+          region: regionName,
+          group: groups.find((each) => each.key === group)?.label,
+          inHand: gap?.question ?? neuron?.title ?? neuron?.label,
+        })
+      : thinkingTrail(t`Brain`, thinking.title, aboutOf(thinking.about, atlas));
 
+  // Going anywhere in the brain puts the picture of an answer's thinking away.
   const go = (next: AtlasView) => {
     setCursor(-1);
+    thinking.putAway();
     void navigate({ search: searchOf(next) });
   };
   // A note's own page. From its neuron, the camera goes in first and its dots build the page.
@@ -290,7 +371,10 @@ const AtlasPage = () => {
     if (keyIsElsewhere(event) || dive !== undefined) {
       return;
     }
-    const out = stepOut(view);
+    const out =
+      thinking.thought === undefined
+        ? stepOut(view)
+        : aboutView(thinking.about);
     if (event.key === "Escape" && out) {
       go(out);
     } else if (event.key === "Enter" && !keyOnControl(event)) {
@@ -317,7 +401,7 @@ const AtlasPage = () => {
       clear={{
         ...CLEAR,
         corner: legendCorner(groups.length),
-        right: dock === "drawer" ? dockDrawerWidth : 0,
+        right: dock === "drawer" ? drawerWidth : 0,
       }}
       controls={controls}
       dive={dive}
@@ -339,25 +423,34 @@ const AtlasPage = () => {
       spot={spot}
       view={view}
     >
-      <AtlasLegend
-        groups={
-          groups.length > 0
-            ? {
-                items: groups,
-                total: groups.reduce((sum, each) => sum + each.count, 0),
-                selected: group,
-                onSelect: (key) => {
-                  go({ region, group: key });
-                },
-              }
-            : undefined
-        }
-        onReset={() => controls.current?.reset()}
-        onSpot={setSpot}
-        onZoom={(factor) => controls.current?.zoom(factor)}
-        spot={spot}
-        under={region !== undefined}
+      {/* Grasp's thinking: a dive into the brain over the atlas, which rests under it. */}
+      <ThinkingDive
+        clear={{ ...CLEAR, right: diveClearOf(dock, drawerWidth) }}
+        onOpen={open}
+        still={reduce}
+        thought={thinking.thought}
       />
+      {thinking.thought === undefined ? (
+        <AtlasLegend
+          groups={
+            groups.length > 0
+              ? {
+                  items: groups,
+                  total: groups.reduce((sum, each) => sum + each.count, 0),
+                  selected: group,
+                  onSelect: (key) => {
+                    go({ region, group: key });
+                  },
+                }
+              : undefined
+          }
+          onReset={() => controls.current?.reset()}
+          onSpot={setSpot}
+          onZoom={(factor) => controls.current?.zoom(factor)}
+          spot={spot}
+          under={region !== undefined}
+        />
+      ) : null}
       {dive === undefined ? <AtlasTrail onGo={go} steps={trail} /> : null}
     </BrainAtlas>
   );

@@ -33,9 +33,18 @@
   // OAUTH_RELAY "on" sends every client's sign-in and connections back
   // through the stage's OAuth relay, as every client this admin deploys is
   // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
-  // each client's own origin. One that's unset is a setting the admin
-  // works without, as src/env.d.ts says, except the Access pair, without
-  // which nothing is deployed.
+  // each client's own origin. ROOMS_ORIGIN is Grasp's Rooms' team origin
+  // (e.g. https://rooms.grasp.example), which the proposal under Contract
+  // is read from (src/proposal/rooms.ts); DISCORD_PUBLIC_KEY is Grasp's
+  // Discord application's public key, hex (General Information), which
+  // every interaction Discord posts to the bot is signed with, and
+  // DISCORD_STAFF_IDS the Discord user ids of Grasp's staff, comma-separated:
+  // the only people the bot answers (src/admin/discord.ts). An empty one is
+  // a setting not configured yet; the admin works without it (Rooms isn't
+  // read, the bot refuses everything), except the Access pair, without
+  // which nothing is deployed. Which organization is Grasp's own is chosen
+  // on Platform (the admin's database), and secrets live in the stage's
+  // 1Password Environment.
   "vars": {
     "STAGE": "production",
     "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
@@ -45,6 +54,9 @@
     "CLIENT_DOMAIN": "ongrasp.app",
     "ADMIN_HOST": "admin.ongrasp.app",
     "OAUTH_RELAY": "on",
+    "ROOMS_ORIGIN": "",
+    "DISCORD_PUBLIC_KEY": "",
+    "DISCORD_STAFF_IDS": "",
   },
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
@@ -106,12 +118,10 @@
   ],
   // Imports newly published releases (src/releases/import.ts) every 5
   // minutes; on weekday mornings, posts the admin's digest to Discord
-  // (src/admin/discord-digest.ts, `digestCron`); every morning, warns
-  // staff of Teams bot secrets about to expire
-  // (src/clients/teams-bot-expiry.ts, `expiryCron`); every hour, watches
+  // (src/admin/discord-digest.ts, `digestCron`); every hour, watches
   // Stephen at every client (src/clients/watch.ts, `watchCron`).
   "triggers": {
-    "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *", "45 * * * *"],
+    "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "45 * * * *"],
   },
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
   // scripts/cloudflare-account-setup.ts creates it as grasp-router-hosts
@@ -130,9 +140,8 @@
   ],
   // What provisioning and releases need from the account's Secrets Store
   // (src/deploy/context.ts): the deployer's token, with deploy permissions
-  // only, on every hosting destination's account (AI Gateway edit among
-  // them: provisioning makes each client's gateway; and Zone and Email
-  // Sending edit: provisioning makes the client's sending domain,
+  // only, on every hosting destination's account (Zone and Email Sending
+  // edit among them: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
   // are derived from; and the secrets every client shares. Deploy platform
   // copies every one of them in from the stage's 1Password Environment
@@ -180,6 +189,38 @@
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
     },
+    // Grasp's own AI provider keys, which pay for its platform features
+    // (converting PDFs for the Brain, transcription, speech, fixed in
+    // core's src/platform-ai.ts). Every client's connect gets them as
+    // shared secrets, never its core (src/deploy/context.ts). Optional:
+    // added to the stage's 1Password Environment, each is bound at the next
+    // Deploy platform; until then, the features on its provider aren't
+    // available in any organization.
+    {
+      "binding": "OPENAI_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "OPENAI_API_KEY",
+    },
+    {
+      "binding": "ANTHROPIC_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ANTHROPIC_API_KEY",
+    },
+    {
+      "binding": "MISTRAL_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "MISTRAL_API_KEY",
+    },
+    {
+      "binding": "OPENROUTER_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "OPENROUTER_API_KEY",
+    },
+    {
+      "binding": "ELEVENLABS_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ELEVENLABS_API_KEY",
+    },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a
@@ -211,15 +252,6 @@
       "binding": "DISCORD_DIGEST_WEBHOOK",
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_DIGEST_WEBHOOK",
-    },
-    // The webhook staff alerts are posted to, which names the channel
-    // (src/alerts.ts). The admin's alone. Optional: added to the stage's
-    // 1Password Environment, it's bound at the next Deploy platform; until
-    // then, alerts are only logged.
-    {
-      "binding": "STAFF_ALERTS_WEBHOOK",
-      "store_id": "account-secrets-store",
-      "secret_name": "STAFF_ALERTS_WEBHOOK",
     },
     // A read-only Attio API key (records, object configuration, notes and
     // meetings read; user management read to name deal owners), for the
@@ -259,6 +291,9 @@
         "CLIENT_DOMAIN": "staging.ongrasp.app",
         "ADMIN_HOST": "admin.staging.ongrasp.app",
         "OAUTH_RELAY": "on",
+        "ROOMS_ORIGIN": "",
+        "DISCORD_PUBLIC_KEY": "",
+        "DISCORD_STAFF_IDS": "",
       },
       "d1_databases": [
         {
@@ -358,6 +393,31 @@
           "secret_name": "APP_OAUTH_CLIENTS_STAGING",
         },
         {
+          "binding": "OPENAI_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "OPENAI_API_KEY_STAGING",
+        },
+        {
+          "binding": "ANTHROPIC_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ANTHROPIC_API_KEY_STAGING",
+        },
+        {
+          "binding": "MISTRAL_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "MISTRAL_API_KEY_STAGING",
+        },
+        {
+          "binding": "OPENROUTER_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "OPENROUTER_API_KEY_STAGING",
+        },
+        {
+          "binding": "ELEVENLABS_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ELEVENLABS_API_KEY_STAGING",
+        },
+        {
           "binding": "STRIPE_RESTRICTED_KEY",
           "store_id": "account-secrets-store",
           "secret_name": "STRIPE_RESTRICTED_KEY_STAGING",
@@ -371,11 +431,6 @@
           "binding": "DISCORD_DIGEST_WEBHOOK",
           "store_id": "account-secrets-store",
           "secret_name": "DISCORD_DIGEST_WEBHOOK_STAGING",
-        },
-        {
-          "binding": "STAFF_ALERTS_WEBHOOK",
-          "store_id": "account-secrets-store",
-          "secret_name": "STAFF_ALERTS_WEBHOOK_STAGING",
         },
         {
           "binding": "ATTIO_READ_KEY",

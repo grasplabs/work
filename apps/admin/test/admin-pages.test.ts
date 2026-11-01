@@ -597,61 +597,42 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, and no account to adopt", async () => {
+  it("offers to add an organization from the overview, asking only its name, web address, email domain, first admin and hosting", async () => {
     const overview = await page("/");
     const { status, html } = await page("/new-organization");
-    const main = html.slice(html.indexOf("<main"));
-    /** The choice `label` makes, up to the next one. */
-    const choiceOf = (label: string): string => {
-      const at = main.indexOf(label);
-      const start = main.lastIndexOf("<label", at);
-      return main.slice(start, main.indexOf("</label>", at));
-    };
-    const [hand, attio, rooms] = [
-      "By hand",
-      "A deal won in Attio",
-      "A proposal signed in Rooms",
-    ].map((label) => {
-      const choice = choiceOf(label);
-      return {
-        chosen: choice.includes('aria-checked="true"'),
-        disabled: choice.includes('aria-disabled="true"'),
-      };
-    });
+    const mainAt = html.indexOf("<main");
+    /** Whether the page's main part says `text`. */
+    const says = (text: string): boolean => html.includes(text, mainAt);
     expect({
       link: overview.html.includes('href="/new-organization"'),
       status,
-      title: main.includes("New organization</h1>"),
-      choices: { hand, attio, rooms },
-      why: [
-        "Not yet: the admin isn&#x27;t connected to Attio.",
-        "Not yet: the admin isn&#x27;t connected to Rooms.",
-      ].map((text) => main.includes(text)),
-      fields: [
-        "name",
-        "clientId",
-        "admins",
-        "domains",
-        "entraTenantId",
-        "googleHostedDomain",
-        "ring",
-      ].every((field) => main.includes(`name="${field}"`)),
-      // Its release and destination are chosen on its Setup, once added.
-      account: ["releaseId", "accountId"].some((field) =>
-        main.includes(`name="${field}"`)
-      ),
+      title: says("New organization</h1>"),
+      labels: [
+        "Name",
+        "Web address",
+        "Company email domain",
+        "First admin&#x27;s email",
+        "Grasp Cloud",
+        "On-premises",
+        "Keep data in the EU",
+      ].map(says),
+      // Its platform's domain after the web address.
+      suffix: says(".grasp.test"),
+      // Everything else has a default, put right on its Setup.
+      asked: [
+        "Ring",
+        "Entra tenant id",
+        "Release",
+        "Model spend",
+        "A deal won in Attio",
+      ].map(says),
     }).toStrictEqual({
       link: true,
       status: 200,
       title: true,
-      choices: {
-        hand: { chosen: true, disabled: false },
-        attio: { chosen: false, disabled: true },
-        rooms: { chosen: false, disabled: true },
-      },
-      why: [true, true],
-      fields: true,
-      account: false,
+      labels: [true, true, true, true, true, true, true],
+      suffix: true,
+      asked: [false, false, false, false, false],
     });
   });
 
@@ -777,11 +758,11 @@ describe("the admin's frame", () => {
       contract: {
         title: contract.html.includes("Contract</h1>"),
         about: contract.html.includes(
-          "What was signed, what it gives the company, and what is billed."
+          "The seats taken, the proposal, the agreements, and what is billed."
         ),
-        // Core holds no contract yet, from Rooms; nor is it linked in Rooms or Stripe.
+        // Not linked in Rooms or Stripe yet.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
+          "The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
@@ -862,29 +843,18 @@ describe("the admin's frame", () => {
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
       summary: {
-        contract: html.includes("Not known yet"),
-        // Core holds no contract: it is neither a draft nor a fee of nothing.
-        draft: ["Being written", "not sent yet", "€0"].some((text) =>
-          html.includes(text)
+        // Core holds no contract: no status, terms, fee or seats it gives.
+        contract: ["Not known yet", "Being written", "not sent yet", "€0"].some(
+          (text) => html.includes(text)
         ),
-        seats: html.includes("taken; the contract isn’t known yet"),
+        seats: html.includes("are taken"),
         runs: html.includes("Still runs"),
         fee: html.includes("Fee a month"),
       },
-      terms: [
-        partOf("The terms").includes(
-          "Nothing is known about the contract yet."
-        ),
-        partOf("The terms").includes(
-          "Once Rooms is connected, this fills in by itself."
-        ),
-      ],
-      gives: [
-        partOf("What it gives the company").includes(
-          "Not known yet; 2 are taken."
-        ),
-        // What the model works out of AI use isn't what was used: the AI use section says what it is.
-        partOf("What it gives the company").includes("was used this month"),
+      parts: [
+        partOf("The terms"),
+        partOf("What it gives the company"),
+        partOf("Invoices"),
       ],
       agreements: {
         open: partOf("Agreed before the first interview").includes(
@@ -901,21 +871,16 @@ describe("the admin's frame", () => {
           "Who else handles the data"
         ),
       },
-      invoices: partOf("Invoices").includes(
-        "None known yet: nothing is known about the contract."
-      ),
     }).toStrictEqual({
       status: 200,
       toCome: false,
       summary: {
-        contract: true,
-        draft: false,
+        contract: false,
         seats: true,
         runs: false,
         fee: false,
       },
-      terms: [true, true],
-      gives: [true, false],
+      parts: ["", "", ""],
       agreements: {
         open: true,
         processing: true,
@@ -923,7 +888,6 @@ describe("the admin's frame", () => {
         council: true,
         others: true,
       },
-      invoices: true,
     });
   });
 

@@ -326,7 +326,7 @@ type KnowledgeSignal = { id: string; collection: { id: string; name: string } } 
     }
   | {
       kind: "unread_document";
-      /** Days since it changed; nobody read it for \`evidence.days\` days (${unreadDays}, or fewer where the audit log keeps less) either. */
+      /** Days since it changed; nobody read it for \`evidence.days\` days (${unreadDays}) either. */
       value: number;
       evidence: { document: { id: string; path: string; title: string }; updatedAt: string; days: number };
     }

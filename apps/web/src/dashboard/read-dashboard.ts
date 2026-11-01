@@ -37,8 +37,8 @@ import { goalProgressOf, noReturns, teamProgressOf } from "./returns.ts";
 import type { GoalProgress, TeamsRead } from "./returns.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
-import { decidesRequests } from "./to-do.tsx";
-import type { Waiting } from "./to-do.tsx";
+import { decidesRequests } from "./waiting.ts";
+import type { Waiting } from "./waiting.ts";
 import type { Board, EnginesRead } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
@@ -151,6 +151,9 @@ export const readWaiting = async (
           ofKind(read, "appApproval").map(({ waiting }) => waiting)
         )
       : undefined,
+    heldStarts: partOf(feed, "heldStarts", (read) =>
+      ofKind(read, "heldStart").map(({ start }) => start)
+    ),
     decisions: partOf(feed, "decisions", (read) =>
       ofKind(read, "decision").map(({ decision }) => decision)
     ),

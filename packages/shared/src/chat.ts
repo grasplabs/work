@@ -7,6 +7,7 @@ import type {
   ScreenBundle,
   ScreenProblem,
 } from "./screens.ts";
+import type { ThinkingStep } from "./thinking.ts";
 import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -58,6 +59,27 @@ export interface ChatSummary {
   projectId: string | null;
   /** The App it is for (`ChatsApi.forApp`), or null for none. */
   appId: string | null;
+}
+
+/**
+ * Where a search was found in what was said in a chat: the words just
+ * before it, what matched as it was said, and the words after it; cut
+ * ends carry an ellipsis.
+ */
+export interface ChatSearchSnippet {
+  before: string;
+  found: string;
+  after: string;
+}
+
+/** A chat a search found (`ChatsApi.search`). */
+export interface ChatSearchHit {
+  chat: ChatSummary;
+  /**
+   * Where it was said, for a chat whose title and project's name don't
+   * hold every word searched for; null for one they do.
+   */
+  said: ChatSearchSnippet | null;
 }
 
 // Projects: a person groups their chats, and tells each chat's agent what
@@ -324,6 +346,76 @@ export interface ChatCitedDocument {
 export const citedSnippetMax = 200;
 
 /**
+ * How much the chat's agent may ask at once (`askQuestions`, GRA-1001):
+ * a few short questions, each with a few short choices, plain text, one
+ * line each. The person can always answer otherwise ("Something else") or
+ * type instead.
+ */
+export const chatAskLimits = {
+  questions: 4,
+  choicesMin: 2,
+  choices: 6,
+  questionLength: 300,
+  choiceLength: 120,
+} as const;
+
+/** Text starting and ending with something other than space. */
+const unpadded = /^\S(?:.*\S)?$/su;
+
+/**
+ * What a question or a choice never holds: controls (line breaks among
+ * them), invisible formatting (bidi overrides, zero-width characters) and
+ * the line and paragraph separators, so it shows as the one line it reads
+ * as, and can't pass for something the page itself shows.
+ */
+const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * One line of plain text, as a question or a choice is: taken as written
+ * or refused, never trimmed.
+ */
+const askLine = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .regex(unpadded)
+    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
+      message:
+        "A question or choice is one line of well-formed text, with no control or invisible formatting characters",
+    });
+
+/** What the agent asks the person at once, as it calls `askQuestions`. */
+export const chatAskSchema = z.strictObject({
+  questions: z
+    .array(
+      z.strictObject({
+        question: askLine(chatAskLimits.questionLength),
+        choices: z
+          .array(askLine(chatAskLimits.choiceLength))
+          .min(chatAskLimits.choicesMin)
+          .max(chatAskLimits.choices)
+          .refine((choices) => new Set(choices).size === choices.length, {
+            message: "A question's choices are all different",
+          }),
+      })
+    )
+    .min(1)
+    .max(chatAskLimits.questions),
+});
+export type ChatAsk = z.infer<typeof chatAskSchema>;
+
+/**
+ * Questions the agent asked the person, with choices: data, never
+ * commands. A choice only says what the person may answer; their answer
+ * is their own next message, and anything the agent then changes still
+ * waits for them to confirm it in Grasp.
+ */
+export interface ChatAsked extends ChatAsk {
+  /** The call that asked them. */
+  callId: string;
+}
+
+/**
  * What the model thought before it answered, as its provider let it be
  * shown: its own words, or a summary of them (OpenAI's). A redacted part
  * (Anthropic's safety filters) shows nothing, but its time counts.
@@ -360,6 +452,12 @@ export type ChatMessage =
       code: ChatCode[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
+      /**
+       * The questions it asked the person, with choices, if it ended its
+       * response asking them (`askQuestions`): shown in place of the
+       * composer until they answer.
+       */
+      asked?: ChatAsked;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -382,6 +480,12 @@ export type ChatMessage =
       text: string;
       failed: boolean;
       at: string;
+      /**
+       * A step of thinking the brain showed (`show_thinking`, see
+       * `ThinkingStep`), for the result of a call that showed one; none
+       * for any other.
+       */
+      thinking?: ThinkingStep;
     };
 
 /**
@@ -649,6 +753,22 @@ export interface ChatsApi {
   efforts: () => Promise<Record<string, ModelEfforts>>;
   /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
+  /**
+   * The person's own chats, in project `projectId` when one is named, that
+   * hold every word of `query` in their title, their project's name or
+   * what was said in them, the most recently active first: at most a
+   * page's worth. Never anyone else's.
+   */
+  search: (
+    query: string,
+    projectId?: string | null
+  ) => Promise<ChatSearchHit[]>;
+  /**
+   * One of the person's chats, as `list` gives it, however long ago it was
+   * active: for a chat past the end of the list. Not theirs, or not there,
+   * is `agent.chat_not_found`.
+   */
+  summary: (chatId: string) => Promise<ChatSummary>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
   /**

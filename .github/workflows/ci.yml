@@ -8,11 +8,19 @@
 # account; the admins, routers and connect gateways are deployed by hand
 # with the Deploy platform workflow. Jobs with secrets never run for pull
 # requests from forks. CI deploys nothing: the admins roll releases out.
+#
+# A draft pull request runs only the fast checks (static, conventions):
+# the tests, workerd, the release build and the journeys wait until it is
+# ready for review, which runs them all (`ready_for_review`). A draft can't
+# be merged, and the merge queue runs everything again on top of main.
+# A ready pull request runs only the test projects its changes can affect
+# (plan, below); the merge queue runs every one.
 name: CI
 
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   push:
     branches: [main]
@@ -66,16 +74,53 @@ jobs:
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
+  # Which test projects the run's changes can affect, and how many shards
+  # their files take (scripts/test-plan.ts). A pull request compares its
+  # merge commit with the main it was made on (HEAD^1): a change in a
+  # workspace package runs the projects of that package and of every
+  # package that depends on it, by pnpm's graph, and a change outside every
+  # package (config, lockfile, CI, tooling) runs them all. The merge queue
+  # runs them all. Shards: the fewest that each end within about 10 minutes
+  # by the durations (scripts/test-shards.ts), at most 16. Not for drafts.
+  # Small on purpose: the checkout's last two commits, the cached install,
+  # and a few seconds of Vitest resolving its projects (no tests run).
+  plan:
+    name: plan
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      projects: ${{ steps.plan.outputs.projects }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge commit and its first parent, the base it compares with.
+          fetch-depth: 2
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - id: plan
+        run: node scripts/test-plan.ts
+        env:
+          GRASP_TEST_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+
   # `vp test` in shards, a runner each: unsharded, one passing run reached
   # 16 minutes at about 5,300 tests (October 2026). Each shard gets its part
-  # of the test files, split by how long each takes
+  # of the planned projects' test files, split by how long each takes
   # (scripts/test-sequencer.ts, with the times in
   # scripts/test-durations.json), so the shards end together and together
-  # run every file once. Add a shard by adding to `shard`: `--shard` takes
-  # the count from the matrix. Part of the required `check` (below).
+  # run every file once. The plan (above) sets how many: `--shard` takes
+  # the count from the matrix. Skipped when the plan has no tests to run.
+  # Part of the required `check` (below).
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
-    if: github.event_name != 'push'
+    needs: plan
+    if: needs.plan.outputs.shards != '[]'
     runs-on: ubuntu-latest
     # The test step's 15 minutes, and room for the steps around it.
     timeout-minutes: 21
@@ -84,33 +129,7 @@ jobs:
       # it.
       fail-fast: false
       matrix:
-        shard:
-          [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-          ]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,9 +189,11 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
-      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+      # The plan's `--project` arguments, unquoted, none for every project.
+      - run: vp test $GRASP_TEST_PROJECTS --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
         timeout-minutes: 15
         env:
+          GRASP_TEST_PROJECTS: ${{ needs.plan.outputs.projects }}
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
           GRASP_STALL_REPORT_AFTER_MINUTES: 13
@@ -215,29 +236,46 @@ jobs:
             echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
           fi
 
-  # The one required check (.github/rulesets/main.json) for static, release
-  # and every test shard, so sharding leaves the ruleset as it is. It runs however
-  # they ended, and passes only if all of them passed: GitHub counts a
-  # skipped required check as passing, so this job mustn't be skipped when
-  # one of them failed, was cancelled or was skipped.
+  # The one required check (.github/rulesets/main.json) for static, release,
+  # the plan and every test shard, so sharding leaves the ruleset as it is.
+  # It runs however they ended, and passes only if all of them passed:
+  # GitHub counts a skipped required check as passing, so this job mustn't
+  # be skipped when one of them failed, was cancelled or was skipped. Two
+  # skips pass: the test shards when the plan has none to run, and, on a
+  # draft, everything but static (a draft can't be merged; marking it
+  # ready runs it all, and this check again).
   check:
     name: check
-    needs: [static, release, test]
+    needs: [static, plan, release, test]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, release: $RELEASE, test shards: $TEST"
-          if [ "$STATIC" != success ] || [ "$RELEASE" != success ] || [ "$TEST" != success ]; then
-            echo "::error title=check::static ended as $STATIC, release as $RELEASE and the test shards as $TEST; check passes only when all three succeed."
+          echo "static: $STATIC, plan: $PLAN ($SHARDS), release: $RELEASE, test shards: $TEST, draft: $DRAFT"
+          if [ "$STATIC" != success ]; then
+            echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
+            exit 1
+          fi
+          if [ "$DRAFT" = true ]; then
+            echo "A draft runs only the fast checks; marking it ready for review runs the rest."
+            exit 0
+          fi
+          if [ "$TEST" = skipped ] && [ "$PLAN" = success ] && [ "$SHARDS" = '[]' ]; then
+            TEST="success (no tests affected)"
+          fi
+          if [ "$PLAN" != success ] || [ "$RELEASE" != success ] || [ "${TEST%% *}" != success ]; then
+            echo "::error title=check::the plan ended as $PLAN, release as $RELEASE and the test shards as $TEST; check passes only when all of them succeed."
             exit 1
           fi
         env:
           STATIC: ${{ needs.static.result }}
+          PLAN: ${{ needs.plan.result }}
+          SHARDS: ${{ needs.plan.outputs.shards }}
           RELEASE: ${{ needs.release.result }}
           # A matrix job's result: a failure if any shard failed.
           TEST: ${{ needs.test.result }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
 
   # The journeys (playwright.config.ts) in parts, a runner and a stack
   # each. Unsplit, the job took 18 to 23 minutes and ran into its 30
@@ -260,7 +298,7 @@ jobs:
   # together, and Renovate moves them in one pull request.
   e2e:
     name: e2e (${{ matrix.part }})
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       # The runner's own user, which owns the checkout, the caches and
@@ -315,10 +353,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Without the pnpm store cache, here and in admin-e2e: in the image the
+      # store sits at another path and is packed with gzip, not zstd, so it
+      # is another cache from the one the other jobs restore. Only pull
+      # requests ran these jobs, so it never reached main's scope: a pull
+      # request's first run missed it, and all 12 jobs then packed the store
+      # to save it, 35 to 49 s each, for one to win and the rest to fail. A
+      # restore that hit was 12 s slower than the install fetching every
+      # package (October 2026).
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           node-version-file: .node-version
-          cache: true
+          cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
       - run: |
@@ -353,7 +399,7 @@ jobs:
   # The one required e2e check (.github/rulesets/main.json) for every part,
   # so splitting leaves the ruleset as it is. Like `check`, it runs however
   # they ended and passes only if all of them passed: GitHub counts a
-  # skipped required check as passing.
+  # skipped required check as passing. A draft skips the parts.
   e2e-result:
     name: e2e
     needs: [e2e]
@@ -362,7 +408,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          echo "e2e parts: $E2E"
+          echo "e2e parts: $E2E, draft: $DRAFT"
+          if [ "$DRAFT" = true ]; then
+            echo "A draft skips the journeys; marking it ready for review runs them."
+            exit 0
+          fi
           if [ "$E2E" != success ]; then
             echo "::error title=e2e::the e2e parts ended as $E2E; e2e passes only when every part succeeds."
             exit 1
@@ -370,16 +420,18 @@ jobs:
         env:
           # A matrix job's result: a failure if any part failed.
           E2E: ${{ needs.e2e.result }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
 
   # The admin's journeys (playwright.admin.config.ts): a stack of
   # their own, the admin on the fake Cloudflare API, so apart from e2e's.
   # Chromium only, in e2e's image.
   admin-e2e:
     name: admin-e2e
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
+    # On GitHub's runners, as e2e above.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -389,7 +441,8 @@ jobs:
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           node-version-file: .node-version
-          cache: true
+          # As e2e's: the image's store is a cache of its own.
+          cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
       - run: vp run e2e:admin
@@ -404,7 +457,7 @@ jobs:
   # On-prem ready: core must boot on plain workerd.
   workerd:
     name: workerd
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -433,6 +486,8 @@ jobs:
   # for byte.
   release:
     name: release
+    # Not for a draft; a push to main has no pull request.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -528,15 +583,13 @@ jobs:
     name: publish-release
     needs: release
     if: github.event_name == 'push'
+    # It holds the staging 1Password token: GitHub-hosted runners only, so
+    # no secret leaves GitHub's machines.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
-    # Reads the run's jobs (its own id) and the merged pull request's
-    # reviews, for the release's limit evidence.
     permissions:
       contents: read
-      actions: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -548,8 +601,7 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       # Staging's releases bucket and the account's R2 endpoint, by the names
-      # module, for every step after: the release before is read from the
-      # bucket, and the release goes to it.
+      # module, for every step after: the release goes to it.
       - run: |
           set -euo pipefail
           echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
@@ -564,21 +616,7 @@ jobs:
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
           required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-      # What the release's platform limits are raised over: the release
-      # published before it. Its limit evidence goes next to its manifest,
-      # and a raise without evidence (a capacity run per profile and the
-      # PR's CODEOWNERS approval, GRA-942) fails here, before anything is
-      # uploaded. The release itself is the release job's bundle, unchanged.
-      - run: vp run release:previous --out previous-manifest.json
-      # The capacity job for each limit the release raises, on workerd, on
-      # this commit (the release's own): its workloads, or nothing when it
-      # raises none. The cloudflare profile waits for a real account in CI
-      # (GRA-382), so a raise reaches only on-premises clients until then.
-      - run: vp run capacity --profile workerd --release release-out --previous previous-manifest.json --out capacity-workerd.json
-      # Each passing workload, this job's id and the merged PR's CODEOWNER
-      # approval, as the release's evidence (read with this job's token).
-      - run: vp run release:evidence --release release-out --previous previous-manifest.json --capacity capacity-workerd.json
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CI_JOB_NAME: publish-release
-      - run: vp run release:upload --release release-out
+      # Published under the month's next id (`YY.MM.N`, from the bucket;
+      # @grasp-os/shared/release-id): only the manifest's id changes from
+      # the release job's bundle, never a blob.
+      - run: vp run release:upload --release release-out --assign-id

@@ -30,24 +30,6 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * The migrations were squashed into one (0000_brain.sql) in a hard cut:
- * every database runs from it.
- */
-export const compatibleFromMigration = 0;
-
-/**
  * Audit events of changes to this database that haven't reached the
  * host's audit log yet. Each is written in the same batch as its change
  * (audit.ts), as the host's `audit.eventOf` port made it, so a change is
@@ -352,6 +334,82 @@ export const searchRebuilds = sqliteTable("search_rebuilds", {
   /** When the purge's writes were done, ms; null while they may not be. */
   writesDoneAt: integer("writes_done_at"),
 });
+
+/**
+ * Each version of a learning suite (GRA-311, ../eval-suites.ts): the
+ * cases, grader and pins a skill is judged by, proposed from permitted
+ * evidence and accepted by its owner. Its cases' digests, per split, and
+ * its grader's are frozen with it: a change is a new version, never an
+ * edit, and scores are never compared across versions.
+ */
+export const brainEvalSuiteVersions = sqliteTable(
+  "brain_eval_suite_versions",
+  {
+    suiteId: text("suite_id").notNull(),
+    version: integer().notNull(),
+    /** Moved on by every change of state: what an acceptance names. */
+    revision: integer().notNull(),
+    /** User ID of the domain owner, who alone accepts it. */
+    ownerId: text("owner_id").notNull(),
+    /**
+     * Whom its owner handed the suite on to: the owner of the versions
+     * proposed after it. Null while they keep it.
+     */
+    nextOwnerId: text("next_owner_id"),
+    name: text().notNull(),
+    state: text({ enum: ["proposed", "calibrated", "accepted", "retired"] })
+      .notNull()
+      .default("proposed"),
+    /** SHA-256 of each split's cases, as canonical JSON. */
+    developmentDigest: text("development_digest").notNull(),
+    validationDigest: text("validation_digest").notNull(),
+    /** The sealed final cases': only the evaluator reads them. */
+    finalDigest: text("final_digest").notNull(),
+    /** The grader, as JSON (its version and checks), and its digest. */
+    grader: text().notNull(),
+    graderDigest: text("grader_digest").notNull(),
+    /** Baseline, model, environment and policy versions, as JSON. */
+    pins: text().notNull(),
+    /** User ID of whoever proposed it. */
+    proposedBy: text("proposed_by").notNull(),
+    acceptedBy: text("accepted_by"),
+    acceptedAt: timestamp("accepted_at"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.suiteId, table.version] })]
+);
+
+/**
+ * The cases of each suite version (../eval-suites.ts), in their split:
+ * development, validation or the sealed final set. A case's group (its
+ * related variants) and source stay in one split. Expected outcomes are
+ * the evaluator's alone: never in recall, a skill's context or memory.
+ */
+export const brainEvalCases = sqliteTable(
+  "brain_eval_cases",
+  {
+    suiteId: text("suite_id").notNull(),
+    version: integer().notNull(),
+    caseId: text("case_id").notNull(),
+    split: text({ enum: ["development", "validation", "final"] }).notNull(),
+    family: text().notNull(),
+    group: text().notNull(),
+    source: text().notNull(),
+    /** What the task is given, as JSON. */
+    input: text().notNull(),
+    /** What a correct outcome satisfies, as JSON: the answer key. */
+    expected: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.suiteId, table.version, table.caseId] }),
+    index("brain_eval_cases_split_idx").on(
+      table.suiteId,
+      table.version,
+      table.split
+    ),
+  ]
+);
 
 /**
  * The Brain's memory records (../memories.ts): what a person, or

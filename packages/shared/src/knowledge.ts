@@ -1,7 +1,11 @@
 import type {
+  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
   CommandReceipt,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
   MemoriesGetInput,
   MemoriesLineageInput,
   MemoriesListInput,
@@ -13,6 +17,10 @@ import type {
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
+  RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
+  RelationsGetInput,
   RecallInput,
   RememberInput,
   LessonLineage,
@@ -315,6 +323,26 @@ export interface KnowledgeApi {
    */
   recall: (input: RecallInput) => Promise<MemoryPack>;
   /**
+   * The entities the person's readable sources mention, most mentioned
+   * first, or those with a name starting with `query` (GRA-305).
+   */
+  entities: (input?: EntitiesListInput) => Promise<EntitySummary[]>;
+  /** The readable sources that mention one entity, at their versions. */
+  entitySources: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+  /**
+   * The relations the person's readable sources state about one entity,
+   * on a date and as known at a moment if asked, each with its passage
+   * (GRA-306): what a source says, never an accepted fact.
+   */
+  relations: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+  /**
+   * The paths out from one entity, one or two relations long, through what
+   * the person may read, within a budget of paths and time (GRA-306).
+   */
+  relationsExplain: (
+    input: RelationsExplainInput
+  ) => Promise<RelationsExplanation>;
+  /**
    * Asks the Brain to remember something of the person's own (brain-api.ts):
    * retry with the same key after a lost reply. Admitted, it is kept as a
    * proposed record; refused by admission, only its receipt is kept.
@@ -481,7 +509,12 @@ export {
   versionInputSchema,
   wikiLinkPattern,
 } from "@grasp-os/brain/knowledge";
-export { searchQueryMaxLength } from "@grasp-os/brain/contract";
+export {
+  memoryKindSchema,
+  rememberTextMaxLength,
+  searchQueryMaxLength,
+} from "@grasp-os/brain/contract";
+export type { MemoryKind } from "@grasp-os/brain/contract";
 export type {
   Backlink,
   BacklinkPage,

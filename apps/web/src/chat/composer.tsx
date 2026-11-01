@@ -28,6 +28,7 @@ import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { isEffort } from "./model-choice.ts";
 
 // Where a question is written, in the prototype's look
@@ -266,6 +267,7 @@ const QuestionField = ({
   onText,
   compact,
   label,
+  describedBy,
   placeholder,
   maxLength,
 }: {
@@ -273,6 +275,7 @@ const QuestionField = ({
   onText: (text: string) => void;
   compact: boolean;
   label: string | undefined;
+  describedBy: string | undefined;
   placeholder: string | undefined;
   maxLength: number | undefined;
 }) => {
@@ -285,6 +288,7 @@ const QuestionField = ({
     // field, spaced for the box, doesn't fit.
     return (
       <InputGroupTextarea
+        aria-describedby={describedBy}
         aria-label={name}
         className="field-sizing-content max-h-40 min-h-0"
         maxLength={longest}
@@ -322,7 +326,30 @@ const QuestionField = ({
 };
 
 /** Where nobody picks a model. */
-const noModels: readonly string[] = [];
+export const noModels: readonly string[] = [];
+
+/**
+ * Whether a question has no model it may name (`model` empty): the
+ * organization has no AI provider to call yet, or none of its models is
+ * chosen. Nothing is sent then.
+ */
+export const lacksModel = (model: string | undefined): boolean => model === "";
+
+/**
+ * Where a question names a model (`model` given) but there are none to
+ * name: the way to connect an AI provider, under the box to ask in or the
+ * questions asked in its place.
+ */
+export const NoModelNotice = ({
+  model,
+  models,
+}: {
+  model: string | undefined;
+  models: readonly string[];
+}) =>
+  model === undefined || models.length > 0 ? null : (
+    <ConnectAiProvider size="xs" />
+  );
 
 /** Where the model doesn't think, or nobody picks how hard. */
 const noLevels: readonly ModelEffort[] = [];
@@ -344,6 +371,7 @@ export const Composer = ({
   onStop,
   compact = false,
   label,
+  describedBy,
   placeholder,
   children,
   maxLength,
@@ -382,6 +410,8 @@ export const Composer = ({
   compact?: boolean;
   /** What the box is called; "Your question" without it. */
   label?: string;
+  /** The id of what says more about the box, in a compact box. */
+  describedBy?: string;
   placeholder?: string;
   /** Beside the button, in a compact box only: such as the way to open the dock. */
   children?: ReactNode;
@@ -390,10 +420,10 @@ export const Composer = ({
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
 }) => {
-  const { t } = useLingui();
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
-  const canSend = !running && !busy && !disabled && !empty && model !== "";
+  const canSend =
+    !running && !busy && !disabled && !empty && !lacksModel(model);
   return (
     <form
       className="flex flex-col gap-1.5"
@@ -409,6 +439,7 @@ export const Composer = ({
         <InputGroup size="chat">
           <QuestionField
             compact={compact}
+            describedBy={describedBy}
             label={label}
             maxLength={maxLength}
             onText={onText}
@@ -433,6 +464,7 @@ export const Composer = ({
           <PromptInputBody>
             <QuestionField
               compact={compact}
+              describedBy={undefined}
               label={label}
               maxLength={maxLength}
               onText={onText}
@@ -459,11 +491,7 @@ export const Composer = ({
           </PromptInputFooter>
         </InputGroup>
       )}
-      {compact || model === undefined || models.length > 0 ? null : (
-        <p className="text-muted-foreground px-1 text-xs">
-          {t`No model is set up for this deployment yet.`}
-        </p>
-      )}
+      {compact ? null : <NoModelNotice model={model} models={models} />}
       <ErrorText>{failure}</ErrorText>
     </form>
   );

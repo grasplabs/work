@@ -12,13 +12,14 @@
  * - Access: the dev bypass (`DEV_ACCESS_EMAIL`, src/access.ts), which holds
  *   only for requests to this machine.
  * - `POST /__e2e/seed` seeds what a journey starts from,
- *   `POST /__e2e/seed-placed` the placed-client journey's and
- *   `POST /__e2e/seed-organizations` the organization sections'
- *   (test/e2e-seed.ts). `POST /__e2e/core` holds a seeded core's snapshot
- *   answer for a while, or lets it answer at once again, and answers how
- *   many snapshots it answered so far. `POST /__e2e/fault` makes one of
- *   the admin's server functions fail, or answer what its page can't
- *   show, until it is cleared.
+ *   `POST /__e2e/seed-placed` the placed-client journey's,
+ *   `POST /__e2e/seed-organizations` the organization sections' and
+ *   `POST /__e2e/seed-create` the create journey's (test/e2e-seed.ts).
+ *   `POST /__e2e/core` holds a seeded core's snapshot answer for a while,
+ *   or lets it answer at once again, and answers how many snapshots it
+ *   answered so far. `POST /__e2e/fault` makes one of the admin's server
+ *   functions fail, or answer what its page can't show, until it is
+ *   cleared.
  */
 import { loopbackHosts } from "@grasp-os/shared/router";
 import { toCrossJSONAsync } from "seroval";
@@ -28,7 +29,7 @@ import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { seed, seedOrganizations, seedPlaced } from "./e2e-seed.ts";
+import { seed, seedCreate, seedOrganizations, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { AdminRuns } from "../src/run-object.ts";
@@ -73,6 +74,14 @@ if (held === undefined) {
     }
     if (loopbackHosts.has(url.hostname)) {
       return await outbound(input, init);
+    }
+    // DNS-over-HTTPS, as a create page looks up how a company signs in:
+    // every domain the journeys use is on Google Workspace.
+    if (url.hostname === "cloudflare-dns.com") {
+      return Response.json({
+        Status: 0,
+        Answer: [{ type: 15, data: "1 aspmx.l.google.com." }],
+      });
     }
     throw new Error(`Unexpected outbound request to ${url.href}`);
   };
@@ -168,7 +177,17 @@ export default {
       if (!loopbackHosts.has(url.hostname)) {
         return new Response("Forbidden", { status: 403 });
       }
+      // The seed offboards every client before it, so their accounts go
+      // too: the fake starts again, as each test's does, and never runs
+      // out of the databases it keeps clients' data in.
+      cloudflare.reset();
       return Response.json(await seed(cloudflare, tokens));
+    }
+    if (url.pathname === "/__e2e/seed-create" && request.method === "POST") {
+      if (!loopbackHosts.has(url.hostname)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return Response.json(await seedCreate(cloudflare, tokens));
     }
     if (url.pathname === "/__e2e/seed-placed" && request.method === "POST") {
       if (!loopbackHosts.has(url.hostname)) {

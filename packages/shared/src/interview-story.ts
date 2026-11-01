@@ -174,6 +174,7 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   next: "steps",
   workaround: "steps",
   work: "steps",
+  who: "you",
   exception: "differently",
   wait: "differently",
   rule: "differently",

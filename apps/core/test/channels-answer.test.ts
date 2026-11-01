@@ -5,10 +5,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeStep, pausedReply, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -22,7 +22,7 @@ import {
 
 // A member's Teams message answered by the organization's agent in their
 // own Teams chat in Grasp (src/channels/answer.ts): the turn runs in their
-// own Workspace object, with the model gateway faked behind it, and the
+// own Workspace object, with the model provider faked behind connect, and the
 // answer, with its sources, goes back through connect to the fake Bot
 // Connector (test/bot-connector-fake.ts).
 
@@ -117,13 +117,13 @@ describe("a member's question", setUpTime, () => {
   });
 
   it("goes on in the same chat, and another person's stays apart", async () => {
-    const gateway = fakeGateway(
+    const provider = await fakeProvider(
       says("Hi, Ann."),
       says("Hi, Bo."),
       says("Still here.")
     );
-    const ann = await memberAnsweredBy(idp, gateway);
-    const bo = await memberAnsweredBy(idp, gateway);
+    const ann = await memberAnsweredBy(idp, provider);
+    const bo = await memberAnsweredBy(idp, provider);
 
     await post(messageFrom(ann.teams, { text: "Hello" }));
     await post(messageFrom(bo.teams, { text: "Hello" }));
@@ -136,10 +136,11 @@ describe("a member's question", setUpTime, () => {
     expect(annChats).toHaveLength(1);
     expect(boChats).toHaveLength(1);
     expect(annChats[0]?.id).not.toBe(boChats[0]?.id);
+    // Each answer, by its words: not the thumbs that follow a streamed one.
     const said = async (conversation: string) => {
       const answers = await answersIn(conversation);
-      return answers.map((answer) =>
-        ["Hi, Ann.", "Hi, Bo.", "Still here."].find((text) =>
+      return answers.flatMap((answer) =>
+        ["Hi, Ann.", "Hi, Bo.", "Still here."].filter((text) =>
           answer.includes(text)
         )
       );
@@ -198,7 +199,7 @@ describe("a turn that can't answer", setUpTime, () => {
   });
 
   it("asks for text when a message has none", async () => {
-    const { teams, gateway } = await member(idp);
+    const { teams, provider } = await member(idp);
 
     await post(messageFrom(teams, { text: "" }));
 
@@ -206,6 +207,6 @@ describe("a turn that can't answer", setUpTime, () => {
     expect(lines).toStrictEqual([
       "I can only read text for now. Type your question, and I'll answer it.",
     ]);
-    expect(gateway.requests).toHaveLength(0);
+    expect(provider.requests).toHaveLength(0);
   });
 });

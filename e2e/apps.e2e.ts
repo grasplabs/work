@@ -159,9 +159,87 @@ test.beforeAll(async () => {
 test("a builder finds an engine in the list, opens it and uses its app with live data", async ({
   pageOf,
 }) => {
+  // Seven more domains of this run's own, each with one app: five
+  // published, two drafts, so the Apps page offers its search and tabs.
+  // Their names carry `run`, which no other test's do.
+  const run = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
+    String.fromCodePoint(97 + (byte % 26))
+  ).join("");
+  const published = ["books", "payroll", "stock", "fleet", "sales"];
+  const drafts = ["hiring", "legal"];
+  await withApi(builder, async (api) => {
+    await Promise.all([
+      ...published.map(async (domain) => {
+        const { id } = await api.apps.create({ name: `${domain} ${run}` });
+        await release(api, id, counterApp(`${domain}app${run}`), "First");
+      }),
+      ...drafts.map(async (domain) => {
+        const { id } = await api.apps.create({ name: `${domain} ${run}` });
+        const { version } = await api.apps.files.commit(
+          id,
+          counterApp(`${domain}app${run}`),
+          "First"
+        );
+        await api.apps.versions.setCurrent(id, version);
+      }),
+    ]);
+  });
+
   const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
+  await nav.getByRole("link", { name: "Apps" }).click();
+  const tiles = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  const search = page.getByRole("textbox", { name: "Search the apps" });
+  const tab = (label: string) =>
+    page.getByRole("tab", { name: new RegExp(`^${label}`, "u") });
+  /** What each tab counts, in the order they stand. */
+  const counts = async () =>
+    await Promise.all(
+      ["All", "Published", "Draft"].map(
+        async (label) => await tab(label).textContent()
+      )
+    );
+
+  // A search by domain name finds that domain's apps, and the tabs count
+  // what it leaves: this run's seven, five published and two drafts.
+  await search.fill(run);
+  await expect(tiles).toHaveCount(7);
+  expect(await counts()).toStrictEqual(["All7", "Published5", "Draft2"]);
+  await tab("Draft").click();
+  await expect(tiles).toHaveCount(2);
+  await expect(
+    tiles.getByRole("link", { name: `legalapp${run}` })
+  ).toBeVisible();
+  await tab("Published").click();
+  await expect(tiles).toHaveCount(5);
+  await tab("All").click();
+  await expect(tiles).toHaveCount(7);
+
+  // A search by an app's own name finds it alone, under its domain.
+  await search.fill(`payrollapp${run}`);
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles).toContainText(`payroll ${run}`);
+  expect(await counts()).toStrictEqual(["All1", "Published1", "Draft0"]);
+
+  // A search nothing matches says so, and lists nothing.
+  await search.fill(`nothing-${run}`);
+  await expect(
+    page.getByText(`No app is called “nothing-${run}”`)
+  ).toBeVisible();
+  await expect(tiles).toHaveCount(0);
+  expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
+  await search.fill("");
+
+  // On the Apps page its app is a tile, under its domain's name, which
+  // opens the app on its App's page.
+  const tile = tiles.filter({ hasText: name });
+  await tile.getByRole("link", { name: "counter" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
+  );
+  await counterScreen(page);
+
   await nav.getByRole("link", { name: "Domains" }).click();
 
   // Its card says what its version holds, as core counts it.
@@ -222,32 +300,24 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   await expect(
     page.getByRole("link", { name: "Open full page" })
   ).toHaveAttribute("href", `/domains/${app}/apps/counter/full`);
-
-  // An old link to the screen still leads to it, from before apps were
-  // engines and from before engines were Domains, and to its full page.
-  await page.goto(`/apps/${app}/screens/counter`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
-  );
-  await counterScreen(page);
-  await page.goto(`/engines/${app}/apps/counter`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
-  );
-  await page.goto(`/engines/${app}/apps/counter/full`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter/full$`, "u")
-  );
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   pageOf,
 }) => {
-  const everyone = ["Chat", "Brain", "Domains", "Workflows", "Integrations"];
+  const everyone = [
+    "Chat",
+    "Brain",
+    "Domains",
+    "Apps",
+    "Workflows",
+    "Integrations",
+  ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
-    await page.goto("/");
+    // In Workflows, where an admin's Requests is under it.
+    await page.goto("/workflows");
     const links = page
       .getByRole("navigation", { name: "Main" })
       .getByRole("link");
@@ -264,12 +334,12 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         )
         .map((link) => link.textContent ?? "")
     );
-    // The person menu, at the sidebar's foot, ends in their role.
-    await page
-      .getByRole("button", {
-        name: new RegExp(`${roleNames[person.role]}$`, "u"),
-      })
-      .click();
+    // The person menu, at the sidebar's foot, by their name; their role is
+    // said inside it.
+    await page.getByRole("button", { name: "Person", exact: true }).click();
+    await expect(
+      page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
+    ).toBeVisible();
     const items = page.getByRole("menuitem");
     await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
     const menuTexts = await items.allTextContents();
@@ -293,6 +363,11 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   };
   const [chat, ...rest] = everyone;
   const nav = [chat, "Dashboard", ...rest];
+  // Stephen's requests sit under Workflows for admins only, while they are
+  // in Workflows.
+  const adminNav = nav.flatMap((section) =>
+    section === "Workflows" ? [section, "Requests"] : [section]
+  );
   const menu = ["Settings", "Sign out"];
   const account = ["Profile", "Notifications", "Security"];
   expect({
@@ -301,13 +376,18 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     user: await sidebarOf(user),
   }).toStrictEqual({
     admin: {
-      nav,
+      nav: adminNav,
       menu,
       settings: [
         "Workspace",
         "Members and roles",
+        // The organization's own AI provider keys and the models its calls use.
+        "AI providers",
         "Models",
         "AI spend",
+        // The company's groups of teams, the brain's regions: right after
+        // AI spend, as in the prototype.
+        "Brain",
         // Who can reach Stephen and what he may do for whom.
         "Stephen",
         "Pulse",
@@ -326,13 +406,19 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     builder: { nav, menu, settings: ["Packages", ...account] },
     user: { nav, menu, settings: ["Packages", ...account] },
   });
+  // Outside Workflows, Requests isn't under it.
+  const page = await pageOf(admin);
+  await page.goto("/");
+  const main = page.getByRole("navigation", { name: "Main" });
+  await expect(main.getByRole("link", { name: "Chat" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Requests" })).toHaveCount(0);
 });
 
-test("an old link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
+test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
   page,
   pageOf,
 }) => {
-  await page.goto(`/apps/${app}/screens/counter`);
+  await page.goto(`/domains/${app}/apps/counter`);
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
@@ -353,13 +439,13 @@ test("someone with the user role finds no engine to open", async ({
   pageOf,
 }) => {
   const page = await pageOf(user);
-  // An old link to one engine, from before they were Domains, leads to
-  // that Domain.
-  await page.goto("/engines/some-engine");
-  await expect(page).toHaveURL(/\/domains\/some-engine$/u);
-  // An old link to the list leads to the Domains.
+  // The Apps page has none for them, and no way to make one.
   await page.goto("/apps");
-  await expect(page).toHaveURL(/\/domains$/u);
+  await expect(
+    page.getByText("The apps your colleagues are making show here.")
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "New app" })).toHaveCount(0);
+  await page.goto("/domains");
   await expect(
     page.getByText("There are no domains you can open yet.", { exact: false })
   ).toBeVisible();
@@ -372,7 +458,7 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto("/sign-in?returnTo=%2Fengines");
+  await page.goto("/sign-in?returnTo=%2Fdomains");
   await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/domains");
 
@@ -384,64 +470,11 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   ]) {
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await page.goto(`/sign-in?returnTo=${encodeURIComponent(elsewhere)}`);
+    // Chat's box, whether its heading greets or offers the tour.
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
-    await expect(
-      page.getByRole("heading", { name: "What should we look at today?" })
-    ).toBeVisible();
+    await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);
   }
-});
-
-test("an engine whose contents can't be read, or never come, keeps its card, and the others theirs", async ({
-  pageOf,
-}) => {
-  const brokenName = `Broken ${crypto.randomUUID()}`;
-  // Released, so published: on the Published tab with the others, as a
-  // draft is on a tab of its own.
-  const broken = await newApp(builder, brokenName);
-  const page = await pageOf(builder);
-  // The page asks core for this engine's contents as for an App core
-  // doesn't have, which core refuses.
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const toCore = socket.connectToServer();
-    socket.onMessage((message) => {
-      const text = String(message);
-      toCore.send(
-        text.includes('"contents"') ? text.replaceAll(broken, "missing") : text
-      );
-    });
-  });
-  await page.goto("/domains");
-  const cards = page
-    .getByRole("list", { name: "Domains" })
-    .getByRole("listitem");
-
-  await expect(cards.filter({ hasText: brokenName })).toContainText(
-    "Its contents couldn't be read."
-  );
-  await expect(cards.filter({ hasText: name })).toContainText("1 app");
-  await expect(page.getByRole("alert")).toHaveCount(0);
-
-  // A read that never comes costs only its own card too, not the page: the
-  // list shows, where a page waiting on every read would say core can't
-  // be reached.
-  const hangingName = `Hanging ${crypto.randomUUID()}`;
-  const hanging = await newApp(builder, hangingName);
-  const waiting = await pageOf(builder);
-  const gate = await callGate(waiting, hanging);
-  gate.hold();
-  await waiting.goto("/domains");
-  const waitingCards = waiting
-    .getByRole("list", { name: "Domains" })
-    .getByRole("listitem");
-  await expect(waitingCards.filter({ hasText: hangingName })).toContainText(
-    "Its contents couldn't be read.",
-    // The card waits out its read's limit, well under this.
-    { timeout: 10_000 }
-  );
-  await expect(waitingCards.filter({ hasText: name })).toContainText("1 app");
-  await expect(waiting.getByRole("alert")).toHaveCount(0);
-  gate.release();
 });
 
 test("a runs read that never comes leaves the engine usable, and says so in its tab", async ({

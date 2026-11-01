@@ -17,7 +17,8 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Waiting } from "../dashboard/to-do.tsx";
+import { inInbox } from "../dashboard/in-inbox.tsx";
+import type { Waiting } from "../dashboard/waiting.ts";
 import { inboxItems, listed, unread } from "./items.ts";
 
 // The inbox's items (items.ts), as the prototype derives them
@@ -232,6 +233,22 @@ const waiting = (ranOut = true) =>
       state: "ready",
       data: [{ app, name: "Invoices", version: 3, screens: ["Overview"] }],
     },
+    heldStarts: {
+      state: "ready",
+      data: [
+        {
+          id: "held-start-1",
+          workflow: "greet",
+          workflowName: "Greet",
+          version: 1,
+          input: { who: "Ada" },
+          inputHash: "hash-1",
+          chatId: "chat-1",
+          requestedAt: "2026-10-12T07:00:00.000Z",
+          expiresAt: "2026-10-13T07:00:00.000Z",
+        },
+      ],
+    },
     decisions: {
       state: "ready",
       data: [
@@ -266,6 +283,7 @@ describe(inboxItems, () => {
         "decision:decision-1",
         "failed:failure-1",
         "goLive:app-invoices:4",
+        "heldStart:held-start-1",
         "held:held-new",
         "held:held-old",
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
@@ -342,6 +360,37 @@ describe(inboxItems, () => {
   });
 });
 
+describe(inInbox, () => {
+  it("leads the dashboard to every item it has no card or row of its own for", () => {
+    // The pile settles changes, lost answers, requests and packages; rows
+    // under it lead to engines, failed workflows and connections.
+    const onDashboard = new Set([
+      "held",
+      "outcome",
+      "request",
+      "packages",
+      "screens",
+      "failed",
+      "reconnect",
+    ]);
+    const all = inboxItems(waiting(), admin, readAt);
+    const elsewhere = all.filter(({ source }) => !onDashboard.has(source.type));
+    expect(
+      inInbox(waiting(), admin, readAt)
+        .map(({ id }) => id)
+        .toSorted()
+    ).toStrictEqual(elsewhere.map(({ id }) => id).toSorted());
+    expect(elsewhere.map(({ id }) => id).toSorted()).toStrictEqual([
+      "asked:asked-1",
+      "decision:decision-1",
+      "goLive:app-invoices:4",
+      "heldStart:held-start-1",
+      "stopped:stopped-1",
+      "workflowGoLive:workflow-quotes:2",
+    ]);
+  });
+});
+
 describe(listed, () => {
   const items = inboxItems(waiting(), admin, readAt);
 
@@ -358,6 +407,7 @@ describe(listed, () => {
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
     ).toStrictEqual([
       "decision",
+      "heldStart",
       "goLive",
       "failedRun",
       "goLive",
@@ -390,6 +440,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });

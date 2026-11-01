@@ -10,7 +10,7 @@ import {
 } from "@grasp-os/ui/components/select";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import {
   createFileRoute,
   Link,
@@ -21,21 +21,24 @@ import {
 import {
   ActivityIcon,
   BellIcon,
+  BrainIcon,
   BuildingIcon,
   CircleHelpIcon,
   CoinsIcon,
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
-  MessageCircleIcon,
   MessagesSquareIcon,
   PackageIcon,
+  PlugIcon,
+  RocketIcon,
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
@@ -50,11 +53,13 @@ import { SiteHeader } from "../frame/site-header.tsx";
 type SettingsPath =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/ai-providers"
   | "/settings/models"
   | "/settings/spend"
   | "/settings/stephen"
   | "/settings/pulse"
   | "/settings/onboarding"
+  | "/settings/brain"
   | "/settings/audit"
   | "/settings/outcomes"
   | "/settings/billing"
@@ -105,15 +110,26 @@ const groupsFor = ({
                 icon: UsersIcon,
               },
             ]),
+        {
+          label: msg`AI providers`,
+          to: "/settings/ai-providers",
+          icon: PlugIcon,
+        },
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
+        // Its groups of teams, the brain's regions.
+        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
         // A name, like Pulse: the company's assistant in its chat apps.
-        { label: "Stephen", to: "/settings/stephen", icon: MessageCircleIcon },
+        {
+          label: "Stephen",
+          to: "/settings/stephen",
+          icon: MessagesSquareIcon,
+        },
         { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
         {
           label: msg`Onboarding`,
           to: "/settings/onboarding",
-          icon: MessagesSquareIcon,
+          icon: RocketIcon,
         },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
         ...(staff
@@ -183,19 +199,11 @@ const SettingsLayout = () => {
             : [{ label: t`Settings` }, { label: labelOf(current.label) }]
         }
       />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 pb-24">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <h1 className="text-2xl font-medium tracking-tight">
-              <Trans>Settings</Trans>
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              <Trans>
-                Your workspace, who may do what in it, and your own account.
-              </Trans>
-            </p>
-          </div>
-        </div>
+      <Page wide>
+        <PageHeading
+          description={t`Your workspace, who may do what in it, and your own account.`}
+          title={t`Settings`}
+        />
         <div className="@container">
           <div className="flex flex-col gap-6 text-sm @3xl:flex-row @3xl:items-start @3xl:gap-8">
             <div className="@3xl:hidden">
@@ -256,7 +264,7 @@ const SettingsLayout = () => {
             </div>
           </div>
         </div>
-      </div>
+      </Page>
     </>
   );
 };

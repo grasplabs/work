@@ -1,6 +1,6 @@
 import type { LinkToSend } from "@grasp-os/shared/onboarding";
 
-import { toCsv } from "../landscape/landscape.ts";
+import { toCsv } from "../csv.ts";
 
 // The links the company's admin sends themselves, from what core gives
 // (`onboarding.links()`): which are out, which are new since they last

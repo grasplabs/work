@@ -2,7 +2,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
-import { auditEvents, clients, settings } from "../db/schema.ts";
+import { auditEvents, clients } from "../db/schema.ts";
 import { clientSignInSchema } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { isConfigPending } from "../rollout/targets.ts";
@@ -18,8 +18,6 @@ export interface ClientSettingsView {
   pinnedReleaseId: string | null;
   /** Its record's sign-in; null when it has none, or one that doesn't parse. */
   signIn: ClientSignInRecord | null;
-  /** Whether a `SIGN_IN` setting replaces its record's sign-in on deploy. */
-  signInOverridden: boolean;
   /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
   teamsBot: TeamsBot | null;
   /** Whether a change to its sign-in or bot waits for its next deploy. */
@@ -54,17 +52,12 @@ export const clientSettings = async (
   if (client === undefined) {
     return null;
   }
-  const rows = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.clientId, clientId));
   const signIn = clientSignInSchema.safeParse(parsedJson(client.signIn));
   return {
     ring: client.ring,
     active: client.status === "active",
     pinnedReleaseId: client.pinnedReleaseId,
     signIn: signIn.success ? signIn.data : null,
-    signInOverridden: rows.some(({ key }) => key === "SIGN_IN"),
     teamsBot: teamsBotOf(client.teamsBot),
     configPending: await isConfigPending(db, clientId, client.configChangedAt),
   };

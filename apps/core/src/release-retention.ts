@@ -5,7 +5,7 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -655,9 +655,10 @@ const deleteRelease = async (
       .returning({ appId: sdkReleaseManifests.appId }),
     db.delete(sdkResourceBindings).where(
       and(
-        // A release's own store bindings: a workflow resource's bindings
-        // (workflow-resources.ts) are never an App release's.
-        eq(sdkResourceBindings.kind, "store"),
+        // A release's own store binding and the stores it declares: a
+        // workflow resource's bindings (workflow-resources.ts) are never
+        // an App release's.
+        inArray(sdkResourceBindings.kind, ["store", "storeResource"]),
         eq(sdkResourceBindings.resourceId, key.app),
         eq(sdkResourceBindings.resourceVersion, key.version),
         gone

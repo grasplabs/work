@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { fileLimits } from "./app-file-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { appIdSchema, identifierSchema, storeIdSchema } from "./ids.ts";
+import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import { platformLimits } from "./platform-limits.ts";
 import {
@@ -273,36 +273,6 @@ export const claimSchema = z.strictObject({
 export type ClaimInput = z.infer<typeof claimSchema>;
 
 /**
- * A look at a mutation's receipt, never a claim of it (spec 10.7.8): what
- * it is scoped to and its key, as `claimSchema` has them. Nothing about it
- * changes, and nothing runs.
- */
-export const receiptLookupSchema = z.strictObject({
-  storeId: storeIdSchema,
-  scope: receiptScopeSchema,
-  key: receiptKeySchema,
-});
-export type ReceiptLookup = z.infer<typeof receiptLookupSchema>;
-
-/**
- * Where a mutation's receipt stands, without its outcome: `committed` once
- * its change committed; `claimed` while an attempt holds it, until
- * `deadline`, past which nothing more commits under that attempt;
- * `expired` once only its tombstone is left, so whether it committed
- * can't be told; `none` when no attempt ever claimed it.
- */
-export type ReceiptStanding =
-  | { readonly state: "committed" }
-  | {
-      readonly state: "claimed";
-      readonly deadline: number;
-      /** The latest attempt's claim: each claim moves it on. */
-      readonly fence: number;
-    }
-  | { readonly state: "expired" }
-  | { readonly state: "none" };
-
-/**
  * The attempt holding a receipt, as its commit names it. The deadline it
  * claimed with stays with the store, which checks it.
  */
@@ -570,6 +540,8 @@ export const dataErrors = defineErrorFamily({
     "This record is being deleted, with the records that refer to it. It can't be changed or referred to meanwhile.",
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
+  "data.store_consumed":
+    "Workflows or Apps call this store's operations through approvals. Revoke those approvals first, then delete the store.",
   "data.store_managed_by_app":
     "This store is an App's default store: the App's builders and the organization's admins manage it. Share the App instead.",
   "data.store_closing":
@@ -626,12 +598,6 @@ export const migrationErrors = defineErrorFamily({
     "Only a failed schema change can be abandoned: this one's defaults are still being filled in.",
   "migration.abandoned":
     "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
-  "migration.sample_busy":
-    "Another dry run of this migration is running, or it ran a few times in the last minute already. Try again in a minute.",
-  "migration.not_pending":
-    "This version's migration isn't the change pending on its store, so there is nothing of it to dry-run yet.",
-  "migration.not_declared":
-    "This version declares no such explicit migration, or binds no store for it to run on.",
   "migration.invalid":
     "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
   "migration.incompatible_write":
@@ -756,48 +722,9 @@ export interface AbandonedBackfill {
   abandonedAt: string;
 }
 
-/** Records a migration's dry run samples by default, and at most. */
-export const migrationSampleRows = 20;
-export const migrationSampleMaxRows = 100;
-
-/**
- * An admin's request to dry-run an App version's explicit migration on a
- * sample of the real records it would transform (`StoresApi.sampleMigration`).
- */
-export const sampleMigrationSchema = z.strictObject({
-  app: appIdSchema,
-  version: z.number().int().min(1),
-  migration: z.string().min(1).max(128),
-  rows: z.number().int().min(1).max(migrationSampleMaxRows).optional(),
-});
-export type SampleMigration = z.input<typeof sampleMigrationSchema>;
-
-/**
- * What a migration's dry run found: `passed` when its transform answered
- * every sampled record with what the target table takes, `failed` when it
- * didn't, `empty` when it had no record left to transform (done, or
- * not started). `failure` names the record and the transform's issues: for the
- * admin who asked alone, kept nowhere (the receipt keeps the reason). On a
- * table read or written by owner, the issues only when the admin owns that
- * record (a thrown message can carry its values): empty otherwise.
- */
-export interface MigrationSample {
-  id: string;
-  app: string;
-  version: number;
-  migration: string;
-  store: string;
-  outcome: "passed" | "failed" | "empty";
-  rows: number;
-  owners: number;
-  sampledAt: string;
-  failure: { record: string | null; reason: string; issues: string[] } | null;
-}
-
 /**
  * Business stores, for admins: a store's failed schema change, and
- * abandoning it (spec 17.2, 17.3), and dry-running an explicit migration on a
- * sample of real records. Abandoning keeps the store's contract
+ * abandoning it (spec 17.2, 17.3). Abandoning keeps the store's contract
  * as it was and takes the releases sealed on the change out of force, so
  * the store takes schema changes again. Never Grasp staff.
  */
@@ -812,6 +739,4 @@ export interface StoresApi {
   appBackfills: (app: string) => Promise<AppStoreBackfill[]>;
   /** Abandons the store's failed backfill (see `AbandonedBackfill`). */
   abandonBackfill: (input: AbandonBackfill) => Promise<AbandonedBackfill>;
-  /** Dry-runs a version's explicit migration on a sample of real records. */
-  sampleMigration: (input: SampleMigration) => Promise<MigrationSample>;
 }

@@ -49,6 +49,7 @@ import {
   readTree,
   storeBlueprintTree,
   storeTree,
+  screensIn,
   supersededBy,
   toApp,
   toVersion,
@@ -642,6 +643,7 @@ export const createFromBlueprint = async (
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
@@ -997,6 +999,7 @@ export const acceptBlueprintUpdate = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,

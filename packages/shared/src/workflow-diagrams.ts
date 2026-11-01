@@ -1,4 +1,5 @@
 import type { WorkflowRunStatus } from "./workflow-resources.ts";
+import type { RunAiProviderWait } from "./workflows.ts";
 // A workflow's diagram (platform specification 13.10 and 22.7): drawn
 // only from a definition that passed the profile, never a second model of
 // it. Every declared path is in it, each task by its stable ID; showing it
@@ -11,6 +12,38 @@ export type DiagramNext =
   | { kind: "exit" }
   | { kind: "end" }
   | { kind: "task"; task: string };
+
+/**
+ * A named part of a workflow (`metadata.grasp.section` on the task that
+ * begins it): the part runs from that task to the next one that begins a
+ * part, in the same list. Display text only, as a label is.
+ */
+export interface DiagramSection {
+  name: string;
+  /** What the part is for, in one sentence. */
+  purpose: string | null;
+  /** The part in a few sentences, as Grasp writes it when it drafts. */
+  summary: string | null;
+}
+
+/**
+ * How a workflow goes on through a door: it `waits` for the other
+ * workflow to finish (a child workflow), `hands` its item over to it and
+ * ends there (an event the other workflow is started by, as its last
+ * task), or `starts` it and goes on (such an event, with more after it).
+ */
+export type DoorFlow = "waits" | "hands" | "starts";
+
+/**
+ * Another workflow a task leads to: a child workflow it runs, or one an
+ * event it emits starts. Its ID and name only for a reader who may see
+ * that workflow; for anyone else both are null, and only the flow shows.
+ */
+export interface DiagramDoor {
+  flow: DoorFlow;
+  workflowId: string | null;
+  name: string | null;
+}
 
 /** One task, as declared, with the scopes it holds. */
 export interface DiagramTask {
@@ -32,6 +65,17 @@ export interface DiagramTask {
   guarded: boolean;
   next: DiagramNext;
   scopes: DiagramScope[];
+  /**
+   * The named part it begins, if it begins one. Missing from a diagram
+   * drawn before parts were: such a workflow is drawn in no parts.
+   */
+  section?: DiagramSection | null;
+  /**
+   * The other workflows it leads to, as core resolved them for the
+   * reader: a child workflow's one, each one an emitted event starts.
+   * Missing where core drew no doors.
+   */
+  doors?: DiagramDoor[];
 }
 
 /** A list of tasks a task holds, or a case of a switch. */
@@ -101,10 +145,16 @@ export interface WorkflowRunTrace {
   /** False when the journal held more than one read takes. */
   complete: boolean;
   /**
-   * The run's retention, as the deployment has it now, is over, or its
+   * The run's retention is over, or its
    * details were swept: nothing of what it reached is shown.
    */
   detailsRemoved: boolean;
+  /**
+   * While it runs, a step of it waiting for its AI provider (as the run
+   * says it, `WorkflowResourceRun.aiProvider`): so what follows its trace
+   * sees a wait begin and end, which its status, still running, doesn't.
+   */
+  aiProvider?: RunAiProviderWait;
 }
 
 /**

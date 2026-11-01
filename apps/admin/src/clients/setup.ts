@@ -18,7 +18,6 @@ import {
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
-import { clientGatewayId } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { bucketNames, databaseNames } from "../deploy/resources.ts";
@@ -27,6 +26,7 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import { daysUntil } from "./teams-bot.ts";
 import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";
 import { lastWatched } from "./watch.ts";
@@ -68,15 +68,17 @@ export interface ClientSetup {
     rotatedAt: Date | null;
     rotationLiveAt: Date | null;
     configChangedAt: Date | null;
-    /** The most its model calls may cost a month, in whole euros (GRA-141). */
-    modelSpendCeiling: number;
   } | null;
   /** How its people sign in, as its record has it; null without one. */
   signIn: ClientSignInRecord | null;
-  /** Whether a `SIGN_IN` setting replaces that on deploy. */
-  signInOverridden: boolean;
   /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
   teamsBot: TeamsBot | null;
+  /**
+   * Days until its Teams bot's secret expires, read now: negative once it
+   * has; null without a bot. Microsoft refuses every send once it has, and
+   * Stephen goes silent in Teams.
+   */
+  teamsBotSecretDays: number | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
   /**
@@ -93,10 +95,10 @@ export interface ClientSetup {
   workers: SetupWorker[];
   /**
    * What the release it runs keeps in its account: its databases and
-   * buckets as that release's manifest names them, and its AI Gateway.
-   * Null before anything is live there.
+   * buckets as that release's manifest names them. Null before anything
+   * is live there.
    */
-  resources: { databases: string[]; buckets: string[]; gateway: string } | null;
+  resources: { databases: string[]; buckets: string[] } | null;
   /** The newest imported releases, newest first: the latest `setupReleaseLimit`. */
   releases: {
     id: string;
@@ -137,7 +139,6 @@ const byHand: ReadonlySet<string> = new Set([
   "client.place",
   "client.provision_placed",
   "client.ring",
-  "client.model_spend_ceiling",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
@@ -195,7 +196,6 @@ const resourcesOf = async (
   return {
     databases: databaseNames(manifest),
     buckets: bucketNames(manifest),
-    gateway: clientGatewayId,
   };
 };
 
@@ -256,7 +256,6 @@ export const getClientSetup = async (
       rotatedAt: clients.rotatedAt,
       rotationLiveAt: clients.rotationLiveAt,
       configChangedAt: clients.configChangedAt,
-      modelSpendCeiling: clients.modelSpendCeiling,
     })
     .from(clients)
     .where(eq(clients.id, clientId));
@@ -277,8 +276,11 @@ export const getClientSetup = async (
     provisioning,
     account: account ?? null,
     signIn: settings?.signIn ?? null,
-    signInOverridden: settings?.signInOverridden ?? false,
     teamsBot: settings?.teamsBot ?? null,
+    teamsBotSecretDays:
+      settings?.teamsBot === null || settings?.teamsBot === undefined
+        ? null
+        : daysUntil(settings.teamsBot.secretExpiresOn, new Date()),
     configPending: settings?.configPending ?? false,
     sealedSecrets,
     watched,

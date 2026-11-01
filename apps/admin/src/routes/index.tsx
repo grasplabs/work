@@ -30,8 +30,12 @@ import {
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { ReadinessBanner } from "../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../admin/readiness.ts";
+import { Section } from "../admin/section.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
@@ -493,13 +497,10 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
   }
   const more = waiting.length - todayItems;
   return (
-    <section className="bg-card overflow-hidden rounded-xl border text-sm">
-      <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">Needs Grasp today</h2>
-        <p className="text-muted-foreground">
-          At every organization, the most pressing first.
-        </p>
-      </div>
+    <Section
+      title="Needs Grasp today"
+      description="At every organization, the most pressing first."
+    >
       <ul className="flex flex-col">
         {waiting.slice(0, todayItems).map(({ id, name, text }, index) => (
           <li
@@ -539,7 +540,7 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
             : `${more} more, on the organizations’ own overviews.`}
         </p>
       ) : null}
-    </section>
+    </Section>
   );
 };
 
@@ -561,6 +562,7 @@ const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
   const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const readiness = Route.useLoaderData();
   const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
@@ -583,6 +585,7 @@ const Overview = () => {
       overview
       title="Organizations"
     >
+      <ReadinessBanner readiness={readiness} />
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
@@ -669,5 +672,7 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: async () => await fetchReadiness(),
   component: Overview,
+  pendingComponent: PageLoading,
 });

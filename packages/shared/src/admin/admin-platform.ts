@@ -1,8 +1,8 @@
 /**
  * Each company's own Grasp as the admin runs it, and how a release reaches every company: the
  * records the admin (`apps/admin`) keeps, in the words its pages say them in. A company is a
- * client of the admin: its own Cloudflare account in the EU, made and set up by a provisioning
- * run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
+ * client of the admin: its own Workers in Grasp's EU Workers for Platforms namespace, made and set
+ * up by a provisioning run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
  * out, from the records the admin reads.
  */
 
@@ -16,7 +16,7 @@ export const PROVISION_STEPS = [
 ] as const;
 export type ProvisionStep = (typeof PROVISION_STEPS)[number];
 
-/** A deploy, in order: the EU resources and AI Gateway, the database migrations, the Workers with their secrets, a smoke check through the router, and the hostname in the router's map. */
+/** A deploy, in order: the EU resources, the database migrations, the Workers with their secrets, a smoke check through the router, and the hostname in the router's map. */
 export const DEPLOY_STEPS = [
   "resources",
   "migrations",
@@ -51,7 +51,7 @@ export const ringName = (ring: number): string => {
 export type WorkerName = "core" | "connect";
 
 export interface Release {
-  /** As CI names it: `r<run>-<commit>`. */
+  /** As CI's publish names it: `YY.MM.N`. */
   id: string;
   commit: string;
   /** The day it was imported into the admin. */

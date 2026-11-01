@@ -2,10 +2,8 @@
 // boundary's default, each in the unit its name says. A count of characters
 // is never applied as a count of bytes, nor a wall time as CPU time.
 //
-// These are the ceilings of this release. A deployment's operator may set
-// lower ones for the limits core reads through its quota policy
-// (`QUOTA_LIMITS`, quota-policy.ts), never higher: raising a ceiling takes
-// capacity and security evidence, and so a release that changes it here.
+// These are the limits of this release, the same in every deployment:
+// changing one is a code change here, in a release.
 // What an App, a workflow or any other resource declares is held to them
 // too: a declaration may only be stricter.
 //

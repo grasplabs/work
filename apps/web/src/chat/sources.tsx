@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
+import { MessageActions } from "@grasp-os/ui/components/message";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
@@ -20,7 +21,6 @@ import type { ReactNode } from "react";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { MessageActions } from "./message.tsx";
 
 // What the chat's answers may hold, in the prototype's sources look
 // (grasplabs/prototype `components/ai-elements/sources.tsx`): the
@@ -52,7 +52,7 @@ export const ChatSources = ({
   return (
     <div className="flex flex-wrap items-start gap-2 text-xs">
       {restricted ? (
-        <Badge variant="destructive">
+        <Badge variant="attention">
           <Trans>Restricted</Trans>
         </Badge>
       ) : null}
