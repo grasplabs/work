@@ -33,8 +33,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 // follow every way data moves from one to another. A workflow run started
 // by an App starts from that App's flag, and state shared across a
 // workspace's chats would need a flag on the workspace, not on each chat.
-// Whatever adds such a flow adds the flag with it: a call from one App to
-// another's export carries it both ways (app-calls.ts); a chat started to
+// Whatever adds such a flow adds the flag with it: a chat started to
 // fix a failed run starts restricted when the run's App is, since the
 // run's report may hold what it read (run-fixes.ts); an independent
 // workflow's run started by a restricted App, or from a restricted chat,

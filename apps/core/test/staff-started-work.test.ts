@@ -11,14 +11,14 @@ import {
   codeResults,
   codeStep,
   model,
-  pointAtGateway,
+  configureObject,
   says,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { finished, stepDone, woken } from "./runs.ts";
 import {
   openRpc,
@@ -168,10 +168,8 @@ describe("a workflow run Grasp staff start", () => {
 
 /** `someone`'s own chats, answered by the agent saying `text`. */
 const answering = async (someone: { userId: string }, text: string) => {
-  await pointAtGateway(
-    workspace(env, personalWorkspaceId(someone.userId)),
-    fakeGateway(says(text))
-  );
+  await fakeProvider(says(text));
+  await configureObject(workspace(env, personalWorkspaceId(someone.userId)));
 };
 
 /** Sends `text` in a new chat of `chats`' and waits for its answer. */

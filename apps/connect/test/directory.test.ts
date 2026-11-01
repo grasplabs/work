@@ -347,10 +347,10 @@ describe("the directory's connection", () => {
       })
     );
     const mail = await addConnection();
-    const landscape = await addConnection({
-      provider: "microsoft-landscape",
+    const documents = await addConnection({
+      provider: "microsoft-documents",
       serverKind: "native",
-      server: "microsoft-landscape",
+      server: "microsoft-documents",
       tenant: acmeTenant,
     });
     const lapsed = await addConnection({
@@ -364,12 +364,12 @@ describe("the directory's connection", () => {
     expect({
       mailCall,
       readMail: await codeOf(read(mail)),
-      readLandscape: await codeOf(read(landscape)),
+      readDocuments: await codeOf(read(documents)),
       readLapsed: await codeOf(read(lapsed)),
       readUnknown: await codeOf(read("connection-unknown")),
       listed: listed
         .filter(({ id }) =>
-          [connectionId, lapsed, mail, landscape].includes(id)
+          [connectionId, lapsed, mail, documents].includes(id)
         )
         .map(({ id, provider, status, tenant }) => ({
           own: id === connectionId,
@@ -381,7 +381,7 @@ describe("the directory's connection", () => {
     }).toStrictEqual({
       mailCall: "connect.server_unavailable",
       readMail: "directory.not_found",
-      readLandscape: "directory.not_found",
+      readDocuments: "directory.not_found",
       readLapsed: "directory.inactive",
       readUnknown: "directory.not_found",
       listed: [

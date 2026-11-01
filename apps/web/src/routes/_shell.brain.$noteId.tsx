@@ -1,4 +1,4 @@
-import type { Source, Workspace } from "@grasp-os/shared/brain";
+import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
@@ -13,7 +13,12 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -26,6 +31,7 @@ import { MentionLinks } from "../brain/brain-article/mention-links.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
+import { TeamWork } from "../brain/brain-article/team-work.tsx";
 import { Capped, NoteChip } from "../brain/brain-chips.tsx";
 import { dotClass, tintClass } from "../brain/brain-colors.ts";
 import { useBrainData } from "../brain/brain-data.ts";
@@ -47,11 +53,16 @@ import {
   splitTimeline,
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
+import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
+import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
+import { labelOf } from "../brain/witness.ts";
+import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
 // prototype links out of the brain, to a workflow on its Workflows page, a
@@ -125,11 +136,13 @@ const SourceTabs = ({
   source,
   statements,
   activeId,
+  onRemove,
   children,
 }: {
   source: TranscribedSource;
   statements: Workspace["statements"];
   activeId: string | undefined;
+  onRemove: ((statement: Statement) => void) | undefined;
   children: ReactNode;
 }) => {
   const [tab, setTab] = useState("transcript");
@@ -171,6 +184,7 @@ const SourceTabs = ({
           {/* The transcript stays mounted behind the summary, so its tools only take the row while it shows. */}
           <TranscriptView
             activeId={activeId}
+            onRemove={onRemove}
             source={source}
             statements={statements}
             toolbarIn={tab === "transcript" ? toolbar : null}
@@ -369,7 +383,7 @@ const DetailRows = ({
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
-  // A tool's AI, as Grasp sees it, belongs with the Landscape, which is parked: it is left out for now.
+  // A tool's AI, as Grasp sees it, is left out: the Landscape it belonged with was removed.
   const shown = new Set([
     t`They told us`,
     t`What was said`,
@@ -556,11 +570,15 @@ const ExportButton = ({
 const NoteToolbar = ({
   note,
   source,
+  onForget,
 }: {
   note: Note;
   source: Source | undefined;
+  /** Takes the source out of the brain, for whoever may. */
+  onForget?: (() => void) | undefined;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
+  const { title } = note;
   return (
     // The row wraps when there is no room for both sides, so nothing runs off the page.
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -590,6 +608,12 @@ const NoteToolbar = ({
           <Trans>Show in the brain</Trans>
         </Button>
         <ExportButton note={note} source={source} />
+        {onForget === undefined ? null : (
+          <ForgetButton
+            label={t`Remove ${title} from the brain`}
+            onClick={onForget}
+          />
+        )}
       </div>
     </div>
   );
@@ -653,6 +677,7 @@ const NoteBody = ({
   transcribed,
   statements,
   activeId,
+  onRemove,
 }: {
   note: Note;
   workspace: Workspace;
@@ -660,7 +685,10 @@ const NoteBody = ({
   transcribed: TranscribedSource | undefined;
   statements: StatementRow[];
   activeId: string | undefined;
+  /** Takes one thing that was said out of the brain, for whoever may. */
+  onRemove: ((statement: Statement) => void) | undefined;
 }) => {
+  const { brain } = useBrainData();
   const nameable = nameableFrom(note, byId);
   const article = (
     <Article byId={byId} nameable={nameable} paragraphs={note.article} />
@@ -680,6 +708,7 @@ const NoteBody = ({
     return (
       <TranscriptView
         activeId={activeId}
+        onRemove={onRemove}
         source={transcribed}
         statements={workspace.statements}
       />
@@ -689,6 +718,7 @@ const NoteBody = ({
     return (
       <SourceTabs
         activeId={activeId}
+        onRemove={onRemove}
         source={transcribed}
         statements={workspace.statements}
       >
@@ -708,10 +738,15 @@ const NoteBody = ({
         <SourceContentsTable byId={byId} contents={contents} />
       ) : null}
       {article}
-      {statements.length > 0 ? (
+      {note.kind === "team" ? (
+        // A team's page is its work, never its people's words: those live on the work's pages.
+        <TeamWork brain={brain} team={note} ws={workspace} />
+      ) : null}
+      {note.kind !== "team" && statements.length > 0 ? (
         <StatementsByKind
           activeId={activeId}
           kern={kernOf(note.id, statements)}
+          onRemove={onRemove}
           rows={statements}
         />
       ) : null}
@@ -732,9 +767,29 @@ const NoteContent = ({
   hash: string;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
+  const canForget = useCanForget();
+  // Once a source is gone its page is too: back to the brain. One thing said goes and the page stays.
+  const forget = useForget((target) => {
+    if ("source" in target) {
+      void navigate({ to: "/brain" });
+    }
+  });
   const source = workspace.sources.find(
     (candidate) => candidate.id === note.id
   );
+  const onRemove = canForget
+    ? (statement: Statement) => {
+        forget.ask({ statements: [statement.id] }, t`what was said`);
+      }
+    : undefined;
+  const { title } = note;
+  const onForget =
+    canForget && source?.forgettable === true
+      ? () => {
+          forget.ask({ source: note.id }, title);
+        }
+      : undefined;
   const transcribed: TranscribedSource | undefined =
     source?.transcript === undefined
       ? undefined
@@ -744,7 +799,9 @@ const NoteContent = ({
       (candidate) => candidate.id === id
     );
     const place = statement ? placeOf(statement, workspace.sources) : undefined;
-    return statement && place ? [{ statement, place }] : [];
+    return statement && place
+      ? [{ statement, place, who: labelOf(workspace, place.source) }]
+      : [];
   });
   // The statement a link opened, when it is one of this note's.
   const activeId = statements.some((row) => row.statement.id === hash)
@@ -765,6 +822,7 @@ const NoteContent = ({
             content: (
               <TranscriptRail
                 activeId={activeId}
+                onRemove={onRemove}
                 source={transcribed}
                 statements={workspace.statements}
               />
@@ -805,17 +863,61 @@ const NoteContent = ({
         />
       }
       tabs={tabs}
-      toolbar={<NoteToolbar note={note} source={source} />}
+      toolbar={<NoteToolbar note={note} onForget={onForget} source={source} />}
     >
       <NoteBody
         activeId={activeId}
         byId={byId}
         note={note}
+        onRemove={onRemove}
         statements={statements}
         transcribed={transcribed}
         workspace={workspace}
       />
+      {forget.element}
     </NoteArticle>
+  );
+};
+
+/**
+ * A piece of work's page: its note, and what Grasp knows about it in its
+ * own sentences (`?knowledge` opens that tab, as the brain's navigation
+ * does).
+ */
+const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
+  const { knowledge } = Route.useSearch();
+  const navigate = useNavigate({ from: "/brain/$noteId" });
+  return (
+    <Tabs
+      onValueChange={(value: string) => {
+        void navigate({
+          search: value === "knowledge" ? { knowledge: true } : {},
+          hash: (previous) => previous ?? "",
+        });
+      }}
+      value={knowledge === true ? "knowledge" : "note"}
+    >
+      <div className="mx-auto w-full max-w-5xl px-6 pt-4">
+        <TabsList variant="line">
+          <TabsTrigger value="note">
+            <Trans context="tab: a piece of work's note in the brain">
+              Note
+            </Trans>
+          </TabsTrigger>
+          <TabsTrigger value="knowledge">
+            <Trans context="tab: what Grasp knows about a piece of work">
+              Knowledge
+            </Trans>
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="note">{children}</TabsContent>
+      <TabsContent value="knowledge">
+        <div className="pb-chat px-6 pt-8">
+          <WorkKnowledgeTab work={note.id} />
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 };
 
@@ -830,7 +932,9 @@ const NoteContent = ({
 const NotePage = () => {
   const { t } = useLingui();
   const { noteId } = Route.useParams();
-  const { brain, workspace } = useBrainData();
+  const { brain, workspace: read } = useBrainData();
+  const { transcript } = Route.useLoaderData();
+  const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
   const note = brain.notes.find((candidate) => candidate.id === noteId);
@@ -850,17 +954,53 @@ const NotePage = () => {
       />
     );
   }
-  return (
-    <NoteContent
-      byId={new Map(brain.notes.map((candidate) => [candidate.id, candidate]))}
-      hash={hash}
-      key={note.id}
-      note={note}
-      workspace={workspace}
-    />
+  const content = (
+    <>
+      {transcript === undefined ? null : <NotLoaded page={transcript} />}
+      <NoteContent
+        byId={
+          new Map(brain.notes.map((candidate) => [candidate.id, candidate]))
+        }
+        hash={hash}
+        key={note.id}
+        note={note}
+        workspace={workspace}
+      />
+    </>
+  );
+  // A piece of work has what Grasp knows about it beside its note.
+  return note.kind === "candidate" ? (
+    <WorkTabs note={note}>{content}</WorkTabs>
+  ) : (
+    content
   );
 };
 
 export const Route = createFileRoute("/_shell/brain/$noteId")({
+  // `?knowledge` opens a piece of work on what Grasp knows about it.
+  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
+    search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true }
+      : {},
+  // The note's transcript, when its source has one: `brain.read`, which the
+  // layout read, says only how many turns it has.
+  loader: async ({
+    abortController,
+    context: { core },
+    params: { noteId },
+    parentMatchPromise,
+  }) => {
+    const { loaderData } = await parentMatchPromise;
+    const workspace =
+      loaderData?.state === "ready" ? loaderData.data.workspace : undefined;
+    return {
+      transcript: await loadTranscript(
+        core,
+        workspace,
+        noteId,
+        abortController.signal
+      ),
+    };
+  },
   component: NotePage,
 });

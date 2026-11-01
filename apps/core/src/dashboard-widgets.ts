@@ -29,7 +29,7 @@ import type {
 import type { Member } from "./auth/identity.ts";
 import type { KeptWidget } from "./custom-widgets.ts";
 import { workspace } from "./durable-objects.ts";
-import { gatewaySettings, modelForRole, models } from "./models.ts";
+import { modelSettings, modelForRole, models } from "./models.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { runActivity } from "./workflows/activity.ts";
 import { workflowOverview } from "./workflows/overview.ts";
@@ -287,7 +287,7 @@ export const makeWidget = async (
     }
     id = known.data;
   }
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

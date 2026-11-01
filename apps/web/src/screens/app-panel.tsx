@@ -3,12 +3,11 @@ import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { useWide } from "../frame/wide.ts";
 import { useAppPanel } from "./app-panel-context.tsx";
 import type { AppPanel, OpenedPanel } from "./app-panel-context.tsx";
-import { ScreenFrame } from "./screen-frame.tsx";
 import type { FailureReason } from "./screen-host.ts";
 import { usePushNavigate } from "./screen-navigate.ts";
 
@@ -21,6 +20,12 @@ import { usePushNavigate } from "./screen-navigate.ts";
 // which lets go of the frame's port, subscriptions and streams. Work the
 // screen started that core admitted carries on as it does when any frame
 // goes.
+
+// The frame and its host load once a panel first opens.
+const ScreenFrame = lazy(async () => {
+  const { ScreenFrame: frame } = await import("./screen-frame.tsx");
+  return { default: frame };
+});
 
 /** Why a panel's screen ended that close the panel: its App is gone for them. */
 const closesPanel: ReadonlySet<FailureReason> = new Set<FailureReason>([
@@ -69,23 +74,28 @@ const PanelScreen = ({
           <XIcon />
         </Button>
       </div>
-      <ScreenFrame
-        app={opened.app}
-        beside
-        embedded
-        onEnded={(ended) => {
-          // The App is gone for the person, or they are: the panel goes too.
-          if (ended.status === "signed-out" || closesPanel.has(ended.reason)) {
-            onDiscard();
-          }
-        }}
-        onGuardChange={onGuard}
-        onNavigate={navigate}
-        screen={opened.screen}
-        {...(opened.route === undefined ? {} : { route: opened.route })}
-        {...(opened.input === undefined ? {} : { input: opened.input })}
-        {...(opened.surface === undefined ? {} : { surface: opened.surface })}
-      />
+      <Suspense fallback={null}>
+        <ScreenFrame
+          app={opened.app}
+          beside
+          embedded
+          onEnded={(ended) => {
+            // The App is gone for the person, or they are: the panel goes too.
+            if (
+              ended.status === "signed-out" ||
+              closesPanel.has(ended.reason)
+            ) {
+              onDiscard();
+            }
+          }}
+          onGuardChange={onGuard}
+          onNavigate={navigate}
+          screen={opened.screen}
+          {...(opened.route === undefined ? {} : { route: opened.route })}
+          {...(opened.input === undefined ? {} : { input: opened.input })}
+          {...(opened.surface === undefined ? {} : { surface: opened.surface })}
+        />
+      </Suspense>
     </div>
   );
 };

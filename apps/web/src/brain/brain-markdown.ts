@@ -123,9 +123,6 @@ export const noteMarkdown = (
     if (given(ref.workflowId)) {
       return `[${label}](${baseUrl}/workflows/${pathPart(ref.workflowId)})`;
     }
-    if (given(ref.policyId)) {
-      return `[${label}](${baseUrl}/policies/documents/${pathPart(ref.policyId)})`;
-    }
     if (given(ref.to)) {
       const statement = given(ref.statement)
         ? `#${pathPart(ref.statement)}`

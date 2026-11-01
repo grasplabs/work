@@ -37,14 +37,14 @@ watched();
 
 describe("a known person's message", () => {
   it("is taken, and its conversation kept as theirs", async () => {
-    const { userId, teams, gateway } = await member(idp, says("You're free."));
+    const { userId, teams, provider } = await member(idp, says("You're free."));
 
     await expect(post(messageFrom(teams))).resolves.toBe(200);
 
     await expect(kept(teams.conversation)).resolves.toStrictEqual([
       { platform: "teams", userId },
     ]);
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
     expect(toMicrosoft).toStrictEqual([]);
   });
 
@@ -101,7 +101,7 @@ describe("a known person's message", () => {
   });
 
   it("is taken once when Teams sends it again", async () => {
-    const { teams, gateway } = await member(
+    const { teams, provider } = await member(
       idp,
       says("First."),
       says("Second.")
@@ -113,7 +113,7 @@ describe("a known person's message", () => {
     await post(messageFrom(teams));
 
     await expect(kept(teams.conversation)).resolves.toHaveLength(1);
-    expect(gateway.requests).toHaveLength(2);
+    expect(provider.requests).toHaveLength(2);
   });
 });
 

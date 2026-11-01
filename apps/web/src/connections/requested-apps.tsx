@@ -7,6 +7,7 @@ import { ClockIcon } from "lucide-react";
 import { formatDate, formatDayMonth } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { AppLogo } from "./app-logo.tsx";
+import { IntegrationsSection } from "./integrations-section.tsx";
 
 // The apps people asked Grasp to add, until Grasp adds them, as in the
 // prototype (`routes/integrations/index.tsx`, `Requested`): who asked,
@@ -40,38 +41,47 @@ const RequestedRow = ({ request }: { request: AppRequest }) => {
   );
 };
 
-const RequestedList = ({ requests }: { requests: Loaded<AppRequest[]> }) => {
-  if (requests.state !== "ready" || requests.data.length === 0) {
-    return null;
-  }
+const RequestedList = ({
+  requests,
+  search,
+}: {
+  requests: Loaded<AppRequest[]>;
+  search: string | undefined;
+}) => {
+  const { t } = useLingui();
+  const needle = (search ?? "").trim().toLocaleLowerCase();
+  const shown =
+    requests.state === "ready"
+      ? requests.data.filter(({ name }) =>
+          name.toLocaleLowerCase().includes(needle)
+        )
+      : [];
   return (
-    <section
-      aria-labelledby="integrations-requested"
-      className="flex flex-col gap-1"
+    <IntegrationsSection
+      count={shown.length}
+      id="requested"
+      title={t({ message: "Requested", context: "apps someone asked for" })}
     >
-      <h2 className="text-muted-foreground" id="integrations-requested">
-        <Trans context="apps someone asked for">Requested</Trans>
-      </h2>
-      <ul className="grid grid-cols-1 gap-x-10 gap-y-1 @2xl:grid-cols-2">
-        {requests.data.map((request) => (
-          <RequestedRow key={request.id} request={request} />
-        ))}
-      </ul>
-    </section>
+      {shown.map((request) => (
+        <RequestedRow key={request.id} request={request} />
+      ))}
+    </IntegrationsSection>
   );
 };
 
 /**
- * The apps asked for, under the catalog; nothing while they load, when
- * nobody asked, or when the read failed.
+ * The apps asked for whose name holds what was searched; nothing while
+ * they load, when nobody asked, or when the read failed.
  */
 export const RequestedApps = ({
   requests,
+  search,
 }: {
   /** Read on its own, so the catalog never waits for it. */
   requests: Promise<Loaded<AppRequest[]>>;
+  search: string | undefined;
 }) => (
   <Await fallback={null} promise={requests}>
-    {(loaded) => <RequestedList requests={loaded} />}
+    {(loaded) => <RequestedList requests={loaded} search={search} />}
   </Await>
 );

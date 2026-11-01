@@ -22,7 +22,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   bindWorkflowToApp,
@@ -31,9 +31,15 @@ import {
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
+import {
+  grantPermission,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
 import { standingOf } from "../src/screen-trust.ts";
+import { pendingWorkflowBindings } from "../src/workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -42,6 +48,7 @@ import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
+import { decideGoLive, requestGoLive } from "../src/workflow-lifecycle.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
@@ -64,6 +71,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { connectModels } from "./model-provider.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Catalog bindings, App bindings and parameters of independent workflows
@@ -76,8 +84,14 @@ import { outcome, refusal, unique } from "./sign-in.ts";
 
 type Person = Identity;
 
-/** The model the test deployment's gateway allows (vite.config.ts). */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the only one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+// No call reaches the model: its provider is connected, and the model
+// chosen, so that an admin may bind it.
+const chooseModel = async (): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
+};
 
 const person = async (role: Role, staff = false): Promise<Person> => {
   const userId = crypto.randomUUID();
@@ -314,6 +328,20 @@ const definitionOf = ({
     ],
   });
 
+/** An action of a workflow's that reads Knowledge through `docs`. */
+const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const look = action({
+  args: {},
+  returns: v.object({ status: v.string() }),
+  uses: [resource.knowledge("docs", { operations: ["search"] })],
+  handler: async (ctx) => {
+    const hits = await ctx.resources.docs.search({ text: "leave" });
+    return { status: String(hits.length) };
+  },
+});
+`;
+
 /** A workflow `owner` created and published as `draft` at version 1. */
 const workflowOf = async (owner: Person, model?: string) => {
   const workflow = await createWorkflowResource(
@@ -418,6 +446,8 @@ const decide = async (
 };
 
 describe("the host catalog", () => {
+  beforeAll(chooseModel);
+
   it("takes a contract once, from an admin, as the profile reads it, and never changes it", async () => {
     const admin = await person("admin");
     const builder = await person("builder");
@@ -530,6 +560,8 @@ const eventContract = async (admin: Person): Promise<string> => {
 };
 
 describe("event contracts", () => {
+  beforeAll(chooseModel);
+
   it("admit each event type only with its data's contract and whether a screen sends it", async () => {
     const admin = await person("admin");
     const data = JSON.stringify(emptyObject);
@@ -777,6 +809,8 @@ describe("event contracts", () => {
 });
 
 describe("approving a workflow's binding", () => {
+  beforeAll(chooseModel);
+
   it("is for admins, of a target that can serve it, in a version that declares it", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -794,7 +828,8 @@ describe("approving a workflow's binding", () => {
       builder: await outcome(approve(ada, model)),
       staff: await outcome(approve(staff, model)),
       notAllowed: await outcome(
-        approve(admin, { kind: "model", model: "openai/not-allowed" })
+        // A model there is, but one the organization didn't choose.
+        approve(admin, { kind: "model", model: "openai/gpt-5.4" })
       ),
       wrongKind: await outcome(
         approve(admin, { kind: "decision", deciders: ["role:admin"] })
@@ -971,7 +1006,233 @@ describe("approving a workflow's binding", () => {
   });
 });
 
+describe("bindings waiting on an admin", () => {
+  it("list a live version's and a go-live version's unapproved bindings for admins, with the targets that would serve, until one is approved and lets a start through", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({
+        name: workflow.name,
+        version: "1.1.0",
+        model: key,
+      }),
+      basedOn: 1,
+    });
+    const asked = await requestGoLive(env, ada, workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    await decideGoLive(env, admin, workflow.id, {
+      version: 1,
+      verdict: "approve",
+      revision: asked.revision,
+    });
+    const live = await requestGoLive(env, ada, workflow.id, {
+      version: 2,
+      revision: asked.revision + 1,
+    });
+    const pendingOf = async () => {
+      const pending = await pendingWorkflowBindings(env, admin);
+      return pending.filter((each) => each.workflow.id === workflow.id);
+    };
+    const before = await pendingOf();
+    const refused = await outcome(start(ada, workflow.id));
+    const [offered] = before[0]?.bindings[0]?.offered ?? [];
+    if (offered === undefined) {
+      throw new Error("No target offered");
+    }
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "summary",
+      target: offered.target,
+      reviewed: { version: 1 },
+    });
+    const after = await pendingOf();
+    const started = await outcome(start(ada, workflow.id));
+
+    const waiting = (version: number, isLive: boolean) => ({
+      workflow: { id: workflow.id, name: workflow.name },
+      version,
+      live: isLive,
+      bindings: [
+        {
+          alias: "summary",
+          kind: "model",
+          contractId: key,
+          offered: [
+            {
+              target: { kind: "model", model: allowedModel },
+              label: allowedModel,
+            },
+          ],
+        },
+      ],
+    });
+    expect({
+      goLiveAsked: live.goLive?.version,
+      before,
+      refused,
+      after,
+      started,
+    }).toStrictEqual({
+      goLiveAsked: 2,
+      before: [waiting(1, true), waiting(2, false)],
+      refused: "workflow.binding_unapproved",
+      // Version 2 still waits: an approval serves the version reviewed alone.
+      after: [waiting(2, false)],
+      started: "ok",
+    });
+  });
+
+  it("offer a knowledge binding the workflow's own collection grants only, and approve no target that wouldn't serve as the Approve lands", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = `docs-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "knowledge" });
+    const handbook = await createCollection(env, admin, {
+      name: "Handbook",
+      access: "everyone",
+    });
+    const reading = async () => {
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `read-${unique()}`
+      );
+      await publishWorkflowVersion(env, ada, workflow.id, {
+        definition: JSON.stringify({
+          document: {
+            dsl: "1.0.3",
+            namespace: workflowNamespace,
+            name: workflow.name,
+            version: "1.0.0",
+            title: workflow.name,
+            metadata: {
+              grasp: {
+                profile: "grasp-open-workflow/1",
+                params: {},
+                bindings: {
+                  look: {
+                    kind: "operation",
+                    contract: "local:code/look.ts#look",
+                  },
+                  docs: { kind: "knowledge", contract: key },
+                },
+              },
+            },
+          },
+          input: { schema: objectSchema({ who: { type: "string" } }) },
+          output: { schema: objectSchema({ status: { type: "string" } }) },
+          do: [
+            {
+              look: {
+                call: "grasp.operation",
+                with: { binding: "look", arguments: {} },
+              },
+            },
+          ],
+        }),
+        basedOn: null,
+        modules: { "code/look.ts": lookModule },
+      });
+      const permissionId = await granted(ada, admin, {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "collection", collectionId: handbook.id },
+        actions: ["read"],
+        binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      return { workflow, permissionId };
+    };
+    const { workflow, permissionId } = await reading();
+    // Another workflow's grant on the same collection: never this one's.
+    const other = await reading();
+    const asked = await requestGoLive(env, ada, workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    await decideGoLive(env, admin, workflow.id, {
+      version: 1,
+      verdict: "approve",
+      revision: asked.revision,
+    });
+    const offeredOf = async () => {
+      const pending = await pendingWorkflowBindings(env, admin);
+      return pending
+        .filter((each) => each.workflow.id === workflow.id)
+        .flatMap((each) =>
+          each.bindings
+            .filter(({ alias }) => alias === "docs")
+            .map(({ offered }) => offered)
+        );
+    };
+    const approve = async (target: unknown) =>
+      await outcome(
+        approveWorkflowBinding(env, admin, workflow.id, {
+          alias: "docs",
+          target,
+          reviewed: { version: 1 },
+        })
+      );
+
+    const before = await offeredOf();
+    const othersGrant = await approve({
+      kind: "knowledge",
+      permissionId: other.permissionId,
+    });
+    // Revoked after it was offered, before the Approve lands.
+    await revokePermission(env, admin, permissionId);
+    const revokedSinceOffered = await approve({
+      kind: "knowledge",
+      permissionId,
+    });
+    const approvals = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_binding_approvals WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .first<{ count: number }>();
+
+    expect({
+      before,
+      othersGrant,
+      revokedSinceOffered,
+      approvals: approvals?.count,
+      after: await offeredOf(),
+    }).toStrictEqual({
+      before: [
+        [{ target: { kind: "knowledge", permissionId }, label: "Handbook" }],
+      ],
+      othersGrant: "workflow.binding_invalid",
+      revokedSinceOffered: "workflow.binding_invalid",
+      approvals: 0,
+      after: [[]],
+    });
+  });
+
+  it("are listed to the organization's own admins only, never builders, users or Grasp staff", async () => {
+    const [builder, user, staff] = await Promise.all([
+      person("builder"),
+      person("user"),
+      person("admin", true),
+    ]);
+
+    const refused = await Promise.all(
+      [builder, user, staff].map(
+        async (by) => await outcome(pendingWorkflowBindings(env, by))
+      )
+    );
+
+    expect(refused).toStrictEqual([
+      "role.forbidden",
+      "role.forbidden",
+      "role.forbidden",
+    ]);
+  });
+});
+
 describe("approving an operation", () => {
+  beforeAll(chooseModel);
+
   it("takes no App's export as its target, whatever release or shape it names, and approves nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1063,6 +1324,8 @@ describe("approving an operation", () => {
 });
 
 describe("what a start freezes", () => {
+  beforeAll(chooseModel);
+
   it("serves an approval to the exact version an admin reviewed, never a later or an earlier one", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1181,7 +1444,15 @@ describe("what a start freezes", () => {
     const frozen: unknown = JSON.parse(stored?.bindings ?? "[]");
     // The start admitted before the revocation, sent again, is that start.
     const sentAgain = await startWorkflow(env, asAda, workflow.id, request);
+    const events = await allEvents();
     expect({
+      // Recorded once, by the revocation that changed it.
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.binding.revoked" && target?.id === workflow.id
+        )
+        .map(({ detail }) => detail.approval),
       revokedAgain: (await generation()) === revoked,
       unapproved,
       frozen,
@@ -1189,6 +1460,7 @@ describe("what a start freezes", () => {
       after: await outcome(start(ada, workflow.id)),
       sentAgain: sentAgain.id,
     }).toStrictEqual({
+      audited: [approval.id],
       unapproved: "workflow.binding_unapproved",
       frozen: [
         {
@@ -1319,6 +1591,8 @@ describe("what a start freezes", () => {
 });
 
 describe("parameter configuration", () => {
+  beforeAll(chooseModel);
+
   it("is revision-checked, checked against the current version, and edited by builders, never staff", async () => {
     const ada = await person("builder");
     const reader = await person("builder");
@@ -1586,6 +1860,8 @@ describe("parameter configuration", () => {
 });
 
 describe("a sensitive parameter", () => {
+  beforeAll(chooseModel);
+
   it("stays withheld once any version marked it, whatever a later version says", async () => {
     const ada = await person("builder");
     const reader = await person("builder");
@@ -1635,6 +1911,8 @@ describe("a sensitive parameter", () => {
 });
 
 describe("an App binding a workflow", () => {
+  beforeAll(chooseModel);
+
   it("pins an exact version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1795,6 +2073,8 @@ describe("an App binding a workflow", () => {
 });
 
 describe("screen trust through workflows", () => {
+  beforeAll(chooseModel);
+
   it("makes the screens of an App sensitive again when an App its workflow calls is granted more", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1836,6 +2116,8 @@ describe("screen trust through workflows", () => {
 });
 
 describe("retention", () => {
+  beforeAll(chooseModel);
+
   it("removes a receipt's input and values and a replaced revision's values, and nothing else", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
@@ -1864,7 +2146,7 @@ describe("retention", () => {
       },
       { timeout: 30_000, interval: 100 }
     );
-    // Run retention, past the deployment's retention (30 days).
+    // Past the run retention (30 days).
     await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 3_600_000));
     const receipt = await receiptRow(first.id);
     const revisions = await env.DB.prepare(
@@ -1906,6 +2188,8 @@ describe("retention", () => {
 });
 
 describe("deleting a workflow", () => {
+  beforeAll(chooseModel);
+
   it("is refused while a run of it hasn't ended, and the refusal audited with it", async () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(

@@ -935,7 +935,9 @@ const createAuth = (
         creatorRole: "admin",
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
-        teams: { enabled: true },
+        // An organization may have no teams at all: an admin deletes
+        // the last one as any other (Settings › Members).
+        teams: { enabled: true, allowRemovingAllTeams: true },
         // Leaving a team, or the team's deletion, can take a role in each
         // App shared with it away: their hosts tell the open screens to
         // look again (access-revocations.ts).

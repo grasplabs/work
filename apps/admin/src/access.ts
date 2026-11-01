@@ -5,7 +5,9 @@
  * the team's keys, for the admin's application, or it is refused.
  */
 import { loopbackHosts } from "@grasp-os/shared/router";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createLocalJWKSet, errors, jwtVerify } from "jose";
+import type { JSONWebKeySet } from "jose";
+import { z } from "zod";
 
 /** The staff member a request comes from, as Access vouches for them. */
 export interface Staff {
@@ -33,16 +35,108 @@ const assertionHeader = "cf-access-jwt-assertion";
 /** Methods that change nothing, so a cross-site request can't abuse them. */
 const safeMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 
-/** One key set per team, so its keys are fetched once per isolate, not per request. */
-const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+/** How long a team's keys are kept before they are fetched again. */
+const keysMaxAgeMs = 10 * 60 * 1000;
 
-const keySetFor = (issuer: string) => {
-  let keySet = keySets.get(issuer);
-  if (keySet === undefined) {
-    keySet = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
-    keySets.set(issuer, keySet);
+/** How long a key set's fetch may take. */
+const keysTimeoutMs = 5000;
+
+/**
+ * How long after a refetch for a key id the kept keys didn't have the next
+ * such refetch waits: a forged JWT naming a made-up key id, sent past
+ * Access, is refused at once rather than fetching the keys each time.
+ */
+const missCooldownMs = 30 * 1000;
+
+/**
+ * Each team's keys as last fetched, per isolate: plain data only. Never a
+ * fetch in flight, a response or a remote key set holding one: those
+ * belong to the request that made them, and another request awaiting them
+ * fails ("Cannot perform I/O on behalf of a different request") or hangs.
+ * Each request that finds no fresh keys fetches them itself.
+ * `lastMissFetchAt` is when a JWT's unknown key id last made a request
+ * try to fetch them again (`missCooldownMs`), recorded before that fetch
+ * starts, whether it then succeeds or not; null before any.
+ */
+const keyCache = new Map<
+  string,
+  { keys: JSONWebKeySet; fetchedAt: number; lastMissFetchAt: number | null }
+>();
+
+const keySetSchema = z.object({
+  keys: z.array(z.object({ kty: z.string() }).loose()),
+});
+
+/**
+ * The team's keys, fetched now, in the asking request, and kept, with the
+ * last miss refetch as it was recorded (`lastMissFetchAt`).
+ */
+const fetchKeys = async (issuer: string): Promise<JSONWebKeySet> => {
+  const response = await fetch(`${issuer}/cdn-cgi/access/certs`, {
+    signal: AbortSignal.timeout(keysTimeoutMs),
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Access keys answered ${String(response.status)}`);
   }
-  return keySet;
+  const keys: JSONWebKeySet = keySetSchema.parse(await response.json());
+  keyCache.set(issuer, {
+    keys,
+    fetchedAt: Date.now(),
+    lastMissFetchAt: keyCache.get(issuer)?.lastMissFetchAt ?? null,
+  });
+  return keys;
+};
+
+/**
+ * Verifies `token` with the team's keys: those kept while fresh, else
+ * fetched; kept keys that have no key for it are fetched again once, as
+ * Access rotates its keys, at most once every `missCooldownMs`: within
+ * it, a JWT naming an unknown key id is refused without a fetch.
+ */
+const verifyAccessToken = async (
+  token: string,
+  issuer: string,
+  audience: string
+) => {
+  const options = {
+    issuer,
+    audience,
+    // Access signs with RS256; nothing else is accepted.
+    algorithms: ["RS256"],
+  };
+  const kept = keyCache.get(issuer);
+  if (kept === undefined || Date.now() - kept.fetchedAt >= keysMaxAgeMs) {
+    return await jwtVerify(
+      token,
+      createLocalJWKSet(await fetchKeys(issuer)),
+      options
+    );
+  }
+  try {
+    return await jwtVerify(token, createLocalJWKSet(kept.keys), options);
+  } catch (error) {
+    if (!(error instanceof errors.JWKSNoMatchingKey)) {
+      throw error;
+    }
+    // Read, checked and recorded with nothing awaited in between, before
+    // the fetch: concurrent misses after this one refuse at once, and a
+    // fetch that fails still starts the cooldown.
+    const now = Date.now();
+    const current = keyCache.get(issuer) ?? kept;
+    if (
+      current.lastMissFetchAt !== null &&
+      now - current.lastMissFetchAt < missCooldownMs
+    ) {
+      throw error;
+    }
+    keyCache.set(issuer, { ...current, lastMissFetchAt: now });
+    return await jwtVerify(
+      token,
+      createLocalJWKSet(await fetchKeys(issuer)),
+      options
+    );
+  }
 };
 
 /**
@@ -61,12 +155,7 @@ const verifiedStaff = async (
     return null;
   }
   try {
-    const { payload } = await jwtVerify(token, keySetFor(issuer), {
-      issuer,
-      audience,
-      // Access signs with RS256; nothing else is accepted.
-      algorithms: ["RS256"],
-    });
+    const { payload } = await verifyAccessToken(token, issuer, audience);
     if (typeof payload.email !== "string" || payload.email === "") {
       return null;
     }

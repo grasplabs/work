@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { WebSocketRoute } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -7,14 +7,37 @@ import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // The Chat page: a person asks in a new chat and follows the answer as it
-// comes in, renames the chat, reads the writes its agent holds for them
+// comes in, finds it in the ⌘K window by what was said in it, renames it
+// there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off. The local stack reaches no model, so the answer is the
+// off. The stack's provider refuses its key, so the answer is the
 // gateway's failure; streaming, resuming and the person check themselves
 // are core's tests (apps/core/test/chats.test.ts).
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
+
+/** The window of the person's chats and projects, opened from its icon. */
+const chatsWindow = async (page: Page) => {
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  const window = page.getByRole("dialog", { name: "Chats" });
+  await expect(window).toBeVisible();
+  return window;
+};
+
+/** A chat's row in the window, by its title. */
+const rowOf = (window: ReturnType<Page["getByRole"]>, title: string) =>
+  window
+    .getByRole("option")
+    .filter({ has: window.page().getByText(title, { exact: true }) });
+
+const regExpSyntax = /[$()*+.?[\\\]^{|}]/gu;
+
+/** A project in the window's column, by its name, with its count of chats. */
+const scopeOf = (window: ReturnType<Page["getByRole"]>, name: string) =>
+  window.getByRole("navigation", { name: "Projects" }).getByRole("button", {
+    name: new RegExp(`^${name.replaceAll(regExpSyntax, "\\$&")} \\d+$`, "u"),
+  });
 
 /**
  * A write the chat's agent asked for, as connect holds it for `person`:
@@ -100,19 +123,27 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
+  // Offered the tour first, in the greeting's place: turned down, the box
+  // to ask in has the focus the gone button had.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByLabel("Your question")).toBeFocused();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // No model answers here: the answer says so once the turn ends.
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  // The local stack's provider refuses every key (e2e/model-fake.ts): the
+  // answer says so once the turn ends, and who can put it right.
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
-  const chats = page.getByRole("navigation", { name: "Recent chats" });
-  await expect(chats.getByRole("link", { name: question })).toBeVisible();
+  // It is the first chat in the window, named after the question.
+  let chats = await chatsWindow(page);
+  await expect(rowOf(chats, question)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(chats).toHaveCount(0);
 
   // Trying again asks the question again, and a draft started meanwhile
   // stays in the box.
@@ -124,35 +155,41 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     messages.getByRole("listitem").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  // The first try's failure stays where it was; the new one is last.
+  await expect(messages.getByRole("alert").last()).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   await box.fill("");
 
-  // Renamed from the chat's menu in the list.
+  // Renamed from the chat's menu in the window, in place: the name is in
+  // a field, Escape keeps the one it had and Enter keeps the new one.
+  chats = await chatsWindow(page);
   await chats.getByRole("button", { name: `More for ${question}` }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  // In place: the name is in a field, Enter keeps it.
   const name = chats.getByLabel("Chat name");
   await expect(name).toBeFocused();
-  await name.fill(`Draft ${tag}`);
-  await name.press("Enter");
-  await expect(chats.getByRole("link", { name: `Draft ${tag}` })).toBeVisible();
-
-  // A double click renames it too, rather than opening it; Escape keeps
-  // the name it had.
-  await chats.getByRole("link", { name: `Draft ${tag}` }).dblclick();
-  await chats.getByLabel("Chat name").fill("Never kept");
-  await chats.getByLabel("Chat name").press("Escape");
-  await expect(chats.getByRole("link", { name: `Draft ${tag}` })).toBeFocused();
-  await chats.getByRole("link", { name: `Draft ${tag}` }).dblclick();
+  await name.fill("Never kept");
+  await name.press("Escape");
+  await expect(rowOf(chats, question)).toBeVisible();
+  await chats.getByRole("button", { name: `More for ${question}` }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
   await chats.getByLabel("Chat name").fill(title);
   await chats.getByLabel("Chat name").press("Enter");
+  await expect(rowOf(chats, title)).toBeVisible();
+
+  // Found by what was said in it, which its title no longer holds, with
+  // the line it was said in under the title; a word nobody said finds
+  // nothing.
+  const search = chats.getByLabel("Search chats and projects");
+  await search.fill(`ben ${tag}`);
+  await expect(rowOf(chats, title)).toContainText(`Send Ben invoice ${tag}.`);
+  await expect(rowOf(chats, title).locator("mark")).toHaveText("Ben");
+  await search.fill(`never said ${tag}`);
+  await expect(chats.getByRole("option")).toHaveCount(0);
+  await expect(chats).toContainText("No chat has that.");
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
-  await expect(chats.getByRole("link", { name: title })).toBeVisible();
-  // One line per chat: its title alone.
-  await expect(chats.getByRole("link", { name: title })).toHaveText(title);
 
   const chatId = new URL(page.url()).searchParams.get("chat") ?? "";
   const account = `mail-${tag}@acme.test`;
@@ -254,19 +291,18 @@ test("a person groups chats in a project with a goal and a document, moves them 
   const second = `Second about ${tag}.`;
   const projectName = `Board report ${tag}`;
   await page.goto("/");
-  const chats = page.getByRole("navigation", { name: "Recent chats" });
-  const projects = chats.getByRole("region", { name: "Projects" });
-  const project = projects.getByRole("listitem", { name: projectName });
-  const asked = async (question: string): Promise<void> => {
-    await page.getByLabel("Your question").fill(question);
+  const asked = async (box: string, question: string): Promise<void> => {
+    await page.getByLabel(box).fill(question);
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page).toHaveURL(/[?&]chat=/u);
   };
-  await asked(first);
-  await expect(chats.getByRole("link", { name: first })).toBeVisible();
+  await asked("Your question", first);
 
-  // A new project, with a goal and a document; a PDF isn't taken.
-  await projects.getByRole("button", { name: "New project" }).click();
+  // A new project from the window, with a goal and a document; a PDF
+  // isn't taken.
+  let chats = await chatsWindow(page);
+  await expect(rowOf(chats, first)).toBeVisible();
+  await chats.getByRole("button", { name: "New project" }).click();
   const dialog = page.getByRole("dialog", { name: "New project" });
   await dialog.getByLabel("Name").fill(projectName);
   await dialog.getByLabel("Goal").fill("Get the board report out by Friday.");
@@ -289,60 +325,63 @@ test("a person groups chats in a project with a goal and a document, moves them 
   ).toHaveText("brief.md");
   await dialog.getByRole("button", { name: "Create project" }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(project).toContainText("No chats yet.");
+  // The window shows the new project, which holds no chat yet.
+  const projects = chats.getByRole("navigation", { name: "Projects" });
+  const project = scopeOf(chats, projectName);
+  await expect(project).toHaveAttribute("aria-pressed", "true");
+  await expect(chats).toContainText("No chats here yet.");
 
   // Moved in from the chat's menu, by keyboard.
+  await projects.getByRole("button", { name: /^All chats/u }).click();
   await chats.getByRole("button", { name: `More for ${first}` }).focus();
   await page.keyboard.press("Enter");
   await page.getByRole("menuitem", { name: "Move to project" }).focus();
   await page.keyboard.press("ArrowRight");
   await page.getByRole("menuitem", { name: projectName }).focus();
   await page.keyboard.press("Enter");
-  await expect(project.getByRole("link", { name: first })).toBeVisible();
-  // The open chat says which project it is in.
+  await project.click();
+  await expect(rowOf(chats, first)).toBeVisible();
+  // The open chat says which project it is in, and leads to its page.
+  await page.keyboard.press("Escape");
+  const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(crumbs).toContainText(projectName);
+  await crumbs.getByRole("link", { name: projectName }).click();
+
+  // The project's page: its goal as its instructions, its document and
+  // the room it takes, and its chats.
+  await expect(page).toHaveURL(/\/projects\//u);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectName);
+  const reads = page.getByRole("complementary", {
+    name: "What Grasp reads in this project",
+  });
+  await expect(reads).toContainText("Get the board report out by Friday.");
   await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" })
-  ).toContainText(projectName);
+    reads.getByRole("list", { name: "Documents in this project" })
+  ).toHaveText("brief.md");
+  await expect(reads).toContainText("of the project’s room used");
+  const projectChats = page.getByRole("region", { name: "Chats" });
+  await expect(projectChats.getByRole("link", { name: first })).toBeVisible();
 
   // A chat started from the project is in it.
-  await project
-    .getByRole("button", { name: `More for the project ${projectName}` })
-    .click();
+  await asked(`Start a chat in ${projectName}`, second);
+  chats = await chatsWindow(page);
+  await project.click();
+  await expect(rowOf(chats, first)).toBeVisible();
+  await expect(rowOf(chats, second)).toBeVisible();
+
+  // Taken out of it from its menu: it stays among all chats.
+  await chats.getByRole("button", { name: `More for ${first}` }).click();
+  await page.getByRole("menuitem", { name: "Move to project" }).click();
+  await page.getByRole("menuitem", { name: "Take out of the project" }).click();
+  await expect(rowOf(chats, first)).toHaveCount(0);
+  await projects.getByRole("button", { name: /^All chats/u }).click();
+  await expect(rowOf(chats, first)).toBeVisible();
+
+  // Deleted from its page: its chats stay.
+  await project.click();
+  await chats.getByRole("link", { name: "Instructions and files" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectName);
   await page
-    .getByRole("menuitem", { name: "New chat in this project" })
-    .click();
-  await expect(
-    page.getByText(`New chat in the project ${projectName}`)
-  ).toBeVisible();
-  await asked(second);
-  await expect(project.getByRole("link", { name: second })).toBeVisible();
-
-  // Dragged out onto the chats by date, and back in onto the project.
-  const byDate = chats.getByRole("region", { name: "Chats by date" });
-  await project.getByRole("link", { name: first }).dragTo(byDate);
-  await expect(project.getByRole("link", { name: first })).toHaveCount(0);
-  await expect(byDate.getByRole("link", { name: first })).toBeVisible();
-  await byDate
-    .getByRole("link", { name: first })
-    .dragTo(project.getByRole("button", { name: projectName, exact: true }));
-  await expect(project.getByRole("link", { name: first })).toBeVisible();
-
-  // Its goal and document are kept.
-  await project
-    .getByRole("button", { name: `More for the project ${projectName}` })
-    .click();
-  await page.getByRole("menuitem", { name: "Goal and documents" }).click();
-  const editing = page.getByRole("dialog", { name: "Edit project" });
-  await expect(editing.getByLabel("Goal")).toHaveValue(
-    "Get the board report out by Friday."
-  );
-  await expect(
-    editing.getByRole("list", { name: "Documents in this project" })
-  ).toHaveText("brief.md");
-  await editing.getByRole("button", { name: "Cancel" }).click();
-
-  // Deleted: its chats stay, by date.
-  await project
     .getByRole("button", { name: `More for the project ${projectName}` })
     .click();
   await page.getByRole("menuitem", { name: "Delete project" }).click();
@@ -350,9 +389,31 @@ test("a person groups chats in a project with a goal and a document, moves them 
     .getByRole("dialog", { name: `Delete the project “${projectName}”?` })
     .getByRole("button", { name: "Delete project" })
     .click();
-  await expect(project).toHaveCount(0);
-  await expect(byDate.getByRole("link", { name: first })).toBeVisible();
-  await expect(byDate.getByRole("link", { name: second })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/projects\//u);
+  chats = await chatsWindow(page);
+  await expect(scopeOf(chats, projectName)).toHaveCount(0);
+  await expect(rowOf(chats, first)).toBeVisible();
+  await expect(rowOf(chats, second)).toBeVisible();
+});
+
+test("a person starts a chat from one of the questions under the box", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  await page.goto("/");
+  // The questions wait while the tour is offered, as in the prototype:
+  // turned down, they are under the box.
+  await page.getByRole("button", { name: "Not now" }).click();
+  const questions = page.getByRole("list", { name: "Questions to start with" });
+  await expect(questions.getByRole("button")).toHaveCount(4);
+  await questions
+    .getByRole("button", { name: "What waits on me today?" })
+    .click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  await expect(
+    page.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
+  ).toHaveText("What waits on me today?");
 });
 
 test("a followed chat says core can't be reached when it stays out of reach", async ({
@@ -375,21 +436,19 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
-  // The turn has ended (the local stack reaches no model), so nothing
-  // else is on its way when the connection drops.
+  // The turn has ended (the local stack's provider refuses every key), so
+  // nothing else is on its way when the connection drops.
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`
   );
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
-  await expect(
-    page
-      .getByRole("navigation", { name: "Recent chats" })
-      .getByRole("link", { name: `Out of reach ${tag}.` })
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    `Out of reach ${tag}.`
+  );
 
   // The page's connection drops and none gets in: following stops, and
   // says why, once the page has waited its few seconds for a connection.
@@ -420,33 +479,36 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
   await control.click();
   const choices = page.getByRole("menuitemradio");
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
   ]);
 
   // One that thinks offers its efforts in the same menu, which stays open
   // for them, at the model's own default.
-  await page.getByRole("menuitemradio", { name: /^glm-5\.3-flash/u }).click();
+  await page
+    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
+    .click();
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
     "Low",
+    "Medium",
     "High",
     "Max",
   ]);
   await expect(
-    page.getByRole("menuitemradio", { name: "High" })
+    page.getByRole("menuitemradio", { name: "Medium" })
   ).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemradio", { name: "Max" }).click();
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   const question = `Think hard ${tag}.`;
@@ -461,23 +523,23 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     (message) => message.includes('"send"') && message.includes(question)
   );
   expect(asked).toContain('"effort":"max"');
-  expect(asked).toContain('"model":"workers-ai/@cf/zai-org/glm-5.3-flash"');
+  expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
   // Kept for the person in this browser.
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
   await page
-    .getByRole("menuitemradio", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
     .click();
   await expect(choices).toHaveCount(2);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
 });
 
@@ -539,38 +601,35 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   // The page stayed where it was.
   expect(new URL(page.url()).pathname).toBe("/domains");
 
-  // Folded away, it is the bar again, and opens again on the same chat,
-  // the cursor in the box all along, and what was typed still there.
+  // Folded away, it is the bar again, and a click into the box opens it
+  // again on the same chat, the cursor in the box all along, and what was
+  // typed still there.
   await dock.getByRole("button", { name: "Fold the chat away" }).click();
   await expect(dock).toHaveCount(0);
   await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(dock).toHaveCount(0);
+  await box.click();
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await expect(box).toBeFocused();
   await expect(box).toHaveValue(`Half a thought ${tag}`);
 
-  // It is the chat in Chat, in its list, where the dock isn't.
+  // It is the chat in Chat, where the dock isn't.
   await dock.getByRole("link", { name: "Open in chat" }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(question);
-  await expect(
-    page
-      .getByRole("navigation", { name: "Recent chats" })
-      .getByRole("link", { name: question, exact: true })
-  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
 
   // A new chat from the dock starts afresh.
   await page.goto("/knowledge");
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await box.click();
   await dock.getByRole("button", { name: "New chat" }).click();
   await expect(dock.getByRole("list", { name: "Messages" })).toHaveCount(0);
   await expect(dock).toContainText("Ask anything, or describe a process");
@@ -582,17 +641,13 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await expect(messages.getByRole("listitem").first()).toHaveText(second);
 
   // Chat, from the sidebar, opens on the dock's chat, and both chats are
-  // in its list.
+  // in its window.
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Chat" })
     .click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(second);
-  const list = page.getByRole("navigation", { name: "Recent chats" });
-  await expect(
-    list.getByRole("link", { name: second, exact: true })
-  ).toBeVisible();
-  await expect(
-    list.getByRole("link", { name: question, exact: true })
-  ).toBeVisible();
+  const chats = await chatsWindow(page);
+  await expect(rowOf(chats, second)).toBeVisible();
+  await expect(rowOf(chats, question)).toBeVisible();
 });

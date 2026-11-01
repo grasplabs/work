@@ -13,15 +13,17 @@ import {
   connectorsFile,
 } from "../../connect/build.ts";
 import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
+import { testRun } from "./test-run.ts";
 
 const connect = path.join(import.meta.dirname, "../../connect");
 const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
 
-/** Where core's global setup writes the bundle for its tests. */
-export const connectBundle = path.join(
-  import.meta.dirname,
-  "../dist/test-connect/index.js"
-);
+/**
+ * Where core's global setup writes the bundle for its tests: in the run's
+ * own directory, so another run can't rewrite it while this one's config
+ * reads it.
+ */
+export const connectBundle = path.join(testRun, "connect.js");
 
 /** The connect Worker's bundle, as one ES module, its connectors in it. */
 export const bundleConnect = async (): Promise<string> => {

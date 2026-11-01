@@ -13,6 +13,13 @@ export interface Deadline {
   endsAt: number;
 }
 
+/** Whether an abort's reason says time ran out: a `TimeoutError`. */
+const isTimeoutReason = (reason: unknown): boolean =>
+  typeof reason === "object" &&
+  reason !== null &&
+  "name" in reason &&
+  reason.name === "TimeoutError";
+
 /**
  * Ends work after `ms`, or when its caller cancels it. Its timer is cleared
  * when the work ends, so none outlives it (in core, to keep a Durable Object awake)
@@ -31,7 +38,9 @@ export const deadline = (ms: number, caller?: AbortSignal): Deadline => {
         : AbortSignal.any([caller, timer.signal]),
     stopped: () => {
       if (caller?.aborted === true) {
-        return "cancelled";
+        // A caller that ends the work for its own time running out (an
+        // attempt's deadline, `AbortSignal.timeout`) stopped it for time.
+        return isTimeoutReason(caller.reason) ? "timeout" : "cancelled";
       }
       return timer.signal.aborted ? "timeout" : undefined;
     },

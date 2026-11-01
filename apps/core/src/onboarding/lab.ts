@@ -16,7 +16,7 @@ import { z } from "zod";
 
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
@@ -52,10 +52,12 @@ const purpose = "onboarding.lab";
 const sameSiteFetches = new Set(["same-origin", "none"]);
 
 /** How the local core reaches its models, as the lab labels every result with it. */
-const viaOf = (env: Env): LabVia => {
-  const settings = gatewaySettings(env);
+const viaOf = async (env: Env): Promise<LabVia> => {
+  const settings = await modelSettings(env);
+  if (settings.models.length === 0) {
+    return { quick: null, careful: null };
+  }
   return {
-    gateway: settings.gateway ?? "",
     quick: modelForRole(settings, "quick", { sensitive: true }) ?? null,
     careful: modelForRole(settings, "careful", { sensitive: true }) ?? null,
   };
@@ -76,9 +78,15 @@ const ask = async (
   asked: Extract<LabRequest, { action: "ask" }>,
   requestId: string
 ): Promise<Response> => {
-  const model = modelForRole(gatewaySettings(env), asked.role, {
-    sensitive: true,
-  });
+  const settings = await modelSettings(env);
+  if (settings.models.length === 0) {
+    return errorResponse(
+      503,
+      modelErrors.create("model.no_provider"),
+      requestId
+    );
+  }
+  const model = modelForRole(settings, asked.role, { sensitive: true });
   if (model === undefined) {
     return errorResponse(
       503,
@@ -255,7 +263,7 @@ export const labResponse = async (
     return await links(env);
   }
   if (asked.action === "via") {
-    return Response.json(viaOf(env));
+    return Response.json(await viaOf(env));
   }
   if (asked.action === "turn") {
     return await turn(env, asked, requestId, ctx);

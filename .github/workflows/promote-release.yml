@@ -2,11 +2,11 @@
 # from staging's releases bucket, where CI publishes every merge
 # (publish-release in ci.yml), to production's, where production's admin
 # imports it and rolls it out to clients ring by ring. Run it by hand from
-# main with the release's id (`r<run>-<sha7>`, as the staging admin shows
-# it) once staging's clients run it well. It builds nothing: the release
-# is checked against its manifest when fetched and again before it's
-# uploaded, with the limit evidence CI published beside it, which
-# production's admin checks again on import. A release already in
+# main with the release's id (`YY.MM.N`, such as 26.10.42, as the staging
+# admin shows it) once staging's clients run it well; production gets it
+# under the same id. It builds nothing: the release is checked against
+# its manifest when fetched and again before it's uploaded, and
+# production's admin checks it again on import. A release already in
 # production's bucket stays as it is.
 #
 # It runs in the production GitHub environment, whose required reviewers
@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: The release's id, as the staging admin shows it (r<run>-<sha7>)
+        description: The release's id, as the staging admin shows it (YY.MM.N, such as 26.10.42)
         type: string
         required: true
 

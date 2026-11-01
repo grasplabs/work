@@ -1,4 +1,5 @@
 import type { ModelEfforts } from "@grasp-os/shared/models";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
@@ -29,12 +30,9 @@ export const NewApp = ({
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
-            <h1
-              className="text-2xl font-medium tracking-tight text-balance"
-              id="new-app"
-            >
+            <PageHeaderTitle id="new-app">
               <Trans>What should the app show, and for whom?</Trans>
-            </h1>
+            </PageHeaderTitle>
           </div>
           <Composer
             placeholder={t`Describe the app: what it shows, and for whom`}

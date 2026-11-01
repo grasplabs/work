@@ -331,8 +331,8 @@ export const holdsClassRights = (
 /**
  * What `provider` asks for when the company has `classes` on, if it asks
  * by class: the suites' own connections only, not the read-only admin
- * connections that share their sign-in (the landscape's, the directory's,
- * the documents'), which ask for their own.
+ * connections that share their sign-in (the directory's, the
+ * documents'), which ask for their own.
  */
 export const rightsFor = (
   provider: string,

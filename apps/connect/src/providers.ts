@@ -10,8 +10,6 @@ import { placesProviderSchema } from "@grasp-os/shared/document-places";
 import type { PlacesProvider } from "@grasp-os/shared/document-places";
 import { hrProviderSchema } from "@grasp-os/shared/hr";
 import type { HrProvider } from "@grasp-os/shared/hr";
-import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
-import type { LandscapeProvider } from "@grasp-os/shared/landscape";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
@@ -113,8 +111,8 @@ export interface OAuthProviderConfig {
    * The access a token must be granted, exactly: tokens granted more than
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
-   * more than it asks for, as the landscape's, the directory's and the
-   * documents'; none for the rest.
+   * more than it asks for, as the directory's and the documents'; none
+   * for the rest.
    */
   granted?: {
     allowed: ReadonlySet<string>;
@@ -129,8 +127,8 @@ export interface OAuthProviderConfig {
    */
   renewalRequires?: readonly string[];
   /**
-   * Only shared connections, never a person's own (the landscape's, the
-   * directory's, the documents').
+   * Only shared connections, never a person's own (the directory's, the
+   * documents').
    */
   sharedOnly?: boolean;
   /** Parameters the authorization request adds to the standard ones. */
@@ -276,63 +274,6 @@ const microsoft: OAuthProviderConfig = {
   account: entraAccount,
 };
 
-/** What the landscape's Microsoft connection reads Graph with, and only that. */
-const landscapeScopes = [
-  "openid",
-  "profile",
-  "email",
-  "offline_access",
-  "User.Read",
-  // The tenant's enterprise apps, with their publishers.
-  "Application.Read.All",
-  // The grants people and admins gave them.
-  "DelegatedPermissionGrant.Read.All",
-  // The names of the people who gave them.
-  "User.ReadBasic.All",
-] as const;
-
-/**
- * The application landscape's read-only admin connection to Entra
- * (GRA-539), kept apart from Microsoft 365's mail, calendar and files.
- * It signs in with an app registration of its own
- * (`MICROSOFT_LANDSCAPE_CLIENT_*`): Entra puts every scope a person ever
- * granted an app into each token it issues for it, so a token of the
- * Microsoft 365 app could carry mail. A token granted anything beyond
- * these scopes, or short of the reads, is refused all the same.
- */
-const microsoftLandscape: OAuthProviderConfig = {
-  ...microsoft,
-  id: "microsoft-landscape",
-  // Read-only: the write a Microsoft 365 renewal must still hold isn't
-  // asked for here, so its renewal requires nothing of it.
-  renewalRequires: [],
-  // No connector: its connection takes no calls, only core's sync reads it.
-  server: "microsoft-landscape",
-  scopes: landscapeScopes,
-  granted: {
-    // Entra names the OpenID scopes in its answer, or leaves them out.
-    allowed: new Set(landscapeScopes.map((scope) => scope.toLowerCase())),
-    required: [
-      "Application.Read.All",
-      "DelegatedPermissionGrant.Read.All",
-      "User.ReadBasic.All",
-    ],
-  },
-  sharedOnly: true,
-  client: (env) =>
-    credentials(
-      env.MICROSOFT_LANDSCAPE_CLIENT_ID,
-      env.MICROSOFT_LANDSCAPE_CLIENT_SECRET
-    ),
-};
-
-/** The landscape's connections, by provider. */
-const landscapeProviders: Readonly<
-  Record<LandscapeProvider, OAuthProviderConfig>
-> = {
-  "microsoft-landscape": microsoftLandscape,
-};
-
 /**
  * Google Workspace. Google can only hint at the domain (`hd`), so the ID
  * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
@@ -395,8 +336,8 @@ const microsoftDirectoryScopes = [
 
 /**
  * The directory's read-only admin connection to Entra (GRA-369), for the
- * onboarding to know who works where. As the landscape's, it signs in
- * with an Entra app registration of its own
+ * onboarding to know who works where. It signs in with an Entra app
+ * registration of its own
  * (`MICROSOFT_DIRECTORY_CLIENT_*`), since Entra puts every scope a person
  * ever granted an app into each token for it, and a token granted
  * anything beyond these scopes, or short of the read, is refused.
@@ -688,17 +629,13 @@ const appProvider = ({
 };
 
 /**
- * The provider `id` names: a suite, the landscape's, the directory's, the
- * documents', an HR platform's, or an app of this release.
+ * The provider `id` names: a suite, the directory's, the documents', an
+ * HR platform's, or an app of this release.
  */
 export const providerFor = (id: string): ProviderConfig | undefined => {
   const suite = oauthProviderSchema.safeParse(id);
   if (suite.success) {
     return providers[suite.data];
-  }
-  const landscape = landscapeProviderSchema.safeParse(id);
-  if (landscape.success) {
-    return landscapeProviders[landscape.data];
   }
   const directory = directoryProviderSchema.safeParse(id);
   if (directory.success) {

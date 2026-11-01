@@ -24,17 +24,17 @@ import { maxChatsPerPerson } from "../src/workspace.ts";
 import {
   codeStep,
   model,
+  configureObject,
   pausedReply,
-  pointAtGateway,
   says,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { fullScan } from "./query-plans.ts";
 import { callAuth, openRpc, outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -65,14 +65,14 @@ type Person = Awaited<ReturnType<typeof person>>;
 const objectOf = ({ userId }: { userId: string }) =>
   workspace(env, personalWorkspaceId(userId));
 
-/** Points `someone`'s chats at a fake gateway that answers `replies`. */
+/** Has the provider answer `someone`'s chats with `replies`. */
 const answering = async (
   someone: { userId: string },
-  ...replies: GatewayReply[]
+  ...replies: ProviderReply[]
 ) => {
-  const gateway = fakeGateway(...replies);
-  await pointAtGateway(objectOf(someone), gateway);
-  return gateway;
+  const provider = await fakeProvider(...replies);
+  await configureObject(objectOf(someone));
+  return provider;
 };
 
 /** A Workspace object's env, to point it elsewhere. */
@@ -1060,7 +1060,7 @@ describe("chats", () => {
     // The model thinks, then holds its thought open until the test lets it
     // go on: the time it thought covers the hold.
     const thinking = Promise.withResolvers<boolean>();
-    const gateway = fakeGateway({
+    const gateway = await fakeProviderFor([opus], {
       ...says("Two plus two is four."),
       outputTokens: 80,
       thinking: {
@@ -1069,9 +1069,7 @@ describe("chats", () => {
         pause: { until: thinking.promise },
       },
     });
-    await pointAtGateway(objectOf(ann), gateway, {
-      config: { gateway: "grasp-os-test", models: [opus] },
-    });
+    await configureObject(objectOf(ann));
     const chat = await ann.chats.create("Sums");
     const follower = await follow(ann.chats, chat.id);
 
@@ -1139,7 +1137,7 @@ describe("chats", () => {
     const last = follower.messages().at(-1);
     expect(
       last?.role === "assistant" ? [last.end, last.failure] : last
-    ).toStrictEqual(["failed", "model.failed"]);
+    ).toStrictEqual(["failed", "model.provider_unavailable"]);
     expect(follower.now()?.stopped).toBeNull();
   });
 

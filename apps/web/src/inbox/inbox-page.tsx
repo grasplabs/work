@@ -32,8 +32,9 @@ import { Await, Link } from "@tanstack/react-router";
 import { ArrowDownUpIcon, InboxIcon, ListFilterIcon } from "lucide-react";
 import { useState } from "react";
 
-import { actorOf, typeLabels } from "../activity/audit-log.tsx";
+import { actorOf } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
+import { typeLabels } from "../activity/type-labels.ts";
 import type { LatestActivity } from "../dashboard/activity.tsx";
 import type { Directory } from "../directory.ts";
 import { formatDateTime, formatDayMonth } from "../format.ts";
@@ -56,11 +57,10 @@ const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "Everything", context: "inbox filter" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
   brain: msg({ message: "Brain", context: "inbox filter" }),
-  policies: msg({ message: "Policies", context: "inbox filter" }),
   apps: msg({ message: "Apps and connections", context: "inbox filter" }),
 };
 
-const groups = ["all", "workflows", "brain", "policies", "apps"] as const;
+const groups = ["all", "workflows", "brain", "apps"] as const;
 
 const sortLabel: Record<Sort, MessageDescriptor> = {
   urgent: msg({
@@ -230,12 +230,14 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
 /** The list and the item beside it, or on a narrow screen one at a time. */
 const ToDoTab = ({
   items,
+  chosen,
   group,
   sort,
   olderFailures,
   onSaid,
 }: {
   items: readonly InboxItem[];
+  chosen: string | undefined;
   group: Group;
   sort: Sort;
   olderFailures: boolean;
@@ -243,9 +245,12 @@ const ToDoTab = ({
 }) => {
   const { t } = useLingui();
   const list = listed(items, group, sort);
-  const [selectedId, setSelectedId] = useState<string>();
+  // One the page was opened on, as the dashboard leads to it, is open from the start.
+  const [selectedId, setSelectedId] = useState(chosen);
   // On a narrow screen the item takes the list's place once one is chosen, with a way back.
-  const [reading, setReading] = useState(false);
+  const [reading, setReading] = useState(
+    chosen !== undefined && list.some(({ id }) => id === chosen)
+  );
   const selected = list.find((item) => item.id === selectedId) ?? list[0];
   // Once nothing is left to read (the last one decided, or a filter that keeps none), the list comes back.
   if (reading && selected === undefined) {
@@ -336,11 +341,14 @@ const ToDoTab = ({
  */
 export const InboxPage = ({
   items,
+  chosen,
   notLoaded,
   olderFailures,
   activity,
 }: {
   items: readonly InboxItem[];
+  /** The item opened first, by its ID: the list's first when none is, or it waits no more. */
+  chosen?: string;
   notLoaded: readonly Loaded<unknown>[];
   /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
   olderFailures: boolean;
@@ -454,6 +462,7 @@ export const InboxPage = ({
             value="todo"
           >
             <ToDoTab
+              chosen={chosen}
               group={group}
               items={items}
               olderFailures={olderFailures}

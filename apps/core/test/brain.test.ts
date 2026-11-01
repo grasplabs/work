@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
@@ -7,13 +6,13 @@ import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { mondayOf } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -27,8 +26,8 @@ import { connectDb } from "./test-env.ts";
 // The company brain's workspace (`brain.read`, brain-rpc.ts), assembled
 // from what core holds: the onboarding (the kickoff, who works where)
 // and the connections. Each is put in here as the product puts it in:
-// staff bring in the kickoff, the admin gives the roster. AI Gateway is
-// the outside system, a fake behind the AI binding. What can go wrong,
+// staff bring in the kickoff, the admin gives the roster. The model
+// provider behind connect is the outside system, a fake. What can go wrong,
 // tried here: a team counted twice when two sources name it; the
 // onboarding, which only admins see, reaching anyone else, beyond the
 // kickoff's vision and teams, which it gives the brain as records; the
@@ -87,7 +86,7 @@ const staffApi = async () => {
 };
 
 /**
- * Staff bring the kickoff in, read by the fake gateway as `reading`, and
+ * Staff bring the kickoff in, read by the fake provider as `reading`, and
  * keep the sponsor's `answers`.
  */
 const bringInKickoff = async (
@@ -95,21 +94,15 @@ const bringInKickoff = async (
   reading: typeof kickoffReading = kickoffReading
 ): Promise<void> => {
   const staff = await staffApi();
-  const fake = fakeGateway({
+  await fakeProvider({
     text: JSON.stringify(reading),
     inputTokens: 900,
     outputTokens: 300,
   });
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    await staff.onboardingStaff.saveKickoff({
-      locale: "en",
-      transcript: { text: kickoffTranscript },
-    });
-  } finally {
-    spy.mockRestore();
-  }
+  await staff.onboardingStaff.saveKickoff({
+    locale: "en",
+    transcript: { text: kickoffTranscript },
+  });
   for (const field of visionFields) {
     const text = answers[field];
     if (text !== undefined) {
@@ -181,14 +174,14 @@ const wordFile = (text: string): Uint8Array<ArrayBuffer> => {
   );
 };
 
-/** The admin shares a document the fake gateway reads as naming `tools` and `teams`. */
+/** The admin shares a document the fake provider reads as naming `tools` and `teams`. */
 const shareDocument = async (
   admin: Awaited<ReturnType<typeof signedInApi>>,
   name: string,
   tools: string[],
   teams: string[]
 ) => {
-  const fake = fakeGateway({
+  await fakeProvider({
     text: JSON.stringify({
       about: "How invoices are booked.",
       tools,
@@ -200,19 +193,13 @@ const shareDocument = async (
     inputTokens: 1200,
     outputTokens: 150,
   });
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    return await admin.api.onboarding.shareDocument({
-      locale: "en",
-      name,
-      bytes: wordFile(
-        "Invoices are typed into Exact Online by Finance, after a check in ClaimsPro."
-      ),
-    });
-  } finally {
-    spy.mockRestore();
-  }
+  return await admin.api.onboarding.shareDocument({
+    locale: "en",
+    name,
+    bytes: wordFile(
+      "Invoices are typed into Exact Online by Finance, after a check in ClaimsPro."
+    ),
+  });
 };
 
 /** HubSpot, the catalog's one toolkit, as the brain lists it. */
@@ -288,6 +275,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
       goals: [],
       teams: [],
+      teamGroups: [],
+      interviewWeeks: [],
       tools: [],
       sources: [],
       statements: [],
@@ -295,8 +284,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       gaps: [],
       workflows: [],
       connections: true,
-      landscape: [],
-      policies: [],
     });
   });
 
@@ -557,7 +544,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           kind: "interview",
           title: "Interview with Finance",
           date: finishedWeek,
-          who: "Head of finance",
+          // The lead's role alone would point at them: never sent.
           step: 2,
           interviewee: "stakeholder",
           teamIds: ["team-finance"],
@@ -1050,48 +1037,42 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     const { promise: reading, resolve: read } =
       Promise.withResolvers<boolean>();
     const { promise: asked, resolve: ask } = Promise.withResolvers<boolean>();
-    const fake = fakeGateway({
-      text: JSON.stringify({
-        ...kickoffReading,
-        teams: [{ name: "Legal", does: term, people: 3 }],
-      }),
-      inputTokens: 900,
-      outputTokens: 300,
-    });
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(async (...args) => {
+    await answeringProvider(async () => {
       ask(true);
       await reading;
-      return await fake.binding.fetch(...args);
-    });
-    try {
-      /** The save, as its code: `saved`, or why it was refused. */
-      const saving = async (): Promise<string> => {
-        try {
-          await staff.onboardingStaff.saveKickoff({
-            locale: "en",
-            transcript: { text: `${kickoffTranscript}\nAnna (CEO): ${term}.` },
-          });
-          return "saved";
-        } catch (error) {
-          return kickoffErrors.codeOf(error) ?? String(error);
-        }
+      return {
+        text: JSON.stringify({
+          ...kickoffReading,
+          teams: [{ name: "Legal", does: term, people: 3 }],
+        }),
+        inputTokens: 900,
+        outputTokens: 300,
       };
-      const saved = saving();
-      await asked;
-      const plan = await admin.api.knowledge.preparePurge(input);
-      await admin.api.knowledge.purge(input, plan.token);
-      read(true);
-      const after = await onboardingStore(env).kickoff();
+    });
+    /** The save, as its code: `saved`, or why it was refused. */
+    const saving = async (): Promise<string> => {
+      try {
+        await staff.onboardingStaff.saveKickoff({
+          locale: "en",
+          transcript: { text: `${kickoffTranscript}\nAnna (CEO): ${term}.` },
+        });
+        return "saved";
+      } catch (error) {
+        return kickoffErrors.codeOf(error) ?? String(error);
+      }
+    };
+    const saved = saving();
+    await asked;
+    const plan = await admin.api.knowledge.preparePurge(input);
+    await admin.api.knowledge.purge(input, plan.token);
+    read(true);
+    const after = await onboardingStore(env).kickoff();
 
-      expect({
-        saved: await saved,
-        // The kickoff as it was before: the save kept nothing.
-        same: after.transcript?.at === before.transcript?.at,
-      }).toStrictEqual({ saved: "kickoff.purged", same: true });
-    } finally {
-      spy.mockRestore();
-    }
+    expect({
+      saved: await saved,
+      // The kickoff as it was before: the save kept nothing.
+      same: after.transcript?.at === before.transcript?.at,
+    }).toStrictEqual({ saved: "kickoff.purged", same: true });
   });
 
   it("forgets the kickoff a content purge reaches, so no answer after gives the brain its words again", async () => {

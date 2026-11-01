@@ -10,21 +10,16 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { sendStaffAlert } from "../alerts.ts";
-import type { AlertOutcome } from "../alerts.ts";
-import { adminDatabase, audit } from "../db/act.ts";
+import { adminDatabase } from "../db/act.ts";
 import { rotateClientSecrets } from "../deploy/rotation.ts";
 import { adminReader } from "./admin.ts";
+import { clientAiStatus } from "./ai-status.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
-import { clientModelSpend } from "./model-spend.ts";
-import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
-  modelSpendCeilingInputSchema,
   ringInputSchema,
   sealedSecretInputSchema,
-  setModelSpendCeiling,
   setRing,
   setSealedSecret,
   setSignIn,
@@ -100,39 +95,19 @@ export const fetchClientSetup = createServerFn({ method: "GET" })
   .handler(async ({ data }) => await getClientSetup(env, data.clientId));
 
 /**
- * A client's quota policy: the generation the admin sets beside the one
- * its core applies, read live; null for no such client.
+ * A client's AI as its core reports it, read live: the providers its
+ * organization connected and how their calls last fared; null when
+ * unknown.
  */
-export const fetchClientQuotaPolicy = createServerFn({ method: "GET" })
+export const fetchClientAiStatus = createServerFn({ method: "GET" })
   .validator(clientSchema)
-  .handler(async ({ data }) => await clientQuotaPolicy(env, data.clientId));
-
-/**
- * A client's model spend this month as its core's ledger counts it, read
- * live; null when unknown.
- */
-export const fetchClientModelSpend = createServerFn({ method: "GET" })
-  .validator(clientSchema)
-  .handler(async ({ data }) => await clientModelSpend(env, data.clientId));
+  .handler(async ({ data }) => await clientAiStatus(env, data.clientId));
 
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)
   .handler(
     async ({ data, context }) =>
       await change(async () => await setRing(env, context.staff, data))
-  );
-
-/**
- * Sets a client's monthly model spend ceiling, in whole euros, audited:
- * its core's gateway holds it to it from its next deploy.
- */
-export const setModelSpendCeilingFn = createServerFn({ method: "POST" })
-  .validator(modelSpendCeilingInputSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(
-        async () => await setModelSpendCeiling(env, context.staff, data)
-      )
   );
 
 /** Applies a client's settings now: a deploy of the release it runs, live at once. */
@@ -188,21 +163,6 @@ export const fetchTeamsPackageFn = createServerFn({ method: "GET" })
     async ({ data }) =>
       await clientTeamsPackage(adminDatabase(env.DB), data.clientId)
   );
-
-/**
- * Sends a test alert about a client to the staff alerts' channel
- * (src/alerts.ts), to see the channel works: audited as the staff member
- * who sent it (`alert.test`), and answered with what became of it.
- */
-export const sendTestAlertFn = createServerFn({ method: "POST" })
-  .validator(clientSchema)
-  .handler(async ({ data, context }): Promise<AlertOutcome> => {
-    await audit(adminDatabase(env.DB), context.staff, {
-      action: "alert.test",
-      clientId: data.clientId,
-    });
-    return await sendStaffAlert(env, { clientId: data.clientId, kind: "test" });
-  });
 
 /**
  * Rotates a client's derived secrets (src/deploy/rotation.ts): changed

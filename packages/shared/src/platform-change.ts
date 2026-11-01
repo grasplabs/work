@@ -21,7 +21,7 @@ export const platformChangeSchema = z.object({
    * `settings_and_secrets` (both in one version) or `rollback`.
    */
   what: identifierSchema,
-  /** The release the version runs, e.g. `r000123-abcdef0`. */
+  /** The release the version runs, e.g. `26.01.123`. */
   release: identifierSchema,
   /** When the admin made the change. */
   at: z.iso.datetime(),

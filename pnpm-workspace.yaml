@@ -86,10 +86,9 @@ catalog:
   better-auth: 1.7.5
   # The admin's Cloudflare Access check.
   jose: 6.2.12
-  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, WhatsApp and
   # the rest, its state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
-  "@chat-adapter/discord": 4.43.0
   "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
@@ -108,6 +107,7 @@ catalog:
   "@babel/types": 7.29.8
   "@base-ui/react": 1.8.0
   "@fontsource-variable/geist": 5.2.8
+  "@fontsource-variable/newsreader": 5.3.0
   # Translations of the frontend: macros compiled at build time, catalogs
   # in apps/web/src/locales.
   "@lingui/babel-plugin-lingui-macro": 6.8.0
@@ -150,6 +150,9 @@ catalog:
   happy-dom: 21.0.3
   # The kit's one-time-code input.
   input-otp: 1.5.0
+  # The CSS parser the motion lint (scripts/lint) works a duration out with,
+  # as Vite and Tailwind already resolve it.
+  lightningcss: 1.33.0
   lucide-react: 1.47.0
   # The kit's motion, as the prototype animates (components/shimmer).
   motion: 14.3.0

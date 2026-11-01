@@ -1,6 +1,7 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
+import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -19,20 +20,19 @@ import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
-import { modelSpendReportPath } from "@grasp-os/shared/model-spend-report";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPath,
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
-import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminAskResponse } from "./admin-ask.ts";
 import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
+import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
@@ -46,8 +46,6 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { carryOnAfterConnecting } from "./channels/answer.ts";
-import { channelResponse } from "./channels/door.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
@@ -59,7 +57,6 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
-import { modelSpendReportResponse } from "./model-spend-report.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
@@ -85,7 +82,6 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
-import { quotaPolicyReportResponse } from "./workflows/quota-report.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -268,7 +264,13 @@ const connectionRouteResponse = async (
     // Someone who connected from a chat app is told there, and what they
     // asked is answered again, after the browser is sent on.
     return await handleConnectionCallback(request, env, (userId) => {
-      ctx.waitUntil(carryOnAfterConnecting(env, userId));
+      // The channel layer, and the Chat SDK with it, loads when first used,
+      // not as core starts (GRA-1349).
+      const carryOn = async (): Promise<void> => {
+        const { carryOnAfterConnecting } = await import("./channels/answer.ts");
+        await carryOnAfterConnecting(env, userId);
+      };
+      ctx.waitUntil(carryOn());
     });
   }
   if (isCatalogLogoPath(pathname)) {
@@ -339,8 +341,7 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
-  [quotaPolicyReportPath, quotaPolicyReportResponse],
-  [modelSpendReportPath, modelSpendReportResponse],
+  [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
   [adminKickoffPath, adminKickoffResponse],
@@ -426,6 +427,7 @@ const route = async (
   // platform's own signed requests get through.
   const platform = channelPlatformOf(pathname);
   if (platform !== undefined) {
+    const { channelResponse } = await import("./channels/door.ts");
     return await channelResponse(request, env, platform, requestId, ctx);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);

@@ -10,44 +10,6 @@
     }
   },
   "commit": "0000000000000000000000000000000000000000",
-  "compatibility": {
-    "databases": {
-      "grasp-os-connect": {
-        "compatibleFrom": 0,
-        "schema": 0
-      },
-      "grasp-os-core": {
-        "compatibleFrom": 0,
-        "schema": 0
-      },
-      "grasp-os-knowledge": {
-        "compatibleFrom": 0,
-        "schema": 0
-      }
-    },
-    "interfaces": {
-      "connect": {
-        "calls": {},
-        "serves": 1
-      },
-      "core": {
-        "calls": {
-          "connect": {
-            "max": 1,
-            "min": 1
-          }
-        }
-      }
-    },
-    "sdkProtocols": {
-      "max": 2,
-      "min": 2
-    },
-    "workflowJournal": {
-      "max": 9,
-      "min": 8
-    }
-  },
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,
@@ -55,11 +17,7 @@
   "packages": {
     "zod": "0.0.0-fixture"
   },
-  "platformLimits": {
-    "authoringFiles": 200,
-    "workflowSteps": 1000
-  },
-  "releaseId": "r000001-0000000",
+  "releaseId": "26.01.1",
   "workers": {
     "connect": {
       "bindings": [
@@ -133,7 +91,8 @@
       },
       "previewUrls": false,
       "requiredSecrets": [
-        "CAPABILITY_SIGNING_KEY"
+        "CAPABILITY_SIGNING_KEY",
+        "TOKEN_ENCRYPTION_KEY"
       ],
       "workersDev": false
     },
@@ -241,10 +200,6 @@
           "jurisdiction": "eu",
           "name": "BRAIN_OBJECTS",
           "type": "r2_bucket"
-        },
-        {
-          "name": "AI",
-          "type": "ai"
         },
         {
           "name": "EMAIL",

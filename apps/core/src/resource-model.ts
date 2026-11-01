@@ -8,7 +8,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { z } from "zod";
 
-import { gatewaySettings, models, usableAnswerTokens } from "./models.ts";
+import { modelSettings, models, usableAnswerTokens } from "./models.ts";
 import type { ResourceContext } from "./operations.ts";
 import type {
   BindingCaller,
@@ -236,8 +236,9 @@ const generate = async (
 };
 
 export const modelAdapter: ResourceAdapter<"model"> = {
-  bind: async (env, _app, declaration, target) =>
-    gatewaySettings(env).models.includes(target.model)
+  bind: async (env, _app, declaration, target) => {
+    const { models: allowed } = await modelSettings(env);
+    return allowed.includes(target.model)
       ? {
           contractId: modelContract.contractId,
           fingerprint: await modelFingerprint,
@@ -252,5 +253,6 @@ export const modelAdapter: ResourceAdapter<"model"> = {
               context
             ),
         }
-      : undefined,
+      : undefined;
+  },
 };

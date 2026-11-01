@@ -242,7 +242,7 @@ export const findByPath = async (
     .get();
 
 /** Splits rows so no insert binds more parameters than D1 allows. */
-const inChunks = <Row extends object>(rows: Row[]): Row[][] => {
+export const inChunks = <Row extends object>(rows: Row[]): Row[][] => {
   const [first] = rows;
   if (!first) {
     return [];

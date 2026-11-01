@@ -1,3 +1,4 @@
+import type { Statement } from "@grasp-os/shared/brain";
 import {
   Tabs,
   TabsContent,
@@ -20,10 +21,13 @@ export const StatementsByKind = ({
   kern,
   rows,
   activeId,
+  onRemove,
 }: {
   kern: Kern;
   rows: StatementRow[];
   activeId?: string | undefined;
+  /** Takes one statement out of the brain, for whoever may. */
+  onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
   const { t } = useLingui();
   const box = useRef<HTMLElement>(null);
@@ -66,7 +70,11 @@ export const StatementsByKind = ({
               {rows
                 .filter((row) => row.statement.kind === kind)
                 .map((row) => (
-                  <StatementLine key={row.statement.id} row={row} />
+                  <StatementLine
+                    key={row.statement.id}
+                    onRemove={onRemove}
+                    row={row}
+                  />
                 ))}
             </ul>
           </TabsContent>

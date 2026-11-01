@@ -1,3 +1,4 @@
+import { brainErrors } from "@grasp-os/brain/contract";
 import { descriptorFromText, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
@@ -40,9 +41,10 @@ import {
   workflowResources,
   workflowResourceVersions,
   workflowStartReceipts,
+  runChatSources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
-import { appHost } from "./durable-objects.ts";
+import { appHost, workspace } from "./durable-objects.ts";
 import { allowingPermissionSql } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
@@ -59,6 +61,7 @@ import {
 import type { ChildPlace } from "./workflows/quotas.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
+import { runEvidenceMaxRows } from "./workflows/run-evidence.ts";
 import { startFilesDropped } from "./workflows/run-files.ts";
 import { handFiles } from "./workflows/start-files.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
@@ -1055,6 +1058,109 @@ const restrictedStart = async (
   }
 };
 
+/**
+ * The chat whose agent is behind a start by `invoker`: the agent's own
+ * start from its chat (held-starts.ts), or an App's start an agent's call
+ * made. None for any other start.
+ */
+const startingChatOf = (invoker: StartInvoker): StartingAgent | undefined => {
+  if (invoker.type === "app") {
+    return invoker.agent ?? undefined;
+  }
+  if (
+    invoker.type !== "agent" ||
+    invoker.context?.type !== "chat" ||
+    invoker.authority.subject.type !== "agent"
+  ) {
+    return undefined;
+  }
+  return {
+    agentId: invoker.authority.subject.agentId,
+    workspaceId: invoker.context.workspaceId,
+    chatId: invoker.context.chatId,
+  };
+};
+
+/**
+ * What the chat behind a start by `invoker` has read, withheld or not
+ * (GRA-1093): the chat of the agent that started it, itself or through
+ * an App's call (`startingChatOf`). Its run is held to them
+ * (workflows/resource-reads.ts), as its input may carry any. None for any
+ * other start. More than a run keeps is refused (`brain.budget_exceeded`),
+ * never cut short.
+ *
+ * Refused (`workflow.start_denied`, recorded by `refuse`) once that chat
+ * is deleted, or being deleted. A start its
+ * agent's call staged in an App's outbox is delivered later, its input
+ * still carrying what the chat had read, while the chat's sources went
+ * with it: the start is refused rather than admitted unheld. Refused, not
+ * held to a copy taken as it was staged: what a run is held to is always
+ * read from the chat as the start is admitted, one place and one time,
+ * and a deleted chat's starts go with it, as its held writes do.
+ */
+const chatPinsOf = async (
+  env: Env,
+  invoker: StartInvoker,
+  refuse: () => Promise<void>
+): Promise<ChatPins | undefined> => {
+  const agent = startingChatOf(invoker);
+  if (agent === undefined || !("authority" in invoker)) {
+    return undefined;
+  }
+  const sources = await workspace(env, agent.workspaceId).heldSourcesOf(
+    agent.chatId
+  );
+  if (sources === null) {
+    await refuse();
+    throw denied();
+  }
+  if (sources.length > runEvidenceMaxRows) {
+    throw brainErrors.create("brain.budget_exceeded");
+  }
+  return {
+    scope: {
+      workspaceId: agent.workspaceId,
+      chatId: agent.chatId,
+      agentId: agent.agentId,
+      personId: invoker.authority.onBehalfOf,
+    },
+    sources,
+  };
+};
+
+/** The chat a run was started from, and what it had read. */
+interface ChatPins {
+  scope: {
+    workspaceId: string;
+    chatId: string;
+    agentId: string;
+    personId: string;
+  };
+  sources: readonly string[];
+}
+
+/** `pins` copied onto run `runId`, once it is `admitted`. */
+const pinsAdmitted = (
+  env: Env,
+  runId: string,
+  pins: ChatPins | undefined,
+  admitted: SQL
+): BatchItem<"sqlite">[] => {
+  if (pins === undefined || pins.sources.length === 0) {
+    return [];
+  }
+  const { workspaceId, chatId, agentId, personId } = pins.scope;
+  const db = drizzle(env.DB);
+  return [
+    db
+      .insert(runChatSources)
+      .select(
+        sql`SELECT ${runId}, value, ${workspaceId}, ${chatId}, ${agentId}, ${personId} FROM json_each(${JSON.stringify(pins.sources)}) WHERE ${admitted}`
+      )
+      .onConflictDoNothing(),
+  ];
+};
+
 /** Where a start of `invoker` sits in a lineage, if not at a root of its own. */
 const lineageOf = (
   invoker: StartInvoker
@@ -1233,6 +1339,17 @@ export const decideWorkflowStart = async (
   // Read after the invoker's code formed the input it starts with, so a
   // restricted read that fed it is seen (`restrictedStart`).
   const restricted = await restrictedStart(env, invoker);
+  // And what the chat behind it had read, copied onto its run as it is
+  // admitted (`chatPinsOf`).
+  const pins = await chatPinsOf(env, invoker, async () => {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.start_denied"
+    );
+  });
   // Frozen now, from what was read above: the parameter values of the
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
@@ -1273,8 +1390,12 @@ export const decideWorkflowStart = async (
   );
   return {
     authorization: {
-      id: handed.runId,
-      alsoAdmitted: handed.admitted,
+      // The ID its files and pins were copied under.
+      id: handed.runId ?? runId,
+      alsoAdmitted: (admitted) => [
+        ...(handed.admitted?.(admitted) ?? []),
+        ...pinsAdmitted(env, handed.runId ?? runId, pins, admitted),
+      ],
       workflowId: id,
       version,
       manifestHash,

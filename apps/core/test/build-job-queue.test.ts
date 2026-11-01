@@ -12,10 +12,9 @@ import {
   codeResults,
   codeStep,
   pausedReply,
-  pointAtGateway,
+  configureObject,
   says,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   desk,
@@ -31,6 +30,7 @@ import {
   buildJobsOf,
 } from "./build-jobs.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 
 // A build a chat's code hands to a durable job (`env.build.submit`): it
 // goes on after the code run that submitted it ends, as a workflow of
@@ -51,7 +51,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     // Another App's job holds the client's one build.
     const other = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL, 0)"
+      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL)"
     )
       .bind(other, Date.now())
       .run();
@@ -65,16 +65,14 @@ describe("build jobs", { timeout: 180_000 }, () => {
       // Its own code reads it queued, waiting for the client's share.
       await vi.waitFor(
         async () => {
-          await pointAtGateway(
-            chat.stub,
-            fakeGateway(
-              codeStep(`export default async (self, env) => {
+          await fakeProvider(
+            codeStep(`export default async (self, env) => {
                 const { status, queued } = await env.build.job(${JSON.stringify(job.id)});
                 return { status, waitingFor: queued?.waitingFor ?? null };
               };`),
-              says("It waits its turn.")
-            )
+            says("It waits its turn.")
           );
+          await configureObject(chat.stub);
           await chat.ask("How's that build?");
           const results = await codeResults(chat.stub, chat.chat.id);
           expect(results.at(-1)?.text).toMatch(queuedForClient);
@@ -143,7 +141,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
           "UPDATE build_leases SET admitted_at = admitted_at - 700000 WHERE job_id = ?"
         ).bind(job.id),
         env.DB.prepare(
-          "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', ?, ?, 600000, NULL, 0)"
+          "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', ?, ?, 600000, NULL)"
         ).bind(other, record?.appId ?? "", Date.now()),
       ]);
       storing.restore();
@@ -243,7 +241,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     // Another App's job holds the client's one build.
     const other = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL, 0)"
+      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL)"
     )
       .bind(other, Date.now())
       .run();

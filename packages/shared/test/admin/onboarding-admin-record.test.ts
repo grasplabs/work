@@ -641,13 +641,12 @@ describe("the parts of the platform", () => {
     }
     const switched = partsOf({
       ...noordkade.seed,
-      parts: { policies: true, engines: false },
+      parts: { inbox: true, engines: false },
     });
     expect(switched).toMatchObject({
-      policies: true,
+      inbox: true,
       engines: false,
       chat: true,
-      inbox: false,
     });
   });
 });

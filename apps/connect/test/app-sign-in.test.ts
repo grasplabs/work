@@ -345,7 +345,7 @@ describe("threat model", () => {
         scope: "personal",
         origin,
         callbackOrigin,
-        returnTo: "/connections",
+        returnTo: "/integrations",
       });
     const started = await start(relayOrigin);
     const url = new URL(started.url);

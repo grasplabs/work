@@ -1,6 +1,7 @@
 import { guestMessageMaxLength } from "@grasp-os/shared/guests";
 import type { GuestView } from "@grasp-os/shared/guests";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -138,9 +139,9 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
     <>
       <GraspBuddy />
       <div className="flex flex-col gap-2 text-center">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <PageHeaderTitle>
           <Trans>Hi {name}</Trans>
-        </h1>
+        </PageHeaderTitle>
         <p className="text-muted-foreground text-balance">
           <Trans>
             This chat asks how your work is done. Everything you write is kept
@@ -256,9 +257,9 @@ const Guest = () => {
         <>
           <GraspBuddy />
           <div className="flex flex-col items-center gap-2 text-center">
-            <h1 className="text-2xl font-medium tracking-tight">
+            <PageHeaderTitle>
               <Trans>This chat can&apos;t be opened</Trans>
-            </h1>
+            </PageHeaderTitle>
             <ErrorText>{shown.message}</ErrorText>
           </div>
         </>

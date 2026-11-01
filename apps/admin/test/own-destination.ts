@@ -1,22 +1,16 @@
 /**
  * A new admin's own shared destination as its tests reach it
  * (src/hosting/placement.ts, `ensureStageDestination`): staff adding a
- * client, placing it, and recording a check through the form, each
- * through the admin's entry; Grasp's own account on the fake Cloudflare
- * API; and what the destination's record says.
+ * client and placing it, each through the admin's entry; and Grasp's own
+ * account on the fake Cloudflare API.
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 
-import {
-  placeAndProvisionFn,
-  recordCapabilityCheckFn,
-} from "../src/hosting/functions.ts";
-import { destinationOf } from "../src/hosting/inventory.ts";
+import { placeAndProvisionFn } from "../src/hosting/functions.ts";
 import { stageDestinationId } from "../src/hosting/placement.ts";
-import type { Capability } from "../src/hosting/policy.ts";
 import { startClient } from "../src/provision/functions.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { db, staff } from "./hosting.ts";
+import { staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
 import { placedRelease } from "./placed.ts";
 
@@ -38,33 +32,6 @@ export const sharedRelease = async (): Promise<string> =>
     ...core,
     bindings: core.bindings.filter(({ type }) => documented.has(type)),
   }));
-
-/** What no provisioning observes, so a person vouches for each. */
-export const vouched: readonly Capability[] = [
-  "durable_objects.eu_jurisdiction",
-  "logs.payload_free",
-  "models.approved_transport",
-  "secrets.replication_recorded",
-];
-
-/** Staff recording, through the form, that they checked `capability`. */
-export const vouch = async (
-  capability: Capability,
-  email = staff.email,
-  holds = true
-) =>
-  await callServerFn(
-    recordCapabilityCheckFn,
-    {
-      destinationId: ownId,
-      capability,
-      holds,
-      procedure: `Read ${capability} back on a test client`,
-      record: "https://linear.app/grasp-os/issue/GRA-430",
-      observedAt: "2026-10-29T09:00:00.000Z",
-    },
-    { email }
-  );
 
 /** A client staff add, as the new-organization form does. */
 export const added = async (): Promise<string> => {
@@ -92,20 +59,9 @@ export const added = async (): Promise<string> => {
 export const place = async (clientId: string, releaseId: string) =>
   await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId, policyId: "eu-storage", destinationId: null },
+    { clientId, releaseId, destinationId: null },
     { email: staff.email }
   );
-
-/** What the destination's record says of each capability: its status and who observed it. */
-export const recordedOf = async () => {
-  const { capabilities } = await destinationOf(db, ownId);
-  return Object.fromEntries(
-    Object.entries(capabilities).map(([capability, entry]) => [
-      capability,
-      `${entry?.status ?? "unknown"} by ${entry?.evidence.recordedBy ?? "nobody"}`,
-    ])
-  );
-};
 
 /** Grasp's own account on the fake API, with the stage's clients' namespace in it. */
 export const graspAccount = (

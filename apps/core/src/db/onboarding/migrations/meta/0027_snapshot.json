@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a5071bc3-1186-4aeb-bf54-2b7d6390761a",
+  "id": "f4d752eb-3b69-4fdf-9182-3a8fb86d01e3",
   "prevId": "9735d107-a355-4563-b820-977b44bbd986",
   "tables": {
     "answer_waits": {
@@ -395,13 +395,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "check_mark": {
-          "name": "check_mark",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {},
@@ -512,6 +505,13 @@
         },
         "about": {
           "name": "about",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "named": {
+          "name": "named",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1283,6 +1283,30 @@
           "name": "readbacks_person_receipt_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "referrals": {
+      "name": "referrals",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

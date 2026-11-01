@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import {
   adminAskPath,
   adminAskPurpose,
@@ -9,23 +8,21 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import { fakeProvider, fakeProviderFor, testModel } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { auditedDuring, routed } from "./sign-in.ts";
 
 // Ask Grasp on Grasp's own core (src/admin-ask.ts): only the admin's
 // signed question reaches the model gateway, every question is in the
 // audit log by the staff member the admin names before the model is
 // asked, and the admin's document only goes to a model the deployment's
-// rules let take sensitive data. AI Gateway is the outside system: a fake
-// behind the AI binding.
+// rules let take sensitive data. The model provider behind connect is the
+// outside system (test/model-provider.ts).
 
 const staffEmail = "ada.lovelace@grasp.test";
-
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** Words only the admin's document holds, to find where they went. */
 const document = `# Grasp's admin
@@ -76,17 +73,24 @@ const ask = async (
   );
 };
 
-/** What `run` returns while the gateway answers with `replies`, and what was sent to it. */
-const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    spy.mockRestore();
-  }
+/**
+ * What `run` returns while the organization's provider answers with
+ * `replies`, and what was sent to it: its models `models` when given.
+ */
+const answering = async <T>(
+  replies: ProviderReply[],
+  run: () => Promise<T>,
+  models?: readonly string[]
+) => {
+  const provider =
+    models === undefined
+      ? await fakeProvider(...replies)
+      : await fakeProviderFor(models, ...replies);
+  return { requests: provider.requests, result: await run() };
 };
+
+/** Core's env under the deployment's rules `rules`. */
+const withRules = (rules: object): Env => ({ ...env, MODEL_GATEWAY: rules });
 
 const answer = {
   text: "Noordkade: its health needs a look, with 12 of 20 interviews done.",
@@ -95,6 +99,26 @@ const answer = {
 };
 
 describe("Ask Grasp on Grasp's own core", () => {
+  // First in the file: no test has connected a provider yet.
+  it("answers that no model may answer while the organization connected no AI provider, after the question is on record", async () => {
+    const body = bodyOf();
+    const signature = await signatureOf(body);
+    const seen: { status: number; refusal: unknown } = {
+      status: 0,
+      refusal: undefined,
+    };
+    const events = await auditedDuring(async () => {
+      const response = await ask(body, { signature });
+      seen.status = response.status;
+      seen.refusal = await response.json();
+    });
+    expect({
+      status: seen.status,
+      code: z.object({ code: z.string() }).parse(seen.refusal).code,
+      asked: events.filter(({ action }) => action === "admin.ask").length,
+    }).toStrictEqual({ status: 503, code: "model.no_provider", asked: 0 });
+  });
+
   it("refuses anyone but the console, a stale or malformed question, and sends the model nothing", async () => {
     const fresh = bodyOf();
     const old = bodyOf({
@@ -176,7 +200,7 @@ describe("Ask Grasp on Grasp's own core", () => {
     expect({
       status: result.status,
       answer: adminAskAnswerSchema.parse(result.answered),
-      model: requests.map(({ url }) => url.includes("workers-ai")),
+      model: requests.map(({ url }) => url.includes("api.anthropic.com")),
       document: sent.includes("Interviews done: 12 of 20"),
       conversation: [
         "How many companies are there?",
@@ -204,45 +228,41 @@ describe("Ask Grasp on Grasp's own core", () => {
 
   it("sends the document only to a model the deployment's rules let take sensitive data, and asks none when there is none", async () => {
     const euModel = "openai/gpt-5.4";
-    const withRules = (rules: object): Env => ({
-      ...env,
-      MODEL_GATEWAY: {
-        gateway: "grasp-os-test",
-        models: [workersAi, euModel],
-        ...rules,
-      },
-    });
     const ruled = bodyOf();
     const none = bodyOf();
     const [ruledSignature, noneSignature] = await Promise.all([
       signatureOf(ruled),
       signatureOf(none),
     ]);
-    const { requests, result } = await answering([answer], async () => {
-      const allowed = await ask(ruled, {
-        signature: ruledSignature,
-        coreEnv: withRules({
-          sensitive: { models: [euModel], connections: [] },
-        }),
-      });
-      await allowed.text();
-      const refused = await ask(none, {
-        signature: noneSignature,
-        // Only Workers AI may take sensitive data, and only the EU model stays in the EU.
-        coreEnv: withRules({
-          sensitive: { models: [workersAi], connections: [] },
-          eu: { models: [euModel], deployment: true },
-        }),
-      });
-      const refusal = z
-        .object({ code: z.string() })
-        .parse(await refused.json());
-      return {
-        allowed: allowed.status,
-        refused: refused.status,
-        code: refusal.code,
-      };
-    });
+    const { requests, result } = await answering(
+      [answer],
+      async () => {
+        const allowed = await ask(ruled, {
+          signature: ruledSignature,
+          coreEnv: withRules({
+            sensitive: { models: [euModel], connections: [] },
+          }),
+        });
+        await allowed.text();
+        const refused = await ask(none, {
+          signature: noneSignature,
+          // Only the default may take sensitive data, and only the EU model stays in the EU.
+          coreEnv: withRules({
+            sensitive: { models: [testModel], connections: [] },
+            eu: { models: [euModel], deployment: true },
+          }),
+        });
+        const refusal = z
+          .object({ code: z.string() })
+          .parse(await refused.json());
+        return {
+          allowed: allowed.status,
+          refused: refused.status,
+          code: refusal.code,
+        };
+      },
+      [testModel, euModel]
+    );
     expect({
       ...result,
       sent: requests.map(({ url }) => url.includes("openai")),

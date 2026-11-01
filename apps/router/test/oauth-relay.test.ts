@@ -105,6 +105,10 @@ const refusal = async (response: Response) => ({
   body: await response.text(),
 });
 
+/** `text` with its character at `at` changed to another. */
+const flipped = (text: string, at: number): string =>
+  `${text.slice(0, at)}${text[at] === "A" ? "B" : "A"}${text.slice(at + 1)}`;
+
 describe("the OAuth relay", () => {
   const cores = fakeCores();
 
@@ -187,13 +191,9 @@ describe("the OAuth relay", () => {
       [label, issued, otherMac, provider, own],
       // A MAC cut short, or flipped.
       [label, issued, mac?.slice(0, -1), provider, own],
-      [
-        label,
-        issued,
-        `${mac?.slice(0, -1)}${mac?.endsWith("A") === true ? "B" : "A"}`,
-        provider,
-        own,
-      ],
+      // A character flipped where every bit counts: the last of an
+      // unpadded base64url MAC carries padding bits, which decode the same.
+      [label, issued, flipped(mac ?? "", 0), provider, own],
     ].map((parts) => parts.join("."));
     const responses = await Promise.all([
       ...changed.map(

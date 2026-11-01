@@ -16,11 +16,21 @@ import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
+
+/**
+ * Grasp's own keys at OpenAI, Anthropic and ElevenLabs, for platform
+ * features, as set on connect in the tests; none for the other providers,
+ * which aren't offered for them.
+ */
+export const platformOpenAiKey = "test-platform-openai-key-0001";
+export const platformAnthropicKey = "test-platform-anthropic-key-0001";
+export const platformElevenLabsKey = "test-platform-elevenlabs-key-0001";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {
@@ -34,20 +44,6 @@ export const connectClient = clients.microsoft;
 
 /** Grasp's Google client for connections, as set on connect in the tests. */
 export const googleConnectClient = clients.google;
-
-/** Grasp's Entra app for the application landscape, as set on connect. */
-export const landscapeClient = clients.microsoftLandscape;
-
-/**
- * Where tests set what Graph holds of the tenant's grants, for the
- * landscape's reads: POST `{ grants, apps, people }` as Graph has them
- * (`oauth2PermissionGrants`, `servicePrincipals`, `users`), or
- * `{ throttle: seconds }` to have every grants read throttled until
- * `{ throttle: null }`, or
- * `{ failing: "all" }` to have every grants read fail, or `"later"` every
- * page but the first, until `false`.
- */
-export const landscapeControlUrl = "https://graph-control.test/landscape";
 
 /** Grasp's Entra app for the directory's connection, as set on connect. */
 export const directoryClient = clients.microsoftDirectory;
@@ -83,10 +79,6 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 /** What the documents' Entra app is granted, as Entra's token answer says. */
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
-
-/** What the landscape's Entra app is granted, as Entra's token answer says. */
-export const landscapeGranted =
-  "openid profile email Application.Read.All DelegatedPermissionGrant.Read.All User.Read User.ReadBasic.All";
 
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
@@ -460,7 +452,6 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
@@ -506,43 +497,15 @@ const documentsGraph = (url) => {
   }
   return undefined;
 };
-const landscapeIds = (url) =>
-  [...(url.searchParams.get("$filter") ?? "").matchAll(/'([^']*)'/gu)].map((match) => match[1]);
-/** Graph's grants of the tenant, a page at a time, with their apps and people. */
-const landscapeGraph = (url) => {
-  if (url.pathname === "/v1.0/oauth2PermissionGrants") {
-    if (landscape.failing === "all" || (landscape.failing === "later" && url.searchParams.has("$skiptoken"))) {
-      return new Response("Unavailable", { status: 500 });
-    }
-    if (landscape.throttle !== null) {
-      const seconds = landscape.throttle;
-      return new Response("Slow down", { status: 429, headers: { "retry-after": String(seconds) } });
-    }
-    const top = Number(url.searchParams.get("$top") ?? "100");
-    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
-    const next = from + top;
-    return Response.json({
-      value: landscape.grants.slice(from, next),
-      ...(next < landscape.grants.length
-        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$top=" + top + "&$skiptoken=" + next }
-        : {}),
-    });
-  }
-  if (url.pathname === "/v1.0/servicePrincipals") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.apps.filter(({ id }) => ids.includes(id)) });
-  }
-  if (url.pathname === "/v1.0/users") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.people.filter(({ id }) => ids.includes(id)) });
-  }
-  return undefined;
-};
 const osv = (${osvFake.toString()})();
+const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (aiProviders.handles(url)) {
+      return await aiProviders.answer(request, url);
+    }
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
     }
@@ -551,10 +514,6 @@ export default {
     }
     if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
       return await mailServer(request, url);
-    }
-    if (request.method === "POST" && url.href === ${JSON.stringify(landscapeControlUrl)}) {
-      Object.assign(landscape, await request.json());
-      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
       Object.assign(directory, await request.json());
@@ -599,12 +558,6 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
       return directoryGraph(url);
-    }
-    if (url.hostname === "graph.microsoft.com" && request.method === "GET") {
-      const answered = landscapeGraph(url);
-      if (answered !== undefined) {
-        return answered;
-      }
     }
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending
@@ -834,17 +787,14 @@ export default {
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
     );
-    // The landscape's, the directory's or the documents' own app, or the one for every other connection.
-    const forLandscape = form.get("client_id") === ${JSON.stringify(landscapeClient.id)};
+    // The directory's or the documents' own app, or the one for every other connection.
     const forDirectory = form.get("client_id") === ${JSON.stringify(directoryClient.id)};
     const forDocuments = form.get("client_id") === ${JSON.stringify(documentsClient.id)};
-    const client = forLandscape
-      ? ${JSON.stringify(landscapeClient)}
-      : forDirectory
-        ? ${JSON.stringify(directoryClient)}
-        : forDocuments
-          ? ${JSON.stringify(documentsClient)}
-          : ${JSON.stringify(connectClient)};
+    const client = forDirectory
+      ? ${JSON.stringify(directoryClient)}
+      : forDocuments
+        ? ${JSON.stringify(documentsClient)}
+        : ${JSON.stringify(connectClient)};
     if (form.get("client_secret") !== client.secret || digest !== challenge) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }
@@ -865,7 +815,6 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),
