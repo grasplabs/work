@@ -41,11 +41,13 @@ import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { AppAccessRequests } from "../engines/app-access-requests.tsx";
 import { ExportDefinition } from "../engines/app-definition.tsx";
+import { RemoveApp } from "../engines/app-remove.tsx";
 import {
   AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { AppVersions } from "../engines/app-versions.tsx";
 import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -543,7 +545,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     packages,
     surfaces,
   } = Route.useLoaderData();
-  const { tab } = Route.useSearch();
+  const { tab: asked } = Route.useSearch();
   const entry = useRouterState({
     select: ({ location }) => location.state.__TSR_key,
   });
@@ -559,6 +561,10 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   // its workflows, where its work is; one made for something else on its
   // apps, which are what fill it.
   const first = app.process === null ? "apps" : "workflows";
+  // Versions are for its builders, Grasp staff among them: core lists them
+  // to no one else, so the tab isn't there for a user.
+  const readsVersions = app.role === "builder";
+  const tab = asked === "versions" && !readsVersions ? undefined : asked;
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
       <div className="flex flex-wrap items-start gap-4">
@@ -581,9 +587,12 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
-        <ExportDefinition app={app} identity={identity} />
-        {/* On its bar, as the prototype's Publish: for who builds. */}
-        <AppStatusControls app={app} identity={identity} />
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportDefinition app={app} identity={identity} />
+          {/* On its bar, as the prototype's Publish: for who builds. */}
+          <AppStatusControls app={app} identity={identity} />
+          <RemoveApp app={app} identity={identity} />
+        </div>
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
@@ -637,6 +646,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
+          {readsVersions ? (
+            <TabsTrigger value="versions">
+              <Trans>Versions</Trans>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="workflows">
           <div className="pt-4">
@@ -709,6 +723,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </Await>
           </div>
         </TabsContent>
+        {readsVersions ? (
+          <TabsContent value="versions">
+            <div className="pt-4">
+              <AppVersions app={app} identity={identity} />
+            </div>
+          </TabsContent>
+        ) : null}
         <TabsContent value="members">
           <div className="pt-4">
             <Members app={app} identity={identity} members={members} />
@@ -810,8 +831,11 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
   // pass through unchecked.
   validateSearch: (
     search: Record<string, unknown>
-  ): { tab?: "settings" | undefined } => ({
-    tab: search.tab === "settings" ? "settings" : undefined,
+  ): { tab?: "settings" | "versions" | undefined } => ({
+    tab:
+      search.tab === "settings" || search.tab === "versions"
+        ? search.tab
+        : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them. Core lists every
