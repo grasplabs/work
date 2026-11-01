@@ -116,6 +116,8 @@ jobs:
     outputs:
       projects: ${{ steps.plan.outputs.projects }}
       shards: ${{ steps.plan.outputs.shards }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      admin-e2e: ${{ steps.plan.outputs['admin-e2e'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,7 +271,8 @@ jobs:
   # skips pass: the test shards when the plan has none to run, and, on a
   # draft, everything but static (a draft can't be merged; marking it
   # ready runs it all, and this check again). In the merge queue the
-  # journeys (e2e, admin-e2e) skip too, and pass (why: e2e, below).
+  # journeys (e2e, admin-e2e) skip too, and pass (why: e2e, below), and so
+  # does a journey suite whose stack the plan finds unchanged.
   check:
     name: check
     needs: [static, plan, test, release, workerd, e2e, admin-e2e]
@@ -295,8 +298,16 @@ jobs:
             E2E=success
             ADMIN_E2E=success
           fi
+          if [ "$E2E" = skipped ] && [ "$PLAN" = success ] && [ "$E2E_RUNS" = false ]; then
+            echo "The change doesn't reach e2e's stack: no journey to run."
+            E2E="success (stack unchanged)"
+          fi
+          if [ "$ADMIN_E2E" = skipped ] && [ "$PLAN" = success ] && [ "$ADMIN_E2E_RUNS" = false ]; then
+            echo "The change doesn't reach the admin's stack: no admin journey to run."
+            ADMIN_E2E="success (stack unchanged)"
+          fi
           failed=""
-          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=$E2E" "admin-e2e=$ADMIN_E2E"; do
+          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=${E2E%% *}" "admin-e2e=${ADMIN_E2E%% *}"; do
             [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
           done
           if [ -n "$failed" ]; then
@@ -313,6 +324,8 @@ jobs:
           TEST: ${{ needs.test.result }}
           E2E: ${{ needs.e2e.result }}
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
+          E2E_RUNS: ${{ needs.plan.outputs.e2e }}
+          ADMIN_E2E_RUNS: ${{ needs.plan.outputs['admin-e2e'] }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
@@ -348,9 +361,14 @@ jobs:
   # GRA-1016). Its tag must be the catalog's @playwright/test, whose browser
   # builds it carries: check:playwright-image (static) holds the two
   # together, and Renovate moves them in one pull request.
+  #
+  # Only when the plan finds the change reaches its stack
+  # (scripts/test-plan.ts, `journeysReached`): a change to the admin, the
+  # router or Vitest's test files alone leaves what it runs as it was.
   e2e:
     name: e2e (${{ matrix.part }})
-    if: github.event_name != 'push' && github.event_name != 'merge_group' && github.event.pull_request.draft != true
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       # The runner's own user, which owns the checkout, the caches and
@@ -439,10 +457,14 @@ jobs:
   # The admin's journeys (playwright.admin.config.ts): a stack of
   # their own, the admin on the fake Cloudflare API, so apart from e2e's.
   # Chromium only, in e2e's image.
+  # Only when the plan finds the change reaches the admin (scripts/test-plan.ts,
+  # `journeysReached`). Skipped so, `check` passes it, and fails the run
+  # when the plan itself failed.
   admin-e2e:
     name: admin-e2e
     # Not in the merge queue, as e2e above.
-    if: github.event_name != 'push' && github.event_name != 'merge_group' && github.event.pull_request.draft != true
+    needs: plan
+    if: needs.plan.outputs['admin-e2e'] == 'true' && github.event_name != 'merge_group'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
