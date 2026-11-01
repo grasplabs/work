@@ -108,16 +108,16 @@ describe("a Worker's config as it deploys", () => {
       name: "grasp-admin-staging",
       secrets_store_secrets: [
         {
-          binding: "ROOMS_READ_TOKEN",
+          binding: "STRIPE_RESTRICTED_KEY",
           store_id: "account-secrets-store",
-          secret_name: "ROOMS_READ_TOKEN_STAGING",
+          secret_name: "STRIPE_RESTRICTED_KEY_STAGING",
         },
       ],
     });
     const deployed: unknown = JSON.parse(
       await filledConfig(built, account().lookups, {
         env: undefined,
-        optional: new Set(["ROOMS_READ_TOKEN"]),
+        optional: new Set(["STRIPE_RESTRICTED_KEY"]),
       })
     );
 
@@ -137,16 +137,16 @@ describe("a Worker's config as it deploys", () => {
           secret_name: "KEY",
         },
         {
-          binding: "ROOMS_READ_TOKEN",
+          binding: "STRIPE_RESTRICTED_KEY",
           store_id: "account-secrets-store",
-          secret_name: "ROOMS_READ_TOKEN",
+          secret_name: "STRIPE_RESTRICTED_KEY",
         },
       ],
     });
     const deployed: unknown = JSON.parse(
       await filledConfig(built, account(["KEY"]).lookups, {
         env: undefined,
-        optional: new Set(["ROOMS_READ_TOKEN"]),
+        optional: new Set(["STRIPE_RESTRICTED_KEY"]),
       })
     );
 
