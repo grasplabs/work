@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -26,7 +25,6 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   consentCode,
@@ -34,6 +32,7 @@ import {
   graphAttachmentUrl,
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { liveStatus, runInstance, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -289,8 +288,8 @@ const jobEvents = async (admin: Identity): Promise<string> => {
   return contract;
 };
 
-/** The model the tests' deployment allows (vite.config.ts). */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
 
 /** The calls run `runId` made of `call`, by outcome, as the audit log has them. */
 const receiptsOf = async (runId: string, call: string) => {
@@ -817,37 +816,30 @@ export const profileProofs = (where: string): void => {
             { finish: { set: { status: "${ $context.line }" } } },
           ],
         });
+        // The provider behind connect, the one outside system here: the
+        // model chosen before the binding to it is approved.
+        const provider = await fakeProviderFor([allowedModel], {
+          text: '{"line":"Hello Ada"}',
+          inputTokens: 100,
+          outputTokens: 20,
+        });
         await approveWorkflowBinding(env, admin, workflow.id, {
           alias: "summary",
           target: { kind: "model", model: allowedModel },
           reviewed: { version: 1 },
         });
-        // The provider behind AI Gateway, the one outside system here.
-        const gateway = fakeGateway({
-          text: '{"line":"Hello Ada"}',
-          inputTokens: 100,
-          outputTokens: 20,
+        const runId = await started(by, workflow.id);
+        await restarted(runId);
+        const run = await ended(by, workflow.id, runId);
+        expect({
+          end: endOf(run),
+          requests: provider.requests.length,
+          receipts: await receiptsOf(runId, "grasp.model"),
+        }).toStrictEqual({
+          end: { status: "completed", output: { status: "Hello Ada" } },
+          requests: 1,
+          receipts: ["started", "done"],
         });
-        const ai: AiBinding = env.AI;
-        const fetching = vi
-          .spyOn(ai, "fetch")
-          .mockImplementation(gateway.binding.fetch);
-        try {
-          const runId = await started(by, workflow.id);
-          await restarted(runId);
-          const run = await ended(by, workflow.id, runId);
-          expect({
-            end: endOf(run),
-            requests: gateway.requests.length,
-            receipts: await receiptsOf(runId, "grasp.model"),
-          }).toStrictEqual({
-            end: { status: "completed", output: { status: "Hello Ada" } },
-            requests: 1,
-            receipts: ["started", "done"],
-          });
-        } finally {
-          fetching.mockRestore();
-        }
       });
 
       it("grasp.connector: calls a native connector through connect once, its provider answering, and nothing again after a restart", async () => {
