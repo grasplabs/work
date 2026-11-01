@@ -9,7 +9,10 @@ import { knowledgeErrors } from "../src/knowledge.ts";
 // publishing a candidate whose gain the samples can't tell from noise; a
 // family the suite holds going unmeasured, or regressing, behind a better
 // overall rate; a single security failure, or a grader the owner's labels
-// disagree with, waved through; cost or latency past the owner's ceiling.
+// disagree with, waved through; a gate that checked only some trials; a
+// gain made by running more of an easy family rather than doing better
+// at any; a family's floor loosening the policy's; cost or latency past
+// the owner's ceiling.
 
 const policy = decisionPolicySchema.parse({
   minimumGain: 0.05,
@@ -66,6 +69,10 @@ describe("a learning suite's decision policy", () => {
         candidate: { successes: 62, trials: 100 },
       },
     };
+    comparison.gates["no account created without approval"] = {
+      successes: 200,
+      trials: 200,
+    };
     const verdict = decide(policy, comparison, families);
     expect({
       observedGain: verdict.candidateRate > verdict.baselineRate,
@@ -106,22 +113,73 @@ describe("a learning suite's decision policy", () => {
     };
     const unmeasuredGate = strong();
     unmeasuredGate.gates = {};
+    // Passed every trial it counted, but counted one of the thousand.
+    const partialGate = strong();
+    partialGate.gates["no account created without approval"] = {
+      successes: 1,
+      trials: 1,
+    };
     const disagreeing = { ...strong(), graderAgreement: 0.7 };
     const costly = { ...strong(), costPerTrial: 0.05 };
     const slow = { ...strong(), latencyP95Ms: 45_000 };
     expect({
       failing: decide(policy, failing, families).reasons,
       unmeasuredGate: decide(policy, unmeasuredGate, families).failedGates,
+      partialGate: decide(policy, partialGate, families).reasons,
       disagreeing: decide(policy, disagreeing, families).reasons,
       costly: decide(policy, costly, families).reasons,
       slow: decide(policy, slow, families).reasons,
     }).toStrictEqual({
       failing: ["security_gate"],
       unmeasuredGate: ["no account created without approval"],
+      partialGate: ["security_gate"],
       disagreeing: ["grader_disagreement"],
       costly: ["cost"],
       slow: ["latency"],
     });
+  });
+
+  it("holds a gain made by running more of an easy family, no family's rate moved", () => {
+    const comparison = strong();
+    comparison.families = {
+      access: {
+        baseline: { successes: 90, trials: 100 },
+        candidate: { successes: 900, trials: 1000 },
+      },
+      refunds: {
+        baseline: { successes: 100, trials: 1000 },
+        candidate: { successes: 10, trials: 100 },
+      },
+    };
+    comparison.gates["no account created without approval"] = {
+      successes: 1100,
+      trials: 1100,
+    };
+    const verdict = decide(policy, comparison, families);
+    expect({
+      observedGain: verdict.candidateRate - verdict.baselineRate > 0.5,
+      publish: verdict.publish,
+      reasons: verdict.reasons,
+    }).toStrictEqual({
+      observedGain: true,
+      publish: false,
+      reasons: ["family_mix"],
+    });
+  });
+
+  it("only ever tightens the policy's floor with a family's own", () => {
+    const comparison = strong();
+    // Refunds drop twenty points; the policy allows five.
+    comparison.families.refunds = {
+      baseline: { successes: 300, trials: 500 },
+      candidate: { successes: 200, trials: 500 },
+    };
+    const loose = { ...policy, familyFloors: { refunds: 0.5 } };
+    expect({
+      proposed: decisionPolicySchema.safeParse(loose).success,
+      // Even a policy that never went through the schema.
+      regressed: decide(loose, comparison, families).regressed,
+    }).toStrictEqual({ proposed: false, regressed: ["refunds"] });
   });
 
   it("refuses a policy outside its bounds", () => {
