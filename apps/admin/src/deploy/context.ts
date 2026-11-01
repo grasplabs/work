@@ -316,7 +316,7 @@ export interface DeployContext {
     hosts: RouterHosts;
     /** The domain clients are served under: a client is `<id>.<domain>`. */
     domain: string;
-    /** How the probe reaches core. */
+    /** How long the smoke check waits between tries, and for each. */
     smoke?: SmokeOptions;
     /**
      * The clients' dispatch namespace, as the router binds it: how a core
