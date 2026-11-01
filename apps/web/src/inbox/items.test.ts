@@ -11,6 +11,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
+  BindingApprovalItem,
   GoLiveItem,
   SignInAgainItem,
   WorkflowGoLiveItem,
@@ -157,6 +158,33 @@ const workflowGoLive: WorkflowGoLiveItem = {
   selfApproval: false,
 };
 
+const bindingApproval: BindingApprovalItem = {
+  kind: "bindingApproval",
+  id: "bindingApproval:workflow-quotes:2",
+  at: null,
+  urgent: true,
+  waitsOn: { type: "admin" },
+  verdicts: [],
+  pending: {
+    workflow: { id: "workflow-quotes", name: "Quotes" },
+    version: 2,
+    live: true,
+    bindings: [
+      {
+        alias: "summary",
+        kind: "model",
+        contractId: "summary-v1",
+        offered: [
+          {
+            target: { kind: "model", model: "openai/gpt-5" },
+            label: "openai/gpt-5",
+          },
+        ],
+      },
+    ],
+  },
+};
+
 /** What waits, every part read. */
 const waiting = (ranOut = true) =>
   ({
@@ -269,6 +297,7 @@ const waiting = (ranOut = true) =>
       ],
     },
     workflowGoLives: { state: "ready", data: [workflowGoLive] },
+    bindings: { state: "ready", data: [bindingApproval] },
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
@@ -280,6 +309,7 @@ describe(inboxItems, () => {
     expect(ids.toSorted()).toStrictEqual(
       [
         "asked:asked-1",
+        "bindingApproval:workflow-quotes:2",
         "decision:decision-1",
         "failed:failure-1",
         "goLive:app-invoices:4",
@@ -308,9 +338,10 @@ describe(inboxItems, () => {
     }
   });
 
-  it("leaves the permission requests to admins, who decide them", () => {
+  it("leaves the permission requests and the bindings to approve to admins, who decide them", () => {
     const kinds = inboxItems(waiting(), member, readAt).map(({ kind }) => kind);
     expect(kinds).not.toContain("permissionRequest");
+    expect(kinds).not.toContain("bindingApproval");
     expect(kinds).toContain("packages");
   });
 
@@ -382,6 +413,7 @@ describe(inInbox, () => {
     ).toStrictEqual(elsewhere.map(({ id }) => id).toSorted());
     expect(elsewhere.map(({ id }) => id).toSorted()).toStrictEqual([
       "asked:asked-1",
+      "bindingApproval:workflow-quotes:2",
       "decision:decision-1",
       "goLive:app-invoices:4",
       "heldStart:held-start-1",
@@ -407,6 +439,7 @@ describe(listed, () => {
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
     ).toStrictEqual([
       "decision",
+      "bindingApproval",
       "heldStart",
       "goLive",
       "failedRun",
@@ -440,6 +473,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 8);
   });
 });

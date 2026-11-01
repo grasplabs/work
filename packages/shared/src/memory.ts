@@ -23,23 +23,6 @@ export const memoryLimits: Readonly<Record<MemoryFileName, number>> = {
   "USER.md": 2000,
 };
 
-// Left for the admin's deploy check (apps/admin's src/deploy/core-config.ts)
-// until it drops `MEMORY_LIMITS` (#1765): core no longer reads the var.
-// Delete both then.
-
-/** The largest limit a deployment may set: past it, memory crowds out work. */
-export const memoryMaxLimit = 32_000;
-
-/**
- * The `MEMORY_LIMITS` var: a limit in tokens per file name, such as
- * `{"USER.md": 1000}`. A file it doesn't name keeps its default.
- */
-export const memoryLimitsSchema = z.strictObject({
-  "AGENTS.md": z.int().min(1).max(memoryMaxLimit).optional(),
-  "MEMORY.md": z.int().min(1).max(memoryMaxLimit).optional(),
-  "USER.md": z.int().min(1).max(memoryMaxLimit).optional(),
-} satisfies Record<MemoryFileName, z.ZodType>);
-
 /**
  * Where an agent works, as far as memory goes:
  * - `own`: a person's own chat, working on the App `appId` when given;

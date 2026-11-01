@@ -118,7 +118,7 @@ describe("an organization's Setup", () => {
       // Deployed by the admin, and the contract not held by core yet.
       checklist: [
         "Its own platform is deployed",
-        "From Rooms, once it is connected.",
+        "Not known here yet.",
         "1 of 6 in place.",
       ].map((text) => checklist.includes(text)),
       deployed: checklist.includes(
