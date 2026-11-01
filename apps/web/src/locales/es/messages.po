@@ -1006,7 +1006,7 @@ msgstr "{name} ha cerrado sesión en todas partes."
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} puede escribir. Cambiar a Lectura"
 
@@ -1018,7 +1018,7 @@ msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} solo lee. Cambiar a Escritura"
 
@@ -2004,6 +2004,10 @@ msgstr "Un proyecto admite archivos Markdown, de texto, CSV y JSON."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "Una pregunta"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Una herramienta de Lectura se ejecuta sin preguntar. Una llamada a una herramienta de Escritura desde el chat, o de una persona que usa un dominio, espera a que esa persona la confirme. Pulsa la insignia de una herramienta para cambiarla. Marca una herramienta como Lectura solo si no cambia nada: si está mal marcada, cambia cosas sin preguntar."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3944,6 +3948,10 @@ msgstr "Cambiado: actúa en nombre de quien use el dominio, con todo lo que el d
 #: src/chat/builds.tsx
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
+
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Cambia"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -8585,7 +8593,7 @@ msgstr "Necesita tu propia app de inicio de sesión"
 msgid "Never"
 msgstr "Nunca"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nunca"
@@ -8933,6 +8941,10 @@ msgstr "Aún sin enlace"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Ya no declarados"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Ya no se ofrece"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -11168,7 +11180,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Leer"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lectura"
@@ -11287,6 +11299,10 @@ msgstr "Leyendo quién puede ser responsable…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Leyendo tu lista de personal"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Lee"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11416,6 +11432,7 @@ msgstr "Recordar algo"
 msgid "Reminded on {date}"
 msgstr "Recordado el {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11444,6 +11461,10 @@ msgstr "Quitar {label}"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "¿Quitar {label}?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Quitar {name}"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -17031,7 +17052,7 @@ msgstr "Espacio de trabajo"
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Escritura"

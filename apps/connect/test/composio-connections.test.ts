@@ -1,13 +1,23 @@
-import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  composioConsentText,
+  composioToolName,
+  composioToolsSchema,
+} from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   OrganizationConnection,
   StartToolkitConnection,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { log } from "@grasp-os/shared/log";
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import {
+  changeToolkitTools,
+  reconcileUnsyncedTools,
+} from "../src/composio-connections.ts";
 import { fakeComposioApi } from "./composio-api.ts";
 import {
   agentFor,
@@ -36,7 +46,7 @@ const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS" },
+        { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["pipeline"] },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
       ],
@@ -960,4 +970,1082 @@ describe("a Composio connection", () => {
     ).resolves.toBe("connect.server_unavailable");
     expect(composio.state.mcp.requests).toBe(0);
   });
+});
+
+/** Changes the tools of `connectionId` for `person`, as core does. */
+const change = async (
+  person: ConnectionPerson,
+  connectionId: string,
+  tools: (string | { name: string; read?: boolean; resource?: string })[]
+) => await exports.default.changeToolkitTools({ person, connectionId, tools });
+
+/** The allowlist of the one server connect made at Composio. */
+const serverTools = () =>
+  [...composio.state.holds.servers.values()].map(
+    ({ allowedTools }) => allowedTools
+  );
+
+/** Whether connection `connectionId` is out of sync with Composio. */
+const outOfSync = async (connectionId: string): Promise<boolean> => {
+  const row = await env.DB.prepare(
+    "SELECT tools_sent_seq > tools_settled_seq AS unsynced FROM connections WHERE id = ?"
+  )
+    .bind(connectionId)
+    .first<{ unsynced: number }>();
+  return row?.unsynced === 1;
+};
+
+/** The stored allowlist of `connectionId`, as connect's registry holds it. */
+const toolsNow = async (connectionId: string) => {
+  const row = await stored(connectionId);
+  return row?.tools;
+};
+
+/** The tool names the `action` events of `recorded` list, in order. */
+const namesIn = (
+  recorded: readonly { action: string; detail: Record<string, unknown> }[],
+  action: string
+) =>
+  recorded
+    .filter((event) => event.action === action)
+    .flatMap(({ detail }) =>
+      Object.entries(detail)
+        .filter(([key]) => key.startsWith("names"))
+        .flatMap(([, value]) => String(value).split(","))
+    );
+
+/** Composio updates connect asked for. */
+const updates = () =>
+  composio.state.requests.filter(({ method }) => method === "PATCH");
+
+describe("changing what a connected Composio toolkit may do", () => {
+  const workflow = agentFor("user-anna");
+
+  it("changes the tools at Composio and in connect for an admin, audited, and calls follow at once", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const changed = await change(admin, connectionId, [
+      { name: "HUBSPOT_LIST_CONTACTS", read: true },
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const listed = await exports.default.listConnections(admin);
+    const recorded = await events();
+    const event = recorded.find(({ action }) => action === "connection.tools");
+    const storedNow: unknown = JSON.parse(
+      (await toolsNow(connectionId)) ?? "null"
+    );
+
+    expect({
+      changed,
+      stored: storedNow,
+      composio: serverTools(),
+      update: await outcome(
+        callAs(workflow, call(connectionId, "HUBSPOT_UPDATE_CONTACT"))
+      ),
+      taken: await outcome(
+        callAs(workflow, call(connectionId, "HUBSPOT_CREATE_CONTACT"))
+      ),
+      listed: listed.find(({ id }) => id === connectionId)?.readTools,
+      event: event?.detail,
+      came: namesIn(recorded, "connection.tools.added"),
+      went: namesIn(recorded, "connection.tools.removed"),
+      // Marked a read on the admin's word alone: named.
+      named: recorded
+        .filter(({ action }) => action === "connection.tools.read_tools")
+        .map(
+          ({ detail }) =>
+            Object.values(detail).filter(
+              (value) => value === "HUBSPOT_LIST_CONTACTS"
+            ).length
+        ),
+    }).toMatchObject({
+      changed: { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"] },
+      stored: [
+        { name: "HUBSPOT_LIST_CONTACTS", read: true },
+        "HUBSPOT_UPDATE_CONTACT",
+      ],
+      composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+      update: "ok",
+      taken: "connect.action_not_found",
+      listed: ["HUBSPOT_LIST_CONTACTS"],
+      event: {
+        outcome: "ok",
+        toolCount: 2,
+        readCount: 1,
+        added: 1,
+        removed: 1,
+      },
+      named: [1],
+      // Who allowed which tool, and took which away, by name.
+      came: ["HUBSPOT_UPDATE_CONTACT"],
+      went: ["HUBSPOT_CREATE_CONTACT"],
+    });
+  });
+
+  it("is only for admins, never Grasp staff, recorded, and asks Composio nothing for anyone else", async () => {
+    const connectionId = await connectHubSpot(someone("admin"));
+    const before = await toolsNow(connectionId);
+    const people = [someone("user"), { ...someone("admin"), staff: true }];
+    const ends = await Promise.all(
+      people.map(
+        async (person) =>
+          await outcome(
+            change(person, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+          )
+      )
+    );
+    const all = await events();
+    const refused = all.filter(({ action }) => action === "connection.tools");
+
+    expect({
+      ends,
+      updates: updates(),
+      unchanged: (await toolsNow(connectionId)) === before,
+      refused: refused
+        .map(({ detail }) => String(detail.reason))
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      ends: ["role.forbidden", "connection.staff_not_allowed"],
+      updates: [],
+      unchanged: true,
+      refused: ["connection.staff_not_allowed", "role.forbidden"],
+    });
+  });
+
+  it("allows only tools the toolkit has, of a connection it can change, and changes nothing at Composio otherwise", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const ends = [
+      await outcome(change(admin, connectionId, ["HUBSPOT_EXPORT_EVERYTHING"])),
+      await outcome(change(admin, connectionId, [])),
+      await outcome(
+        change(admin, "no-such-connection", ["HUBSPOT_LIST_CONTACTS"])
+      ),
+    ];
+    await exports.default.disconnect({ person: admin, connectionId });
+    ends.push(
+      await outcome(change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]))
+    );
+
+    expect({ ends, updates: updates() }).toStrictEqual({
+      ends: [
+        "connection.invalid",
+        "connection.invalid",
+        "connect.connection_not_found",
+        "connect.connection_not_found",
+      ],
+      updates: [],
+    });
+  });
+
+  it("changes nothing when Composio doesn't take the change, and records that it failed", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    composio.state.failing = "PATCH /mcp/";
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const recorded = await events();
+
+    // Composio refuses the setting back as well: recorded, and left marked
+    // for the clock to finish.
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      failed: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      end: "connection.provider_refused",
+      unchanged: true,
+      failed: [
+        ["failed", "connection.tools_restore_failed"],
+        ["failed", "connection.provider_refused"],
+      ],
+    });
+  });
+
+  it("records it as failed when Composio can't be set back after a change another one beat", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(JSON.stringify(["HUBSPOT_LIST_CONTACTS"]), connectionId)
+        .run();
+      // And Composio takes no update after this one.
+      composio.state.failing = "PATCH /mcp/";
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const recorded = await events();
+
+    expect({
+      end,
+      reasons: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      reasons: [
+        ["failed", "connection.tools_restore_failed"],
+        ["refused", "connection.tools_changed"],
+      ],
+    });
+  });
+
+  it("records it as failed when anything but Composio goes wrong on the way, and changes nothing", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    const { info } = log;
+    const broken = vi.spyOn(log, "info").mockImplementation((event, fields) => {
+      if (event === "composio.request" && fields?.method === "PATCH") {
+        throw new Error("Logging broke");
+      }
+      info(event, fields);
+    });
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      broken.mockRestore();
+    }
+    const recorded = await events();
+
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      failed: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      end: "Error: Logging broke",
+      unchanged: true,
+      failed: [
+        ["failed", "connection.tools_restore_failed"],
+        ["failed", "connection.change_failed"],
+      ],
+    });
+  });
+
+  it("refuses a change another one beat, and sets Composio back to what connect holds", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const theirs = JSON.stringify(["HUBSPOT_LIST_CONTACTS"]);
+    // Another admin's change lands while this one is at Composio.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(theirs, connectionId)
+        .run();
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const afterwards = await events();
+
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: serverTools(),
+      ok: afterwards.filter(
+        ({ action, detail }) =>
+          action === "connection.tools" && detail.outcome === "ok"
+      ).length,
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      stored: theirs,
+      composio: [["HUBSPOT_LIST_CONTACTS"]],
+      ok: 0,
+    });
+  });
+
+  it("leaves Composio on connect's latest list when a newer change lands while a lost one sets Composio back", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const theirs = JSON.stringify(["HUBSPOT_LIST_CONTACTS"]);
+    const newest = ["HUBSPOT_UPDATE_CONTACT", "HUBSPOT_LIST_CONTACTS"];
+    // Another change beats this one while it is at Composio; as this one
+    // sets Composio back to that, a third lands, at Composio first.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(theirs, connectionId)
+        .run();
+      composio.state.beforeUpdate = async () => {
+        await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+          .bind(JSON.stringify(newest), connectionId)
+          .run();
+        for (const server of composio.state.holds.servers.values()) {
+          server.allowedTools = newest;
+        }
+      };
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_CREATE_CONTACT"])
+    );
+
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: serverTools(),
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      stored: JSON.stringify(newest),
+      composio: [newest],
+    });
+  });
+
+  it("sets Composio back when connect can't save a change Composio took, and records it failed", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    // Connect's database refuses the change once Composio has it.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare(
+        "CREATE TRIGGER refuse_tools BEFORE UPDATE OF tools ON connections BEGIN SELECT RAISE(ABORT, 'refused'); END"
+      ).run();
+    };
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_tools").run();
+    }
+    const recorded = await events();
+
+    expect({
+      failed: end !== "ok",
+      unchanged: (await toolsNow(connectionId)) === before,
+      composio: serverTools(),
+      reasons: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      failed: true,
+      unchanged: true,
+      composio: [
+        composioToolsSchema
+          .parse(JSON.parse(before ?? "[]"))
+          .map(composioToolName),
+      ],
+      reasons: [["failed", "connection.change_failed"]],
+    });
+  });
+
+  it("keeps the tools a change names in the same transaction as the change, so a retry still records them", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    // The log refuses the event naming the tool added, once.
+    await env.DB.prepare(
+      "CREATE TRIGGER refuse_names BEFORE INSERT ON audit_outbox WHEN NEW.event LIKE '%connection.tools.added%' BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    ).run();
+    let first: string;
+    try {
+      first = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_names").run();
+    }
+    const unchanged = (await toolsNow(connectionId)) === before;
+    // Sent again, it is made, with its names.
+    await change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"]);
+    const recorded = await events();
+
+    expect({
+      first: first !== "ok",
+      unchanged,
+      stored: await toolsNow(connectionId),
+      came: namesIn(recorded, "connection.tools.added"),
+    }).toStrictEqual({
+      first: true,
+      unchanged: true,
+      stored: JSON.stringify(["HUBSPOT_UPDATE_CONTACT"]),
+      came: ["HUBSPOT_UPDATE_CONTACT"],
+    });
+  });
+
+  it("lists each tool's resource property, so a page changing the tools can keep it", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    await change(admin, connectionId, [
+      { name: "HUBSPOT_LIST_CONTACTS", read: true, resource: "pipeline" },
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const listed = await exports.default.listConnections(admin);
+
+    expect(
+      listed.find(({ id }) => id === connectionId)?.toolResources
+    ).toStrictEqual({ HUBSPOT_LIST_CONTACTS: "pipeline" });
+  });
+
+  it("tells Composio of the tools a change adds only once connect holds them", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    let beforeWrite: string[][] = [];
+    // What Composio allows after the first update, the one before connect's write.
+    composio.state.beforeUpdate = async () => {
+      composio.state.beforeUpdate = async () => {
+        beforeWrite = serverTools();
+        await Promise.resolve();
+      };
+      await Promise.resolve();
+    };
+    await change(admin, connectionId, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+
+    expect({ beforeWrite, after: serverTools() }).toStrictEqual({
+      beforeWrite: [["HUBSPOT_LIST_CONTACTS"]],
+      after: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
+  it("keeps or drops a tool its toolkit no longer has, but adds none it lacks", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // Allowed when connected; Composio has since retired it.
+    const retired = ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_RETIRED_TOOL"];
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(JSON.stringify(retired), connectionId)
+      .run();
+    const kept = await outcome(
+      change(admin, connectionId, [...retired, "HUBSPOT_CREATE_CONTACT"])
+    );
+    const keptNow = await toolsNow(connectionId);
+    const added = await outcome(
+      change(admin, connectionId, [...retired, "HUBSPOT_NEVER_WAS"])
+    );
+    const dropped = await outcome(
+      change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"])
+    );
+
+    expect({
+      kept,
+      keptNow,
+      added,
+      dropped,
+      after: await toolsNow(connectionId),
+    }).toStrictEqual({
+      kept: "ok",
+      keptNow: JSON.stringify([...retired, "HUBSPOT_CREATE_CONTACT"]),
+      added: "connection.invalid",
+      dropped: "ok",
+      after: JSON.stringify(["HUBSPOT_LIST_CONTACTS"]),
+    });
+  });
+
+  it("marks a connection whose Composio couldn't be brought in line, and the clock does it later", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // Composio takes the narrowed update, then none for a while.
+    composio.state.beforeUpdate = async () => {
+      composio.state.failing = "PATCH /mcp/";
+      await Promise.resolve();
+    };
+    await change(admin, connectionId, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const marked = await outOfSync(connectionId);
+    composio.state.failing = undefined;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let still: boolean;
+    try {
+      // Past the wait after its first failure.
+      vi.setSystemTime(Date.now() + 61_000);
+      await reconcileUnsyncedTools(env);
+      still = await outOfSync(connectionId);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect({ marked, composio: serverTools(), still }).toStrictEqual({
+      marked: true,
+      composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+      still: false,
+    });
+  });
+
+  it("marks a connection before Composio is told, so a send a crash cuts short is still repaired", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    let whileTold = false;
+    composio.state.beforeUpdate = async () => {
+      whileTold = await outOfSync(connectionId);
+    };
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+
+    expect({
+      markedWhileTold: whileTold,
+      afterwards: await outOfSync(connectionId),
+    }).toStrictEqual({ markedWhileTold: true, afterwards: false });
+  });
+
+  it("keeps reconciling newer marked connections while older ones keep failing", async () => {
+    const admin = someone("admin");
+    await env.DB.prepare(
+      "UPDATE connections SET tools_settled_seq = tools_sent_seq"
+    ).run();
+    const marked: string[] = [];
+    for (let n = 0; n < 21; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+      marked.push(await connectHubSpot(admin));
+    }
+    const serverOf = async (connectionId: string) => {
+      const row = await stored(connectionId);
+      return row?.serverId ?? "";
+    };
+    const marks = marked.map((connectionId) =>
+      env.DB.prepare(
+        "UPDATE connections SET tools_sent_seq = tools_settled_seq + 1 WHERE id = ?"
+      ).bind(connectionId)
+    );
+    await env.DB.batch(marks);
+    // 20 of them are gone at Composio, so theirs keep failing;
+    // the newest one only lags connect.
+    const failing = marked.slice(0, 20);
+    const newest = marked[20] ?? "";
+    for (const connectionId of failing) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+      composio.state.holds.servers.delete(await serverOf(connectionId));
+    }
+    const newestServer = composio.state.holds.servers.get(
+      await serverOf(newest)
+    );
+    const lagging = [...(newestServer?.allowedTools ?? [])];
+    if (newestServer !== undefined) {
+      newestServer.allowedTools = [];
+    }
+    await reconcileUnsyncedTools(env);
+    await reconcileUnsyncedTools(env);
+    const state = await env.DB.prepare(
+      "SELECT id, tools_sent_seq > tools_settled_seq AS unsynced, tools_sync_failures AS failures FROM connections WHERE tools_sent_seq > tools_settled_seq OR id = ?"
+    )
+      .bind(newest)
+      .all<{ id: string; unsynced: number; failures: number }>();
+    const newestNow = state.results.find(({ id }) => id === newest);
+    const stillFailing = state.results.filter(({ id }) => failing.includes(id));
+
+    expect({
+      newestUnsynced: newestNow?.unsynced,
+      newestAtComposio: newestServer?.allowedTools,
+      stillMarked: stillFailing.length,
+      // Each tried once, then put off: not again in the same minute.
+      failures: [...new Set(stillFailing.map(({ failures }) => failures))],
+    }).toStrictEqual({
+      newestUnsynced: 0,
+      newestAtComposio: lagging,
+      stillMarked: 20,
+      failures: [1],
+    });
+  });
+
+  it("takes a change whose write landed but whose answer was lost as made, and records no failure", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    let toolsWrite = false;
+    let lost = false;
+    const db = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare") {
+          return (query: string): unknown => {
+            if (/^update "connections" set "tools"/iu.test(query)) {
+              toolsWrite = true;
+            }
+            return target.prepare(query);
+          };
+        }
+        if (property === "batch") {
+          return async (
+            statements: D1PreparedStatement[]
+          ): Promise<unknown> => {
+            const answer: unknown = await target.batch(statements);
+            if (toolsWrite && !lost) {
+              lost = true;
+              throw new Error("The answer was lost");
+            }
+            return answer;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const result = await changeToolkitTools(
+      { ...env, DB: db },
+      {
+        person: admin,
+        connectionId,
+        tools: ["HUBSPOT_UPDATE_CONTACT"],
+      }
+    );
+    const recorded = await events();
+
+    expect({
+      result,
+      lost,
+      outcomes: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason ?? null]),
+    }).toStrictEqual({
+      result: { tools: ["HUBSPOT_UPDATE_CONTACT"] },
+      lost: true,
+      outcomes: [["ok", null]],
+    });
+  });
+
+  it("drops a held action of a tool taken away, so nobody is asked to confirm it", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const held = await callAs(
+      inChat,
+      call(connectionId, "HUBSPOT_CREATE_CONTACT")
+    );
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+    const left = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM pending_actions WHERE id = ?"
+    )
+      .bind(held.pending?.id ?? "")
+      .first<{ n: number }>();
+    const recorded = await events();
+    const dropped = recorded.find(
+      ({ action }) => action === "connection.action.dropped"
+    );
+
+    expect({
+      held: typeof held.pending?.id,
+      left: left?.n,
+      reason: dropped?.detail.reason,
+    }).toStrictEqual({
+      held: "string",
+      left: 0,
+      reason: "connection.tools_changed",
+    });
+  });
+
+  it("keeps a held action whose tool a newer change allowed again before it is dropped", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const held = await callAs(
+      inChat,
+      call(connectionId, "HUBSPOT_CREATE_CONTACT")
+    );
+    // Narrowed first; by the time Composio is brought in line, a newer
+    // change has allowed the held action's tool again.
+    const heldNow = async () => {
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM pending_actions WHERE id = ?"
+      )
+        .bind(held.pending?.id ?? "")
+        .first<{ n: number }>();
+      return row?.n;
+    };
+    let whileNarrowing: number | undefined;
+    composio.state.beforeUpdate = async () => {
+      whileNarrowing = await heldNow();
+      composio.state.beforeUpdate = async () => {
+        await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+          .bind(
+            JSON.stringify(["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_CONTACT"]),
+            connectionId
+          )
+          .run();
+      };
+    };
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+    const left = await heldNow();
+    const recorded = await events();
+
+    expect({
+      whileNarrowing,
+      left,
+      dropped: recorded.some(
+        ({ action }) => action === "connection.action.dropped"
+      ),
+    }).toStrictEqual({ whileNarrowing: 1, left: 1, dropped: false });
+  });
+});
+
+// Composio kept in step with connect's tool list through crashes (GRA-993's
+// threat model). Actors share one connection: a change (`a`),
+// connect's clock reconciling (`r`) and a second change (`b`). Every send
+// to Composio is held at four points: before connect counts it, before
+// Composio applies it, after it applied it but before it answers, and
+// once answered, before connect records the answer. A walk is the order the actors move from one point
+// to the next; an actor no longer moved has crashed there, its send, if
+// held before applying, never landing. After every move, Composio may
+// differ from connect only while the connection counts as out of sync;
+// after the walk and enough time, connect's clock leaves it in sync. A
+// sample is walked on every run, from a fixed seed, with the walks that
+// once found a fault; CONNECT_WALK_ALL=1 walks every order of a change
+// and the clock, and many more drawn with a second change.
+
+/** One send's answer recorded: the statement held at `answered`. */
+/**
+ * Where connect's side of a send is held: its count and unanswered row,
+ * one batch, before it goes out; and its answer recorded.
+ */
+const heldStatements =
+  /^(?:insert into "composio_tool_sends"|delete from "composio_tool_sends" where .*"seq" = \?)/u;
+
+/**
+ * `db`, whose statements matching `held` wait for `gate` before running,
+ * alone or in a batch.
+ */
+const gatedDb = (
+  db: D1Database,
+  held: RegExp,
+  gate: () => Promise<void>
+): D1Database => {
+  const real = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
+  const gated = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const proxy = new Proxy(statement, {
+      get: (target, property): unknown => {
+        if (property === "bind") {
+          return (...values: unknown[]) => gated(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          await gate();
+          return Reflect.apply(value, target, args);
+        };
+      },
+    });
+    real.set(proxy, statement);
+    return proxy;
+  };
+  return new Proxy(db, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return held.test(query) ? gated(statement) : statement;
+        };
+      }
+      if (property === "batch") {
+        return async (
+          statements: D1PreparedStatement[]
+        ): Promise<D1Result[]> => {
+          if (statements.some((statement) => real.has(statement))) {
+            await gate();
+          }
+          return await target.batch(
+            statements.map((statement) => real.get(statement) ?? statement)
+          );
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+};
+
+/** An actor: what it does, on the `env` its sends are held through. */
+type Actors = Record<string, (actorEnv: Env) => Promise<unknown>>;
+
+/** The tool names connect holds for `connectionId`. */
+const connectNames = async (connectionId: string): Promise<string[]> => {
+  const kept = z
+    .array(z.union([z.string(), z.object({ name: z.string() })]))
+    .parse(JSON.parse((await toolsNow(connectionId)) ?? "[]"));
+  return kept.map((tool) => (typeof tool === "string" ? tool : tool.name));
+};
+
+/** Whether Composio's server `serverId` allows what connect holds. */
+const inStep = async (connectionId: string, serverId: string) => {
+  const atComposio = composio.state.holds.servers.get(serverId);
+  const names = await connectNames(connectionId);
+  return (
+    JSON.stringify([...(atComposio?.allowedTools ?? [])].toSorted()) ===
+    JSON.stringify(names.toSorted())
+  );
+};
+
+/**
+ * Walks `walk` for `actors` on connection `connectionId`, from `allowed`
+ * in step: what went wrong, if anything, and the actors still able to
+ * move after it.
+ */
+const walked = async (
+  connectionId: string,
+  serverId: string,
+  actors: Actors,
+  walk: readonly string[]
+): Promise<{ wrong: string[]; movable: string[] }> => {
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE connections SET tools = ?, tools_sent_seq = 0, tools_settled_seq = 0, tools_sync_failures = 0, tools_sync_retry_at = NULL WHERE id = ?"
+    ).bind(JSON.stringify(allowed), connectionId),
+    env.DB.prepare("DELETE FROM composio_tool_sends"),
+  ]);
+  const server = composio.state.holds.servers.get(serverId);
+  if (server !== undefined) {
+    server.allowedTools = [...allowed];
+  }
+  let moving: string | undefined;
+  const held = new Map<string, () => void>();
+  const arrived = new Map<string, () => void>();
+  const started = new Set<string>();
+  const done = new Set<string>();
+  const hold = async (): Promise<void> => {
+    const actor = moving;
+    if (actor === undefined) {
+      return;
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    held.set(actor, () => {
+      resolve(true);
+    });
+    arrived.get(actor)?.();
+    await promise;
+  };
+  composio.state.updateGate = hold;
+  const wrong: string[] = [];
+  try {
+    for (const actor of walk) {
+      // A move of an actor that ended changes nothing.
+      if (done.has(actor)) {
+        continue;
+      }
+      moving = actor;
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      arrived.set(actor, () => {
+        resolve(true);
+      });
+      const release = held.get(actor);
+      held.delete(actor);
+      if (release !== undefined) {
+        release();
+      } else if (!started.has(actor)) {
+        started.add(actor);
+        const run = actors[actor];
+        const actorEnv = {
+          ...env,
+          DB: gatedDb(env.DB, heldStatements, hold),
+        };
+        void (async () => {
+          try {
+            await run?.(actorEnv);
+          } catch {
+            // A refused change is one way it ends.
+          }
+          done.add(actor);
+          arrived.get(actor)?.();
+        })();
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one move at a time
+      await promise;
+      moving = undefined;
+      // oxlint-disable-next-line no-await-in-loop -- checked after each move
+      const differs = !(await inStep(connectionId, serverId));
+      // oxlint-disable-next-line no-await-in-loop -- checked after each move
+      if (differs && !(await outOfSync(connectionId))) {
+        wrong.push(`differs unmarked after ${walk.join(" ")}`);
+      }
+    }
+    const movable = Object.keys(actors).filter((actor) => !done.has(actor));
+    // The rest crashed where they are. Time passes: the clock settles it.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (let run = 0; run < 3; run += 1) {
+        vi.setSystemTime(Date.now() + 3 * 60 * 60 * 1000);
+        // oxlint-disable-next-line no-await-in-loop -- one clock run at a time
+        await reconcileUnsyncedTools(env);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    if (!(await inStep(connectionId, serverId))) {
+      wrong.push(`never repaired after ${walk.join(" ")}`);
+    }
+    if (await outOfSync(connectionId)) {
+      wrong.push(`still out of sync after ${walk.join(" ")}`);
+    }
+    return { wrong, movable };
+  } finally {
+    composio.state.updateGate = undefined;
+  }
+};
+
+/**
+ * Thousands of sends in seconds: each one's wait for an answer would hold
+ * a timer for ten seconds, past the isolate's limit on timers.
+ */
+const untimed = () => {
+  vi.spyOn(AbortSignal, "timeout").mockReturnValue(
+    new AbortController().signal
+  );
+};
+
+/** Whether to walk every order (`CONNECT_WALK_ALL=1`, vite.config.ts). */
+const walkAll = z
+  .object({ CONNECT_WALK_ALL: z.literal("1") })
+  .safeParse(env).success;
+
+/** How a sample of walks is drawn. */
+interface Draw {
+  /** The walks always walked: ones that found a fault before. */
+  fixed: readonly (readonly string[])[];
+  seed: number;
+  count: number;
+  /** Most moves a drawn walk has. */
+  longest: number;
+}
+
+/**
+ * The `fixed` walks of `actors`, then `count` drawn from `seed`: each up
+ * to `longest` moves of actors picked at random, each actor crashing
+ * wherever its moves end. What went wrong.
+ */
+const drawnWalks = async (
+  connectionId: string,
+  serverId: string,
+  actors: Actors,
+  { fixed, seed, count, longest }: Draw
+): Promise<string[]> => {
+  untimed();
+  // A linear congruential generator: the same walks on every run.
+  let state = seed;
+  const draw = (): number => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+  const names = Object.keys(actors);
+  const drawn = Array.from({ length: count }, () =>
+    Array.from(
+      { length: Math.floor(draw() * (longest + 1)) },
+      () => names[Math.floor(draw() * names.length)] ?? ""
+    )
+  );
+  const wrong: string[] = [];
+  for (const walk of [...fixed, ...drawn]) {
+    // oxlint-disable-next-line no-await-in-loop -- each walk on its own
+    const result = await walked(connectionId, serverId, actors, walk);
+    wrong.push(...result.wrong);
+  }
+  return wrong;
+};
+
+/** Every walk of `actors`, each actor crashing anywhere or finishing. */
+const everyWalk = async (
+  connectionId: string,
+  serverId: string,
+  actors: Actors
+): Promise<string[]> => {
+  const wrong: string[] = [];
+  const pending: string[][] = [[]];
+  untimed();
+  while (pending.length > 0) {
+    const walk = pending.pop() ?? [];
+    // oxlint-disable-next-line no-await-in-loop -- each walk on its own
+    const result = await walked(connectionId, serverId, actors, walk);
+    wrong.push(...result.wrong);
+    for (const actor of result.movable) {
+      pending.push([...walk, actor]);
+    }
+  }
+  return wrong;
+};
+
+/** A change of `connectionId` to `tools`, by `admin`. */
+const changeTo =
+  (admin: ConnectionPerson, connectionId: string, tools: string[]) =>
+  async (actorEnv: Env) =>
+    await changeToolkitTools(actorEnv, {
+      person: admin,
+      connectionId,
+      tools,
+    });
+
+const setUp = async () => {
+  const admin = someone("admin");
+  const connectionId = await connectHubSpot(admin);
+  await env.DB.prepare(
+    "UPDATE connections SET tools_settled_seq = tools_sent_seq WHERE id != ?"
+  )
+    .bind(connectionId)
+    .run();
+  const row = await stored(connectionId);
+  return { admin, connectionId, serverId: row?.serverId ?? "" };
+};
+
+describe("Composio's tool list through crashes", () => {
+  it("keeps a change and the clock's reconcile in step, crashing anywhere", async () => {
+    const { admin, connectionId, serverId } = await setUp();
+    const actors: Actors = {
+      a: changeTo(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]),
+      r: async (actorEnv) => {
+        await reconcileUnsyncedTools(actorEnv);
+      },
+    };
+    const wrong = walkAll
+      ? await everyWalk(connectionId, serverId, actors)
+      : await drawnWalks(connectionId, serverId, actors, {
+          fixed: [
+            // The narrowing, answered, crashes before the change's write:
+            // Composio narrower than connect.
+            ["a", "a"],
+            // The clock counts its send while the narrowing is unanswered;
+            // the narrowing lands after the clock's.
+            ["a", "a", "r", "r", "r", "a", "r", "r"],
+            // The clock counts and reads between the change's count and
+            // its unanswered row.
+            ["a", "r", "r", "r", "a", "r", "r", "a"],
+          ],
+          seed: 993,
+          count: 800,
+          longest: 14,
+        });
+
+    expect(wrong).toStrictEqual([]);
+  }, 600_000);
+
+  it("keeps two changes and the clock's reconcile in step, crashing anywhere", async () => {
+    const { admin, connectionId, serverId } = await setUp();
+    const wrong = await drawnWalks(
+      connectionId,
+      serverId,
+      {
+        a: changeTo(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]),
+        r: async (actorEnv) => {
+          await reconcileUnsyncedTools(actorEnv);
+        },
+        b: changeTo(admin, connectionId, [
+          "HUBSPOT_LIST_CONTACTS",
+          "HUBSPOT_UPDATE_CONTACT",
+        ]),
+      },
+      {
+        fixed: [
+          ["b", "a", "r", "a", "r", "b", "r", "r", "b", "b", "a", "r", "b"],
+          // A narrowing lands after the other change's reconcile, and is
+          // answered before that reconcile settles.
+          "r a r r r r r r a b b b b b b r b a a b r a b b".split(" "),
+        ],
+        seed: 993,
+        // Every order of three is past running: many more drawn instead.
+        count: walkAll ? 20_000 : 600,
+        longest: 24,
+      }
+    );
+
+    expect(wrong).toStrictEqual([]);
+  }, 3_600_000);
 });

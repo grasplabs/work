@@ -1006,7 +1006,7 @@ msgstr "{name} is signed out everywhere."
 msgid "{name} logo"
 msgstr "{name} logo"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} may write. Change to Read"
 
@@ -1018,7 +1018,7 @@ msgstr "{name} no longer changes the domain's data (write → read)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} now changes the domain's data (read → write)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} reads only. Change to Write"
 
@@ -2004,6 +2004,10 @@ msgstr "A project takes Markdown, text, CSV and JSON files."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "A question"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3944,6 +3948,10 @@ msgstr "Changed: it acts for whoever uses the domain, with everything the domain
 #: src/chat/builds.tsx
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
+
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Changes"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -8585,7 +8593,7 @@ msgstr "Needs your own sign-in app"
 msgid "Never"
 msgstr "Never"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Never"
@@ -8933,6 +8941,10 @@ msgstr "No link yet"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "No longer declared"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "No longer offered"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -11168,7 +11180,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Read"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Read"
@@ -11287,6 +11299,10 @@ msgstr "Reading who can own it…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Reading your staff list"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Reads"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11416,6 +11432,7 @@ msgstr "Remember something"
 msgid "Reminded on {date}"
 msgstr "Reminded on {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11444,6 +11461,10 @@ msgstr "Remove {label}"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "Remove {label}?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Remove {name}"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -17031,7 +17052,7 @@ msgstr "Workspace"
 msgid "Would run after approval"
 msgstr "Would run after approval"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Write"

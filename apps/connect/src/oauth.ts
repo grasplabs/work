@@ -45,7 +45,12 @@ import {
   connectionEvent,
   refuseStaff,
 } from "./connection-audit.ts";
-import { allowedToolNames, offeredToolNames } from "./connections.ts";
+import {
+  allowedToolNames,
+  offeredToolNames,
+  readToolNames,
+  toolResourcesOf,
+} from "./connections.ts";
 import {
   connections,
   connectionTokens,
@@ -975,6 +980,8 @@ export const listConnections = async (
     ...(row.serverKind === "composio" && {
       tools: allowedToolNames(row),
       offeredTools: offeredToolNames(row),
+      readTools: readToolNames(row),
+      toolResources: toolResourcesOf(row),
     }),
   }));
 };

@@ -4,6 +4,8 @@ import {
   composioToolsSchema,
   connectionCallbackPath,
   connectionErrors,
+  changeToolkitToolsSchema,
+  connectErrors,
   finishConnectionSchema,
   oauthFlowLifetimeMs,
   startToolkitConnectionSchema,
@@ -17,13 +19,24 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { recordEvents } from "./audit.ts";
+import { recordEvents, recordEventsIf } from "./audit.ts";
 import { composioEntry, composioTools } from "./catalog.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
@@ -34,8 +47,15 @@ import {
 } from "./connection-audit.ts";
 import { isComposioServerUrl } from "./connections.ts";
 import type { Connection } from "./connections.ts";
-import { composioCleanups, composioFlows, connections } from "./db/schema.ts";
+import {
+  composioCleanups,
+  composioFlows,
+  composioToolSends,
+  connections,
+  pendingActions,
+} from "./db/schema.ts";
 import { erasureBegan } from "./erased-people.ts";
+import { dropPendingActions } from "./pending.ts";
 
 // Connecting a Composio toolkit: one shared connection per toolkit, scoped
 // to the tools the admin allows. Composio holds its tokens, in its cloud,
@@ -393,7 +413,10 @@ const detailOf = (toolkit: string) => ({ provider: toolkit, scope: "shared" });
 const refuseUnlessAdmin = async (
   env: Env,
   person: ConnectionPerson,
-  toolkit: string
+  toolkit: string,
+  /** What was refused: connecting, or changing a connection's tools. */
+  action: "connection.connect" | "connection.tools" = "connection.connect",
+  connectionId?: string
 ): Promise<void> => {
   let reason: "connection.staff_not_allowed" | "role.forbidden" | undefined;
   if (person.staff) {
@@ -404,11 +427,13 @@ const refuseUnlessAdmin = async (
   if (reason === undefined) {
     return;
   }
-  await auditRefusal(env, person, "connection.connect", {
-    ...detailOf(toolkit),
-    outcome: "refused",
-    reason,
-  });
+  await auditRefusal(
+    env,
+    person,
+    action,
+    { ...detailOf(toolkit), outcome: "refused", reason },
+    connectionId
+  );
   throw reason === "role.forbidden"
     ? roleErrors.create("role.forbidden")
     : connectionErrors.create("connection.staff_not_allowed");
@@ -426,6 +451,40 @@ const readToolsOf = (tools: readonly (string | ComposioToolRule)[]): string[] =>
   tools.flatMap((tool) =>
     typeof tool !== "string" && tool.read === true ? [tool.name] : []
   );
+
+/**
+ * Whether every one of `tools` is one of `toolkit`'s, each held to a
+ * resource only by one of its own input properties: a name that matches
+ * nothing would be an entry that silently allows nothing, or holds
+ * nothing. One of `kept`, entries the connection allows already, passes
+ * as it is though the toolkit no longer has it: it is kept, not added, so
+ * a tool Composio retired never blocks a change. With the names Composio
+ * says only read (`hinted`).
+ */
+const checkedTools = async (
+  key: string,
+  toolkit: string,
+  tools: readonly (string | ComposioToolRule)[],
+  kept: readonly (string | ComposioToolRule)[] = []
+): Promise<{ fits: boolean; hinted: ReadonlySet<string> }> => {
+  const toolkitTools = await composioTools(key, toolkit);
+  const inputsOf = new Map(
+    toolkitTools.map(({ name, inputs }) => [name, inputs])
+  );
+  const hinted = new Set(
+    toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
+  );
+  const keptEntries = new Set(kept.map((tool) => JSON.stringify(tool)));
+  const fits = tools.every((tool) => {
+    const inputs = inputsOf.get(composioToolName(tool));
+    if (inputs === undefined) {
+      return keptEntries.has(JSON.stringify(tool));
+    }
+    const resource = typeof tool === "string" ? undefined : tool.resource;
+    return resource === undefined || inputs.includes(resource);
+  });
+  return { fits, hinted };
+};
 
 /**
  * Starts connecting a toolkit for an admin who consented: records their
@@ -457,24 +516,9 @@ export const startToolkitConnection = async (
     throw connectionErrors.create("connection.own_auth_required");
   }
   // Only tools the toolkit has, each held to a resource only by one of its
-  // own input properties: a name that matches nothing would be an entry
-  // that silently allows nothing, or holds nothing.
-  const toolkitTools = await composioTools(key, toolkit);
-  const inputsOf = new Map(
-    toolkitTools.map(({ name, inputs }) => [name, inputs])
-  );
-  const hinted = new Set(
-    toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
-  );
+  // own input properties (`checkedTools`).
+  const { fits, hinted } = await checkedTools(key, toolkit, tools);
   const readTools = readToolsOf(tools);
-  const fits = tools.every((tool) => {
-    const inputs = inputsOf.get(composioToolName(tool));
-    const resource = typeof tool === "string" ? undefined : tool.resource;
-    return (
-      inputs !== undefined &&
-      (resource === undefined || inputs.includes(resource))
-    );
-  });
   if (!fits) {
     throw connectionErrors.create("connection.invalid");
   }
@@ -996,3 +1040,526 @@ export const revokeAtComposio = async (
     },
     null
   );
+
+/** Sets the allowlist of Composio's MCP server `serverId` to `tools`. */
+const setServerTools = async (
+  key: string,
+  serverId: string,
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<void> => {
+  await composioRequest(key, {
+    method: "PATCH",
+    path: `/mcp/${encodeURIComponent(serverId)}`,
+    body: { allowed_tools: tools.map(composioToolName) },
+    schema: z.unknown(),
+  });
+};
+
+/**
+ * How long after it was sent a send Composio didn't answer may still land
+ * there: well past connect's own wait for an answer (composio.ts).
+ */
+const unansweredLandsWithinMs = 120_000;
+
+/** A send `sendTools` made. */
+interface Send {
+  /** Its count (`tools_sent_seq`). */
+  seq: number;
+  /**
+   * Whether every send before it was answered, or sent too long ago to land
+   * still, when it was counted: then none can land after it, and it may
+   * settle the connection (`settle`).
+   */
+  last: boolean;
+}
+
+/**
+ * Sends Composio's server `serverId` the tool list `tools` of connection
+ * `connectionId`, counted first (`tools_sent_seq`), so the connection is
+ * out of sync from before the send until a reconcile settles it
+ * (`settle`), whatever happens to this one. The send is kept as unanswered
+ * (`composio_tool_sends`) until Composio answers it: one it never answers
+ * may land there later still. Whether an earlier one was unanswered is
+ * read as it is counted, never later: one answered after this one went
+ * out may have landed after it.
+ */
+const sendTools = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  serverId: string,
+  connectionId: string,
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<Send> => {
+  const now = Date.now();
+  // Counted, kept as unanswered, and the earlier unanswered read, in one
+  // batch: no count without its row.
+  const [counted, , earlier] = await db.batch([
+    db
+      .update(connections)
+      .set({ toolsSentSeq: sql`${connections.toolsSentSeq} + 1` })
+      .where(eq(connections.id, connectionId))
+      .returning({ seq: connections.toolsSentSeq }),
+    db.insert(composioToolSends).select(
+      db
+        .select({
+          connectionId: connections.id,
+          seq: connections.toolsSentSeq,
+          sentAt: sql<Date>`${now}`.as("sent_at"),
+        })
+        .from(connections)
+        .where(eq(connections.id, connectionId))
+    ),
+    db
+      .select({ seq: composioToolSends.seq })
+      .from(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          lt(
+            composioToolSends.seq,
+            sql`(SELECT ${connections.toolsSentSeq} FROM ${connections} WHERE ${connections.id} = ${connectionId})`
+          ),
+          gt(composioToolSends.sentAt, new Date(now - unansweredLandsWithinMs))
+        )
+      )
+      .limit(1),
+  ]);
+  const seq = counted[0]?.seq;
+  if (seq === undefined) {
+    throw new Error("The connection is gone.");
+  }
+  const answered = async () => {
+    await db
+      .delete(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          eq(composioToolSends.seq, seq)
+        )
+      );
+  };
+  try {
+    await setServerTools(key, serverId, tools);
+  } catch (error) {
+    // Composio answered, refusing: this send lands nowhere later. One it
+    // never answered stays kept.
+    if (error instanceof ComposioError && error.status !== undefined) {
+      await answered();
+    }
+    throw error;
+  }
+  await answered();
+  return { seq, last: earlier.length === 0 };
+};
+
+/** Rounds of bringing Composio to connect's list before giving up. */
+const reconcileRounds = 3;
+
+/**
+ * Makes Composio's server `serverId` allow what connect holds for
+ * connection `connectionId` now: reads connect's list, sends it, then
+ * reads it again, and sends again while what it reads after a send isn't
+ * what it sent. A send overtaken by a newer change, which may have landed
+ * at Composio before it, is so followed by that change's list: the last
+ * send of every change is of connect's latest list, whatever the order.
+ * The send that told Composio the latest one, if one did.
+ */
+const reconciled = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  serverId: string,
+  connectionId: string
+): Promise<Send | undefined> => {
+  const listNow = async (): Promise<string | undefined> => {
+    const now = await db
+      .select({ tools: connections.tools })
+      .from(connections)
+      .where(eq(connections.id, connectionId))
+      .get();
+    return now?.tools ?? undefined;
+  };
+  let sent = await listNow();
+  for (let round = 0; round < reconcileRounds; round += 1) {
+    const parsed = composioToolsSchema.safeParse(JSON.parse(sent ?? "null"));
+    if (!parsed.success) {
+      return undefined;
+    }
+    let send: Send;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one send, then a read
+      send = await sendTools(db, key, serverId, connectionId, parsed.data);
+    } catch (error) {
+      log.warn("composio.tools_reconcile_failed", errorFields(error));
+      return undefined;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read after each send
+    const after = await listNow();
+    if (after === sent) {
+      return send;
+    }
+    sent = after;
+  }
+  return undefined;
+};
+
+/** How long the clock waits after a reconcile's first failure. */
+const unsyncedRetryBaseMs = 60_000;
+/** Most doublings of that wait: about an hour at most. */
+const unsyncedRetryDoublings = 6;
+
+/**
+ * Settles connection `connectionId` at `send`, which told Composio
+ * connect's latest list: only if no send came after it (that one's
+ * reconcile, or the clock, settles), and none before it could land after
+ * it (`Send.last`; the clock settles once none can). Whether it settled.
+ */
+const settle = async (
+  db: ReturnType<typeof drizzle>,
+  connectionId: string,
+  { seq, last }: Send
+): Promise<boolean> => {
+  const settled = last
+    ? await db
+        .update(connections)
+        .set({
+          toolsSettledSeq: seq,
+          toolsSyncFailures: 0,
+          toolsSyncRetryAt: null,
+        })
+        .where(
+          and(
+            eq(connections.id, connectionId),
+            eq(connections.toolsSentSeq, seq)
+          )
+        )
+        .returning({ id: connections.id })
+        .get()
+    : undefined;
+  if (settled !== undefined) {
+    await db
+      .delete(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          lte(composioToolSends.seq, seq)
+        )
+      );
+    return true;
+  }
+  // Still the latest send: one before it may land yet, so the clock comes
+  // back once it no longer can. A later send's is its own to settle.
+  await db
+    .update(connections)
+    .set({ toolsSyncRetryAt: new Date(Date.now() + unansweredLandsWithinMs) })
+    .where(
+      and(eq(connections.id, connectionId), eq(connections.toolsSentSeq, seq))
+    );
+  return false;
+};
+
+/**
+ * Reconciles connection `connectionId` (`reconciled`) and settles it at
+ * the send that did (`settle`); out of sync until then, for connect's
+ * clock to try again (`reconcileUnsyncedTools`). A failure puts the next
+ * try off, twice as long each time, so ones that keep failing leave the
+ * clock to others. Whether Composio was told connect's latest list.
+ */
+const reconcileAndSettle = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  serverId: string,
+  connectionId: string
+): Promise<boolean> => {
+  const startedAt = Date.now();
+  const send = await reconciled(db, key, serverId, connectionId);
+  if (send === undefined) {
+    await db
+      .update(connections)
+      .set({
+        toolsSyncFailures: sql`${connections.toolsSyncFailures} + 1`,
+        // SQLite reads the failures before this update's.
+        toolsSyncRetryAt: sql`${startedAt} + (${unsyncedRetryBaseMs} << min(${connections.toolsSyncFailures}, ${unsyncedRetryDoublings}))`,
+      })
+      .where(eq(connections.id, connectionId));
+    return false;
+  }
+  await settle(db, connectionId, send);
+  return true;
+};
+
+/** Most connections out of sync one clock run reconciles. */
+const unsyncedPerRun = 20;
+
+/**
+ * Reconciles Composio for the connections out of sync, a few each run:
+ * what a change's reconcile left unfinished (Composio away, or refusing
+ * for a while), or a send a crash cut short. Ones never tried first, then
+ * the longest due, and none before its retry time, so ones that keep
+ * failing never hold back the rest. Connect's clock runs it.
+ */
+export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
+  const key = composioKey(env);
+  if (key === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const marked = await db
+    .select({ id: connections.id, serverId: connections.composioServerId })
+    .from(connections)
+    .where(
+      and(
+        gt(connections.toolsSentSeq, connections.toolsSettledSeq),
+        eq(connections.status, "active"),
+        eq(connections.serverKind, "composio"),
+        isNotNull(connections.composioServerId),
+        or(
+          isNull(connections.toolsSyncRetryAt),
+          lte(connections.toolsSyncRetryAt, new Date())
+        )
+      )
+    )
+    // SQLite sorts nulls first: never tried before tried.
+    .orderBy(asc(connections.toolsSyncRetryAt), asc(connections.id))
+    .limit(unsyncedPerRun);
+  for (const { id, serverId } of marked) {
+    if (serverId === null) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+    if (!(await reconcileAndSettle(db, key, serverId, id))) {
+      log.warn("composio.tools_still_unsynced", { connectionId: id });
+    }
+  }
+};
+
+/**
+ * Changes which tools a shared Composio connection allows, and which of
+ * them only read, for an admin (GRA-993; the threat model is on the
+ * issue). Only tools its toolkit has, as connecting checks them.
+ * Composio's server first, then connect's own list, which every call goes
+ * by, only if it is still the list read: should another change have won
+ * in between, Composio is set back to what connect holds and the change
+ * is refused (`connection.tools_changed`). So connect never allows a tool
+ * Composio wasn't told of, and a lost race leaves no wider list. Audited
+ * with the lists' hashes and counts, the tools newly marked as reads that
+ * Composio doesn't call read-only named, as consenting names them; a
+ * held action of a tool taken away is dropped. The tools it allows now.
+ */
+export const changeToolkitTools = async (
+  env: Env,
+  request: unknown
+): Promise<{ tools: string[] }> => {
+  const { person, connectionId, tools } = connectionErrors.parse(
+    "connection.invalid",
+    changeToolkitToolsSchema,
+    request
+  );
+  const db = drizzle(env.DB);
+  const row = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  const changeable =
+    row !== undefined &&
+    row.serverKind === "composio" &&
+    row.scope === "shared" &&
+    row.status === "active" &&
+    row.composioServerId !== null &&
+    row.tools !== null;
+  if (!changeable) {
+    throw connectErrors.create("connect.connection_not_found");
+  }
+  const { provider: toolkit } = row;
+  const serverId = row.composioServerId ?? "";
+  const before = row.tools ?? "[]";
+  await refuseUnlessAdmin(env, person, toolkit, "connection.tools", row.id);
+  const detail = detailOf(toolkit);
+  const failed = async (reason: string, outcome: "refused" | "failed") => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.tools",
+      { ...detail, outcome, reason },
+      row.id
+    );
+  };
+  const key = composioKey(env);
+  if (key === undefined) {
+    await failed("connection.provider_unavailable", "failed");
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const previous = composioToolsSchema.parse(JSON.parse(before));
+  const { fits, hinted } = await checkedTools(key, toolkit, tools, previous);
+  if (!fits) {
+    await failed("connection.invalid", "refused");
+    throw connectionErrors.create("connection.invalid");
+  }
+  const stored = JSON.stringify(tools);
+  const names = tools.map(composioToolName);
+  // A held action of a tool not allowed would be refused when confirmed:
+  // dropped, so nobody is asked to confirm it. Idempotent, so the same
+  // choice sent again finishes it should an earlier try stop short.
+  // By the list connect holds as each is dropped, never this change's:
+  // a newer change may have allowed its tool again meanwhile.
+  const dropUnallowed = async () => {
+    await dropPendingActions(
+      env,
+      sql`${pendingActions.connectionId} = ${row.id} AND ${pendingActions.action} NOT IN (
+        SELECT CASE WHEN allowed.type = 'object'
+          THEN json_extract(allowed.value, '$.name') ELSE allowed.value END
+        FROM json_each((SELECT ${connections.tools} FROM ${connections}
+          WHERE ${connections.id} = ${row.id})) AS allowed)`,
+      "connection.tools_changed",
+      person
+    );
+  };
+  // Composio told what connect holds, recorded for whoever reconciles
+  // should it not finish: connect, which every call goes by, stays as it is.
+  const reconcile = async () => {
+    if (!(await reconcileAndSettle(db, key, serverId, row.id))) {
+      await failed("connection.tools_restore_failed", "failed");
+    }
+  };
+  if (stored === before) {
+    // Already connect's list: Composio, and held actions, brought in line
+    // with it, so sending the same choice again repairs a change that
+    // stopped after Composio was told.
+    await reconcile();
+    await dropUnallowed();
+    return { tools: names };
+  }
+  // Narrowed first, widened after: before connect's write, Composio is told
+  // only the tools both lists allow; the ones this adds reach it only once
+  // connect holds them (the reconcile below). Composio may lag connect,
+  // never lead it.
+  const kept = new Set(previous.map(composioToolName));
+  const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
+  try {
+    await sendTools(db, key, serverId, row.id, narrowed);
+  } catch (error) {
+    // Composio may have taken the narrowing all the same (an answer lost
+    // or unreadable): brought back to connect's list, which is unchanged,
+    // or left out of sync for the clock (`reconcileAndSettle`).
+    await reconcile();
+    // Recorded whatever went wrong: Composio refusing, or anything else
+    // on the way, which goes on as it was.
+    if (!(error instanceof ComposioError)) {
+      await failed("connection.change_failed", "failed");
+      throw error;
+    }
+    await failed("connection.provider_refused", "failed");
+    throw connectionErrors.create("connection.provider_refused");
+  }
+  const previousNames = new Set(previous.map(composioToolName));
+  const previousReads = new Set(readToolsOf(previous));
+  const readTools = readToolsOf(tools);
+  // Newly marked as reads without Composio's hint: the admin's word alone,
+  // named, as consenting names them.
+  const named = packedNames(
+    readTools.filter((tool) => !previousReads.has(tool) && !hinted.has(tool))
+  );
+  const addedNames = names.filter((name) => !previousNames.has(name));
+  const removedNames = [...previousNames].filter(
+    (name) => !names.includes(name)
+  );
+  // Which tools came and went, by name, so the log answers who allowed
+  // each: as many as fit, the rest counted.
+  const addedPacked = packedNames(addedNames);
+  const removedPacked = packedNames(removedNames);
+  const partsOf = (
+    action:
+      | "connection.tools.added"
+      | "connection.tools.removed"
+      | "connection.tools.read_tools",
+    details: readonly Record<string, string>[],
+    extra: Record<string, boolean> = {}
+  ) =>
+    details.map((part, index) =>
+      connectionEvent(person, action, row.id, {
+        ...detail,
+        ...extra,
+        part: index + 1,
+        ...part,
+      })
+    );
+  const namedEntries = [
+    ...partsOf("connection.tools.added", addedPacked.details),
+    ...partsOf("connection.tools.removed", removedPacked.details),
+    ...partsOf("connection.tools.read_tools", named.details, { hinted: false }),
+  ];
+  const updatedAt = new Date();
+  // Only while the list is still the one read.
+  const stillRead = sql`${connections.id} = ${row.id} AND ${connections.tools} = ${before}`;
+  // Made by this change: its list, at its time, read after its update.
+  const madeHere = sql`${connections.id} = ${row.id} AND ${connections.tools} = ${stored} AND ${connections.updatedAt} = ${updatedAt.getTime()}`;
+  let changed: boolean;
+  try {
+    // The change, its event and the tools it named, in one transaction:
+    // each named event only once the change itself was made.
+    [changed = false] = await recordEventsIf(env, [
+      {
+        entry: connectionEvent(person, "connection.tools", row.id, {
+          ...detail,
+          outcome: "ok",
+          beforeHash: await sha256Hex(before),
+          toolsHash: await sha256Hex(stored),
+          toolCount: tools.length,
+          readCount: readTools.length,
+          added: addedNames.length,
+          removed: removedNames.length,
+          unnamedAdded: addedPacked.rest.length,
+          unnamedRemoved: removedPacked.rest.length,
+          unnamedReads: named.rest.length,
+        }),
+        from: connections,
+        where: stillRead,
+        writes: [
+          db
+            .update(connections)
+            .set({ tools: stored, updatedAt })
+            .where(stillRead),
+        ],
+      },
+      ...namedEntries.map((entry) => ({
+        entry,
+        from: connections,
+        where: madeHere,
+        writes: [],
+      })),
+    ]);
+  } catch (error) {
+    // The write may have landed and only its answer failed: read back,
+    // it is this change's, made with its events in one transaction.
+    let landed: { id: string } | undefined;
+    try {
+      landed = await db
+        .select({ id: connections.id })
+        .from(connections)
+        .where(madeHere)
+        .get();
+    } catch {
+      // Not read: taken as not made, the safe side for Composio.
+      landed = undefined;
+    }
+    if (landed === undefined) {
+      // Composio was told part of this change, connect kept the list it
+      // had: Composio goes back to connect's.
+      await reconcile();
+      await failed("connection.change_failed", "failed");
+      throw error;
+    }
+    changed = true;
+  }
+  if (!changed) {
+    // Another change won: Composio goes to what connect holds now.
+    await reconcile();
+    await failed("connection.tools_changed", "refused");
+    throw connectionErrors.create("connection.tools_changed");
+  }
+  // A change that lost meanwhile may have sent Composio an older list
+  // after this one's: Composio brought to connect's latest.
+  await reconcile();
+  await dropUnallowed();
+  return { tools: names };
+};

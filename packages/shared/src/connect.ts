@@ -336,6 +336,17 @@ export interface ConnectionSummary {
    * whatever the admin allowed. Absent for a native connection.
    */
   offeredTools?: string[];
+  /**
+   * Those of `tools` the admin marked as only reading, which run without
+   * asking. Absent for a native connection.
+   */
+  readTools?: string[];
+  /**
+   * The input property naming the one resource a call of each tool acts
+   * on, for the tools the admin gave one, by tool name: kept by whatever
+   * changes the tools. Absent for a native connection.
+   */
+  toolResources?: Record<string, string>;
 }
 
 /**
@@ -541,6 +552,18 @@ export interface ConnectionsApi extends StephenReachApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Changes which tools a shared Composio connection allows, and which of
+   * them only read, for an admin, audited (GRA-993): only tools the
+   * toolkit has. A held action of a tool taken away is dropped. Someone
+   * changing them at the same moment makes it `connection.tools_changed`.
+   * The tools it allows now.
+   */
+  changeTools: (request: {
+    connectionId: string;
+    /** The tools to allow, each by name or with its rule. */
+    tools: (string | ComposioToolRule)[];
+  }) => Promise<{ tools: string[] }>;
   /**
    * Asks for an app the catalog doesn't have, audited. An app asked for
    * already, by its name in any case, isn't asked for again: that
@@ -1058,6 +1081,14 @@ export const startToolkitConnectionSchema = z.strictObject({
 export type StartToolkitConnection = z.input<
   typeof startToolkitConnectionSchema
 >;
+
+/** Changes the tools a shared Composio connection allows (GRA-993). */
+export const changeToolkitToolsSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: identifierSchema,
+  tools: composioToolsSchema,
+});
+export type ChangeToolkitTools = z.input<typeof changeToolkitToolsSchema>;
 
 /** Lists one entry's tools. */
 export const catalogToolsRequestSchema = z.strictObject({
@@ -1729,6 +1760,15 @@ export interface ConnectApi
     request: StartToolkitConnection
   ) => Promise<{ url: string }>;
   /**
+   * Changes the tools a shared Composio connection allows, for an admin:
+   * Composio's server first, then connect's own list, which every call
+   * goes by, only if it is still the one read (`connection.tools_changed`
+   * otherwise, Composio set back). Audited, failed attempts too.
+   */
+  changeToolkitTools: (
+    request: ChangeToolkitTools
+  ) => Promise<{ tools: string[] }>;
+  /**
    * One catalog entry's tools, or `connect.catalog_entry_not_found` for
    * anything `catalog` doesn't list. Composio's toolkits are listed only if
    * `composio` and connect has a Composio key, and only those that have
@@ -1941,6 +1981,8 @@ export const connectionErrors = defineErrorFamily({
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
+  "connection.tools_changed":
+    "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
 });
 
 /** Which App's held actions of which binding to drop. */

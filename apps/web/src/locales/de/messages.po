@@ -1006,7 +1006,7 @@ msgstr "{name} ist überall abgemeldet."
 msgid "{name} logo"
 msgstr "Logo von {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} darf schreiben. Auf Lesen ändern"
 
@@ -1018,7 +1018,7 @@ msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} liest nur. Auf Schreiben ändern"
 
@@ -2004,6 +2004,10 @@ msgstr "Ein Projekt nimmt Markdown-, Text-, CSV- und JSON-Dateien an."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "Eine Frage"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Schreiben aus dem Chat oder von einer Person, die eine Domäne nutzt, wartet, bis diese Person ihn bestätigt. Drücke auf das Badge eines Tools, um das zu ändern. Setze ein Tool nur auf Lesen, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3944,6 +3948,10 @@ msgstr "Geändert: Er handelt für jeden, der die Domäne nutzt, mit allem, was 
 #: src/chat/builds.tsx
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Geändert: liest und überschreibt jeden Datensatz von {table}, egal wem er gehört"
+
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Ändert"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -8585,7 +8593,7 @@ msgstr "Braucht eigene Anmelde-App"
 msgid "Never"
 msgstr "Nie"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nie"
@@ -8933,6 +8941,10 @@ msgstr "Noch kein Link"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Nicht mehr deklariert"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Nicht mehr angeboten"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -11168,7 +11180,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Lesen"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lesen"
@@ -11287,6 +11299,10 @@ msgstr "Liest, wer verantwortlich sein kann…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Mitarbeiterliste wird gelesen"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Liest"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11416,6 +11432,7 @@ msgstr "Etwas merken"
 msgid "Reminded on {date}"
 msgstr "Erinnert am {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11444,6 +11461,10 @@ msgstr "{label} entfernen"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "{label} entfernen?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "{name} entfernen"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -17031,7 +17052,7 @@ msgstr "Arbeitsbereich"
 msgid "Would run after approval"
 msgstr "Würde nach der Genehmigung laufen"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Schreiben"

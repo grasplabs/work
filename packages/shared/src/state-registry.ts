@@ -597,6 +597,10 @@ const connectDb: D1State = {
       `${connect}composio-connections.ts`,
       "Deletions at Composio still owed."
     ),
+    composio_tool_sends: transient(
+      `${connect}composio-connections.ts`,
+      "Tool-list sends to Composio not yet answered, kept a few minutes at most."
+    ),
     connection_tokens: secret(
       `${connect}vault.ts`,
       "OAuth tokens sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."

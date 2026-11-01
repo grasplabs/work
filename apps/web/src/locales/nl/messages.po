@@ -1006,7 +1006,7 @@ msgstr "{name} is overal afgemeld."
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
 
@@ -1018,7 +1018,7 @@ msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} wijzigt nu de gegevens van het domein (lezen → schrijven)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} leest alleen. Wijzigen naar Schrijven"
 
@@ -2004,6 +2004,10 @@ msgstr "Een project neemt Markdown-, tekst-, CSV- en JSON-bestanden aan."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "Een vraag"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een domein gebruikt, wacht tot die persoon hem bevestigt. Druk op de badge van een tool om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3944,6 +3948,10 @@ msgstr "Gewijzigd: deze code handelt namens iedereen die het domein gebruikt, me
 #: src/chat/builds.tsx
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Gewijzigd: leest en herschrijft elk record van {table}, van wie het ook is"
+
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Wijzigt"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -8585,7 +8593,7 @@ msgstr "Eigen inlog-app nodig"
 msgid "Never"
 msgstr "Nooit"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nooit"
@@ -8933,6 +8941,10 @@ msgstr "Nog geen link"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Niet meer gedeclareerd"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Niet meer aangeboden"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -11168,7 +11180,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Lezen"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lezen"
@@ -11287,6 +11299,10 @@ msgstr "Lezen wie eigenaar kan zijn…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Je personeelslijst lezen"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Leest"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11416,6 +11432,7 @@ msgstr "Iets onthouden"
 msgid "Reminded on {date}"
 msgstr "Herinnerd op {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11444,6 +11461,10 @@ msgstr "{label} verwijderen"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "{label} verwijderen?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "{name} verwijderen"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -17031,7 +17052,7 @@ msgstr "Werkruimte"
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Schrijven"

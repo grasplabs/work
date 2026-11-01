@@ -17,6 +17,7 @@ import type {
   CatalogSource,
   ConnectionScope,
   CatalogTool,
+  ComposioToolRule,
   ConnectionOwner,
   ConnectionPerson,
   ConnectionSummary,
@@ -440,6 +441,23 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       consent,
       origin: config.origin,
       returnTo: `${back.pathname}${back.search}`,
+    });
+  }
+
+  /**
+   * Changes which tools a shared Composio connection allows, as the
+   * signed-in person: connect checks the rest (the role, the connection,
+   * the tools), and audits it (GRA-993).
+   */
+  async changeTools(request: {
+    connectionId: string;
+    tools: (string | ComposioToolRule)[];
+  }): Promise<{ tools: string[] }> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.changeToolkitTools({
+      person,
+      connectionId: request.connectionId,
+      tools: request.tools,
     });
   }
 
