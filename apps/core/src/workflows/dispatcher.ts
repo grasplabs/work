@@ -51,7 +51,6 @@ import { requireRunEvidenceReadable } from "./run-evidence.ts";
 import type { EvidenceRun } from "./run-evidence.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
-import { wakingOnSettle } from "./share-wakes.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
@@ -82,8 +81,8 @@ import { wakingOnSettle } from "./share-wakes.ts";
 // values it started with.
 
 /**
- * Whose person share of the attempts running at once a run's attempts
- * take (admission.ts): the person who started it; for a run nobody
+ * Whose person share of the model requests in flight a run's calls take
+ * (model-admission.ts): the person who started it; for a run nobody
  * started, its account's (quotas.ts, `accountOf`): its lineage root's for
  * a run of the root's App (a run started under another, by mail or a
  * connector event its parent's step caused, keeps its parent's), and its
@@ -308,11 +307,6 @@ const runWorkflow = async (
   // The refusal that caught the run's isolate tampering (host.ts), if any:
   // the run fails with it, whatever its code made of the refusal.
   let tampered: StepError | undefined;
-  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
-  // the run's code is done, never before a step's outcome; none started
-  // after that, by a settle that came too late.
-  const wakes: Promise<void>[] = [];
-  const waking = { open: true };
   // Whose recalls the run's output is checked against (run-evidence.ts).
   let hosted: EvidenceRun | undefined;
   const result = await settledRun(async () => {
@@ -377,24 +371,15 @@ const runWorkflow = async (
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
       admitAttempt: async (attempt) =>
-        wakingOnSettle(
+        await admitAttempt(
           env,
-          await admitAttempt(
-            env,
-            {
-              run: runId,
-              // Its account: its App's in the lineage, which it joined.
-              root: accountOf(row),
-              subject: run.shareSubject,
-              resource: run.app,
-            },
-            attempt
-          ),
-          (wake) => {
-            if (waking.open) {
-              wakes.push(wake());
-            }
-          }
+          {
+            run: runId,
+            // Its account: its App's in the lineage, which it joined.
+            root: accountOf(row),
+            resource: run.app,
+          },
+          attempt
         ),
     });
     try {
@@ -410,8 +395,6 @@ const runWorkflow = async (
       return await afterCpuKill(error, calls);
     }
   });
-  waking.open = false;
-  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     // Cancelled or taken over as it ran (its load let go, say): whoever
     // ended it, or the newer activation, records what comes of it.

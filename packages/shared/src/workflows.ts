@@ -66,11 +66,9 @@ export const workflowErrors = defineErrorFamily({
   "workflow.lineage_busy":
     "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
   "workflow.queued":
-    "Workflow steps already running take this domain's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
+    "As many workflow steps as may run at once, in this domain or in the organization, are already running. This one waits and runs once one finishes.",
   "workflow.queue_timeout":
-    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this domain busy throughout: try again later.",
-  "workflow.queue_full":
-    "As many of this person's, or this domain's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
+    "This workflow step waited to run for as long as a step may wait, so it was stopped. Steps already running kept the organization or this domain busy throughout: try again later.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
@@ -508,10 +506,8 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "model.rate_limited",
   // Nothing ran; room comes back as the lineage's attempts under way settle.
   "workflow.lineage_busy",
-  // Nothing ran; a share comes back as attempts running at once settle.
+  // Nothing ran; a slot comes back as attempts running at once settle.
   "workflow.queued",
-  // Nothing ran, nor was queued; places come free as waiting steps run.
-  "workflow.queue_full",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);

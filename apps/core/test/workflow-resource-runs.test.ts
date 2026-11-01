@@ -563,15 +563,6 @@ describe("runs of JSON workflows", () => {
   });
 });
 
-/** A first attempt at step `step` of a later activation, held a minute. */
-const laterAttempt = (step: string) => ({
-  key: `capacity:${unique()}`,
-  step,
-  number: 1,
-  generation: 100,
-  deadline: Date.now() + 60_000,
-});
-
 /** A workflow of `by`'s whose run waits an hour before it finishes. */
 const waitingWorkflow = async (by: Acting) =>
   await published(by, (name) =>
@@ -1827,14 +1818,13 @@ const receiptSchema = z.object({
   admittedAt: z.number(),
   deadline: z.number(),
   hostCalls: z.number(),
-  subject: z.string(),
   resource: z.string(),
 });
 
 /** The receipts of run `id`'s attempts, in the order they were admitted. */
 const receiptsOf = async (id: string | null) => {
   const { results } = await env.DB.prepare(
-    "SELECT step_key AS key, attempt, root_run_id AS root, settled_at IS NOT NULL AS settled, reserved_ms AS reserved, used_ms AS used, admitted_at AS admittedAt, deadline, host_calls AS hostCalls, subject, resource FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at, attempt"
+    "SELECT step_key AS key, attempt, root_run_id AS root, settled_at IS NOT NULL AS settled, reserved_ms AS reserved, used_ms AS used, admitted_at AS admittedAt, deadline, host_calls AS hostCalls, resource FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at, attempt"
   )
     .bind(id)
     .all();
@@ -1852,16 +1842,6 @@ const loadWaitsOf = async (id: string | null): Promise<number> =>
         )
         .one().waits
   );
-
-/** How many places in the admission queue run `id` holds. */
-const placesOf = async (id: string | null): Promise<number> => {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS places FROM workflow_admission_queue WHERE run_id = ?"
-  )
-    .bind(id)
-    .first<{ places: number }>();
-  return row?.places ?? 0;
-};
 
 /** Step `task:greet`'s module on `host`, stopped past its CPU time as the Loader stops it. */
 const stoppedIn = async (host: ResourceRunHost): Promise<void> => {
@@ -1895,17 +1875,43 @@ const hangingModule = `export default { metadata: { profile: "grasp-open-workflo
   return { status: "never" };
 } };`;
 
+/**
+ * An attempt of run `run` of workflow `workflowId`'s, of activation
+ * `generation`, admitted late: how its admission came out.
+ */
+const late = async (
+  run: string | null,
+  workflowId: string,
+  generation: number
+) =>
+  await outcome(
+    admitAttempt(
+      env,
+      {
+        run: run ?? "",
+        root: run ?? "",
+        resource: `workflow-resource:${workflowId}`,
+      },
+      {
+        key: `late:${unique()}`,
+        number: 1,
+        generation,
+        deadline: Date.now() + 60_000,
+      }
+    )
+  );
+
 describe(
   "the lineage quotas of runs of JSON workflows",
   { timeout: 90_000 },
   () => {
-    it("admits each attempt against the run's own lineage and its person's and workflow's shares, settling it with what it used and the expressions it evaluated", async () => {
+    it("admits each attempt against the run's own lineage and its workflow's slots, settling it with what it used and the expressions it evaluated", async () => {
       const by = await builder();
       const workflow = await published(by, greetThenCall);
-      // One attempt at once for the person: the call's attempt is admitted
+      // One attempt at once for the workflow: the call's attempt is admitted
       // only once the greeting's has settled and given its share back.
       const { runId, run } = await withQuotas(
-        { workflowPersonAttempts: 1 },
+        { workflowAppAttempts: 1 },
         async () => {
           const started = await start(by, workflow.id);
           return {
@@ -1927,13 +1933,12 @@ describe(
           lineage?.used ===
           receipts.reduce((sum, { used }) => sum + (used ?? 0), 0),
         receipts: receipts.map(
-          ({ key, attempt, root, settled, hostCalls, subject, resource }) => ({
+          ({ key, attempt, root, settled, hostCalls, resource }) => ({
             key: key.length > 0,
             attempt,
             root,
             settled,
             hostCalls,
-            subject,
             resource,
           })
         ),
@@ -1956,7 +1961,6 @@ describe(
           root: runId,
           settled: 1,
           hostCalls: 1,
-          subject: by.userId,
           resource: `workflow-resource:${workflow.id}`,
         })),
       });
@@ -2004,7 +2008,6 @@ describe(
       const owner = {
         run: runId,
         root: runId,
-        subject: by.userId,
         resource: `workflow-resource:${workflow.id}`,
       };
       // What the engine was told each time, and what each attempt ended as.
@@ -2284,7 +2287,7 @@ describe(
       });
     });
 
-    it("queues an attempt behind its person's share, and runs it once a stopped run's attempt gives the share back, charged up to its deadline", async () => {
+    it("holds an attempt while every slot is taken, and runs it once a stopped run's attempt gives its slot back, charged up to its deadline", async () => {
       const by = await builder();
       const hanging = await published(by, (name) =>
         definitionOf(name, [{ finish: { set: { status: "done" } } }])
@@ -2292,10 +2295,10 @@ describe(
       await forgedModule(hanging.id, hangingModule);
       const workflow = await published(by, greetThenCall);
       const result = await withQuotas(
-        { workflowPersonAttempts: 1 },
+        { workflowClientAttempts: 1 },
         async () => {
           const holder = await start(by, hanging.id);
-          // Its attempt holds the person's only share.
+          // Its attempt holds the deployment's only slot.
           await vi.waitFor(
             async () => {
               await expect(receiptsOf(holder.runId)).resolves.toHaveLength(1);
@@ -2311,10 +2314,8 @@ describe(
             },
             { timeout: 30_000, interval: 200 }
           );
-          // One stopped while it waits gives up its place as it ends.
-          const placesBefore = await placesOf(stopped);
+          // One is stopped while it waits; then the holder is.
           await terminateResourceRun(env, by, workflow.id, stopped);
-          const placesAfter = await placesOf(stopped);
           await terminateResourceRun(env, by, hanging.id, holder.runId);
           const run = await ended(by, workflow.id, runId);
           const [held] = await vi.waitFor(
@@ -2329,14 +2330,12 @@ describe(
             run,
             held,
             holder: await lineageOf(holder.runId),
-            places: [placesBefore, placesAfter],
           };
         }
       );
       expect({
         status: result.run.status,
         output: result.run.output,
-        places: result.places,
         chargedToDeadline:
           result.held?.used ===
           (result.held?.deadline ?? 0) - (result.held?.admittedAt ?? 0),
@@ -2344,7 +2343,6 @@ describe(
       }).toStrictEqual({
         status: "completed",
         output: { status: "Hello, Ada!" },
-        places: [1, 0],
         chargedToDeadline: true,
         holderHolds: 0,
       });
@@ -2371,29 +2369,6 @@ describe(
       const done = await published(by, greetThenCall);
       const { runId: endedRun } = await start(by, done.id);
       await ended(by, done.id, endedRun);
-      const late = async (
-        run: string | null,
-        workflowId: string,
-        generation: number
-      ) =>
-        await outcome(
-          admitAttempt(
-            env,
-            {
-              run: run ?? "",
-              root: run ?? "",
-              subject: by.userId,
-              resource: `workflow-resource:${workflowId}`,
-            },
-            {
-              key: `late:${unique()}`,
-              step: "late",
-              number: 1,
-              generation,
-              deadline: Date.now() + 60_000,
-            }
-          )
-        );
       expect({
         fencedActivation: await late(sleepingRun, waiting.id, fenced),
         newerActivation: await late(sleepingRun, waiting.id, fenced + 1),
@@ -2402,87 +2377,6 @@ describe(
         fencedActivation: "execution.stale_attempt",
         newerActivation: "ok",
         endedRun: "execution.stale_attempt",
-      });
-    });
-
-    it("keeps a resumed run's step waiting for a share while its row still says paused, and queues none of a run still paused", async () => {
-      const by = await builder();
-      const waiting = await waitingWorkflow(by);
-      const { runId: holder } = await start(by, waiting.id);
-      const { runId: resumed } = await start(by, waiting.id);
-      const { runId: paused } = await start(by, waiting.id);
-      const app = crypto.randomUUID();
-      const now = Date.now();
-      // Both paused, as the engine last told core. One was resumed since:
-      // its resume is admitted, the newest control, and the engine runs it
-      // again before core hears of it. The other's pause is the newest.
-      const receipt = (run: string | null, kind: string, generation: number) =>
-        env.DB.prepare(
-          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).bind(
-          crypto.randomUUID(),
-          run,
-          app,
-          by.userId,
-          "0".repeat(31) + String(generation),
-          kind,
-          kind === "resume" ? "admitted" : "applied",
-          now,
-          now,
-          generation
-        );
-      await env.DB.batch([
-        env.DB.prepare(
-          "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
-        ).bind(app, by.userId, now),
-        env.DB.prepare(
-          "UPDATE workflow_resource_runs SET status = 'paused', control_generation = 2 WHERE id IN (?, ?)"
-        ).bind(resumed, paused),
-        receipt(resumed, "pause", 1),
-        receipt(resumed, "resume", 2),
-        receipt(paused, "pause", 2),
-      ]);
-      const ownerOf = (run: string | null) => ({
-        run: run ?? "",
-        root: run ?? "",
-        subject: by.userId,
-        resource: `workflow-resource:${waiting.id}`,
-      });
-      const result = await withQuotas(
-        { ...configuredLimits, workflowPersonAttempts: 1 },
-        async () => {
-          // The person's one attempt at once, taken.
-          const held = await admitAttempt(
-            env,
-            ownerOf(holder),
-            laterAttempt("held")
-          );
-          try {
-            return {
-              resumed: await outcome(
-                admitAttempt(env, ownerOf(resumed), laterAttempt("resumed"))
-              ),
-              resumedPlaces: await placesOf(resumed),
-              paused: await outcome(
-                admitAttempt(env, ownerOf(paused), laterAttempt("paused"))
-              ),
-              pausedPlaces: await placesOf(paused),
-            };
-          } finally {
-            await held.settle();
-            await env.DB.prepare(
-              "DELETE FROM workflow_admission_queue WHERE run_id IN (?, ?)"
-            )
-              .bind(resumed, paused)
-              .run();
-          }
-        }
-      );
-      expect(result).toStrictEqual({
-        resumed: "workflow.queued",
-        resumedPlaces: 1,
-        paused: "execution.stale_attempt",
-        pausedPlaces: 0,
       });
     });
 

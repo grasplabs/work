@@ -343,10 +343,7 @@ const coreDb: D1State = {
     ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
-    workflow_admission_queue: transient(`${core}workflows/admission.ts`),
     build_leases: transient(`${core}build-admission.ts`),
-    build_commit_fences: transient(`${core}build-admission.ts`),
-    build_admission_queue: transient(`${core}build-admission.ts`),
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
     workflow_ai_waits: cache(
       `${core}workflows/ai-waits.ts`,

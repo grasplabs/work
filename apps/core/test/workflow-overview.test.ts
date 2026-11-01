@@ -703,7 +703,7 @@ describe("the Workflows page", buildTime, () => {
     });
   });
 
-  it("shows a run waiting for a share as queued, with the share and when it asks again, wherever runs are listed, and nothing of who else waits", async () => {
+  it("shows a run whose model call waits for a share as queued, with the share and when it asks again, wherever runs are listed, and nothing of who else waits", async () => {
     const [owner, user] = await Promise.all([
       personApi("builder"),
       personApi("user"),
@@ -726,13 +726,13 @@ describe("the Workflows page", buildTime, () => {
     const at = (minutes: number) => now - minutes * minute;
     const retryAt = now + 30_000;
     const seeded = {
-      // Its step asks for a share of its App's attempts: queued.
+      // Its step's model call asks for a share of its App's requests: queued.
       queued: await seedRun(app, {
         workflow: "remind",
         status: "running",
         createdAt: at(1),
       }),
-      // Its step stopped asking two minutes ago: its place lapsed.
+      // Its step stopped asking two minutes ago: its wait lapsed.
       lapsed: await seedRun(app, {
         workflow: "remind",
         status: "running",
@@ -764,19 +764,9 @@ describe("the Workflows page", buildTime, () => {
       asksAt = retryAt
     ) =>
       await env.DB.prepare(
-        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)"
+        "INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)"
       )
-        .bind(
-          run,
-          `step-${unique()}`,
-          owner.userId,
-          app,
-          seenAt,
-          seenAt,
-          waitingFor,
-          asksAt,
-          now + minute
-        )
+        .bind(run, `step-${unique()}`, app, waitingFor, asksAt, seenAt)
         .run();
     await place(seeded.queued.id, "app", now);
     await place(seeded.lapsed.id, "app", now - 2 * minute);
@@ -865,9 +855,7 @@ describe("the Workflows page", buildTime, () => {
       expect(failed).not.toContain(seeded.queued.id);
     } finally {
       await owner.api.workflows.cancel(sleeper.id);
-      await env.DB.prepare(
-        "DELETE FROM workflow_admission_queue WHERE resource = ?"
-      )
+      await env.DB.prepare("DELETE FROM workflow_model_waits WHERE owner = ?")
         .bind(app)
         .run();
     }
