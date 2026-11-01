@@ -306,6 +306,10 @@ msgstr "{count, plural, one {{name} a # application dont personne n’a approuv�
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} travaillent ici, sur # travail apparu dans ce que les gens ont dit.} other {{names} travaillent ici, sur # travaux apparus dans ce que les gens ont dit.}}"
 
+#: src/inbox/items.ts
+msgid "{count, plural, one {# binding} other {# bindings}}"
+msgstr "{count, plural, one {# liaison} other {# liaisons}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
 msgstr "{count, plural, one {# blocage} other {# blocages}}"
@@ -728,6 +732,10 @@ msgstr "{kept} sur {written}"
 #: src/dashboard/dependency-requests.tsx
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about} : {summary}"
+
+#: src/inbox/item-detail.tsx
+msgid "{kind}: {contractId}"
+msgstr "{kind} : {contractId}"
 
 #: src/onboarding/work-list.tsx
 msgid "{known} of {workflows} workflows known"
@@ -2977,6 +2985,10 @@ msgctxt "let a waiting item go ahead"
 msgid "Approve"
 msgstr "Approuver"
 
+#: src/inbox/item-detail.tsx
+msgid "Approve {alias}"
+msgstr "Approuver {alias}"
+
 #: src/inbox/items.ts
 msgid "Approve {name}?"
 msgstr "Approuver {name} ?"
@@ -3007,6 +3019,10 @@ msgstr "Approuver les paquets pour {domain}"
 msgid "Approve the packages for {domain}?"
 msgstr "Approuver les paquets pour {domain} ?"
 
+#: src/inbox/items.ts
+msgid "Approve what {name} reaches"
+msgstr "Approuver ce que {name} atteint"
+
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
@@ -3034,6 +3050,10 @@ msgstr "Approuvé dans {left} s"
 #: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "A approuvé des paquets"
+
+#: src/inbox/item-detail.tsx
+msgid "Approved: {alias} of {name}."
+msgstr "Approuvé : {alias} de {name}."
 
 #: src/dashboard/report.ts
 msgid "Approved: {approved}"
@@ -3525,6 +3545,11 @@ msgstr "Lier un workflow"
 #: src/inbox/items.ts
 msgid "Binding"
 msgstr "Liaison"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
+msgid "Bindings"
+msgstr "Liaisons"
 
 #: src/brain/brain.ts
 msgid "Blocker"
@@ -7510,6 +7535,10 @@ msgstr "Son accès a expiré. L’équipe Grasp ne peut pas la reconnecter : un 
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "Son accès a expiré. Reconnectez-vous avec le même compte : les domaines et les agents gardent leurs autorisations."
 
+#: src/inbox/item-detail.tsx
+msgid "Its bindings"
+msgstr "Ses liaisons"
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Son budget ne peut pas être lu : elle ne sert rien plutôt que de fonctionner sans budget. Liez-la à nouveau pour redéfinir son budget."
@@ -7630,6 +7659,10 @@ msgstr "Ses étapes ne peuvent pas être lues dans son code : chaque étape peut
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings."
 msgstr "Ses étapes ne peuvent pas être lues dans son code : chaque étape peut donc faire tout ce que fait son code, sans appeler aucune liaison du domaine."
+
+#: src/inbox/item-detail.tsx
+msgid "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
+msgstr "Sa cible demande des choix que la boîte de réception ne propose pas encore : approuvez-la sur la page du workflow."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -14160,6 +14193,10 @@ msgstr "Les modifications du brouillon disparaissent, et la prochaine modificati
 msgid "The earlier wording stays in the goal's history."
 msgstr "La formulation précédente reste dans l’historique de l’objectif."
 
+#: src/inbox/item-detail.tsx
+msgid "The events its contract admits"
+msgstr "Les événements que son contrat admet"
+
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
@@ -14518,6 +14555,10 @@ msgstr "L’exécution démarrée le {openedAt}"
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "L'exécution a été arrêtée."
+
+#: src/inbox/item-detail.tsx
+msgid "The run's own files"
+msgstr "Les fichiers propres à l'exécution"
 
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
@@ -15729,6 +15770,14 @@ msgstr "Version {version}"
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est exécuté : l'une de ses tâches utilise quelque chose que Grasp ne sait pas encore exécuter."
 
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "La version {version} de {name} attend sa mise en production. Une fois en production, rien ne la démarre tant qu'un administrateur n'a pas approuvé ce qu'elle atteint : chaque modèle, connexion, magasin ou collection qu'elle appelle."
+
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "La version {version} de {name} est en production, mais rien ne la démarre tant qu'un administrateur n'a pas approuvé ce qu'elle atteint : chaque modèle, connexion, magasin ou collection qu'elle appelle."
+
 #: src/screens/screen-frame.tsx
 msgid "Version {version}: read-only preview"
 msgstr "Version {version} : aperçu en lecture seule"
@@ -15798,6 +15847,7 @@ msgstr "Volume"
 msgid "wait for a decision now"
 msgstr "attendent maintenant une décision"
 
+#: src/inbox/items.ts
 #: src/interview/words.ts
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -16053,6 +16103,10 @@ msgstr "est passé à des personnes"
 msgctxt "log filter"
 msgid "What"
 msgstr "Quoi"
+
+#: src/inbox/item-detail.tsx
+msgid "What {alias} reaches"
+msgstr "Ce que {alias} atteint"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What {name} is told changes only through the Stephen Lab, a version at a time. Each version has a mark, the same here and in the lab."
