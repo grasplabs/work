@@ -56,6 +56,7 @@ import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { ShareWorkflow } from "../workflows/share-workflow.tsx";
+import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
@@ -320,6 +321,7 @@ const WorkflowHeader = ({
             </Link>
           ) : null}
         </div>
+        <StartIndependentRun workflow={resource.id} />
         <ShareWorkflow resource={resource} />
         {resource.owner === me && askable.state === "ready" ? (
           <AskStephen askable={askable.data} workflow={resource.id} />
