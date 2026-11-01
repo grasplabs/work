@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
@@ -83,6 +84,11 @@ const signature = async (
 };
 
 interface Sent {
+  /**
+   * How the body goes: as JSON, as Slack sends events (the default), or
+   * form-encoded as `payload=`, as Slack sends a press on a button.
+   */
+  form?: boolean;
   /** Slack's headers, or none of them (`null`). */
   signed?: { timestamp?: number; secret?: string; body?: string } | null;
   doorEnv?: Env;
@@ -97,10 +103,16 @@ interface Sent {
  */
 const post = async (
   payload: unknown,
-  { signed = {}, doorEnv = env, caught = true }: Sent = {}
+  { form = false, signed = {}, doorEnv = env, caught = true }: Sent = {}
 ) => {
-  const body = JSON.stringify(payload);
-  const headers = new Headers({ "content-type": "application/json" });
+  const body = form
+    ? new URLSearchParams({ payload: JSON.stringify(payload) }).toString()
+    : JSON.stringify(payload);
+  const headers = new Headers({
+    "content-type": form
+      ? "application/x-www-form-urlencoded"
+      : "application/json",
+  });
   if (signed !== null) {
     const timestamp = signed.timestamp ?? Math.floor(Date.now() / 1000);
     headers.set("x-slack-request-timestamp", String(timestamp));
@@ -164,6 +176,46 @@ const messageFrom = (
     ...extra,
   },
 });
+
+/**
+ * A press by `user` on button `actionId` of a message the bot sent in
+ * `channel`, carrying `value`, as Slack posts one (`block_actions`).
+ */
+const pressFrom = (
+  user: string,
+  {
+    channel = `D${unique().toUpperCase()}`,
+    actionId = confirmAction,
+    value,
+  }: { channel?: string; actionId?: string; value: string }
+) => {
+  const ts = `${Math.floor(Date.now() / 1000)}.000100`;
+  return {
+    type: "block_actions",
+    team: { id: "TACME", domain: "acme" },
+    api_app_id: "ASTEPHEN",
+    user: { id: user, username: "ben", name: "ben", team_id: "TACME" },
+    channel: { id: channel, name: "directmessage" },
+    container: {
+      type: "message",
+      message_ts: ts,
+      channel_id: channel,
+      is_ephemeral: false,
+    },
+    message: { type: "message", ts, user: "UBOT", text: "Card" },
+    trigger_id: `trigger-${unique()}`,
+    response_url: "https://hooks.slack.test/actions/T/1/x",
+    actions: [
+      {
+        type: "button",
+        block_id: "actions",
+        action_id: actionId,
+        value,
+        action_ts: ts,
+      },
+    ],
+  };
+};
 
 /** Someone with a Slack account linked to their Grasp person. */
 const linkedPerson = async () => {
@@ -356,6 +408,65 @@ describe("who gets in from Slack", () => {
       statuses: results.map(({ status }) => status),
       sent: await slackSawIn(ownChannel),
     }).toStrictEqual({ handed: [], statuses: [200, 200], sent: [] });
+  });
+});
+
+describe("a press on a card in Slack", () => {
+  it("reaches the card's handler for a linked person in their own direct message, as a press in Teams does", async () => {
+    const { slackUser } = await linkedPerson();
+    // Writes that aren't held: the card's handler says it changed since.
+    const confirm = pressFrom(slackUser, {
+      value: JSON.stringify([
+        { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
+      ]),
+    });
+    const confirmed = await post(confirm, { form: true });
+    // An offer that isn't there: Start's handler says it is gone.
+    const start = pressFrom(slackUser, {
+      actionId: startAction,
+      value: crypto.randomUUID(),
+    });
+    const started = await post(start, { form: true });
+
+    const said = async (channel: string) => {
+      const calls = await slackSawIn(channel);
+      return calls.map(({ method, fields }) => [method, fields.text]);
+    };
+    expect({
+      confirmed: confirmed.status,
+      confirmSaid: await said(confirm.channel.id),
+      started: started.status,
+      startSaid: await said(start.channel.id),
+    }).toStrictEqual({
+      confirmed: 200,
+      confirmSaid: [["chat.postMessage", say("changedSince", "en")]],
+      started: 200,
+      startSaid: [["chat.postMessage", say("startGone", "en")]],
+    });
+  });
+
+  it("is refused unsigned, and runs nothing for someone who hasn't linked their Slack account, or outside a direct message", async () => {
+    const { slackUser } = await linkedPerson();
+    const value = JSON.stringify([
+      { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
+    ]);
+    const unsigned = await post(pressFrom(slackUser, { value }), {
+      form: true,
+      signed: null,
+    });
+    const stranger = pressFrom(`U${unique()}`, { value });
+    const inChannel = pressFrom(slackUser, {
+      channel: `C${unique().toUpperCase()}`,
+      value,
+    });
+    await post(stranger, { form: true });
+    await post(inChannel, { form: true });
+
+    expect({
+      unsigned: unsigned.status,
+      stranger: await slackSawIn(stranger.channel.id),
+      inChannel: await slackSawIn(inChannel.channel.id),
+    }).toStrictEqual({ unsigned: 401, stranger: [], inChannel: [] });
   });
 });
 

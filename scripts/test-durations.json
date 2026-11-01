@@ -537,7 +537,6 @@
   "@grasp-os/shared test/operations.test.ts": 0,
   "@grasp-os/shared test/package-limits.test.ts": 0,
   "@grasp-os/shared test/permissions.test.ts": 0,
-  "@grasp-os/shared test/quota-policy.test.ts": 0,
   "@grasp-os/shared test/release.test.ts": 0,
   "@grasp-os/shared test/roles.test.ts": 0,
   "@grasp-os/shared test/router.test.ts": 0,

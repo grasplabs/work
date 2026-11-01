@@ -2064,6 +2064,14 @@ msgctxt "lesson scope"
 msgid "A shared chat"
 msgstr "Een gedeelde chat"
 
+#: src/brain/share-record.tsx
+msgid "A shared chat with {people}"
+msgstr "Een gedeelde chat met {people}"
+
+#: src/brain/share-record.tsx
+msgid "A shared chat with only you in it"
+msgstr "Een gedeelde chat met alleen jou erin"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Een personeelslijst is de snelste weg: namen, e-mailadressen, teams en functies, als CSV- of Excelbestand. Ik gebruik hem alleen om te weten met wie ik moet praten."
@@ -2369,6 +2377,10 @@ msgstr "Toegevoegd"
 msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Toegevoegd"
+
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Toegevoegd {at}"
 
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
@@ -3682,6 +3694,10 @@ msgstr "Roept {tools} aan (elk van hun methodes): kan iets wijzigen"
 msgid "Came in"
 msgstr "Binnengekomen"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Binnengekomen {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Kwam naar voren in {source}"
@@ -3695,6 +3711,7 @@ msgstr "Niet leesbaar"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3861,6 +3878,10 @@ msgstr "Aanpassen: {text}"
 msgid "Changed"
 msgstr "Gewijzigd"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Gewijzigd {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Een chat gewijzigd"
@@ -3956,6 +3977,10 @@ msgstr "Wijzigt"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verloren ging, zodat niemand weet of ze effect hadden. Alleen die persoon kan op haar dashboard zeggen wat er gebeurde; volg het met haar op."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Wijzigingen sinds {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -4618,6 +4643,10 @@ msgstr "Kopiëren als Markdown"
 msgid "Copy code"
 msgstr "Code kopiëren"
 
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "Kopiëren naar Our skills"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Tabel kopiëren"
@@ -5051,6 +5080,18 @@ msgstr "Is dit gebeurd? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Concept verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Dit concept verwerpen?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -9661,6 +9702,10 @@ msgstr "Niets gevonden."
 msgid "Nothing happened that matches."
 msgstr "Er is niets gebeurd dat overeenkomt."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Er is niets veranderd sinds {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -10407,6 +10452,10 @@ msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig."
+
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "Our skills heeft al een skill op {path}: pas die aan."
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
@@ -11642,6 +11691,10 @@ msgstr "Resources"
 msgid "Restore"
 msgstr "Herstellen"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Deze versie herstellen"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Versie {number} herstellen"
@@ -12599,6 +12652,7 @@ msgstr "Toon in het logboek"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12801,6 +12855,10 @@ msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Sinds je laatst keek"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
@@ -14059,6 +14117,10 @@ msgstr "De domeinen en workflows die goedgekeurde npm-pakketten mogen gebruiken.
 msgid "The domains this chat builds didn't load."
 msgstr "De domeinen die deze chat bouwt, zijn niet geladen."
 
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "De wijzigingen van het concept verdwijnen, en de volgende wijziging van de agent begint opnieuw bij de app zoals die is. De versies blijven bewaard, zodat je er een kunt herstellen."
+
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
 msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
@@ -14664,6 +14726,10 @@ msgstr "Er is hier geen workflow meer met die naam. De kaart van een team is mis
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
+
+#: src/brain/share-record.tsx
+msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
+msgstr "Je kunt het nog nergens delen: je zit in geen team en in geen chat die anderen delen."
 
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
