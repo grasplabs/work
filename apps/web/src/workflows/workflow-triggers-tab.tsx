@@ -228,7 +228,9 @@ const TriggerRow = ({
       </div>
       {manages ? (
         <div className="flex flex-wrap items-center gap-2 pl-7">
-          {own && (trigger.stopped || !trigger.enabled) ? (
+          {/* Turning it on runs it as its owner, so core asks them to
+              build the workflow still; turning off and deleting don't. */}
+          {own && builder && (trigger.stopped || !trigger.enabled) ? (
             <Button
               disabled={busy}
               onClick={() => {
@@ -612,7 +614,24 @@ interface Read {
   triggers: WorkflowTrigger[];
   versions: number[];
   connections: ListedConnection[];
+  /** Why the connections couldn't be read: its rows name a connection by its id then. */
+  connectionsFailure?: string;
 }
+
+/**
+ * The connections Connect lists, asked only for the accounts' names: when
+ * it can't answer, none, and why, so the triggers still show, by
+ * connection id.
+ */
+const accountsOf = async (
+  list: () => Promise<ListedConnection[]>
+): Promise<Pick<Read, "connections" | "connectionsFailure">> => {
+  try {
+    return { connections: await list() };
+  } catch (error) {
+    return { connections: [], connectionsFailure: failureText(error) };
+  }
+};
 
 /** The tab's own trigger, beside the page's others. */
 export const TriggersTabTrigger = () => (
@@ -621,16 +640,22 @@ export const TriggersTabTrigger = () => (
   </TabsTrigger>
 );
 
-/** Workflow `workflow`'s triggers, read once as it mounts; a change asks for `onChanged`. */
+/**
+ * Workflow `workflow`'s triggers, read as it mounts and again for each
+ * `generation`, which a change asks for with `onChanged`. The list shown
+ * stays until the next read is in, so the Add form keeps what was typed.
+ */
 const TriggersRead = ({
   workflow,
   me,
   builder,
+  generation,
   onChanged,
 }: {
   workflow: string;
   me: string;
   builder: boolean;
+  generation: number;
   onChanged: () => void;
 }) => {
   const core = useCore();
@@ -641,23 +666,24 @@ const TriggersRead = ({
     let stopped = false;
     const readAll = async (): Promise<void> => {
       try {
-        const [triggers, versions, connections] = await core.withSession(
+        const [triggers, versions, accounts] = await core.withSession(
           async (session) =>
             await Promise.all([
               session.workflowResources.triggers.list(workflow),
               builder
                 ? session.workflowResources.versions(workflow)
                 : Promise.resolve([]),
-              session.connections.list(),
+              accountsOf(async () => await session.connections.list()),
             ])
         );
         if (!stopped) {
+          setFailure(undefined);
           setRead({
             triggers,
             versions: versions
               .map(({ version }) => version)
               .toSorted((a, b) => a - b),
-            connections,
+            ...accounts,
           });
         }
       } catch (error) {
@@ -670,7 +696,8 @@ const TriggersRead = ({
     return () => {
       stopped = true;
     };
-  }, [builder, core, workflow]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `generation` says when to read again
+  }, [builder, core, generation, workflow]);
 
   const changed = async (): Promise<void> => {
     onChanged();
@@ -685,6 +712,7 @@ const TriggersRead = ({
   }
   return (
     <>
+      <ErrorText>{read.connectionsFailure}</ErrorText>
       {read.triggers.length === 0 ? (
         <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
           <Trans>Nothing starts it on its own yet.</Trans>
@@ -740,10 +768,10 @@ export const TriggersTabContent = ({
         <TriggersRead
           builder={builder}
           // Read again, as core has them now, after each change.
-          key={generation}
+          generation={generation}
           me={me}
           onChanged={() => {
-            setGeneration(generation + 1);
+            setGeneration((current) => current + 1);
           }}
           workflow={workflow}
         />

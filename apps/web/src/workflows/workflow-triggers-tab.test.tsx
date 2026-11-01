@@ -94,8 +94,14 @@ const connection = (
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 
-/** The tab for `me` (a builder when `builder`): what core was asked to do. */
-const shown = async (builder: boolean): Promise<unknown[]> => {
+/**
+ * The tab for `me` (a builder when `builder`), with Connect down when
+ * `connectFails`: what core was asked to do.
+ */
+const shown = async (
+  builder: boolean,
+  connectFails = false
+): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const triggers = {
     list: async () => await Promise.resolve([stoppedSchedule, othersMail]),
@@ -125,11 +131,16 @@ const shown = async (builder: boolean): Promise<unknown[]> => {
       await Promise.resolve([{ version: 1 }, { version: 2 }]),
   };
   const connections = {
-    list: async () =>
-      await Promise.resolve([
+    list: async (): Promise<ListedConnection[]> => {
+      await Promise.resolve();
+      if (connectFails) {
+        throw new Error("Connect isn't answering.");
+      }
+      return [
         connection("connection-ms", "microsoft", "invoices@acme.test"),
         connection("connection-google", "google", "drive@acme.test"),
-      ]),
+      ];
+    },
   };
   const core = {
     withSession: async <T,>(
@@ -335,9 +346,36 @@ describe("a workflow's Triggers tab", () => {
     expect({
       add: buttons("Add the trigger").length,
       turnOff: buttons("Turn off").length,
-      // Their own stopped schedule they may still turn on and delete.
+      // Their own stopped schedule they may still delete, but not turn on:
+      // core runs it only for someone who builds the workflow.
       turnOnAgain: buttons("Turn on again").length,
       deletes: buttons("Delete").length,
-    }).toStrictEqual({ add: 0, turnOff: 0, turnOnAgain: 1, deletes: 1 });
+    }).toStrictEqual({ add: 0, turnOff: 0, turnOnAgain: 0, deletes: 1 });
+  });
+
+  it("keeps what the builder typed to add while they change another trigger", async () => {
+    const asked = await shown(true);
+    await fill("When, as a cron expression", "30 7 * * *");
+    await press("Turn off");
+
+    expect({
+      asked,
+      cron: field("When, as a cron expression")?.value,
+    }).toStrictEqual({
+      asked: [{ setEnabled: "trigger-mail", enabled: false }],
+      cron: "30 7 * * *",
+    });
+  });
+
+  it("still shows the triggers when Connect can't name the accounts, by connection id", async () => {
+    await shown(true, true);
+    const says = document.body.textContent;
+
+    expect({
+      schedule: says.includes("0 9 * * 1-5"),
+      mail: says.includes("connection-ms"),
+      why: says.includes("Connect isn't answering."),
+      turnOff: buttons("Turn off").length,
+    }).toStrictEqual({ schedule: true, mail: true, why: true, turnOff: 1 });
   });
 });
