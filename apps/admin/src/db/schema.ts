@@ -15,6 +15,14 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
+/**
+ * The release channels (src/rollout/channels.ts): every client follows
+ * one, and each points at one release. Every new release goes to Edge on
+ * its own; staff promote one to Beta or Stable.
+ */
+export const channelIds = ["edge", "beta", "stable"] as const;
+export type Channel = (typeof channelIds)[number];
+
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
   /** `YY.MM.N` (@grasp-os/shared/release-id); the commit is `commitSha`. */
@@ -62,6 +70,20 @@ export const releaseImportProgress = sqliteTable("release_import_progress", {
 });
 
 /**
+ * The release each channel points at (src/rollout/channels.ts): the
+ * desired state the reconciler deploys (src/rollout/reconciler.ts). No
+ * row yet: no release promoted to it. How it got there is in the audit
+ * log (`channel.promote`).
+ */
+export const channels = sqliteTable("channels", {
+  id: text({ enum: channelIds }).primaryKey(),
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * A client: one deployment of Grasp OS, placed in a hosting destination
  * (src/hosting/), where its operation provisions and releases it.
  */
@@ -88,6 +110,11 @@ export const clients = sqliteTable(
     rotationLiveAt: timestamp("rotation_live_at"),
     /** The rollout ring it's in: 0 first. */
     ring: integer().notNull().default(1),
+    /**
+     * The release channel it follows (src/rollout/channels.ts): a release
+     * promoted to it is deployed to it, unless it's pinned.
+     */
+    channel: text({ enum: channelIds }).notNull().default("stable"),
     status: text({ enum: ["provisioning", "active", "offboarded"] })
       .notNull()
       .default("provisioning"),
@@ -158,7 +185,12 @@ export const clients = sqliteTable(
   },
   // What a rollout reaches: the active clients of a ring or two
   // (src/rollout/targets.ts).
-  (table) => [index("clients_status_ring_idx").on(table.status, table.ring)]
+  (table) => [
+    index("clients_status_ring_idx").on(table.status, table.ring),
+    // What the reconciler reads: the active clients of a channel
+    // (src/rollout/reconciler.ts).
+    index("clients_status_channel_idx").on(table.status, table.channel),
+  ]
 );
 
 /**
@@ -320,6 +352,32 @@ export const rolloutTargets = sqliteTable(
 );
 
 /**
+ * Each client's last deploy by the reconciler (src/rollout/reconciler.ts),
+ * and its claim while it runs: a deploy starts only by replacing the row
+ * as it was read (its `runId`), in the same batch as the client's runner
+ * claim (src/runners.ts), so two ticks never deploy one client twice.
+ * The lease is the run's own life: a `deploying` row whose run ended
+ * without saying so is settled as failed on the next tick.
+ */
+export const clientDeploys = sqliteTable("client_deploys", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id),
+  /** The release it deploys or deployed: the client's target then. */
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  /** The deploy's run (src/rollout/deploy.ts). */
+  runId: text("run_id").notNull(),
+  status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
+  /** Why it failed: a code, never a message or a response body. */
+  error: text(),
+  startedAt: timestamp("started_at").notNull(),
+  /** When it ended; null while it runs. */
+  endedAt: timestamp("ended_at"),
+});
+
+/**
  * A secret of a client's own that can't be derived, such as its Teams
  * bot's client secret, minted in the client's own Entra
  * (src/deploy/sealed-secrets.ts): sealed with a key derived from
@@ -401,6 +459,9 @@ export const auditEvents = sqliteTable(
   (table) => [
     index("audit_events_at_idx").on(table.at),
     index("audit_events_client_idx").on(table.clientId, table.at),
+    // A channel's history, and which channels a release was on
+    // (src/rollout/channels.ts).
+    index("audit_events_action_idx").on(table.action, table.target),
   ]
 );
 
