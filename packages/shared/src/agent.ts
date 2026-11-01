@@ -1,4 +1,7 @@
 import {
+  chatFileMaxBytes,
+  chatFilesMax,
+  chatFilesPerQuestionMax,
   projectDocumentMaxKb,
   projectDocumentsMax,
   projectGoalMaxLength,
@@ -43,6 +46,14 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_project_documents": `A project has at most ${projectDocumentsMax} documents. Remove one to add another.`,
   "agent.project_document_not_found":
     "There's no such document in the project.",
+  "agent.file_unsupported":
+    "Only PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV and JSON files can be attached, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
+  "agent.file_too_large": `A file attached to a question is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
+  "agent.too_many_files": `A question carries at most ${chatFilesPerQuestionMax} files, and a chat keeps at most ${chatFilesMax}. Start a new chat to attach more.`,
+  "agent.file_busy":
+    "The file's text couldn't be read just now. Attach it again in a moment.",
+  "agent.file_not_found":
+    "There's no such file in this chat, or another question carried it already. Attach it again.",
   "agent.run_revoked":
     "A permission of this chat's agent was revoked while this code run was under way, so its APIs don't answer any more.",
   "agent.history_revoked":

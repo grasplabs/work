@@ -27,6 +27,7 @@ import m0024 from './0024_custom_widgets.sql';
 import m0025 from './0025_chat_app.sql';
 import m0026 from './0026_chat_search_text.sql';
 import m0027 from './0027_drop_email_preferences.sql';
+import m0028 from './0028_chat_files.sql';
 
   export default {
     journal,
@@ -58,7 +59,8 @@ m0023,
 m0024,
 m0025,
 m0026,
-m0027
+m0027,
+m0028
     }
   }
   

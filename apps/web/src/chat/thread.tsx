@@ -66,6 +66,7 @@ import {
   useAnswerThinking,
 } from "./answer-thinking.tsx";
 import { AskedLine } from "./asked-questions.tsx";
+import { FileCards } from "./chat-files.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -73,7 +74,7 @@ import {
 } from "./conversation.tsx";
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
-import { signOf } from "./sign.ts";
+import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
@@ -261,25 +262,35 @@ const noArrivals: readonly (number | undefined)[] = [];
 
 /**
  * The trace's first line, over an answer Grasp works on: what it does now,
- * as a light runs through the words; the step of its thinking it is at,
- * while it shows that in the brain.
+ * as a light runs through the words; the file it reads, while its code reads
+ * one of the chat's; the step of its thinking it is at, while it shows that
+ * in the brain.
  */
 const Working = ({
   doing,
+  file,
   thinking,
   arrivals = noArrivals,
 }: {
   doing: WorkState;
+  file?: string;
   thinking?: ThinkingOf;
   arrivals?: readonly (number | undefined)[];
 }) => {
   const { t } = useLingui();
-  const label = {
-    reading: t`Reading the workspace`,
-    thinking: t`Thinking`,
-    writing: t`Writing`,
-    working: t`Working on it`,
-  }[doing];
+  const label =
+    file === undefined
+      ? {
+          reading: t`Reading the workspace`,
+          thinking: t`Thinking`,
+          writing: t`Writing`,
+          working: t`Working on it`,
+        }[doing]
+      : t({
+          message: `Reading ${file}`,
+          comment:
+            "Grasp reads a file the person attached; {file} is its name.",
+        });
   if (thinking !== undefined) {
     return (
       <ThinkingLine arrivals={arrivals} fallback={label} thinking={thinking} />
@@ -755,6 +766,8 @@ const progressOf = (
   shown: ChatPartial | null;
   replies: readonly Answer[];
   doing: WorkState | undefined;
+  /** The code step being written or run: the newest answer's last. */
+  step: ChatCode | undefined;
   worked: ReadonlyMap<number, number>;
 } => {
   const shown =
@@ -773,6 +786,7 @@ const progressOf = (
     doing: running
       ? signOf({ partial: shown, replies, ran: (id) => results.has(id) })
       : undefined,
+    step: (shown ?? replies.at(-1))?.code.at(-1),
     worked: workedFor(turns, current),
   };
 };
@@ -803,7 +817,10 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
-  /** The calls the chat's code made: what it did to the dashboard, under its step. */
+  /**
+   * The calls the chat's code made: what it did to the dashboard, under its
+   * step, and what it reads, while it reads it.
+   */
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
@@ -826,12 +843,13 @@ export const ChatThread = ({
     lastAnswer !== undefined &&
     messages.findLastIndex(({ role }) => role === "user") <
       messages.indexOf(lastAnswer);
-  const { shown, replies, doing, worked } = progressOf(
+  const { shown, replies, doing, step, worked } = progressOf(
     messages,
     partial,
     running,
     results
   );
+  const file = readingFileOf({ doing, step, tools, messages });
   const answerThinking = useAnswerThinking(messages, running);
   // On the brain's atlas the dive plays an answer's thinking; anywhere else,
   // a note's page in the brain too, the answer carries it as a card.
@@ -866,6 +884,7 @@ export const ChatThread = ({
       return (
         <Working
           doing={doing}
+          file={file}
           {...(thinking === undefined
             ? {}
             : { thinking, arrivals: answerThinking.arrivals(thinking) })}
@@ -898,7 +917,7 @@ export const ChatThread = ({
         sign={doing}
         top={
           doing !== undefined && replies.length === 0 ? (
-            <Working doing={doing} />
+            <Working doing={doing} file={file} />
           ) : undefined
         }
         writing
@@ -927,6 +946,10 @@ export const ChatThread = ({
                 return (
                   <li key={item.message.id}>
                     <Message align="end">
+                      {item.message.files === undefined ||
+                      item.message.files.length === 0 ? null : (
+                        <FileCards files={item.message.files} />
+                      )}
                       <Bubble variant="muted">
                         <BubbleContent>{item.message.text}</BubbleContent>
                       </Bubble>

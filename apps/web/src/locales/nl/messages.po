@@ -3351,6 +3351,14 @@ msgstr "Aan het werk"
 msgid "Athens"
 msgstr "Athene"
 
+#: src/chat/chat-files.tsx
+msgid "Attach files"
+msgstr "Bestanden bijvoegen"
+
+#: src/activity/audit-words.ts
+msgid "Attached a file to a chat"
+msgstr "Een bestand aan een chat toegevoegd"
+
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
 msgstr "Poging {n}"
@@ -11455,6 +11463,11 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Lezen"
 
+#. Grasp reads a file the person attached; {file} is its name.
+#: src/chat/thread.tsx
+msgid "Reading {file}"
+msgstr "{file} wordt gelezen"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "{name} lezen"
@@ -11654,6 +11667,7 @@ msgstr "{label} verwijderen"
 msgid "Remove {label}?"
 msgstr "{label} verwijderen?"
 
+#: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 msgid "Remove {name}"
 msgstr "{name} verwijderen"
@@ -11705,6 +11719,10 @@ msgstr "Verwijderen: {item}"
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Verwijderd"
+
+#: src/activity/audit-words.ts
+msgid "Removed a file from a chat before sending it"
+msgstr "Een bestand uit een chat verwijderd voordat het werd verstuurd"
 
 #: src/activity/audit-words.ts
 msgid "Removed a member"
