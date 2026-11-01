@@ -54,12 +54,7 @@ import {
   onboardingSummaryRequestSchema,
 } from "@grasp-os/shared/onboarding-summary";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
-import {
-  platformUpdateNoticeSchema,
-  platformUpdatePath,
-  platformUpdatePurpose,
-  platformUpdateSignatureHeader,
-} from "@grasp-os/shared/platform-change";
+import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPath,
   connectVersionPurpose,
@@ -112,43 +107,6 @@ export const deploymentOfPath = (url: string): string | undefined =>
 /** The R2 jurisdiction a call names, as the API reads its header. */
 const jurisdictionOf = (call: ApiCall): string =>
   call.headers.get("cf-r2-jurisdiction") ?? "default";
-
-/**
- * What a client's core answers a platform update notice with, as core
- * does (core's src/platform-updates.ts): 204 once the signature checks
- * out, with the key its live version's auth secret gives, and the notice
- * parses; 403 otherwise. An account can have its core answer otherwise,
- * as one from before the endpoint would (`noticeStatus`).
- */
-const takeNotice = async (
-  { core }: CoreHost,
-  live: VersionState,
-  request: Request
-): Promise<Response> => {
-  if (core.noticeStatus !== undefined) {
-    return new Response(null, { status: core.noticeStatus });
-  }
-  const body = await request.text();
-  const key = await hkdfHmacKey(
-    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
-    platformUpdatePurpose,
-    ["sign"]
-  );
-  const expected = toHex(
-    new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
-    )
-  );
-  const notice = platformUpdateNoticeSchema.safeParse(JSON.parse(body));
-  if (
-    request.headers.get(platformUpdateSignatureHeader) !== expected ||
-    !notice.success
-  ) {
-    return new Response("Forbidden", { status: 403 });
-  }
-  core.notices.push(notice.data);
-  return new Response(null, { status: 204 });
-};
 
 /** What core answers a path it has no route for: its frontend's page. */
 const frontendPage = (): Response =>
@@ -657,7 +615,6 @@ const signedPosts: ReadonlyMap<
   string,
   (host: CoreHost, live: VersionState, request: Request) => Promise<Response>
 > = new Map([
-  [platformUpdatePath, takeNotice],
   [onboardingSummaryPath, answerSummary],
   [provisionProbePath, answerProbe],
   [connectVersionPath, answerConnectVersion],
@@ -999,7 +956,6 @@ export const fakeCloudflareApi = (token: string) => {
     }
     const core: CoreState = {
       name: clientId,
-      notices: [],
       adminReaders: [],
       coreAsked: [],
       kickoffAsks: [],
@@ -1143,8 +1099,7 @@ export const fakeCloudflareApi = (token: string) => {
   /**
    * What a client's core answers, once it got to it (`workerAnswer`): its
    * live version's `/health`, to a request carrying the router secret that
-   * version has, the platform update notices it takes, and the admin's
-   * signed requests it answers, its provisioning probe among them. One
+   * version has, and the admin's signed requests it answers, its provisioning probe among them. One
    * whose core redirects answers a request that won't follow with the
    * redirect, and one that does as wherever it points would, as its core.
    */

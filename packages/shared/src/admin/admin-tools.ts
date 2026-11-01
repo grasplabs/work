@@ -8,11 +8,10 @@ import {
   errorRateOf,
   needsOf,
   releaseOf,
-  ringName,
-  ringsOf,
+  CHANNEL_NAMES,
   standingOf,
 } from "./admin-platform.ts";
-import type { Platform, Release, Rollout } from "./admin-platform.ts";
+import type { Platform, Release } from "./admin-platform.ts";
 import { ADMIN_SOURCES } from "./admin-sources.ts";
 import type { AdminSource } from "./admin-sources.ts";
 import { byUrgency } from "./admin-view.ts";
@@ -161,7 +160,7 @@ export const ADMIN_TOOLS = [
     name: "platforms",
     title: "Every company’s platform",
     description:
-      "Every company’s own Grasp as the console runs it: how it stands, its ring (Alpha, Beta or Production) and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now, ring by ring.",
+      "Every company’s own Grasp as the console runs it: how it stands, its channel (Edge, Beta or Stable) and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now.",
     inputSchema: NOTHING,
     annotations: READS,
   },
@@ -690,14 +689,13 @@ export const askedLine = (
   return `- app ${app.id}: asked for by ${asked.join("; ")}.`;
 };
 
-/** What the admin holds about every company's own platform, and the release going out: none until the admin reads it. */
+/** What the admin holds about every company's own platform: none until the admin reads it. */
 export interface Fleet {
   platforms: { org: string; platform: Platform }[];
   releases: Release[];
-  rollout: Rollout | null;
 }
 
-export const NO_FLEET: Fleet = { platforms: [], releases: [], rollout: null };
+export const NO_FLEET: Fleet = { platforms: [], releases: [] };
 
 /** One company's platform in a line, as a model reads it. */
 const platformLine = (
@@ -713,38 +711,21 @@ const platformLine = (
   }
   const rate = errorRateOf(platform);
   const errors = rate === null ? "no" : `${Math.round(rate * 1000) / 10}%`;
-  const needs = needsOf(platform, fleet.releases).map((need) => need.kind);
+  const needs = needsOf(platform).map((need) => need.kind);
   const look = needs.length > 0 ? `; needs a look: ${needs.join(", ")}` : "";
   const pinned = given(platform.pinned) ? " (pinned)" : "";
-  return `- ${name}: ${standingOf(platform, fleet.releases)}; in ${ringName(platform.ring)}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
+  return `- ${name}: ${standingOf(platform)}; on ${CHANNEL_NAMES[platform.channel]}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
 };
 
-/** The release going out, ring by ring, in a line. */
-const rolloutLine = (rollout: Rollout): string => {
-  const status =
-    rollout.status === "waiting"
-      ? `waiting for someone at Grasp to approve ${ringName(Math.min(rollout.ring + 1, 2))}`
-      : rollout.status;
-  const rings = ringsOf(rollout)
-    .map(
-      (ring) =>
-        `${ringName(ring.ring)}: ${ring.done} of ${ring.targets.length} on it`
-    )
-    .join("; ");
-  return `Going out now: ${rollout.release}, ${status}. ${rings}.`;
-};
-
-/** Every company's platform, then the release going out, a line each. */
+/** Every company's platform, a line each. */
 const fleetLines = (
   fleet: Fleet,
   views: readonly AdminView[],
   names: Names
-): string[] => [
-  ...fleet.platforms.map((each) =>
+): string[] =>
+  fleet.platforms.map((each) =>
     platformLine(each.org, each.platform, fleet, views, names)
-  ),
-  ...(fleet.rollout ? [rolloutLine(fleet.rollout)] : []),
-];
+  );
 
 /**
  * Everything the admin's chat reads before it answers: the digest, then
@@ -987,21 +968,13 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
       structured: {
         platforms: fleet.platforms.map(({ org, platform }) => ({
           organization: org,
-          standing: standingOf(platform, fleet.releases),
-          ring: platform.ring,
-          ringName: ringName(platform.ring),
+          standing: standingOf(platform),
+          channel: platform.channel,
           release: releaseOf(platform),
           pinned: platform.pinned,
           drift: driftOf(platform),
-          needs: needsOf(platform, fleet.releases).map((need) => need.kind),
+          needs: needsOf(platform).map((need) => need.kind),
         })),
-        rollout: fleet.rollout
-          ? {
-              release: fleet.rollout.release,
-              status: fleet.rollout.status,
-              ring: fleet.rollout.ring,
-            }
-          : null,
       },
     };
   },
