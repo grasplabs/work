@@ -69,14 +69,8 @@ export interface Refusal {
    * `model.rate_limited`, until the provider's rate may let it through.
    */
   retryAfterSeconds?: number;
-  /** For `model.queued`: the share of the requests in flight it waits for. */
+  /** For `model.queued`: the limit of the requests in flight it waits for. */
   waitingFor?: ModelShare;
-  /**
-   * For `model.queued`: whether its call holds a place in the queue. One
-   * given none is told so at once, not kept asking (models.ts). Never told
-   * to the caller.
-   */
-  placed?: boolean;
 }
 
 /**

@@ -39,20 +39,12 @@ const person = (key = "ada"): LedgerScope => ({ scope: "user", key });
 
 /**
  * Ada's shares of the requests in flight, room enough that none fills in
- * these tests, for a call of its own (fair-model-admission.test.ts tests
- * the shares).
+ * these tests, for a call of its own (model-slots.test.ts tests
+ * the limits).
  */
 const roomyFair = (): Admission["fair"] => ({
-  place: crypto.randomUUID(),
   subject: "ada",
-  resource: null,
-  shares: {
-    client: 1000,
-    person: 1000,
-    app: 1000,
-    queuedPerPerson: 1000,
-    queuedPerApp: 1000,
-  },
+  shares: { client: 1000, person: 1000 },
 });
 
 /** How long after its deadline the gateway has a request come due (models.ts). */

@@ -123,8 +123,8 @@ import { busyRetryAfterSeconds, slotFree } from "./admission.ts";
  * client and of one App (admission.ts), how long one step waits for load,
  * the independent workflows and live triggers one person creates
  * (workflow-resources.ts, trigger-resources.ts), and the provider requests
- * to models in flight at once in the client, for one person and of one
- * App, with the calls waiting for a share (model-admission.ts).
+ * to models in flight at once in the client and for one person
+ * (model-admission.ts).
  */
 const quotaLimitNames = [
   "workflowSteps",
@@ -142,9 +142,6 @@ const quotaLimitNames = [
   "triggerResourcesPerPerson",
   "modelClientRequests",
   "modelPersonRequests",
-  "modelAppRequests",
-  "modelQueuedPerPerson",
-  "modelQueuedPerApp",
 ] as const;
 
 type QuotaLimit = (typeof quotaLimitNames)[number];

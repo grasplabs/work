@@ -68,7 +68,7 @@ const rowSchema = z.object({
 
 /** A step of the run whose model call waits for a share (model-waits.ts). */
 const queuedSchema = z.object({
-  waitingFor: z.enum(["client", "person", "app"]),
+  waitingFor: z.enum(["client", "person"]),
   retryAt: z.number(),
 });
 

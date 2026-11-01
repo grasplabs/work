@@ -759,7 +759,7 @@ describe("the Workflows page", buildTime, () => {
     await sleeping(sleeper.id, "idle");
     const place = async (
       run: string,
-      waitingFor: "client" | "person" | "app",
+      waitingFor: "client" | "person",
       seenAt: number,
       asksAt = retryAt
     ) =>
@@ -768,10 +768,10 @@ describe("the Workflows page", buildTime, () => {
       )
         .bind(run, `step-${unique()}`, app, waitingFor, asksAt, seenAt)
         .run();
-    await place(seeded.queued.id, "app", now);
-    await place(seeded.lapsed.id, "app", now - 2 * minute);
-    await place(seeded.paused.id, "app", now);
-    await place(seeded.deciding.id, "app", now);
+    await place(seeded.queued.id, "client", now);
+    await place(seeded.lapsed.id, "client", now - 2 * minute);
+    await place(seeded.paused.id, "client", now);
+    await place(seeded.deciding.id, "client", now);
     await place(sleeper.id, "person", now);
     // Another run waits for another share: each run shows its own, and
     // only which share and when (`toStrictEqual` below), never who else
@@ -783,8 +783,8 @@ describe("the Workflows page", buildTime, () => {
       status: "running",
       createdAt: at(5),
     });
-    await place(other.id, "person", now, retryAt + minute);
-    await place(other.id, "client", now);
+    await place(other.id, "client", now, retryAt + minute);
+    await place(other.id, "person", now);
 
     const asked = async (person: Person) => {
       const [page, appRuns, overview, status, screenRuns] = await Promise.all([
@@ -825,19 +825,19 @@ describe("the Workflows page", buildTime, () => {
     });
     const expected = {
       runs: {
-        queued: queuedFor("app"),
+        queued: queuedFor("client"),
         lapsed: { status: "running", queued: null },
         paused: { status: "paused", queued: null },
         deciding: { status: "waiting", queued: null },
       },
       appRuns: {
-        queued: queuedFor("app"),
+        queued: queuedFor("client"),
         lapsed: { status: "running", queued: null },
         paused: { status: "paused", queued: null },
       },
-      other: queuedFor("client"),
-      onScreen: queuedFor("app"),
-      lastRemind: queuedFor("app"),
+      other: queuedFor("person"),
+      onScreen: queuedFor("client"),
+      lastRemind: queuedFor("client"),
       lastIdle: queuedFor("person"),
       status: queuedFor("person"),
     };

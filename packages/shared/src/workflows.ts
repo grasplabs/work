@@ -817,7 +817,7 @@ export interface RunControl {
  * only: never who else holds it, nor their runs.
  */
 export interface RunQueue {
-  waitingFor: "client" | "person" | "app";
+  waitingFor: "client" | "person";
   retryAt: string;
 }
 

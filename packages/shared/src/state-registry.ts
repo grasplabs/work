@@ -833,7 +833,6 @@ const modelLedger: DurableObjectState = {
   schema: `${core}db/model-ledger`,
   tables: {
     requests: exported(`${core}model-ledger.ts`),
-    queue: transient(`${core}model-admission.ts`),
     policy: exported(`${core}model-ledger.ts`),
     spend: exported(`${core}model-ledger.ts`),
     provider_health: cache(
