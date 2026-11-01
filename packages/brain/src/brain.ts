@@ -181,6 +181,15 @@ export interface BrainPorts<C> {
     }
   ) => Promise<void>;
   /**
+   * Whether `reader` may replace an entity match decision `decidedBy`
+   * someone else made (GRA-1080, entities.ts): the host's decision, refused
+   * as `brain.denied`. The decider replaces their own without asking.
+   */
+  mayReplaceMatch: (
+    reader: C,
+    decision: { decidedBy: string }
+  ) => Promise<void>;
+  /**
    * Memory records in a recall (GRA-298), as the host decides whom they
    * serve: the Brain matches within what it answers and widens nothing.
    */
