@@ -628,7 +628,7 @@ describe("permissions", () => {
       }),
     };
 
-    // Grants from before the v1 server went, as 0189 found them: an App's
+    // Grants from before the v1 server went, as the migration found them: an App's
     // on another App's exports, an agent's by an export's name, and the
     // ones it keeps, an agent's `read` and an App's connection.
     const legacy = {
@@ -665,15 +665,15 @@ describe("permissions", () => {
           )
       )
     );
-    // 0189's own cleanup: its deletes, as the migration ran them.
+    // The migration's own cleanup: its deletes, as the migration ran them.
     const migrations = z
       .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
       .parse(testBinding("CORE_MIGRATIONS"));
     const cleanup = migrations
-      .find(({ name }) => name.startsWith("0189_"))
+      .find(({ name }) => name.includes("_drop_v1_exports"))
       ?.queries.filter((query) => query.trimStart().startsWith("DELETE"));
     if (cleanup === undefined || cleanup.length === 0) {
-      throw new Error("0189 deletes no permissions");
+      throw new Error("drop_v1_exports deletes no permissions");
     }
     await env.DB.batch(cleanup.map((query) => env.DB.prepare(query)));
     const { results } = await env.DB.prepare(

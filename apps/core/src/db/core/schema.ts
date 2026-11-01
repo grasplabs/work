@@ -156,7 +156,7 @@ export const organizations = sqliteTable("organizations", {
 
 /**
  * The organization's settings an admin keeps beside its name and time zone
- * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * (org-settings.ts): one row per kind (`billing`), its value as
  * JSON, checked again as it is read. None until an admin saves one.
  */
 export const orgSettings = sqliteTable("org_settings", {
@@ -1507,6 +1507,12 @@ export const previewFixtureStores = sqliteTable(
   {
     storeId: text("store_id").primaryKey(),
     appId: text("app_id").notNull(),
+    /**
+     * Whose chat's preview it is: what their removal discards at once
+     * (`discardPreviewStoresOf`). Null for one recorded before core kept
+     * it, left to the sweep.
+     */
+    personId: text("person_id"),
     createdAt: timestamp("created_at").notNull(),
     /**
      * When the sweep tries it again, once a discard of it failed or ran out
@@ -1515,7 +1521,10 @@ export const previewFixtureStores = sqliteTable(
      */
     retryAfter: timestamp("retry_after"),
   },
-  (table) => [index("preview_fixture_stores_created_at").on(table.createdAt)]
+  (table) => [
+    index("preview_fixture_stores_created_at").on(table.createdAt),
+    index("preview_fixture_stores_person").on(table.personId),
+  ]
 );
 
 /**

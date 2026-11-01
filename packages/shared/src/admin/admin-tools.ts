@@ -415,9 +415,6 @@ export const needText = (
     case "ask": {
       return `The first conversation left ${many(need.fields.length, "thing", "things")} open: ask the sponsor.`;
     }
-    case "research": {
-      return "The research on the company is not started.";
-    }
     case "conflict": {
       // The research's words stay in the admin: an answer says only that.
       return "The research disagrees with the company’s own account; the admin shows where.";
