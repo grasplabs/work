@@ -15,7 +15,6 @@
  */
 export const familyNamespaces = [
   "admin",
-  "admin_ask",
   "agent",
   "ai_key",
   "ai_provider",

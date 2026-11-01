@@ -1,4 +1,3 @@
-import { adminAskPurpose } from "@grasp-os/shared/admin-ask";
 import { adminCommandAnswerSchema } from "@grasp-os/shared/admin-command";
 import type { AdminCommand } from "@grasp-os/shared/admin-command";
 import { adminKickoffPurpose } from "@grasp-os/shared/admin-kickoff";
@@ -118,10 +117,9 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
       [
         { body, signature: null },
         { body, signature: "0".repeat(64) },
-        // The admin's keys for the snapshot, the kickoff and the chat.
+        // The admin's keys for the snapshot and the kickoff.
         { body, signature: await signedFor(adminSnapshotPurpose) },
         { body, signature: await signedFor(adminKickoffPurpose) },
-        { body, signature: await signedFor(adminAskPurpose) },
         // Signed for another company: its own auth secret.
         {
           body,
@@ -152,7 +150,7 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
       events: events.length,
       paused: await paused(),
     }).toStrictEqual({
-      statuses: [401, 401, 401, 401, 401, 401, 403, 403, 403, 403, 404],
+      statuses: [401, 401, 401, 401, 401, 403, 403, 403, 403, 404],
       events: 0,
       paused: false,
     });

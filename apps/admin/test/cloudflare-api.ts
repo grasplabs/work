@@ -13,11 +13,6 @@
  * vite.test.config.ts and vite.e2e.config.ts).
  */
 import {
-  adminAskPath,
-  adminAskPurpose,
-  adminAskRequestSchema,
-} from "@grasp-os/shared/admin-ask";
-import {
   adminCommandEnvelopeSchema,
   adminCommandPath,
   adminCommandPurpose,
@@ -554,47 +549,6 @@ const answerAdmin = async (
   return Response.json(account.admin ?? emptyAdminSnapshot(account.name));
 };
 
-/**
- * What Grasp's own core answers Ask Grasp's question with, as core does
- * (core's src/admin-ask.ts): the account's answer once the signature
- * checks out, with the key its live version's auth secret gives for Ask
- * Grasp's purpose, and the question parses, keeping it; 401 for a request
- * signed otherwise, 403 for one that doesn't parse.
- */
-const answerAsk = async (
-  account: AccountState,
-  live: VersionState,
-  request: Request
-): Promise<Response> => {
-  const body = await request.text();
-  const key = await hkdfHmacKey(
-    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
-    adminAskPurpose,
-    ["verify"]
-  );
-  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
-  const signed = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
-      Number.parseInt(pair, 16)
-    ),
-    new TextEncoder().encode(body)
-  );
-  if (!signed) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const asked = adminAskRequestSchema.safeParse(JSON.parse(body));
-  if (!asked.success) {
-    return new Response("Forbidden", { status: 403 });
-  }
-  account.asked.push(asked.data);
-  if (account.ask === "no_model") {
-    return Response.json({ code: "admin_ask.no_model" }, { status: 503 });
-  }
-  return Response.json(account.ask ?? { text: "An answer.", truncated: false });
-};
-
 /** A kickoff with nothing brought in yet, as core answers it. */
 export const emptyKickoff = (): AdminKickoffView => ({
   transcript: null,
@@ -700,7 +654,6 @@ const signedPosts: ReadonlyMap<
   [onboardingSummaryPath, answerSummary],
   [provisionProbePath, answerProbe],
   [connectVersionPath, answerConnectVersion],
-  [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
   [adminCommandPath, answerCommand],
   [aiStatusReportPath, answerAiStatus],
@@ -1033,7 +986,6 @@ export const fakeCloudflareApi = (token: string) => {
       scriptUploads: [],
       notices: [],
       adminReaders: [],
-      asked: [],
       kickoffAsks: [],
       commands: [],
     };
