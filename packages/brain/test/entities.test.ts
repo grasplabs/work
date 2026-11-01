@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
 import { brainErrors } from "../src/contract.ts";
-import { brainMentions } from "../src/db/schema.ts";
+import { brainEntityMatches, brainMentions } from "../src/db/schema.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   decideEntityMatch,
@@ -1504,6 +1504,147 @@ describe("entity linking", () => {
       // The decision made meanwhile stands.
       same: [pair[1]],
     });
+  });
+
+  it("refuses a replacement read from a decision a purge deleted and another person made again", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    // Two people who read both sides, neither an admin.
+    const alice: Caller = { userId: "alice", reads: admin.reads };
+    const bob: Caller = { userId: "bob", reads: admin.reads };
+    await decideEntityMatch(host.brain, alice, {
+      entities: pair,
+      decision: "different",
+    });
+    let meanwhile = false;
+    // Between Alice's read of her decision and her write: a purge deletes
+    // it, and Bob decides the pair again, at the first revision too.
+    const racing = {
+      ...host.brain,
+      db: new Proxy(host.brain.db, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!meanwhile) {
+                meanwhile = true;
+                await host.brain.db.delete(brainEntityMatches);
+                await decideEntityMatch(host.brain, bob, {
+                  entities: pair,
+                  decision: "same",
+                  evidence: { documentId: proof, version: 1 },
+                });
+              }
+              return await Reflect.apply(value, target, args);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const late = await outcome(
+      decideEntityMatch(racing, alice, {
+        entities: pair,
+        decision: "different",
+      })
+    );
+
+    expect({
+      late,
+      same: await sameAsFor(host.brain, bob, pair[0]),
+    }).toStrictEqual({
+      late: "brain.revision_conflict",
+      // Bob's decision stands.
+      same: [pair[1]],
+    });
+  });
+
+  it("leaves no `same` on evidence a purge rewrote, though it was decided mid-purge and the purge stopped right after", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    const writer = writerOf("admin");
+    const content = {
+      type: "content",
+      documentIds: [proof],
+      terms: ["calls"],
+      reason: "erasure_request",
+    };
+    const prepared = await preparePurge(host.brain, writer, content, noCopies);
+    let cleared = false;
+    let decided = false;
+    // Once the purge cleared the evidence's decisions, a `same` on it
+    // lands, then the rewrite commits and the purge stops.
+    const stopping = {
+      ...host.brain,
+      db: new Proxy(host.brain.db, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "delete" && typeof value === "function") {
+            return (...args: unknown[]): unknown => {
+              if (args[0] === brainEntityMatches) {
+                cleared = true;
+              }
+              return Reflect.apply(value, target, args);
+            };
+          }
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!cleared || decided) {
+                return await Reflect.apply(value, target, args);
+              }
+              decided = true;
+              await decideEntityMatch(host.brain, admin, {
+                entities: pair,
+                decision: "same",
+                evidence: { documentId: proof, version: 1 },
+              });
+              await Reflect.apply(value, target, args);
+              throw new Error("The purge stopped.");
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const stopped = await outcome(
+      purge(stopping, writer, content, prepared.token, noCopies)
+    );
+
+    expect({
+      decided,
+      stopped,
+      same: await sameAsFor(host.brain, admin, pair[0]),
+    }).toStrictEqual({
+      decided: true,
+      stopped: "Error: The purge stopped.",
+      same: [],
+    });
+  });
+
+  it("records who read a match, and from which collections", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    await decideEntityMatch(host.brain, admin, {
+      entities: pair,
+      decision: "same",
+      evidence: { documentId: proof, version: 1 },
+    });
+    const before = host.reads.length;
+    await sameAsFor(host.brain, admin, pair[0]);
+    const recorded = host.reads.slice(before);
+
+    expect(
+      recorded.map(({ caller, record }) => ({
+        caller,
+        read: record.detail?.read,
+        documents: record.documentIds?.length,
+      }))
+    ).toStrictEqual([
+      { caller: "admin", read: "entity_matches", documents: 2 },
+    ]);
   });
 
   it("forgets a `same` whose evidence a purge rewrites, though both entities stay", async () => {
