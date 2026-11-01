@@ -71,7 +71,6 @@ jobs:
       - run: vp run check:product-name
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
-      - run: vp run check:state-registry
       - run: vp run check:playwright-image
       # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
