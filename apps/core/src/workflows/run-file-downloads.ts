@@ -408,9 +408,6 @@ export const runFileResponse = async (
               ? undefined
               : new Uint8Array(await object.bytes());
           });
-          // And again once read: access lost, the file deleted or its
-          // details gone while R2 answered holds the chunk back.
-          await stillAllowed();
           // The bytes written, or none: a chunk changed in R2 ends it.
           if (
             bytes === undefined ||
@@ -420,6 +417,10 @@ export const runFileResponse = async (
           ) {
             throw fileErrors.create("file.incomplete");
           }
+          // And again last, with nothing awaited after it: access lost, the
+          // file deleted or its details gone while R2 answered holds the
+          // chunk back.
+          await stillAllowed();
           controller.enqueue(bytes);
         },
       },
