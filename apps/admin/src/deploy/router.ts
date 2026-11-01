@@ -16,6 +16,7 @@ import {
 import type { RouterHost } from "@grasp-os/shared/router";
 import { z } from "zod";
 
+import type { CoreAddress } from "../clients/core-address.ts";
 import { DeployError } from "./errors.ts";
 
 /** The router's hostname map, as the admin uses it (the router's `HOSTS`, a KV namespace). */
@@ -25,17 +26,19 @@ export interface RouterHosts {
   delete: (key: string) => Promise<void>;
 }
 
-/** How the smoke check reaches core, and how long it waits between tries. */
+/**
+ * How long the smoke check waits between tries, and for each. Core itself
+ * is reached only as its `CoreAddress` says: through the dispatch
+ * namespace (src/clients/core-address.ts).
+ */
 export interface SmokeOptions {
-  /** `fetch` by default. */
-  fetch?: typeof fetch;
   /** The first retry's wait, doubling after; tests pass 0. */
   retryDelayMs?: number;
   /** How long one try may take, its body included; tests pass less. */
   attemptTimeoutMs?: number;
 }
 
-/** Tries of the smoke check: a new workers.dev hostname can take a moment. */
+/** Tries of the smoke check: a new upload can take a moment to answer. */
 const smokeAttempts = 5;
 const defaultSmokeDelayMs = 2000;
 /**
@@ -83,7 +86,7 @@ export const answeringVersion = async (
 };
 
 /**
- * Tries core's health check at `origin` until it answers a version
+ * Tries core's health check at `core` until it answers a version
  * `accepts` takes, to a request carrying the client's router secret as
  * the router sends it: a few tries, each with its own deadline, waiting
  * longer between them (a new hostname, or the old version still
@@ -91,11 +94,10 @@ export const answeringVersion = async (
  * or undefined after the last try.
  */
 const smokeTries = async (
-  origin: string,
+  core: CoreAddress,
   routerSecret: string,
   accepts: (version: string) => boolean,
   {
-    fetch: fetchCore = fetch,
     retryDelayMs = defaultSmokeDelayMs,
     attemptTimeoutMs = defaultAttemptTimeoutMs,
   }: SmokeOptions
@@ -103,8 +105,8 @@ const smokeTries = async (
   for (let attempt = 1; attempt <= smokeAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- tries in turn
     const answering = await answeringVersion(
-      fetchCore,
-      origin,
+      core.fetch,
+      core.origin,
       routerSecret,
       attemptTimeoutMs
     );
@@ -120,7 +122,7 @@ const smokeTries = async (
 };
 
 /**
- * Checks that core at `origin` answers its health check at all, to a
+ * Checks that `core` answers its health check at all, to a
  * request carrying the client's router secret: for a core whose live
  * version the admin can't read beforehand (a user Worker in a dispatch
  * namespace, whose upload is live at once and whose versions the
@@ -130,12 +132,12 @@ const smokeTries = async (
  * tries it took.
  */
 export const smokeAnswering = async (
-  origin: string,
+  core: CoreAddress,
   routerSecret: string,
   { refuses, ...options }: SmokeOptions & { refuses?: string } = {}
 ): Promise<{ version: string; attempts: number }> => {
   const answered = await smokeTries(
-    origin,
+    core,
     routerSecret,
     (version) => version !== refuses,
     options
@@ -143,7 +145,7 @@ export const smokeAnswering = async (
   if (answered === undefined) {
     throw new DeployError(
       "smoke_check_failed",
-      `Core at ${origin} didn't answer its health check`
+      `Core at ${core.origin} didn't answer its health check`
     );
   }
   return answered;

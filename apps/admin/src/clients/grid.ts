@@ -198,9 +198,9 @@ const recordedClients = async (db: AdminDatabase) => {
 
 /**
  * What the router knows of client `clientId`'s core: where it answers (its
- * script through `dispatcher`, or its origin: `coreAddressOf`), and the
- * secret the router sends. A script without a dispatcher to reach it by is
- * `unknown`, never another client's core.
+ * script through `dispatcher`: `coreAddressOf`), and the secret the router
+ * sends. An entry the namespace can't reach (no dispatcher, or no script)
+ * is `unknown`, never another client's core or a request over the internet.
  */
 export const routeOf = async (
   hosts: RouterHosts,
