@@ -71,8 +71,6 @@ export interface ClientSetup {
   } | null;
   /** How its people sign in, as its record has it; null without one. */
   signIn: ClientSignInRecord | null;
-  /** Whether a `SIGN_IN` setting replaces that on deploy. */
-  signInOverridden: boolean;
   /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
   teamsBot: TeamsBot | null;
   /**
@@ -278,7 +276,6 @@ export const getClientSetup = async (
     provisioning,
     account: account ?? null,
     signIn: settings?.signIn ?? null,
-    signInOverridden: settings?.signInOverridden ?? false,
     teamsBot: settings?.teamsBot ?? null,
     teamsBotSecretDays:
       settings?.teamsBot === null || settings?.teamsBot === undefined

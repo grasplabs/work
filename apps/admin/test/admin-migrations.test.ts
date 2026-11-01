@@ -1,15 +1,10 @@
 import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { clients, settings } from "../src/db/schema.ts";
 import { signInApps } from "../src/deploy/context.ts";
-import {
-  derivedCoreConfig,
-  onboardingSender,
-} from "../src/deploy/core-config.ts";
+import { derivedCoreConfig } from "../src/deploy/core-config.ts";
 import { configuredCoreVars } from "../src/deploy/core-vars.ts";
 
 // The admin's migrations on a database with rows in it, as staging's and
@@ -114,62 +109,79 @@ describe("the admin's migrations, on rows", () => {
     });
   });
 
-  it("drop a client's saved PLATFORM_AI setting with the setting itself, so its next deploy takes the rest", async () => {
+  it("drop every client's saved settings with their table, so a client that had them still deploys with only what the admin derives", async () => {
     const db = migrationDb();
-    const { before, it: dropPlatformAi } = upTo("0043_drop_platform_ai.sql");
+    const { before, it: dropSettings } = upTo("0044_drop_client_settings.sql");
     await applyD1Migrations(db, before);
-    const orm = drizzle(db);
     const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
     const signIn = JSON.stringify({
       domains: ["acme.test"],
       admins: ["ada@acme.test"],
       googleHostedDomain: "acme.test",
     });
-    const now = new Date();
-    await orm.insert(clients).values({
-      id: clientId,
-      name: clientId,
-      ring: 0,
-      signIn,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await orm.insert(settings).values(
-      [
-        ["PLATFORM_AI", JSON.stringify({ conversion: { provider: "local" } })],
-        ["AUDIT_RETENTION_DAYS", JSON.stringify(90)],
-      ].map(([key, value]) => ({
-        clientId,
-        key: key ?? "",
-        value: value ?? "",
-        updatedBy: "staff@grasp.test",
-        updatedAt: now,
-      }))
-    );
+    const now = Date.now();
+    // A row for each var no deploy sets any more, and one that would have
+    // replaced the derived sign-in.
+    const saved = {
+      QUOTA_LIMITS: { generation: 1, limits: { workflowSteps: 10 } },
+      MODEL_GATEWAY: { eu: { models: ["openai/gpt-5"], deployment: true } },
+      MEMORY_LIMITS: { "USER.md": 10 },
+      AUDIT_RETENTION_DAYS: 90,
+      AUDIT_ARCHIVE_RETENTION_DAYS: 400,
+      RUN_RETENTION_DAYS: 7,
+      INBOUND_MAIL_DOMAIN: "mail.acme.test",
+      SIGN_IN: { domains: ["elsewhere.test"] },
+    };
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO clients (id, name, ring, sign_in, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?)"
+        )
+        .bind(clientId, clientId, signIn, now, now),
+      ...Object.entries(saved).map(([key, value]) =>
+        db
+          .prepare(
+            "INSERT INTO settings (client_id, key, value, updated_by, updated_at) VALUES (?, ?, ?, 'staff@grasp.test', ?)"
+          )
+          .bind(clientId, key, JSON.stringify(value), now)
+      ),
+    ]);
 
-    await applyD1Migrations(db, [dropPlatformAi]);
+    await applyD1Migrations(db, [dropSettings]);
     const domain = "grasp.test";
-    const vars = await configuredCoreVars(
-      orm,
+    const derived = derivedCoreConfig({
       clientId,
-      derivedCoreConfig({
-        clientId,
-        signIn,
-        domain,
-        apps: signInApps(env),
-      }),
-      {
-        by: "staff@grasp.test",
-        what: "release",
-        release: "26.01.100000001",
-        at: now.toISOString(),
-      },
-      onboardingSender(clientId, domain).address
-    );
+      signIn,
+      domain,
+      apps: signInApps(env),
+    });
+    const change = {
+      by: "staff@grasp.test",
+      what: "release",
+      release: "26.01.100000001",
+      at: new Date(now).toISOString(),
+    } as const;
+    const vars = configuredCoreVars(clientId, derived, change);
+    const tables = await db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+      )
+      .all();
 
     expect({
-      platformAi: "PLATFORM_AI" in vars,
-      kept: vars.AUDIT_RETENTION_DAYS,
-    }).toStrictEqual({ platformAi: false, kept: 90 });
+      names: Object.keys(vars).toSorted(),
+      signIn: vars.SIGN_IN,
+      table: tables.results,
+    }).toStrictEqual({
+      names: [
+        "CLIENT_ID",
+        "MAIL_FROM",
+        "PLATFORM_CHANGE",
+        "RUNTIME_PROFILE",
+        "SIGN_IN",
+      ],
+      signIn: derived.SIGN_IN,
+      table: [],
+    });
   });
 });

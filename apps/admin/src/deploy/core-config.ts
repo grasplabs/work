@@ -1,25 +1,14 @@
 /**
  * The deployment config every deploy derives for a client's core:
- * `SIGN_IN`, from the client's record,
- * and `MAIL_FROM`, Grasp's onboarding sender at the client's sending
- * domain (`onboardingSender`), each replaced by a client setting of the
- * same name, if it has one (src/deploy/deploy.ts), a `MAIL_FROM` only by
- * one at the same address; and `RUNTIME_PROFILE`, `cloudflare`, which
- * the deploy fixes and no client setting can change (it isn't a
- * deployment config var): every client runs on Cloudflare, which enforces
- * Code Mode's CPU limit, so its run records say so (core's
- * src/code-mode.ts). Derived on every deploy, so rollouts keep them. And the check every deploy makes
- * of the config it is about to set, settings included, before it changes
- * anything (`checkDeployedConfig`).
+ * `SIGN_IN`, from the client's record, `MAIL_FROM`, Grasp's onboarding
+ * sender at the client's sending domain (`onboardingSender`), and
+ * `RUNTIME_PROFILE`, `cloudflare`: every client runs on Cloudflare, which
+ * enforces Code Mode's CPU limit, so its run records say so (core's
+ * src/code-mode.ts). Derived on every deploy, so rollouts keep them. And
+ * the check every deploy makes of the config it is about to set before it
+ * changes anything (`checkDeployedConfig`).
  */
 import {
-  auditArchiveRetentionSchema,
-  auditRetentionDefaultDays,
-  auditRetentionSchema,
-  inboundMailDomainSchema,
-  mailFromSchema,
-  modelRulesConfigSchema,
-  runRetentionSchema,
   signInConfigSchema,
   unreachableAdmins,
 } from "@grasp-os/shared/deployment-config";
@@ -27,11 +16,9 @@ import type {
   MailFrom,
   SignInConfig,
 } from "@grasp-os/shared/deployment-config";
-import { memoryLimitsSchema } from "@grasp-os/shared/memory";
 import { clientDomain } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
@@ -235,10 +222,8 @@ const signInOf = (
  * Entra tenant nor a Google Workspace included: nobody could sign in),
  * `admin_unreachable` when it names no admin, or one whose email isn't in
  * its domains (the rule `clientSignInSchema` applies to a client's
- * record). Checked on the
- * `SIGN_IN` a deploy is about to set, whether derived or a setting that
- * replaces it; whatever saves a `SIGN_IN` setting checks it the same way.
- * A code, never the emails: a deploy's error is audited.
+ * record). Checked on the `SIGN_IN` a deploy is about to set. A code,
+ * never the emails: a deploy's error is audited.
  */
 export const signInSettingProblem = (
   value: unknown
@@ -275,77 +260,12 @@ const checkDeployedSignIn = (
 };
 
 /**
- * A model as `MODEL_GATEWAY` names it, by its shape alone:
- * `<provider>/<model>`. Which models the gateway offers only core knows
- * (its provider catalogs), so that part is core's to check.
+ * Throws unless core would take the config a deploy of client `clientId`
+ * is about to set on core (`vars`): `sign_in_incomplete` for a `SIGN_IN`
+ * nobody, or no admin, could sign in with (`checkDeployedSignIn`). The
+ * error never names an email.
  */
-const modelRefShape = z.string().regex(/^[^/\s]+\/\S+$/u);
-
-/**
- * What core parses each deployment config var with, `SIGN_IN` apart
- * (`checkDeployedSignIn`): `MODEL_GATEWAY` as the client's model rules.
- */
-const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
-  MODEL_GATEWAY: [modelRulesConfigSchema(modelRefShape)],
-  MEMORY_LIMITS: [memoryLimitsSchema],
-  AUDIT_RETENTION_DAYS: [auditRetentionSchema],
-  AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],
-  RUN_RETENTION_DAYS: [runRetentionSchema],
-  INBOUND_MAIL_DOMAIN: [inboundMailDomainSchema],
-  MAIL_FROM: [mailFromSchema],
-  QUOTA_LIMITS: [quotaLimitsSchema],
-};
-
-/**
- * Throws unless core would take every deployment config var in `vars`,
- * what a deploy of client `clientId` is about to set on core, derived or
- * a setting: `sign_in_incomplete` for a `SIGN_IN` nobody, or no admin,
- * could sign in with (`checkDeployedSignIn`), `setting_invalid` for any
- * other var its schema refuses, and for an archive retention shorter than
- * the retention, which core refuses too. Core fails closed on a var it
- * can't parse (no sign-in, no model calls), so one is never deployed. And
- * `mail_sender_locked` for a `MAIL_FROM` at another address than
- * `sender`, the onboarding sender's: its `EMAIL` binding sends from that
- * address alone, so core's mail would all fail. The error names the var,
- * never its value.
- */
-export const checkDeployedConfig = (
-  clientId: string,
-  vars: Readonly<Record<string, unknown>>,
-  sender: string
-): void => {
-  checkDeployedSignIn(clientId, vars);
-  const invalid = (name: string): DeployError =>
-    new DeployError(
-      "setting_invalid",
-      `${clientId}'s ${name} to deploy isn't one core would take`
-    );
-  for (const [name, schemas] of Object.entries(configSchemas)) {
-    const value = vars[name];
-    if (
-      value !== undefined &&
-      schemas.some((schema) => !schema.safeParse(value).success)
-    ) {
-      throw invalid(name);
-    }
-  }
-  const archive = auditArchiveRetentionSchema.safeParse(
-    vars.AUDIT_ARCHIVE_RETENTION_DAYS
-  );
-  const retention = auditRetentionSchema.safeParse(
-    vars.AUDIT_RETENTION_DAYS ?? auditRetentionDefaultDays
-  );
-  if (archive.success && retention.success && archive.data < retention.data) {
-    throw invalid("AUDIT_ARCHIVE_RETENTION_DAYS");
-  }
-  const from = mailFromSchema.safeParse(vars.MAIL_FROM);
-  if (from.success && from.data.address !== sender) {
-    throw new DeployError(
-      "mail_sender_locked",
-      `${clientId}'s MAIL_FROM to deploy isn't the onboarding sender's address`
-    );
-  }
-};
+export const checkDeployedConfig = checkDeployedSignIn;
 
 /**
  * The IdP `signIn` names that the admin has no OAuth app id for
@@ -388,12 +308,9 @@ export interface CoreConfigInputs {
 /**
  * The deployment config vars a deploy derives for a client's core:
  * `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM` (`onboardingSender`)
- * always, `SIGN_IN` when its record has sign-in. Core's model rules
- * (`MODEL_GATEWAY`) are the client's own setting, if it has one; every
- * model key is its connect's.
- * `CLIENT_ID` is what core answers the provisioning probe with
- * (src/hosting/probe.ts); like `RUNTIME_PROFILE`, it's no deployment
- * config var, so no client setting can name it.
+ * always, `SIGN_IN` when its record has sign-in. Every model key is its
+ * connect's. `CLIENT_ID` is what core answers the provisioning probe with
+ * (src/hosting/probe.ts).
  */
 export const derivedCoreConfig = ({
   clientId,
