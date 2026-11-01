@@ -2,8 +2,8 @@
  * Grasp's admin on a hostname of its own (`admin.<domain>`), served by the
  * admin's Worker on every hostname it has. Staff work on that one, so every
  * page load moves there: any other hostname of the Worker only still
- * answers what isn't a page (server functions, the admin's MCP server,
- * Discord's interactions) and what changes something. Every hostname sits
+ * answers what isn't a page (server functions, the admin's MCP server)
+ * and what changes something. Every hostname sits
  * behind the same Access application, so the Access check (src/access.ts)
  * is the same on each.
  *
@@ -19,10 +19,10 @@ export interface AdminHostEnv {
 
 /**
  * What isn't a page and is answered where it's asked: TanStack Start's
- * server functions (its default base), the admin's MCP server
- * (src/admin/mcp.ts) and Discord's interactions (src/admin/discord.ts).
+ * server functions (its default base) and the admin's MCP server
+ * (src/admin/mcp.ts).
  */
-const notPages = ["/_serverFn", "/mcp", "/discord/interactions"] as const;
+const notPages = ["/_serverFn", "/mcp"] as const;
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -31,8 +31,8 @@ const isUnder = (pathname: string, base: string): boolean =>
  * Where a page request should go instead, or null to serve it here: on
  * any hostname but the admin's, every page load goes to the same page on
  * the admin's. Only page loads (GET, HEAD) move; server functions, the
- * MCP server, Discord's interactions and anything that changes something
- * are answered where they're asked.
+ * MCP server and anything that changes something are answered where
+ * they're asked.
  */
 export const adminHostRedirect = (
   request: Request,

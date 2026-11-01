@@ -1606,7 +1606,9 @@ describe("a purge of content", setUpTime, () => {
       // The earlier version was rewritten; the current one, and the one
       // saved meanwhile, weren't.
       afterFirst: [false, true, true],
-      again: 2,
+      // In all: the earlier version the first run rewrote, its count kept
+      // with it, and the two the run again rewrote.
+      again: 3,
       afterAgain: [
         "# Note\n(removed) one.",
         "# Note\n(removed) two.",

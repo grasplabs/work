@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { z } from "zod";
 
@@ -24,7 +25,11 @@ import type { PurgeStatus, purgeInputSchema } from "./knowledge.ts";
 // writes, and only it changes the purge or its steps, so a trailing run
 // never changes one another finished or took over. Each attempt owes its
 // own rebuild. An admin may start a purge fresh instead: the
-// unfinished one is kept as it stood, superseded by the new one. The record holds who,
+// unfinished one is kept as it stood, superseded by the new one, once no
+// attempt holds it within its lease. Each destructive statement of a
+// step's batches holds only while its attempt does (`heldNow`), so one
+// that lost its purge changes nothing; its batches carry the counts of
+// what they changed (`runStep`'s `save`). The record holds who,
 // when, which documents (as its audit event does) and counts: never a
 // term, text or anything else the purge erased.
 
@@ -150,6 +155,24 @@ const countsOf = (stored: string | null): StepCounts => {
  */
 export const attemptHolds = ({ purgeId, attempt }: PurgeAttempt, at: Date) =>
   sql`EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${purgeId} AND ${brainPurges.attempt} = ${attempt} AND ${brainPurges.attemptAt} = ${at.getTime()} AND ${brainPurges.completedAt} IS NULL AND ${brainPurges.supersededBy} IS NULL)`;
+
+/**
+ * Whether `held` holds its purge at `now`: its attempt, within its lease,
+ * open, not superseded. Not tied to a renewal in the same batch, as
+ * `attemptHolds` is: for a batch of a step's own data.
+ */
+const attemptLive = ({ purgeId, attempt }: PurgeAttempt, now: Date) =>
+  sql`EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${purgeId} AND ${brainPurges.attempt} = ${attempt} AND ${brainPurges.attemptAt} > ${now.getTime() - purgeAttemptLeaseMs} AND ${brainPurges.completedAt} IS NULL AND ${brainPurges.supersededBy} IS NULL)`;
+
+/**
+ * The condition each destructive statement of a step's batch carries:
+ * `held` still holds its purge as the statement runs (`attemptLive`, now).
+ * An attempt that lost its purge (taken over, or begun fresh) changes
+ * nothing, and its step ends as `knowledge.conflict` at its ownership
+ * check after (`runStep`).
+ */
+export const heldNow = <C>(brain: Brain<C>, held: PurgeAttempt): SQL =>
+  attemptLive(held, brain.ports.clock());
 
 /**
  * `attemptHolds`, or the purge held by no attempt at all (`held` let it
@@ -296,7 +319,18 @@ export const openPurge = async <C>(
               .where(
                 and(
                   eq(brainPurges.id, open.id),
-                  isNull(brainPurges.supersededBy)
+                  isNull(brainPurges.supersededBy),
+                  // Never under a run that holds it: it would go on
+                  // deleting beside the new one. Left open, the new one's
+                  // insert breaks the one open purge of an input, and is
+                  // refused as `knowledge.conflict`, below.
+                  or(
+                    isNull(brainPurges.attemptAt),
+                    lt(
+                      brainPurges.attemptAt,
+                      new Date(now.getTime() - purgeAttemptLeaseMs)
+                    )
+                  )
                 )
               ),
           ];
@@ -332,6 +366,29 @@ export const openPurge = async <C>(
   return { purgeId, attempt, resumed: false, counts };
 };
 
+/**
+ * Whether a purge of `input` was begun and isn't finished: run again, what
+ * it named may be gone since (another purge deleted it), and it goes on.
+ */
+export const purgeUnfinished = async <C>(
+  brain: Brain<C>,
+  input: PurgeInput
+): Promise<boolean> => {
+  const key = await keyOf(brain, input);
+  const [open] = await brain.db
+    .select({ id: brainPurges.id })
+    .from(brainPurges)
+    .where(
+      and(
+        eq(brainPurges.key, key),
+        isNull(brainPurges.completedAt),
+        isNull(brainPurges.supersededBy)
+      )
+    )
+    .limit(1);
+  return open !== undefined;
+};
+
 /** Why a step failed, as a stable code: never a message. */
 const reasonOf = (error: unknown): string =>
   knowledgeErrors.codeOf(error) ??
@@ -352,14 +409,19 @@ const added = (a: StepCounts, b: StepCounts): StepCounts => {
  * adds to what it stored, which is answered. Each of its writes renews
  * the attempt's hold in the same batch and is made only under it: an
  * attempt whose lease lapsed, that was taken over, or whose purge
- * finished refuses as `knowledge.conflict` and changes nothing.
+ * finished refuses as `knowledge.conflict` and changes nothing. `run` is
+ * given `save`: the statement that stores what this run changed so far
+ * with the batch that changes it, so a step that fails later keeps the
+ * count of what it did.
  */
 export const runStep = async <C>(
   brain: Brain<C>,
   held: PurgeAttempt,
   step: string,
-  /** Answers what it changed, as counts, or nothing to count. */
-  run: () => Promise<unknown>
+  /** Answers what it changed in all, as counts, or nothing to count. */
+  run: (
+    save: (changedSoFar: StepCounts) => BatchItem<"sqlite">
+  ) => Promise<unknown>
 ): Promise<StepCounts> => {
   const { db } = brain;
   const mine = and(
@@ -403,12 +465,24 @@ export const runStep = async <C>(
     throw knowledgeErrors.create("knowledge.conflict");
   }
   const before = countsOf(started.counts);
+  const save = (changedSoFar: StepCounts): BatchItem<"sqlite"> =>
+    db
+      .update(brainPurgeSteps)
+      .set({ counts: JSON.stringify(added(before, changedSoFar)) })
+      .where(and(mine, attemptLive(held, brain.ports.clock())));
   let changed: StepCounts;
   try {
-    changed = countsOf(JSON.stringify((await run()) ?? {}));
+    changed = countsOf(JSON.stringify((await run(save)) ?? {}));
   } catch (error) {
     // Blocked, and the purge let go: run again, it goes on at once.
-    await underHold({ state: "blocked", reason: reasonOf(error) }, true);
+    const blocked = await underHold(
+      { state: "blocked", reason: reasonOf(error) },
+      true
+    );
+    // Lost to another attempt meanwhile: that is what this attempt says.
+    if (blocked === undefined) {
+      throw knowledgeErrors.create("knowledge.conflict");
+    }
     throw error;
   }
   const counts = added(before, changed);
