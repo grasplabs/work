@@ -14,7 +14,6 @@ type TriggerChange = NonNullable<
 >[number];
 
 /** An export added, removed or changed, as a version's review says. */
-type ExportChange = VersionReview["exports"][number];
 
 /** One changed file of a version's server code: before, and after. */
 export interface ServerFile {
@@ -195,63 +194,6 @@ export const migrationFixturesText = ({
             msg`${plural(fixtures, { one: "It passed its # fixture when the version was sealed", other: "It passed all # of its fixtures when the version was sealed" })}`
           ),
     failed: false,
-  };
-};
-
-/** What an export lets another App do, in a reviewer's words. */
-const accessWords = {
-  read: msg`reads the domain's data`,
-  write: msg`changes the domain's data`,
-} as const;
-
-/**
- * An export's change, as the panel says it, and whether it opens more to
- * other Apps (`widens`: a new export that changes data, or one that only
- * read and now changes data), which the panel highlights.
- */
-export const exportChangeText = ({
-  name,
-  change,
-  access,
-  accessBefore,
-}: ExportChange): { text: string; widens: boolean } => {
-  if (change === "added") {
-    const does = access === null ? undefined : i18n._(accessWords[access]);
-    return {
-      text:
-        does === undefined
-          ? i18n._(msg`Other domains may now call ${name}`)
-          : i18n._(msg`Other domains may now call ${name}, which ${does}`),
-      widens: access === "write",
-    };
-  }
-  if (change === "removed") {
-    return {
-      text: i18n._(msg`Other domains may no longer call ${name}`),
-      widens: false,
-    };
-  }
-  if (accessBefore === "read" && access === "write") {
-    return {
-      text: i18n._(msg`${name} now changes the domain's data (read → write)`),
-      widens: true,
-    };
-  }
-  if (accessBefore === "write" && access === "read") {
-    return {
-      text: i18n._(
-        msg`${name} no longer changes the domain's data (write → read)`
-      ),
-      widens: false,
-    };
-  }
-  const does = access === null ? undefined : i18n._(accessWords[access]);
-  return {
-    text:
-      does === undefined
-        ? i18n._(msg`${name} changed`)
-        : i18n._(msg`${name} changed: it ${does}`),
-    widens: false,
   };
 };
 

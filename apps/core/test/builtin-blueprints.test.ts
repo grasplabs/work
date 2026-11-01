@@ -24,6 +24,7 @@ import {
   installBuiltinBlueprint,
 } from "../src/app-blueprints.ts";
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
+import { storeTree, versionTree } from "../src/apps.ts";
 import { blueprintsDigestText } from "../src/builtin-digest.ts";
 import {
   builtins,
@@ -34,7 +35,7 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
-import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
+import { grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
@@ -344,7 +345,6 @@ describe("the built-in blueprints", () => {
     await expect(ensureInstalled()).resolves.toBeTruthy();
     const admin = await signedInApi(idp, "admin");
     const before = await helloRow();
-    const caller = await admin.api.apps.create({ name: `Caller ${unique()}` });
     const listed = await admin.api.apps.list();
 
     expect({
@@ -353,7 +353,7 @@ describe("the built-in blueprints", () => {
       unmark: await outcome(admin.api.apps.blueprints.unmark("hello")),
       calls: await outcome(
         admin.api.permissions.request({
-          subject: { type: "app", appId: caller.id },
+          subject: { type: "agent", agentId: `agent-${unique()}` },
           object: { type: "app", appId: "hello" },
           actions: ["read"],
           binding: "HELLO",
@@ -381,10 +381,6 @@ describe("the built-in blueprints", () => {
       // Its workflows' tests run as it becomes current.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await builder.api.apps.versions.setCurrent(created.app.id, 1);
-      if ("app/server.ts" in blueprint.files) {
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        await serverBuilt(created.app.id, 1);
-      }
       // Its workflows call the App's bindings where a review can name each
       // call, as the check of an agent's draft over it asks, and its steps
       // read as the workflow and review pages outline them: none throws.
@@ -1027,6 +1023,60 @@ describe("the built-in blueprints", () => {
       whole: [],
       wholeFiles: next.blueprints.find(({ id }) => id === "hello")?.files,
       ofMarked: null,
+    });
+
+    await reinstall();
+  });
+
+  it("drop the v1 server's files a copy still holds as its builder takes an update, which commits", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Kept a server",
+    });
+    // Copied before the v1 server went, with a server of its own added:
+    // its version still holds it, which no commit may write now.
+    const legacy = new Map(
+      Object.entries({
+        ...(await builder.api.apps.files.read(app.id, 1)),
+        "app/server.ts": "export class App {}\n",
+      })
+    );
+    const tree = await versionTree(legacy);
+    await storeTree(env, appIdSchema.parse(app.id), tree);
+    await env.DB.prepare(
+      "UPDATE app_versions SET tree = ? WHERE app_id = ? AND version = 1"
+    )
+      .bind(tree.tree, app.id)
+      .run();
+
+    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    await install(
+      releaseWith({ files: { ...hello().files, "schema.ts": schema } })
+    );
+    const offered = await builder.api.apps.blueprints.update(app.id);
+    if (!offered) {
+      throw new Error("No update was offered");
+    }
+    const { version } = await builder.api.apps.blueprints.acceptUpdate(app.id, {
+      to: offered.to,
+      over: 1,
+    });
+    const taken = await builder.api.apps.files.read(app.id, version);
+
+    expect({
+      changes: offered.changes.map(({ path, change }) => [path, change]),
+      conflicts: offered.conflicts,
+      v1: Object.keys(taken).filter((path) => path.startsWith("app/")),
+      schema: taken["schema.ts"],
+    }).toStrictEqual({
+      changes: [
+        ["app/server.ts", "deleted"],
+        ["schema.ts", "modified"],
+      ],
+      conflicts: [],
+      v1: [],
+      schema,
     });
 
     await reinstall();

@@ -595,10 +595,7 @@ describe("removing an App", slow, () => {
 
   it("takes no permission request that read the App before it was removed, and the database refuses any other write that would, but to what it is", async () => {
     const owner = await personApi("builder");
-    const [app, other] = await Promise.all([
-      archivedApp(owner),
-      owner.api.apps.create({ name: `Other ${unique()}` }),
-    ]);
+    const app = await archivedApp(owner);
     const by = acting(owner, "builder");
     // Removed right after the request first read the App.
     const racing = {
@@ -621,14 +618,14 @@ describe("removing an App", slow, () => {
         by,
         {
           subject: { type: "app", appId: app },
-          object: { type: "app", appId: other.id },
-          actions: ["read"],
-          binding: "OTHER",
+          object: { type: "platform" },
+          actions: ["statistics"],
+          binding: "STATS",
         },
         {
           app: async (id, role) => await appFor(env, by, id, role),
           resource: () => {
-            throw new Error("Only Apps are named here");
+            throw new Error("Only the App is named here");
           },
         }
       )
