@@ -986,10 +986,10 @@ describe("erasing a person", () => {
     });
   });
 
-  it("forgets their preferences in every App's store, their screens' submissions and their own Knowledge signals, and leaves everyone else's", async () => {
+  it("forgets their preferences in every App's store and their own Knowledge signals, and leaves everyone else's", async () => {
     const { admin, person } = await removedPerson();
     const other = await signedInApi(idp, "user");
-    const { app, storeId } = await appWithPreferences();
+    const { storeId } = await appWithPreferences();
     await inStore(storeId, (sql) => {
       for (const who of [person.userId, other.userId]) {
         sql.exec(
@@ -1001,21 +1001,6 @@ describe("erasing a person", () => {
       }
     });
     const now = Date.now();
-    for (const who of [person.userId, other.userId]) {
-      // oxlint-disable-next-line no-await-in-loop -- one person at a time
-      await env.DB.prepare(
-        "INSERT INTO screen_submissions (id, person_id, app_id, kind, contract_id, fingerprint, app_version, path, attempt, idempotency_key, created_at, expires_at) VALUES (?, ?, ?, 'mutation', 'notes.add', 'f', 1, '/', 1, ?, ?, ?)"
-      )
-        .bind(
-          crypto.randomUUID(),
-          who,
-          app,
-          crypto.randomUUID(),
-          now,
-          now + 60_000
-        )
-        .run();
-    }
 
     // The usage signals of a Knowledge collection of each, its searches'
     // keys being what they asked.
@@ -1050,23 +1035,11 @@ describe("erasing a person", () => {
     expect({
       theirs: await preferencesOf(person.userId),
       others: await preferencesOf(other.userId),
-      theirSubmissions: await rowsOf(
-        "screen_submissions",
-        "person_id",
-        person.userId
-      ),
-      otherSubmissions: await rowsOf(
-        "screen_submissions",
-        "person_id",
-        other.userId
-      ),
       theirSignals: await rowsOf("knowledge_signals", "owner", person.userId),
       otherSignals: await rowsOf("knowledge_signals", "owner", other.userId),
     }).toStrictEqual({
       theirs: 0,
       others: 1,
-      theirSubmissions: 0,
-      otherSubmissions: 1,
       theirSignals: 0,
       otherSignals: 1,
     });

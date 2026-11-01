@@ -26,7 +26,6 @@ import {
   chatAudiences,
   businessStores,
   knowledgeSignals,
-  screenSubmissions,
   personErasureAreas,
   personErasures,
   sessions,
@@ -330,8 +329,8 @@ const workspaceArea: ErasureStep = {
 /**
  * What they left in the company's Apps that is theirs alone (GRA-1184):
  * their preferences in every App's store (`sdk_preferences`, a host-owned
- * table no App code reaches), what their screens kept to recover their
- * submissions, and the usage signals computed for them as the owner of
+ * table no App code reaches), and the usage signals computed for them as
+ * the owner of
  * Knowledge collections (what others asked there, counted, and what they
  * haven't read or reviewed), which the daily computation no longer makes
  * for anyone erased (knowledge/signals.ts). The Apps' records they own are
@@ -356,9 +355,6 @@ const apps: ErasureStep = {
         .forgetPreferences(storeId, userId);
     }
     await db.batch([
-      db
-        .delete(screenSubmissions)
-        .where(eq(screenSubmissions.personId, userId)),
       db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
       completed(db, userId, "apps"),
     ]);
