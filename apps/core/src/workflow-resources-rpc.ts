@@ -5,6 +5,7 @@ import type {
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
+  PendingWorkflowBindings,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
@@ -24,12 +25,14 @@ import type {
 
 import {
   bindWorkflowToApp,
+  listAppWorkflowBindings,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { pendingWorkflowBindings } from "./workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   listWorkflowBindings,
@@ -399,6 +402,13 @@ export class WorkflowResourcesRpc
     });
   }
 
+  async pendingBindings(): Promise<PendingWorkflowBindings[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await pendingWorkflowBindings(this.#env, person)
+    );
+  }
+
   async bindToApp(id: string, input: unknown): Promise<AppWorkflowBinding> {
     return await withPerson(
       this.#check,
@@ -410,6 +420,13 @@ export class WorkflowResourcesRpc
     await withPerson(this.#check, async (person) => {
       await unbindWorkflowFromApp(this.#env, person, binding);
     });
+  }
+
+  async appBindings(app: string): Promise<AppWorkflowBinding[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listAppWorkflowBindings(this.#env, person, app)
+    );
   }
 
   async catalog(): Promise<CatalogContractEntry[]> {

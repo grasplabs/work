@@ -10,7 +10,6 @@ import {
   templatePublicationSchema,
 } from "@grasp-os/shared/resource-bindings";
 import type { PublishedTemplate } from "@grasp-os/shared/resource-bindings";
-import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -186,17 +185,6 @@ export const templateVersionsOf = async (
     .orderBy(desc(resourceTemplates.publishedAt))
     .limit(limit);
   return rows.map(toPublished);
-};
-
-/** Every template version, newest first: for admins and builders. */
-export const listTemplates = async (
-  env: Env,
-  by: Identity
-): Promise<PublishedTemplate[]> => {
-  if (by.staff || (!isAdmin(by.role) && by.role !== "builder")) {
-    throw roleErrors.create("role.forbidden");
-  }
-  return await templateVersionsOf(env, undefined, 200);
 };
 
 /** Version `version` of template `templateId`, if it is published. */
