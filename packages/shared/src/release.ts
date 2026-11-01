@@ -440,3 +440,12 @@ export const verifyReleaseBlobs = async (
 /** How many blobs a release names: what verifying it reads, besides its manifest. */
 export const blobCount = (manifest: ReleaseManifest): number =>
   expectationsOf(manifest).size;
+
+/**
+ * Every blob key the manifest names. Blobs are content-addressed, so
+ * releases share them: one may leave the bucket only once no kept release
+ * names it.
+ */
+export const blobKeys = (manifest: ReleaseManifest): string[] => [
+  ...expectationsOf(manifest).keys(),
+];

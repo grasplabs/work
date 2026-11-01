@@ -6,6 +6,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   domain_not_set:
     "The admin has no CLIENT_DOMAIN yet, so no client can be deployed.",
   release_not_imported: "That release isn't imported.",
+  bundle_deleted:
+    "That release was never promoted past Edge, and its bundle was deleted after 14 days: build it again from its commit to use it.",
   promotion_not_allowed:
     "A release goes Edge, then Beta, then Stable, and a channel goes back only to a release it had.",
   channel_changed:

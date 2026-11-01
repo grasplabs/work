@@ -337,6 +337,13 @@
       "when": 1793565322533,
       "tag": "0047_reconciler_takes_over",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1793565645402,
+      "tag": "0048_release_bundles",
+      "breakpoints": true
     }
   ]
 }
