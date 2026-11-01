@@ -5,9 +5,8 @@
 interface __BaseEnv_Env {
   /**
    * `none` in tests and local runs, where workerd has no jurisdictions: the
-   * Discord bot's state objects are then got without one
-   * (src/admin/discord.ts). Never set in wrangler.jsonc; unset or anything
-   * else means the EU.
+   * admin's run objects are then got without one (src/workflow-runs.ts).
+   * Never set in wrangler.jsonc; unset or anything else means the EU.
    */
   DURABLE_OBJECT_JURISDICTION?: string;
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */

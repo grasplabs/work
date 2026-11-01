@@ -8,8 +8,6 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
-import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
@@ -64,10 +62,9 @@ type SharedSecret =
  * holds no key, and never into the admin's database. And only ever to
  * Grasp Cloud: a deploy runs only in a Cloudflare destination the admin's
  * own deployer reaches (hosting/operation.ts refuses a workerd one,
- * `destination_unsupported`, before it delivers anything), and a client's
- * export for relocation carries none of the shared secrets
- * (src/deploy/secret-export.ts). On-prem never gets them: its operator
- * leaves them unset, and its platform features run locally or not at all.
+ * `destination_unsupported`, before it delivers anything). On-prem never
+ * gets them: its operator leaves them unset, and its platform features run
+ * locally or not at all.
  */
 const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
   core: ["ENTRA_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"],
@@ -243,26 +240,6 @@ const sharedValues = async (env: Env): Promise<DeploySecrets["shared"]> => {
       ),
     ])
   );
-};
-
-/**
- * The providers Grasp has its own key for in Secrets Store: the ones
- * Platform → AI offers, and the ones a deploy's `PLATFORM_AI` may name.
- * Read to tell, never answered: no value leaves here.
- */
-export const platformKeyProviders = async (
-  env: Env
-): Promise<ReadonlySet<AiProviderId>> => {
-  const present = await Promise.all(
-    aiProviderIds.map(async (provider) => {
-      const name = aiProviders[provider].platformSecret;
-      return name !== undefined &&
-        (await optionalStoreSecret(env, name)) !== undefined
-        ? [provider]
-        : [];
-    })
-  );
-  return new Set(present.flat());
 };
 
 /** Every secret a deploy gives the Workers, read from Secrets Store. */

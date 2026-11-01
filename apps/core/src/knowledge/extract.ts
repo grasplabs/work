@@ -4,21 +4,15 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
-import type { PlatformAi } from "@grasp-os/shared/platform-ai";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase, withNode } from "@grasp-os/shared/runtime";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import {
-  deploymentStaysInEu,
-  modelRules,
-  models,
-  usableAnswerTokens,
-} from "../models.ts";
+import { modelRules, models, usableAnswerTokens } from "../models.ts";
 import type { ModelAnswer, ModelCall } from "../models.ts";
-import { platformAi, platformRouteFor } from "../platform-ai.ts";
+import { platformAi } from "../platform-ai.ts";
 import {
   boundedInCore,
   PlatformBoundError,
@@ -39,30 +33,29 @@ import type ExtractorWorker from "./extractor/worker.ts";
 //
 // - Grasp's own document conversion (`platformConverter`) for a PDF in a
 //   normal collection: a model that reads the file itself, its text and
-//   each page as an image, so a scan is read too, the provider and model
-//   the platform's settings name (@grasp-os/shared/platform-ai), OpenAI's
-//   by default. A model call like any: through the model gateway
-//   (models.ts, `platformCall`), judged by the rules, metered against the
-//   budgets of the person who uploaded it and audited as metadata only,
-//   and through connect with Grasp's own key. It sends the file out of the
-//   deployment, to a provider that isn't pinned to the EU.
+//   each page as an image, so a scan is read too, by OpenAI's model at its
+//   EU data residency host (platform-ai.ts). A model call like any:
+//   through the model gateway (models.ts, `platformCall`), judged by the
+//   rules, metered against the budgets of the person who uploaded it and
+//   audited as metadata only, and through connect with Grasp's own key. It
+//   sends the file out of the deployment, to Grasp's project in the EU.
 // - The local extractor for everything else: a Word or Excel file, which
 //   it reads exactly, as their text is structured XML, for nothing; a
 //   WebVTT file, which only it reads as a transcript; a file in a
 //   sensitive collection (the flag the gateway's data rule reads too);
-//   every file of a deployment whose config keeps everything in the EU;
-//   and every file where the platform's settings say `local` (on-prem).
-//   So a sensitive file's content never leaves the deployment's own
-//   Workers.
+//   and every file while Grasp has no key for the conversion's provider
+//   (on-prem, a stack without Grasp's keys). So a sensitive file's content
+//   never leaves the deployment's own Workers.
 //
 // Threat model of the conversion, and how each is closed:
 // - A sensitive file sent out: routed to the local extractor before
 //   anything is read (`extractorFor`), and the gateway's rules judge the
 //   call as carrying sensitive data besides.
 // - Sent on a key that isn't Grasp's, or to a provider nobody chose: only
-//   `platformCall` with the settings' provider, whose key connect holds;
-//   without one the upload fails as `upload.conversion_unavailable`,
-//   never read another way behind the admin's back.
+//   `platformCall` with the conversion's provider (platform-ai.ts), whose
+//   key connect holds, at its EU host; without the key the file is read
+//   here, sent nowhere. One the gateway refuses fails as
+//   `upload.conversion_unavailable`.
 // - A file that runs up the bill: an upload is at most 10 MB, and the
 //   ledger bounds the request by the model's whole context window before
 //   it is sent (model-documents.ts), against the uploader's budgets.
@@ -429,11 +422,8 @@ const busyCodes: ReadonlySet<string> = new Set([
   "model.rate_limited",
 ]);
 
-/** Settings that convert a PDF with a model: a provider and its model. */
-type ConversionSettings = Exclude<
-  PlatformAi["conversion"],
-  { provider: "local" }
->;
+/** What converts a PDF: a provider and its model (platform-ai.ts). */
+type ConversionSettings = (typeof platformAi)["conversion"];
 
 /**
  * One request of a conversion through the gateway with Grasp's key, the
@@ -531,44 +521,27 @@ export type ExtractorName = "platform" | "local";
 /**
  * The extractor for a file in `collection`, uploaded by `trigger`: Grasp's
  * own conversion for a PDF in a normal collection; the local one for any
- * other file, for a sensitive collection, for a deployment whose config
- * keeps everything in the EU, and where the platform's settings say
- * `local`. Settings that don't parse leave a PDF unconverted
- * (`upload.conversion_unavailable`), never read another way unasked.
+ * other file, for a sensitive collection, while the deployment's rules
+ * don't parse, and while Grasp has no key for the conversion's provider
+ * (on-prem, a stack without Grasp's keys), when nothing is sent out.
  */
-export const extractorFor = (
+export const extractorFor = async (
   env: Env & LocalExtractorEnv,
   collection: { sensitive: boolean },
   mediaType: UploadMediaType,
   trigger: AuditActor
-): { name: ExtractorName; extract: Extractor } => {
+): Promise<{ name: ExtractorName; extract: Extractor }> => {
   const local = { name: "local", extract: localExtractor(env) } as const;
-  if (collection.sensitive || mediaType !== uploadTypes.pdf) {
-    return local;
-  }
-  const conversion = platformAi(env)?.conversion;
-  // An EU-only deployment's PDFs go out only where Grasp's project for
-  // the provider is in the EU; read here otherwise, never sent elsewhere,
-  // as while the deployment's rules don't parse.
   if (
-    modelRules(env) === undefined ||
-    (deploymentStaysInEu(env) &&
-      (conversion === undefined ||
-        conversion.provider === "local" ||
-        platformRouteFor(env, conversion.provider)?.region !== "eu"))
+    collection.sensitive ||
+    mediaType !== uploadTypes.pdf ||
+    modelRules(env) === undefined
   ) {
     return local;
   }
-  if (conversion === undefined) {
-    return {
-      name: "platform",
-      extract: async () =>
-        await Promise.reject(
-          uploadErrors.create("upload.conversion_unavailable")
-        ),
-    };
-  }
-  if (conversion.provider === "local") {
+  const { conversion } = platformAi;
+  const routes = await env.CONNECT.aiProviderRoutes();
+  if (!routes.platform.includes(conversion.provider)) {
     return local;
   }
   return {

@@ -326,7 +326,30 @@ const QuestionField = ({
 };
 
 /** Where nobody picks a model. */
-const noModels: readonly string[] = [];
+export const noModels: readonly string[] = [];
+
+/**
+ * Whether a question has no model it may name (`model` empty): the
+ * organization has no AI provider to call yet, or none of its models is
+ * chosen. Nothing is sent then.
+ */
+export const lacksModel = (model: string | undefined): boolean => model === "";
+
+/**
+ * Where a question names a model (`model` given) but there are none to
+ * name: the way to connect an AI provider, under the box to ask in or the
+ * questions asked in its place.
+ */
+export const NoModelNotice = ({
+  model,
+  models,
+}: {
+  model: string | undefined;
+  models: readonly string[];
+}) =>
+  model === undefined || models.length > 0 ? null : (
+    <ConnectAiProvider size="xs" />
+  );
 
 /** Where the model doesn't think, or nobody picks how hard. */
 const noLevels: readonly ModelEffort[] = [];
@@ -399,7 +422,8 @@ export const Composer = ({
 }) => {
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
-  const canSend = !running && !busy && !disabled && !empty && model !== "";
+  const canSend =
+    !running && !busy && !disabled && !empty && !lacksModel(model);
   return (
     <form
       className="flex flex-col gap-1.5"
@@ -467,10 +491,7 @@ export const Composer = ({
           </PromptInputFooter>
         </InputGroup>
       )}
-      {/* No model to name: the organization has no AI provider to call yet, or none of its models is chosen. */}
-      {compact || model === undefined || models.length > 0 ? null : (
-        <ConnectAiProvider size="xs" />
-      )}
+      {compact ? null : <NoModelNotice model={model} models={models} />}
       <ErrorText>{failure}</ErrorText>
     </form>
   );

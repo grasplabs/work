@@ -51,14 +51,6 @@ interface __BaseEnv_Env {
   /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
   MODEL_GATEWAY?: unknown;
   /**
-   * Each of Grasp's own AI features' provider and model, as shared's
-   * platform-ai.ts describes it (src/platform-ai.ts): JSON, OpenAI's
-   * defaults while unset.
-   */
-  PLATFORM_AI?: unknown;
-  /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
-  MEMORY_LIMITS?: unknown;
-  /**
    * Lower limits on an App's npm packages than the defaults
    * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
    */
@@ -69,22 +61,8 @@ interface __BaseEnv_Env {
    * deploys.
    */
   PLATFORM_CHANGE?: unknown;
-  /** Days the audit log keeps events before archiving (src/audit-log.ts, `retainAuditLog`). */
-  AUDIT_RETENTION_DAYS?: unknown;
-  /** Days archived audit events are kept before they're purged (src/audit-log.ts). */
-  AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
-  /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
-  RUN_RETENTION_DAYS?: unknown;
-  /** The domain the deployment receives mail at (src/workflows/overview.ts). */
-  INBOUND_MAIL_DOMAIN?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
-  /**
-   * The limits the operator lowered, with the policy's generation
-   * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
-   * src/workflows/quotas.ts).
-   */
-  QUOTA_LIMITS?: unknown;
   /**
    * `cloudflare` where core runs on Cloudflare's runtime, which enforces
    * Code Mode's CPU limit; anything else, unset included, is taken as a
@@ -138,6 +116,11 @@ interface __BaseEnv_Env {
    * effect (src/workflows/host.ts).
    */
   WORKFLOW_OFF_WAIT_MS?: string;
+  /**
+   * Tests only: lower quota limits than the platform's, so a test reaches
+   * one cheaply (src/workflows/quotas.ts, `quotaLimits`): JSON, partial.
+   */
+  TEST_QUOTA_LIMITS?: unknown;
   /**
    * Tests only: a shorter deadline for a run waiting on an unknown outcome
    * its person hasn't resolved (src/workflows/host.ts).
@@ -199,12 +182,12 @@ interface __BaseEnv_Env {
   DEFINITION_EXPORT_MAX_BYTES?: string;
   /**
    * Tests only: lower bounds on an App's statistics points, `perCall/
-   * perMinute` (src/app.ts, `claimStatistic`).
+   * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_POINT_LIMITS?: string;
   /**
    * Tests only: lower bounds on an App's statistics reads, `perCall/
-   * perMinute` (src/app.ts, `claimStatistic`).
+   * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_READ_LIMITS?: string;
   /** The router secret before the current one, while rotating (src/router-secret.ts). */

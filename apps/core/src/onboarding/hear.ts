@@ -18,7 +18,7 @@ import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
-import { heardBudgets, transcriptionModelOf } from "./transcription.ts";
+import { heardBudgets, transcriptionModel } from "./transcription.ts";
 
 // `POST /api/interview/hear` (`@grasp-os/shared/interview-hear`): a
 // stretch of what someone said on their interview link, written down from
@@ -27,9 +27,8 @@ import { heardBudgets, transcriptionModelOf } from "./transcription.ts";
 // Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/interview.ts, `hear`).
 //
-// Written down by the transcription model the platform's settings name
-// (@grasp-os/shared/platform-ai), OpenAI's by default, the one live
-// transcription takes, through connect with Grasp's own key: core sends
+// Written down by Grasp's transcription model (src/platform-ai.ts), the
+// one live transcription takes, through connect with Grasp's own key: core sends
 // none. Only once the model gateway admitted it (models.ts,
 // `models(env).listen`): the rules judge it, and the deployment's budgets
 // hold its seconds, before anything is sent; the way to the upstream is
@@ -215,12 +214,8 @@ const admitted = async (
   requestId: string
 ): Promise<Listening | Response> => {
   try {
-    const model = transcriptionModelOf(env);
-    if (model === undefined) {
-      throw modelErrors.create("model.unconfigured");
-    }
     return await models(env).listen({
-      model,
+      model: transcriptionModel,
       seconds,
       // Admitted within half of it at most, written down in the rest.
       openMs: 2 * hearTimeoutMs,

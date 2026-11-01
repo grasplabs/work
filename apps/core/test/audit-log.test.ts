@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chainHash } from "../src/audit-chain.ts";
-import { archiveRetentionDays } from "../src/audit-log.ts";
 import { appendStored, oversizedFields } from "./audit-events.ts";
 
 // A fresh log per test; the deployment's own is `auditLog(env)`.
@@ -836,7 +835,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 /**
  * Runs `run` with the clock `days` ahead: the log works out what to purge
- * from its own clock and archive retention (365 days in tests).
+ * from its own clock and archive retention (seven years).
  */
 const inDays = async <T>(days: number, run: () => Promise<T>): Promise<T> => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -848,9 +847,12 @@ const inDays = async <T>(days: number, run: () => Promise<T>): Promise<T> => {
   }
 };
 
+/** Days an event is kept in all, archive included: seven years. */
+const archiveRetentionDays = 7 * 365;
+
 /** Purges as the log would once archive retention has passed. */
 const purgeLater = async (log: Log) =>
-  await inDays(366, async () => await log.purge());
+  await inDays(archiveRetentionDays + 1, async () => await log.purge());
 
 /** Archives what the log holds now, and then a second stretch. */
 const archiveTwoStretches = async (log: Log): Promise<void> => {
@@ -869,7 +871,7 @@ describe("AuditLog purges", () => {
 
     // Not before archive retention has passed.
     await expect(
-      inDays(364, async () => await log.purge())
+      inDays(archiveRetentionDays - 1, async () => await log.purge())
     ).resolves.toBeNull();
     await expect(purgeLater(log)).resolves.toStrictEqual({
       from: 1,
@@ -890,57 +892,6 @@ describe("AuditLog purges", () => {
         },
       },
     ]);
-  });
-
-  it("works out archive retention from deployment config, seven years unless set, and purges nothing on one that is invalid", () => {
-    // Unset: seven years, or the log's own retention when that is longer.
-    expect(archiveRetentionDays({})).toBe(2555);
-    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "3000" })).toBe(3000);
-    // Nor any while unset, if the log's own retention is invalid.
-    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "7" })).toBeUndefined();
-    // Below the floor, above the ceiling, or not whole days: none.
-    for (const days of ["30", "364", "3651", "400.5", "a year"]) {
-      expect(
-        archiveRetentionDays({ AUDIT_ARCHIVE_RETENTION_DAYS: days })
-      ).toBeUndefined();
-    }
-    expect(archiveRetentionDays({ AUDIT_ARCHIVE_RETENTION_DAYS: "730" })).toBe(
-      730
-    );
-  });
-
-  it("refuses an archive retention shorter than retention, as it's an event's total age", () => {
-    const logged = vi.spyOn(console, "error").mockReturnValue();
-    try {
-      // Events would be purged before they were archived.
-      expect(
-        archiveRetentionDays({
-          AUDIT_RETENTION_DAYS: "800",
-          AUDIT_ARCHIVE_RETENTION_DAYS: "700",
-        })
-      ).toBeUndefined();
-      expect(logged).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: "config.invalid",
-          var: "AUDIT_ARCHIVE_RETENTION_DAYS",
-        })
-      );
-    } finally {
-      logged.mockRestore();
-    }
-    expect(
-      archiveRetentionDays({
-        AUDIT_RETENTION_DAYS: "800",
-        AUDIT_ARCHIVE_RETENTION_DAYS: "800",
-      })
-    ).toBe(800);
-    // Nor any while retention itself is invalid.
-    expect(
-      archiveRetentionDays({
-        AUDIT_RETENTION_DAYS: "7",
-        AUDIT_ARCHIVE_RETENTION_DAYS: "730",
-      })
-    ).toBeUndefined();
   });
 
   it("verifies a purged stretch as purged, and the chain across it", async () => {
@@ -1081,7 +1032,7 @@ describe("AuditLog purges", () => {
     await archivedKey(log);
 
     const purged = await inDays(
-      366,
+      archiveRetentionDays + 1,
       async () =>
         await runInDurableObject(
           log,

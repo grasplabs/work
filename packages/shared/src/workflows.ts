@@ -101,6 +101,8 @@ export const workflowErrors = defineErrorFamily({
   // own: the audit log and failure reports carry these instead.
   "workflow.step_failed": "A step of the workflow failed.",
   "workflow.run_failed": "The workflow run failed.",
+  "workflow.compensation_failed":
+    "The workflow run failed, and undoing what it had done failed too.",
 });
 
 /**
@@ -615,6 +617,11 @@ export interface RunSummary {
   compensation?: {
     cause: "failure" | "cancellation";
     activity: "running" | "waiting" | "paused";
+    /**
+     * After a failure, what the run failed with, to those who see why a
+     * run failed (its person and admins): as `error` once it ends.
+     */
+    originalError?: { code: string; message: string };
   };
   /** Why it failed, once failed: a code and message, no values. */
   error?: { code: string; message: string };
@@ -792,12 +799,6 @@ export type WorkflowTrigger = { position: number } & (
       type: "email";
       /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
       localPart: string;
-      /**
-       * The whole address people send to: the local part at the
-       * deployment's inbound mail domain (`INBOUND_MAIL_DOMAIN`); null
-       * while the deployment has none set.
-       */
-      address: string | null;
     }
   | { type: "event"; event: string }
 );
@@ -873,9 +874,9 @@ export interface WorkflowRun {
   failure?: RunFailure;
   /**
    * Set once its details are removed, its retention over: an ended run
-   * keeps them for the deployment's `RUN_RETENTION_DAYS`, 30 days unless
-   * set, counted from when it ended. The same wherever the run is read.
-   * The run itself stays: what it was, how it ended, when and for whom.
+   * keeps them for 30 days, counted from when it ended. The same wherever
+   * the run is read. The run itself stays: what it was, how it ended, when
+   * and for whom.
    */
   detailsRemoved?: true;
 }

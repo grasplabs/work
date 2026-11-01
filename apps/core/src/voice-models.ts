@@ -1,8 +1,3 @@
-import {
-  speechProviders,
-  transcriptionProviders,
-} from "@grasp-os/shared/platform-ai";
-import type { SpeechModel } from "@grasp-os/shared/platform-ai";
 import type { SpokenWord } from "@grasp-os/shared/voice";
 
 import type { ListPrices } from "./model-prices.ts";
@@ -33,7 +28,13 @@ const dollarsPer1000Chars = {
   eleven_v4_turbo: 0.04,
   eleven_v3: 0.08,
   eleven_flash_v2_5: 0.04,
-} as const satisfies Record<SpeechModel, number>;
+} as const;
+
+/** The providers that say a line: ElevenLabs (platform-ai.ts). */
+const speechProviders = ["elevenlabs"] as const;
+
+/** The providers that write down speech: OpenAI (platform-ai.ts). */
+const transcriptionProviders = ["openai"] as const;
 
 /** A speech model the gateway offers. */
 export interface VoiceRef {

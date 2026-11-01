@@ -102,10 +102,6 @@ msgid "{account} on {provider}"
 msgstr "{account} bij {provider}"
 
 #: src/brain/brain.ts
-msgid "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
-msgstr "{ai, select, tool {Een AI-tool, volgens Grasp} builtIn {AI ingebouwd, volgens Grasp} other {Geen AI, volgens Grasp}}"
-
-#: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Een AI-tool, volgens het team} builtIn {AI ingebouwd, volgens het team} other {Geen AI, volgens het team}}"
 
@@ -258,14 +254,6 @@ msgstr "{browser} op {system}"
 msgid "{cached} of them from a cache"
 msgstr "waarvan {cached} uit een cache"
 
-#: src/brain/brain.ts
-msgid "{category} by {vendor}"
-msgstr "{category} van {vendor}"
-
-#: src/brain/brain.ts
-msgid "{category} by {vendor}, with AI built in"
-msgstr "{category} van {vendor}, met ingebouwde AI"
-
 #: src/routes/_shell.workflows.index.tsx
 msgid "{chosen} (no longer in this domain)"
 msgstr "{chosen} (niet meer in dit domein)"
@@ -318,9 +306,9 @@ msgstr "{count, plural, one {{name} heeft # app waarvan niemand de code heeft go
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} werken hier, aan # stuk werk dat naar voren kwam in wat mensen vertelden.} other {{names} werken hier, aan # stukken werk die naar voren kwamen in wat mensen vertelden.}}"
 
-#: src/brain/brain.ts
-msgid "{count, plural, one {# application} other {# applications}}"
-msgstr "{count, plural, one {# applicatie} other {# applicaties}}"
+#: src/inbox/items.ts
+msgid "{count, plural, one {# binding} other {# bindings}}"
+msgstr "{count, plural, one {# koppeling} other {# koppelingen}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
@@ -450,6 +438,14 @@ msgstr "{count, plural, one {De uren van # workflow optellen} other {De uren van
 #: src/chat/sources.tsx
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antwoorden steunen op # bron} other {Antwoorden steunen op # bronnen}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Stelde je een vraag} other {Stelde je # vragen}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}}"
 
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
@@ -615,20 +611,6 @@ msgstr "{file} verwijderd"
 msgid "{finished} of {started}"
 msgstr "{finished} van {started}"
 
-#. Days and their hours: "Monday to Friday, 8:00 to 18:00"
-#: src/settings/pulse.ts
-msgid "{first} to {last}, {ranges}"
-msgstr "{first} t/m {last}, {ranges}"
-
-#: src/settings/pulse-people.tsx
-msgid "{first}–{last} of {matching}"
-msgstr "{first}–{last} van {matching}"
-
-#. A day and its hours: "Wednesday, 8:00 to 12:00, 13:00 to 18:00"
-#: src/settings/pulse.ts
-msgid "{first}, {ranges}"
-msgstr "{first}, {ranges}"
-
 #: src/onboarding/interview-people.tsx
 msgid "{first}'s own link"
 msgstr "De eigen link van {first}"
@@ -658,14 +640,6 @@ msgstr "{freshCount, plural, one {# nieuwe link om te versturen} other {# nieuwe
 #: src/onboarding/interviews-progress.tsx
 msgid "{freshCount, plural, one {The new link, as a list} other {The # new links, as a list}}"
 msgstr "{freshCount, plural, one {De nieuwe link, als lijst} other {De # nieuwe links, als lijst}}"
-
-#: src/settings/pulse.ts
-msgid "{from} to {until}"
-msgstr "{from} tot {until}"
-
-#: src/settings/pulse.ts
-msgid "{from} to midnight"
-msgstr "{from} tot middernacht"
 
 #: src/brain/brain.ts
 msgid "{gaps, plural, one {# gap} other {# gaps}}"
@@ -713,10 +687,6 @@ msgstr "{hours} u"
 msgid "{hours} of the {all} hours a week"
 msgstr "{hours} van de {all} uur per week"
 
-#: src/settings/week-hours.tsx
-msgid "{hoursOn, plural, one {On # hour a week: {summary}.} other {On # hours a week: {summary}.}}"
-msgstr "{hoursOn, plural, one {# uur per week aan: {summary}.} other {# uur per week aan: {summary}.}}"
-
 #: src/dashboard/report.ts
 msgid "{idle, plural, one {# more workflow didn't run in this time.} other {# more workflows didn't run in this time.}}"
 msgstr "{idle, plural, one {# andere workflow liep in deze tijd niet.} other {# andere workflows liepen in deze tijd niet.}}"
@@ -736,6 +706,10 @@ msgstr "{kept} van {written}"
 #: src/dashboard/dependency-requests.tsx
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
+
+#: src/inbox/item-detail.tsx
+msgid "{kind}: {contractId}"
+msgstr "{kind}: {contractId}"
 
 #: src/onboarding/work-list.tsx
 msgid "{known} of {workflows} workflows known"
@@ -965,11 +939,6 @@ msgstr "{name} kon niet worden hernoemd. Probeer het opnieuw."
 msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
 msgstr "{name} accepteerde deze service user niet. Controleer de ID en het token, en of hij de werkgegevens van mensen mag lezen."
 
-#. The first hour Pulse may report on a day
-#: src/settings/week-hours.tsx
-msgid "{name} from"
-msgstr "{name} vanaf"
-
 #: src/chat/side-panel.tsx
 msgid "{name} has no app to show."
 msgstr "{name} heeft geen app om te tonen."
@@ -1033,11 +1002,6 @@ msgstr "{name} leest alleen. Wijzigen naar Schrijven"
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
 msgstr "{name} doet mee"
-
-#. The last hour Pulse may report on a day
-#: src/settings/week-hours.tsx
-msgid "{name} until"
-msgstr "{name} tot"
 
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
@@ -1156,28 +1120,12 @@ msgid "{path}, which would no longer run"
 msgstr "{path}, dat niet meer zou draaien"
 
 #: src/brain/brain.ts
-msgid "{people, plural, one {{app} is used by # person, and nobody mentioned it in an interview. No team owns it.} other {{app} is used by # people, and nobody mentioned it in an interview. No team owns it.}}"
-msgstr "{people, plural, one {{app} wordt gebruikt door # persoon, en niemand noemde het in een interview. Geen team is eigenaar.} other {{app} wordt gebruikt door # mensen, en niemand noemde het in een interview. Geen team is eigenaar.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {{app} is used by # person, and nobody mentioned it in an interview.} other {{app} is used by # people, and nobody mentioned it in an interview.}}"
-msgstr "{people, plural, one {{app} wordt gebruikt door # persoon, en niemand noemde het in een interview.} other {{app} wordt gebruikt door # mensen, en niemand noemde het in een interview.}}"
-
-#: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persoon.} other {{sector}, # mensen.}}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
 msgstr "{people, plural, one {# persoon heeft toegang. Mensen doen mee door in te loggen met het account van je organisatie; nodig ze uit om ze vanaf het begin een rol te geven.} other {# personen hebben toegang. Mensen doen mee door in te loggen met het account van je organisatie; nodig ze uit om ze vanaf het begin een rol te geven.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {# person uses it, seen through {channels}. No team has named it yet.} other {# people use it, seen through {channels}. No team has named it yet.}}"
-msgstr "{people, plural, one {# persoon gebruikt het, gezien via {channels}. Nog geen team heeft het genoemd.} other {# mensen gebruiken het, gezien via {channels}. Nog geen team heeft het genoemd.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {# person, as {app}} other {# people, as {app}}}"
-msgstr "{people, plural, one {# persoon, als {app}} other {# mensen, als {app}}}"
 
 #: src/brain/brain.ts
 #: src/onboarding/interview-teams.tsx
@@ -1188,10 +1136,6 @@ msgstr "{people, plural, one {# persoon} other {# mensen}}"
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}} · {helpful} helpful"
 msgstr "{people, plural, one {# persoon} other {# personen}} · {helpful} nuttig"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "{people, plural, one {Everyone in your directory, # person. Problems first.} other {Everyone in your directory, # people. Problems first.}}"
-msgstr "{people, plural, one {Iedereen in je directory, # persoon. Problemen eerst.} other {Iedereen in je directory, # mensen. Problemen eerst.}}"
 
 #: src/onboarding/work-record.tsx
 msgid "{people, plural, one {From # person.} other {From # people.}}"
@@ -1375,10 +1319,6 @@ msgstr "{score} van 5"
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "App {screen}"
-
-#: src/brain/brain.ts
-msgid "{seen, select, microsoftSso {Seen in use through Microsoft sign-in} googleSso {Seen in use through Google sign-in} other {Seen in use through Pulse}}"
-msgstr "{seen, select, microsoftSso {In gebruik gezien via inloggen met Microsoft} googleSso {In gebruik gezien via inloggen met Google} other {In gebruik gezien via Pulse}}"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "{share} not helpful"
@@ -1607,21 +1547,9 @@ msgstr "{told} van {steps}"
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} van # tool toegestaan} other {{count} van # tools toegestaan}}"
 
-#: src/settings/pulse-people.tsx
-msgid "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
-msgstr "{total, plural, one {{matching} van # persoon} other {{matching} van # mensen}}"
-
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {Bij {withPerson} van # run was een beslissing van een persoon nodig.} other {Bij {withPerson} van # runs was een beslissing van een persoon nodig.}}"
-
-#: src/settings/pulse-people.tsx
-msgid "{total, plural, one {# person} other {# people}}"
-msgstr "{total, plural, one {# persoon} other {# mensen}}"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
-msgstr "{total} wordt voor deze modelaanroepen vastgehouden tot je beslist: wat elk had kunnen kosten. Geef het vrij, of breng het volledig in rekening."
 
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
@@ -1806,10 +1734,6 @@ msgstr "**Jij:**"
 msgid "+{by}"
 msgstr "+{by}"
 
-#: src/settings/pulse-people.tsx
-msgid "<0>{reporting} of {total}</0><1>{total, plural, one {person has Pulse} other {people have Pulse}}</1>"
-msgstr "<0>{reporting} van {total}</0><1>{total, plural, one {persoon heeft Pulse} other {mensen hebben Pulse}}</1>"
-
 #: src/dashboard/runs-widget.tsx
 msgid "<0>{without}</0> without a person"
 msgstr "<0>{without}</0> zonder een persoon"
@@ -1957,6 +1881,10 @@ msgctxt "memory record kind"
 msgid "A lesson"
 msgstr "Een les"
 
+#: src/engines/app-workflows.tsx
+msgid "A letter, then letters, digits or underscores, such as summary."
+msgstr "Een letter, dan letters, cijfers of underscores, zoals summary."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Een opzoeking"
@@ -2092,6 +2020,14 @@ msgctxt "lesson scope"
 msgid "A shared chat"
 msgstr "Een gedeelde chat"
 
+#: src/brain/share-record.tsx
+msgid "A shared chat with {people}"
+msgstr "Een gedeelde chat met {people}"
+
+#: src/brain/share-record.tsx
+msgid "A shared chat with only you in it"
+msgstr "Een gedeelde chat met alleen jou erin"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Een personeelslijst is de snelste weg: namen, e-mailadressen, teams en functies, als CSV- of Excelbestand. Ik gebruik hem alleen om te weten met wie ik moet praten."
@@ -2104,6 +2040,10 @@ msgstr "Een stap"
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
 msgstr "Een team"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "A team it is no longer shared with"
+msgstr "Een team waarmee hij niet meer gedeeld is"
 
 #: src/settings/person-limits.tsx
 msgid "A team no longer in your organization"
@@ -2140,10 +2080,6 @@ msgstr "Heeft een workflow een app nodig die hier nog niet staat? Laat Grasp wet
 #: src/workflows/requests/request-plan.tsx
 msgid "A workflow started"
 msgstr "Een gestarte workflow"
-
-#: src/routes/_shell.settings.notifications.tsx
-msgid "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
-msgstr "Een workflow om te controleren of goed te keuren, een run die op jou wacht, of een wijziging in een live workflow."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow with AI is in its test run."
@@ -2224,6 +2160,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Actie"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -2281,7 +2218,6 @@ msgid "Actor ID"
 msgstr "Actor-ID"
 
 #: src/onboarding/connect-steps.tsx
-#: src/routes/_shell.settings.pulse.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
@@ -2290,10 +2226,6 @@ msgstr "Toevoegen"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add a card"
 msgstr "Kaart toevoegen"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Add a domain for a second brand or an old one."
-msgstr "Voeg een domein toe voor een tweede merk of een oud domein."
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -2341,6 +2273,10 @@ msgstr "Een woord toevoegen"
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Uitzondering toevoegen"
+
+#: src/engines/app-integrations.tsx
+msgid "Add an integration"
+msgstr "Een integratie toevoegen"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -2390,13 +2326,18 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Toegevoegd"
 
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Toegevoegd {at}"
+
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "Een lid aan een domein toegevoegd"
 
-#: src/brain/brain.ts
-msgid "Added as an open question"
-msgstr "Toegevoegd als open vraag"
+#: src/engines/app-integrations.tsx
+msgctxt "why an integration is one of a domain's"
+msgid "Added by hand"
+msgstr "Met de hand toegevoegd"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -2425,10 +2366,6 @@ msgstr "Toegevoegd: leest en herschrijft elk record van {table}, van wie het ook
 #: src/routes/_shell.settings.billing.tsx
 msgid "Address"
 msgstr "Adres"
-
-#: src/workflows/triggers.tsx
-msgid "Address copied"
-msgstr "Adres gekopieerd"
 
 #: src/brain/brain.ts
 msgctxt "note property"
@@ -2518,10 +2455,6 @@ msgstr "AI"
 msgctxt "kind of fact"
 msgid "AI"
 msgstr "AI"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "AI apps"
-msgstr "AI-apps"
 
 #: src/routes/_shell.settings.ai-providers.tsx
 #: src/routes/_shell.settings.tsx
@@ -2645,10 +2578,6 @@ msgstr "Alle plekken"
 msgid "All teams"
 msgstr "Alle teams"
 
-#: src/settings/pulse.ts
-msgid "All the time"
-msgstr "Altijd"
-
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
 msgstr "Alle workflowtests slagen."
@@ -2673,10 +2602,6 @@ msgstr "Bijna klaar: is dit je organisatie?"
 #: src/onboarding/setup-frame.tsx
 msgid "Almost there"
 msgstr "Bijna klaar"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Already decided: {model}"
-msgstr "Al besloten: {model}"
 
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
@@ -2766,6 +2691,10 @@ msgstr "Een app draait pas als een beheerder de code heeft goedgekeurd. Dat gebe
 #: src/engines/app-status.tsx
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Een gearchiveerd domein blijft zoals het is en gaat offline: niemand opent de apps, de triggers stoppen en onafgemaakte runs worden geannuleerd. Een bouwer kan het later herstellen, als concept."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
+msgstr "Een gearchiveerd domein blijft zoals het was en gaat offline: niemand opent het, de triggers stoppen en onvoltooide runs worden geannuleerd. Een bouwer kan het herstellen, als concept."
 
 #: src/settings/audit-chain.tsx
 msgid "An entry doesn't link to the one before it."
@@ -2949,7 +2878,6 @@ msgstr "Goedkeuring van apps"
 msgid "App not found"
 msgstr "App niet gevonden"
 
-#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Applicatie"
@@ -2957,14 +2885,6 @@ msgstr "Applicatie"
 #: src/brain/brain.ts
 msgid "Applications"
 msgstr "Applicaties"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications in use on devices"
-msgstr "Applicaties in gebruik op apparaten"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications signed in to"
-msgstr "Applicaties waarop wordt ingelogd"
 
 #: src/onboarding/review-parts.tsx
 msgid "Apply it if the sender’s domain is {domain}."
@@ -2996,6 +2916,10 @@ msgctxt "let a waiting item go ahead"
 msgid "Approve"
 msgstr "Goedkeuren"
 
+#: src/inbox/item-detail.tsx
+msgid "Approve {alias}"
+msgstr "{alias} goedkeuren"
+
 #: src/inbox/items.ts
 msgid "Approve {name}?"
 msgstr "{name} goedkeuren?"
@@ -3026,6 +2950,10 @@ msgstr "De pakketten voor {domain} goedkeuren"
 msgid "Approve the packages for {domain}?"
 msgstr "De pakketten voor {domain} goedkeuren?"
 
+#: src/inbox/items.ts
+msgid "Approve what {name} reaches"
+msgstr "Goedkeuren wat {name} bereikt"
+
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
@@ -3053,6 +2981,10 @@ msgstr "Goedgekeurd over {left} s"
 #: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Pakketten goedgekeurd"
+
+#: src/inbox/item-detail.tsx
+msgid "Approved: {alias} of {name}."
+msgstr "Goedgekeurd: {alias} van {name}."
 
 #: src/dashboard/report.ts
 msgid "Approved: {approved}"
@@ -3092,12 +3024,17 @@ msgid "Apps to approve"
 msgstr "Apps om goed te keuren"
 
 #: src/engines/app-status.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Archive"
 msgstr "Archiveren"
 
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "{name} archiveren?"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Archive and take offline"
+msgstr "Archiveren en offline halen"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
@@ -3386,6 +3323,7 @@ msgstr "Deze weken afwezig. Niets wacht op {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -3395,6 +3333,10 @@ msgstr "Terug"
 #: src/onboarding/setup-frame.tsx
 msgid "Back and forward"
 msgstr "Terug en verder"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Back to {appName}"
+msgstr "Terug naar {appName}"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
@@ -3511,21 +3453,30 @@ msgstr "Factuur-e-mail"
 msgid "Billing emails"
 msgstr "Factuur-e-mails"
 
-#: src/routes/_shell.settings.notifications.tsx
-msgid "Billing problems"
-msgstr "Problemen met facturatie"
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "Billing runs through Stripe. You see it here and change it there."
 msgstr "De facturatie loopt via Stripe. Je ziet het hier en wijzigt het daar."
+
+#: src/engines/app-workflows.tsx
+msgid "Bind"
+msgstr "Koppelen"
 
 #: src/engines/resource-bindings.tsx
 msgid "Bind {alias}"
 msgstr "{alias} koppelen"
 
+#: src/engines/app-workflows.tsx
+msgid "Bind a workflow"
+msgstr "Workflow koppelen"
+
 #: src/inbox/items.ts
 msgid "Binding"
 msgstr "Koppeling"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
+msgid "Bindings"
+msgstr "Koppelingen"
 
 #: src/brain/brain.ts
 msgid "Blocker"
@@ -3548,6 +3499,7 @@ msgctxt "dashboard widget"
 msgid "Board goals"
 msgstr "Doelen van de directie"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Bound"
 msgstr "Gekoppeld"
@@ -3623,11 +3575,6 @@ msgstr "Bedrijfsproces"
 msgid "By {by}"
 msgstr "Door {by}"
 
-#. Column value: a team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By a team"
-msgstr "Door een team"
-
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "By day"
 msgstr "Per dag"
@@ -3647,11 +3594,6 @@ msgstr "Op naam, alleen voor Grasp. Een naam opent die persoon: de link, waarove
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "By name, for Grasp only. A name opens that person."
 msgstr "Op naam, alleen voor Grasp. Een naam opent die persoon."
-
-#. Column value: no team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By nobody"
-msgstr "Door niemand"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "By person"
@@ -3714,6 +3656,10 @@ msgstr "Roept {tools} aan (elk van hun methodes): kan iets wijzigen"
 msgid "Came in"
 msgstr "Binnengekomen"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Binnengekomen {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Kwam naar voren in {source}"
@@ -3727,11 +3673,13 @@ msgstr "Niet leesbaar"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/app-workflows.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
@@ -3881,6 +3829,14 @@ msgstr "Hun eigen wijzigen"
 msgid "Change this team"
 msgstr "Dit team wijzigen"
 
+#: src/engines/app-workflows.tsx
+msgid "Change version"
+msgstr "Versie wijzigen"
+
+#: src/engines/app-workflows.tsx
+msgid "Change what {alias} starts"
+msgstr "Wijzigen wat {alias} start"
+
 #: src/dashboard/widget-ask.tsx
 msgid "Change with Grasp"
 msgstr "Wijzigen met Grasp"
@@ -3892,6 +3848,10 @@ msgstr "Aanpassen: {text}"
 #: src/chat/builds.tsx
 msgid "Changed"
 msgstr "Gewijzigd"
+
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Gewijzigd {at}"
 
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
@@ -3985,6 +3945,10 @@ msgstr "Gewijzigd: leest en herschrijft elk record van {table}, van wie het ook 
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verloren ging, zodat niemand weet of ze effect hadden. Alleen die persoon kan op haar dashboard zeggen wat er gebeurde; volg het met haar op."
 
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Wijzigingen sinds {when}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Wijzigt iets"
@@ -4000,14 +3964,6 @@ msgstr "Wijzigt de gegevens van het domein"
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Wijzigingen in de opslag van het domein"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge"
-msgstr "In rekening brengen"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge {amount} for this model call?"
-msgstr "{amount} in rekening brengen voor deze modelaanroep?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -4116,6 +4072,14 @@ msgstr "Kies een persoon of een team"
 msgid "Choose a person or a team."
 msgstr "Kies een persoon of een team."
 
+#: src/engines/app-workflows.tsx
+msgid "Choose a version"
+msgstr "Kies een versie"
+
+#: src/engines/app-workflows.tsx
+msgid "Choose a workflow"
+msgstr "Kies een workflow"
+
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Documenten kiezen"
@@ -4181,6 +4145,7 @@ msgstr "Filters wissen"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -4646,10 +4611,6 @@ msgstr "Gekopieerd"
 msgid "Copy"
 msgstr "Kopiëren"
 
-#: src/workflows/triggers.tsx
-msgid "Copy address"
-msgstr "Adres kopiëren"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Kopiëren als Markdown"
@@ -4657,6 +4618,10 @@ msgstr "Kopiëren als Markdown"
 #: src/chat/answer-markdown.tsx
 msgid "Copy code"
 msgstr "Code kopiëren"
+
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "Kopiëren naar Our skills"
 
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
@@ -4704,10 +4669,6 @@ msgstr "Gecorrigeerd door"
 msgid "Could be better"
 msgstr "Kan beter"
 
-#: src/workflows/triggers.tsx
-msgid "Could not copy the address"
-msgstr "Het adres kon niet worden gekopieerd"
-
 #: src/activity/pending.tsx
 msgid "couldn't be read"
 msgstr "kon niet worden gelezen"
@@ -4719,6 +4680,10 @@ msgstr "Het team van {named} kon niet worden gewijzigd"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
 msgstr "De workflows van dit domein konden niet worden geladen."
+
+#: src/engines/app-owner.tsx
+msgid "Couldn't load who may answer for it."
+msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 
 #: src/workflows/owner-picker.tsx
 msgid "Couldn't make {chosen} the owner of {named}"
@@ -4893,6 +4858,18 @@ msgstr "Beslissing niet gevonden"
 msgid "Decisions"
 msgstr "Beslissingen"
 
+#: src/inbox/item-detail.tsx
+msgid "Decline"
+msgstr "Weigeren"
+
+#: src/inbox/item-detail.tsx
+msgid "Decline starting {name}"
+msgstr "Starten van {name} weigeren"
+
+#: src/inbox/item-detail.tsx
+msgid "Declined: {name}."
+msgstr "Geweigerd: {name}."
+
 #: src/workflows/resource-params.tsx
 msgid "Default"
 msgstr "Standaard"
@@ -5042,10 +5019,6 @@ msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Ontwikkeltools"
 
-#: src/settings/pulse-people.tsx
-msgid "Device"
-msgstr "Apparaat"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "Devices"
 msgstr "Apparaten"
@@ -5079,6 +5052,18 @@ msgstr "Is dit gebeurd? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Concept verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Dit concept verwerpen?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -5194,6 +5179,7 @@ msgstr "Doet niet mee: niemand erin krijgt een link."
 #: src/dashboard/runs-widget.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -5235,6 +5221,7 @@ msgstr "Domein-app"
 msgid "Domain budgets"
 msgstr "Domeinbudgetten"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
@@ -5247,6 +5234,7 @@ msgstr "Snelkoppelingen van domeinen"
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -5497,7 +5485,6 @@ msgstr "Instructies bewerken"
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/onboarding/organization-dialogs.tsx
-#: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/settings/invitations.tsx
@@ -5513,14 +5500,6 @@ msgstr "E-mail en agenda"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Medewerker"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Employee email domain"
-msgstr "E-maildomein van medewerkers"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Employee email domains"
-msgstr "E-maildomeinen van medewerkers"
 
 #: src/brain/brain.ts
 msgid "Employee interviews"
@@ -5650,10 +5629,6 @@ msgstr "Elk uitgenodigd team geïnterviewd"
 #: src/workflows/requests/request-summary.tsx
 msgid "Every Monday morning, to you"
 msgstr "Elke maandagochtend, naar jou"
-
-#: src/routes/_shell.settings.notifications.tsx
-msgid "Every Monday: hours, runs, and what is waiting."
-msgstr "Elke maandag: uren, runs en wat er wacht."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Every other app Grasp can connect to."
@@ -5825,6 +5800,10 @@ msgstr "Exporteren"
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Export CSV"
 msgstr "CSV exporteren"
+
+#: src/engines/app-definition.tsx
+msgid "Export definition"
+msgstr "Definitie exporteren"
 
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
@@ -6287,6 +6266,10 @@ msgstr "Toestemming gegeven voor een verbinding"
 msgid "Gave up revoking a disconnected account's access at its provider"
 msgstr "Het intrekken van de toegang van een ontkoppeld account bij de provider opgegeven"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "General"
+msgstr "Algemeen"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Krijgt de links zodra het team is ingelicht"
@@ -6348,10 +6331,6 @@ msgstr "Doelen, en waarom nu AI"
 msgid "Good. Now say something, so I can hear you too."
 msgstr "Mooi. Zeg nu iets, zodat ik jou ook kan horen."
 
-#: src/brain/brain.ts
-msgid "Google sign-in"
-msgstr "Inloggen met Google"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Got it."
 msgstr "Begrepen."
@@ -6376,6 +6355,14 @@ msgstr "Toegang van Grasp"
 #: src/chat/thread.tsx
 msgid "Grasp added a widget to your dashboard."
 msgstr "Grasp heeft een widget aan je dashboard toegevoegd."
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp vraagt"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp vraagt, {number} van {total}"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
@@ -6433,10 +6420,6 @@ msgstr "Grasp kon deze vraag niet aan het model stellen. Probeer het opnieuw."
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp weet niet waar dit vandaan kwam, dus het kan hier niet worden afgehandeld."
-
-#: src/routes/_shell.settings.notifications.tsx
-msgid "Grasp doesn’t send these emails yet. What you choose here applies once it does."
-msgstr "Grasp stuurt deze e-mails nog niet. Wat je hier kiest, geldt zodra dat wel gebeurt."
 
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
@@ -6725,10 +6708,6 @@ msgstr "Van genoeg mensen gehoord"
 #: src/onboarding/interview-people.tsx
 msgid "Held by"
 msgstr "Afgenomen door"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Held for review"
-msgstr "Vastgehouden voor beoordeling"
 
 #: src/interview/words.ts
 msgid "Hello"
@@ -7160,6 +7139,7 @@ msgstr "Instructies voor {name}"
 msgid "Integration"
 msgstr "Integratie"
 
+#: src/engines/app-integrations.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -7211,10 +7191,6 @@ msgstr "Interviews"
 msgctxt "what AI was used for"
 msgid "Interviews"
 msgstr "Interviews"
-
-#: src/settings/ai-providers.tsx
-msgid "Interviews aren't transcribed: this deployment keeps everything in the EU, and {whereItRuns} isn't."
-msgstr "Interviews worden niet uitgeschreven: deze omgeving houdt alles in de EU, en {whereItRuns} niet."
 
 #: src/settings/invitations.tsx
 msgid "Invite"
@@ -7268,10 +7244,6 @@ msgstr "ze antwoordde iets wat niet haar records zijn"
 #: src/dashboard/outcome-card.tsx
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "Het kan nog één keer worden verstuurd, precies zoals eerder. Niets wordt ongedaan gemaakt."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
-msgstr "Het telt als uitgegeven tegen de budgetten: het meeste dat het had kunnen kosten. Dit kan niet ongedaan worden gemaakt."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
@@ -7337,10 +7309,6 @@ msgstr "Er is nog geen stap vastgelegd."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Het is voorgoed weg en kan niet worden teruggehaald. Het auditlogboek houdt bij dat het is verwijderd en door wie, nooit wat het was."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It is no longer held."
-msgstr "Het wordt niet meer vastgehouden."
-
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "Het is geen van deze"
@@ -7364,10 +7332,6 @@ msgstr "Het weet wie welk team leidt, zodat ik eerst met de teamleiders kan prat
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Misschien is het hernoemd of verwijderd."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
-msgstr "Het telt niet meer mee tegen de budgetten, alsof het niets kostte. Dit kan niet ongedaan worden gemaakt."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -7429,14 +7393,6 @@ msgstr "Het wacht sinds {since} op je rol, {role}."
 msgid "It waits on your team, {team}, since {since}."
 msgstr "Het wacht sinds {since} op je team, {team}."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was charged {amount} on {when}."
-msgstr "Er is op {when} {amount} voor in rekening gebracht."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was released on {when}, charging nothing."
-msgstr "Het is op {when} vrijgegeven, zonder kosten."
-
 #: src/workflows/today-lanes.tsx
 msgid "It went through no other workflow today."
 msgstr "Het ging vandaag door geen andere workflow."
@@ -7485,6 +7441,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: domeinen en agents houden hun toestemmingen ervoor."
 
+#: src/inbox/item-detail.tsx
+msgid "Its bindings"
+msgstr "Zijn koppelingen"
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van zonder budget te draaien. Koppel hem opnieuw om het budget opnieuw in te stellen."
@@ -7492,6 +7452,11 @@ msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van 
 #: src/routes/_shell.settings.models.tsx
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Het budget kan niet worden gelezen, dus de koppeling bedient niets."
+
+#: src/engines/app-integrations.tsx
+msgctxt "why an integration is one of a domain's"
+msgid "Its code uses it"
+msgstr "Zijn code gebruikt hem"
 
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
@@ -7600,6 +7565,10 @@ msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan all
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings."
 msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan alles doen wat de code doet, zonder een koppeling van het domein aan te roepen."
+
+#: src/inbox/item-detail.tsx
+msgid "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
+msgstr "Het doel vraagt keuzes die de inbox nog niet biedt: keur het goed op de pagina van de workflow."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -7801,10 +7770,6 @@ msgstr "Laatst op {date}"
 msgid "Last run"
 msgstr "Laatste run"
 
-#: src/settings/pulse-people.tsx
-msgid "Last seen"
-msgstr "Laatst gezien"
-
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
 msgstr "Tot slot de cijfers en het resultaat."
@@ -7902,10 +7867,6 @@ msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
 msgstr "Lessen"
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
-msgstr "Laat een AI-app zoals Claude of ChatGPT met Grasp werken. Die leest wat Grasp weet en kan je een pagina laten zien. Voor al het andere vraagt die het je eerst hier: er verandert niets tenzij jij het toestaat."
-
 #: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Het oude adres van een gewist lid weer toegelaten"
@@ -7969,10 +7930,6 @@ msgstr "Limieten per persoon"
 #: src/settings/chat-accounts.tsx
 msgid "Link"
 msgstr "Link"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Link for AI apps"
-msgstr "Koppeling voor AI-apps"
 
 #: src/onboarding/interview-words.ts
 msgctxt "step of the interviews"
@@ -8128,6 +8085,18 @@ msgstr "Laag"
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Laag"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made by {person} on {date}."
+msgstr "Gemaakt door {person} op {date}."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made for"
+msgstr "Gemaakt voor"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made on {date}."
+msgstr "Gemaakt op {date}."
 
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
@@ -8296,10 +8265,6 @@ msgstr "Berichten die ze Grasp in een chatapp sturen."
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
 msgstr "Microfoon: {name}"
-
-#: src/brain/brain.ts
-msgid "Microsoft sign-in"
-msgstr "Inloggen met Microsoft"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Middle"
@@ -8501,6 +8466,7 @@ msgstr "Gedempt"
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
@@ -8524,6 +8490,10 @@ msgstr "Naam"
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Geef hieronder een model op dat dit endpoint aanbiedt, kies het en test het dan."
 
+#: src/engines/app-workflows.tsx
+msgid "Name in the app's code"
+msgstr "Naam in de code van de app"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Naam van een nieuwe workflow"
@@ -8532,22 +8502,9 @@ msgstr "Naam van een nieuwe workflow"
 msgid "Name of your HR platform"
 msgstr "Naam van je hr-platform"
 
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: whether a team named the application in a conversation"
-msgid "Named"
-msgstr "Genoemd"
-
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Genoemd door"
-
-#: src/brain/brain.ts
-msgid "Named by {teams, plural, one {# team} other {# teams}}, and seen in use by {people, plural, one {# person} other {# people}} through {channels}."
-msgstr "Genoemd door {teams, plural, one {# team} other {# teams}}, en in gebruik gezien bij {people, plural, one {# persoon} other {# mensen}} via {channels}."
-
-#: src/brain/brain.ts
-msgid "Named by a team"
-msgstr "Genoemd door een team"
 
 #: src/brain/brain.ts
 msgid "Named in {source}"
@@ -8593,11 +8550,6 @@ msgstr "Heeft daarnaast nodig"
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
 
-#: src/settings/pulse.ts
-msgctxt "Pulse status"
-msgid "Needs attention"
-msgstr "Vraagt aandacht"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "Needs help: {cost} a month current cost, nothing redesigned yet"
 msgstr "Hulp nodig: {cost} per maand huidige kosten, nog niets herontworpen"
@@ -8638,11 +8590,6 @@ msgstr "Nooit"
 
 #: src/connections/connect-dialog.tsx
 msgctxt "what a tool may do"
-msgid "Never"
-msgstr "Nooit"
-
-#: src/settings/pulse.ts
-msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nooit"
 
@@ -8751,12 +8698,8 @@ msgstr "Nieuwste eerst"
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Nieuwste item eerst. Er is niets verzonden of gewijzigd: elke aanroep is beantwoord met wat jij hebt opgegeven."
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
-msgid "Next"
-msgstr "Volgende"
-
-#: src/settings/pulse-people.tsx
-msgctxt "page"
 msgid "Next"
 msgstr "Volgende"
 
@@ -8929,9 +8872,14 @@ msgstr "Er is nog geen zelfstandige workflow met je gedeeld."
 msgid "No independent workflow of yours serves this process."
 msgstr "Geen van je zelfstandige workflows dient dit proces."
 
+#: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "Geen integraties komen overeen met je zoekopdracht."
+
+#: src/engines/app-integrations.tsx
+msgid "No integrations yet."
+msgstr "Nog geen integraties."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "No interviews yet"
@@ -8978,10 +8926,6 @@ msgstr "Nog geen link"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Niet meer gedeclareerd"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "No longer held: {model}"
-msgstr "Niet meer vastgehouden: {model}"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -9070,11 +9014,6 @@ msgstr "Nog geen mensen."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Geen toestemmingen."
-
-#: src/settings/pulse.ts
-msgctxt "Pulse status"
-msgid "No Pulse"
-msgstr "Geen Pulse"
 
 #: src/onboarding/interview-actions.tsx
 msgid "no reason given"
@@ -9212,10 +9151,6 @@ msgstr "Geen ondernemingsraad"
 msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nee: de hash of de koppeling naar de gebeurtenis ervoor klopt niet."
 
-#: src/brain/brain.ts
-msgid "Nobody"
-msgstr "Niemand"
-
 #: src/routes/decisions.$decision.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand heeft op tijd geantwoord, dus deze beslissing is gesloten."
@@ -9264,6 +9199,10 @@ msgstr "Niemand heeft hem nog bewerkt: hij begint met een definitie die de contr
 msgid "Nobody has said yet. At the end of their interview, people can say how it was: from 1 to 5."
 msgstr "Nog niemand heeft gezegd hoe het was. Aan het einde van hun interview kunnen mensen dat zeggen: van 1 tot 5."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Nobody in particular"
+msgstr "Niemand in het bijzonder"
+
 #: src/onboarding/organization-words.ts
 msgid "Nobody is asked about “{work}”"
 msgstr "Niemand krijgt vragen over ‘{work}’"
@@ -9295,7 +9234,6 @@ msgstr "Niemand leidt het"
 
 #: src/onboarding/interview-people.tsx
 #: src/routes/_shell.settings.members.tsx
-#: src/settings/pulse-people.tsx
 msgid "Nobody matches."
 msgstr "Niemand komt overeen."
 
@@ -9361,7 +9299,6 @@ msgid "None"
 msgstr "Geen"
 
 #: src/routes/_shell.settings.billing.tsx
-#: src/routes/_shell.settings.pulse.tsx
 msgctxt "nothing set"
 msgid "None"
 msgstr "Geen"
@@ -9698,6 +9635,10 @@ msgstr "Niets gevonden."
 msgid "Nothing happened that matches."
 msgstr "Er is niets gebeurd dat overeenkomt."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Er is niets veranderd sinds {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -9723,10 +9664,6 @@ msgstr "Hier staat nog niets."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
 msgstr "Er komt niets zolang het abonnement niet loopt."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Nothing is held for review now."
-msgstr "Er wordt nu niets vastgehouden voor beoordeling."
 
 #: src/onboarding/work-record.tsx
 msgid "Nothing is missing."
@@ -9827,10 +9764,6 @@ msgstr "Opgemerkt in"
 msgid "Noticed in {source}"
 msgstr "Opgemerkt in {source}"
 
-#: src/routes/_shell.settings.tsx
-msgid "Notifications"
-msgstr "Meldingen"
-
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
 msgid "now"
@@ -9878,11 +9811,6 @@ msgstr "van wat er werd opgeschreven"
 msgid "Off"
 msgstr "Uit"
 
-#: src/settings/week-hours.tsx
-msgctxt "a day without Pulse hours"
-msgid "Off"
-msgstr "Uit"
-
 #: src/workflows/requests/request-summary.tsx
 msgctxt "weekly summary not sent"
 msgid "Off"
@@ -9908,10 +9836,6 @@ msgstr "Uit, antwoordt hij hier alleen: hij zet geen wijziging klaar om te beves
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Uit: niemand kan het koppelen, beheerders ook niet. Bestaande koppelingen blijven werken."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Off. Nothing of this workspace is kept for an AI app."
-msgstr "Uit. Er wordt niets van deze werkruimte bewaard voor een AI-app."
-
 #: src/connections/offer-switch.tsx
 msgid "Offer {name}"
 msgstr "{name} aanbieden"
@@ -9919,11 +9843,6 @@ msgstr "{name} aanbieden"
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Aangeboden aan je organisatie"
-
-#: src/settings/pulse.ts
-msgctxt "Pulse status"
-msgid "Offline"
-msgstr "Offline"
 
 #: src/dashboard/signals.tsx
 msgid "Often corrected"
@@ -10058,11 +9977,6 @@ msgctxt "part of an interview"
 msgid "One real case"
 msgstr "Eén echt geval"
 
-#: src/settings/pulse.ts
-msgctxt "Pulse status"
-msgid "Online"
-msgstr "Online"
-
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
@@ -10090,6 +10004,10 @@ msgstr "Alleen gemarkeerde beurten"
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Alleen als de voorwaarde geldt"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Only its builders change these settings."
+msgstr "Alleen de bouwers ervan wijzigen deze instellingen."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "Only mapped"
@@ -10261,10 +10179,6 @@ msgstr "Link openen"
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
 msgstr "Nu open"
-
-#: src/brain/brain.ts
-msgid "Open question"
-msgstr "Open vraag"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -10449,6 +10363,10 @@ msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om 
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig."
 
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "Our skills heeft al een skill op {path}: pas die aan."
+
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Output"
@@ -10510,8 +10428,8 @@ msgctxt "column: who owns a workflow"
 msgid "Owner"
 msgstr "Eigenaar"
 
-#: src/brain/brain.ts
-msgctxt "note property: the team that owns an application"
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Eigenaar"
 
@@ -10739,10 +10657,6 @@ msgctxt "view of the interviews"
 msgid "People"
 msgstr "Mensen"
 
-#: src/routes/_shell.settings.pulse.tsx
-msgid "People and devices"
-msgstr "Mensen en apparaten"
-
 #: src/settings/stephen-settings.tsx
 msgid "People can start these by asking him. A workflow's owner opens it to asking on its page."
 msgstr "Mensen kunnen deze starten door het hem te vragen. De eigenaar van een workflow zet dat open op de pagina ervan."
@@ -10787,10 +10701,6 @@ msgstr "Mensen die iets vroegen"
 msgid "People who do the work themselves. The lead's own account is an overview, never one of them."
 msgstr "Mensen die het werk zelf doen. Het verhaal van de teamleider is een overzicht, nooit een van hen."
 
-#: src/routes/_shell.settings.pulse.tsx
-msgid "People with these email addresses count as employees."
-msgstr "Mensen met deze e-mailadressen tellen als medewerkers."
-
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
@@ -10799,10 +10709,6 @@ msgstr "Per dag"
 #: src/engines/resource-bindings.tsx
 msgid "Per day (UTC), in US dollars"
 msgstr "Per dag (UTC), in Amerikaanse dollars"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Per day, the hours it may report in. Outside them, Pulse stays quiet."
-msgstr "Per dag de uren waarin Pulse mag rapporteren. Daarbuiten blijft het stil."
 
 #: src/engines/resource-bindings.tsx
 msgid "Per month"
@@ -10841,18 +10747,12 @@ msgstr "Recht voor de platformstatistieken"
 msgid "Permission to invite guests"
 msgstr "Recht om gasten uit te nodigen"
 
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: the OAuth permissions granted to an application"
-msgid "Permissions"
-msgstr "Rechten"
-
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Gevraagde toestemmingen"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/package-approvers.tsx
-#: src/settings/pulse-people.tsx
 msgid "Person"
 msgstr "Persoon"
 
@@ -10947,11 +10847,6 @@ msgstr "Opschoning eerst bekijken"
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Voorbeeld: wijzigt niets, leest geen echte gegevens"
-
-#: src/settings/pulse-people.tsx
-msgctxt "page"
-msgid "Previous"
-msgstr "Vorige"
 
 #: src/brain/brain-transcript.tsx
 msgid "Previous match"
@@ -11069,15 +10964,10 @@ msgid "Published as version {0}."
 msgstr "Gepubliceerd als versie {0}."
 
 #. Product name: keep it as it is
-#. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
 #: src/brain/brain.ts
 msgid "Pulse"
 msgstr "Pulse"
-
-#: src/settings/week-hours.tsx
-msgid "Pulse never reports."
-msgstr "Pulse rapporteert nooit."
 
 #: src/brain/brain.ts
 msgid "Pulse on company devices. Adds which applications, MCP servers and skills are actually used, AI tools and shadow IT included."
@@ -11123,6 +11013,10 @@ msgstr "Zet het in mappen met een schuine streep, zoals in handboek/verlof."
 #: src/dashboard/widget-board.tsx
 msgid "Put one back"
 msgstr "Terugzetten"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Putting it away"
+msgstr "Opbergen"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Putting it on your board…"
@@ -11459,14 +11353,6 @@ msgstr "Afgewezen: {rejected}"
 msgid "Rejected: {who}."
 msgstr "Afgewezen: {who}."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release"
-msgstr "Vrijgeven"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release the {amount} held for this model call?"
-msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
-
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
 msgstr "Onthouden"
@@ -11490,10 +11376,6 @@ msgstr "Verwijderen"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Remove {documentName}"
 msgstr "{documentName} verwijderen"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Remove {domain}"
-msgstr "{domain} verwijderen"
 
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
@@ -11664,10 +11546,6 @@ msgstr "Verzoeken"
 msgid "Requests over time"
 msgstr "Verzoeken door de tijd"
 
-#: src/settings/pulse-people.tsx
-msgid "Reset"
-msgstr "Resetten"
-
 #: src/engines/resource-bindings.tsx
 msgid "Resource"
 msgstr "Resource"
@@ -11680,8 +11558,13 @@ msgstr "Resources"
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Restore"
 msgstr "Herstellen"
+
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Deze versie herstellen"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
@@ -12082,10 +11965,6 @@ msgstr "Draait in"
 msgid "Runs now"
 msgstr "Draait nu"
 
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Runs on company laptops and sees which apps and AI tools are used, never what is in them. Not rolled out yet."
-msgstr "Draait op bedrijfslaptops en ziet welke apps en AI-tools worden gebruikt, nooit wat erin staat. Nog niet uitgerold."
-
 #: src/dashboard/runs-widget.tsx
 msgid "Runs over the last {fullDays} days, by the day they started and how they stand now."
 msgstr "Runs van de afgelopen {fullDays} dagen, per dag waarop ze startten en hoe ze er nu voor staan."
@@ -12280,6 +12159,7 @@ msgstr "Chats en projecten doorzoeken"
 msgid "Search for another name, or look under another tab."
 msgstr "Zoek op een andere naam, of kijk onder een ander tabblad."
 
+#: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
 msgstr "Integraties doorzoeken"
@@ -12297,10 +12177,6 @@ msgstr "Leden zoeken"
 #: src/workflows/requests/request-who.tsx
 msgid "Search people"
 msgstr "Personen zoeken"
-
-#: src/settings/pulse-people.tsx
-msgid "Search people and devices"
-msgstr "Mensen en apparaten zoeken"
 
 #: src/settings/package-approvers.tsx
 msgid "Search people and teams"
@@ -12407,6 +12283,7 @@ msgstr "Zelf goedgekeurd"
 msgid "Self-approved: nobody else could approve it"
 msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Versturen"
@@ -12522,10 +12399,15 @@ msgstr "Ingesteld. Typ een nieuwe waarde om deze te vervangen."
 
 #: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Instellingen"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Settings of {appName}"
+msgstr "Instellingen van {appName}"
 
 #: src/engines/app-page.tsx
 msgid "Settings of {name}"
@@ -12633,6 +12515,7 @@ msgstr "Toon in het logboek"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12687,6 +12570,10 @@ msgstr "De eerste {pageMaxLimit} bestanden worden getoond."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "De eerste {runsPageSize} van meer runs worden getoond."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."
+msgstr "Wordt bij het domein getoond. Het opent het domein voor niemand: wie het mag gebruiken, is met wie het gedeeld is."
 
 #: src/workflows/workflow-diagram.tsx
 msgctxt "parts in a row"
@@ -12832,6 +12719,10 @@ msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
 
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Sinds je laatst keek"
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Grootte"
@@ -12895,6 +12786,10 @@ msgstr "Iemand anders"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Someone it is no longer shared with"
+msgstr "Iemand met wie hij niet meer gedeeld is"
+
 #: src/knowledge/purge.tsx
 msgid "Someone left the organization"
 msgstr "Iemand heeft de organisatie verlaten"
@@ -12911,6 +12806,7 @@ msgstr "Iemand die niet meer bij je organisatie hoort"
 msgid "Someone's own work"
 msgstr "Iemands eigen werk"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Iets anders"
@@ -12980,10 +12876,22 @@ msgstr "Stakeholder uitgenodigd in Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder aangewezen: de {role}"
 
+#: src/inbox/item-detail.tsx
+msgid "Start"
+msgstr "Starten"
+
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
 msgstr "Beginnen"
+
+#: src/inbox/item-detail.tsx
+msgid "Start {name}"
+msgstr "{name} starten"
+
+#: src/inbox/items.ts
+msgid "Start {name}?"
+msgstr "{name} starten?"
 
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Start a chat in {name}"
@@ -13008,6 +12916,10 @@ msgstr "Opnieuw beginnen op een nieuw apparaat"
 #: src/tour/tour-script.ts
 msgid "Start the tour"
 msgstr "Rondleiding starten"
+
+#: src/engines/app-workflows.tsx
+msgid "Start with a letter, then use only letters, digits or underscores."
+msgstr "Begin met een letter en gebruik daarna alleen letters, cijfers of underscores."
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.interviewers.tsx
@@ -13045,6 +12957,10 @@ msgstr "Te laat begonnen een verbinding te volgen: eerdere wijzigingen zijn niet
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Begonnen te volgen wat er bij een verbinding verandert"
+
+#: src/inbox/item-detail.tsx
+msgid "Started: {name}."
+msgstr "Gestart: {name}."
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -13093,9 +13009,9 @@ msgstr "Statistieken"
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
-#: src/settings/pulse-people.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/traces.tsx
@@ -13367,6 +13283,10 @@ msgctxt "kind of fact"
 msgid "System"
 msgstr "Systeem"
 
+#: src/engines/app-integrations.tsx
+msgid "Take {integrationName} off {appName}"
+msgstr "{integrationName} van {appName} afhalen"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
 msgstr "{who} uit {name} halen"
@@ -13498,7 +13418,6 @@ msgstr "Doel-ID"
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/package-approvers.tsx
-#: src/settings/pulse-people.tsx
 #: src/workflows/team-picker.tsx
 msgid "Team"
 msgstr "Team"
@@ -13843,9 +13762,21 @@ msgstr "De afspraak tussen het bedrijf en Grasp over de omgang met gegevens, get
 msgid "The answer was cut off at the model's limit."
 msgstr "Het antwoord is afgekapt op de limiet van het model."
 
+#: src/engines/app-workflows.tsx
+msgid "The app can no longer start a workflow by this name, until a builder binds it again. Runs already started go on."
+msgstr "De app kan onder deze naam geen workflow meer starten, tot een bouwer hem opnieuw koppelt. Runs die al gestart zijn gaan door."
+
 #: src/screens/screen-frame.tsx
 msgid "The app couldn't be loaded."
 msgstr "De app kon niet worden geladen."
+
+#: src/engines/app-workflows.tsx
+msgid "The app starts no workflow of its own."
+msgstr "De app start geen eigen workflow."
+
+#: src/engines/app-workflows.tsx
+msgid "The app starts this exact version by its name, until a builder binds another. Starting it still takes the app's own permission on the workflow, which an admin grants."
+msgstr "De app start precies deze versie onder haar naam, tot een bouwer een andere koppelt. Starten vraagt nog steeds de eigen toestemming van de app voor de workflow, die een beheerder geeft."
 
 #: src/screens/screen-frame.tsx
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
@@ -13904,6 +13835,10 @@ msgstr "Het bedrijfsproces dat {name} dient"
 #: src/routes/_shell.settings.billing.tsx
 msgid "The card Stripe charges for each invoice."
 msgstr "De kaart die Stripe voor elke factuur belast."
+
+#: src/engines/app-integrations.tsx
+msgid "The catalog can’t be read right now, so nothing can be added. Try again in a moment."
+msgstr "De catalogus kan nu niet worden gelezen, dus er kan niets worden toegevoegd. Probeer het zo meteen opnieuw."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
@@ -14059,9 +13994,17 @@ msgstr "De domeinen en workflows die goedgekeurde npm-pakketten mogen gebruiken.
 msgid "The domains this chat builds didn't load."
 msgstr "De domeinen die deze chat bouwt, zijn niet geladen."
 
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "De wijzigingen van het concept verdwijnen, en de volgende wijziging van de agent begint opnieuw bij de app zoals die is. De versies blijven bewaard, zodat je er een kunt herstellen."
+
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
 msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
+
+#: src/inbox/item-detail.tsx
+msgid "The events its contract admits"
+msgstr "De gebeurtenissen die zijn contract toelaat"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
@@ -14106,10 +14049,6 @@ msgstr "De invoer is geen JSON."
 #: src/onboarding/staff-words.ts
 msgid "The interview days are set"
 msgstr "De interviewdagen staan vast"
-
-#: src/settings/ai-providers.tsx
-msgid "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and {whereItRuns} isn't."
-msgstr "De vragen van het interview worden niet voorgelezen: deze omgeving houdt alles in de EU, en {whereItRuns} niet."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The interviews"
@@ -14426,6 +14365,10 @@ msgstr "De run gestart op {openedAt}"
 msgid "The run was stopped."
 msgstr "De run is gestopt."
 
+#: src/inbox/item-detail.tsx
+msgid "The run's own files"
+msgstr "De eigen bestanden van de run"
+
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
 msgstr "Dezelfde pijn in meer dan één team"
@@ -14668,6 +14611,10 @@ msgstr "Er is hier geen workflow meer met die naam. De kaart van een team is mis
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
+
+#: src/brain/share-record.tsx
+msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
+msgstr "Je kunt het nog nergens delen: je zit in geen team en in geen chat die anderen delen."
 
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
@@ -14982,10 +14929,6 @@ msgstr "Deze maand tot nu toe"
 msgid "This note can't be opened"
 msgstr "Deze notitie kan niet worden geopend"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
-msgstr "Deze kan alleen worden vrijgegeven: een budgetrecord waartegen hij telt is beschadigd, dus in rekening brengen zou tegen een verkeerd totaal tellen. Neem contact op met Grasp."
-
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
@@ -15098,11 +15041,6 @@ msgstr "Verlopen: {timedOut}"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Timeline"
 msgstr "Tijdlijn"
-
-#: src/settings/week-hours.tsx
-msgctxt "between two hours"
-msgid "to"
-msgstr "tot"
 
 #: src/activity/audit-log.tsx
 msgid "To"
@@ -15292,6 +15230,7 @@ msgstr "Proberen"
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-owner.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx
@@ -15326,6 +15265,7 @@ msgstr "Twee antwoorden"
 msgid "Type"
 msgstr "Type"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Liever typen"
@@ -15358,6 +15298,14 @@ msgstr "Getypt, begonnen op {started}, nog niet akkoord."
 #: src/dashboard/signals.tsx
 msgid "Unanswered question"
 msgstr "Onbeantwoorde vraag"
+
+#: src/engines/app-workflows.tsx
+msgid "Unbind"
+msgstr "Ontkoppelen"
+
+#: src/engines/app-workflows.tsx
+msgid "Unbind {alias}?"
+msgstr "{alias} ontkoppelen?"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
@@ -15539,10 +15487,6 @@ msgstr "Een gekoppelde tool gebruikt"
 msgid "Used by"
 msgstr "Gebruikt door"
 
-#: src/brain/brain.ts
-msgid "Used in a workflow"
-msgstr "Gebruikt in een workflow"
-
 #: src/labels.ts
 msgid "User"
 msgstr "Gebruiker"
@@ -15572,6 +15516,7 @@ msgstr "Nu controleren"
 msgid "Verify the chain"
 msgstr "Keten controleren"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -15617,6 +15562,7 @@ msgid "Version {number}, current"
 msgstr "Versie {number}, huidig"
 
 #: src/brain/brain.ts
+#: src/engines/app-workflows.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -15627,6 +15573,14 @@ msgstr "Versie {version}"
 #: src/workflows/test-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
+
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "Versie {version} van {name} is gevraagd om live te gaan. Zodra dat zo is, start niets haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
+
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
 
 #: src/screens/screen-frame.tsx
 msgid "Version {version}: read-only preview"
@@ -15650,6 +15604,10 @@ msgstr "Versies"
 msgctxt "highest end of a rating of the interview"
 msgid "Very good"
 msgstr "Heel goed"
+
+#: src/chat/chat-window.tsx
+msgid "via {app}"
+msgstr "via {app}"
 
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
@@ -15693,6 +15651,7 @@ msgstr "Volume"
 msgid "wait for a decision now"
 msgstr "wachten nu op een beslissing"
 
+#: src/inbox/items.ts
 #: src/interview/words.ts
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -15845,6 +15804,10 @@ msgstr "wacht op je rol, {role}"
 msgid "waits on your team, {team}"
 msgstr "wacht op je team, {team}"
 
+#: src/inbox/items.ts
+msgid "Waits until"
+msgstr "Wacht tot"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Warsaw"
@@ -15927,7 +15890,6 @@ msgstr "Week {week} van {weeks}"
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Week {week} van {weeks} · {stage}"
 
-#: src/routes/_shell.settings.notifications.tsx
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Wekelijkse samenvatting"
@@ -15944,6 +15906,10 @@ msgstr "ging naar mensen"
 msgctxt "log filter"
 msgid "What"
 msgstr "Wat"
+
+#: src/inbox/item-detail.tsx
+msgid "What {alias} reaches"
+msgstr "Wat {alias} bereikt"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What {name} is told changes only through the Stephen Lab, a version at a time. Each version has a mark, the same here and in the lab."
@@ -16113,7 +16079,6 @@ msgstr "Wat hij deed"
 msgid "What it does, in a few words"
 msgstr "Wat het doet, in een paar woorden"
 
-#: src/brain/brain.ts
 #: src/brain/remember-dialog.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "What it is"
@@ -16131,6 +16096,11 @@ msgstr "Waaraan hij gekoppeld is, kan hem niet meer bedienen: het recht is inget
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd. Koppel hem opnieuw zodra je hebt gecontroleerd dat het nog past."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgctxt "what an app is for, in a sentence"
+msgid "What it is for"
+msgstr "Waarvoor hij is"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Waar het op berust"
@@ -16146,6 +16116,10 @@ msgstr "Wat het zegt"
 #: src/brain/memory-page.tsx
 msgid "What it should say"
 msgstr "Wat er moet staan"
+
+#: src/inbox/item-detail.tsx
+msgid "What it starts with"
+msgstr "Waarmee hij start"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
@@ -16260,6 +16234,10 @@ msgstr "Wat de klant deelt, en ons eigen deskresearch. Voegt beleid, procedures 
 #: src/chat/builds.tsx
 msgid "What the domain holds"
 msgstr "Wat het domein heeft"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "What the domain is called and what it is for."
+msgstr "Hoe het domein heet en waarvoor het is."
 
 #: src/engines/resource-bindings.tsx
 msgid "What the domain's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
@@ -16392,10 +16370,6 @@ msgstr "Wanneer"
 msgid "When {when}"
 msgstr "Als {when}"
 
-#: src/routes/_shell.settings.notifications.tsx
-msgid "When a payment fails or the card is about to run out, so you can fix it in time."
-msgstr "Als een betaling mislukt of de kaart bijna verloopt, zodat je het op tijd kunt oplossen."
-
 #: src/brain/lessons-view.tsx
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 msgstr "Als een taak steeds op dezelfde manier mislukt, noteert het Brein dat hier als een les die je kunt nakijken."
@@ -16403,10 +16377,6 @@ msgstr "Als een taak steeds op dezelfde manier mislukt, noteert het Brein dat hi
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
 msgstr "Wanneer een workflow bekend is"
-
-#: src/workflows/triggers.tsx
-msgid "When an email arrives at {address}"
-msgstr "Als er een e-mail binnenkomt op {address}"
 
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
@@ -16437,17 +16407,9 @@ msgstr "Wanneer er een als bekend telt"
 msgid "When people say different things"
 msgstr "Als mensen verschillende dingen zeggen"
 
-#: src/routes/_shell.settings.pulse.tsx
-msgid "When Pulse may report"
-msgstr "Wanneer Pulse mag rapporteren"
-
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "als iemand hem start"
-
-#: src/routes/_shell.settings.notifications.tsx
-msgid "When something needs you"
-msgstr "Als iets op jou wacht"
 
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
@@ -16514,6 +16476,10 @@ msgctxt "what Grasp knows, by source"
 msgid "Where the documents live"
 msgstr "Waar de documenten staan"
 
+#: src/engines/app-integrations.tsx
+msgid "Where the domain’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing."
+msgstr "Waar de gegevens van het domein vandaan komen. Die waar zijn code om vraagt, staan hier vanzelf; voeg elke andere toe die het nodig heeft. Toevoegen verbindt niets."
+
 #: src/brain/thinking/shapes.ts
 msgid "Where the hours go"
 msgstr "Waar de uren naartoe gaan"
@@ -16565,10 +16531,6 @@ msgstr "Welke AI-tools gebruiken mensen?"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Welke domeinen en agents toestemmingen hebben: {why}"
-
-#: src/routes/_shell.settings.notifications.tsx
-msgid "Which emails Grasp sends you. Only to you; nobody else’s change."
-msgstr "Welke e-mails Grasp je stuurt. Dit geldt alleen voor jou, niet voor anderen."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Which HR platform do you use?"
@@ -16622,6 +16584,10 @@ msgstr "Wie"
 msgid "who answers"
 msgstr "wie antwoordt"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Who answers for the domain: who is asked about it and decides what changes."
+msgstr "Wie verantwoordelijk is voor het domein: aan wie er vragen over gesteld worden en wie beslist wat er verandert."
+
 #: src/brain/brain.ts
 msgid "Who approves a new tool"
 msgstr "Wie keurt een nieuwe tool goed"
@@ -16643,10 +16609,6 @@ msgstr "Wie met hem kan praten"
 msgctxt "kind of fact"
 msgid "Who comes next"
 msgstr "Wie daarna komt"
-
-#: src/routes/_shell.settings.pulse.tsx
-msgid "Who counts"
-msgstr "Wie telt mee"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -16864,6 +16826,7 @@ msgstr "Bepaald wat er beter kan"
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/standard-widgets.tsx
+#: src/engines/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -16897,6 +16860,11 @@ msgstr "Workflow niet gevonden"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Workflow packages"
 msgstr "Workflowpakketten"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Workflow start"
+msgstr "Workflowstart"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"
@@ -16985,6 +16953,10 @@ msgstr "Workflows die {title} dienen"
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
 msgstr "Workflows die het meest uitgaven"
+
+#: src/engines/app-workflows.tsx
+msgid "Workflows the app starts"
+msgstr "Workflows die de app start"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
@@ -17249,6 +17221,7 @@ msgstr "Je AI-aanbieder weigert je sleutel. Vraag je beheerder hem te controlere
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Je AI-aanbieder antwoordt niet. Meestal is dat een storing aan hun kant; probeer het over een tijdje opnieuw."
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
@@ -17262,6 +17235,10 @@ msgstr "Je antwoord"
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Je browser laat me de microfoon niet gebruiken. Sta het toe naast het adres en probeer het opnieuw."
+
+#: src/inbox/items.ts
+msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
+msgstr "De agent van je chat wil deze workflow voor je starten. Er draait niets tot je het bevestigt, met precies de getoonde invoer."
 
 #: src/interview/before.tsx
 msgid "Your choice"
@@ -17294,10 +17271,6 @@ msgstr "De naam van je bedrijf in Grasp. Een beheerder wijzigt hem."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
 msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Your decision changed nothing."
-msgstr "Je besluit heeft niets veranderd."
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

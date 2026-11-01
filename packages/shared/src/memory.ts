@@ -16,25 +16,12 @@ import type { Provenance } from "./knowledge.ts";
 export const memoryFileNames = ["AGENTS.md", "MEMORY.md", "USER.md"] as const;
 export type MemoryFileName = (typeof memoryFileNames)[number];
 
-/** Each memory file's size limit, in tokens, unless the deployment sets one. */
-export const memoryDefaultLimits: Readonly<Record<MemoryFileName, number>> = {
+/** Each memory file's size limit, in tokens. */
+export const memoryLimits: Readonly<Record<MemoryFileName, number>> = {
   "AGENTS.md": 2000,
   "MEMORY.md": 2000,
   "USER.md": 2000,
 };
-
-/** The largest limit a deployment may set: past it, memory crowds out work. */
-export const memoryMaxLimit = 32_000;
-
-/**
- * The `MEMORY_LIMITS` var: a limit in tokens per file name, such as
- * `{"USER.md": 1000}`. A file it doesn't name keeps its default.
- */
-export const memoryLimitsSchema = z.strictObject({
-  "AGENTS.md": z.int().min(1).max(memoryMaxLimit).optional(),
-  "MEMORY.md": z.int().min(1).max(memoryMaxLimit).optional(),
-  "USER.md": z.int().min(1).max(memoryMaxLimit).optional(),
-} satisfies Record<MemoryFileName, z.ZodType>);
 
 /**
  * Where an agent works, as far as memory goes:

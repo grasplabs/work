@@ -333,12 +333,10 @@ export const RollBack = ({
 export const SignInChange = ({
   clientId,
   signIn,
-  overridden,
   refresh,
 }: {
   clientId: string;
   signIn: ClientSignInRecord | null;
-  overridden: boolean;
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
@@ -360,9 +358,6 @@ export const SignInChange = ({
         );
       }}
     >
-      {overridden ? (
-        <p>A SIGN_IN setting replaces this on deploy, until it is removed.</p>
-      ) : null}
       {/* Keyed by what was read: the fields start again from it after a save. */}
       <FieldGroup key={JSON.stringify(signIn)}>
         <SignInFields current={signIn} idPrefix="setup-sign-in" />

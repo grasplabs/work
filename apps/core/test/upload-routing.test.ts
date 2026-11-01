@@ -10,22 +10,25 @@ import { extractUpload, originalKey } from "../src/knowledge/uploads.ts";
 import { usableAnswerTokens } from "../src/models.ts";
 import type { PlannedReply } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  platformAnthropicKey,
-  platformOpenAiKey,
-} from "./connect-providers.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { streamText } from "./model-provider.ts";
-import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
+import {
+  carrying,
+  connectWithoutGraspKeys,
+  keyPlaces,
+  plan,
+  sentCount,
+} from "./platform-providers.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Which extractor reads an uploaded file: Grasp's own document conversion
-// (@grasp-os/shared/platform-ai), OpenAI's by default, for a PDF in a
+// (core's src/platform-ai.ts), OpenAI's at its EU host, for a PDF in a
 // normal collection, through the model gateway and connect with Grasp's
 // key; and the Worker itself for any other file, a sensitive collection's,
-// a deployment whose rules keep everything in the EU, and where the
-// platform's settings say `local`. A sensitive file never leaves the
+// while the deployment's rules don't parse, and while Grasp has no key for
+// the conversion's provider. A sensitive file never leaves the
 // deployment. The providers are the outside systems: fakes behind
 // connect's fetch, which keep what they were sent. Connect, the gateway,
 // the ledger and the audit log are real.
@@ -118,17 +121,17 @@ const withDeployment = async <T>(
   }
 };
 
-/** Runs `run` with `settings` as the platform's AI settings. */
-const withPlatformAi = async <T>(
-  settings: unknown,
-  run: () => Promise<T>
-): Promise<T> => {
-  const { PLATFORM_AI: before } = env;
-  env.PLATFORM_AI = settings;
+/**
+ * Runs `run` as a deployment where connect holds no key of Grasp's (on
+ * premises, a stack without them).
+ */
+const withoutGraspKeys = async <T>(run: () => Promise<T>): Promise<T> => {
+  const real = env.CONNECT;
+  env.CONNECT = connectWithoutGraspKeys(real);
   try {
     return await run();
   } finally {
-    env.PLATFORM_AI = before;
+    env.CONNECT = real;
   }
 };
 
@@ -298,95 +301,6 @@ describe("upload routing", { timeout: 60_000 }, () => {
     });
   });
 
-  it("converts on Anthropic when the platform's settings say so, with Grasp's key there", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    await plan(platformAnthropicKey, [
-      converted("anthropic-messages", "# Expense policy\n\nClaim in a week."),
-    ]);
-
-    const upload = await withPlatformAi(
-      { conversion: { provider: "anthropic", model: "claude-haiku-4-5" } },
-      async () => await uploadedTo(person.api, collectionId, name)
-    );
-
-    // Only this test converts on Anthropic: what carries Grasp's key there.
-    const [sent, ...more] = await carrying(platformAnthropicKey);
-    const pdf = await fixture("expense-policy.pdf");
-    const body: unknown = JSON.parse(sent?.body ?? "{}");
-    expect({
-      status: upload.status,
-      extractor: await extractorOf(upload),
-      requests: more.length + 1,
-      host: sent?.host,
-      body,
-    }).toMatchObject({
-      status: "ready",
-      extractor: "platform",
-      requests: 1,
-      host: "api.anthropic.com",
-      body: {
-        model: "claude-haiku-4-5",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: toBase64(pdf),
-                },
-              },
-              { type: "text" },
-            ],
-          },
-        ],
-      },
-    });
-  });
-
-  it.each([
-    [
-      "Grasp has no key for the conversion's provider",
-      { conversion: { provider: "openrouter", model: "openai/gpt-5-mini" } },
-    ],
-    [
-      "the platform's settings don't parse",
-      { conversion: { provider: "no-such-provider", model: "toMarkdown" } },
-    ],
-    // Broken JSON meant to keep conversion local: never OpenAI's default.
-    [
-      "the platform's settings aren't JSON",
-      '{"conversion": {"provider": "local"',
-    ],
-    ["the platform's settings are null", "null"],
-  ])(
-    "fails a PDF at once while %s, sending nothing, never read another way",
-    async (_, settings) => {
-      const person = await signedInApi(idp, "user");
-      const collectionId = await ownCollection(person.api);
-      const name = newName("pdf");
-
-      const upload = await withPlatformAi(
-        settings,
-        async () => await uploadedTo(person.api, collectionId, name)
-      );
-
-      expect({
-        status: upload.status,
-        failure: upload.failure?.code,
-        sent: await carrying(name),
-      }).toStrictEqual({
-        status: "failed",
-        failure: "upload.conversion_unavailable",
-        sent: [],
-      });
-    }
-  );
-
   it("reads a Word file in the Worker, sending nothing", async () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
@@ -452,33 +366,6 @@ describe("upload routing", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keeps every file of an EU-only deployment in the Worker while Grasp's project is in the US", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    const uploads: Upload[] = [];
-
-    await withDeployment(euOnly, async () => {
-      await withPlatformAi({ region: "us" }, async () => {
-        uploads.push(await uploadedTo(person.api, collectionId, name));
-      });
-    });
-
-    expect({
-      sent: await carrying(name),
-      uploads: await Promise.all(
-        uploads.map(async (upload) => ({
-          status: upload.status,
-          extractor: await extractorOf(upload),
-          sent: await timesSent(upload),
-        }))
-      ),
-    }).toStrictEqual({
-      sent: [],
-      uploads: [{ status: "ready", extractor: "local", sent: 0 }],
-    });
-  });
-
   it("keeps a file in the Worker while the deployment's rules don't parse", async () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
@@ -502,12 +389,11 @@ describe("upload routing", { timeout: 60_000 }, () => {
     });
   });
 
-  it("reads every file in the Worker where the platform's settings say local, as on-prem", async () => {
+  it("reads a PDF in the Worker while Grasp has no key for the conversion's provider, as on-prem", async () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
     const name = newName("pdf");
-    const upload = await withPlatformAi(
-      { conversion: { provider: "local" } },
+    const upload = await withoutGraspKeys(
       async () => await uploadedTo(person.api, collectionId, name)
     );
 

@@ -603,7 +603,7 @@ describe("Settings › AI providers", () => {
     const openai = {
       id: "openai",
       label: aiProviders.openai.label,
-      whereItRuns: aiProviders.openai.whereItRuns,
+      whereItRuns: "OpenAI, European Union",
     } as const;
     const elevenLabs = {
       id: "elevenlabs",
@@ -613,9 +613,9 @@ describe("Settings › AI providers", () => {
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
-        { feature: "conversion", provider: openai, off: false },
-        { feature: "transcription", provider: openai, off: false },
-        { feature: "speech", provider: elevenLabs, off: false },
+        { feature: "conversion", provider: openai },
+        { feature: "transcription", provider: openai },
+        { feature: "speech", provider: elevenLabs },
       ],
     });
     await shown(api);
@@ -625,10 +625,10 @@ describe("Settings › AI providers", () => {
         each.querySelector("h2")?.textContent === "Grasp's own AI features"
     );
     expect(text()).toContain(
-      "Grasp converts uploaded PDFs with OpenAI, United States, using Grasp's own key."
+      "Grasp converts uploaded PDFs with OpenAI, European Union, using Grasp's own key."
     );
     expect(text()).toContain(
-      "Grasp transcribes interviews with OpenAI, United States, using Grasp's own key."
+      "Grasp transcribes interviews with OpenAI, European Union, using Grasp's own key."
     );
     expect(text()).toContain(
       "Grasp reads the interview's questions aloud with ElevenLabs, European Union, using Grasp's own key."
@@ -637,37 +637,9 @@ describe("Settings › AI providers", () => {
     expect(section?.textContent).toContain("Grasp's own provider keys");
   });
 
-  it("says which of Grasp's own features are off where the deployment keeps everything in the EU and Grasp's project isn't there", async () => {
-    const openai = {
-      id: "openai",
-      label: aiProviders.openai.label,
-      whereItRuns: "OpenAI, United States",
-    } as const;
-    const elevenLabs = {
-      id: "elevenlabs",
-      label: aiProviders.elevenlabs.label,
-      whereItRuns: "ElevenLabs, United States",
-    } as const;
-    const { api } = fakeAiProviders({
-      platform: [
-        { feature: "conversion", provider: null, off: false },
-        { feature: "transcription", provider: openai, off: true },
-        { feature: "speech", provider: elevenLabs, off: true },
-      ],
-    });
-    await shown(api);
-
-    expect(text()).toContain(
-      "Interviews aren't transcribed: this deployment keeps everything in the EU, and OpenAI, United States isn't."
-    );
-    expect(text()).toContain(
-      "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and ElevenLabs, United States isn't."
-    );
-  });
-
   it("says when documents are converted on the deployment itself", async () => {
     const { api } = fakeAiProviders({
-      platform: [{ feature: "conversion", provider: null, off: false }],
+      platform: [{ feature: "conversion", provider: null }],
     });
     await shown(api);
 

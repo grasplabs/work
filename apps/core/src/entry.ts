@@ -26,7 +26,6 @@ import {
   connectVersionPath,
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
-import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
@@ -83,7 +82,6 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
-import { quotaPolicyReportResponse } from "./workflows/quota-report.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -343,7 +341,6 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
-  [quotaPolicyReportPath, quotaPolicyReportResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],

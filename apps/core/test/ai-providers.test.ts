@@ -1257,44 +1257,20 @@ describe("AI providers", { timeout: 60_000 }, () => {
   describe("Grasp's own keys, for platform features", () => {
     it("tells the organization's admins which provider handles each of Grasp's own features, and where it runs", async () => {
       const { admin: by } = await admin();
-      const uses = async (platform?: unknown) => {
-        const before = env.PLATFORM_AI;
-        env.PLATFORM_AI = platform;
-        try {
-          const listing = await by.api.aiProviders.list();
-          return listing.platform.map(
-            ({ feature, provider }) =>
-              `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
-          );
-        } finally {
-          env.PLATFORM_AI = before;
-        }
-      };
 
-      // Grasp's OpenAI project and ElevenLabs account keep their data in
-      // the EU unless set.
-      await expect(uses()).resolves.toStrictEqual([
+      const listing = await by.api.aiProviders.list();
+
+      // Always at their providers' EU hosts: Grasp's to keep there.
+      expect(
+        listing.platform.map(
+          ({ feature, provider }) =>
+            `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
+        )
+      ).toStrictEqual([
         "conversion: OpenAI, European Union",
         "transcription: OpenAI, European Union",
         "speech: ElevenLabs, European Union",
       ]);
-      await expect(
-        uses({ conversion: { provider: "local" }, region: "us" })
-      ).resolves.toStrictEqual([
-        "conversion: here",
-        "transcription: OpenAI, United States",
-        "speech: ElevenLabs, United States",
-      ]);
-      // Set but broken: every feature off, never the defaults' provider.
-      for (const broken of [
-        { speech: { provider: "openai" } },
-        '{"conversion": {"provider": "local"',
-        "null",
-        null,
-      ]) {
-        // oxlint-disable-next-line no-await-in-loop -- one setting at a time
-        await expect(uses(broken)).resolves.toStrictEqual([]);
-      }
     });
 
     it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {

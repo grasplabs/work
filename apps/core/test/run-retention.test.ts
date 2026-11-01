@@ -34,7 +34,7 @@ import {
   stopped,
   woken,
 } from "./runs.ts";
-import { openRpc, signedInApi } from "./sign-in.ts";
+import { signedInApi } from "./sign-in.ts";
 import {
   appWith,
   hitCall,
@@ -44,7 +44,7 @@ import {
 } from "./workflow-apps.ts";
 
 // Retention of workflow runs, from its threat model (src/workflows/
-// retention.ts): once a run has ended for the deployment's retention, the
+// retention.ts): once a run has ended for its retention (30 days), the
 // engine removes its record of it, the clock, every 15 minutes, what core and
 // connect keep of it, and the run stays. Each case below is a way that
 // could go wrong: a run swept too early, or while it still waits; a run
@@ -68,9 +68,9 @@ const day = 24 * 60 * 60 * 1000;
 /** What a run reads, that must not outlive its retention. */
 const transcript = "TRANSCRIPT the guest said the margin is 12%";
 
-/** What readers say in place of a swept run's words, kept `days` days. */
-const removed = (days: number): string =>
-  `The details of this run were removed: they are kept for ${days} days after a run ends.`;
+/** What readers say in place of a swept run's words. */
+const removedWords =
+  "The details of this run were removed: they are kept for 30 days after a run ends.";
 
 /** The time `days` from now, for the clock to run at. */
 const daysOn = (days: number): Date => new Date(Date.now() + days * day);
@@ -348,7 +348,7 @@ describe("run retention", { timeout: 60_000 }, () => {
           failure: {
             ...before.failed.failure,
             step: "read",
-            error: { code: "workflow.run_failed", message: removed(30) },
+            error: { code: "workflow.run_failed", message: removedWords },
           },
         },
       },
@@ -475,61 +475,33 @@ describe("run retention", { timeout: 60_000 }, () => {
     });
   });
 
-  it("says how long details are kept as the deployment has it when the run is read, and keeps no number in the row", async () => {
+  it("says how long details are kept when the run is read, and keeps no number in the row", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, fails);
     const failed = await endedRun(builder, app, "fails");
-    const shorter = { ...env, RUN_RETENTION_DAYS: "7" };
 
-    await runQuarterHourTasks(shorter, daysOn(6));
+    await runQuarterHourTasks(env, daysOn(29));
     const within = await builder.api.workflows.status(failed.id);
-    await runQuarterHourTasks(shorter, daysOn(8));
-    // Read where the retention is 7 days, and where it is the default.
-    const { core } = await openRpc(builder.session, { coreEnv: shorter });
-    const asSet = await core.authenticate().workflows.status(failed.id);
-    const byDefault = await builder.api.workflows.status(failed.id);
+    await runQuarterHourTasks(env, daysOn(31));
+    const after = await builder.api.workflows.status(failed.id);
     const row = await rowOf(failed.id);
 
     expect({
       within: within.failure?.error.message,
-      asSet: asSet.failure?.error.message,
-      byDefault: byDefault.failure?.error.message,
-      removed: byDefault.detailsRemoved,
+      after: after.failure?.error.message,
+      removed: after.detailsRemoved,
       kept: z
         .object({ error: z.object({ message: z.string() }) })
         .parse(JSON.parse(String(row?.failure))).error.message,
     }).toStrictEqual({
       within: `Couldn't read: ${transcript}`,
-      asSet: removed(7),
-      byDefault: removed(30),
+      after: removedWords,
       removed: true,
       kept: "",
     });
   });
 
-  it("removes nothing while the deployment's retention is no number of days it may be", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    const old = await oldRuns(builder, app, 1, 4000);
-
-    const invalid = [];
-    // Over 30 days the engine no longer has the run's record to keep.
-    for (const days of ["0", "soon", "31", "1.5"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      await runQuarterHourTasks({ RUN_RETENTION_DAYS: days });
-      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      invalid.push(await sweptOf(old));
-    }
-    // The longest it may be.
-    await runQuarterHourTasks({ RUN_RETENTION_DAYS: "30" });
-
-    expect({ invalid, valid: await sweptOf(old) }).toStrictEqual({
-      invalid: [0, 0, 0, 0],
-      valid: 1,
-    });
-  });
-
-  it("has the engine keep each run's record for the deployment's retention, and no longer", async () => {
+  it("has the engine keep each run's record for the retention, and no longer", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, keeps);
     const start = {
@@ -540,32 +512,16 @@ describe("run retention", { timeout: 60_000 }, () => {
       actor: { type: "system" },
     } as const;
 
-    const byDefault = await startRun(env, start);
-    const shorter = await startRun({ ...env, RUN_RETENTION_DAYS: "7" }, start);
-    // A config core can't read: the engine keeps it as long as it may.
-    const unset = await startRun({ ...env, RUN_RETENTION_DAYS: "soon" }, start);
-    const asked = await Promise.all(
-      [byDefault, shorter, unset].map(
-        async ({ id }) =>
-          await runInDurableObject(runObject(id), (_object, state) =>
-            state.storage.sql
-              .exec<{ success: number; error: number }>(
-                "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
-              )
-              .one()
-          )
-      )
+    const { id } = await startRun(env, start);
+    const asked = await runInDurableObject(runObject(id), (_object, state) =>
+      state.storage.sql
+        .exec<{ success: number; error: number }>(
+          "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
+        )
+        .one()
     );
-    await Promise.all(
-      [byDefault, shorter, unset].map(async ({ id }) => {
-        await endedInCore(id);
-      })
-    );
-    expect(asked).toStrictEqual([
-      { success: 30 * day, error: 30 * day },
-      { success: 7 * day, error: 7 * day },
-      { success: 30 * day, error: 30 * day },
-    ]);
+    await endedInCore(id);
+    expect(asked).toStrictEqual({ success: 30 * day, error: 30 * day });
   });
 
   it("reads the same everywhere once its retention is over, swept or not: details removed, and nothing it returned or said", async () => {
@@ -601,7 +557,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       message: undefined,
       detailsRemoved: true,
     };
-    const goneFailed = { ...gone, step: "read", message: removed(30) };
+    const goneFailed = { ...gone, step: "read", message: removedWords };
 
     expect({
       before: { output: before.output, removed: before.detailsRemoved },
@@ -734,7 +690,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       },
       // Who decided, and how, stays; what was asked and sent doesn't.
       after: {
-        description: removed(30),
+        description: removedWords,
         status: "approved",
         by: decider.userId,
       },
@@ -862,7 +818,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       first: "D1_ERROR: broken for the test",
       between: { message: `Couldn't read: ${transcript}`, removed: undefined },
-      after: { message: removed(30), removed: true },
+      after: { message: removedWords, removed: true },
     });
   });
 

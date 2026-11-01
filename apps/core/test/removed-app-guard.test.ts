@@ -16,8 +16,6 @@ const leftOpen = new Set([
   "app_statistic_steps",
   "improvement_signals",
   "dependency_admission_refusals",
-  "migration_samples",
-  "migration_sample_leases",
   "run_lineage_accounts",
   "workflow_resource_run_controls",
   "sdk_release_pins",

@@ -20,7 +20,7 @@ import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 
 import { isRouteApi } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
-import type { ModelTransport, TransportRoute } from "./model-transport.ts";
+import type { TransportRoute } from "./model-transport.ts";
 
 // The provider's own API, reached through connect, which holds every key
 // (connect's ai-providers.ts): the organization's own, or Grasp's for
@@ -432,58 +432,51 @@ const connectFetch =
   };
 
 /**
- * The transport to `target`'s provider through connect: a route for each
- * of its models whose API it speaks, at its fixed base URL, or the
- * organization's for an OpenAI-compatible endpoint.
+ * The route to `ref` through connect, when it is `target`'s provider's: at
+ * its fixed base URL, or the organization's for an OpenAI-compatible
+ * endpoint, for a model whose API core speaks. None for anything else,
+ * ElevenLabs's included, which speaks no text API (`connectRequest`).
  */
-export const connectTransport = (
+export const connectRoute = (
   env: ConnectEnv,
-  target: ConnectTarget
-): ModelTransport => ({
-  kind: "connect",
-  capabilities: {
-    // ElevenLabs speaks no text API: it says lines (`connectRequest`).
-    providers: target.provider === "elevenlabs" ? [] : [target.provider],
-    payloadLoggingOff: true,
-    sharedCacheOff: true,
-  },
-  route: (ref): TransportRoute | undefined => {
-    const base =
-      ref.provider === target.provider ? baseUrlOf(ref, target) : undefined;
-    const api: Api | undefined =
-      ref.provider === "openai-compatible"
-        ? "openai-completions"
-        : ref.catalog.api;
-    const host = base === undefined ? undefined : URL.parse(base)?.hostname;
-    if (
-      base === undefined ||
-      host === undefined ||
-      api === undefined ||
-      !isRouteApi(api)
-    ) {
-      return undefined;
-    }
-    return {
-      transport: "connect",
-      model: {
-        ...ref.catalog,
-        api,
-        baseUrl: base.replace(/\/+$/u, ""),
-      },
+  target: ConnectTarget,
+  ref: ModelRef
+): TransportRoute | undefined => {
+  const base =
+    ref.provider === target.provider ? baseUrlOf(ref, target) : undefined;
+  const api: Api | undefined =
+    ref.provider === "openai-compatible"
+      ? "openai-completions"
+      : ref.catalog.api;
+  const host = base === undefined ? undefined : URL.parse(base)?.hostname;
+  if (
+    base === undefined ||
+    host === undefined ||
+    api === undefined ||
+    !isRouteApi(api)
+  ) {
+    return undefined;
+  }
+  return {
+    transport: "connect",
+    model: {
+      ...ref.catalog,
       api,
-      host: host.toLowerCase(),
-      headers: placeholderHeaders(target.provider),
-      fetch: connectFetch(env, target, host.toLowerCase()),
-      tagged: (init, id, endsAt) => {
-        const headers = new Headers(init?.headers);
-        headers.set(ledgerRequestHeader, id);
-        headers.set(endsAtHeader, String(endsAt));
-        return { ...init, headers };
-      },
-      logIdOf: (headers) =>
-        requestIdHeaders
-          .map((name) => headers[name])
-          .find((value) => value !== undefined),
-    };
-  },
-});
+      baseUrl: base.replace(/\/+$/u, ""),
+    },
+    api,
+    host: host.toLowerCase(),
+    headers: placeholderHeaders(target.provider),
+    fetch: connectFetch(env, target, host.toLowerCase()),
+    tagged: (init, id, endsAt) => {
+      const headers = new Headers(init?.headers);
+      headers.set(ledgerRequestHeader, id);
+      headers.set(endsAtHeader, String(endsAt));
+      return { ...init, headers };
+    },
+    logIdOf: (headers) =>
+      requestIdHeaders
+        .map((name) => headers[name])
+        .find((value) => value !== undefined),
+  };
+};

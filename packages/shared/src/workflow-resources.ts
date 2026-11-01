@@ -176,6 +176,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+  "workflow.start_held_gone":
+    "That start no longer waits for you: it was confirmed, declined or let lapse, or isn't yours.",
+  "workflow.start_held_changed":
+    "What that start would send changed since you saw it. Look at it again, then confirm.",
+  "workflow.start_offer_only":
+    "In a chat app, offer the start on a card instead: the person presses Start there.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
   "workflow.start_conflict":
@@ -496,6 +502,29 @@ export interface WorkflowBindingApproval {
   status: "active" | "revoked";
   approvedBy: string;
   approvedAt: string;
+}
+
+/**
+ * A version of a workflow that runs, or waits to go live, whose catalog
+ * bindings an admin hasn't approved, so its starts are refused
+ * (`workflow.binding_unapproved`): each binding, with the targets core can
+ * offer now that would serve it, each checked as an approval is. A
+ * binding with none offered is approved where its target is chosen in
+ * full (its workflow's page).
+ */
+export interface PendingWorkflowBindings {
+  workflow: { id: string; name: string };
+  version: number;
+  /** Whether it is the version that runs now, rather than the one asked to go live. */
+  live: boolean;
+  bindings: {
+    alias: string;
+    kind: CatalogBindingKind;
+    /** The catalog contract it calls. */
+    contractId: string;
+    /** Each target offered, with what it names: a model's ID, a collection's name; empty for one that names nothing. */
+    offered: { target: WorkflowBindingTarget; label: string }[];
+  }[];
 }
 
 const paramNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
@@ -1296,10 +1325,21 @@ export interface WorkflowResourcesApi {
   ) => Promise<WorkflowBindingApproval>;
   /** Revokes a binding approval; for the organization's admins. */
   revokeBinding: (id: string, approval: string) => Promise<void>;
+  /**
+   * The versions of workflows that run or wait to go live whose bindings
+   * no admin approved, at most 50, each with the targets core can offer;
+   * for the organization's own admins, never Grasp staff.
+   */
+  pendingBindings: () => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */
   unbindFromApp: (binding: string) => Promise<void>;
+  /**
+   * The workflow versions App `app` binds, by alias: for the App's
+   * builders, archived or not, never Grasp staff.
+   */
+  appBindings: (app: string) => Promise<AppWorkflowBinding[]>;
   /** The host catalog's contracts, for builders. */
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */

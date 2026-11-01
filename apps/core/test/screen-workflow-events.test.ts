@@ -36,6 +36,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -686,6 +687,47 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     });
   });
 
+  it("shows a screen following a run that it may send it nothing once the App is restricted, under a revision of its own", async () => {
+    const { builder, app, reference } = await invoicesApp([
+      ["start"],
+      ["send"],
+    ]);
+    const lease = await screenOf(builder, app);
+    const runId = await startedRun(builder, app, lease, reference);
+    /** The run's snapshot as its screen follows it, once it waits. */
+    const followed = async () =>
+      await vi.waitFor(
+        async () => {
+          const { value, revision } = await readWorkflowWatch(
+            env,
+            builder.acting,
+            app,
+            {
+              workflow: { ...wireOf(reference), kind: "workflow" },
+              watch: "run",
+              runId,
+            }
+          );
+          const [wait] = z
+            .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
+            .parse(value).waits;
+          expect(wait).toBeDefined();
+          return { canSend: wait?.canSend, revision };
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    const open = await followed();
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    const restricted = await followed();
+
+    expect({
+      open: open.canSend,
+      restricted: restricted.canSend,
+      // A revision of its own: pushed to the screen, never the same one.
+      movedOn: (restricted.revision ?? 0) > (open.revision ?? 0),
+    }).toStrictEqual({ open: true, restricted: false, movedOn: true });
+  });
+
   it("sends nothing from an App in restricted mode to a run that isn't restricted, and sends to one started restricted", async () => {
     const { builder, app, reference } = await invoicesApp([
       ["start"],
@@ -698,12 +740,43 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     const send = async (runId: string) =>
       outcomeOf(await called(builder, app, lease, sendText(reference, runId)));
 
+    // What each run's snapshot says of sending it its event: as a send
+    // goes, once the run waits for it.
+    const canSend = async (runId: string) =>
+      await vi.waitFor(
+        async () => {
+          const { value: snapshot } = await readWorkflowWatch(
+            env,
+            builder.acting,
+            app,
+            {
+              workflow: { ...wireOf(reference), kind: "workflow" },
+              watch: "run",
+              runId,
+            }
+          );
+          const [wait] = z
+            .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
+            .parse(snapshot).waits;
+          expect(wait).toBeDefined();
+          return wait?.canSend;
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    // Read before sending: the event a send delivers ends the wait.
+    const shown = {
+      unrestrictedRun: await canSend(before),
+      restrictedRun: await canSend(after),
+    };
+
     expect({
       unrestrictedRun: await send(before),
       restrictedRun: isEvent(await send(after)),
+      shown,
     }).toStrictEqual({
       unrestrictedRun: "permission.restricted",
       restrictedRun: true,
+      shown: { unrestrictedRun: false, restrictedRun: true },
     });
   });
 });

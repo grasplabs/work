@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   auditEvents,
+  clientAdminReads,
   clientPlacements,
   clientProvisions,
   clients,
   clientRuns,
   hostingDestinations,
   releases,
-  settings,
 } from "../src/db/schema.ts";
 import { DiscardError, discardClient } from "../src/hosting/discard.ts";
 import {
@@ -459,13 +459,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
 
   it("discards nothing of a client that went live between the check and the discard, and audits no discard", async () => {
     const clientId = await client();
-    await db.insert(settings).values({
-      clientId,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db.insert(clientAdminReads).values({ clientId, askedAt: new Date() });
     // The client goes live just before the discard's batch runs.
     const racing = new Proxy(env.DB, {
       get: (target, name): unknown => {
@@ -500,15 +494,15 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .from(clients)
         .where(eq(clients.id, clientId))
         .get(),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, clientId)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, clientId)),
       audited: await actorsOf(clientId, "client.discard"),
     }).toStrictEqual({
       refusal: "not_provisioning",
       client: { status: "active" },
-      settings: [{ key: "AUDIT_RETENTION_DAYS" }],
+      reads: [{ clientId }],
       audited: [],
     });
   });
@@ -516,13 +510,9 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("discards a client never placed, audited, freeing its id, and refuses one placed, unknown or being worked on", async () => {
     const shared = await destination();
     const mistaken = await client();
-    await db.insert(settings).values({
-      clientId: mistaken,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db
+      .insert(clientAdminReads)
+      .values({ clientId: mistaken, askedAt: new Date() });
     const placed = await client();
     await placeClient(db, staff, {
       clientId: placed,
@@ -546,10 +536,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .select({ id: clients.id })
         .from(clients)
         .where(eq(clients.id, mistaken)),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, mistaken)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, mistaken)),
     };
 
     expect({
@@ -562,7 +552,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       kept: await placementOf(placed),
     }).toStrictEqual({
       discarded: { refused: null },
-      left: { client: [], settings: [] },
+      left: { client: [], reads: [] },
       discardedBy: [caller],
       placed: { refused: "placed" },
       unknown: { refused: "client_unknown" },

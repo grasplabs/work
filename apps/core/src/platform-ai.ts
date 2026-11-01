@@ -1,64 +1,42 @@
-import { platformRouteOf } from "@grasp-os/shared/ai-providers";
-import type {
-  AiProviderId,
-  PlatformRoute,
-} from "@grasp-os/shared/ai-providers";
-import { jsonVar } from "@grasp-os/shared/config";
-import { log } from "@grasp-os/shared/log";
-import {
-  parsePlatformAi,
-  platformAiSchema,
-} from "@grasp-os/shared/platform-ai";
-import type { PlatformAi } from "@grasp-os/shared/platform-ai";
+import type { Speaker } from "@grasp-os/shared/voice";
 
-// Which provider and model each of Grasp's own AI features uses
-// (@grasp-os/shared/platform-ai): the `PLATFORM_AI` var, deployment config
-// the admin sets, read on every use, OpenAI's defaults for what it leaves
-// out; set but broken, every feature is off (fail closed). Each feature then goes through the model gateway (models.ts) with
-// Grasp's own key for its provider, which connect holds.
+// Grasp's own AI features, the ones Grasp pays for, fixed in code:
+// changing a provider, a model or a voice is a change here, released as
+// any change is. Each goes through the model gateway (models.ts) with
+// Grasp's own key for its provider, which connect holds, always at the
+// provider's EU data residency host (`platformRouteOf`, @grasp-os/shared/
+// ai-providers): keeping it in the EU is Grasp's to do, so no deployment
+// turns a feature off for it. A provider Grasp has no key for leaves its
+// feature unavailable, never served by another.
 
 /**
- * Each platform feature's provider and model: the `PLATFORM_AI` var, the
- * defaults while none is set. One that is set but isn't JSON, or doesn't
- * parse, is none at all: `undefined`, and every platform feature is
- * unavailable until it is fixed, never on a provider nobody chose. The
- * admin checks it before it deploys; core refuses it all the same.
+ * Each speaker's voice, by its ElevenLabs ID. Stephen's is "Adam", the
+ * voice Eleven v4 is shown with: young, confident, conversational.
+ * Claire's is "Jessica": playful, bright and warm, checked by ElevenLabs
+ * in English, Dutch, German and Spanish, not in French. The sample
+ * speakers are ElevenLabs's own voices, each clearly not Stephen.
  */
-export const platformAi = (
-  env: Pick<Env, "PLATFORM_AI">
-): PlatformAi | undefined => {
-  if (env.PLATFORM_AI === undefined) {
-    return parsePlatformAi({});
-  }
-  const value = jsonVar(env.PLATFORM_AI);
-  if (value === undefined) {
-    log.error("platform_ai.invalid", { reason: "not_json" });
-    return undefined;
-  }
-  const settings = parsePlatformAi(value);
-  if (settings === undefined) {
-    log.error("platform_ai.invalid", {
-      reason: "schema",
-      paths: (platformAiSchema.safeParse(value).error?.issues ?? [])
-        .map(({ path }) => path.join("."))
-        .join(" "),
-    });
-  }
-  return settings;
-};
+const voices = {
+  stephen: "s3TPKV1kjDlVtZbl4Ksh",
+  claire: "r1KmysJdVYZjJCm4mL3b",
+  lisa: "EXAVITQu4vr4xnSDxMaL",
+  mark: "cjVigY5qzO86Huf0OWal",
+  tim: "TX3LPaxmHKxFdv7VOQHJ",
+} as const satisfies Record<Speaker, string>;
 
 /**
- * Where Grasp's own key for `provider` sends a platform feature's
- * requests, by the settings' region (`platformRouteOf`): OpenAI's EU host
- * for an EU project. None while the settings don't parse, when every
- * platform feature is off.
+ * Each feature's provider and model: OpenAI's GPT-5.4 mini reads PDFs
+ * (text and page images, so scans too), GPT-4o Transcribe writes down
+ * speech, live and recorded, and ElevenLabs's Eleven v4 says the lines,
+ * v4 Turbo a line only known as it is said, with the same voices.
  */
-export const platformRouteFor = (
-  env: Pick<Env, "PLATFORM_AI">,
-  provider: AiProviderId
-): PlatformRoute | undefined => {
-  const settings = platformAi(env);
-  return settings === undefined
-    ? undefined
-    : platformRouteOf(provider, settings.region);
-};
+export const platformAi = {
+  conversion: { provider: "openai", model: "gpt-5.4-mini" },
+  transcription: { provider: "openai", model: "gpt-4o-transcribe" },
+  speech: {
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    quickModel: "eleven_v4_turbo",
+    voices,
+  },
+} as const;

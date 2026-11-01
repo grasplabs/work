@@ -55,8 +55,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import { QuotaPolicyCard } from "../clients/quota-policy-card.tsx";
-import type { ClientQuotaPolicy } from "../clients/quota-policy.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
@@ -618,8 +616,7 @@ const Checklist = ({
     },
     {
       id: "platform",
-      label:
-        "Its own platform is deployed, in its own Cloudflare account in the EU",
+      label: "Its own platform is deployed, in the EU",
       state: setup.provisioning.client?.status === "active" ? "done" : "todo",
       to: "setup",
     },
@@ -646,7 +643,7 @@ const Checklist = ({
   // Until core holds the contract, neither it nor its agreements is known here.
   const steps = known.map((step): ChecklistStep =>
     !contractRead && step.to === "contract"
-      ? { ...step, state: "unknown", why: "From Rooms, once it is connected." }
+      ? { ...step, state: "unknown", why: "Not known here yet." }
       : step
   );
   const done = steps.filter(({ state }) => state === "done").length;
@@ -931,7 +928,6 @@ const Status = ({
   setup,
   needs,
   view,
-  quotaPolicy,
   aiStatus,
   progress,
   hosting,
@@ -942,8 +938,6 @@ const Status = ({
   needs: PlatformNeed[];
   /** What its core answered, worked out; null when it didn't answer. */
   view: AdminView | null;
-  /** Its quota policy, its core read live; null when it couldn't be read. */
-  quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its AI as its core reports it, read live and not awaited; null when unknown. */
   aiStatus: Promise<AiStatusReport | null>;
   hosting: ClientHostingView | null;
@@ -989,18 +983,9 @@ const Status = ({
         clientId={clientId}
       />
     </Section>
-    {setup.provisioning.client?.status === "active" ? (
-      // Its core read live, within the grid's deadline: the Setup shows
-      // without waiting for it, and the section once it answers.
-      <Await fallback={null} promise={quotaPolicy}>
-        {(policy) =>
-          policy === null ? null : <QuotaPolicyCard policy={policy} />
-        }
-      </Await>
-    ) : null}
     <StephenWatched setup={setup} />
     <Section
-      description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
+      description="From its address to where its data is. Everything after the router runs in the EU, apart from every other company’s."
       title="How it runs"
     >
       <div className="border-t px-5 py-4">
@@ -1756,14 +1741,6 @@ const Settings = ({
                     ? "Not since it was set up"
                     : dayOf(account.configChangedAt),
               },
-              ...(setup.signInOverridden
-                ? [
-                    {
-                      label: "On deploy",
-                      value: "A setting of its own replaces this",
-                    },
-                  ]
-                : []),
               ...(setup.configPending
                 ? [
                     {
@@ -1777,12 +1754,7 @@ const Settings = ({
           />
         )}
         {client === null ? null : (
-          <SignInChange
-            clientId={clientId}
-            overridden={setup.signInOverridden}
-            refresh={refresh}
-            signIn={signIn}
-          />
+          <SignInChange clientId={clientId} refresh={refresh} signIn={signIn} />
         )}
       </Section>
       {client === null ? null : (
@@ -1891,7 +1863,6 @@ export const OrgSetup = ({
   setup,
   tab,
   view,
-  quotaPolicy,
   aiStatus,
   progress,
   releases,
@@ -1901,8 +1872,6 @@ export const OrgSetup = ({
   setup: ClientSetup;
   tab: SetupTab;
   view: AdminView | null;
-  /** Its quota policy, read live and not awaited; null when it couldn't be read. */
-  quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its AI as its core reports it, read live and not awaited; null when unknown. */
   aiStatus: Promise<AiStatusReport | null>;
   /** Every imported release, newest first. */
@@ -1941,7 +1910,6 @@ export const OrgSetup = ({
             progress={progress}
             needs={needs}
             aiStatus={aiStatus}
-            quotaPolicy={quotaPolicy}
             releases={releases}
             setup={setup}
             view={view}

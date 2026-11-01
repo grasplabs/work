@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { AskOrCompose } from "../chat/asked-questions.tsx";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatMore } from "../chat/chat-more.tsx";
 import { ChatSwitcherButton, HeaderIcon } from "../chat/chat-switcher.tsx";
@@ -303,7 +304,14 @@ const OpenChat = ({
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
             <BuildsFailure read={builds} />
             <ChatSources names={sourceNames} provenance={view.provenance} />
-            <Composer running={view.running} {...composer} />
+            <AskOrCompose
+              messages={view.messages}
+              onAnswer={(answers) => {
+                void ask(answers);
+              }}
+              running={view.running}
+              {...composer}
+            />
             <ComposerNote organizationName={organizationName} />
           </div>
         </section>
@@ -356,6 +364,7 @@ const Chat = () => {
           running: false,
           projectId: null,
           appId: null,
+          via: "web",
         });
   // The open chat: the chat dock carries it on on every other page. An
   // App's own chat stays the App's, in the dock on its page, and leaves

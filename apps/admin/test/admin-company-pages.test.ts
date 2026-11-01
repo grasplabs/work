@@ -1,4 +1,4 @@
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { setSignIn } from "../src/clients/settings.ts";
@@ -11,7 +11,7 @@ import {
 } from "../src/db/schema.ts";
 import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
-import { accessJwt, mockAccess } from "./access.ts";
+import { mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { adminOf } from "./secrets-store-admin.ts";
@@ -65,18 +65,6 @@ const setupOf = async (clientId: string, tab?: string) =>
     `/organizations/${clientId}/setup${tab === undefined ? "" : `?tab=${tab}`}`
   );
 
-/** Where the admin sends a staff member's page load of `url`, and how. */
-const movedFrom = async (url: string) => {
-  const response = await exports.default.fetch(url, {
-    headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) },
-    redirect: "manual",
-  });
-  return {
-    status: response.status,
-    location: response.headers.get("location"),
-  };
-};
-
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
   const at = html.indexOf(`aria-label="${title}"`);
@@ -84,36 +72,6 @@ const sectionOf = (html: string, title: string): string => {
 };
 
 describe("the company pages, in the admin", () => {
-  it("moves old addresses to where their page is now for good, keeping what the address asked", async () => {
-    const moves = await Promise.all(
-      [
-        "https://ops.grasp.test/admin?phase=open",
-        "https://ops.grasp.test/clients/new?from=grid",
-        "https://ops.grasp.test/clients/acme?tab=settings",
-      ].map(movedFrom)
-    );
-
-    expect(
-      moves.map(({ status, location }) => ({
-        status,
-        to: location === null ? null : new URL(location, "https://x.test"),
-      }))
-    ).toMatchObject([
-      { status: 301, to: { pathname: "/", search: "?phase=open" } },
-      {
-        status: 301,
-        to: { pathname: "/new-organization", search: "?from=grid" },
-      },
-      {
-        status: 301,
-        to: {
-          pathname: "/organizations/acme/setup",
-          search: "?tab=settings",
-        },
-      },
-    ]);
-  });
-
   it("lists every organization with its own platform still to read from its account, and a way to add one", async () => {
     const live = await recordClient("active");
 

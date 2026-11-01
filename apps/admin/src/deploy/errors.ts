@@ -25,15 +25,6 @@ export const deployErrorCodes = [
   "unknown_migration_tag",
   /** A binding in the manifest names a placeholder the admin doesn't fill. */
   "unknown_placeholder",
-  /** A client setting isn't a deployment config var core reads. */
-  "unknown_setting",
-  /** A client setting, or the config derived for it, isn't one core would take. */
-  "setting_invalid",
-  /**
-   * A `MAIL_FROM` setting names another address than the onboarding
-   * sender's, the only one the client's `EMAIL` binding sends from.
-   */
-  "mail_sender_locked",
   /**
    * The client's sign-in can't be made: its record doesn't parse, or it
    * names an IdP the admin has no app id for.

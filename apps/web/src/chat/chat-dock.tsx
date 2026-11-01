@@ -32,9 +32,9 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { appSlot, setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
-import { Composer } from "./composer.tsx";
 import { OpenChat, useDockWidth, useUnfoldOnPointer } from "./dock-frame.tsx";
 import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
@@ -515,10 +515,18 @@ const Dock = ({
   const hintId = useId();
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
-    <Composer
+    <AskOrCompose
       {...composer}
       compact
       describedBy={unfolds ? hintId : undefined}
+      messages={view.messages}
+      onAnswer={(answers) => {
+        // As a question sent from the bar does: the reply shows.
+        if (mode === "bar") {
+          moveTo("frame");
+        }
+        void ask(answers);
+      }}
       label={words.title}
       onSend={() => {
         if (mode === "bar") {
@@ -538,7 +546,7 @@ const Dock = ({
           }}
         />
       ) : null}
-    </Composer>
+    </AskOrCompose>
   );
   const drawer = mode === "drawer";
   const { place, look } = dockLook(mode);
