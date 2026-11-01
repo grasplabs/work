@@ -205,7 +205,7 @@ describe("erasing a person in connect", () => {
     });
   });
 
-  it("refuses while its provider won't revoke the grant, the connection stopped but its sealed tokens kept, and finishes once it does", async () => {
+  it("refuses while its provider won't revoke the grant, the connection stopped and the revoke owed, and finishes once it does", async () => {
     const person = someone();
     const { connectionId, refreshToken } = await liveConnection(person);
     const revokeAt = `https://${sampleOAuthAuthHost}/oauth/revoke`;
@@ -233,7 +233,7 @@ describe("erasing a person in connect", () => {
       revoked: apps.holds(refreshToken),
     }).toStrictEqual({
       refused: "connection.erase_pending",
-      meanwhile: { status: "disconnected", named: true, tokens: 1, calls: [] },
+      meanwhile: { status: "disconnected", named: true, tokens: 0, calls: [] },
       finished: { connections: 1 },
       revoked: false,
     });

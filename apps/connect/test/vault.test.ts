@@ -289,11 +289,10 @@ describe("refreshing", () => {
     ).toContain(minted);
   });
 
-  it("that finishes after a disconnect whose revoke is owed stores nothing over the kept tokens, and goes no further", async () => {
+  it("that finishes after a disconnect whose revoke is owed stores nothing, and goes no further", async () => {
     const person = someone();
     const connectionId = await connected("google", person);
     await expire(connectionId);
-    const kept = await tokenRow(connectionId);
     const provider = Promise.withResolvers<Response>();
     providers.state.refresh = async () => await provider.promise;
     const refreshing = outcome(accessTokenFor(env, connectionId));
@@ -304,11 +303,7 @@ describe("refreshing", () => {
     provider.resolve(new Response(null, { status: 200 }));
 
     await expect(refreshing).resolves.toBe("connect.connection_inactive");
-    const after = await tokenRow(connectionId);
-    expect({
-      sealed: after?.sealed === kept?.sealed,
-      generation: after?.generation,
-    }).toStrictEqual({ sealed: true, generation: kept?.generation });
+    await expect(tokenRow(connectionId)).resolves.toBeUndefined();
   });
 
   it("that loses to one elsewhere (its lease lapsed) gives the stored token, and revokes nothing", async () => {
@@ -463,7 +458,7 @@ describe("disconnecting", () => {
     ).resolves.toBe("connect.connection_inactive");
   });
 
-  it("deletes the tokens where the provider can't revoke them, and keeps them sealed, the revoke owed, where it is down", async () => {
+  it("deletes the tokens where the provider can't revoke them, or is down, and owes the revoke where it is down", async () => {
     const person = someone();
     const microsoft = await connected("microsoft", person);
     const google = await connected("google", person);
@@ -479,12 +474,22 @@ describe("disconnecting", () => {
       tokenRow(microsoft),
       tokenRow(google),
     ]);
-    // Microsoft has no revocation endpoint: nothing to revoke with them.
-    // Google's revoke is owed (src/revocations.ts), its tokens kept until.
+    // Microsoft has no revocation endpoint: nothing is owed. Google's
+    // revoke is owed (src/revocations.ts), with a sealed copy of its own.
+    const owed = await env.DB.prepare(
+      "SELECT connection_id AS id FROM token_revocations WHERE connection_id IN (?, ?)"
+    )
+      .bind(microsoft, google)
+      .all<{ id: string }>();
     expect({
       microsoft: microsoftTokens,
-      google: googleTokens === undefined ? undefined : "kept",
-    }).toStrictEqual({ microsoft: undefined, google: "kept" });
+      google: googleTokens,
+      owed: owed.results.map(({ id }) => id),
+    }).toStrictEqual({
+      microsoft: undefined,
+      google: undefined,
+      owed: [google],
+    });
     await expect(
       Promise.all([statusOf(microsoft), statusOf(google)])
     ).resolves.toStrictEqual(["disconnected", "disconnected"]);

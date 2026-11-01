@@ -169,6 +169,13 @@
       "when": 1793454413780,
       "tag": "0023_delete_landscape_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793526927678,
+      "tag": "0024_owed_revoke_tokens",
+      "breakpoints": true
     }
   ]
 }
