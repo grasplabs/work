@@ -75,7 +75,6 @@
     "./diagnostics": "./src/diagnostics.ts",
     "./directory": "./src/directory.ts",
     "./document-places": "./src/document-places.ts",
-    "./email-preferences": "./src/email-preferences.ts",
     "./encoding": "./src/encoding.ts",
     "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
