@@ -9,6 +9,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 
 import { signInConfig } from "../auth/config.ts";
 import { onOrigin, personOf, tenantOf } from "../connections.ts";
+import { startOAuthConnection } from "../oauth-relay.ts";
 import { anyMailboxPointed, classesOn } from "../tool-classes.ts";
 
 // What the onboarding connects, from one of its steps: the admin starts a
@@ -64,11 +65,10 @@ export const startOnboardingConnection = async (
   if (back === undefined) {
     throw connectionErrors.create("connection.invalid");
   }
-  return await env.CONNECT.startConnection({
+  return await startOAuthConnection(env, config, {
     person: await personOf(env, identity),
     provider,
     scope: "shared",
-    origin: config.origin,
     ...(tenant === undefined ? {} : { tenant }),
     returnTo: `${back.pathname}${back.search}`,
     classes: await classesOn(env),

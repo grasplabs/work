@@ -4,7 +4,7 @@ import type { Permission } from "@grasp-os/shared/permissions";
 
 import { auditedCall, chatAuthority, requireOpenRun } from "./agent-scope.ts";
 import type { AgentScope, CallOutcome } from "./agent-scope.ts";
-import { memberOf } from "./auth/identity.ts";
+import { actingPerson } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { forSandbox } from "./bindings.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -61,7 +61,9 @@ export const asPerson = async <T>(
         if (!allowed(permissions)) {
           throw readDenied(action);
         }
-        const person = await memberOf(env.DB, scope.personId);
+        // A Grasp staff member's turn reads as them while their staff
+        // session lasts (GRA-1088), with the agent's grant still needed.
+        const person = await actingPerson(env, scope.personId, scope.staff);
         if (person === undefined) {
           throw permissionErrors.create("permission.person_inactive");
         }

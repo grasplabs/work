@@ -293,8 +293,7 @@ const mindsOf = (before: Result, after: Result): string[] => [
         "Mind: the two runs did not talk to the same people (other tempers, or another seed).",
       ]),
   ...(before.via.quick === after.via.quick &&
-  before.via.careful === after.via.careful &&
-  before.via.gateway === after.via.gateway
+  before.via.careful === after.via.careful
     ? []
     : [
         "Mind: the two runs reached other models. What they differ by is also that.",

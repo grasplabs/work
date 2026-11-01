@@ -321,7 +321,7 @@ export const PackagesDetails = ({
       {request.counts.findings === 0 && request.counts.refused === 0 ? null : (
         <div className="flex flex-wrap gap-2">
           {request.counts.findings === 0 ? null : (
-            <Badge variant="destructive">
+            <Badge variant="attention">
               <Plural
                 value={request.counts.findings}
                 one="# finding reported"

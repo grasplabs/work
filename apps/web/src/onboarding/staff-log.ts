@@ -1,8 +1,6 @@
-import { logFilterSchema } from "@grasp-os/shared/onboarding-staff";
-import type {
-  LogFilter,
-  StaffLogEntry,
-} from "@grasp-os/shared/onboarding-staff";
+import type { StaffLogEntry } from "@grasp-os/shared/onboarding-staff";
+import { logFilterSchema } from "@grasp-os/shared/onboarding-staff-log";
+import type { LogFilter } from "@grasp-os/shared/onboarding-staff-log";
 
 // The onboarding's log as Grasp's area shows it (prototype
 // `lib/admin-log.ts`): its filters in the address, how much happened on

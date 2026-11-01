@@ -84,14 +84,35 @@ const connect :Workerd.Worker = (
     });
   });
 
+  // A connector has no Node.js: `nodejs_compat` is the default from
+  // 2026-08-04 on, and `isolateBase` turns it off, so none of its timers'
+  // callbacks can throw where nothing loaded first catches it (GRA-939).
+  it("answers a connector's own Response as its own, whatever headers it has", async () => {
+    const response = await fetch(new URL("/marked", served.url));
+    const { answered } = z
+      .object({ answered: z.string() })
+      .parse(await response.json());
+
+    expect(answered).toBe("own,null");
+  });
+
+  it("gives a connector no setImmediate, process or node:timers", async () => {
+    const response = await fetch(new URL("/node", served.url));
+    const { answered } = z
+      .object({ answered: z.string() })
+      .parse(await response.json());
+
+    expect(answered).toBe("undefined,undefined,refused");
+  });
+
   // Each way a connector's code can have workerd report an error with its
   // message: the same connector loaded as it is reports it, which shows the
-  // path is read; through `loadConnector`, nothing. What a default
-  // export's handler hands its own context's `waitUntil` is still
-  // reported: pinned so a change is seen (GRA-939).
+  // path is read; through `loadConnector`, nothing: not what its `fetch`
+  // throws, which connect gets as an error as before, nor what it hands its
+  // own context's `waitUntil` (GRA-939).
   it.each([
-    ["setImmediate", false],
-    ["waitUntil", true],
+    ["thrown", false],
+    ["waitUntil", false],
   ])(
     "reports %s from a connector loaded as it is, and from one loadConnector loads: %s",
     async (name, reported) => {

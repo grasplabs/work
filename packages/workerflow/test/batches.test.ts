@@ -1054,14 +1054,25 @@ describe("a schedule's occurrence", () => {
 });
 
 describe("a run's steps", () => {
-  it("aren't capped at a managed engine's step limit", async () => {
-    const id = newId();
-    // Past the reference's 1,024 steps for a free plan's instance.
-    await workflow("many-steps").create({ id, params: { steps: 1100 } });
+  // A thousand and more steps, one after another: some two and a half
+  // seconds alone, several times that on a loaded CI shard, past the
+  // helpers' usual deadline.
+  const manyStepsMs = 60_000;
 
-    await expect(ended("many-steps", id)).resolves.toStrictEqual({
-      status: "complete",
-      output: 1100,
-    });
-  });
+  it(
+    "aren't capped at a managed engine's step limit",
+    { timeout: manyStepsMs + 5000 },
+    async () => {
+      const id = newId();
+      // Past the reference's 1,024 steps for a free plan's instance.
+      await workflow("many-steps").create({ id, params: { steps: 1100 } });
+
+      await expect(
+        ended("many-steps", id, env.RUNS, manyStepsMs)
+      ).resolves.toStrictEqual({
+        status: "complete",
+        output: 1100,
+      });
+    }
+  );
 });

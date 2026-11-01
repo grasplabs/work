@@ -51,6 +51,7 @@ export type {
   AppTestSuite,
   LiveQuery,
   PublicReference,
+  TestDecisionAnswer,
   TestEffects,
   TestPrincipal,
   TestRunOutcome,

@@ -146,6 +146,8 @@ export const uploadErrors = defineErrorFamily({
     "The uploaded file is gone before its text was read. Upload it again.",
   "upload.superseded":
     "A later upload of a file with the same name was saved first, so this one wasn't.",
+  "upload.conversion_unavailable":
+    "Reading PDFs isn't set up for this deployment yet. Ask Grasp to set it up, then upload the file again.",
   "upload.extractor_busy":
     "The file waited an hour for its text to be read, and couldn't be: uploads are busier than usual. Upload it again later.",
 });

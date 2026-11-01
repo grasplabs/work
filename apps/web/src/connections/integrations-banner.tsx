@@ -1,3 +1,4 @@
+import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -69,7 +70,7 @@ const SignInAgain = ({
 };
 
 /**
- * A band across the top of Integrations: the brain in the middle, in dots, and a nerve coming in
+ * A band across the top of Integrations, on a painted field: the brain in the middle, in dots, and a nerve coming in
  * to it for every connected app, carrying its signals (`IntegrationsNerves`). Connect an app and
  * a nerve grows in; the brain takes `LINES` of them and no more. An app that needs signing in
  * again has a nerve that glows whole: with the pointer on it its name shows there, and a click
@@ -92,7 +93,12 @@ export const IntegrationsBanner = ({
     attention: stateOf(integration) === "needs_reauth",
   }));
   return (
-    <div className="banner-light relative h-44 overflow-hidden rounded-2xl border">
+    <PaintedField
+      className="h-44"
+      painting="mist"
+      pattern="horizon"
+      shape="band"
+    >
       <IntegrationsNerves
         lines={lines}
         onHold={(id, at) => {
@@ -118,6 +124,6 @@ export const IntegrationsBanner = ({
             shown={held === integration.key}
           />
         ))}
-    </div>
+    </PaintedField>
   );
 };

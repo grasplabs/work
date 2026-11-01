@@ -2,13 +2,19 @@ import { defineConfig, devices } from "@playwright/test";
 import type { Project } from "@playwright/test";
 
 import { localSignIn } from "./apps/core/test/sign-in-config.ts";
-import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
+import {
+  testAuthSecret,
+  testCapabilityKey,
+  testTokenKey,
+} from "./e2e/people.ts";
 import {
   corePort,
   e2eModel,
   e2eThinkingModel,
+  connectConfig,
   idpOrigin,
   idpPort,
+  modelFakePort,
   origin,
   stateDir,
 } from "./e2e/stack.ts";
@@ -200,6 +206,9 @@ export default defineConfig({
     // the fake IdP below (e2e/people.ts).
     {
       command: [
+        // Connect's config, which sends the AI providers' requests to the
+        // fake ones below (e2e/connect-config.ts).
+        "node e2e/connect-config.ts &&",
         // The dir comes from `env` below, so no path is ever shell syntax.
         'rm -rf "$DEV_PERSIST_TO" &&',
         `vp run --filter @grasp-os/core dev --local --port ${corePort}`,
@@ -214,14 +223,10 @@ export default defineConfig({
         // was lost) checking every 2 s at first, not every minute, so a
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
-        // `--local` has no Workers AI: a deployment kept in the EU extracts
-        // uploads' text in the Worker instead (knowledge/extract.ts). The
-        // Models page shows the rules and budgets.
+        // The Models page shows the rules and budgets.
         devVar(
           "MODEL_GATEWAY",
           JSON.stringify({
-            gateway: "grasp-os-e2e",
-            models: [e2eModel, e2eThinkingModel],
             eu: { models: [e2eModel, e2eThinkingModel], deployment: true },
             budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
           })
@@ -229,10 +234,14 @@ export default defineConfig({
       ].join(" "),
       env: {
         DEV_PERSIST_TO: stateDir,
+        // Core's dev script runs connect with it (e2e/connect-config.ts).
+        CONNECT_WRANGLER_CONFIG: connectConfig,
         // Core signs each connector call's capability and connect checks
         // it: from the environment, which wrangler gives both Workers, as
         // a `--var` reaches core alone.
         CAPABILITY_SIGNING_KEY: testCapabilityKey,
+        // Connect seals the AI provider keys the stack connects with it.
+        TOKEN_ENCRYPTION_KEY: testTokenKey,
       },
       port: corePort,
       reuseExistingServer: false,
@@ -240,6 +249,14 @@ export default defineConfig({
       // CI runner, so a runner a few seconds slower missed a 120 s limit
       // before any test ran.
       timeout: 240_000,
+    },
+    // Stands in for the AI providers: connect sends every model request
+    // here, so none leaves the machine (e2e/model-fake.ts).
+    {
+      command: "node e2e/model-fake.ts",
+      port: modelFakePort,
+      reuseExistingServer: false,
+      timeout: 30_000,
     },
     // Stands in for the client's Entra tenant.
     {

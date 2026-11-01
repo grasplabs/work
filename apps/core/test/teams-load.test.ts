@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   memberAnsweredBy,
   messageFrom,
@@ -17,7 +17,7 @@ import {
 // to the fake Bot Connector. The model echoes each question's own mark,
 // so an answer that reached the wrong person, or none, shows.
 //
-// 500 people's turns at once are for grasp-os-staging, with budgets and
+// 500 people's turns at once are for a staging client, with budgets and
 // limits on: workerd runs one isolate here, and signing in 500 people
 // would take the suite's whole budget.
 
@@ -35,7 +35,7 @@ const loadTime = { timeout: 600_000 };
 const markPattern = /load-question-[\da-f-]+/gu;
 
 /** An answer to the question the request asks: its mark, said back. */
-const echo = (body: unknown): GatewayReply => {
+const echo = (body: unknown): ProviderReply => {
   const marks = JSON.stringify(body).match(markPattern) ?? [];
   const mark = marks.at(-1) ?? "no-mark";
   const text = `Answer for ${mark}.`;
@@ -44,11 +44,13 @@ const echo = (body: unknown): GatewayReply => {
 
 describe("the door at a 500-person client", loadTime, () => {
   it("answers 50 people writing at once, each in their own chat with their own answer, none lost", async () => {
-    const gateway = answeringGateway((requests) => echo(requests.at(-1)?.body));
+    const provider = await answeringProvider((requests) =>
+      echo(requests.at(-1)?.body)
+    );
     const members = [];
     for (let index = 0; index < people; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- the mock IdP signs one in at a time
-      members.push(await memberAnsweredBy(idp, gateway));
+      members.push(await memberAnsweredBy(idp, provider));
     }
     const asked = members.map(({ teams }) => ({
       teams,

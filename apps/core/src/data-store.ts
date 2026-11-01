@@ -6,8 +6,6 @@ import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
   ClaimInput,
-  ReceiptLookup,
-  ReceiptStanding,
   Commit,
   DefinedTables,
   SchemaConsumer,
@@ -127,34 +125,6 @@ export class DataStore extends DurableObject<Env> {
    */
   fillMissing(storeId: StoreId, step: BackfillStep): string {
     return JSON.stringify(this.#live().fillMissing(storeId, step));
-  }
-
-  /**
-   * `StoreHost.sampleMigration`: a migration's dry-run sample, as JSON text
-   * (its records carry fields, which RPC types can't carry deeply).
-   */
-  sampleMigration(
-    storeId: StoreId,
-    sample: {
-      table: string;
-      migration: string;
-      consumer: { resourceId: string; resourceVersion: number };
-      limit: number;
-    }
-  ): string {
-    return JSON.stringify(this.#live().sampleMigration(storeId, sample));
-  }
-
-  /**
-   * `StoreHost.checkSampleOutputs`: a migration's dry-run outputs, as JSON
-   * text (they carry fields, which RPC types can't carry deeply).
-   */
-  checkSampleOutputs(
-    storeId: StoreId,
-    sample: string
-  ): ReturnType<StoreHost["checkSampleOutputs"]> {
-    const parsed: unknown = JSON.parse(sample);
-    return this.#live().checkSampleOutputs(storeId, parsed);
   }
 
   /**
@@ -306,11 +276,6 @@ export class DataStore extends DurableObject<Env> {
    */
   async claim(input: ClaimInput): Promise<string> {
     return JSON.stringify(await this.#live().claim(input));
-  }
-
-  /** `StoreHost.receiptStanding`: a look at a receipt, never a claim. */
-  async receiptStanding(input: ReceiptLookup): Promise<ReceiptStanding> {
-    return await this.#live().receiptStanding(input);
   }
 
   /**

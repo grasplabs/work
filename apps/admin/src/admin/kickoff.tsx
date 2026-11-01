@@ -16,6 +16,7 @@ import type { VisionField } from "@grasp-os/shared/admin/interviews";
 import { toBase64 } from "@grasp-os/shared/encoding";
 import {
   answerMaxLength,
+  isVisionShared,
   transcriptFileKinds,
   transcriptFileMaxBytes,
   transcriptMaxLength,
@@ -72,6 +73,8 @@ const refusals: Readonly<Record<KickoffRefusal, string>> = {
   "kickoff.not_read":
     "The conversation couldn’t be read just now. Try again in a moment.",
   "kickoff.invalid": "That isn’t something the kickoff takes.",
+  "kickoff.purged":
+    "An admin purged words from the kickoff while this was being read. Bring the transcript in again.",
   not_answered: "The company’s Grasp didn’t answer. Try again in a moment.",
 };
 
@@ -261,6 +264,8 @@ const Answer = ({
   keep: Keep;
 }) => {
   const id = useId();
+  const sharedId = useId();
+  const shared = isVisionShared(field.field);
   const { busy, failure, run } = useKickoff(keep);
   const [text, setText] = useState(field.answer ?? "");
   return (
@@ -283,6 +288,7 @@ const Answer = ({
         {`The sponsor’s answer: ${visionWords[field.field]}`}
       </label>
       <Textarea
+        aria-describedby={shared ? sharedId : undefined}
         disabled={busy}
         id={id}
         maxLength={answerMaxLength}
@@ -292,6 +298,11 @@ const Answer = ({
         placeholder="The sponsor’s answer"
         value={text}
       />
+      {shared ? (
+        <p className="text-muted-foreground text-xs" id={sharedId}>
+          Part of the company’s vision: every member will see this answer.
+        </p>
+      ) : null}
       {failure === null ? null : (
         <p className="text-destructive" role="alert">
           {failure}

@@ -11,7 +11,7 @@ import { dependencyLocks, packageCleanups } from "../db/core/schema.ts";
 /**
  * Records `key` (a tarball's integrity, or an artifact's hash) for
  * cleanup, before its files are written; recording it again moves its
- * time on, so the cron gives a write under way its full hour.
+ * time on, so the clock gives a write under way its full hour.
  */
 export const recordCleanup = async (
   env: Env,
@@ -54,7 +54,7 @@ export const clearBuildCleanup = async (
 
 /**
  * Moves `key`'s record on, if it has one, as its file is read: what is in
- * use gets its full hour again before the cron may delete it.
+ * use gets its full hour again before the clock may delete it.
  */
 export const touchCleanup = async (env: Env, key: string): Promise<void> => {
   await drizzle(env.DB)

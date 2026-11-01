@@ -212,11 +212,14 @@ const reportLimits = screenLimits.report;
 
 /**
  * A problem in a screen, as the frame reports it: an uncaught error, an
- * unhandled rejection or a `console.error` call. Written by App code, so
- * it is held to size and never counts as more than text.
+ * unhandled rejection or a `console.error` call of the App's own code; or
+ * a `warning`, a `console.error` call of the kit's (React's development
+ * warnings in a preview), which shows but fails nothing. Written by App
+ * code, so it is held to size and never counts as more than text; which
+ * kind it is, the frame says, so it is never more than a diagnostic.
  */
 export const screenProblemSchema = z.strictObject({
-  kind: z.enum(["error", "rejection", "console"]),
+  kind: z.enum(["error", "rejection", "console", "warning"]),
   message: z.string().transform((text) => text.slice(0, reportLimits.message)),
   stack: z
     .string()
@@ -402,12 +405,6 @@ export interface RunSubscriptionApi {
 export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
   delivery: () => Promise<ScreenDelivery>;
-  /**
-   * Tells core the page got the answer of `request`, a keyed submission
-   * the frame sent (spec 10.7.8): core forgets it from the person's
-   * recovery index. Anything else is forgotten nothing.
-   */
-  received: (request: string) => Promise<void>;
   /**
    * Starts a run of the App's workflow, for the person: anyone with a role
    * in the App. Audited as started on a screen (`via: "screen"`).

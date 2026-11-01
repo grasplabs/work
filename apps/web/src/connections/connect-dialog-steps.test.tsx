@@ -22,6 +22,21 @@ import { integrationsOf } from "./integrations.ts";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+// Someone who asked for less motion: the dialog stands still, and the test
+// reads it without waiting on animations the test DOM can't run.
+Reflect.set(window, "matchMedia", (query: string) => ({
+  matches: query.includes("reduce"),
+  media: query,
+  onchange: null,
+  addEventListener: () => {
+    // Nothing changes during a test.
+  },
+  removeEventListener: () => {
+    // Nothing to stop.
+  },
+  dispatchEvent: () => false,
+}));
+
 const someone = (role: Identity["role"]): Identity => ({
   userId: "u1",
   email: "ada@example.com",
@@ -197,6 +212,23 @@ describe("the connect dialog's steps", () => {
       "done",
       "active",
     ]);
+  });
+
+  it("fades the waiting row in as signing in starts, rather than swapping it into the buttons' place", async () => {
+    await opened(someone("user"), async () => await waitingForever());
+    const before = button("Sign in to Microsoft 365")?.closest(
+      '[data-slot="fade-in"]'
+    );
+    await press(button("Sign in to Microsoft 365"));
+    const waiting = [...document.querySelectorAll("output")].find((each) =>
+      each.textContent?.includes("Waiting for Microsoft 365")
+    );
+    const after = waiting?.closest('[data-slot="fade-in"]');
+    expect({
+      fadesIn: after instanceof HTMLElement,
+      anew: after !== before,
+      buttonsLeft: before?.isConnected,
+    }).toStrictEqual({ fadesIn: true, anew: true, buttonsLeft: false });
   });
 
   it("goes by the newest attempt only, when an older one answers after trying again failed", async () => {

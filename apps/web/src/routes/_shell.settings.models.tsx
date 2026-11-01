@@ -5,6 +5,7 @@ import type {
   ModelRulesSettings,
   ModelSettings,
 } from "@grasp-os/shared/models";
+import { isAdmin } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
@@ -33,12 +34,14 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
-// Models, for admins: the models the deployment allows and the client's
-// rules for model calls (EU routing, which models take sensitive data,
-// budgets). They are deployment config that Grasp sets as agreed with the
-// client, so the page only shows them, as core reads them; core checks
-// the role. What was spent against the budgets is AI spend's
-// (`_shell.settings.spend.tsx`). Beside them, each engine's model binding
+// Models, for admins: the models the organization's calls may use and the
+// client's rules for model calls (EU routing, which models take sensitive
+// data, budgets). The models are the organization's own choice, made with
+// its AI provider keys in Settings › AI providers, so the page only shows
+// them and points there: its own admins get the link, anyone else (Grasp
+// staff, who read but never change whose key pays) who to ask. The rules
+// are deployment config, as core reads them; core checks the role. What
+// was spent against the budgets is AI spend's (`_shell.settings.spend.tsx`). Beside them, each engine's model binding
 // with the caps an admin set on it (on the engine's Resources tab) and
 // what it spent against them today and this month.
 
@@ -243,7 +246,7 @@ const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
 const BindingCaps = ({ binding }: { binding: ModelBindingSpend }) => {
   if (binding.budgetDamaged) {
     return (
-      <span className="text-destructive">
+      <span className="text-status-attention">
         <Trans>Its budget can&apos;t be read, so it serves nothing.</Trans>
       </span>
     );
@@ -313,7 +316,7 @@ const SpentOf = ({
 const BindingAlert = ({ binding }: { binding: ModelBindingSpend }) => {
   if (binding.alert === "reached") {
     return (
-      <Badge variant="destructive">
+      <Badge variant="attention">
         <Trans>Cap reached</Trans>
       </Badge>
     );
@@ -385,7 +388,7 @@ const BindingBudgets = ({
                     {binding.alias}
                   </span>
                   {binding.model === null ? (
-                    <span className="text-destructive text-xs">
+                    <span className="text-status-attention text-xs">
                       <Trans>
                         What it is bound to can&apos;t be read, so it serves
                         nothing.
@@ -455,7 +458,33 @@ const EngineBudgets = ({ settings }: { settings: ModelSettings }) => {
   );
 };
 
-const Settings = ({ settings }: { settings: ModelSettings }) => {
+/**
+ * Where the models are changed: Settings › AI providers, for the
+ * organization's own admins; anyone else asks them.
+ */
+const WhereToChange = ({ canChange }: { canChange: boolean }) =>
+  canChange ? (
+    <Trans>
+      To change them, go to{" "}
+      <Link
+        className="underline underline-offset-4"
+        to="/settings/ai-providers"
+      >
+        Settings › AI providers
+      </Link>
+      .
+    </Trans>
+  ) : (
+    <Trans>To change them, ask your admin.</Trans>
+  );
+
+const Settings = ({
+  settings,
+  canChange,
+}: {
+  settings: ModelSettings;
+  canChange: boolean;
+}) => {
   const { t } = useLingui();
   if (settings.models.length === 0) {
     return (
@@ -463,9 +492,10 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
         <Section title={t`Allowed models`}>
           <p className="text-muted-foreground text-sm">
             <Trans>
-              Models aren&apos;t set up for this deployment yet, so no model
-              call can be made. Grasp sets them up.
-            </Trans>
+              No model is chosen for your organization yet, so no model call can
+              be made.
+            </Trans>{" "}
+            <WhereToChange canChange={canChange} />
           </p>
         </Section>
         <EngineBudgets settings={settings} />
@@ -478,10 +508,12 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
     <>
       <Section
         description={
-          <Trans>
-            Grasp sets these for your organization, as agreed with you. To
-            change them, contact Grasp.
-          </Trans>
+          <>
+            <Trans>
+              Your organization chooses these with its own AI provider keys.
+            </Trans>{" "}
+            <WhereToChange canChange={canChange} />
+          </>
         }
         title={t`Allowed models`}
       >
@@ -513,6 +545,7 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
 const Models = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
       <SettingsSection title={t`Models`}>
@@ -520,7 +553,12 @@ const Models = () => {
       </SettingsSection>
     );
   }
-  return <Settings settings={page.data} />;
+  return (
+    <Settings
+      canChange={isAdmin(identity.role) && !identity.staff}
+      settings={page.data}
+    />
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/models")({

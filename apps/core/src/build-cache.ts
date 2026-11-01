@@ -53,6 +53,22 @@ export const quarantineAfter = 3;
  */
 export const waitBackoff = { firstMs: 250, mostMs: 4000 } as const;
 
+/** What a cached build is written with: when it was last used. */
+export const usedNow = (): R2PutOptions => ({
+  customMetadata: { usedAt: String(Date.now()) },
+});
+
+/**
+ * When a cached build was last used: as it was last written, or, for one
+ * written before builds said so, when it was uploaded.
+ */
+export const lastUsedOf = (object: R2Object): number => {
+  const usedAt = Number(object.customMetadata?.usedAt);
+  return Number.isFinite(usedAt) && usedAt > 0
+    ? usedAt
+    : object.uploaded.getTime();
+};
+
 /** Where quarantined bytes are kept for operators. */
 const quarantinePrefix = "build-quarantine/";
 
@@ -293,6 +309,31 @@ const keep = async (
         isNull(buildReceipts.quarantinedAt)
       )
     );
+};
+
+/**
+ * Keeps `text`, already made, as `key`'s: under the key's lease, taken for
+ * `ms`, as a build keeps its bytes (`keep`), then given back. Whether it
+ * was kept: not while another holds the lease (it keeps its own), nor for
+ * a quarantined key.
+ */
+export const keepUnderLease = async (
+  env: CacheEnv,
+  key: string,
+  text: string,
+  ms: number
+): Promise<boolean> => {
+  const holder = crypto.randomUUID();
+  if (!(await takeLease(env, key, holder, ms))) {
+    return false;
+  }
+  try {
+    await keep(env, key, holder, text, usedNow());
+  } finally {
+    await giveBack(env, key, holder);
+  }
+  const receipt = await receiptOf(env, key);
+  return receipt?.objectKey === objectKeyOf(key, holder);
 };
 
 /** What a build answers, and whether its bytes may be kept. */

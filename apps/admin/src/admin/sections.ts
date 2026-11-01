@@ -114,7 +114,7 @@ export const sectionWords: Record<
   },
   contract: {
     title: "Contract",
-    about: "What was signed, what it gives the company, and what is billed.",
+    about: "The seats taken, the agreements, and what is billed.",
     icon: FileSignatureIcon,
   },
   members: {
@@ -218,20 +218,13 @@ const needSections: Record<Need["kind"], OrgSection> = {
 export const needSection = (need: Need): OrgSection => needSections[need.kind];
 
 /** A system a section's figures come from. */
-export type OrgSource =
-  | "core"
-  | "admin"
-  | "attio"
-  | "rooms"
-  | "stripe"
-  | "composio";
+export type OrgSource = "core" | "admin" | "attio" | "stripe" | "composio";
 
 /** Each source by name, as a section's line says it. */
 export const sourceNames: Record<OrgSource, string> = {
   core: "the company’s own Grasp",
   admin: "this admin",
   attio: "Attio",
-  rooms: "Rooms",
   stripe: "Stripe",
   composio: "Composio",
 };
@@ -257,13 +250,10 @@ export const originsOf = (
   snapshot: AdminSnapshot,
   /** Stripe was read for the company now. */
   stripe: boolean,
-  /** Rooms was read for the company now. */
-  rooms = false,
   /** Attio was read for the company now. */
   attio = false
 ): Record<OrgSection, Origin[]> => {
   const contacts = snapshot.contacts !== null;
-  const contract = snapshot.contract !== null;
   const works = snapshot.works !== null;
   const integrations = snapshot.integrations !== null;
   return {
@@ -278,8 +268,6 @@ export const originsOf = (
       },
     ],
     contract: [
-      { source: "rooms", what: "The contract", read: contract },
-      { source: "rooms", what: "The proposal and who signed it", read: rooms },
       { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],
     members: [fromCore],

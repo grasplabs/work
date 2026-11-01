@@ -16,6 +16,9 @@ export default defineProject({
     // The reference sleeps and backs off in real time; the polls fail at
     // 10 s first.
     testTimeout: 20_000,
+    // As in vite.config.ts: a run object's alarm logs from another request
+    // than the test's.
+    disableConsoleIntercept: true,
   },
   plugins: [
     cloudflareTest({

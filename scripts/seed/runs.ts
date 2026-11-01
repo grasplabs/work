@@ -1,10 +1,10 @@
 /**
- * Runs over the last 30 days. Each run is a real one: started through
- * core's API by the person it names, run by the engine, its decision
- * answered through the API by the person who decides. Only its times are
- * then moved back, in core's local D1, as core's tests write it: no API
- * starts a run in the past, and the dashboard counts runs by the day they
- * started.
+ * Runs over the last 30 days. Each run is a real one of an independent
+ * workflow: started through core's API by the person it names, run by the
+ * engine, its decision answered through the API by the person who
+ * decides. Only its times are then moved back, in core's local D1, as
+ * core's tests write it: no API starts a run in the past, and the
+ * overview and activity count runs by the day they started.
  */
 import type { DatabaseSync } from "node:sqlite";
 
@@ -174,10 +174,10 @@ const ended = (status: string): boolean =>
  */
 const settled = async (db: DatabaseSync, runs: readonly Started[]) => {
   const run = db.prepare(
-    "SELECT status, created_at, ended_at FROM workflow_runs WHERE id = ?"
+    "SELECT status, created_at, ended_at FROM workflow_resource_runs WHERE id = ?"
   );
   const open = db.prepare(
-    "SELECT id FROM workflow_decisions WHERE run_id = ? AND status = 'open'"
+    "SELECT id FROM workflow_decisions WHERE resource_run_id = ? AND status = 'open'"
   );
   const deadline = Date.now() + settleTimeoutMs;
   for (;;) {
@@ -206,11 +206,16 @@ const answered = (
 ): answer is Exclude<Answer, "open"> =>
   answer !== undefined && answer !== "open";
 
+/** The trigger that keeps an independent run's start time as it began. */
+const pinnedTrigger = "workflow_resource_runs_pinned";
+
 /**
- * Moves each run, its decision and what it told people back to when the
- * plan has it start, keeping how long each part took: seconds for the
- * engine's own steps, and for a decision the hours someone took to
- * answer, never past now.
+ * Moves each run and its decision back to when the plan has it start,
+ * keeping how long each part took: seconds for the engine's own steps,
+ * and for a decision the hours someone took to answer, never past now.
+ * A run's start time is pinned in core's D1, as nothing but a start ever
+ * sets it: the seed lifts the pin for its own moves, in one transaction,
+ * and puts it back as it was.
  */
 const backdate = (
   db: DatabaseSync,
@@ -218,26 +223,30 @@ const backdate = (
   now: number
 ): void => {
   const runOf = db.prepare(
-    "SELECT status, created_at, ended_at FROM workflow_runs WHERE id = ?"
+    "SELECT status, created_at, ended_at FROM workflow_resource_runs WHERE id = ?"
   );
   const decisionsOf = db.prepare(
-    "SELECT id, opened_at, expires_at, decided_at FROM workflow_decisions WHERE run_id = ?"
+    "SELECT id, opened_at, expires_at, decided_at FROM workflow_decisions WHERE resource_run_id = ?"
   );
   const moveRun = db.prepare(
-    `UPDATE workflow_runs SET created_at = ?, ended_at = ?,
-       started_by = CASE WHEN ? THEN NULL ELSE started_by END,
-       failure = CASE WHEN failure IS NULL THEN NULL ELSE json_set(failure, '$.failedAt', ?) END
-     WHERE id = ?`
+    "UPDATE workflow_resource_runs SET created_at = ?, ended_at = ? WHERE id = ?"
   );
   const moveDecision = db.prepare(
     "UPDATE workflow_decisions SET opened_at = ?, expires_at = ?, decided_at = ? WHERE id = ?"
   );
-  const moveNotifications = db.prepare(
-    "UPDATE notifications SET created_at = ?, updated_at = ? WHERE run_id = ?"
-  );
+  const pin = z
+    .object({ sql: z.string() })
+    .parse(
+      db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?"
+        )
+        .get(pinnedTrigger)
+    );
   db.exec("BEGIN IMMEDIATE");
   try {
-    for (const { id, workflow, at, answerAfter } of runs) {
+    db.exec(`DROP TRIGGER ${pinnedTrigger}`);
+    for (const { id, at, answerAfter } of runs) {
       const run = runRowSchema.optional().parse(runOf.get(id));
       if (run === undefined) {
         continue;
@@ -267,17 +276,9 @@ const backdate = (
         }
         moveDecision.run(openedAt, expiresAt, decidedAt, decision.id);
       }
-      moveRun.run(
-        at,
-        endedAt,
-        workflow.scheduled === true ? 1 : 0,
-        new Date(endedAt ?? at).toISOString(),
-        id
-      );
-      if (endedAt !== null) {
-        moveNotifications.run(endedAt, endedAt, id);
-      }
+      moveRun.run(at, endedAt, id);
     }
+    db.exec(pin.sql);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -286,18 +287,18 @@ const backdate = (
 };
 
 /**
- * Starts every workflow's runs on `app`, the engine `engine`, answers the
- * decisions the plans answer, and moves them all back in time. Returns
- * how many it started.
+ * Starts every workflow's runs (each workflow by its alias in
+ * `workflowIds`), of the engine `engine`, answers the decisions the plans
+ * answer, and moves them all back in time. Returns how many it started.
  */
 export const seedRuns = async ({
-  app,
+  workflowIds,
   engine,
   workflows,
   sessions,
   db,
 }: {
-  app: string;
+  workflowIds: ReadonlyMap<string, string>;
   engine: string;
   workflows: readonly WorkflowSeed[];
   sessions: ReadonlyMap<PersonKey, Session>;
@@ -339,17 +340,27 @@ export const seedRuns = async ({
 
   const started: Started[] = [];
   await eachLimited(planned, startsAtOnce, async (run) => {
-    const { id } = await sessionOf(run.plan.by).api.workflows.start(
-      app,
-      run.workflow.id,
-      run.plan.input
+    const workflowId = workflowIds.get(run.workflow.alias);
+    if (workflowId === undefined) {
+      throw new Error(`No workflow ${run.workflow.alias}`);
+    }
+    const { runId } = await sessionOf(run.plan.by).api.workflowResources.start(
+      workflowId,
+      {
+        version: 1,
+        input: run.plan.input,
+        key: crypto.randomUUID(),
+      }
     );
-    started.push({ ...run, id });
+    if (runId === null) {
+      throw new Error(`A run of ${run.workflow.id} wasn't admitted`);
+    }
+    started.push({ ...run, id: runId });
   });
   await settled(db, started);
 
   const decisionOf = db.prepare(
-    "SELECT id FROM workflow_decisions WHERE run_id = ? AND status = 'open'"
+    "SELECT id FROM workflow_decisions WHERE resource_run_id = ? AND status = 'open'"
   );
   await eachLimited(started, startsAtOnce, async ({ id, plan }) => {
     const { answer } = plan;

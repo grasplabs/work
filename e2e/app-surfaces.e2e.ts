@@ -256,15 +256,16 @@ test("an App's sidebar entry opens its screen, and its settings screen is a tab 
     core[Symbol.dispose]();
   }
   await page.goto(`/domains/${plain}?tab=settings`);
-  // No Settings tab: the page opens on its first.
-  await expect(page.getByRole("tab", { name: /^Apps/u })).toHaveAttribute(
+  // No Settings tab: the page opens on its first, Workflows.
+  await expect(page.getByRole("tab", { name: /^Workflows/u })).toHaveAttribute(
     "aria-selected",
     "true"
   );
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(0);
 
   // A tab the page doesn't know, by address, as text or as what reads as
-  // a number: the page, on its first tab.
+  // a number: the page, where it opens without one (Apps, for a domain
+  // that serves no business process).
   const firstTab = page.getByRole("tab", { name: /^Apps/u });
   await page.goto(`/domains/${app}?tab=workflows`);
   await expect(firstTab).toHaveAttribute("aria-selected", "true");

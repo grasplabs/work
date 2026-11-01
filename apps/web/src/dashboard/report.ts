@@ -14,6 +14,7 @@ import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 
 import { plainText } from "../chat/chat-markdown.ts";
+import type { ExportFigure } from "../export/figure-tiles.tsx";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { byKindOrder } from "./board.ts";
@@ -115,6 +116,64 @@ const item = (text: string): string => `- ${text}`;
 const unread = (i18n: I18n): string =>
   i18n._(msg`This couldn't be read when the report was made.`);
 
+/** How many of the window's runs stand at `outcome` now. */
+const sumOf = (
+  activity: RunActivity,
+  outcome: "completed" | "failed" | "waiting"
+): number => activity.days.reduce((sum, day) => sum + day[outcome], 0);
+
+/**
+ * The report's key figures, as the prototype's report opens with them in
+ * tiles (`lib/report.ts`): what ran in the window and how much of it no
+ * one had to touch. None when its runs couldn't be read, or none ran:
+ * then "What ran" says so, and a row of noughts would only repeat it.
+ */
+export const reportFigures = (
+  runs: Loaded<RunActivity>,
+  i18n: I18n
+): ExportFigure[] => {
+  if (runs.state !== "ready" || runs.data.runs.total === 0) {
+    return [];
+  }
+  const { data } = runs;
+  const { total, withoutPerson } = data.runs;
+  const count = new Intl.NumberFormat(i18n.locale);
+  const share = new Intl.NumberFormat(i18n.locale, { style: "percent" });
+  return [
+    {
+      key: "runs",
+      value: count.format(total),
+      label: i18n._(
+        msg({ message: "Runs started", context: "a figure of the report" })
+      ),
+    },
+    {
+      key: "completed",
+      value: count.format(sumOf(data, "completed")),
+      label: i18n._(
+        msg({ message: "Completed", context: "a figure of the report" })
+      ),
+    },
+    {
+      key: "failed",
+      value: count.format(sumOf(data, "failed")),
+      label: i18n._(
+        msg({ message: "Failed", context: "a figure of the report" })
+      ),
+    },
+    {
+      key: "alone",
+      value: share.format(withoutPerson / total),
+      label: i18n._(
+        msg({
+          message: "Ran without a person",
+          context: "a figure of the report",
+        })
+      ),
+    },
+  ];
+};
+
 /** What ran: the runs started in the window, and how they stand now. */
 const ranSection = (runs: Loaded<RunActivity>, i18n: I18n): string[] => {
   const heading = `## ${i18n._(msg`What ran`)}`;
@@ -129,11 +188,9 @@ const ranSection = (runs: Loaded<RunActivity>, i18n: I18n): string[] => {
   if (total === 0) {
     return [heading, window, i18n._(msg`No runs yet.`)];
   }
-  const sumOf = (outcome: "completed" | "failed" | "waiting"): number =>
-    data.days.reduce((sum, day) => sum + day[outcome], 0);
-  const completed = sumOf("completed");
-  const failed = sumOf("failed");
-  const waiting = sumOf("waiting");
+  const completed = sumOf(data, "completed");
+  const failed = sumOf(data, "failed");
+  const waiting = sumOf(data, "waiting");
   const share = new Intl.NumberFormat(i18n.locale, {
     style: "percent",
   }).format(withoutPerson / total);

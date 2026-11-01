@@ -1,4 +1,3 @@
-import { catalogGroups } from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -295,48 +294,6 @@ export const find = (
   ];
 };
 
-/**
- * One kind of app on the page: the company's own (connected) apps of it,
- * then the catalog's others.
- */
-export interface IntegrationSection {
-  group: CatalogGroup;
-  own: Integration[];
-  others: Integration[];
-}
-
-/**
- * The page's sections, as the prototype's: one per kind of app, in Grasp's
- * order, the connected apps first in each and the catalog's others after
- * them. Connected shows only what is connected; a kind shows only itself.
- */
-export const sectionsOf = (
-  integrations: readonly Integration[],
-  filter: IntegrationFilter,
-  search?: string
-): IntegrationSection[] => {
-  const found = find(
-    integrations.filter((integration) => keeps(filter, integration)),
-    search
-  );
-  return catalogGroups
-    .map((group) => {
-      const ofGroup = found.filter(
-        (integration) => integration.group === group
-      );
-      return {
-        group,
-        own: ofGroup.filter(
-          (integration) => stateOf(integration) !== "not_connected"
-        ),
-        others: ofGroup.filter(
-          (integration) => stateOf(integration) === "not_connected"
-        ),
-      };
-    })
-    .filter(({ own, others }) => own.length + others.length > 0);
-};
-
 /** How many integrations each kind of app holds. */
 export const countByGroup = (
   integrations: readonly Integration[]
@@ -459,4 +416,81 @@ export const workflowsOf = (
       oneSecond.localeCompare(otherSecond)
     );
   });
+};
+
+/**
+ * The page's sections, by where each app stands, as the prototype's
+ * (`routes/integrations/index.tsx`): what someone has to sign in to again,
+ * what is connected and used, what is connected though no workflow the
+ * person can open uses it, and then the catalog's other apps. Each in
+ * `find`'s order. The prototype's "Still to connect" (an app a workflow
+ * names that nobody connected) has no counterpart: Grasp's workflows name
+ * connections, never apps that aren't there.
+ */
+export interface IntegrationSections {
+  /** The connection the company relies on lapsed: someone has to sign in again. */
+  lapsed: Integration[];
+  /** Connected and used by a workflow; every connected one while that isn't known. */
+  connected: Integration[];
+  /** Connected, and used by no workflow the person can open. */
+  unused: Integration[];
+  /** The catalog's apps nobody connected. */
+  others: Integration[];
+}
+
+/** Whether a connection's access ran out. */
+const ranOut = ({ status }: { status: string }): boolean =>
+  status === "needs_reauth";
+
+/**
+ * Whether the connection the company relies on for `integration` lapsed:
+ * every shared one (or, with none shared, every one the person has), or
+ * one a workflow uses. A lapsed spare beside one that works isn't.
+ */
+export const reliedOnLapsed = (
+  integration: Integration,
+  uses?: readonly ConnectionWorkflows[]
+): boolean => {
+  const { connections } = integration;
+  const shared = connections.filter(({ scope }) => scope === "shared");
+  const relied = shared.length > 0 ? shared : connections;
+  if (relied.length > 0 && relied.every(ranOut)) {
+    return true;
+  }
+  const usedIds = new Set(
+    (uses ?? [])
+      .filter(({ workflows }) => workflows.length > 0)
+      .map(({ connectionId }) => connectionId)
+  );
+  return connections.some(
+    (connection) => ranOut(connection) && usedIds.has(connection.id)
+  );
+};
+
+/**
+ * The sections the filter and the search leave. Which workflows use each
+ * connection is read on its own (`uses`): until it is, or if it can't be,
+ * every connected app counts as used, so none is called unused wrongly.
+ */
+export const sectionsOf = (
+  integrations: readonly Integration[],
+  filter: IntegrationFilter,
+  search?: string,
+  uses?: readonly ConnectionWorkflows[]
+): IntegrationSections => {
+  const found = find(
+    integrations.filter((integration) => keeps(filter, integration)),
+    search
+  );
+  const own = found.filter((integration) => integration.connections.length > 0);
+  const lapsed = own.filter((integration) => reliedOnLapsed(integration, uses));
+  const connected = own.filter((integration) => !lapsed.includes(integration));
+  const used = (integration: Integration): boolean =>
+    uses === undefined || workflowsOf(integration, uses).length > 0;
+  return {
+    lapsed,
+    connected: connected.filter(used),
+    unused: connected.filter((integration) => !used(integration)),
+    others: found.filter((integration) => integration.connections.length === 0),
+  };
 };

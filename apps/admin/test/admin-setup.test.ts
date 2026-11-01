@@ -1,25 +1,25 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { setRing } from "../src/clients/settings.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
-import { clientDeploys, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
+import { adminDatabase } from "../src/db/act.ts";
+import { clients } from "../src/db/schema.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { aiStatusOf, emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-setup-5c1e90";
-const tenantToken = "test-tenant-admin-token-admin-setup-2a7d63";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -31,34 +31,20 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
  * core answers the admin with `snapshot`.
  */
 const liveClient = async (snapshot: AdminSnapshot) => {
-  const release = await publishRelease({ notes: "feat(core): the setup" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): the setup");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Acme ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = snapshot;
   return { clientId, name, account, release };
 };
+
+/** A link into the company's own Grasp, to its audit trail. */
+const toItsAuditTrail = /href="https:\/\/[^"/]+\/settings\/audit"/u;
 
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
@@ -71,7 +57,7 @@ const textOf = (html: string): string =>
   html.replaceAll(/<[^>]+>/gu, "").replaceAll("&#x27;", "'");
 
 describe("an organization's Setup", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The newest release is each test's own: an earlier test's clients are
   // gone from the fake, and are offboarded so nothing counts them.
   beforeEach(async () => {
@@ -86,28 +72,28 @@ describe("an organization's Setup", () => {
     const base = `/organizations/${acme.clientId}/setup`;
 
     const status = await page(base);
-    const deploys = await page(`${base}?tab=deploys`);
+    const history = await page(`${base}?tab=history`);
     const resources = await page(`${base}?tab=resources`);
     const releases = await page(`${base}?tab=releases`);
     const settings = await page(`${base}?tab=settings`);
     const header = textOf(sectionOf(status.html, "How it stands"));
     const checklist = textOf(sectionOf(status.html, "From contract to go"));
     const howItRuns = textOf(sectionOf(status.html, "How it runs"));
-    const quotaPolicy = textOf(sectionOf(status.html, "Quota policy"));
 
     expect({
-      statuses: [status, deploys, resources, releases, settings].map(
+      statuses: [status, history, resources, releases, settings].map(
         (each) => each.status
       ),
       header: [
         `${acme.clientId}.`,
         "Healthy",
-        acme.release.id,
+        acme.release,
         "Beta",
         "Open its Grasp",
         "Its activity",
-        "Open in Cloudflare",
       ].map((text) => header.includes(text)),
+      // Its activity is the audit trail in its own Grasp.
+      activity: toItsAuditTrail.test(sectionOf(status.html, "How it stands")),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
@@ -120,41 +106,29 @@ describe("an organization's Setup", () => {
       ].map((text) =>
         sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
-      // Its core asked which quota policy it applies: the platform's own,
-      // as the admin sets none.
-      quotaPolicy: [
-        "In sync",
-        "Core applies the platform's own, as the admin sets.",
-        "The admin sets no policy",
-      ].map((text) => quotaPolicy.includes(text)),
       howItRuns: [
         "Router",
         "Core",
         "Connect",
         "grasp-os-core",
         "grasp-os-files",
-        "AI Gateway",
       ].map((text) => howItRuns.includes(text)),
+      // No AI Gateway runs for it any more: its AI is its own provider's.
+      gateway: howItRuns.includes("AI Gateway"),
       // Deployed by the admin, and the contract not held by core yet.
       checklist: [
         "Its own platform is deployed",
-        "From Rooms, once it is connected.",
+        "Not known here yet.",
         "1 of 6 in place.",
       ].map((text) => checklist.includes(text)),
       deployed: checklist.includes(
-        "Its own platform is deployed, in its own Cloudflare account in the EU: done"
+        "Its own platform is deployed, in the EU: done"
       ),
-      deploys: {
-        last: textOf(sectionOf(deploys.html, "The last deploy")).includes(
-          `Release · ${acme.release.id}`
-        ),
-        every: textOf(sectionOf(deploys.html, "Recent deploys")).includes(
-          "Done"
-        ),
-        settingUp: deploys.html.includes("Setting it up"),
+      history: {
+        kept: history.html.includes('aria-label="Its history"'),
+        settingUp: history.html.includes("Setting it up"),
       },
       resources: [
-        acme.account.id,
         "grasp-os-core",
         "grasp-os-connect",
         "grasp-os-knowledge",
@@ -164,7 +138,7 @@ describe("an organization's Setup", () => {
       releases: {
         follows: releases.html.includes("Follows the rollouts"),
         runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
-          acme.release.id
+          acme.release
         ),
         runsThis: releases.html.includes("Runs this"),
         latestRollout: releases.html.includes("Not in one yet"),
@@ -178,16 +152,17 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
-      header: [true, true, true, true, true, true, true],
+      header: [true, true, true, true, true, true],
+      activity: true,
       toOldPages: false,
       needs: false,
       numbers: [true, true],
-      quotaPolicy: [true, true, true],
-      howItRuns: [true, true, true, true, true, true],
+      howItRuns: [true, true, true, true, true],
+      gateway: false,
       checklist: [true, true, true],
       deployed: true,
-      deploys: { last: true, every: true, settingUp: false },
-      resources: [true, true, true, true, true, true],
+      history: { kept: true, settingUp: false },
+      resources: [true, true, true, true, true],
       releases: {
         follows: true,
         runs: true,
@@ -207,33 +182,17 @@ describe("an organization's Setup", () => {
     await importReleases(env.RELEASES, db);
     await rotateClientSecrets(db, staff, acme.clientId, new Date());
     await setRing(env, staff, { clientId: acme.clientId, ring: 2 });
-    // Its settings, deployed again, stopped at the smoke check.
-    const later = new Date(Date.now() + 1000);
-    await db.insert(clientDeploys).values({
-      id: crypto.randomUUID(),
-      clientId: acme.clientId,
-      releaseId: acme.release.id,
-      kind: "settings",
-      status: "failed",
-      step: "workers",
-      error: "smoke_check_failed",
-      startedBy: staff.email,
-      createdAt: later,
-      updatedAt: later,
-    });
     const base = `/organizations/${acme.clientId}/setup`;
 
     const status = await page(base);
-    const deploys = await page(`${base}?tab=deploys`);
+    const history = await page(`${base}?tab=history`);
     const settings = await page(`${base}?tab=settings`);
     const needs = textOf(sectionOf(status.html, "What needs a look"));
     const lines = [
-      "The last deploy failed (Settings): smoke_check_failed",
       "New secrets wait to reach it",
       "2 releases behind the newest.",
     ];
-    const done = textOf(sectionOf(deploys.html, "Done here"));
-    const last = textOf(sectionOf(deploys.html, "The last deploy"));
+    const done = textOf(sectionOf(history.html, "Done here"));
 
     expect({
       standing: textOf(sectionOf(status.html, "How it stands")).includes(
@@ -246,12 +205,6 @@ describe("an organization's Setup", () => {
       ring: textOf(sectionOf(status.html, "How it stands")).includes(
         "Production"
       ),
-      last: [
-        "Workers: done",
-        "Smoke check: failed",
-        "Address: to come",
-        "It stopped: smoke_check_failed",
-      ].map((text) => last.includes(text)),
       done: [
         "Moved it to Production.",
         "Rotated its secrets.",
@@ -267,15 +220,132 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       standing: true,
-      needs: [true, true, true],
+      needs: [true, true],
       inOrder: true,
       ring: true,
-      last: [true, true, true, true],
       done: [true, true, true],
       created: false,
       secretsLive: true,
       waiting: true,
     });
+  });
+
+  it("says its AI in one line from what its core reports: working, what its failing calls show since the first such failure, or not connected", async () => {
+    const now = Date.now();
+    const status = (
+      lastOkAt: number | null,
+      failure: {
+        since: number;
+        last: number;
+        kind: string;
+        shows: ProviderTrouble;
+      } | null
+    ): AiStatusReport =>
+      aiStatusOf([
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt,
+          lastFailedAt: failure?.last ?? null,
+          lastFailure: failure?.kind ?? null,
+          failingClass: failure?.shows ?? null,
+          failingSince: failure?.since ?? null,
+        },
+        // Grasp's own key's calls say nothing of the company's AI.
+        {
+          provider: "anthropic",
+          kind: "platform",
+          lastOkAt: now,
+          lastFailedAt: null,
+          lastFailure: null,
+          failingClass: null,
+          failingSince: null,
+        },
+      ]);
+    // Since its first such failure after the call that last worked, not
+    // since its latest.
+    const failingSince = now - 2 * 60 * 1000;
+    const since = `${new Date(failingSince).toISOString().slice(11, 16)} UTC`;
+    const failingAs = async (kind: string, shows: ProviderTrouble) => {
+      const client = await liveClient(emptyAdminSnapshot("Acme"));
+      client.account.ai = status(now - 60 * 60 * 1000, {
+        since: failingSince,
+        last: now - 1000,
+        kind,
+        shows,
+      });
+      return client;
+    };
+    const working = await liveClient(emptyAdminSnapshot("Acme"));
+    working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
+    const shown = [
+      working,
+      await failingAs("auth", "refused"),
+      await failingAs("provider_down", "not_answering"),
+      await failingAs("quota", "limiting"),
+      await liveClient(emptyAdminSnapshot("Acme")),
+    ];
+
+    const sectionFor = async (clientId: string): Promise<string> => {
+      const { html } = await page(`/organizations/${clientId}/setup`);
+      return sectionOf(html, "AI");
+    };
+    const sections: string[] = [];
+    for (const { clientId } of shown) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      sections.push(await sectionFor(clientId));
+    }
+    const lines = sections.map(textOf);
+    const expected = [
+      "AI: OpenAI connected · working · last used 5 min ago",
+      `AI: OpenAI connected · refusing the key since ${since}`,
+      `AI: OpenAI connected · not answering since ${since}`,
+      `AI: OpenAI connected · limiting requests since ${since}`,
+      "AI: not connected yet",
+    ];
+
+    expect({
+      lines: lines.map((line, at) => line?.includes(expected[at] ?? "")),
+      // Read only: nothing to press.
+      buttons: sections.some((html) => html.includes("<button")),
+    }).toStrictEqual({
+      lines: [true, true, true, true, true],
+      buttons: false,
+    });
+  });
+
+  it("reads the AI of a core on an earlier release, whose report says nothing of failing calls, as working", async () => {
+    const now = Date.now();
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    // As that release answers: no `failingClass` or `failingSince`.
+    client.account.ai = {
+      providers: [
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt: now - 5 * 60 * 1000 - 10 * 1000,
+          lastFailedAt: null,
+          lastFailure: null,
+        },
+      ],
+    };
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: OpenAI connected · working · last used 5 min ago"
+    );
+  });
+
+  it("reads the AI of a core that answers with a redirect elsewhere as unknown, never following it", async () => {
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    client.account.aiRedirect = true;
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: couldn’t be read just now."
+    );
   });
 
   it("opens on how it stands for a tab it doesn't have, and has no Setup for a client the admin doesn't know", async () => {

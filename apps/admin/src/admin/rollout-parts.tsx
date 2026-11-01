@@ -6,9 +6,20 @@
  * own (src/rollout/functions.ts), audited there; the page is read again
  * after each, whether it worked or not.
  */
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Label } from "@grasp-os/ui/components/label";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
 import {
   Table,
   TableBody,
@@ -19,12 +30,11 @@ import {
 } from "@grasp-os/ui/components/table";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
+import { TriangleAlertIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { Cost, usd } from "../clients/cost.tsx";
 import { formatTime } from "../releases/format.ts";
 import type { RingChecks } from "../rollout/control.ts";
-import type { RolloutCost } from "../rollout/cost.ts";
 import {
   approveRolloutFn,
   cancelRolloutFn,
@@ -43,9 +53,9 @@ import type {
 } from "../rollout/shared-secrets.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
-import { Panel } from "./panel.tsx";
 import { ringWords, targetWords } from "./platform-parts.tsx";
 import { ringsOf } from "./platform.ts";
+import { Section } from "./section.tsx";
 
 /**
  * A target's statuses once a step of the rollout started on it: what a
@@ -107,7 +117,7 @@ const useControl = () => {
 };
 
 /** A refusal or failure, said where it happened. */
-const Alert = ({ children }: { children: string }) => (
+const Refusal = ({ children }: { children: string }) => (
   <p className="text-destructive" role="alert">
     {children}
   </p>
@@ -130,33 +140,36 @@ export const RingChecklist = ({
 }) => {
   const id = useId();
   return (
-    <fieldset className="flex flex-col gap-1 text-sm">
-      <legend className="sr-only">Before the next ring</legend>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={checks.evalPassed}
-          id={`${id}-eval`}
-          onCheckedChange={(checked) => {
-            onChange({ ...checks, evalPassed: checked });
-          }}
-        />
-        <Label htmlFor={`${id}-eval`}>
-          Stephen&apos;s eval passed on this release
-        </Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={checks.demoSent}
-          id={`${id}-demo`}
-          onCheckedChange={(checked) => {
-            onChange({ ...checks, demoSent: checked });
-          }}
-        />
-        <Label htmlFor={`${id}-demo`}>
-          The five demo messages, sent in real Teams on this ring, all answered
-        </Label>
-      </div>
-    </fieldset>
+    <FieldSet>
+      <FieldLegend className="sr-only">Before the next ring</FieldLegend>
+      <FieldGroup data-slot="checkbox-group">
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={checks.evalPassed}
+            id={`${id}-eval`}
+            onCheckedChange={(checked) => {
+              onChange({ ...checks, evalPassed: checked });
+            }}
+          />
+          <FieldLabel htmlFor={`${id}-eval`}>
+            Stephen&apos;s eval passed on this release
+          </FieldLabel>
+        </Field>
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={checks.demoSent}
+            id={`${id}-demo`}
+            onCheckedChange={(checked) => {
+              onChange({ ...checks, demoSent: checked });
+            }}
+          />
+          <FieldLabel htmlFor={`${id}-demo`}>
+            The five demo messages, sent in real Teams on this ring, all
+            answered
+          </FieldLabel>
+        </Field>
+      </FieldGroup>
+    </FieldSet>
   );
 };
 
@@ -244,7 +257,7 @@ export const Controls = ({ rollout }: { rollout: RolloutView }) => {
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {buttons}
-        {failure === null ? null : <Alert>{failure}</Alert>}
+        {failure === null ? null : <Refusal>{failure}</Refusal>}
       </div>
     </div>
   );
@@ -266,7 +279,7 @@ const keepReason = (check: RevocationCheck, name: string): string | null => {
 const checkLines = (check: RevocationCheck): string[] => [
   ...(check.rotated.length === 0
     ? [
-        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so deploy-ops may not have run, and there's nothing to revoke yet.",
+        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so Deploy platform may not have copied a new value in, and there's nothing to revoke yet.",
       ]
     : []),
   ...(check.revocable.length === 0
@@ -356,7 +369,7 @@ export const Revocation = ({ rolloutId }: { rolloutId: string }) => {
     setVerdict(verdictOf(result));
   };
   return (
-    <Panel
+    <Section
       action={
         <Button
           className="flex-none"
@@ -377,7 +390,7 @@ export const Revocation = ({ rolloutId }: { rolloutId: string }) => {
         <div
           className={cn(
             "flex flex-col gap-1 border-t px-5 py-3",
-            !verdict.safe && "text-destructive"
+            !verdict.safe && "text-status-attention"
           )}
           role={verdict.safe ? undefined : "alert"}
         >
@@ -386,45 +399,7 @@ export const Revocation = ({ rolloutId }: { rolloutId: string }) => {
           ))}
         </div>
       )}
-    </Panel>
-  );
-};
-
-/**
- * The rollout's clients' cost: read (`RolloutCost`), still being read
- * (null), or not read (`failed`).
- */
-export type CostRead = RolloutCost | "failed" | null;
-
-/** The clients' total cost, in words: all of it, its AI share, and how many aren't in it. */
-export const totalCostWords = (cost: CostRead): string => {
-  if (cost === null) {
-    return "reading…";
-  }
-  if (cost === "failed") {
-    return "unknown";
-  }
-  const { total, unknown } = cost;
-  const left =
-    unknown === 0
-      ? ""
-      : `, ${unknown} ${unknown === 1 ? "client" : "clients"} unknown`;
-  return `${usd.format(total.workers + total.ai)} (AI ${usd.format(total.ai)}${left})`;
-};
-
-/** Client `clientId`'s cost cell. */
-const TargetCost = ({
-  cost,
-  clientId,
-}: {
-  cost: CostRead;
-  clientId: string;
-}) => {
-  if (cost === null) {
-    return <span className="text-muted-foreground">reading…</span>;
-  }
-  return (
-    <Cost cost={cost === "failed" ? null : (cost.clients[clientId] ?? null)} />
+    </Section>
   );
 };
 
@@ -433,17 +408,15 @@ type PendingRollback =
   | { clientId: string; ring?: never }
   | { ring: number; clientId?: never };
 
-/** One company in the rollout: where it stands, why, its cost, and its rollback. */
+/** One company in the rollout: where it stands, why, and its rollback. */
 const TargetRow = ({
   target,
   name,
-  cost,
   busy,
   onRollBack,
 }: {
   target: TargetView;
   name: string;
-  cost: CostRead;
   busy: boolean;
   onRollBack: () => void;
 }) => (
@@ -481,9 +454,6 @@ const TargetRow = ({
         {formatTime(target.updatedAt)}
       </span>
     </TableCell>
-    <TableCell className="hidden @xl:table-cell" variant="card">
-      <TargetCost clientId={target.clientId} cost={cost} />
-    </TableCell>
     <TableCell className="text-right" variant="card">
       {reached.has(target.status) ? (
         <Button
@@ -505,11 +475,9 @@ const TargetRow = ({
  */
 export const Targets = ({
   rollout,
-  cost,
   names,
 }: {
   rollout: RolloutView;
-  cost: CostRead;
   names: ReadonlyMap<string, string>;
 }) => {
   const { busy, failure, act } = useControl();
@@ -563,14 +531,14 @@ export const Targets = ({
   return (
     <>
       {confirming === null ? null : (
-        <div
-          className="border-destructive bg-card flex flex-col gap-3 rounded-xl border px-5 py-4"
-          role="alert"
-        >
-          <p>
-            {`Rolling ${confirming.ring === undefined ? (names.get(confirming.clientId) ?? confirming.clientId) : ringWords(confirming.ring)} back puts the shared secrets it ran before back. If you revoked them at their providers, its people can't sign in or reach their connections until the next secrets rollout.`}
-          </p>
-          <div className="flex gap-2">
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              {`Rolling ${confirming.ring === undefined ? (names.get(confirming.clientId) ?? confirming.clientId) : ringWords(confirming.ring)} back puts the shared secrets it ran before back. If you revoked them at their providers, its people can't sign in or reach their connections until the next secrets rollout.`}
+            </p>
+          </AlertDescription>
+          <AlertAction placement="below">
             <Button
               disabled={busy}
               onClick={() => {
@@ -590,13 +558,13 @@ export const Targets = ({
             >
               Keep the new secrets
             </Button>
-          </div>
-        </div>
+          </AlertAction>
+        </Alert>
       )}
-      {failure === null ? null : <Alert>{failure}</Alert>}
-      {left === null ? null : <Alert>{left}</Alert>}
+      {failure === null ? null : <Refusal>{failure}</Refusal>}
+      {left === null ? null : <Refusal>{left}</Refusal>}
       {ringsOf(rollout, rollout.targets).map(({ ring, targets, done }) => (
-        <Panel
+        <Section
           action={
             targets.some(({ status }) => reached.has(status)) ? (
               <Button
@@ -631,12 +599,6 @@ export const Targets = ({
                   >
                     Updated (UTC)
                   </TableHead>
-                  <TableHead
-                    className="hidden w-32 @xl:table-cell"
-                    variant="card"
-                  >
-                    Cost this month
-                  </TableHead>
                   <TableHead className="w-28" variant="card">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -646,7 +608,6 @@ export const Targets = ({
                 {targets.map((target) => (
                   <TargetRow
                     busy={busy}
-                    cost={cost}
                     key={target.clientId}
                     name={names.get(target.clientId) ?? target.clientId}
                     onRollBack={() => {
@@ -658,7 +619,7 @@ export const Targets = ({
               </TableBody>
             </Table>
           </div>
-        </Panel>
+        </Section>
       ))}
     </>
   );

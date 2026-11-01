@@ -25,6 +25,7 @@ import {
   callAs,
   chatOrigin,
   outcome,
+  runMaintenance,
   serverUrl,
   someone,
 } from "./connect.ts";
@@ -157,6 +158,12 @@ const appOrigin = {
   context: { type: "app" as const, appId: "app-crm" },
 };
 
+/** Where App `appId`'s call comes from, as core signs it. */
+const originOf = (appId: string) => ({
+  permissionId: "permission-mail",
+  context: { type: "app" as const, appId },
+});
+
 /** Where a run's call comes from, as core signs it. */
 const runOrigin = {
   permissionId: "permission-mail",
@@ -213,6 +220,30 @@ const eventsFor = async (connectionId: string) => {
 };
 
 describe("a side effect from chat", () => {
+  it("isn't held for someone whose erasure began as it was asked, on a shared connection too", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Their erasure began (connect's person-erasure.ts marks it first)
+    // while the call was on its way: nothing is held for them.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(anna.userId, Date.now())
+      .run();
+
+    const asked = await outcome(hold(inChat(anna), mail(connectionId)));
+
+    expect({
+      asked,
+      ran: server.ran,
+      held: await waitingFor(anna),
+    }).toStrictEqual({
+      asked: "capability.invalid",
+      ran: [],
+      held: [],
+    });
+  });
+
   it("is held, not run, and its person sees the exact call", async () => {
     const anna = someone();
     const connectionId = await addConnection();
@@ -1182,6 +1213,45 @@ describe("a side effect from chat", () => {
     });
   });
 
+  it("of an App core removed are declined as expired, recorded, and its other Apps' wait on", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const removed = `app-${crypto.randomUUID()}`;
+    const inApp = (appId: string) => ({
+      ...appFor(anna.userId, appId),
+      mode: "interactive" as const,
+    });
+    await callAs(inApp(removed), mail(connectionId), {
+      restricted: true,
+      origin: originOf(removed),
+    });
+    await callAs(inApp("app-crm"), mail(connectionId, "cleo@acme.test"), {
+      restricted: true,
+      origin: appOrigin,
+    });
+    await exports.default.dropForRemovedApp({ appId: removed });
+    const waiting = await waitingFor(anna);
+    const events = await eventsFor(connectionId);
+
+    expect({
+      waiting: waiting.map(({ context }) => context),
+      expired: events.filter(
+        ({ action, outcome: why }) =>
+          action === "connection.action.expired" && why === "app.removed"
+      ).length,
+      refusesNonsense: await exports.default
+        .dropForRemovedApp({ appId: removed, more: true })
+        .then(
+          () => "ok",
+          (error: unknown) => connectErrors.codeOf(error)
+        ),
+    }).toStrictEqual({
+      waiting: [appOrigin.context],
+      expired: 1,
+      refusesNonsense: "connect.invalid",
+    });
+  });
+
   it("from a run that read restricted data waits for the person it acts for, and its retries get the answer", async () => {
     const anna = someone();
     const connectionId = await addConnection();
@@ -1519,12 +1589,12 @@ describe("a write held from a chat platform", () => {
     const connectionId = await addConnection();
     await holdFromTeams(anna, connectionId, Date.now() + hourMs);
     // Before midnight the clock leaves it waiting.
-    await exports.default.scheduled();
+    await runMaintenance();
     const before = await leftFor(connectionId);
     later(hourMs + 1);
     // Listed no more the moment its day is over.
     const listed = await waitingFor(anna);
-    await exports.default.scheduled();
+    await runMaintenance();
     const after = await leftFor(connectionId);
     expect({
       before: before.held.length,
@@ -1577,7 +1647,7 @@ describe("a write held from a chat platform", () => {
     const { idempotencyKey: _key, ...call } = mail(connectionId);
     await hold(inChat(anna), call);
     later(30 * 24 * hourMs);
-    await exports.default.scheduled();
+    await runMaintenance();
     const held = await heldFor(anna);
     const { output } = await confirm(anna, held);
     expect({ endsAt: held.endsAt, output }).toStrictEqual({

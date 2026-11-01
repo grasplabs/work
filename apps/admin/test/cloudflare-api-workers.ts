@@ -214,6 +214,11 @@ export const forgetDatabases = (): void => {
   slots.clear();
 };
 
+/** Frees the slot of the fake database `uuid`, once it is deleted. */
+export const forgetDatabase = (uuid: string): void => {
+  slots.delete(uuid);
+};
+
 /**
  * The real D1 database the fake database `uuid` keeps its data in: its
  * own, emptied when it's first used, so no two databases the fake holds,
@@ -282,6 +287,19 @@ const putScript = async (
   return envelope({ id: name });
 };
 
+/**
+ * An upload session's answer as Cloudflare sends it: its errors, messages
+ * and result info null rather than empty (seen on a real account, GRA-430).
+ */
+const sessionEnvelope = (result: Json): Response =>
+  Response.json({
+    success: true,
+    errors: null,
+    messages: null,
+    result_info: null,
+    result,
+  });
+
 /** Opens an assets upload session for the files `json`'s manifest lists that the account lacks. */
 const openAssetsSession = (account: AccountState, json: Json): Response => {
   const { manifest } = z
@@ -302,7 +320,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
   const jwt = `assets-${crypto.randomUUID()}`;
   if (missing.length === 0) {
     account.completions.add(jwt);
-    return envelope({ jwt, buckets: [] });
+    return sessionEnvelope({ jwt, buckets: [] });
   }
   account.sessions.set(jwt, new Set(missing));
   // Two files a bucket, so an upload takes several.
@@ -310,7 +328,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
     { length: Math.ceil(missing.length / 2) },
     (_, index) => missing.slice(index * 2, index * 2 + 2)
   );
-  return envelope({ jwt, buckets });
+  return sessionEnvelope({ jwt, buckets });
 };
 
 /** Takes a bucket of an upload session's files; the last completes it. */
@@ -369,7 +387,32 @@ const secretNames = (script: ScriptState | Response): Response => {
   return envelope(names.map((name) => ({ name, type: "secret_text" })));
 };
 
+/** Removes the secret `encoded` names from `script`: 404 when it has none so named. */
+const deleteSecret = (
+  script: ScriptState | Response,
+  encoded: string
+): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const name = decodeURIComponent(encoded);
+  if (script.versions.at(-1)?.secrets.has(name) !== true) {
+    return notFound();
+  }
+  return (
+    changeSecrets(script, (secrets) => {
+      secrets.delete(name);
+    }) ?? envelope(null)
+  );
+};
+
 export const workerRoutes: Route[] = [
+  {
+    method: "DELETE",
+    path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
+    answer: ({ account, params }) =>
+      account.scripts.delete(params.script ?? "") ? envelope(null) : notFound(),
+  },
   {
     method: "PUT",
     path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
@@ -391,48 +434,6 @@ export const workerRoutes: Route[] = [
           script: { migration_tag: script.migrationTag ?? null },
         },
       });
-    },
-  },
-  {
-    method: "GET",
-    path: /^\/workers\/scripts\/(?<script>[^/]+)\/versions$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      // The latest first, as the API lists them.
-      const items = script.versions
-        .toReversed()
-        .map(({ id, number }) => ({ id, number }));
-      return envelope({ items });
-    },
-  },
-  {
-    method: "POST",
-    path: /^\/workers\/scripts\/(?<script>[^/]+)\/versions$/u,
-    answer: async ({ account, call, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const upload = await readUpload(account, call.body);
-      if (upload instanceof Response) {
-        return upload;
-      }
-      if (upload.metadata.migrations !== undefined) {
-        return refusal(
-          400,
-          10_000,
-          "A version can't carry Durable Object migrations"
-        );
-      }
-      const { id, number } = newVersion(
-        script,
-        upload,
-        secretsOf(script, upload)
-      );
-      return envelope({ id, number });
     },
   },
   {
@@ -518,21 +519,8 @@ export const workerRoutes: Route[] = [
   {
     method: "DELETE",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/secrets\/(?<name>[^/]+)$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const name = decodeURIComponent(params.name ?? "");
-      if (script.versions.at(-1)?.secrets.has(name) !== true) {
-        return notFound();
-      }
-      return (
-        changeSecrets(script, (secrets) => {
-          secrets.delete(name);
-        }) ?? envelope(null)
-      );
-    },
+    answer: ({ account, params }) =>
+      deleteSecret(scriptOf(account, params), params.name ?? ""),
   },
   {
     method: "POST",
@@ -562,22 +550,6 @@ export const workerRoutes: Route[] = [
         .map(({ cron }) => cron);
       return envelope({
         schedules: script.schedules.map((cron) => ({ cron })),
-      });
-    },
-  },
-  {
-    method: "PUT",
-    path: /^\/workflows\/(?<name>[^/]+)$/u,
-    answer: ({ account, params, json }) => {
-      const workflow = {
-        class_name: text(json, "class_name"),
-        script_name: text(json, "script_name"),
-      };
-      account.workflows.set(params.name ?? "", workflow);
-      return envelope({
-        id: crypto.randomUUID(),
-        name: params.name,
-        ...workflow,
       });
     },
   },
@@ -647,6 +619,31 @@ const userWorkerOf = (
 };
 
 export const dispatchRoutes: Route[] = [
+  // The namespace's own details: what Readiness reads as the deployer.
+  {
+    method: "GET",
+    path: /^\/workers\/dispatch\/namespaces\/(?<namespace>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const scripts = namespaceOf(account, params);
+      return scripts instanceof Response
+        ? scripts
+        : envelope({
+            namespace_name: params.namespace,
+            script_count: scripts.size,
+          });
+    },
+  },
+  {
+    method: "DELETE",
+    path: dispatchPath(""),
+    answer: ({ account, params }) => {
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      return scripts.delete(params.script ?? "") ? envelope(null) : notFound();
+    },
+  },
   {
     method: "PUT",
     path: dispatchPath(""),
@@ -661,9 +658,16 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath(""),
     answer: ({ account, params }) => {
-      const script = userWorkerOf(account, params);
-      if (script instanceof Response) {
-        return script;
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      const script = scripts.get(params.script ?? "");
+      // A script the namespace hasn't got isn't a 404: Cloudflare answers
+      // the namespace's own details with a null script, as Grasp Work
+      // showed (GRA-430, 28 Oct).
+      if (script === undefined) {
+        return envelope({ dispatch_namespace: params.namespace, script: null });
       }
       return envelope({
         dispatch_namespace: params.namespace,
@@ -695,5 +699,11 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath("/secrets"),
     answer: ({ account, params }) => secretNames(userWorkerOf(account, params)),
+  },
+  {
+    method: "DELETE",
+    path: dispatchPath("/secrets/(?<name>[^/]+)"),
+    answer: ({ account, params }) =>
+      deleteSecret(userWorkerOf(account, params), params.name ?? ""),
   },
 ];

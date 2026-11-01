@@ -13,7 +13,6 @@
   },
   "scripts": {
     "build": "node build.ts",
-    "deploy": "node build.ts && wrangler deploy",
     "typegen": "wrangler types --include-runtime=false",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply DB --remote"

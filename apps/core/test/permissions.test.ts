@@ -23,8 +23,12 @@ import {
 import { grantReviewed, outlook, reviewedOf } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, connectionIn, envOf, reached } from "./contexts.ts";
-import { runCron, waitingInOutbox, whileLogDown } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  runMinuteTasks,
+  waitingInOutbox,
+  whileLogDown,
+} from "./maintenance.ts";
 import {
   auditedDuring,
   openRpc,
@@ -604,6 +608,10 @@ describe("permissions", () => {
       "CONNECT_DB",
       "CONNECT_MIGRATIONS",
       "CONNECT_PROVIDERS",
+      // Tests set these for a while (env.d.ts), and a test running beside
+      // this one, or one that put back no value, leaves the name in env.
+      "MODEL_BUDGET_MONTH",
+      "MODEL_BUDGET_DAY",
     ]);
     const own = Object.keys(env).filter((name) => !testOnly.has(name));
     expect(
@@ -672,8 +680,8 @@ describe("permissions", () => {
       ).resolves.toBe(1);
       return result;
     });
-    await runCron();
-    await runCron();
+    await runMinuteTasks();
+    await runMinuteTasks();
 
     const events = await allEvents();
     expect({

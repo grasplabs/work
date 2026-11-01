@@ -3,9 +3,10 @@ import {
   routerClientIpHeader,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import worker from "../src/index.ts";
 import {
   fakeCores,
   mapHost,
@@ -21,6 +22,15 @@ const acme = {
 
 const secretOf = async (clientId: string, generation: number) =>
   await deriveRouterSecret(testRouterKey, clientId, generation);
+
+/** `url`'s status from a router whose STAGE is `stage`, misconfigured as it may be. */
+const statusWithStage = async (url: string, stage: string): Promise<number> => {
+  // A value STAGE's type rules out: the misconfiguration under test.
+  const misconfigured: Env = { ...env };
+  Reflect.set(misconfigured, "STAGE", stage);
+  const response = await worker.fetch(new Request(url), misconfigured);
+  return response.status;
+};
 
 const statusOf = async (url: string): Promise<number> => {
   const response = await exports.default.fetch(url);
@@ -67,6 +77,29 @@ describe("router", () => {
     const headers = cores.received[0]?.headers;
     expect(headers?.get("cookie")).toBe("a=b");
     expect(headers?.get(routerSecretHeader)).toBe(await secretOf("acme", 3));
+  });
+
+  it("never routes a host of the other stage, even one its map holds", async () => {
+    // This router is production's (wrangler.jsonc's top level): staging's
+    // clients are below its domain, and stay staging's router's.
+    await mapHost("acme.staging.ongrasp.app", acme);
+    await mapHost("acme.ongrasp.app", acme);
+
+    expect({
+      staging: await statusOf("https://acme.staging.ongrasp.app/"),
+      production: await statusOf("https://acme.ongrasp.app/"),
+    }).toStrictEqual({ staging: 404, production: 200 });
+    expect(cores.received).toHaveLength(1);
+  });
+
+  it("routes nothing when its STAGE names neither stage", async () => {
+    await mapHost("unstaged.ongrasp.app", acme);
+
+    expect({
+      misspelt: await statusWithStage("https://unstaged.ongrasp.app/", "prod"),
+      empty: await statusWithStage("https://unstaged.ongrasp.app/", ""),
+    }).toStrictEqual({ misspelt: 404, empty: 404 });
+    expect(cores.received).toHaveLength(0);
   });
 
   it("looks a hostname up however the request cases it", async () => {

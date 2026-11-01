@@ -3,11 +3,12 @@ import { collections } from "@grasp-os/brain/schema";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
+import { isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appsFoundBy, appsReadableBy } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
-import { memberOf } from "../auth/identity.ts";
+import { actingPerson } from "../auth/identity.ts";
 import { apps } from "../db/core/schema.ts";
 import { collectionsAllowed } from "./access.ts";
 import type { Reader } from "./access.ts";
@@ -30,8 +31,9 @@ import type { Reader } from "./access.ts";
 // permissions.ts `requireCollection`; an App granted it before counts it
 // as a source that doesn't resolve, app-provenance.ts, so the App reaches
 // nobody but its owner and admins), and not for those who may open
-// every App (admins), who find every entry. Apps are never deleted, so
-// every entry's App exists.
+// every App (admins), who find every entry but a removed App's
+// (app-removal.ts): a removed App's row stays, so every entry's App
+// exists, and its entry is read by nobody.
 
 /** The Apps collection, under this ID: no other has it. */
 export const appsCollectionId: CollectionId = collectionIdSchema.parse("apps");
@@ -55,7 +57,11 @@ const personOf = async (
   if (reader.type === "person") {
     return reader.person;
   }
-  return await memberOf(env.DB, reader.authority.onBehalfOf);
+  return await actingPerson(
+    env,
+    reader.authority.onBehalfOf,
+    reader.authority.staff
+  );
 };
 
 /** The entries a reader finds: every one, or those at these paths. */
@@ -63,9 +69,23 @@ type Found = "every" | readonly string[];
 
 /** The entries `person` finds: those of the Apps they may open. */
 const foundBy = async (env: Env, person: Person): Promise<Found> => {
-  // Who may open every App (as `appFor` decides it), whatever it read.
+  // Who may open every App (as `appFor` decides it), whatever it read:
+  // every entry, but a removed App's (app-removal.ts), which nobody opens.
   if (isAdmin(person.role)) {
-    return "every";
+    const removed = await drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .where(isNotNull(apps.removedAt))
+      .limit(1)
+      .get();
+    if (removed === undefined) {
+      return "every";
+    }
+    const kept = await drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .where(isNull(apps.removedAt));
+    return kept.map(({ id }) => appEntryPath(id));
   }
   const rows = await drizzle(env.DB)
     .select({ id: apps.id })

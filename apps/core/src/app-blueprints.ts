@@ -49,6 +49,7 @@ import {
   readTree,
   storeBlueprintTree,
   storeTree,
+  screensIn,
   supersededBy,
   toApp,
   toVersion,
@@ -614,6 +615,7 @@ export const createFromBlueprint = async (
     responsibleId: null,
     audienceType: null,
     audienceId: null,
+    process: null,
     blueprint: blueprint.id,
     currentVersion: null,
     pendingVersion: null,
@@ -622,6 +624,8 @@ export const createFromBlueprint = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: now,
+    removedAt: null,
+    removedBy: null,
   };
   const versionRow: VersionRow = {
     appId: app,
@@ -639,6 +643,7 @@ export const createFromBlueprint = async (
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
@@ -676,6 +681,7 @@ export const createFromBlueprint = async (
       responsibleId: sql<string | null>`NULL`.as("responsible_id"),
       audienceType: sql<"person" | "team" | null>`NULL`.as("audience_type"),
       audienceId: sql<string | null>`NULL`.as("audience_id"),
+      process: sql<string | null>`NULL`.as("process"),
       blueprint: sql<string | null>`${appRow.blueprint}`.as("blueprint"),
       currentVersion: sql<number | null>`${appRow.currentVersion}`.as(
         "current_version"
@@ -687,6 +693,8 @@ export const createFromBlueprint = async (
       statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
       statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
+      removedAt: sql<Date | null>`NULL`.as("removed_at"),
+      removedBy: sql<string | null>`NULL`.as("removed_by"),
     })
     .from(blueprints)
     .where(
@@ -991,6 +999,7 @@ export const acceptBlueprintUpdate = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,

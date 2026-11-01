@@ -29,6 +29,7 @@ import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
+import { LeaveConfirmDialog } from "./leave-confirm-dialog.tsx";
 import { navigationPolicy, tabBudget } from "./navigation-policy.ts";
 import type { NavigationPolicy, PageState } from "./navigation-policy.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
@@ -400,53 +401,6 @@ const Frame = ({
     />
   );
 };
-
-/**
- * Asks whether to leave a screen whose forms hold unsaved edits, or a
- * change whose outcome isn't known yet: once per leave, in Grasp's own
- * dialog, which the screen can't draw over or answer.
- */
-export const LeaveConfirmDialog = ({
-  open,
-  onLeave,
-  onStay,
-}: {
-  open: boolean;
-  onLeave: () => void;
-  onStay: () => void;
-}) => (
-  <AlertDialog
-    onOpenChange={(next) => {
-      if (!next) {
-        onStay();
-      }
-    }}
-    open={open}
-  >
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          <Trans>Leave this app?</Trans>
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          <Trans>
-            It has changes that aren&apos;t saved, or a change it hasn&apos;t
-            heard back about. Leaving loses unsaved changes; anything already
-            saved or running stays.
-          </Trans>
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Stay</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onLeave}>
-          <Trans>Leave</Trans>
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
 
 /**
  * Asks once, when another version of the App was made current while its

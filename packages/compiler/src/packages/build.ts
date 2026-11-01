@@ -40,7 +40,9 @@ let wasmMemory: WebAssembly.Memory | undefined;
  * memory is kept, to measure.
  */
 let started: Promise<void> | undefined;
-const startEsbuild = async (wasmModule: WebAssembly.Module): Promise<void> => {
+export const startEsbuild = async (
+  wasmModule: WebAssembly.Module
+): Promise<void> => {
   started ??= (async () => {
     const instantiate = WebAssembly.instantiate.bind(WebAssembly);
     // Go's runtime instantiates the module itself, with what it imports;

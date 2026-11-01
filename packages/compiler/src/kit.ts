@@ -27,6 +27,12 @@ export interface Kit {
   /** What each of the kit's modules imports, by flat name. */
   moduleImports: Record<string, string[]>;
   /**
+   * What each of the preview kit's modules imports, by flat name: the kit
+   * built for a chat's preview (spec 19.2.1), with React's development
+   * builds and React Fast Refresh. Its own chunks, so its own graph.
+   */
+  previewModuleImports: Record<string, string[]>;
+  /**
    * What the type check reads, by absolute path: TypeScript's libraries
    * and the kit's packages with their declarations, as `/node_modules/…`.
    */
@@ -70,6 +76,8 @@ export const compilerAssets = {
   source: "compiler.js",
   kit: "kit.json",
   kitModules: "kit-modules.json",
+  /** The preview kit's modules (`KitModules`), which only previews load. */
+  kitPreviewModules: "kit-preview-modules.json",
   /** The SDK modules an App's workflows import (`sdkImports`). */
   workflowSdkModules: "sdk-workflow-modules.json",
   /** The SDK modules an App's server isolate loads (`serverSdkImports`). */
@@ -130,6 +138,20 @@ export const screenReferences = {
  * screen needs it (`ScreenClosure.kitModules`).
  */
 export const screenRuntime = "@grasp-os/sdk/screen-runtime";
+
+/**
+ * What runs a chat's preview in its frame in place of `screenRuntime`:
+ * the screen runtime with React Fast Refresh (spec 22.7). Only the
+ * preview kit has it.
+ */
+export const previewRuntime = "@grasp-os/sdk/preview-runtime";
+
+/**
+ * Where a preview build's modules register their components with React
+ * Fast Refresh: only the preview kit has it, and App code never imports it
+ * itself (the compiler adds the import).
+ */
+export const previewRefresh = "@grasp-os/sdk/preview-refresh";
 
 /** The kit's stylesheet, by the id its content is filed under in `stylesheets`. */
 export const kitStylesheet = "@grasp-os/ui/styles.css";

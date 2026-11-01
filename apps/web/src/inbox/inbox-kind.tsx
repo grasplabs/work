@@ -3,22 +3,21 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {
+  CalendarOffIcon,
   CircleCheckIcon,
   CircleHelpIcon,
-  EyeIcon,
-  FileTextIcon,
   GitCompareArrowsIcon,
   GlobeIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
   PackageIcon,
   PencilLineIcon,
+  PlayIcon,
   RocketIcon,
   ScaleIcon,
   ShieldCheckIcon,
   SparklesIcon,
   SplitIcon,
-  TimerIcon,
   TriangleAlertIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -50,13 +49,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     context: "inbox item kind: two sources disagree",
   }),
   openQuestion: msg({ message: "Open question", context: "inbox item kind" }),
-  reviewPolicy: msg({ message: "Policy", context: "inbox item kind" }),
-  watchingRule: msg({ message: "Rule", context: "inbox item kind" }),
-  exceptionEnding: msg({ message: "Exception", context: "inbox item kind" }),
   unknownAiTool: msg({ message: "AI tool", context: "inbox item kind" }),
   signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
   externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
   heldWrite: msg({ message: "Change", context: "inbox item kind" }),
+  heldStart: msg({ message: "Workflow start", context: "inbox item kind" }),
   unknownOutcome: msg({
     message: "Did it happen?",
     context: "inbox item kind: a change whose answer was lost",
@@ -65,6 +62,15 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   packages: msg({ message: "Packages", context: "inbox item kind" }),
   appApproval: msg({ message: "App approval", context: "inbox item kind" }),
   failedRun: msg({ message: "Failed run", context: "inbox item kind" }),
+  stoppedSchedule: msg({
+    message: "Stopped schedule",
+    context: "inbox item kind",
+  }),
+  bindingApproval: msg({
+    message: "Bindings",
+    context:
+      "inbox item kind: what a workflow reaches, for an admin to approve",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -76,18 +82,18 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   confirmResult: CircleCheckIcon,
   conflict: SplitIcon,
   openQuestion: CircleHelpIcon,
-  reviewPolicy: FileTextIcon,
-  watchingRule: EyeIcon,
-  exceptionEnding: TimerIcon,
   unknownAiTool: SparklesIcon,
   signInAgain: KeyRoundIcon,
   externalDomain: GlobeIcon,
   heldWrite: PencilLineIcon,
+  heldStart: PlayIcon,
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   packages: PackageIcon,
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
+  stoppedSchedule: CalendarOffIcon,
+  bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };
 

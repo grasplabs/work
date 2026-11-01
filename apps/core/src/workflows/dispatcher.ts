@@ -114,7 +114,8 @@ const admissionSubjectOf = async (env: Env, row: RunRow): Promise<string> => {
 
 /**
  * Who a run acts for now: its person, or its App's owner; and the App
- * version whose code it runs, for the audit log.
+ * version whose code it runs, for the audit log; and whether staff
+ * started it (GRA-1088).
  */
 const authorityOf = async (env: Env, row: RunRow): Promise<Authority> => {
   const app = appIdSchema.parse(row.appId);
@@ -124,6 +125,11 @@ const authorityOf = async (env: Env, row: RunRow): Promise<Authority> => {
     onBehalfOf: row.startedBy ?? ownerId,
     mode: "workflow",
     appVersion: row.version,
+    // A run a Grasp staff member started, as its row was written
+    // (`startRun`): its person must be staff still, and its events say so.
+    ...(row.startedByStaff && row.startedBy !== null
+      ? { staff: true as const }
+      : {}),
   };
 };
 
@@ -313,7 +319,7 @@ const runWorkflow = async (
   if (row.detailsRemovedAt !== null) {
     throw new Error(`Run ${runId} has ended: its details were removed`);
   }
-  const step = countedStep(engineStep, await stepLimitOf(env));
+  const step = countedStep(engineStep, stepLimitOf(env));
   let lastFailed: FailedStep | undefined;
   const stepFailed = (failure: FailedStep): void => {
     lastFailed = failure;

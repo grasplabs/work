@@ -1,7 +1,7 @@
 /**
  * How the admin changes anything: the change and its audit event in one
  * D1 batch, so neither lands without the other (threat model R19, CO6). A
- * change outside the database (a Workflow started) is recorded first, on
+ * change outside the database (a run started) is recorded first, on
  * its own (`audit`).
  */
 import { sql } from "drizzle-orm";
@@ -20,13 +20,6 @@ export const adminDatabase = (d1: D1Database): AdminDatabase => drizzle(d1);
 /** Who acted: a staff member, or the admin itself (its cron and workflows). */
 export type Actor = Staff | "system";
 
-/**
- * Who an audit event names: an actor, or a Discord user asking Grasp's bot
- * (src/admin/discord.ts), by their Discord id. The bot only reads, so it is
- * only ever recorded on its own (`audit`).
- */
-export type AuditActor = Actor | `discord:${string}`;
-
 /** What happened, as the audit log records it: identifiers, never content. */
 export interface AdminEvent {
   /** A dotted verb, such as `client.create`. */
@@ -43,7 +36,7 @@ export interface AdminEvent {
 const actionPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
 /** Checks `event` and builds its row. */
-const rowOf = (actor: AuditActor, event: AdminEvent) => {
+const rowOf = (actor: Actor, event: AdminEvent) => {
   if (!actionPattern.test(event.action)) {
     throw new Error(`Not an audit action: ${event.action}`);
   }
@@ -79,15 +72,35 @@ export const act = async (
 
 /**
  * Records `event` by `actor` on its own: for an action whose change isn't
- * in the admin's database, such as starting a Workflow. Recorded before
+ * in the admin's database, such as starting a run. Recorded before
  * the action, so an action that then fails is still an audited attempt.
  */
 export const audit = async (
   db: AdminDatabase,
-  actor: AuditActor,
+  actor: Actor,
   event: AdminEvent
 ): Promise<void> => {
   await db.insert(auditEvents).values(rowOf(actor, event));
+};
+
+/**
+ * `event` by `actor` as a statement that records it only if the statement
+ * right before it in a batch changed a row (`changes()`), answering the
+ * event's id when it did: for a batch `actIfChanged` doesn't shape, such
+ * as one whose change needs other rows gone first.
+ */
+export const auditIfChanged = (
+  db: AdminDatabase,
+  actor: Actor,
+  event: AdminEvent
+) => {
+  const row = rowOf(actor, event);
+  return db
+    .insert(auditEvents)
+    .select(
+      sql`SELECT ${row.id}, ${row.at.getTime()}, ${row.actor}, ${row.action}, ${row.clientId}, ${row.target}, ${row.detail} WHERE changes() > 0`
+    )
+    .returning({ id: auditEvents.id });
 };
 
 /**
@@ -112,13 +125,7 @@ export const actIfChanged = async (
   event: AdminEvent,
   following: readonly BatchItem<"sqlite">[] = []
 ): Promise<boolean> => {
-  const row = rowOf(actor, event);
-  const record = db
-    .insert(auditEvents)
-    .select(
-      sql`SELECT ${row.id}, ${row.at.getTime()}, ${row.actor}, ${row.action}, ${row.clientId}, ${row.target}, ${row.detail} WHERE changes() > 0`
-    )
-    .returning({ id: auditEvents.id });
+  const record = auditIfChanged(db, actor, event);
   const [, recorded] = await db.batch([statement, record, ...following]);
   return recorded.length > 0;
 };

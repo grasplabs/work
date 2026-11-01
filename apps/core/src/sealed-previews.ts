@@ -231,7 +231,7 @@ const storeStepMs = 5000;
  * object first (`DataStore.discardFixture`, which refuses any store that
  * isn't a recorded fixture), then core's row, so a discard that fails is
  * found again by the next sweep. A preview still running on one is out of
- * date at its next step (`#requireRecorded`). From the cron, for the time
+ * date at its next step (`#requireRecorded`). From the clock, for the time
  * `at`.
  */
 export const sweepPreviewStores = async (

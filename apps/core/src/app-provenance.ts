@@ -387,7 +387,9 @@ const edgesOf = async (
       // A business store no App owns is a source, not a node: nothing
       // writes into it but whoever holds a grant on it, since a store grant
       // needs a store an App owns (permissions.ts `requireStoreObject`) and
-      // sealing claims the store for its App (`claimStore`). Should
+      // sealing claims the store for its App (`claimStore`). A workflow's
+      // store (store-owners.ts) is one of these until its operations are
+      // served (GRA-682): no grant on it can be asked for yet. Should
       // anything else come to write into one, it must become a node of the
       // graph, so that what one holder wrote reaches the others.
       found
@@ -399,6 +401,10 @@ const edgesOf = async (
     }
   }
   for (const { type, consumer, owner } of served) {
+    // Only an App's: the query reads those of the frontier's Apps.
+    if (owner === null) {
+      continue;
+    }
     const holder = nodeOf(type, consumer);
     const to = appNode(owner);
     link([owner], { from: holder, to }, { from: to, to: holder });

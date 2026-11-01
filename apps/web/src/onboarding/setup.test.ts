@@ -288,9 +288,9 @@ describe("what needs the admin", () => {
     const done = settledAs(fresh, "mail", true);
     const again = settledAs(done, "mail", false);
     expect({
-      fresh: openItems(fresh.settled),
-      done: openItems(done.settled),
-      again: openItems(again.settled),
+      fresh: openItems(fresh.settled, true),
+      done: openItems(done.settled, true),
+      again: openItems(again.settled, true),
       unchanged: settledAs(done, "mail", true) === done,
     }).toStrictEqual({
       fresh: ["mail"],
@@ -298,6 +298,21 @@ describe("what needs the admin", () => {
       again: ["mail"],
       unchanged: true,
     });
+  });
+
+  it("include connecting an AI provider until a model is ready for calls, and hold nothing up when core can't say", () => {
+    expect({
+      none: openItems(["mail"], true, { providers: [], ready: false }),
+      noModel: openItems(["mail"], true, {
+        providers: ["Anthropic"],
+        ready: false,
+      }),
+      ready: openItems(["mail"], true, {
+        providers: ["Anthropic"],
+        ready: true,
+      }),
+      unknown: openItems(["mail"], true, null),
+    }).toStrictEqual({ none: ["ai"], noModel: ["ai"], ready: [], unknown: [] });
   });
 });
 

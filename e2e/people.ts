@@ -4,6 +4,7 @@ import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
 import { newWebSocketRpcSession } from "capnweb";
+import { z } from "zod";
 
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
@@ -14,7 +15,8 @@ import { newWebSocketRpcSession } from "capnweb";
  * front, before any test runs; tests only look theirs up.
  */
 import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
-import { origin } from "./stack.ts";
+import { expectModelRequestsHere } from "./model-fake.ts";
+import { e2eModel, e2eModelKey, e2eThinkingModel, origin } from "./stack.ts";
 
 /** Signs session cookies on the test stack only; never a real secret. */
 export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
@@ -25,6 +27,13 @@ export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
  */
 export const testCapabilityKey =
   "e2e-only-capability-signing-key-of-32-chars-or-more";
+
+/**
+ * Seals what connect keeps, the AI provider keys the stack's organization
+ * adds among them, on the test stack only: 32 bytes, base64. Never a real
+ * secret.
+ */
+export const testTokenKey = btoa("e2e-only-token-key-of-32-bytes!!");
 
 const sessionCookie = "__Host-grasp.session_token";
 
@@ -173,6 +182,60 @@ const rpcSocket = (person: Pick<Person, "cookie">): WebSocket => {
   return new WebSocket(url, { headers } as never);
 };
 
+/**
+ * A team of the organization, named `name`, made by `admin` as Better
+ * Auth's organization plugin makes one; its ID.
+ */
+export const teamMadeBy = async (
+  admin: Pick<Person, "cookie">,
+  name: string
+): Promise<string> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/create-team", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Making team ${name} failed (${response.status}): ${await response.text()}`
+    );
+  }
+  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  return id;
+};
+
+/** Puts `userId` in the team `teamId`, as an admin does through Better Auth. */
+export const teamMemberAddedBy = async (
+  admin: Pick<Person, "cookie">,
+  teamId: string,
+  userId: string
+): Promise<void> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/add-team-member", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ teamId, userId }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Adding ${userId} to team ${teamId} failed (${response.status}): ${await response.text()}`
+    );
+  }
+};
+
 /** The person's API over `/rpc`, from Node, as their browser would open it. */
 export const apiOf = (person: Pick<Person, "cookie">) => {
   const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
@@ -223,7 +286,7 @@ export const endSession = async (
  */
 const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
-  appPage: { builder: "builder", user: "user" },
+  appPage: { builder: "builder", user: "user", colleague: "builder" },
   screens: { one: "builder", two: "builder" },
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
@@ -242,7 +305,7 @@ const cast = {
   notesLanguage: { builder: "builder" },
   signOutFailure: { member: "user" },
   workflowEditor: { builder: "builder" },
-  workflowDiagram: { builder: "builder" },
+  workflowDiagram: { builder: "builder", admin: "admin" },
   workflowModules: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
@@ -253,6 +316,7 @@ const cast = {
   memberRemoval: { admin: "admin", leaving: "user" },
   workspaceSettings: { admin: "admin", member: "user" },
   memberInvites: { admin: "admin" },
+  teams: { admin: "admin", member: "user" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
@@ -261,10 +325,12 @@ const cast = {
   notFound: { member: "user" },
   errorReports: { member: "user" },
   connections: { admin: "admin", user: "user" },
-  landscape: { admin: "admin", user: "user" },
   knowledge: { one: "user", two: "user" },
   knowledgeUploads: { one: "user" },
   knowledgeReader: { admin: "admin", reader: "user" },
+  knowledgeCreate: { admin: "admin", member: "user" },
+  knowledgePurge: { admin: "admin", member: "user" },
+  knowledgeSkills: { admin: "admin", member: "user" },
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
@@ -305,7 +371,11 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChanges: { member: "user" },
+  brainTranscript: { member: "user" },
+  brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   boardGoals: { admin: "admin", member: "user" },
+  workflowTeam: { admin: "admin", builder: "builder", member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
   staffInterviews: { admin: "admin" },
@@ -387,6 +457,19 @@ export const signInCast = async (attempts: number): Promise<Cast> => {
           await api.members.setRole(userId, role);
         })
     );
+    // The stack's AI providers and models (e2e/stack.ts), as an admin
+    // connects them in Settings: every page that offers a model reads them.
+    await api.aiProviders.add({ provider: "mistral", key: e2eModelKey });
+    await api.aiProviders.add({ provider: "anthropic", key: e2eModelKey });
+    await api.aiProviders.setModels({
+      defaultModel: e2eModel,
+      fallbacks: [e2eThinkingModel],
+    });
+    // Each provider asked once, as an admin tests it: its request must
+    // reach the stack's fake providers, never the provider itself.
+    await api.aiProviders.test("mistral", e2eModel);
+    await api.aiProviders.test("anthropic", e2eThinkingModel);
+    await expectModelRequestsHere(["api.mistral.ai", "api.anthropic.com"]);
     const byAttempt: Cast = Array.from({ length: attempts }, () => ({}));
     for (const { attempt, scene, name, ...person } of signedIn) {
       const scenes = byAttempt[attempt] ?? {};

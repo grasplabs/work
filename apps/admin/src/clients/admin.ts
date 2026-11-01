@@ -27,8 +27,7 @@
  * read, when one is linked and Secrets Store has the key
  * (src/billing/billing.ts): in the same turn, within the same deadline, so
  * its billing never holds up the snapshot or another client. So is its
- * proposal in Grasp's Rooms, when a room is linked and Rooms can be read
- * (src/proposal/proposal.ts). So is its company in Grasp's Attio, with
+ * company in Grasp's Attio, with
  * its people and deals, when a company is linked and Secrets Store has
  * Attio's key (src/crm/crm.ts).
  */
@@ -57,14 +56,13 @@ import type { Crm } from "../crm/crm.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientAdminReads } from "../db/schema.ts";
-import { deploySecrets } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { deploySecrets, ifStored } from "../deploy/context.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited } from "../live-reads.ts";
-import { proposalOf, roomsAccess, roomsLinks } from "../proposal/proposal.ts";
-import type { Proposal } from "../proposal/proposal.ts";
-import { clientGrid, healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
+import type { CoreAddress } from "./core-address.ts";
+import { clientGrid, healthTimeoutMs, routeOf } from "./grid.ts";
 import type { GridRow } from "./grid.ts";
 
 const encoder = new TextEncoder();
@@ -105,8 +103,6 @@ export type ClientAdmin =
       at: string;
       /** What it pays and whether it is paid, as Stripe says, or why that isn't read. */
       billing: Billing;
-      /** The proposal it was sent and what was signed, as Rooms says, or why that isn't read. */
-      proposal: Proposal;
       /** Its company, people and deals, as Attio says, or why that isn't read. */
       crm: Crm;
     }
@@ -120,7 +116,7 @@ export type ClientAdmin =
 
 /** What asking a client's core for its snapshot takes. */
 export interface AdminSnapshotRequestOptions {
-  coreUrl: string;
+  core: CoreAddress;
   routerSecret: string;
   /** The client's core auth secret, the signing key's source. */
   authSecret: string;
@@ -146,7 +142,7 @@ const statusError = (status: number): AdminReadError => {
  * connection).
  */
 export const adminSnapshotOf = async ({
-  coreUrl,
+  core,
   routerSecret,
   authSecret,
   staff,
@@ -163,7 +159,7 @@ export const adminSnapshotOf = async ({
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(`${coreUrl}${adminSnapshotPath}`, {
+  const response = await core.fetch(`${core.origin}${adminSnapshotPath}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -229,7 +225,8 @@ const readClient = async (
           env.ROUTER_HOSTS,
           secrets.routerKey,
           row.id,
-          row.hostname
+          row.hostname,
+          env.DISPATCHER
         );
         if (route === "no_route") {
           return { error: "no_route" };
@@ -238,7 +235,7 @@ const readClient = async (
           return { error: "unconfigured" };
         }
         const read = await adminSnapshotOf({
-          coreUrl: route.coreUrl,
+          core: route.core,
           routerSecret: route.secret,
           authSecret: await clientAuthSecret(secrets, row.id, route.generation),
           staff,
@@ -371,25 +368,15 @@ export const clientAdmins = async (
   const db = adminDatabase(env.DB);
   const grid = await clientGrid(env);
   const known = grid.filter(({ status }) => status !== "offboarded");
-  const [
-    lastAnswered,
-    secrets,
-    key,
-    links,
-    rooms,
-    roomLinks,
-    attio,
-    companyLinks,
-  ] = await Promise.all([
-    lastAnswers(db),
-    ifStored(async (): Promise<DeploySecrets> => await deploySecrets(env)),
-    stripeKey(env),
-    stripeLinks(db),
-    roomsAccess(env),
-    roomsLinks(db),
-    attioKey(env),
-    attioLinks(db),
-  ]);
+  const [lastAnswered, secrets, key, links, attio, companyLinks] =
+    await Promise.all([
+      lastAnswers(db),
+      ifStored(async (): Promise<DeploySecrets> => await deploySecrets(env)),
+      stripeKey(env),
+      stripeLinks(db),
+      attioKey(env),
+      attioLinks(db),
+    ]);
   const askedAt = new Date();
   const sources: ReadSources = {
     env,
@@ -415,14 +402,6 @@ export const clientAdmins = async (
             })
           : null,
         row.status === "active"
-          ? proposalOf({
-              access: rooms,
-              projectId: roomLinks.get(row.id) ?? null,
-              clientId: row.id,
-              timeoutMs: options.timeoutMs,
-            })
-          : null,
-        row.status === "active"
           ? crmOf({
               key: attio,
               recordId: companyLinks.get(row.id) ?? null,
@@ -438,7 +417,7 @@ export const clientAdmins = async (
   );
   await keepOutcomes(db, outcomes, askedAt);
   return known.map((client, index): ClientAdmin => {
-    const [outcome, billing, proposal, crm] = read[index] ?? [];
+    const [outcome, billing, crm] = read[index] ?? [];
     if (outcome !== undefined && "snapshot" in outcome) {
       return {
         client,
@@ -446,7 +425,6 @@ export const clientAdmins = async (
         snapshot: outcome.snapshot,
         at: outcome.at.toISOString(),
         billing: billing ?? { state: "not_linked" },
-        proposal: proposal ?? { state: "not_linked" },
         crm: crm ?? { state: "not_linked" },
       };
     }
@@ -462,7 +440,7 @@ export const clientAdmins = async (
 /**
  * Every active client's admin snapshot alone, as `staff`, or why it isn't
  * here: what the admin's watch reads (src/clients/watch.ts), without the
- * billing, proposal and CRM a page shows beside it. Each client's read is
+ * billing and CRM a page shows beside it. Each client's read is
  * kept as `clientAdmins` keeps it.
  */
 export const clientSnapshots = async (

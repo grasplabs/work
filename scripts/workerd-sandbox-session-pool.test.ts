@@ -10,7 +10,7 @@
  * workerd-sandbox-session.test.ts has the rest.
  */
 import { once } from "node:events";
-import type { Socket } from "node:net";
+import type { Server, Socket } from "node:net";
 import { connect, createServer } from "node:net";
 import path from "node:path";
 
@@ -25,6 +25,12 @@ import { cleanUp, tempDir } from "./workerd-test-server.ts";
 describe("a session on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
+  // A stand-in core behind a proxy that drops what the supervisor says of
+  // the CPU time it bounds. Served here, with the rest of the setup: a
+  // workerd's start takes seconds on a loaded runner, which the test of
+  // what the call does there shouldn't count.
+  let unboundedCoreUrl: string;
+  let unbounding: Server;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
@@ -33,9 +39,34 @@ describe("a session on the on-prem sandbox", () => {
       log: () => {},
     });
     coreUrl = await serveStandIn("session-worker.ts", supervisor.socket);
+    const proxy = path.join(tempDir(), "unbounding.sock");
+    unbounding = createServer((client: Socket) => {
+      const upstream = connect(supervisor.socket);
+      let head = true;
+      upstream.on("data", (chunk: Buffer) => {
+        client.write(
+          head
+            ? chunk
+                .toString("latin1")
+                .replace(/\r\nx-grasp-sandbox-cpu-ms: \d+/iu, "")
+            : chunk
+        );
+        head = false;
+      });
+      client.pipe(upstream);
+      upstream.on("close", () => {
+        client.destroy();
+      });
+      client.on("close", () => {
+        upstream.destroy();
+      });
+    }).listen(proxy);
+    await once(unbounding, "listening");
+    unboundedCoreUrl = await serveStandIn("session-worker.ts", proxy);
   }, 120_000);
 
   afterAll(async () => {
+    unbounding.close();
     await supervisor.stop();
     cleanUp();
   });
@@ -287,37 +318,9 @@ describe("a session on the on-prem sandbox", () => {
   );
 
   it("refuses to run on a sandbox that doesn't say it bounds the call's CPU time", async () => {
-    // A proxy in front of the supervisor that drops what it says.
-    const proxy = path.join(tempDir(), "proxy.sock");
-    const server = createServer((client: Socket) => {
-      const upstream = connect(supervisor.socket);
-      let head = true;
-      upstream.on("data", (chunk: Buffer) => {
-        client.write(
-          head
-            ? chunk
-                .toString("latin1")
-                .replace(/\r\nx-grasp-sandbox-cpu-ms: \d+/iu, "")
-            : chunk
-        );
-        head = false;
-      });
-      client.pipe(upstream);
-      upstream.on("close", () => {
-        client.destroy();
-      });
-      client.on("close", () => {
-        upstream.destroy();
-      });
-    }).listen(proxy);
-    try {
-      const behindProxy = await serveStandIn("session-worker.ts", proxy);
-      const outcome = await run("capabilities", "app-stand-in", behindProxy);
-      expect(outcome.status).toBe("unavailable");
-      expect(outcome.message).toContain("doesn't bound");
-    } finally {
-      server.close();
-    }
+    const outcome = await run("capabilities", "app-stand-in", unboundedCoreUrl);
+    expect(outcome.status).toBe("unavailable");
+    expect(outcome.message).toContain("doesn't bound");
   });
 
   it("says the sandbox is unavailable, not the App's fault, when the supervisor is gone", async () => {

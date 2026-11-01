@@ -1,3 +1,4 @@
+import { declaredWorkflows } from "@grasp-os/sdk/host";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import type {
   DecisionConfirmation,
@@ -15,14 +16,22 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { loadRelease } from "../app-releases.ts";
 import { appFor } from "../apps.ts";
-import { workflowDecisions, workflowRuns } from "../db/core/schema.ts";
+import {
+  appWorkflowBindings,
+  workflowDecisions,
+  workflowResourceRuns,
+  workflowRuns,
+  workflowStartReceipts,
+} from "../db/core/schema.ts";
 import {
   answerableBy,
   answerDecision,
   confirmDecision,
   reviewDecision,
 } from "../decisions/decisions.ts";
+import { appHost } from "../durable-objects.ts";
 import { queuedRuns } from "./admission.ts";
 import {
   findRun,
@@ -278,13 +287,76 @@ export const screenRun = async (
   return toScreenRun(found, waiting.get(row.id) ?? []);
 };
 
+/** The App a screen asks through, and the version of it the frame runs. */
+export interface ScreenOf {
+  readonly app: unknown;
+  /** The release version of the frame's build; none for a frame with none. */
+  readonly version: number | undefined;
+}
+
 /**
- * The ID of the decision `decision` (its name in the workflow) of the
- * App's run `run`; `decision.not_found` for any other.
+ * Whether App `app` may answer, through its release at `version`, a
+ * decision of a run of workflow `workflowId` at `version`: as the
+ * reference's inbox lists it (workflow-reference-queries.ts), the version
+ * the release's seal pins for one of its aliases, while the App's binding
+ * of that alias still names it.
+ */
+const answersThrough = async (
+  env: Env,
+  app: AppId,
+  release: number,
+  run: { workflowId: string; version: number }
+): Promise<boolean> => {
+  const sealed = await loadRelease(env, app, release);
+  const aliases = declaredWorkflows(sealed.app, sealed.workflows)
+    .filter(
+      ({ pinned }) =>
+        pinned?.workflowId === run.workflowId && pinned.version === run.version
+    )
+    .map(({ alias }) => alias);
+  if (aliases.length === 0) {
+    return false;
+  }
+  const bound = await drizzle(env.DB)
+    .select({ alias: appWorkflowBindings.alias })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, app),
+        eq(appWorkflowBindings.status, "active"),
+        eq(appWorkflowBindings.workflowResourceId, run.workflowId),
+        eq(appWorkflowBindings.workflowResourceVersion, run.version),
+        inArray(appWorkflowBindings.alias, aliases)
+      )
+    )
+    .get();
+  return bound !== undefined;
+};
+
+/**
+ * The ID of the decision `decision` of the App's run `run`, as a screen
+ * names it: an App run's decision by its name in the workflow; an
+ * independent run's (workflows.<alias>.queries.decisions, its wait's
+ * `id`) by its ID. `decision.not_found` for any other, alike.
+ *
+ * An independent run's decision is the App's to answer only while:
+ * - the App started its run (its start receipt names the App);
+ * - the frame's release pins the run's workflow version for an alias the
+ *   App's binding still names it under, as the inbox lists it;
+ * - the run's restricted mode is the App's: a restricted run's only
+ *   through a restricted App (what it holds never out through one that
+ *   isn't), and an unrestricted run's only through an App that isn't
+ *   (an answer a restricted App's screen composes may carry what it
+ *   read, as its sends may: screen-workflows.ts).
+ * An App run keeps its App's restricted mode (restricted.ts): its
+ * decisions need no such check. Who may answer, until when, against
+ * which context and with which confirmation is the decision service's
+ * (`answerDecision`), as on the decision's own page.
  */
 const appDecision = async (
   env: Env,
   app: AppId,
+  release: number | undefined,
   run: unknown,
   decision: unknown
 ): Promise<string> => {
@@ -297,7 +369,8 @@ const appDecision = async (
     decisionNameSchema,
     decision
   );
-  const found = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const found = await db
     .select({ id: workflowDecisions.id })
     .from(workflowDecisions)
     .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
@@ -309,10 +382,46 @@ const appDecision = async (
       )
     )
     .get();
-  if (!found) {
+  if (found) {
+    return found.id;
+  }
+  const independent =
+    release === undefined
+      ? undefined
+      : await db
+          .select({
+            id: workflowDecisions.id,
+            restricted: workflowResourceRuns.restricted,
+            workflowId: workflowResourceRuns.workflowResourceId,
+            version: workflowResourceRuns.version,
+          })
+          .from(workflowDecisions)
+          .innerJoin(
+            workflowResourceRuns,
+            eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+          )
+          .innerJoin(
+            workflowStartReceipts,
+            eq(workflowStartReceipts.id, workflowResourceRuns.id)
+          )
+          .where(
+            and(
+              eq(workflowDecisions.id, name),
+              eq(workflowResourceRuns.id, runId.data),
+              eq(workflowStartReceipts.invokerType, "app"),
+              eq(workflowStartReceipts.invokerId, app)
+            )
+          )
+          .get();
+  if (
+    release === undefined ||
+    independent === undefined ||
+    independent.restricted !== (await appHost(env, app).isRestricted()) ||
+    !(await answersThrough(env, app, release, independent))
+  ) {
     throw decisionErrors.create("decision.not_found");
   }
-  return found.id;
+  return independent.id;
 };
 
 /**
@@ -323,16 +432,16 @@ const appDecision = async (
 export const reviewScreenDecision = async (
   env: Env,
   by: Identity,
-  app: unknown,
+  screen: ScreenOf,
   run: unknown,
   decision: unknown,
   answer: unknown
 ): Promise<DecisionReview> => {
-  const { id } = await appFor(env, by, app, "user");
+  const { id } = await appFor(env, by, screen.app, "user");
   return await reviewDecision(
     env,
     by,
-    await appDecision(env, id, run, decision),
+    await appDecision(env, id, screen.version, run, decision),
     answer
   );
 };
@@ -347,20 +456,20 @@ export const reviewScreenDecision = async (
 export const confirmScreenDecision = async (
   env: Env,
   by: Identity,
-  app: unknown,
+  screen: ScreenOf,
   run: unknown,
   decision: unknown,
   revision: unknown,
   answer: unknown
 ): Promise<DecisionConfirmation> => {
-  const { id } = await appFor(env, by, app, "user");
+  const { id } = await appFor(env, by, screen.app, "user");
   return await confirmDecision(
     env,
     by,
-    await appDecision(env, id, run, decision),
+    await appDecision(env, id, screen.version, run, decision),
     revision,
     answer,
-    "screen"
+    { app: id }
   );
 };
 
@@ -377,19 +486,19 @@ export const confirmScreenDecision = async (
 export const decideScreenRun = async (
   env: Env,
   by: Identity,
-  app: unknown,
+  screen: ScreenOf,
   run: unknown,
   decision: unknown,
   answer: unknown,
   confirmation: unknown
 ): Promise<DecisionView> => {
-  const { id } = await appFor(env, by, app, "user");
+  const { id } = await appFor(env, by, screen.app, "user");
   return await answerDecision(
     env,
     by,
-    await appDecision(env, id, run, decision),
+    await appDecision(env, id, screen.version, run, decision),
     answer,
     confirmation,
-    "screen"
+    { app: id }
   );
 };

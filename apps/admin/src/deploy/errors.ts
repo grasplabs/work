@@ -1,3 +1,7 @@
+import { CloudflareApiError } from "../cloudflare/api.ts";
+import { ClientDomainUnsetError } from "./client-domain.ts";
+import { MissingStoreSecretError } from "./context.ts";
+
 /**
  * Why a deploy stopped, as its `client_deploys` row and audit event record
  * it: a fixed code, never a message or a response body (threat model R17).
@@ -5,20 +9,6 @@
 export const deployErrorCodes = [
   /** The release isn't imported, or its manifest no longer parses. */
   "release_not_imported",
-  /** The release declares nothing of what its code works with. */
-  "release_undeclared",
-  /**
-   * The release doesn't work with what the client runs: a Worker would
-   * call one of its Workers, or one of its Workers another, at a version
-   * that one doesn't serve, or it doesn't read a workflow journal or run
-   * an App release the client's code may have left.
-   */
-  "release_incompatible",
-  /**
-   * The release's code doesn't run on a database's schema as the
-   * client's migrations left it: a later release's contracted it.
-   */
-  "schema_incompatible",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */
@@ -29,23 +19,12 @@ export const deployErrorCodes = [
   "bucket_outside_eu",
   /** A D1 migration failed to apply. */
   "d1_migration_failed",
-  /** A newer deploy of the same client started: this one no longer runs. */
-  "deploy_superseded",
   /** Another runner took the client over while the deploy ran: a rollback. */
   "runner_replaced",
   /** The account's script ran a Durable Object migration the release doesn't have. */
   "unknown_migration_tag",
   /** A binding in the manifest names a placeholder the admin doesn't fill. */
   "unknown_placeholder",
-  /** A client setting isn't a deployment config var core reads. */
-  "unknown_setting",
-  /** A client setting, or the config derived for it, isn't one core would take. */
-  "setting_invalid",
-  /**
-   * A `MAIL_FROM` setting names another address than the onboarding
-   * sender's, the only one the client's `EMAIL` binding sends from.
-   */
-  "mail_sender_locked",
   /**
    * The client's sign-in can't be made: its record doesn't parse, or it
    * names an IdP the admin has no app id for.
@@ -67,8 +46,6 @@ export const deployErrorCodes = [
   "unknown_worker",
   /** The release's Workers bind each other as services in a cycle. */
   "service_binding_cycle",
-  /** The client's id can't be its hostname: not a lowercase DNS label, or reserved. */
-  "invalid_client_id",
   /** No free workers.dev subdomain was found for the account. */
   "subdomain_unavailable",
   /** Core's address isn't an `https://*.workers.dev` origin. */
@@ -95,3 +72,29 @@ export class DeployError extends Error {
     this.code = code;
   }
 }
+
+/** What a secret missing from Secrets Store is recorded as, before its name. */
+export const storeSecretMissing = "store_secret_missing";
+
+/**
+ * A failure as the admin records it: a code, never a message. A step's own
+ * failure has its `DeployError` code; a secret missing from Secrets Store
+ * is `store_secret_missing: <its name>`, no client domain
+ * `client_domain_unset`; the API's is `cloudflare_<status>`
+ * and its error codes; anything else is `unexpected`.
+ */
+export const errorCode = (error: unknown): string => {
+  if (error instanceof DeployError) {
+    return error.code;
+  }
+  if (error instanceof MissingStoreSecretError) {
+    return `${storeSecretMissing}: ${error.secret}`;
+  }
+  if (error instanceof ClientDomainUnsetError) {
+    return "client_domain_unset";
+  }
+  if (error instanceof CloudflareApiError) {
+    return ["cloudflare", error.status, ...error.codes].join("_");
+  }
+  return "unexpected";
+};

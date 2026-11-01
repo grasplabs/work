@@ -317,11 +317,11 @@ const without = (address: string): string => new URL(address).pathname;
 const withToken = (address: string, token: string): string =>
   `${without(address)}?${new URLSearchParams({ token }).toString()}`;
 
-/** Runs the cron's sweep at `ahead` until it has read everything once. */
+/** Runs the clock's sweep at `ahead` until it has read everything once. */
 const sweptAt = async (ahead: number): Promise<void> => {
   const at = new Date(Date.now() + ahead);
   for (let run = 0; run < 2; run += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the cron runs
+    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the clock runs
     await sweepScreenFrames(env, at);
   }
 };
@@ -659,7 +659,7 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("deletes staged builds the cron finds past their days, and stages a build in use again before then", async () => {
+  it("deletes staged builds the clock finds past their days, and stages a build in use again before then", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const bundle = await builder.api.screens.open(app, "notes");

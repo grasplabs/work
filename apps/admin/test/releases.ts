@@ -13,11 +13,11 @@ import {
   releaseManifestSchema,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
-import type {
-  ReleaseCompatibility,
-  ReleaseManifest,
-  WorkerEntry,
-} from "@grasp-os/shared/release";
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import {
+  nextReleaseId as nextPublishedId,
+  parsePublishedReleaseId,
+} from "@grasp-os/shared/release-id";
 import { env } from "cloudflare:workers";
 
 const encoder = new TextEncoder();
@@ -44,26 +44,7 @@ export interface ReleaseSpec {
    * one does; without it, a deploy sets up no sending domain.
    */
   sendsMail?: boolean;
-  /** What its code works with: `declared` by default, none when null. */
-  compatibility?: ReleaseCompatibility | null;
-  /**
-   * By name, a database's oldest migration whose code runs on its schema
-   * (0 for one it doesn't name). With it, the release declares each
-   * database's schema from its migrations, as the release build does;
-   * without it, none, as releases built before that did.
-   */
-  compatibleFrom?: Record<string, number>;
 }
-
-/** What a test release's code works with unless its spec says otherwise. */
-export const declared: ReleaseCompatibility = {
-  interfaces: {
-    connect: { serves: 1, calls: {} },
-    core: { calls: { connect: { min: 1, max: 1 } } },
-  },
-  workflowJournal: { min: 8, max: 9 },
-  sdkProtocols: { min: 2, max: 2 },
-};
 
 /** A built release: its manifest and every blob, by R2 key. */
 export interface TestRelease {
@@ -74,10 +55,24 @@ export interface TestRelease {
   blobs: Map<string, Uint8Array>;
 }
 
-// A fresh range per test file, rising within it, so each new release is the
-// newest in the bucket. Nine digits keep the ids sorting by run.
-const firstRun = 100_000_000 + Math.floor(Math.random() * 800_000_000);
-let runs = 0;
+// Each test file publishes in a month of its own, far in the future, so
+// each new release is the newest in the bucket, its ids made as CI's
+// publish makes them (@grasp-os/shared/release-id). They start at N 8, so
+// a file's first releases already go from one digit to two: any order by
+// text instead of by number shows.
+const MONTHS = 12;
+const publishedIn = new Date(
+  Date.UTC(
+    2030 + Math.floor(Math.random() * 60),
+    Math.floor(Math.random() * MONTHS),
+    15
+  )
+);
+const FIRST_N = 8;
+const taken: string[] = [];
+for (let n = 1; n < FIRST_N; n += 1) {
+  taken.push(nextPublishedId(taken, publishedIn));
+}
 // Build times a minute apart, in the order of the releases' ids: never
 // the same millisecond, however fast the test runs.
 const firstBuild = Date.now();
@@ -89,8 +84,9 @@ const randomHex = (length: number): string =>
 
 /** A new release id, newer than every one before it in this file. */
 export const nextReleaseId = (): string => {
-  runs += 1;
-  return `r${firstRun + runs}-${randomHex(7)}`;
+  const id = nextPublishedId(taken, publishedIn);
+  taken.push(id);
+  return id;
 };
 
 const file = async (
@@ -122,33 +118,6 @@ const worker = (
   previewUrls: false,
   observability: { enabled: true },
 });
-
-/**
- * The databases' schemas a release of `spec` declares, core's at
- * `coreSchema` and the others at their one migration; none without
- * `spec.compatibleFrom`.
- */
-const databasesOf = (
-  { compatibleFrom }: ReleaseSpec,
-  coreSchema: number
-): Pick<ReleaseCompatibility, "databases"> => {
-  if (compatibleFrom === undefined) {
-    return {};
-  }
-  const schemas = {
-    "grasp-os-connect": 0,
-    "grasp-os-core": coreSchema,
-    "grasp-os-knowledge": 0,
-  };
-  return {
-    databases: Object.fromEntries(
-      Object.entries(schemas).map(([name, schema]) => [
-        name,
-        { schema, compatibleFrom: compatibleFrom[name] ?? 0 },
-      ])
-    ),
-  };
-};
 
 /** Builds release `id` from `spec`, without publishing it. */
 export const buildRelease = async (
@@ -189,14 +158,14 @@ export const buildRelease = async (
     assets[hash] = { size: bytes.length, r2Key: assetKey(hash) };
     blobs.set(assetKey(hash), bytes);
   }
-  const commit = `${id.slice(-7)}${randomHex(33)}`;
+  const commit = randomHex(40);
   const manifest = releaseManifestSchema.parse({
     manifestVersion: MANIFEST_VERSION,
     releaseId: id,
     commit,
     // From the id's run, so releases built at once still get their order.
     createdAt: new Date(
-      firstBuild + (Number(id.slice(1, id.indexOf("-"))) - firstRun) * 60_000
+      firstBuild + (parsePublishedReleaseId(id)?.n ?? 0) * 60_000
     ).toISOString(),
     notes: spec.notes,
     wranglerVersion: "4.0.0",
@@ -242,6 +211,7 @@ export const buildRelease = async (
             class_name: "WorkflowDispatcher",
           },
           { type: "service", name: "CONNECT", service: "grasp-os-connect" },
+          { type: "worker_loader", name: "LOADER" },
           { type: "version_metadata", name: "CF_VERSION_METADATA" },
           { type: "assets", name: "ASSETS" },
           { type: "d1", name: "DB", id: "$D1_DB_ID" },
@@ -274,14 +244,6 @@ export const buildRelease = async (
       },
     },
     assets,
-    ...(spec.compatibility === null
-      ? {}
-      : {
-          compatibility: {
-            ...(spec.compatibility ?? declared),
-            ...databasesOf(spec, migrations.length - 1),
-          },
-        }),
   });
   return {
     id,

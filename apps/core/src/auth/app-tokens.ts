@@ -70,7 +70,7 @@ const expiryOf = (session: SignedInSession, now: number): number =>
 
 /**
  * Deletes the JWT plugin's keys that can't verify anything any more
- * (token-keys.ts), through Better Auth's own adapter. Run by the cron.
+ * (token-keys.ts), through Better Auth's own adapter. Run by the clock.
  */
 export const sweepTokenKeys = async (env: Env, now: Date): Promise<void> => {
   const auth = await authFor(env, signInConfig(env));

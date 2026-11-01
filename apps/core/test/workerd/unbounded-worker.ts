@@ -1,6 +1,5 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 
-import { loadServer } from "../../src/app.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { buildDependencies } from "../../src/packages/build.ts";
 import { resolveDependencies } from "../../src/packages/resolve.ts";
@@ -100,14 +99,6 @@ export default {
               {},
               {}
             )
-        )
-      );
-    }
-    if (pathname === "/app") {
-      return new Response(
-        await refusal(
-          async () =>
-            await loadServer(env, appIdSchema.parse(crypto.randomUUID()), 1, 1)
         )
       );
     }

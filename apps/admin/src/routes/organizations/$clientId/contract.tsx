@@ -1,24 +1,3 @@
-/**
- * An organization's Contract, ported from the prototype (grasplabs/prototype
- * `components/admin/org-contract.tsx`): where the contract stands and the
- * seats taken, its terms, what it gives the company, the agreements that
- * have to be in place before anyone is interviewed, and the invoices it
- * brought. Read-only: the admin keeps nothing of its own on a company,
- * so the prototype's fields and switches are what they say.
- *
- * Core holds no contract yet, so the model reads it as unknown: the page
- * says nothing is known about it, instead of a draft, dates or fees. The
- * agreements are core's own.
- *
- * Billing is Stripe's (src/billing/billing.ts): how the company pays, what
- * is open or overdue, what it paid last and when the next invoice comes,
- * and its invoices as Stripe has them, once someone at Grasp linked it to
- * its customer there; until then, or without Stripe's key, it says so.
- *
- * The proposal is Rooms' (src/proposal/proposal.ts): the room Grasp wrote
- * it in and who signed it, once someone at Grasp linked the company to
- * its room there; until then, or without Rooms' token, it says so.
- */
 import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
@@ -29,17 +8,30 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
+/**
+ * An organization's Contract, ported from the prototype (grasplabs/prototype
+ * `components/admin/org-contract.tsx`): the seats taken, the
+ * agreements that have to be in place before anyone is interviewed, and
+ * billing. Read-only: the admin keeps nothing of its own on a company.
+ * The agreements are core's own. Core holds no contract's terms, so the
+ * page shows none.
+ *
+ * Billing is Stripe's (src/billing/billing.ts): how the company pays, what
+ * is open or overdue, what it paid last and when the next invoice comes,
+ * and its invoices as Stripe has them, once someone at Grasp linked it to
+ * its customer there; until then, or without Stripe's key, it says so.
+ */
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckIcon, ChevronDownIcon, FileTextIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
-import { RoomsLink } from "../../../admin/rooms-link.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { StripeLink } from "../../../admin/stripe-link.tsx";
 import {
-  contractWords,
-  euros,
+  addSecretStep,
   formatDate,
   formatList,
   money,
@@ -51,28 +43,14 @@ import type {
   Money,
 } from "../../../billing/billing.ts";
 import type { StripeReadError } from "../../../billing/stripe.ts";
-import type {
-  Proposal,
-  ProposalRoom,
-  ProposalSignature,
-} from "../../../proposal/proposal.ts";
-import type { RoomsReadError } from "../../../proposal/rooms.ts";
-
-/** An invoice's amount, always to the cent. */
-const cents = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
 
 /** One for one, many for the rest. */
 const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
 /** What an outside system hasn't brought yet: one line, as the prototype says it for every source. */
-const notConnected = (name: string): string =>
-  `Once ${name} is connected, this fills in by itself.`;
+const notConnected = (name: string, secret: string): string =>
+  `Once ${name} is connected, this fills in by itself. ${addSecretStep(secret)}`;
 
 /** Each agreement by name. */
 const agreementWords: Record<keyof Agreed, string> = {
@@ -84,10 +62,8 @@ const agreementWords: Record<keyof Agreed, string> = {
 /** Who else handles the company's data for Grasp, and what for. */
 const others = [
   { name: "Anthropic", what: "The model that reads, talks and writes." },
-  {
-    name: "ElevenLabs",
-    what: "Stephen’s voice, and writing out what people say.",
-  },
+  { name: "ElevenLabs", what: "Stephen’s voice." },
+  { name: "OpenAI", what: "Writing out what people say, and reading PDFs." },
   { name: "Cloudflare", what: "Where Grasp runs." },
   { name: "Stripe", what: "Invoices and payments." },
 ] as const;
@@ -106,9 +82,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-4 py-4 sm:px-5">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <Stat>{value}</Stat>
     <span
       className={cn(
         "text-xs",
@@ -120,41 +94,12 @@ const Figure = ({
   </div>
 );
 
-/** A part of the page: its title, one line on it, and what is in it. */
-const Part = ({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id?: string;
-  title: string;
-  description: string;
-  children?: ReactNode;
-}) => (
-  <section
-    aria-labelledby={id === undefined ? undefined : `${id}-title`}
-    className="bg-card scroll-mt-4 overflow-hidden rounded-xl border"
-    id={id}
-  >
-    <div className="flex flex-col gap-0.5 px-5 py-4">
-      <h2
-        className="font-medium"
-        id={id === undefined ? undefined : `${id}-title`}
-      >
-        {title}
-      </h2>
-      <p className="text-muted-foreground">{description}</p>
-    </div>
-    {children}
-  </section>
-);
-
 /** One line of a part: what it is on the left, how it stands on the right. */
 const Line = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="min-w-0 text-right">{children}</dd>
+    {/* Beside its label however long it is, rather than on a line of its own pushed to the right. */}
+    <dd className="min-w-0 flex-1 text-right">{children}</dd>
   </div>
 );
 
@@ -166,264 +111,15 @@ const Done = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
-/** Where the contract stands, in a few words under its figure. */
-const statusLine = ({ contract }: AdminView): string => {
-  if (contract.status === "signed") {
-    const on = present(contract.signed) ? formatDate(contract.signed) : "";
-    return present(contract.signedBy)
-      ? `on ${on}, by ${contract.signedBy}`
-      : `on ${on}`;
-  }
-  if (contract.status === "sent" && present(contract.sent)) {
-    return `sent on ${formatDate(contract.sent)}`;
-  }
-  return "not sent yet";
-};
-
-/** How long it runs, once it is more than a draft. */
-const runsFigure = ({
-  contract,
-  asOf,
-}: AdminView): {
-  label: string;
-  value: string;
-  sub: string;
-  attention: boolean;
-} => {
-  const from = formatDate(contract.from);
-  const until = formatDate(contract.until);
-  if (contract.daysLeft < 0) {
-    return {
-      label: "Ended",
-      value: until,
-      sub: "nothing runs now",
-      attention: true,
-    };
-  }
-  if (contract.from > asOf) {
-    return {
-      label: "Starts",
-      value: from,
-      sub: `until ${until}`,
-      attention: false,
-    };
-  }
-  let sub = `until ${until}`;
-  if (contract.renews && present(contract.noticeBy)) {
-    sub = `carries on, unless notice is given by ${formatDate(contract.noticeBy)}`;
-  } else if (contract.ending) {
-    sub = `until ${until}: nothing is agreed for after`;
-  }
-  return {
-    label: "Still runs",
-    value: `${contract.daysLeft} ${plural(contract.daysLeft, "day", "days")}`,
-    sub,
-    attention: contract.ending,
-  };
-};
-
-/** The contract in short: where it stands, how long it runs, what it costs, and the seats taken. */
-const Summary = ({ view }: { view: AdminView }) => {
-  const { contract, seats } = view;
-  const known = !view.unknown.contract;
-  const draft = contract.status === "draft";
-  const runs = runsFigure(view);
-  let seatsSub = "are taken";
-  if (!known) {
-    seatsSub = "taken; the contract isn’t known yet";
-  } else if (seats.of === 0) {
-    seatsSub = "taken; the contract gives none yet";
-  }
-  return (
-    <section
-      aria-label="The contract in short"
-      className="overflow-hidden rounded-xl border"
-    >
-      <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-4">
-        {known ? (
-          <Figure
-            attention={contract.status !== "signed"}
-            label="Contract"
-            sub={statusLine(view)}
-            value={contractWords[contract.status]}
-          />
-        ) : (
-          <Figure
-            label="Contract"
-            sub="the company’s Grasp doesn’t hold it yet"
-            value="Not known yet"
-          />
-        )}
-        {draft || !known ? null : (
-          <>
-            <Figure
-              attention={runs.attention}
-              label={runs.label}
-              sub={runs.sub}
-              value={runs.value}
-            />
-            <Figure
-              label="Fee a month"
-              sub={
-                contract.plan ? `${contract.plan}, before VAT` : "before VAT"
-              }
-              value={euros(contract.fee)}
-            />
-          </>
-        )}
-        <Figure
-          attention={known && seats.of > 0 && seats.used > seats.of}
-          label="Seats"
-          sub={seatsSub}
-          value={
-            known && seats.of > 0
-              ? `${seats.used} of ${seats.of}`
-              : String(seats.used)
-          }
-        />
-      </div>
-    </section>
-  );
-};
-
-/** Why Rooms wasn't read now, as the rest of a sentence. */
-const roomsUnreadWords: Record<RoomsReadError, string> = {
-  refused: "Rooms turned the admin’s token away",
-  not_found: "Rooms has no such room",
-  invalid_answer: "what Rooms answered can’t be read",
-  timeout: "Rooms didn’t answer in time",
-  no_answer: "the request to Rooms failed",
-};
-
-/** The signature the proposal was signed with last, if any. */
-const lastSigned = (room: ProposalRoom): ProposalSignature | undefined =>
-  room.signatures.find((signature) => signature.status === "signed");
-
-/** The proposal in a line: where it stands, or why it isn't known. */
-const proposalLine = (proposal: Proposal): string => {
-  switch (proposal.state) {
-    case "not_connected": {
-      return notConnected("Rooms");
-    }
-    case "not_linked": {
-      return "Not linked to its room in Rooms yet. Link it by the room’s id, and this fills in by itself.";
-    }
-    case "unread": {
-      return `Rooms can’t be read for it now: ${roomsUnreadWords[proposal.error]}.`;
-    }
-    case "read": {
-      const signed = lastSigned(proposal.room);
-      if (signed?.signed !== null && signed !== undefined) {
-        return `Signed by ${signed.signer} on ${formatDate(signed.signed)}.`;
-      }
-      return proposal.room.signatures.some(
-        (signature) => signature.status === "pending"
-      )
-        ? "Sent to sign, not signed yet."
-        : "Not sent to sign yet.";
-    }
-    default: {
-      return proposal satisfies never;
-    }
-  }
-};
-
-/** The terms as they were signed; for a draft, that nothing is agreed yet. */
-const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
-  const { contract } = view;
-  if (view.unknown.contract) {
-    return (
-      <Part
-        description="Nothing is known about the contract yet."
-        id="contract-contract"
-        title="The terms"
-      >
-        <dl>
-          <Line label="The proposal">{proposalLine(proposal)}</Line>
-        </dl>
-      </Part>
-    );
-  }
-  if (contract.status === "draft") {
-    return (
-      <Part
-        description="Nothing is agreed yet: the contract is still being written."
-        id="contract-contract"
-        title="The terms"
-      >
-        <dl>
-          <Line label="The proposal">{proposalLine(proposal)}</Line>
-        </dl>
-      </Part>
-    );
-  }
-  const after =
-    contract.renews && present(contract.noticeBy)
-      ? `Carries on by itself; the last day to give notice is ${formatDate(contract.noticeBy)}.`
-      : "It ends on the last day, unless something new is agreed.";
-  return (
-    <Part
-      description="As it was signed."
-      id="contract-contract"
-      title="The terms"
-    >
-      <dl>
-        <Line label="Plan">{contract.plan || "None named"}</Line>
-        <Line label="Fee a month">{`${euros(contract.fee)}, before VAT`}</Line>
-        <Line label="Signed for the company by">
-          {contract.signedBy ?? "Nobody yet"}
-        </Line>
-        <Line label="Runs from">{formatDate(contract.from)}</Line>
-        <Line label="Runs until">{formatDate(contract.until)}</Line>
-        <Line label="After that">{after}</Line>
-        <Line label="The signed copy">
-          {present(contract.file) ? (
-            <span className="flex min-w-0 items-center gap-2">
-              <FileTextIcon
-                aria-hidden
-                className="text-muted-foreground size-4 flex-none"
-              />
-              <span className="truncate">{contract.file}</span>
-            </span>
-          ) : (
-            "No copy yet"
-          )}
-        </Line>
-        <Line label="The proposal">{proposalLine(proposal)}</Line>
-      </dl>
-    </Part>
-  );
-};
-
-/**
- * How many people may come in, beside the seats taken, and how much AI use
- * the fee covers. Not what was used: where core hasn't counted it, the
- * model only works it out.
- */
-const Gives = ({ view }: { view: AdminView }) => {
-  const { contract, seats } = view;
-  let open = "";
-  if (view.unknown.contract) {
-    open = "Not known yet";
-  } else if (contract.status === "draft") {
-    open = "None agreed yet";
-  }
-  return (
-    <Part
-      description="How many people may come in, and how much AI use the fee covers."
-      title="What it gives the company"
-    >
-      <dl>
-        <Line label="Seats">
-          {`${open === "" ? contract.seats : open}; ${seats.used} ${plural(seats.used, "is", "are")} taken.`}
-        </Line>
-        <Line label="AI use a month">
-          {open === "" ? euros(contract.aiIncluded) : open}
-        </Line>
-      </dl>
-    </Part>
-  );
-};
+/** The seats taken in the company's Grasp. */
+const Summary = ({ view }: { view: AdminView }) => (
+  <section
+    aria-label="The contract in short"
+    className="overflow-hidden rounded-xl border"
+  >
+    <Figure label="Seats" sub="are taken" value={String(view.seats.used)} />
+  </section>
+);
 
 /** How one agreement stands, as the prototype says it. */
 const Stands = ({ agreement }: { agreement: AgreementView }) => {
@@ -472,7 +168,7 @@ const Agreements = ({
     description = `Without all three, nobody is invited. ${open} ${plural(open, "is", "are")} still open.`;
   }
   return (
-    <Part
+    <Section
       description={description}
       id="contract-agreements"
       title="Agreed before the first interview"
@@ -534,67 +230,9 @@ const Agreements = ({
           </CollapsibleContent>
         </Collapsible>
       </div>
-    </Part>
+    </Section>
   );
 };
-
-/** What the invoices come to so far, in a line. */
-const invoicesLine = ({ contract, invoices, unknown }: AdminView): string => {
-  if (unknown.contract) {
-    return "None known yet: nothing is known about the contract.";
-  }
-  if (invoices.length === 0) {
-    return contract.status === "signed"
-      ? `None yet. The first one comes on ${formatDate(contract.from)}.`
-      : "None yet. There is no signed contract.";
-  }
-  const due = invoices.filter((invoice) => invoice.status !== "paid").length;
-  return due > 0
-    ? `One a month, through Stripe. ${due} ${plural(due, "is", "are")} still to be paid.`
-    : "One a month, through Stripe. All are paid.";
-};
-
-/** The invoices the contract brought so far, the newest first. */
-const Invoices = ({ view }: { view: AdminView }) => (
-  <Part
-    description={invoicesLine(view)}
-    id="contract-invoices"
-    title="Invoices"
-  >
-    {view.invoices.length > 0 ? (
-      <ul className="flex flex-col">
-        {view.invoices.map((invoice) => (
-          <li
-            className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
-            key={invoice.number}
-          >
-            <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-              <span className="tabular-nums">{invoice.number}</span>
-              <span className="text-muted-foreground text-xs">
-                {formatDate(invoice.date)}
-              </span>
-            </span>
-            <span className="flex items-baseline gap-x-6">
-              <span className="tabular-nums">
-                {cents.format(invoice.amount)}
-              </span>
-              <span
-                className={cn(
-                  "w-10 text-right text-xs",
-                  invoice.status === "paid"
-                    ? "text-muted-foreground"
-                    : "text-status-attention"
-                )}
-              >
-                {invoice.status === "paid" ? "Paid" : "Due"}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    ) : null}
-  </Part>
-);
 
 /** Amounts in one or more currencies, in a phrase. */
 const moneyOf = (amounts: readonly Money[]): string =>
@@ -614,7 +252,7 @@ const unreadWords: Record<StripeReadError, string> = {
 const billingLine = (billing: Billing): string => {
   switch (billing.state) {
     case "not_connected": {
-      return notConnected("Stripe");
+      return notConnected("Stripe", "STRIPE_RESTRICTED_KEY");
     }
     case "not_linked": {
       return "Not linked to its customer in Stripe yet. Link it by the customer’s id, and this fills in by itself.";
@@ -710,87 +348,6 @@ const BillingLines = ({
   </dl>
 );
 
-/** Each status of a signature request, in a word. */
-const signatureWords: Record<ProposalSignature["status"], string> = {
-  signed: "Signed",
-  pending: "Waiting",
-  revoked: "Withdrawn",
-  expired: "Expired",
-};
-
-/**
- * The proposal: the room in Rooms the company was sent, who was asked to
- * sign it and who did, and the room it is linked to, which staff link or
- * change here.
- */
-const ProposalPart = ({
-  proposal,
-  clientId,
-}: {
-  proposal: Proposal;
-  clientId: string;
-}) => {
-  const projectId = proposal.state === "not_linked" ? null : proposal.projectId;
-  return (
-    <Part
-      description={proposalLine(proposal)}
-      id="contract-proposal"
-      title="The proposal"
-    >
-      {proposal.state === "read" ? (
-        <dl>
-          <Line label="Room in Rooms">
-            <a
-              className="hover:text-foreground underline underline-offset-4"
-              href={proposal.room.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {proposal.room.name}
-            </a>
-          </Line>
-          <Line label="For">{proposal.room.clientName || "Nobody named"}</Line>
-          <Line label="Last changed">
-            {proposal.room.archived
-              ? `${formatDate(proposal.room.updated)}, archived since`
-              : formatDate(proposal.room.updated)}
-          </Line>
-        </dl>
-      ) : null}
-      {proposal.state === "read" && proposal.room.signatures.length > 0 ? (
-        <ul className="flex flex-col">
-          {proposal.room.signatures.map((signature) => (
-            <li
-              className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
-              key={`${signature.email}-${signature.sent}-${signature.status}`}
-            >
-              <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-                <span className="truncate">{signature.signer}</span>
-                <span className="text-muted-foreground text-xs">
-                  {signature.signed === null
-                    ? `Sent ${formatDate(signature.sent)}`
-                    : `Signed ${formatDate(signature.signed)}`}
-                </span>
-              </span>
-              <span
-                className={cn(
-                  "w-20 text-right text-xs",
-                  signature.status === "pending"
-                    ? "text-status-attention"
-                    : "text-muted-foreground"
-                )}
-              >
-                {signatureWords[signature.status]}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <RoomsLink clientId={clientId} projectId={projectId} />
-    </Part>
-  );
-};
-
 /**
  * Billing: what Stripe says the company pays and whether it is paid, and
  * the customer it is linked to there, which staff link or change here.
@@ -804,7 +361,7 @@ const BillingPart = ({
 }) => {
   const customerId = billing.state === "not_linked" ? null : billing.customerId;
   return (
-    <Part
+    <Section
       description={billingLine(billing)}
       id="contract-billing"
       title="Billing"
@@ -816,7 +373,7 @@ const BillingPart = ({
         />
       ) : null}
       <StripeLink clientId={clientId} customerId={customerId} />
-    </Part>
+    </Section>
   );
 };
 
@@ -841,7 +398,7 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
         : `From Stripe, the latest ${invoices.length}. All are paid.`;
   }
   return (
-    <Part description={description} id="contract-invoices" title="Invoices">
+    <Section description={description} id="contract-invoices" title="Invoices">
       {invoices.length > 0 ? (
         <ul className="flex flex-col">
           {invoices.map((invoice) => (
@@ -874,7 +431,7 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
           ))}
         </ul>
       ) : null}
-    </Part>
+    </Section>
   );
 };
 
@@ -882,25 +439,20 @@ const Contract = () => {
   const { admin, view } = useOrganization();
   // Until staff say where the agreements stand, core holds none, and the model's "no works council" is only its default.
   const recorded = admin.snapshot.agreements !== null;
-  const { billing, proposal } = admin;
+  const { billing } = admin;
   return (
     <>
       <Summary view={view} />
-      <Terms proposal={proposal} view={view} />
-      <ProposalPart clientId={admin.client.id} proposal={proposal} />
-      <Gives view={view} />
       <Agreements recorded={recorded} view={view} />
       <BillingPart billing={billing} clientId={admin.client.id} />
       {billing.state === "read" ? (
         <StripeInvoices account={billing.account} />
-      ) : (
-        <Invoices view={view} />
-      )}
+      ) : null}
     </>
   );
 };
 
-/** An organization's Contract: the contract, what it gives, the agreements and the invoices. */
+/** An organization's Contract: the seats, the agreements and billing. */
 export const Route = createFileRoute("/organizations/$clientId/contract")({
   component: Contract,
 });

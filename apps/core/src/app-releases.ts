@@ -67,7 +67,6 @@ import {
   sdkReleaseManifests,
   sdkReleaseTombstones,
   sdkResourceBindings,
-  sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withReferencesText } from "./draft-references.ts";
@@ -78,10 +77,16 @@ import {
   requireMigrationsTarget,
 } from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
+import {
+  declaredStoreResources,
+  projectStoreResource,
+  storeResourceAlias,
+} from "./resource-declarations.ts";
 import { screenArtifact, versionScreens } from "./screens.ts";
 import type { BuildProfile, BuiltScreen } from "./screens.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
+import { claimedFor, claimStore } from "./store-owners.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
 // spec 8's layout into an immutable manifest and the content-addressed
@@ -912,49 +917,6 @@ const isDefaultStore = async (
   return row !== undefined;
 };
 
-/** Whether `store` is claimed for `app` (`sdk_store_owners`). */
-const claimedBy = async (
-  env: Env,
-  store: string | undefined,
-  app: AppId
-): Promise<boolean> => {
-  if (store === undefined) {
-    return false;
-  }
-  const row = await drizzle(env.DB)
-    .select({ app: sdkStoreOwners.appId })
-    .from(sdkStoreOwners)
-    .where(eq(sdkStoreOwners.storeId, store))
-    .get();
-  return row?.app === app;
-};
-
-/**
- * Claims `store` for `app` for good (`sdk_store_owners`), or refuses
- * (`version.store_bound_elsewhere`) a store another App claimed: one
- * statement claims it only where no claim exists, so of two Apps sealing
- * onto a new store at once, exactly one gets it.
- */
-const claimStore = async (
-  env: Env,
-  store: StoreId,
-  app: AppId
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await db
-    .insert(sdkStoreOwners)
-    .values({ storeId: store, appId: app, claimedAt: new Date() })
-    .onConflictDoNothing();
-  const owner = await db
-    .select({ app: sdkStoreOwners.appId })
-    .from(sdkStoreOwners)
-    .where(eq(sdkStoreOwners.storeId, store))
-    .get();
-  if (owner?.app !== app) {
-    throw versionErrors.create("version.store_bound_elsewhere");
-  }
-};
-
 /**
  * The App needs a store: its schema has tables, or it declares
  * preferences, which its store keeps (app-preferences.ts).
@@ -1208,7 +1170,7 @@ const boundStore = async (
   // so a seal that loses the store never defines its tables there, and
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
-  await claimStore(env, opened.id, request.app);
+  await claimStore(env, opened.id, { kind: "app", id: request.app });
   // Its preferences checked against the store's preferences contract
   // first (store-host.ts, `definePreferences`): a version that changes one
   // people may have chosen is refused before its tables are touched. The
@@ -1633,6 +1595,7 @@ export const sealRelease = async (
     { tree: row.tree, store, screens }
   );
   const { manifest, final, sdk, schema } = built;
+  const storeResources = await declaredStoreResources(manifest);
   await requireAsTombstoned(env, { app, version }, hash);
 
   // Reserved first, so no retention sweep deletes bytes this release will
@@ -1713,6 +1676,34 @@ export const sealRelease = async (
                   AND operation_manifest_hash = ${store.operationManifestHash})`,
             }),
           ]),
+      // Each store it declares, in the binding inventory (spec 24): by its
+      // declaration's hash until an approval resolves it, then the store
+      // the active approval of the same declaration resolves, which serves
+      // this release too (resource-bindings.ts).
+      ...storeResources.map(({ alias, hash: declared }) =>
+        db.insert(sdkResourceBindings).values({
+          resourceId: app,
+          resourceVersion: version,
+          alias: storeResourceAlias(alias),
+          kind: "storeResource" as const,
+          targetId: declared,
+          schemaHash: declared,
+          manifestHash: hash,
+          contractId: null,
+          targetVersion: null,
+        })
+      ),
+      ...storeResources.map(({ alias, hash: declared }) =>
+        projectStoreResource(db, {
+          app,
+          version,
+          alias,
+          declared,
+          approval: sql`(SELECT id FROM app_resource_bindings
+            WHERE app_id = ${app} AND alias = ${alias} AND kind = 'store'
+              AND status = 'active' AND declaration_hash = ${declared})`,
+        })
+      ),
       outboxed(db, {
         actor: request.by.actor ?? actorOf(request.by),
         action: "app.release.sealed",
@@ -1732,7 +1723,7 @@ export const sealRelease = async (
   } catch (error) {
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       // Another App's, or being deleted (or gone) as the batch ran.
-      throw (await claimedBy(env, store?.storeId, app))
+      throw (await claimedFor(env, store?.storeId, { kind: "app", id: app }))
         ? dataErrors.create("data.store_unavailable")
         : versionErrors.create("version.store_bound_elsewhere");
     }

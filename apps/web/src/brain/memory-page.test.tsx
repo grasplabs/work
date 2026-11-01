@@ -20,7 +20,8 @@ import { MemoryPage } from "./memory-page.tsx";
 // reaches it over RPC, faked: a person corrects their own record against
 // the revision they read, and sees the correction in its place; another's
 // shared record offers no correction, and a retirement only to an admin;
-// a refusal is said and nothing is taken as done.
+// a refusal is said and nothing is taken as done; a person in no team
+// shares their record into a chat others share, named by who is in it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -104,6 +105,26 @@ const shown = async (admin: boolean, refusal?: string) => {
       }
       return { resourceRefs: [{ kind: "memory", memoryId: "m-new" }] };
     },
+    sharedChats: async () => {
+      await Promise.resolve();
+      calls.push("shared chats");
+      return [
+        { chatId: "chat-1", others: ["Ben", "Cy"], updatedAt: recordedAt },
+      ];
+    },
+    memoriesPublish: async (input: {
+      scope: string;
+      scopeId?: string;
+      text: string;
+      sourceRefs: { memoryId: string; revision: number }[];
+    }) => {
+      await Promise.resolve();
+      const [rests] = input.sourceRefs;
+      calls.push(
+        `publish ${input.scope}:${input.scopeId ?? ""} ${input.text} on ${rests?.memoryId}@${rests?.revision}`
+      );
+      return { resourceRefs: [{ kind: "memory", memoryId: "m-shared" }] };
+    },
     memoriesRetire: async (input: { memoryId: string }) => {
       await Promise.resolve();
       calls.push(`retire ${input.memoryId}`);
@@ -120,7 +141,7 @@ const shown = async (admin: boolean, refusal?: string) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <MemoryPage admin={admin} />,
+    component: () => <MemoryPage admin={admin} teams={[]} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -253,6 +274,43 @@ describe(MemoryPage, () => {
       lineageReads: 2,
       retireStillOffered: false,
     });
+  });
+
+  it("shares a person's own record into a chat others share, named by who else is in it", async () => {
+    const { calls } = await shown(false);
+    await settle();
+    await press(own.statement);
+    await press("Share it");
+    const label = [...document.querySelectorAll("label")].find(
+      (each) => each.textContent === "A shared chat with Ben and Cy"
+    );
+    if (!label) {
+      throw new TypeError("No shared chat offered");
+    }
+    // The only place offered: a person in no team who isn't an admin.
+    const dialog = document.querySelector("[role=dialog]");
+    const radio = dialog?.querySelector<HTMLElement>("[role=radio]");
+    await act(async () => {
+      radio?.click();
+      await Promise.resolve();
+    });
+    const submit = dialog?.querySelector<HTMLButtonElement>(
+      "button[type=submit]"
+    );
+    await act(async () => {
+      submit?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(
+      calls.filter(
+        (call) => call.startsWith("publish") || call === "shared chats"
+      )
+    ).toStrictEqual([
+      "shared chats",
+      "publish session:chat-1 Floor 3 is quiet. on m-own@1",
+    ]);
   });
 
   it("says why core refused a correction, and keeps the record as it was", async () => {

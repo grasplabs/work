@@ -1,6 +1,7 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
+import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -21,14 +22,17 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
-import { provisionProbePath } from "@grasp-os/shared/provision-probe";
-import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
+import {
+  connectVersionPath,
+  provisionProbePath,
+} from "@grasp-os/shared/provision-probe";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminAskResponse } from "./admin-ask.ts";
 import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
+import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
@@ -42,8 +46,6 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { carryOnAfterConnecting } from "./channels/answer.ts";
-import { channelResponse } from "./channels/door.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
@@ -69,7 +71,10 @@ import {
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
-import { provisionProbeResponse } from "./provision-probe.ts";
+import {
+  connectVersionResponse,
+  provisionProbeResponse,
+} from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -77,7 +82,6 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
-import { quotaPolicyReportResponse } from "./workflows/quota-report.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -101,6 +105,36 @@ const isAmbiguousPath = (pathname: string): boolean =>
     return decoded === "." || decoded === "..";
   });
 
+/**
+ * A file the frontend's build named by its content's hash (Vite's
+ * `assets/<name>-<hash>.<ext>`): it never changes under that name.
+ */
+const hashedAsset = /^\/assets\/[^/]+-[\w-]{8,}\.[a-z\d]+$/iu;
+
+/** Seconds a hashed file may be kept: a year, as long as caches keep anything. */
+const hashedAssetMaxAge = 31_536_000;
+
+/**
+ * How long a browser may keep `page`, served at `pathname`. A deployment
+ * in a dispatch namespace answers every static file `max-age=0` (GRA-430),
+ * so core says it: a hashed file for a year, unchanged; any page
+ * (index.html, for the frontend's own routes too, and for a hashed name
+ * that isn't there) only once checked again, so a release reaches everyone
+ * on their next load.
+ */
+const cacheControlOf = (pathname: string, page: Response): string | null => {
+  if (!page.ok) {
+    return null;
+  }
+  const html = page.headers.get("content-type")?.includes("text/html") ?? false;
+  if (html) {
+    return "no-cache";
+  }
+  return hashedAsset.test(pathname)
+    ? `public, max-age=${hashedAssetMaxAge}, immutable`
+    : null;
+};
+
 /** The frontend's files; unknown paths get index.html (single-page app). */
 const pageResponse = async (
   pathname: string,
@@ -109,7 +143,13 @@ const pageResponse = async (
 ): Promise<Response> => {
   const page = await env.ASSETS.fetch(request);
   if (pathname !== interviewPagePath) {
-    return page;
+    const cacheControl = cacheControlOf(pathname, page);
+    if (cacheControl === null) {
+      return page;
+    }
+    const cached = new Response(page.body, page);
+    cached.headers.set("cache-control", cacheControl);
+    return cached;
   }
   // The interview's page carries its link's secret: no referrer, whatever
   // it links to, and no copy kept.
@@ -224,7 +264,13 @@ const connectionRouteResponse = async (
     // Someone who connected from a chat app is told there, and what they
     // asked is answered again, after the browser is sent on.
     return await handleConnectionCallback(request, env, (userId) => {
-      ctx.waitUntil(carryOnAfterConnecting(env, userId));
+      // The channel layer, and the Chat SDK with it, loads when first used,
+      // not as core starts (GRA-1349).
+      const carryOn = async (): Promise<void> => {
+        const { carryOnAfterConnecting } = await import("./channels/answer.ts");
+        await carryOnAfterConnecting(env, userId);
+      };
+      ctx.waitUntil(carryOn());
     });
   }
   if (isCatalogLogoPath(pathname)) {
@@ -295,12 +341,24 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
-  [quotaPolicyReportPath, quotaPolicyReportResponse],
+  [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
   [adminKickoffPath, adminKickoffResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
+]);
+
+/**
+ * The admin's signed requests, by path: each answers only a request the
+ * admin signed, and undefined for anything else.
+ */
+const adminSignedHandlers: ReadonlyMap<
+  string,
+  (request: Request, env: Env) => Promise<Response | undefined>
+> = new Map([
+  [provisionProbePath, provisionProbeResponse],
+  [connectVersionPath, connectVersionResponse],
 ]);
 
 /** Routes a request that has passed the router-secret check. */
@@ -324,12 +382,14 @@ const route = async (
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
   }
-  // The admin's alone: anyone else's request goes on as one to a path
-  // core has no route for (src/provision-probe.ts).
-  if (pathname === provisionProbePath) {
-    const probe = await provisionProbeResponse(request, env);
-    if (probe !== undefined) {
-      return probe;
+  // The admin's alone, the probe and connect's version: anyone else's
+  // request goes on as one to a path core has no route for
+  // (src/provision-probe.ts).
+  const signed = adminSignedHandlers.get(pathname);
+  if (signed !== undefined) {
+    const answer = await signed(request, env);
+    if (answer !== undefined) {
+      return answer;
     }
   }
   if (pathname === screenFramePath) {
@@ -367,6 +427,7 @@ const route = async (
   // platform's own signed requests get through.
   const platform = channelPlatformOf(pathname);
   if (platform !== undefined) {
+    const { channelResponse } = await import("./channels/door.ts");
     return await channelResponse(request, env, platform, requestId, ctx);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);

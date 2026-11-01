@@ -1,23 +1,34 @@
 import { appChangesSchema, appErrors } from "@grasp-os/shared/apps";
-import type { App, AppMemberRef } from "@grasp-os/shared/apps";
+import type { App, AppAnswerer, AppMemberRef } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
-import { appMembers, apps, teamMembers, teams } from "./db/core/schema.ts";
+import {
+  appMembers,
+  apps,
+  members,
+  personErasures,
+  teamMembers,
+  teams,
+  users,
+} from "./db/core/schema.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
 
 // An App's settings besides its code: its name and description, who
-// answers for it, and whom it is made for. Its builders change them, and
+// answers for it, whom it is made for, and the business process it serves
+// (GRA-511), which the UI shows its icon for and groups it by. Its builders change them, and
 // each change is audited as `app.updated`, naming what changed: the
 // people and teams by ID, the name and description only as changed, since
 // the log holds no content.
@@ -56,14 +67,15 @@ const requireAudience = async (
 };
 
 /**
- * That `userId` may answer for `app` now, as SQL: a current member of the
+ * That `userId` (an ID, or a column holding one) may answer for `app` now,
+ * as SQL: a current member of the
  * organization who can open it (`openTo`) as its status lets them
  * (app-access.ts). A draft or an archived App is open only to whoever
  * builds it: an admin, or a builder by role in the organization who owns
  * it or with whom it is shared as a builder, as a person or through a
  * team.
  */
-const mayAnswer = (userId: string, app: string): SQL => sql`(
+const mayAnswer = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId)} AND ${openTo(userId, app)}
   AND (
     EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')
@@ -81,6 +93,36 @@ const mayAnswer = (userId: string, app: string): SQL => sql`(
     ))
   )
 )`;
+
+/**
+ * Who may answer for App `app` now (`mayAnswer`), by ID and name, never
+ * an email, for one of its builders who may name them (never Grasp
+ * staff). Anyone removed or erased is no member any more, and isn't one.
+ */
+export const appAnswerers = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<AppAnswerer[]> => {
+  const found = await appFor(env, by, app, "builder");
+  requireNotStaff(by);
+  // Aliased: `mayAnswer`'s own reads of `members` must not take its
+  // column for theirs.
+  const candidate = alias(members, "candidate");
+  const rows = await drizzle(env.DB)
+    .select({ id: candidate.userId, name: users.name })
+    .from(candidate)
+    .innerJoin(users, eq(users.id, candidate.userId))
+    .where(
+      and(
+        eq(candidate.organizationId, organizationId),
+        mayAnswer(candidate.userId, found.id),
+        sql`NOT EXISTS (SELECT 1 FROM ${personErasures} WHERE ${personErasures.userId} = ${candidate.userId})`
+      )
+    )
+    .orderBy(users.name, candidate.userId);
+  return rows;
+};
 
 /**
  * `app.responsible_invalid` unless `userId` is a current member of the
@@ -181,6 +223,25 @@ const planAudience = async (
 };
 
 /**
+ * The business process it serves, where that changes. Grasp's staff may
+ * set it too: it names nobody and grants nothing, and Grasp assigns it as
+ * it maps a client's work.
+ */
+const planProcess = (
+  plan: Plan,
+  row: Row,
+  process: BusinessProcess | null
+): void => {
+  if (process === row.process) {
+    return;
+  }
+  plan.set.process = process;
+  plan.guards.push(holds(apps.process, row.process));
+  plan.detail.process = process;
+  plan.detail.previousProcess = row.process;
+};
+
+/**
  * Changes App `app`'s settings, for its builders. Settings given as they
  * are already change and record nothing. The write goes through only
  * while what it changes is still what was read, and while whoever answers
@@ -212,6 +273,9 @@ export const updateApp = async (
   if (changes.audience !== undefined) {
     await planAudience(env, plan, row, changes.audience);
   }
+  if (changes.process !== undefined) {
+    planProcess(plan, row, changes.process);
+  }
   if (plan.guards.length === 0) {
     return toApp(row);
   }
@@ -219,7 +283,8 @@ export const updateApp = async (
     db
       .update(apps)
       .set(plan.set)
-      .where(and(eq(apps.id, found.id), ...plan.guards))
+      // Removed meanwhile (app-removal.ts), it is left as removed.
+      .where(and(eq(apps.id, found.id), isNull(apps.removedAt), ...plan.guards))
       .returning(),
     outboxedIfChanged(db, {
       actor: actorOf(by),
@@ -233,7 +298,7 @@ export const updateApp = async (
     throw appErrors.create("app.conflict");
   }
   // Its entry in the Apps collection carries its name and description;
-  // a failed indexing is left to the cron trigger, which finds it stale.
+  // a failed indexing is left to the clock, which finds it stale.
   if (plan.set.name !== undefined || plan.set.description !== undefined) {
     await indexAppNow(env, after.id);
   }

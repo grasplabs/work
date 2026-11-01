@@ -61,7 +61,6 @@ import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
 import { heldManifest, versionReferenceSource } from "./app-releases.ts";
-import type { AppAnswer } from "./app.ts";
 import {
   appFor,
   findVersion,
@@ -75,6 +74,7 @@ import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { PageCallback, StillOpen } from "./page-callbacks.ts";
+import type { AppAnswer } from "./plain-data.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -82,7 +82,6 @@ import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
 import { versionScreenCodes } from "./screen-references.ts";
-import { screenSubmissionReceived } from "./screen-submissions.ts";
 import {
   deliveryOf,
   deliveryAt,
@@ -1437,16 +1436,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     return deliveryOf(await standingOf(env, id, build));
   }
 
-  async received(request: string): Promise<void> {
-    const { env, app } = this.#connection;
-    // From untrusted App code: counted as a request, refused for a build
-    // whose delivery is refused now, and only ever forgetting a row its
-    // receipt says settled (screen-submissions.ts).
-    await this.#delivered("received", async (by) => {
-      await screenSubmissionReceived(env, by, app, request);
-    });
-  }
-
   async startRun(workflow: string, input?: unknown): Promise<WorkflowRun> {
     const { env, app } = this.#connection;
     return await this.#delivered(
@@ -1484,11 +1473,18 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     decision: string,
     answer: unknown
   ): Promise<DecisionReview> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "reviewDecision",
       async (by) =>
-        await reviewScreenDecision(env, by, app, run, decision, answer)
+        await reviewScreenDecision(
+          env,
+          by,
+          { app, version: build?.version },
+          run,
+          decision,
+          answer
+        )
     );
   }
 
@@ -1498,14 +1494,14 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     revision: string,
     answer: unknown
   ): Promise<DecisionConfirmation> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "confirmDecision",
       async (by) =>
         await confirmScreenDecision(
           env,
           by,
-          app,
+          { app, version: build?.version },
           run,
           decision,
           revision,
@@ -1520,11 +1516,19 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     answer: unknown,
     confirmation?: string
   ): Promise<DecisionView> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "decide",
       async (by) =>
-        await decideScreenRun(env, by, app, run, decision, answer, confirmation)
+        await decideScreenRun(
+          env,
+          by,
+          { app, version: build?.version },
+          run,
+          decision,
+          answer,
+          confirmation
+        )
     );
   }
 

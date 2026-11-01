@@ -345,8 +345,8 @@ export const adminSnapshotSchema = z.object({
     openedAt: isoTime.nullable(),
   }),
   /**
-   * The contract and its papers: null until core holds them, from Rooms
-   * and Stripe, with the issue that brings them.
+   * The contract and its papers: null until core holds them, with the
+   * issue that brings them.
    */
   contract: notYetHeld,
   /** The organization's members, by name. */
@@ -366,7 +366,7 @@ export const adminSnapshotSchema = z.object({
   integrations: adminIntegrationsSchema.nullable(),
   /**
    * The apps the company asked Grasp to add, oldest first: what Grasp's
-   * admin lists as integrations to build. None from a core that doesn't
+   * admin lists as apps asked for. None from a core that doesn't
    * send them yet.
    */
   asked: z.array(adminAppAskedSchema).default([]),

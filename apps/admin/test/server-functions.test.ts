@@ -1,7 +1,7 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   applySettingsFn,
@@ -12,9 +12,6 @@ import {
 } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients, rollouts } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { pauseRollout, startRollout } from "../src/rollout/control.ts";
 import {
   approveRolloutFn,
@@ -25,15 +22,17 @@ import {
   rollbackClientFn,
   rollbackRingFn,
 } from "../src/rollout/functions.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
+import { ended, followAdminRuns, reached, stepSucceeded } from "./runs.ts";
+import type { FollowedRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-functions-6a2f90";
-const tenantToken = "test-tenant-admin-token-functions-1d8b47";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -51,12 +50,9 @@ const signIn = {
   googleHostedDomain: "acme.test",
 };
 
-/** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
-  await importReleases(env.RELEASES, db);
-  return release.id;
-};
+/** A release a placed client runs, imported. */
+const importedRelease = async (notes: string): Promise<string> =>
+  await placedRelease(notes);
 
 /** An active client in `ring`, recorded on a new account in the fake. */
 const recordClient = async (ring: number): Promise<string> => {
@@ -69,7 +65,6 @@ const recordClient = async (ring: number): Promise<string> => {
       db.insert(clients).values({
         id: clientId,
         name: clientId,
-        accountId: cloudflare.addAccount().id,
         ring,
         status: "active",
         signIn: JSON.stringify(signIn),
@@ -82,46 +77,35 @@ const recordClient = async (ring: number): Promise<string> => {
   return clientId;
 };
 
-/** An active client in `ring` running `releaseId`, as a deploy made it. */
+/** An active client in `ring` running `releaseId`, placed and provisioned. */
 const activeClient = async (
   ring: number,
   releaseId: string
 ): Promise<string> => {
-  const clientId = await recordClient(ring);
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, setup, clientId, releaseId)
-  );
+  const { clientId } = await livePlacedClient(cloudflare, ring, releaseId);
   return clientId;
 };
 
-/** The runs of `workflow` a test starts, their holds and retry waits going at once. */
-const follow = async (workflow: Workflow) => {
-  const runs = await introspectWorkflow(workflow);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableSleeps();
-    await modifier.disableRetryDelays();
-  });
-  return runs;
-};
+/** The runs a test starts, followed: their retries and sleeps going at once. */
+type Runs = FollowedRuns;
 
-type Runs = Awaited<ReturnType<typeof follow>>;
-
-/** The latest run `runs` follows. */
-const latestOf = async (runs: Runs) => {
-  const all = await runs.get();
-  const last = all.at(-1);
-  if (last === undefined) {
-    throw new Error("No run was started");
-  }
-  return last;
-};
+/** Rollout `rolloutId`'s run, as a test waits on it. */
+const rolloutRunOf = (rolloutId: string) => ({
+  waitForStepResult: async (step: { name: string }) => {
+    await stepSucceeded(adminWorkflows.rollout, rolloutId, step.name);
+  },
+  waitForStatus: async (
+    status: "complete" | "errored" | "terminated" | "paused"
+  ) => {
+    await reached(adminWorkflows.rollout, rolloutId, status);
+  },
+});
 
 /**
  * A rollout of a new release, started by `setup`, that deployed ring 0's
  * client and waits for approval of ring 1, with its run.
  */
-const waitingRollout = async (rolloutRuns: Runs) => {
+const waitingRollout = async (_rolloutRuns: Runs) => {
   const before = await importedRelease("feat(core): the release before");
   const internal = await activeClient(0, before);
   await activeClient(1, before);
@@ -131,7 +115,7 @@ const waitingRollout = async (rolloutRuns: Runs) => {
     releaseId: release,
     scope: { scope: "ring", ring: 1 },
   });
-  const run = await latestOf(rolloutRuns);
+  const run = rolloutRunOf(rolloutId);
   await run.waitForStepResult({ name: "ring 1 approved" });
   return { rolloutId, internal, run };
 };
@@ -175,7 +159,6 @@ interface Arranged {
 /** The runs a change may start or touch, followed. */
 interface Followed {
   rolloutRuns: Runs;
-  applyRuns: Runs;
 }
 
 /**
@@ -387,16 +370,31 @@ const changes: {
   },
   {
     name: "applying a client's settings now",
-    arrange: async ({ applyRuns }) => {
+    arrange: async () => {
       const release = await importedRelease("feat(core): applied to");
       const clientId = await activeClient(1, release);
       return {
         make: async () =>
           await callServerFn(applySettingsFn, { clientId }, { email: caller }),
         audited: { action: "client.apply_settings", clientId, target: null },
+        // Its run, on Workerflow: the one its claim's record names.
         settled: async () => {
-          const run = await latestOf(applyRuns);
-          await run.waitForStatus("complete");
+          const [claim] = await db
+            .select({ detail: auditEvents.detail })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.clientId, clientId),
+                eq(auditEvents.action, "client.apply_settings")
+              )
+            );
+          const run = z
+            .object({ run: z.string() })
+            .parse(JSON.parse(claim?.detail ?? "null"));
+          // Ended, and done: an apply that failed doesn't pass this test.
+          const settledRun = await ended(adminWorkflows.applyClient, run.run);
+          expect(settledRun.status).toBe("complete");
+          return settledRun;
         },
       };
     },
@@ -404,7 +402,7 @@ const changes: {
 ];
 
 describe("the admin's changes, through its entry", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The database outlives each test, and every rollout reaches ring 0:
   // each test's rollout reaches only its own clients, and starts while no
   // earlier test's is open.
@@ -422,14 +420,9 @@ describe("the admin's changes, through its entry", () => {
   it.each(changes.map(({ name, arrange }) => [name, arrange] as const))(
     "%s is audited as the staff member Access vouches for, about its client and target",
     async (_name, arrange) => {
-      await using rolloutRuns = await follow(env.ROLLOUT);
       // An approved rollout deploys its fleet clients in runs of their own.
-      await using _fleetRuns = await follow(env.ROLLOUT_CLIENT);
-      await using applyRuns = await follow(env.APPLY_CLIENT);
-      const { make, audited, settled } = await arrange({
-        rolloutRuns,
-        applyRuns,
-      });
+      await using rolloutRuns = followAdminRuns();
+      const { make, audited, settled } = await arrange({ rolloutRuns });
 
       const { refused } = await make();
       await settled?.();

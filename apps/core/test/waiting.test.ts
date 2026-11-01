@@ -1,4 +1,5 @@
 import type { WaitingFeed, WaitingKind } from "@grasp-os/shared/waiting";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
@@ -25,6 +26,35 @@ const slow = { timeout: 60_000 };
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
+
+/** A JSON schema of an object with `properties`, each required. */
+const objectOf = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** A greeting workflow's definition at `version`, as the lifecycle tests publish one. */
+const greetingOf = (name: string, version: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version,
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectOf({ who: { type: "string" } }) },
+    output: { schema: objectOf({ status: { type: "string" } }) },
+    do: [{ finish: { set: { status: "done" } } }],
+  });
 
 /** The feed's items of `kind`, for `person`. */
 const itemsOf = async <Kind extends WaitingKind>(
@@ -271,6 +301,134 @@ describe("what waits", slow, () => {
       urgent: true,
       verdicts: [],
       builder: [],
+    });
+  });
+
+  it("puts a workflow's version asked to go live before its owner and admins, never who asked, and settles it through the workflow's lifecycle", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const builder = await signedInApi(idp, "builder");
+    const user = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const workflows = owner.api.workflowResources;
+    const workflow = await workflows.create(
+      `greet-${crypto.randomUUID().slice(0, 8)}`
+    );
+    for (const [version, basedOn] of [
+      [1, null],
+      [2, 1],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
+      await workflows.publish(workflow.id, {
+        definition: greetingOf(workflow.name, `${version}.0.0`),
+        basedOn,
+      });
+    }
+    for (const [member, role] of [
+      [builder, "builder"],
+      [user, "user"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one share after another
+      await workflows.share(workflow.id, {
+        type: "person",
+        id: member.userId,
+        role,
+      });
+    }
+    await builder.api.workflowResources.lifecycle.requestGoLive(workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    /** The feed's go-live of this workflow for `person`, as its verdict would name it. */
+    const goLiveFor = async (person: Person) => {
+      const items = await itemsOf(person, "workflowGoLive");
+      return items.find(({ workflow: { id } }) => id === workflow.id);
+    };
+    /** Whom that go-live waits on, as `person` sees it. */
+    const waitsOnFor = async (person: Person) => {
+      const item = await goLiveFor(person);
+      return item?.waitsOn;
+    };
+    const settle = async (by: Person, version: number, revision: number) =>
+      await outcome(
+        by.api.waiting.settle({
+          kind: "workflowGoLive",
+          workflow: workflow.id,
+          version,
+          revision,
+          verdict: "approve",
+        })
+      );
+    // A builder asked: it waits on the owner, as such, and on admins.
+    const first = {
+      owner: await goLiveFor(owner),
+      admin: await waitsOnFor(admin),
+      asker: await goLiveFor(builder),
+      user: await goLiveFor(user),
+      byUser: await settle(user, 1, 1),
+      // A revision the lifecycle moved on from.
+      stale: await settle(owner, 1, 0),
+      approved: await settle(owner, 1, 1),
+    };
+    // The owner asked: it waits on admins alone.
+    await owner.api.workflowResources.lifecycle.requestGoLive(workflow.id, {
+      version: 2,
+      revision: 2,
+    });
+    const second = {
+      owner: await goLiveFor(owner),
+      admin: await waitsOnFor(admin),
+      byOwner: await settle(owner, 2, 3),
+      byBuilder: await settle(builder, 2, 3),
+      approved: await settle(admin, 2, 3),
+    };
+    const lifecycle = await owner.api.workflowResources.lifecycle.get(
+      workflow.id
+    );
+
+    expect({
+      first: {
+        ...first,
+        owner: first.owner && {
+          id: first.owner.id,
+          waitsOn: first.owner.waitsOn,
+          verdicts: first.owner.verdicts,
+          version: first.owner.version,
+          requestedBy: first.owner.requestedBy,
+          revision: first.owner.revision,
+        },
+      },
+      second,
+      live: lifecycle.live?.version,
+      gone: {
+        owner: await goLiveFor(owner),
+        admin: await goLiveFor(admin),
+      },
+    }).toStrictEqual({
+      first: {
+        owner: {
+          id: `workflowGoLive:${workflow.id}:1`,
+          waitsOn: { type: "person", userId: owner.userId },
+          verdicts: ["approve", "reject"],
+          version: 1,
+          requestedBy: builder.userId,
+          revision: 1,
+        },
+        admin: { type: "admin" },
+        asker: undefined,
+        user: undefined,
+        byUser: "role.forbidden",
+        stale: "workflow.lifecycle_conflict",
+        approved: "ok",
+      },
+      second: {
+        owner: undefined,
+        admin: { type: "admin" },
+        byOwner: "workflow.go_live_own_request",
+        byBuilder: "role.forbidden",
+        approved: "ok",
+      },
+      live: 2,
+      gone: { owner: undefined, admin: undefined },
     });
   });
 

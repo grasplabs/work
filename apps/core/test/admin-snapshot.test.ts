@@ -586,7 +586,8 @@ describe("the admin snapshot", () => {
           teams: [{ name: sentinel, does: sentinel }],
         },
       },
-      by
+      by,
+      await onboardingStore(env).purgeMark()
     );
     await store.answerKickoff("pain", sentinel, by);
 
@@ -668,7 +669,7 @@ describe("what the snapshot says the company connected and still needs", () => {
     const { url } = await annas.start({
       provider: "microsoft",
       scope: "personal",
-      returnTo: "/connections",
+      returnTo: "/integrations",
     });
     const authorization = new URL(url);
     await backFromProvider(anna.session, {

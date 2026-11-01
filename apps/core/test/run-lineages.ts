@@ -1,22 +1,23 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import {
   appIdSchema,
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { vi } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { answeringProvider, fakeProviderFor } from "./model-provider.ts";
+import type {
+  FakeProvider,
+  ProviderReply,
+  SentRequest,
+} from "./model-provider.ts";
 import type { signedInApi } from "./sign-in.ts";
 import { outcome } from "./sign-in.ts";
 import {
@@ -29,26 +30,29 @@ import {
 
 // A run lineage's model calls: a run and every run started under it count
 // their model spend and provider requests together, against the lineage's
-// root, for the lineage's whole life. AI Gateway is the outside system: a
-// fake behind the AI binding. The runs, the engine, the dispatcher, the
-// model ledger and the audit log are real. Child runs are started the way
+// root, for the lineage's whole life. The model provider behind connect
+// is the outside system (test/model-provider.ts). The runs, the engine,
+// the dispatcher, the model ledger and the audit log are real. Child runs are started the way
 // core starts a run under another (`startRun`'s `parent`): no App or run
 // can name a parent or a root.
 //
 // What run-lineage-spend, -requests and -policies.test.ts share: each
 // calls `mockIdp()` itself, since a module is loaded once for many files.
 
-const gateway = "grasp-os-test";
-export const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the runs' AI steps go through: Mistral Large, which doesn't think. */
+export const lineageModel = "mistral/mistral-large-latest";
+
+/** The answer a step's binding allows, in tokens. */
+const stepAnswerTokens = 6000;
 
 /** An answer that costs next to nothing. */
 export const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
 
 /**
- * An answer to the steps' schema that costs $0.293226 from Llama 3.3 (a
- * million tokens in at $0.293, 100 out at $2.253 a million): far more
- * than a step's request reserves, about $0.014 for Llama's default
- * 6,000-token answer, so what decides is what was spent.
+ * An answer to the steps' schema that costs $0.50015 from Mistral Large (a
+ * million tokens in at $0.50, 100 out at $1.50 a million): far more than
+ * a step's request reserves, about $0.01 for its binding's 6,000-token
+ * answer, so what decides is what was spent.
  */
 export const dearTotal = {
   text: '{ "total": 1234 }',
@@ -58,17 +62,21 @@ export const dearTotal = {
 
 /**
  * A new App with the sample server and `files`, its model resource
- * `reader`, which its runs' AI steps go through, bound to Llama 3.3.
+ * `reader`, which its runs' AI steps go through, bound to Mistral Large:
+ * a model the organization chose, as an admin binds only those, with a
+ * provider that answers nothing until a test connects its own
+ * (`withProvider`).
  */
 export const appWith = async (
   builder: Parameters<typeof serverAppWith>[0],
   files: Record<string, string>
 ): Promise<string> => {
   const app = await serverAppWith(builder, {
-    ...modelRegistration({ reader: 6000 }),
+    ...modelRegistration({ reader: stepAnswerTokens }),
     ...files,
   });
-  await bindModel(app, "reader", workersAi);
+  await fakeProviderFor([lineageModel]);
+  await bindModel(app, "reader", lineageModel);
   return app;
 };
 
@@ -130,112 +138,31 @@ export const newMonth = (): string => {
 };
 
 /**
- * What `run` returns, with `budgets` in the deployment's gateway config
- * and the fake gateway answering with `replies`: for the runs the
- * dispatcher runs and the calls the test makes alike.
+ * What `run` returns, with `budgets` in the deployment's model rules and
+ * the provider answering with `replies`, in order, or with what `respond`
+ * makes of the requests so far: for the runs the dispatcher runs and the
+ * calls the test makes alike.
  */
-export const withGateway = async <Result>(
+export const withProvider = async <Result>(
   budgets: Record<string, unknown> | undefined,
-  replies: GatewayReply[],
-  run: (fake: ReturnType<typeof fakeGateway>) => Promise<Result>
+  replies:
+    | ProviderReply[]
+    | ((requests: readonly SentRequest[]) => ProviderReply | undefined),
+  run: (fake: FakeProvider) => Promise<Result>
 ): Promise<Result> => {
   const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const sending = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  const fake = Array.isArray(replies)
+    ? await fakeProviderFor([lineageModel], ...replies)
+    : await answeringProvider(replies, { models: [lineageModel] });
   try {
-    env.MODEL_GATEWAY = {
-      gateway,
-      models: [workersAi],
-      ...(budgets === undefined ? {} : { budgets }),
-    };
+    env.MODEL_GATEWAY = budgets === undefined ? {} : { budgets };
     env.MODEL_BUDGET_MONTH = newMonth();
     return await run(fake);
   } finally {
     env.MODEL_GATEWAY = before;
     env.MODEL_BUDGET_MONTH = month;
-    sending.mockRestore();
   }
 };
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-export const configuredLimits = quotaLimitsSchema.parse(
-  env.QUOTA_LIMITS
-).limits;
-
-/**
- * The generation of the next quota policy a test sets: each higher than
- * any before, as an operator's must be.
- */
-let generations = 100;
-
-/** The generation the latest quota policy was set under. */
-export const policyGeneration = (): number => generations;
-
-/**
- * Sets the operator's quota policy to `limits`, under a new generation,
- * which it returns.
- */
-export const setPolicy = (limits: Record<string, number>): number => {
-  generations += 1;
-  env.QUOTA_LIMITS = { generation: generations, limits };
-  return generations;
-};
-
-/**
- * The quota policy generations the model ledger recorded the provider
- * requests of the lineage of `root` under, and how many under each.
- */
-export const generationsOf = async (root: string) =>
-  await runInDurableObject(modelLedger(env), (_instance, state) =>
-    state.storage.sql
-      .exec<{ generation: number | null; requests: number }>(
-        "SELECT policy_generation AS generation, count(*) AS requests FROM requests WHERE actor LIKE ? GROUP BY policy_generation ORDER BY policy_generation",
-        `%${root}%`
-      )
-      .toArray()
-  );
-
-/**
- * Sets the model ledger's highest quota policy generation to
- * `generation`, as a ledger ahead of core would have it; none clears it.
- */
-export const setLedgerGeneration = async (
-  generation?: number
-): Promise<void> => {
-  await runInDurableObject(modelLedger(env), (_instance, state) => {
-    state.storage.sql.exec("DELETE FROM policy");
-    if (generation !== undefined) {
-      state.storage.sql.exec(
-        "INSERT INTO policy (id, generation) VALUES (0, ?)",
-        generation
-      );
-    }
-  });
-};
-
-/**
- * Core's database, with `onRead` run as each statement on the quota
- * policy's table is prepared: one that throws is a table that can't be
- * read.
- */
-export const onPolicyRead = (onRead: () => void): D1Database =>
-  new Proxy(env.DB, {
-    get: (target, property) => {
-      const value: unknown = Reflect.get(target, property);
-      if (property === "prepare") {
-        return (query: string): unknown => {
-          if (query.includes("quota_policies")) {
-            onRead();
-          }
-          return target.prepare(query);
-        };
-      }
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
-    },
-  });
 
 /** `count` of `item`. */
 export const times = <Item>(count: number, item: Item): Item[] =>
@@ -353,9 +280,10 @@ export const refused = async (
     );
 
 /**
- * A call to Llama for the workflow run `trigger`, in the context of `app`
- * for `person`: capped at 100 tokens unless `capped` is false, when it
- * reserves as much as a step's (Llama's whole 24,000-token answer).
+ * A call to Mistral Large for the workflow run `trigger`, in the context
+ * of `app` for `person`: capped at 100 tokens unless `capped` is false,
+ * when it reserves as much as a step's (its binding's 6,000-token answer,
+ * some $0.01).
  */
 export const stepCall = (
   { app, person }: { app: string; person: string },
@@ -364,8 +292,8 @@ export const stepCall = (
 ): ModelCall<undefined> => {
   const appId = appIdSchema.parse(app);
   return {
-    model: workersAi,
-    ...(capped ? { maxTokens: 100 } : {}),
+    model: lineageModel,
+    maxTokens: capped ? 100 : stepAnswerTokens,
     input: "Hello.",
     purpose: "workflow.step",
     trigger,
@@ -431,6 +359,25 @@ export const allAtOnce = async (
   await Promise.all(
     triggers.map(async (trigger) => await callUntilServed(work, trigger))
   );
+
+/**
+ * The outcomes of calls for each of `triggers`, one after another: a
+ * lineage's requests used up before what a test is about. All at once,
+ * a person's share of requests in flight (four) admits them four a round,
+ * each round five seconds on, as the provider behind connect answers in
+ * its own time: a hundred took longer than a test may.
+ */
+export const inTurn = async (
+  triggers: readonly AuditActor[],
+  work: Work
+): Promise<string[]> => {
+  const outcomes: string[] = [];
+  for (const trigger of triggers) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after another
+    outcomes.push(await callFor(work, trigger));
+  }
+  return outcomes;
+};
 
 /** How many of `outcomes` are `outcome`. */
 export const countOf = (outcomes: readonly string[], one: string): number =>

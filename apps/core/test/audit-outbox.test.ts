@@ -6,13 +6,13 @@ import { z } from "zod";
 
 import { auditLog } from "../src/audit-log.ts";
 import { loggedEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { outcome } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // Every audit event waits in an outbox, written with its change, until a
 // drain appends it to the log: core's and Knowledge's own in the background
-// right after each change and on every cron run, connect's on every cron
+// right after each change and on every clock run, connect's on every clock
 // run, over RPC. These tests break the drain in the ways it can break and
 // check that each event still reaches the chain exactly once, in the order
 // it was stored. They share the deployment's single log, so they look only
@@ -152,20 +152,20 @@ describe("draining core's outbox", () => {
     const events = await store(newEvent(), newEvent(), newEvent());
     const ids = events.map(({ id }) => id);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(storedWith(ids)).resolves.toStrictEqual(events);
     await expect(waitingIn(env.DB, ids)).resolves.toStrictEqual([]);
     await expect(auditLog(env).verify()).resolves.toMatchObject({ ok: true });
   });
 
-  it("appends more than one batch in a cron run", async () => {
+  it("appends more than one batch in a clock run", async () => {
     const events = await store(
       ...Array.from({ length: 150 }, () => newEvent())
     );
     const ids = events.map(({ id }) => id);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(storedWith(ids)).resolves.toStrictEqual(events);
   });
@@ -183,7 +183,7 @@ describe("draining core's outbox", () => {
       ),
     ]);
     try {
-      await runCron();
+      await runMinuteTasks();
     } finally {
       await env.DB.batch([
         env.DB.prepare("DROP TRIGGER late_insert"),
@@ -203,7 +203,7 @@ describe("draining core's outbox", () => {
       "CREATE TRIGGER audit_outbox_stuck BEFORE DELETE ON audit_outbox BEGIN SELECT RAISE(ABORT, 'outbox down'); END"
     ).run();
     try {
-      await expect(errorsDuring(runCron)).resolves.toContain(
+      await expect(errorsDuring(runMinuteTasks)).resolves.toContain(
         "audit.outbox.drain_failed"
       );
     } finally {
@@ -213,7 +213,7 @@ describe("draining core's outbox", () => {
     await expect(storedWith(ids)).resolves.toStrictEqual([event]);
     await expect(waitingIn(env.DB, ids)).resolves.toStrictEqual(ids);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(storedWith(ids)).resolves.toStrictEqual([event]);
     await expect(waitingIn(env.DB, ids)).resolves.toStrictEqual([]);
@@ -225,12 +225,12 @@ describe("draining core's outbox", () => {
 
     await expect(
       errorsDuring(async () => {
-        await runCron({ AUDIT_LOG: down(env.AUDIT_LOG) });
+        await runMinuteTasks({ AUDIT_LOG: down(env.AUDIT_LOG) });
       })
     ).resolves.toContain("audit.outbox.drain_failed");
     await expect(waitingIn(env.DB, ids)).resolves.toStrictEqual(ids);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(storedWith(ids)).resolves.toStrictEqual(events);
     await expect(waitingIn(env.DB, ids)).resolves.toStrictEqual([]);
@@ -241,7 +241,7 @@ describe("draining core's outbox", () => {
     await auditLog(env).append([event]);
     await store(event);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(storedWith([event.id])).resolves.toStrictEqual([event]);
     await expect(waitingIn(env.DB, [event.id])).resolves.toStrictEqual([]);
@@ -254,7 +254,7 @@ describe("draining core's outbox", () => {
     const after = await store(newEvent(), newEvent());
     const ids = after.map(({ id }) => id);
 
-    const logs = await errorLogsDuring(runCron);
+    const logs = await errorLogsDuring(runMinuteTasks);
 
     const rejected = await rejectedWith(unreadable);
     const gaps = await gapsNaming(unreadable);
@@ -296,7 +296,7 @@ describe("draining core's outbox", () => {
       "CREATE TRIGGER audit_outbox_stuck BEFORE DELETE ON audit_outbox BEGIN SELECT RAISE(ABORT, 'outbox down'); END"
     ).run();
     try {
-      await errorLogsDuring(runCron);
+      await errorLogsDuring(runMinuteTasks);
     } finally {
       await env.DB.prepare("DROP TRIGGER audit_outbox_stuck").run();
     }
@@ -305,7 +305,7 @@ describe("draining core's outbox", () => {
       left: await waitingIn(env.DB, [unreadable]),
     };
 
-    await errorLogsDuring(runCron);
+    await errorLogsDuring(runMinuteTasks);
 
     expect({
       first: { gaps: first.gaps.length, left: first.left },
@@ -322,9 +322,9 @@ describe("draining core's outbox", () => {
   it("keeps two rejected rows with the same ID, each with its own gap", async () => {
     const id = crypto.randomUUID();
     await storeUnreadable([id], "not an event");
-    await errorLogsDuring(runCron);
+    await errorLogsDuring(runMinuteTasks);
     await storeUnreadable([id], "still not an event");
-    await errorLogsDuring(runCron);
+    await errorLogsDuring(runMinuteTasks);
 
     const rejected = await rejectedWith([id]);
     const gaps = await gapsNaming([id]);
@@ -345,7 +345,7 @@ describe("draining core's outbox", () => {
     const forged = { ...original, action: "permission.revoked" };
     const [, next] = await store(forged, newEvent());
 
-    const logs = await errorLogsDuring(runCron);
+    const logs = await errorLogsDuring(runMinuteTasks);
 
     const gaps = await gapsNaming([original.id]);
     expect({
@@ -382,7 +382,7 @@ describe("draining connect's outbox", () => {
   it("appends connect's events in the order connect stored them, then removes them", async () => {
     const ids = await connectRecords(3);
 
-    await runCron();
+    await runMinuteTasks();
 
     const appended = await storedWith(ids);
     expect(appended.map(({ id, source }) => [id, source])).toStrictEqual(
@@ -400,7 +400,7 @@ describe("draining connect's outbox", () => {
       .bind(unreadable, "not an event", Date.now())
       .run();
 
-    await errorLogsDuring(runCron);
+    await errorLogsDuring(runMinuteTasks);
 
     const gaps = await gapsNaming([unreadable]);
     const moved = await connectDb()
@@ -428,7 +428,7 @@ describe("draining connect's outbox", () => {
     const [fromCore] = await store(newEvent());
 
     const errors = await errorsDuring(async () => {
-      await runCron({ CONNECT: down(env.CONNECT) });
+      await runMinuteTasks({ CONNECT: down(env.CONNECT) });
     });
     expect({
       alert: errors.includes("audit.outbox.drain_failed"),
@@ -442,7 +442,7 @@ describe("draining connect's outbox", () => {
       waiting: ids,
     });
 
-    await runCron();
+    await runMinuteTasks();
 
     const appended = await storedWith(ids);
     expect({
@@ -465,13 +465,13 @@ describe("draining connect's outbox", () => {
 
     await expect(
       errorsDuring(async () => {
-        await runCron({ CONNECT: unacknowledged });
+        await runMinuteTasks({ CONNECT: unacknowledged });
       })
     ).resolves.toContain("audit.outbox.drain_failed");
     // Appended, but still waiting: taken again on the next run.
     await expect(waitingIn(connectDb(), ids)).resolves.toStrictEqual(ids);
 
-    await runCron();
+    await runMinuteTasks();
 
     const appended = await storedWith(ids);
     expect(appended.map(({ id }) => id)).toStrictEqual(ids);

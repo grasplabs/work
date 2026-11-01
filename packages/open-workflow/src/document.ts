@@ -13,6 +13,7 @@ import {
 import { isObject } from "./json-text.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
 import { dslVersion, profileLimits, profileName } from "./limits.ts";
+import { checkStores } from "./stores.ts";
 import {
   checkDataFlow,
   checkTask,
@@ -335,7 +336,7 @@ const checkGrasp = (
   allowKeys(
     checker,
     grasp,
-    ["profile", "params", "bindings", "limits"],
+    ["profile", "params", "bindings", "limits", "stores"],
     pointer,
     site
   );
@@ -380,6 +381,9 @@ const checkGrasp = (
   }
   if (Object.hasOwn(grasp, "limits")) {
     checkLimits(checker, grasp.limits, pointerJoin(pointer, "limits"));
+  }
+  if (Object.hasOwn(grasp, "stores")) {
+    checkStores(checker, grasp.stores, pointerJoin(pointer, "stores"));
   }
 };
 

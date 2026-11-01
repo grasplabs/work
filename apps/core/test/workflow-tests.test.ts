@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
@@ -24,7 +23,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { fixtureRunSessionOf } from "../src/workflows/fixture-run-sessions.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -34,10 +34,11 @@ import { connectDb } from "./test-env.ts";
 // the engine, the same version as anyone's, but nothing of the
 // organization's. The threat model is in workflows/fixture-runs.ts; the
 // ways it can fail come first here: a test's run lands in the
-// organization's runs, receipts or audit; it reaches a model, an App or a
-// store; it outlives its test, or a test died before removing it; a test
-// asks about a run it didn't start; a test starts what the release
-// doesn't bind. Then what a test sees: the run's end, and how often each
+// organization's runs, receipts or audit; it reaches a model, a connection
+// or an action (its model and store calls are workflow-test-calls.test.ts's);
+// it outlives its test, or a test died before removing it; a test asks
+// about a run it didn't start; a test starts what the release doesn't
+// bind. Then what a test sees: the run's end, and how often each
 // task completed.
 
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -436,7 +437,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuse every call that leaves the run's own code: a model is never asked", async () => {
+  it("fail a model call its fixture gives no answer: a model is never asked", async () => {
     const admin = await person("admin");
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
@@ -462,13 +463,11 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
           { summary: { kind: "model", contract: key } }
         )
     );
-    const gateway = fakeGateway({
+    const provider = await fakeProvider({
       text: '{"line":"Hello"}',
       inputTokens: 1,
       outputTokens: 1,
     });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
     const session = await sessionOf(release);
     const run = startedAs(
       await session.start("desk-user", await startOf(release, { who: "Ada" }))
@@ -476,11 +475,42 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const ended: unknown = JSON.parse(await session.runOutcome(run));
     const completed = await session.completedCount(run, "greet");
     await session.close();
-    expect({ ended, completed, asked: gateway.requests.length }).toMatchObject({
-      ended: { status: "failed", code: "resource.unavailable" },
-      completed: 0,
-      asked: 0,
+    expect({ ended, completed, asked: provider.requests.length }).toMatchObject(
+      {
+        ended: { status: "failed", code: "workflow.test_unfixtured" },
+        completed: 0,
+        asked: 0,
+      }
+    );
+  });
+
+  it("leave no way into a closed test for a run it recorded as it closed", async () => {
+    const { release } = await requestsApp(
+      async (by) => await workflowOf(by, greeting())
+    );
+    const session = await sessionOf(release);
+    const request = await startOf(release, { who: "Ada" });
+    // Every ID made meanwhile, the run's among them.
+    const made: string[] = [];
+    const randomUUID = crypto.randomUUID.bind(crypto);
+    const ids = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      const id = randomUUID();
+      made.push(id);
+      return id;
     });
+    let started: number | string;
+    try {
+      // The test closes while its run is being recorded.
+      const starting = session.start("desk-user", request);
+      await session.close();
+      started = startedAs(await starting);
+    } finally {
+      ids.mockRestore();
+    }
+    expect({
+      refused: typeof started,
+      reachable: made.filter((id) => fixtureRunSessionOf(id) !== undefined),
+    }).toStrictEqual({ refused: "string", reachable: [] });
   });
 
   it("answer only about the runs their own test started", async () => {

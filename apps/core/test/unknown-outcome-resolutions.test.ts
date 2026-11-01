@@ -9,9 +9,9 @@ import { appHost } from "../src/durable-objects.ts";
 import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { outcome as codeOf } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -541,7 +541,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         .first<{ state: string; inputHash: string; origin: string }>();
     const before = await receiptRow();
     // Past the run's retention its input goes; the obligation stays.
-    await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
+    await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
     const row = await receiptRow();
     const origin = z
       .object({

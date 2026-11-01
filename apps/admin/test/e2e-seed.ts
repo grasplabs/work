@@ -1,20 +1,20 @@
 /**
- * What the browser journeys' admin starts from (e2e/admin-rollout.e2e.ts),
- * made as the admin's tests make it: its database migrated, its Secrets
- * Store filled as deploy-ops fills it, and a client in ring 0, on its own
- * account in the fake Cloudflare API, running a release a deploy made live,
- * with a newer release imported to roll out.
+ * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
+ * as the admin's tests make it: its database migrated, its Secrets Store
+ * filled with every secret it binds, and a client in ring 0, placed in a
+ * dedicated destination of its own on the fake Cloudflare API, provisioned
+ * on a release, with a newer release imported to roll out.
  */
+import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
+import type { AccountState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { publishRelease } from "./releases.ts";
+import { namespaceRelease } from "./namespace-release.ts";
+import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 
 /** What a seed made, for the journeys to find on the admin's pages. */
@@ -22,6 +22,8 @@ export interface Seeded {
   clientId: string;
   /** The newest release, which it doesn't run yet. */
   releaseId: string;
+  /** The release it runs. */
+  previousReleaseId: string;
 }
 
 /** The admin's migrations, as drizzle-kit writes them (src/db/migrations). */
@@ -65,10 +67,7 @@ const migrate = async (database: D1Database): Promise<void> => {
 };
 
 /** Puts every secret the admin reads in its store, unless it's there. */
-const fillStore = async (tokens: {
-  deployer: string;
-  tenant: string;
-}): Promise<void> => {
+const fillStore = async (tokens: { deployer: string }): Promise<void> => {
   for (const [binding, value] of adminSecrets(tokens)) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
@@ -83,60 +82,119 @@ const fillStore = async (tokens: {
   }
 };
 
-const staff = { email: "staff@grasp.test", sub: "" };
-
 /**
- * Seeds the admin: a new client in ring 0 on the fake's new account,
- * running a release a deploy made live, and a newer release. Every client
- * an earlier seed made is offboarded, so a journey tried again reaches
- * only its own.
+ * Seeds the admin: a new client in ring 0, placed in a dedicated
+ * destination of its own on the fake's new account and provisioned on a
+ * release, and a newer release. Every client an earlier seed made is
+ * offboarded, so a journey tried again reaches only its own.
  */
 export const seed = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  tokens: { deployer: string; tenant: string }
+  tokens: { deployer: string }
 ): Promise<Seeded> => {
   await migrate(env.DB);
   await fillStore(tokens);
-  const db = adminDatabase(env.DB);
-  await db
+  await adminDatabase(env.DB)
     .update(clients)
     .set({ status: "offboarded" })
     .where(eq(clients.status, "active"));
-  const previous = await publishRelease({ notes: "feat(core): what runs" });
-  await importReleases(env.RELEASES, db);
-  const account = cloudflare.addAccount();
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: clientId,
-        accountId: account.id,
-        ring: 0,
-        status: "active",
-        signIn: JSON.stringify({
-          domains: ["acme.test"],
-          admins: ["ada@acme.test"],
-          googleHostedDomain: "acme.test",
-        }),
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, previous.id)
-  );
-  const next = await publishRelease({
-    notes: "feat(core): roll out",
+  const previous = await placedRelease("feat(core): what runs", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const { clientId } = await placedClientRecord(cloudflare, 0);
+  await deployPlaced(clientId, previous);
+  const next = await placedRelease("feat(core): roll out", {
     core: "export default { core: 2 };",
     connect: "export default { connect: 2 };",
   });
-  await importReleases(env.RELEASES, db);
-  return { clientId, releaseId: next.id };
+  return { clientId, releaseId: next, previousReleaseId: previous };
+};
+
+/** What a placed seed made, for the placed-client journey to find on the admin's pages. */
+export interface SeededPlaced {
+  /** A client live on the first release, in a dedicated destination of its own. */
+  clientId: string;
+  /** Two releases a placed client runs, oldest first. */
+  releaseIds: [string, string];
+}
+
+/**
+ * Seeds the admin for the placed-client journey: a client placed in a
+ * dedicated destination on the fake's new account, as the admin can
+ * still place one though its pages offer only Grasp Cloud and
+ * on-premises, live on a first release, and a second to release it to.
+ */
+export const seedPlaced = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  tokens: { deployer: string }
+): Promise<SeededPlaced> => {
+  await migrate(env.DB);
+  await fillStore(tokens);
+  const first = await placedRelease("feat(core): what it starts on", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const { clientId } = await placedClientRecord(cloudflare, 1);
+  await deployPlaced(clientId, first);
+  const second = await placedRelease("feat(core): what it's released to", {
+    core: "export default { core: 2 };",
+    connect: "export default { connect: 2 };",
+  });
+  return { clientId, releaseIds: [first, second] };
+};
+
+/** What the organizations seed made: a client whose core answers, and one not set up yet. */
+export interface SeededOrganizations {
+  /** Live, its core answering the admin's snapshot. */
+  answered: { clientId: string; account: AccountState };
+  /** Added, never provisioned: it has no core to answer. */
+  unset: { clientId: string };
+}
+
+/**
+ * Seeds the admin for the organization sections' journey: every client an
+ * earlier seed made offboarded, then one client live on a release and one
+ * only added, as staff leave an organization before its Setup runs.
+ */
+export const seedOrganizations = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  tokens: { deployer: string }
+): Promise<SeededOrganizations> => {
+  await migrate(env.DB);
+  await fillStore(tokens);
+  await adminDatabase(env.DB)
+    .update(clients)
+    .set({ status: "offboarded" })
+    .where(ne(clients.status, "offboarded"));
+  const release = await placedRelease("feat(core): the sections", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const answered = await placedClientRecord(cloudflare, 0, {
+    name: "Answering Acme",
+  });
+  await deployPlaced(answered.clientId, release);
+  const unset = await placedClientRecord(cloudflare, 0, { name: "Unset Acme" });
+  return {
+    answered: { clientId: answered.clientId, account: answered.account },
+    unset: { clientId: unset.clientId },
+  };
+};
+
+/**
+ * Seeds the admin for the create journey: Grasp's own account in the
+ * fake, with its stage's clients' namespace, where a new organization
+ * goes, and a release that can run there.
+ */
+export const seedCreate = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  tokens: { deployer: string }
+): Promise<{ releaseId: string }> => {
+  await migrate(env.DB);
+  await fillStore(tokens);
+  const account = cloudflare.addAccount("Grasp", undefined, platformAccountId);
+  account.namespaces.set(clientsNamespace("production"), new Map());
+  const manifest = await namespaceRelease();
+  return { releaseId: manifest.releaseId };
 };

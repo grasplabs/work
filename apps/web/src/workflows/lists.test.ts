@@ -6,7 +6,13 @@ import {
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { handledOf, listsOf, needsAttention } from "./lists.ts";
+import {
+  handledOf,
+  listsOf,
+  needsAttention,
+  processesIn,
+  showsUnder,
+} from "./lists.ts";
 
 /** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
@@ -78,5 +84,22 @@ describe("the Workflows page's lists", () => {
       ]),
       none: handledOf([]),
     }).toStrictEqual({ some: 42, none: 0 });
+  });
+
+  it("offers each process a workflow serves once, in the order the UI lists them", () => {
+    expect({
+      some: processesIn(["r2r", null, "o2c", "r2r", "i2r"]),
+      none: processesIn([null, null]),
+    }).toStrictEqual({ some: ["o2c", "i2r", "r2r"], none: [] });
+  });
+
+  it("shows every workflow while no process filters, and only that process's while one does", () => {
+    expect([
+      showsUnder(undefined, null),
+      showsUnder(undefined, "o2c"),
+      showsUnder("o2c", "o2c"),
+      showsUnder("o2c", "p2p"),
+      showsUnder("o2c", null),
+    ]).toStrictEqual([true, true, true, false, false]);
   });
 });

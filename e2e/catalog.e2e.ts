@@ -1,19 +1,18 @@
+import { readdirSync } from "node:fs";
+import nodePath from "node:path";
+
 import { expect, test } from "@playwright/test";
 import type { ElementHandle, Locator, Page } from "@playwright/test";
 
-import {
-  examples,
-  graspComponents,
-  shadcnComponents,
-} from "../packages/ui/catalog/inventory.ts";
 import { recordCspViolations } from "./csp.ts";
 
 // Every component in the UI kit, and every example for agents, on its own
 // page of the local gallery (apps/web/src/routes/kit_.*): each has names for
 // its controls, a visible focus from the keyboard, no sideways scroll on a
 // phone, overlays that open from the keyboard and close with Escape, and a
-// dark theme. The list comes from the kit's inventory, so a component added
-// to the kit is checked without touching this file.
+// dark theme. The list comes from the kit's components and examples
+// directories, so a component added to the kit is checked without touching
+// this file.
 
 // A trace of every failing page, kept as the run's artifact.
 test.use({ trace: "retain-on-failure" });
@@ -26,16 +25,19 @@ test.describe.configure({ mode: "parallel" });
 const phone = { width: 390, height: 844 };
 const desktop = { width: 1280, height: 800 };
 
-const supportedShadcn = Object.entries(shadcnComponents).flatMap(
-  ([name, entry]) => (entry.status === "supported" ? [name] : [])
-);
+/** The names of the `.tsx` modules in `dir` of the UI kit, tests aside. */
+const modulesIn = (dir: string): string[] =>
+  readdirSync(nodePath.join(import.meta.dirname, "../packages/ui", dir))
+    .filter((file) => file.endsWith(".tsx") && !file.endsWith(".test.tsx"))
+    .map((file) => file.slice(0, -".tsx".length));
+
 const pages = [
-  ...[...supportedShadcn, ...Object.keys(graspComponents)].map((name) => ({
+  ...modulesIn("src/components").map((name) => ({
     name,
     heading: name,
     path: `/kit/components/${name}`,
   })),
-  ...Object.keys(examples).map((name) => ({
+  ...modulesIn("catalog/examples").map((name) => ({
     name: `example ${name}`,
     heading: name,
     path: `/kit/examples/${name}`,

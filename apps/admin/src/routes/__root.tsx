@@ -1,11 +1,7 @@
-import {
-  createRootRoute,
-  HeadContent,
-  Link,
-  Scripts,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
@@ -38,17 +34,6 @@ const Frame = () => {
   return <AdminFrame admins={admins} platform={platform} />;
 };
 
-/** A page there isn't, in the admin's frame. */
-const NotFound = () => (
-  <main className="flex flex-col gap-4 p-6">
-    <h1 className="text-2xl font-medium">Not found</h1>
-    <p className="text-sm">There&apos;s no such page.</p>
-    <Link className="text-sm underline underline-offset-4" to="/">
-      Back to the admin
-    </Link>
-  </main>
-);
-
 /**
  * Grasp's admin, in its own frame (src/admin/frame.tsx): the one place
  * staff manage everything, served from the root of its hostname. For
@@ -74,8 +59,11 @@ export const Route = createRootRoute({
       { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }],
+    // Light or dark as the system has it, set before first paint
+    // (public/theme.js, the admin's own), so the admin never flashes light.
+    scripts: [{ src: "/theme.js" }],
   }),
   shellComponent: RootDocument,
   component: Frame,
-  notFoundComponent: NotFound,
+  errorComponent: FrameFailure,
 });

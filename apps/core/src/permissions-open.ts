@@ -41,7 +41,11 @@ const storeOwners = async (
     .select({ store: sdkStoreOwners.storeId, app: sdkStoreOwners.appId })
     .from(sdkStoreOwners)
     .where(inList(sdkStoreOwners.storeId, [...new Set(stores)]));
-  return new Map(rows.map(({ store, app }) => [store, app]));
+  // A workflow's store has no App (store-owners.ts): it names none here,
+  // and no App's reading opens it.
+  return new Map(
+    rows.flatMap(({ store, app }) => (app === null ? [] : [[store, app]]))
+  );
 };
 
 /** Each resource's answer, by its kind and ID, for one listing. */

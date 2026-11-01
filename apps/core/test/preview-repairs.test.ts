@@ -14,13 +14,13 @@ import {
   model,
   openTestRun,
   pausedReply,
-  pointAtGateway,
+  configureObject,
   says,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import {
   keptManifestSchema,
   outcome as answerOf,
@@ -278,10 +278,8 @@ export const broken = query({
  * For each request the agent sent the model, whether `attack` is in it
  * anywhere but a tool's result: its system prompt, or what was said.
  */
-const saidOutsideResults = (
-  gateway: ReturnType<typeof fakeGateway>
-): boolean[] =>
-  gateway.requests.map(({ body }) => {
+const saidOutsideResults = (provider: FakeProvider): boolean[] =>
+  provider.requests.map(({ body }) => {
     const { system, messages } = z
       .object({ system: z.unknown(), messages: z.array(z.unknown()) })
       .parse(body);
@@ -303,7 +301,7 @@ const saidOutsideResults = (
     return JSON.stringify({ system, said }).includes(attack);
   });
 
-const setUp = async (replies: GatewayReply[], agentBuilds = true) => {
+const setUp = async (replies: ProviderReply[], agentBuilds = true) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Invoice desk" });
@@ -325,15 +323,15 @@ const setUp = async (replies: GatewayReply[], agentBuilds = true) => {
   }
   const chat = await builder.api.chats.create("Invoice desk");
   const stub = workspace(env, personalWorkspaceId(builder.userId));
-  const gateway = fakeGateway(...replies);
-  await pointAtGateway(stub, gateway);
-  return { builder, app, chatId: chat.id, stub, gateway };
+  const provider = await fakeProvider(...replies);
+  await configureObject(stub);
+  return { builder, app, chatId: chat.id, stub, provider };
 };
 
 describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   it("fixes a runtime error the preview reports, without the person, and reads its text only as data", async () => {
     const [firstCheck, secondCheck] = [heldCheck(), heldCheck()];
-    const { builder, chatId, stub, gateway } = await setUp([
+    const { builder, chatId, stub, provider } = await setUp([
       // It reads the build API's declaration before it builds.
       readApiStep("build"),
       codeStep(write(desk(false))),
@@ -360,7 +358,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       returned(result?.text)
     );
     // The attack text reaches the model only inside a tool's result.
-    const outsideResults = saidOutsideResults(gateway);
+    const outsideResults = saidOutsideResults(provider);
     expect({
       outcome,
       broken,
@@ -368,10 +366,10 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       failedCheck,
       passedCheck,
       outsideResults,
-      inResult: JSON.stringify(gateway.requests.at(-2)?.body).includes(attack),
+      inResult: JSON.stringify(provider.requests.at(-2)?.body).includes(attack),
       // The agent reads of the preview while previews are on: in the
       // build API's declaration, the result of its first step.
-      declared: JSON.stringify(gateway.requests[1]?.body).includes(
+      declared: JSON.stringify(provider.requests[1]?.body).includes(
         "preview (runtime errors)"
       ),
     }).toStrictEqual({
@@ -400,7 +398,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         failedInARow: 0,
         problems: [],
       },
-      outsideResults: gateway.requests.map(() => false),
+      outsideResults: provider.requests.map(() => false),
       inResult: true,
       declared: true,
     });
@@ -450,6 +448,66 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         passed: false,
         seen: true,
         first: { source: "server", at: "desk.total" },
+      },
+    });
+  });
+
+  it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem, however many warnings came first", async () => {
+    const kinds = `export default async (self, env) => {
+      const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+      const checked = await env.build.check(app.id);
+      return { passed: checked.passed, kinds: checked.preview.problems.map(({ kind }) => kind) };
+    };`;
+    const { builder, app, chatId, stub } = await setUp([
+      codeStep(kinds),
+      says("It passes, with a warning."),
+      codeStep(kinds),
+      says("It fails."),
+    ]);
+    const id = chatIdSchema.parse(chatId);
+    // The side panel has the draft open, and its screen works.
+    await stub.saveDraft(
+      id,
+      app,
+      1,
+      desk(true),
+      [],
+      0,
+      await openTestRun(stub, id)
+    );
+    await previewAt(builder, chatId, 1);
+    const reported = async (kind: "warning" | "console", message: string) => {
+      await builder.api.chats.previewReport(chatId, app, 1, "desk", {
+        kind,
+        message,
+      });
+    };
+
+    // React's development warning, which the frame reports as a warning.
+    await reported(
+      "warning",
+      'Each child in a list should have a unique "key" prop.'
+    );
+    await stub.ask(id, { text: "Check the desk", model });
+    // More warnings than a revision keeps, then the draft's own
+    // console.error: the warnings never take its place.
+    for (let count = 0; count < 10; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      await reported("warning", `Warning number ${count}`);
+    }
+    await reported("console", "The desk couldn't be drawn.");
+    await stub.ask(id, { text: "Check it again", model });
+
+    const [warned, failed] = await codeResults(stub, chatId);
+    expect({
+      warned: returned(warned?.text),
+      failed: returned(failed?.text),
+    }).toStrictEqual({
+      warned: { passed: true, kinds: ["warning"] },
+      // Ten warnings kept, the eleventh dropped, and the problem kept.
+      failed: {
+        passed: false,
+        kinds: [...Array.from({ length: 10 }, () => "warning"), "console"],
       },
     });
   });
@@ -817,7 +875,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   });
 
   it("tells the agent what its spec 8 draft's code threw, only as data in its tool's result", async () => {
-    const { stub, chatId, gateway } = await setUp([
+    const { stub, chatId, provider } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, ${JSON.stringify(spec8Broken)});
@@ -835,21 +893,21 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const results = await codeResults(stub, chatId);
     expect({
       called: returned(results[0]?.text),
-      outsideResults: saidOutsideResults(gateway),
-      inResult: JSON.stringify(gateway.requests.at(-1)?.body).includes(attack),
+      outsideResults: saidOutsideResults(provider),
+      inResult: JSON.stringify(provider.requests.at(-1)?.body).includes(attack),
     }).toStrictEqual({
       called: {
         ok: false,
         code: "internal.unexpected",
         message: `Error: Invoice 7 has no total. ${attack}`,
       },
-      outsideResults: gateway.requests.map(() => false),
+      outsideResults: provider.requests.map(() => false),
       inResult: true,
     });
   });
 
   it("throws to the agent what no change of its spec 8 draft fixes: a kept artifact changed since", async () => {
-    const { builder, stub, chatId, app, gateway } = await setUp([
+    const { builder, stub, chatId, app } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         try {
@@ -896,7 +954,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
     // The stub before the restart is broken with it: a fresh one.
     const restarted = workspace(env, personalWorkspaceId(builder.userId));
-    await pointAtGateway(restarted, gateway);
+    await configureObject(restarted);
 
     await restarted.ask(chat, { text: "Try the invoice desk's notes", model });
 

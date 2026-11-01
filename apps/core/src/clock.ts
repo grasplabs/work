@@ -6,13 +6,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
   clockStarter as starter,
-  tickClock as tick,
 } from "@grasp-os/workerflow/clock";
-import type {
-  ClockPeriod,
-  ClockReport,
-  ClockTask,
-} from "@grasp-os/workerflow/clock";
+import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
@@ -22,28 +17,30 @@ import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
-import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
+import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
+import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
-import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
+import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
+import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
+import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
 import { drainEmittedEvents } from "./workflows/event-delivery.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
@@ -54,13 +51,14 @@ import {
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { sweepRunFiles } from "./workflows/run-files.ts";
 import { repairStarts } from "./workflows/runs.ts";
+import { startDueScheduleTriggers } from "./workflows/schedule-triggers.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
 import { repairWakes } from "./workflows/wakes.ts";
 
 // The client's clock for core (spec 43.5, @grasp-os/workerflow/clock):
 // core's maintenance, repair and schedule-admission tasks, each run once
-// per slot of its period with its own durable state, on the clock's alarm
-// and on core's crons while they last.
+// per slot of its period with its own durable state, on the clock's alarm.
+// Core has no cron: a Workers for Platforms user Worker can't.
 
 /**
  * Every task, in the order each period starts them. Each runs concurrently
@@ -78,6 +76,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: reconcileConsolidation,
   },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
+  { name: "members.erasures", period: "minute", run: retryErasures },
   {
     name: "access.revocations",
     period: "minute",
@@ -125,6 +124,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.schedules",
     period: "minute",
     run: startDueSchedules,
+  },
+  // Independent schedule triggers' due occurrences
+  // (src/workflows/schedule-triggers.ts).
+  {
+    name: "workflows.schedule_triggers",
+    period: "minute",
+    run: startDueScheduleTriggers,
   },
   {
     name: "workflows.starts",
@@ -202,6 +208,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  // Connector triggers' holds and tombstones of events long settled or no
+  // longer coming (src/workflows/connector-triggers.ts).
+  {
+    name: "workflows.connector_holds",
+    period: "quarterHour",
+    run: sweepConnectorTriggerHolds,
+  },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   // Stephen's counts past their week (src/channels/signals.ts).
   {
@@ -209,12 +222,40 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepChannelSignals,
   },
+  // Stephen's requests past their thirteen months, and the questions
+  // nothing points at (src/channels/stephen-requests.ts).
+  {
+    name: "channels.requests",
+    period: "quarterHour",
+    run: sweepStephenRequests,
+  },
+  // The weekly summary of Stephen's requests, on Monday mornings
+  // (src/stephen-summary.ts).
+  {
+    name: "stephen.summaries",
+    period: "quarterHour",
+    run: sendStephenSummaries,
+  },
   // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
-  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
+  // Loaded when it runs, not as core starts: it brings the Chat SDK.
+  {
+    name: "channels.gmail_watch",
+    period: "quarterHour",
+    run: async (env) => {
+      const { renewGmailWatch } = await import("./channels/gmail.ts");
+      await renewGmailWatch(env);
+    },
+  },
   {
     name: "workflows.run_details",
     period: "quarterHour",
     run: sweepRunDetails,
+  },
+  // What a lapsed held start was asked to run with (held-starts.ts).
+  {
+    name: "workflows.held_start_inputs",
+    period: "quarterHour",
+    run: sweepHeldStartInputs,
   },
   {
     name: "workflows.candidate_runs",
@@ -263,19 +304,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepTestFixtures,
   },
-  {
-    name: "screens.submissions",
-    period: "quarterHour",
-    run: sweepScreenSubmissions,
-  },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
-  // The application landscape: each connection read once a day, a bounded
-  // number of pages a run (src/landscape.ts).
-  {
-    name: "landscape.sync",
-    period: "quarterHour",
-    run: syncLandscapes,
-  },
   // The audit log's retention alarm armed, if it isn't yet: retention
   // itself runs on that alarm (src/audit-log.ts), and a deployment that
   // appends nothing after a release still gets it.
@@ -289,7 +318,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
 ];
 
 /** How core logs a task that failed: its name and the error, nothing it worked on. */
-const report: ClockReport = (event, task, error) => {
+export const report: ClockReport = (event, task, error) => {
   log.error(event, { task, ...errorFields(error) });
 };
 
@@ -304,16 +333,6 @@ export const clock = (
   env: Pick<Env, "CLOCK" | "DURABLE_OBJECT_JURISDICTION">
 ): DurableObjectStub<Clock> =>
   inJurisdiction(env, env.CLOCK).getByName("clock");
-
-/** A cron's explicit tick of `period` for time `at` (`tickClock`). */
-export const tickClock = async (
-  env: Env,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  period: ClockPeriod,
-  at: number
-): Promise<void> => {
-  await tick(clock(env), clockTasks, report, env, ctx, period, at);
-};
 
 /** How core logs a clock it couldn't arm. */
 const ensureFailed = (error: unknown): void => {

@@ -14,11 +14,11 @@ import type {
   AppWorkflowBinding,
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { editableApp } from "./apps.ts";
+import { appFor, editableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -107,7 +107,9 @@ export const bindWorkflowToApp = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, right before it commits: throws to write nothing. */
+  admit?: () => Promise<void>
 ): Promise<AppWorkflowBinding> => {
   requireNotStaff(by);
   const { app, alias, version } = workflowResourceErrors.parse(
@@ -143,6 +145,28 @@ export const bindWorkflowToApp = async (
     removedAt: null,
   };
   const db = drizzle(env.DB);
+  // The binding this one replaces, named in its event, so a rebind's
+  // record says what ran before. Read here; should another rebind land
+  // between this read and the batch, the batch's update still removes
+  // whichever is active, and the event names the one read.
+  const replacing = await db
+    .select({
+      id: appWorkflowBindings.id,
+      workflowId: appWorkflowBindings.workflowResourceId,
+      version: appWorkflowBindings.workflowResourceVersion,
+    })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, found.id),
+        eq(appWorkflowBindings.alias, alias),
+        eq(appWorkflowBindings.status, "active")
+      )
+    )
+    .get();
+  // After every read: an agent whose permission was revoked meanwhile
+  // binds nothing.
+  await admit?.();
   try {
     await auditedBatch(env, db, [
       db
@@ -174,7 +198,17 @@ export const bindWorkflowToApp = async (
         actor: by.actor ?? actorOf(by),
         action: "workflow.app_binding.bound",
         target: { type: "app", id: found.id },
-        detail: { binding: row.id, alias, workflowId: workflow.id, version },
+        detail: {
+          binding: row.id,
+          alias,
+          workflowId: workflow.id,
+          version,
+          // Flat, as every event's detail is (`auditDetailValueSchema`):
+          // null for a binding that replaces none.
+          replacedBinding: replacing?.id ?? null,
+          replacedWorkflowId: replacing?.workflowId ?? null,
+          replacedVersion: replacing?.version ?? null,
+        },
       }),
     ]);
   } catch (error) {
@@ -274,6 +308,31 @@ export const unbindWorkflowFromApp = async (
     }),
   ]);
   await tellBindingChanged(env, row.appId);
+};
+
+/**
+ * The active bindings of App `app`, by alias, for `by`, who must build it
+ * and isn't Grasp staff, as for binding and removing one. An archived
+ * App's are listed too: it keeps them for when it is restored.
+ */
+export const listAppWorkflowBindings = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<AppWorkflowBinding[]> => {
+  requireNotStaff(by);
+  const found = await appFor(env, by, app, "builder");
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, found.id),
+        eq(appWorkflowBindings.status, "active")
+      )
+    )
+    .orderBy(asc(appWorkflowBindings.alias));
+  return rows.map(bindingOf);
 };
 
 /**

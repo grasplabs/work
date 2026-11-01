@@ -18,6 +18,8 @@ export {
   schemaLimits,
 } from "./schema.ts";
 export type { IndexBase, SchemaDefinitionCode } from "./schema.ts";
+// The descriptor format a manifest names, for a host that writes one.
+export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
 export { inspectApp } from "./app.ts";

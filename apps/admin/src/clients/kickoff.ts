@@ -34,10 +34,11 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { deploySecrets } from "../deploy/context.ts";
+import { deploySecrets, ifStored } from "../deploy/context.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
-import { clientGrid, ifStored, routeOf } from "./grid.ts";
+import type { CoreAddress } from "./core-address.ts";
+import { clientGrid, routeOf } from "./grid.ts";
 
 /**
  * How long the company's core may take: reading a long conversation takes
@@ -69,6 +70,7 @@ export type KickoffRefusal =
   | "kickoff.unreadable"
   | "kickoff.not_read"
   | "kickoff.invalid"
+  | "kickoff.purged"
   | "not_answered";
 
 /** What the page gets back. */
@@ -88,6 +90,7 @@ const kickoffCodes: ReadonlySet<string> = new Set([
   "kickoff.unreadable",
   "kickoff.not_read",
   "kickoff.invalid",
+  "kickoff.purged",
 ]);
 
 const isKickoffCode = (code: string): code is KickoffRefusal =>
@@ -100,7 +103,7 @@ const clientCore = async (
   env: Env,
   clientId: string
 ): Promise<{
-  coreUrl: string;
+  address: CoreAddress;
   routerSecret: string;
   authSecret: string;
 } | null> => {
@@ -118,13 +121,14 @@ const clientCore = async (
     env.ROUTER_HOSTS,
     secrets.routerKey,
     row.id,
-    row.hostname
+    row.hostname,
+    env.DISPATCHER
   );
   if (route === "no_route" || route === "unknown") {
     return null;
   }
   return {
-    coreUrl: route.coreUrl,
+    address: route.core,
     routerSecret: route.secret,
     authSecret: await clientAuthSecret(secrets, row.id, route.generation),
   };
@@ -181,20 +185,23 @@ export const askKickoff = async (
   try {
     return await Promise.race([
       (async (): Promise<KickoffAnswer> => {
-        const response = await fetch(`${core.coreUrl}${adminKickoffPath}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            [routerSecretHeader]: core.routerSecret,
-            [platformUpdateSignatureHeader]: signature,
-          },
-          body,
-          // Never followed: a redirect would send the signed body, the
-          // transcript and the router secret wherever it points. A 3xx
-          // isn't ok, so it reads as not answered.
-          redirect: "manual",
-          signal: limit.signal,
-        });
+        const response = await core.address.fetch(
+          `${core.address.origin}${adminKickoffPath}`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              [routerSecretHeader]: core.routerSecret,
+              [platformUpdateSignatureHeader]: signature,
+            },
+            body,
+            // Never followed: a redirect would send the signed body, the
+            // transcript and the router secret wherever it points. A 3xx
+            // isn't ok, so it reads as not answered.
+            redirect: "manual",
+            signal: limit.signal,
+          }
+        );
         if (!response.ok) {
           return refusal(refusalOf(response.status, await codeOf(response)));
         }

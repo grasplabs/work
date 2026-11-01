@@ -14,6 +14,7 @@ import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { applyD1Migrations } from "../cloudflare/workers.ts";
+import type { BeforeMigration } from "../cloudflare/workers.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
 import { readBlob } from "./release.ts";
@@ -53,14 +54,16 @@ export const databaseMigrations = (
  * Applies each database's pending migrations from the release, one
  * database at a time, reading each migration from `store` and checking it
  * against the manifest first. Returns how many each database applied, by
- * name. `databases` gives each database's id by name.
+ * name. `databases` gives each database's id by name. `before` is
+ * checked before each migration (`applyD1Migrations`).
  */
 export const migrateDatabases = async (
   api: CloudflareApi,
   accountId: string,
   databases: ReadonlyMap<string, string>,
   manifest: ReleaseManifest,
-  store: ReleaseStore
+  store: ReleaseStore,
+  before?: BeforeMigration
 ): Promise<Map<string, number>> => {
   const applied = new Map<string, number>();
   for (const [name, files] of databaseMigrations(manifest)) {
@@ -75,11 +78,30 @@ export const migrateDatabases = async (
         sql: decoder.decode(await readBlob(store, file)),
       }))
     );
+    // What `before` threw stays its own: the runner's, not the migration's.
+    let refused: { error: unknown } | undefined;
+    const check = async () => {
+      try {
+        await before?.();
+      } catch (error) {
+        refused = { error };
+        throw error;
+      }
+    };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one database at a time
-      const names = await applyD1Migrations(api, accountId, id, migrations);
+      const names = await applyD1Migrations(
+        api,
+        accountId,
+        id,
+        migrations,
+        check
+      );
       applied.set(name, names.length);
     } catch (error) {
+      if (refused !== undefined) {
+        throw refused.error;
+      }
       // An API that didn't answer, or answered 429 or 5xx, stays the API's
       // failure; SQL that D1 refused (a 400, or a statement that failed
       // inside an answer) is the migration's.

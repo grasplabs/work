@@ -5,6 +5,7 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
+import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
 import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
@@ -23,6 +24,7 @@ import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -47,6 +49,11 @@ import {
   verifications,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
+import {
+  isErasedEmail,
+  isErasedSubject,
+  subjectsOf,
+} from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import {
@@ -173,19 +180,24 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
 )`;
 
+/** `members`, as `activeMember` reads it: apart from any caller's. */
+const activeMembership = alias(members, "active_membership");
+
 /**
  * That `userId` (an ID, or a column holding one) is an active member of
  * the organization now, with one of `roles` if given, as a SQL condition.
+ * Its own read of `members` is aliased: a caller's column of `members`
+ * (a query on members itself) is that caller's row, never this read's.
  */
 export const activeMember = (
   userId: string | SQLiteColumn,
   withRoles?: readonly string[]
 ): SQL => sql`EXISTS (
-  SELECT 1 FROM ${members}
-  WHERE ${members.organizationId} = ${organizationId}
-    AND ${members.userId} = ${userId}
-    ${withRoles === undefined ? sql`` : sql`AND ${inList(members.role, withRoles)}`}
-    AND ${notRemoved(userId)}
+  SELECT 1 FROM ${members} AS ${activeMembership}
+  WHERE ${activeMembership.organizationId} = ${organizationId}
+    AND ${activeMembership.userId} = ${userId}
+    ${withRoles === undefined ? sql`` : sql`AND ${inList(activeMembership.role, withRoles)}`}
+    AND ${notRemoved(activeMembership.userId)}
 )`;
 
 /**
@@ -303,6 +315,31 @@ const ensureMember = async (
     .where(eq(users.id, userId));
   // Config emails are lowercased when parsed; Better Auth lowercases the IdP's.
   const email = user?.email.toLowerCase();
+  // Someone an admin removed and then erased signs in again under the email
+  // that was theirs: a new user to Better Auth, but kept out all the same
+  // (person-erasure.ts).
+  if (email !== undefined && (await isErasedEmail(env, email))) {
+    return false;
+  }
+  // And under an identity that was theirs, whatever address it brings now:
+  // the subject their IdP verified, or the Entra object id their ID token
+  // names, which the directory knew them by before they ever signed in.
+  const held = await db
+    .select({
+      providerId: accounts.providerId,
+      accountId: accounts.accountId,
+      oid: accounts.oid,
+    })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
+  if (
+    await isErasedSubject(
+      env,
+      held.flatMap((account) => subjectsOf(account, directoryProviderId))
+    )
+  ) {
+    return false;
+  }
   const configuredAdmin = email !== undefined && config.admins.includes(email);
   const now = new Date();
   const invitation =
@@ -489,6 +526,44 @@ export const adoptDirectoryMember = async (
     .from(accounts)
     .where(eq(accounts.id, signedIn.id));
   return account?.userId ?? userId;
+};
+
+/** A claim of an IdP's verified profile, if it is a string. */
+const claimOf = (
+  profile: Record<string, unknown> | undefined,
+  claim: string
+): string | null => {
+  const value = profile?.[claim];
+  return typeof value === "string" ? value : null;
+};
+
+/**
+ * Whether a sign-in through `provider`, with the verified `profile` and
+ * `email` it brings, is someone erased: by the address that was theirs, or
+ * by the subject or Entra object id their account had, as the account it
+ * would make names them (`subjectsOf`: the SSO plugin keys an account by
+ * the ID token's `sub`).
+ */
+const isErasedSignIn = async (
+  env: Env,
+  provider: string | undefined,
+  email: unknown,
+  profile: Record<string, unknown> | undefined
+): Promise<boolean> => {
+  if (typeof email === "string" && (await isErasedEmail(env, email))) {
+    return true;
+  }
+  const sub = claimOf(profile, "sub");
+  if (provider === undefined || sub === null) {
+    return false;
+  }
+  return await isErasedSubject(
+    env,
+    subjectsOf(
+      { providerId: provider, accountId: sub, oid: claimOf(profile, "oid") },
+      directoryProviderId
+    )
+  );
 };
 
 /**
@@ -757,8 +832,22 @@ const createAuth = (
         }
         if (refusal !== undefined) {
           log.warn("auth.refused", { provider, refusal });
+          return { error: refusal };
         }
-        return refusal === undefined ? undefined : { error: refusal };
+        // Someone erased (person-erasure.ts), by the address or an identity
+        // that was theirs: refused here, before Better Auth writes a user,
+        // an account or an email for them, so nothing of theirs is stored
+        // again. They are told what a removed person is, nothing more.
+        const erased = await isErasedSignIn(
+          env,
+          provider,
+          user.email,
+          source.sso?.profile
+        );
+        if (erased) {
+          log.warn("auth.refused", { provider, refusal: "erased" });
+        }
+        return erased ? { error: "unable to create session" } : undefined;
       },
     },
     databaseHooks: {
@@ -846,7 +935,9 @@ const createAuth = (
         creatorRole: "admin",
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
-        teams: { enabled: true },
+        // An organization may have no teams at all: an admin deletes
+        // the last one as any other (Settings › Members).
+        teams: { enabled: true, allowRemovingAllTeams: true },
         // Leaving a team, or the team's deletion, can take a role in each
         // App shared with it away: their hosts tell the open screens to
         // look again (access-revocations.ts).
@@ -883,6 +974,17 @@ const createAuth = (
           },
         })),
         providersLimit: 0,
+        // In relay mode every IdP sends people back to the OAuth relay,
+        // which sends them on to this deployment's
+        // `/sso/callback/<provider>`, the one the signed state names
+        // (@grasp-os/shared/oauth-relay, routes.ts); the code is
+        // exchanged with this same redirect URI, the one it was given
+        // for. Otherwise IdPs send people straight to that callback.
+        ...(config.callbackOrigin === undefined
+          ? {}
+          : {
+              redirectURI: relayRedirectUri(config.callbackOrigin, "sign-in"),
+            }),
       }),
       // Signs App tokens (app-tokens.ts) with its own keys, and nothing
       // else: its `/token` and `/jwks` routes are off (routes.ts), and it

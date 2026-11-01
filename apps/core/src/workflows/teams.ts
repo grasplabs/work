@@ -1,10 +1,10 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
-import { roleErrors } from "@grasp-os/shared/roles";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -66,6 +66,26 @@ export const teamsSet = async (
       { id, name },
     ])
   );
+};
+
+/**
+ * The organization's teams, by name, that a workflow's team may be set to:
+ * for admins and builders, who set it (`setWorkflowTeam` says which
+ * workflows); not Grasp staff, who never do.
+ */
+export const teamChoices = async (
+  env: Env,
+  by: Identity
+): Promise<WorkflowTeam[]> => {
+  if (by.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  requireBuilder(by);
+  return await drizzle(env.DB)
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, organizationId))
+    .orderBy(asc(teams.name), asc(teams.id));
 };
 
 const teamInputSchema = z.string().min(1).max(256).nullable();

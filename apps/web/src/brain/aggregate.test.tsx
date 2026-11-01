@@ -17,6 +17,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { StatementsByKind } from "./brain-article/statements-by-kind.tsx";
+import { statementWords } from "./brain.ts";
 
 // What the Brain page says of what the interviews gave it (GRA-1084): a
 // statement the onboarding gave is a team's claim five or more of its
@@ -111,5 +112,18 @@ describe("what the Brain page says of the interviews", () => {
       { id: claim.id, basis: true },
       { id: added.id, basis: false },
     ]);
+  });
+
+  it("shows a team's claim in plain words wherever it is named, and anyone's own words in quotation marks", () => {
+    expect({
+      claim: statementWords(
+        "onb-st-0123456789abcdef0123456789abcdef",
+        "Tickets come in through Zendesk."
+      ),
+      added: statementWords("st-zendesk", "Zendesk holds every ticket."),
+    }).toStrictEqual({
+      claim: "Tickets come in through Zendesk.",
+      added: "“Zendesk holds every ticket.”",
+    });
   });
 });

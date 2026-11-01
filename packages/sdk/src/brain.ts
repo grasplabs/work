@@ -2,11 +2,15 @@ import {
   brainErrors,
   changeOptionsSchema,
   commandOptionsSchema,
+  entitiesListInputSchema,
+  entitySourcesInputSchema,
   memoriesGetInputSchema,
   memoriesListInputSchema,
   memoriesProposeChangeInputSchema,
   receiptsGetInputSchema,
   recallInputSchema,
+  relationsExplainInputSchema,
+  relationsGetInputSchema,
   rememberInputSchema,
   skillsReadInputSchema,
   skillsSelectInputSchema,
@@ -15,6 +19,10 @@ import type {
   ChangeOptions,
   CommandOptions,
   CommandReceipt,
+  EntitiesAnswer,
+  EntitiesListInput,
+  EntitySourcesAnswer,
+  EntitySourcesInput,
   MemoriesGetInput,
   MemoriesListInput,
   MemoriesProposeChangeInput,
@@ -23,6 +31,10 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RecallInput,
+  RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
+  RelationsGetInput,
   RememberInput,
   SkillRead,
   SkillSelection,
@@ -37,11 +49,21 @@ export type {
   CommandOptions,
   CommandReceipt,
   Coverage,
+  EntitiesAnswer,
+  EntitiesListInput,
+  EntitySourcesAnswer,
+  EntitySourcesInput,
+  EntitySummary,
   MemoryItem,
   MemoryPack,
   MemoryPage,
   MemoryRecord,
   RecallInput,
+  RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
+  RelationsGetInput,
+  RelationView,
   RememberInput,
   SkillRead,
   SkillRef,
@@ -78,6 +100,12 @@ export interface BrainBinding {
   ) => Promise<CommandReceipt>;
   skillsSelect?: (input: SkillsSelectInput) => Promise<SkillSelection>;
   skillsRead?: (input: SkillsReadInput) => Promise<SkillRead>;
+  entitiesList?: (input: EntitiesListInput) => Promise<EntitiesAnswer>;
+  entitySources?: (input: EntitySourcesInput) => Promise<EntitySourcesAnswer>;
+  relationsGet?: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+  relationsExplain?: (
+    input: RelationsExplainInput
+  ) => Promise<RelationsExplanation>;
 }
 
 /** The Brain, as a caller uses it. */
@@ -110,6 +138,33 @@ export interface Brain {
     select: (input: SkillsSelectInput) => Promise<SkillSelection>;
     /** A pinned skill, at exactly its version. */
     read: (input: SkillsReadInput) => Promise<SkillRead>;
+  };
+  entities: {
+    /**
+     * The entities readable sources mention, by a name's start: at least
+     * two characters for a caller that isn't a person. `truncated`: they
+     * come from the newest sources only, so some may be left out.
+     */
+    list: (input: EntitiesListInput) => Promise<EntitiesAnswer>;
+    /**
+     * The newest readable sources that mention one entity, at their
+     * versions. `truncated`: more mention it than came back.
+     */
+    sources: (input: EntitySourcesInput) => Promise<EntitySourcesAnswer>;
+  };
+  relations: {
+    /**
+     * What readable sources say about one entity, each with its passage:
+     * on a date (`at`), as known at a moment (`knownAt`). Observed, never
+     * an accepted fact; conflicting ones both come back. `truncated`: a
+     * cap left some out, so what came back isn't all there is.
+     */
+    get: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+    /**
+     * The paths out from one entity, one or two relations long, through
+     * what the caller may read, within a budget of paths and time.
+     */
+    explain: (input: RelationsExplainInput) => Promise<RelationsExplanation>;
   };
 }
 
@@ -196,5 +251,33 @@ export const brain = (binding: BrainBinding): Brain => ({
       ),
     read: async (input) =>
       await call(binding, "skillsRead", checked(skillsReadInputSchema, input)),
+  },
+  entities: {
+    list: async (input) =>
+      await call(
+        binding,
+        "entitiesList",
+        checked(entitiesListInputSchema, input)
+      ),
+    sources: async (input) =>
+      await call(
+        binding,
+        "entitySources",
+        checked(entitySourcesInputSchema, input)
+      ),
+  },
+  relations: {
+    get: async (input) =>
+      await call(
+        binding,
+        "relationsGet",
+        checked(relationsGetInputSchema, input)
+      ),
+    explain: async (input) =>
+      await call(
+        binding,
+        "relationsExplain",
+        checked(relationsExplainInputSchema, input)
+      ),
   },
 });

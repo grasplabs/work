@@ -14,6 +14,7 @@ import {
   maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
+import { profileLimits } from "@grasp-os/open-workflow/limits";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
@@ -185,6 +186,12 @@ const taskBase = {
    * `GeneratedTask.scope`).
    */
   scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
+  /**
+   * Beside `scope`: for each `fork` around it, the branch it is in, and
+   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
+   * runs its steps only in that branch of each fork.
+   */
+  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
   /** The descriptors of its input, output and export schemas. */
   schemas: z.strictObject({
     input: descriptorSchema.optional(),
@@ -307,7 +314,7 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
  * `GeneratedListen`): its event binding, its strategy, what of each event
  * it reads, and its filters, each a type and the CloudEvents attributes it
  * requires (by CloudEvents' rule for names), each a template the host
- * builds in the task's enter step.
+ * builds in the task's enter step, and its correlations.
  */
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
@@ -322,6 +329,21 @@ const sealedListenSchema = z.strictObject({
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
           )
           .max(16),
+        // Each correlation by name, and the inbox attribute it correlates
+        // on (generate.ts, `GeneratedCorrelation`): never an expression.
+        correlate: z
+          .array(
+            z.strictObject({
+              name: z
+                .string()
+                .min(1)
+                .max(profileLimits.maxCorrelationNameLength),
+              attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
+            })
+          )
+          .min(1)
+          .max(profileLimits.maxCorrelations)
+          .optional(),
       })
     )
     .min(1)
@@ -350,6 +372,21 @@ const sealedCatchSchema = z.strictObject({
     .optional(),
   when: z.int().min(0).optional(),
   exceptWhen: z.int().min(0).optional(),
+  /** Its retry policy (generate.ts, `GeneratedRetry`), in milliseconds. */
+  retry: z
+    .strictObject({
+      attempts: z.int().min(1).max(5),
+      delayMs: z.int().min(0),
+      backoff: z.enum(["constant", "linear", "exponential"]),
+      jitter: z
+        .strictObject({ fromMs: z.int().min(0), toMs: z.int().min(0) })
+        .optional(),
+      limitMs: z.int().min(0).optional(),
+      attemptMs: z.int().positive().optional(),
+      when: z.int().min(0).optional(),
+      exceptWhen: z.int().min(0).optional(),
+    })
+    .optional(),
 });
 
 /** One task the generated module runs, as the host checks its steps. */
@@ -668,6 +705,7 @@ export const compileWorkflow = async (
             steps,
             schemas,
             scope,
+            branches,
             loop,
             fork,
           }) => ({
@@ -676,6 +714,7 @@ export const compileWorkflow = async (
             pointer,
             steps,
             scope: [...scope],
+            branches: [...branches],
             ...(loop === undefined
               ? {}
               : { loop: z.json().parse(structuredClone(loop)) }),

@@ -1,9 +1,14 @@
-import { applyOutput, applyPartial } from "@grasp-os/shared/chat";
+import {
+  applyOutput,
+  applyPartial,
+  chatToolEventsKept,
+} from "@grasp-os/shared/chat";
 import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
   ChatProvenance,
+  ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
@@ -24,6 +29,8 @@ export interface ChatView {
   partial: ChatPartial | null;
   /** What the running code step has logged so far; `null` while none runs. */
   output: ChatOutput | null;
+  /** The calls the chat's code made, oldest first: the latest core keeps. */
+  tools: ChatToolEvent[];
   running: boolean;
   provenance: ChatProvenance;
   /** Why the last question stopped short; `null` once another starts. */
@@ -40,6 +47,7 @@ export const emptyView: ChatView = {
   messages: [],
   partial: null,
   output: null,
+  tools: [],
   running: false,
   provenance: { sources: [], restricted: false },
   stopped: null,
@@ -48,7 +56,24 @@ export const emptyView: ChatView = {
   loaded: false,
 };
 
-/** `view` with `update` applied: new messages added once, in order. */
+/** `kept` with `added` merged by ID, oldest first, the latest core keeps. */
+const mergedTools = (
+  kept: readonly ChatToolEvent[],
+  added: readonly ChatToolEvent[] | undefined
+): ChatToolEvent[] => {
+  if (added === undefined || added.length === 0) {
+    return [...kept];
+  }
+  const byId = new Map(kept.map((event) => [event.id, event]));
+  for (const event of added) {
+    byId.set(event.id, event);
+  }
+  return [...byId.values()]
+    .toSorted((a, b) => a.id - b.id)
+    .slice(-chatToolEventsKept);
+};
+
+/** `view` with `update` applied: new messages and calls added once, in order. */
 export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
   const last = view.messages.at(-1)?.id ?? 0;
   return {
@@ -58,6 +83,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     ],
     partial: applyPartial(view.partial, update.partial),
     output: applyOutput(view.output, update.output),
+    tools: mergedTools(view.tools, update.tools),
     running: update.running,
     // Sent first, then only when it changes.
     provenance: update.provenance ?? view.provenance,

@@ -18,6 +18,7 @@ import {
 } from "./memory-audience.ts";
 import { mayPublish, mayRetire } from "./memory-publish.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
+import { rerankCandidates } from "./rerank.ts";
 import { skillAuthorities, skillCapabilities } from "./skill-capabilities.ts";
 import { checkWrite } from "./write-rules.ts";
 
@@ -70,7 +71,7 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
     isRefusal: (error) => permissionErrors.codeOf(error) !== undefined,
   },
   onWrite: async (write) => {
-    await checkWrite(env, write);
+    await checkWrite(write);
   },
   blobs: env.BRAIN_OBJECTS,
   audit: {
@@ -83,6 +84,8 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
     hmac: async (purpose, usages) => await derivedHmacKey(env, purpose, usages),
   },
   extractEntities: async (text) => await extractEntities(env, text),
+  rerank: async (reader, request) =>
+    await rerankCandidates(env, reader, request),
   jobs: {
     start: async (id, job) => {
       await runEngine(env).createInternal(

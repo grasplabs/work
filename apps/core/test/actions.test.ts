@@ -30,6 +30,7 @@ import { keepsReceipt } from "../src/action-invocation.ts";
 import { operationRoles } from "../src/app-access.ts";
 import { invocationFor, runInvocationFor } from "../src/app-functions.ts";
 import { createApp } from "../src/apps.ts";
+import { activeStaffRole } from "../src/auth/identity.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
@@ -50,7 +51,11 @@ import type {
 } from "../src/operations.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
+import { signedIn, staffPerson, whoami } from "./sign-in.ts";
+
+const idp = mockIdp();
 
 // Actions (spec 7.4, 12): server functions with no database, which
 // compose the App's queries and mutations, each its own invocation, and
@@ -2442,7 +2447,7 @@ describe("evidence of a refused use", () => {
     });
   });
 
-  it("is kept by core as app.use.refused, from a person's call and a run's", async () => {
+  it("is kept by core as app.use.refused, from a person's call, a Grasp staff member's and a run's", async () => {
     const fixture = await appWith({
       "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 export default defineSchema({ notes: defineTable({ title: v.string() }) });
@@ -2492,6 +2497,26 @@ export default app({
       { path: "notes.probe", kind: "action" },
       {}
     );
+    // The same call, started by Grasp staff in their staff session: core's
+    // mark, on its evidence.
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staffId } = await whoami(session);
+    const staffRole = await activeStaffRole(env, staffId);
+    if (staffRole === undefined) {
+      throw new Error("A staff session");
+    }
+    const staffRequest = crypto.randomUUID();
+    const byStaff = await callOperation(
+      { manifest: release.app, run },
+      await invocationFor(env, release, {
+        by: { userId: staffId, role: staffRole },
+        requestId: staffRequest,
+        deadline: Date.now() + 30_000,
+        byStaff: true,
+      }),
+      { path: "notes.probe", kind: "action" },
+      {}
+    );
     const runId = runIdSchema.parse(crypto.randomUUID());
     const runRequest = crypto.randomUUID();
     const byRun = await callOperation(
@@ -2536,16 +2561,22 @@ export default app({
         (event) =>
           event.action === "app.use.refused" && event.target?.id === appId
       )
-      .map(({ actor, requestId, detail }) => ({ actor, requestId, detail }))
-      .toSorted((one, other) =>
-        String(one.detail?.runId).localeCompare(String(other.detail?.runId))
-      );
-    const evidence = (requestId: string, from: string | null) => ({
-      actor: { type: "app", appId, part: "server" },
+      .map(({ actor, requestId, detail }) => ({ actor, requestId, detail }));
+    const evidence = (
+      requestId: string,
+      from: string | null,
+      staff?: string
+    ) => ({
+      actor: {
+        type: "app",
+        appId,
+        part: "server",
+        ...(staff === undefined ? {} : { staff }),
+      },
       requestId,
       detail: {
         version: 1,
-        person: fixture.owner.userId,
+        person: staff ?? fixture.owner.userId,
         runId: from,
         function: "notes.probe",
         useKind: "function",
@@ -2554,19 +2585,22 @@ export default app({
         errorCode: "operation.not_found",
       },
     });
+    const ofRequest = (requestId: string) =>
+      kept.filter((event) => event.requestId === requestId);
     expect({
       byPerson: codeOf(byPerson),
+      byStaff: codeOf(byStaff),
       byRun: codeOf(byRun),
-      kept,
+      person: ofRequest(personRequest),
+      staff: ofRequest(staffRequest),
+      run: ofRequest(runRequest),
     }).toStrictEqual({
       byPerson: "ok",
+      byStaff: "ok",
       byRun: "ok",
-      kept: [
-        evidence(runRequest, runId),
-        evidence(personRequest, null),
-      ].toSorted((one, other) =>
-        String(one.detail.runId).localeCompare(String(other.detail.runId))
-      ),
+      person: [evidence(personRequest, null)],
+      staff: [evidence(staffRequest, null, staffId)],
+      run: [evidence(runRequest, runId)],
     });
   });
 });

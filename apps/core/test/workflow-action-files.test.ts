@@ -1183,7 +1183,7 @@ describe("a workflow run's own files", () => {
       objects: await objectsOf(runId),
       rows: await rowsOf(runId),
     };
-    // Its details are past their retention, swept by a cron run that came
+    // Its details are past their retention, swept by a clock run that came
     // late: two graces after its scheduled time.
     const now = new Date();
     await sweepWorkflowStartDetails(

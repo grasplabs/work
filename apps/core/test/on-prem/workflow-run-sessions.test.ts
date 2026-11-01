@@ -1,10 +1,9 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { isolateCall, runOwnerOf } from "../../src/workflows/code.ts";
-import { fakeGateway } from "../ai-gateway.ts";
 import { mockIdp } from "../idp.ts";
+import { fakeProviderFor } from "../model-provider.ts";
 import {
   endLiveRuns,
   finished,
@@ -25,7 +24,7 @@ import { appsOf, oneStep, runTime, stepsOf } from "./workflow-runs.ts";
 
 const appWith = appsOf(mockIdp());
 
-const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const extractionModel = "mistral/mistral-large-latest";
 
 /**
  * Holds one of the sandbox's places as `owner`, spinning, until the
@@ -96,26 +95,20 @@ describe("a workflow's runs on-prem", runTime, () => {
         { extract: { total: 1 } }
       ),
     });
-    // The App's model binding, approved: the step names it, not a model.
-    await bindModel(app, "extractor", extractionModel);
-    const gateway = fakeGateway({
+    // The organization's model, and the App's binding to it, approved:
+    // the step names the binding, not a model.
+    await fakeProviderFor([extractionModel], {
       text: '{"total": 1234}',
       inputTokens: 10,
       outputTokens: 5,
     });
-    const ai: AiBinding = env.AI;
-    const answering = vi
-      .spyOn(ai, "fetch")
-      .mockImplementation(gateway.binding.fetch);
-    try {
-      const run = await builder.api.workflows.start(app, "reader");
-      await finished(run.id);
-      await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject(
-        { status: "completed", output: 2468 }
-      );
-    } finally {
-      answering.mockRestore();
-    }
+    await bindModel(app, "extractor", extractionModel);
+    const run = await builder.api.workflows.start(app, "reader");
+    await finished(run.id);
+    await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject({
+      status: "completed",
+      output: 2468,
+    });
   });
 
   it("lets go of a run's session while it waits, and resumes it in a new one, its steps replayed", async () => {

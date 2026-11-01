@@ -84,8 +84,13 @@ export const callServerFn = async <Data, Result>(
     serverFnMeta?: { id: string };
     method?: string;
   },
-  data: Data,
-  { email = "staff@grasp.test", from = origin }: Caller = {}
+  // A function that takes no data is called without it.
+  ...[
+    data,
+    { email = "staff@grasp.test", from = origin } = {},
+  ]: undefined extends Data
+    ? [data?: Data, caller?: Caller]
+    : [data: Data, caller?: Caller]
 ): Promise<Result> => {
   const id = fn.serverFnMeta?.id;
   if (id === undefined) {
