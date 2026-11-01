@@ -16,6 +16,11 @@ import type { Settled } from "../src/workflows/code.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import type {
+  HostedResourceRun,
+  ResourceHostHooks,
+  ScopeFences,
+} from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admittedFreely } from "./runs.ts";
 import { unique } from "./sign-in.ts";
@@ -110,29 +115,52 @@ export const endOf = (run: WorkflowResourceRun) => ({
     : { code: run.error?.code }),
 });
 
-/** How many times run `runId`'s journal completed each step, by name. */
-export const completedSteps = async (
-  runId: string
+/** How many records of `type` run `runId`'s journal has of each step. */
+const stepsIn = async (
+  runId: string,
+  type: "step_completed" | "step_started"
 ): Promise<Map<string, number>> => {
   const page = await runObjectOf(env, runId).history({ after: 0, limit: 500 });
   const completed = new Map<string, number>();
   for (const record of page?.records ?? []) {
     const step = record.unreadable ? null : record.step;
-    if (
-      step !== null &&
-      !record.unreadable &&
-      record.type === "step_completed"
-    ) {
+    if (step !== null && !record.unreadable && record.type === type) {
       completed.set(step.name, (completed.get(step.name) ?? 0) + 1);
     }
   }
   return completed;
 };
 
+/** How many times run `runId`'s journal completed each step, by name. */
+export const completedSteps = async (
+  runId: string
+): Promise<Map<string, number>> => await stepsIn(runId, "step_completed");
+
+/** The names of the steps run `runId`'s journal started, in order. */
+export const startedSteps = async (runId: string): Promise<string[]> => {
+  const started = await stepsIn(runId, "step_started");
+  return [...started.keys()];
+};
+
 /** A host of a run of version 1 of workflow `id`, its steps run at once. */
 export const hostOf = async (
   by: Acting,
-  id: string
+  id: string,
+  {
+    step: given,
+    fences,
+    admitAttempt = admittedFreely,
+    candidate,
+  }: {
+    /** The engine's steps, if not ones that run each step at once. */
+    step?: RunStep;
+    /** The run's settled scopes, if kept beyond this host. */
+    fences?: ScopeFences;
+    /** How each attempt is admitted, if not at once. */
+    admitAttempt?: ResourceHostHooks["admitAttempt"];
+    /** A test run's bindings, by alias, if it is one. */
+    candidate?: HostedResourceRun["calling"]["candidate"];
+  } = {}
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -141,7 +169,7 @@ export const hostOf = async (
     .first<{ hash: string }>();
   const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
   let count = 0;
-  const step: RunStep = {
+  const step: RunStep = given ?? {
     do: async (name, _config, fn) => {
       count += 1;
       return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
@@ -176,16 +204,18 @@ export const hostOf = async (
         principal: by.userId,
         invoker: { type: "person", id: by.userId, appVersion: null },
         bindings: new Map(),
+        ...(candidate === undefined ? {} : { candidate }),
         restricted: false,
       },
       maxModelCalls: 1,
     },
     {
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      ...(fences === undefined ? {} : { fences }),
       tampered: () => {
         // A refusal is what each test reads: nothing else to do with it.
       },
-      admitAttempt: admittedFreely,
+      admitAttempt,
     }
   );
 };
