@@ -1,17 +1,17 @@
-import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   auditEvents,
+  clientAdminReads,
   clientPlacements,
+  clientResources,
   clientProvisions,
   clients,
   clientRuns,
   hostingDestinations,
   releases,
-  settings,
 } from "../src/db/schema.ts";
 import { DiscardError, discardClient } from "../src/hosting/discard.ts";
 import {
@@ -52,11 +52,8 @@ const caller = "ops@grasp.test";
  * attempt in a shared destination stops at validation
  * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
-const importedRelease = async (
-  adjust: (manifest: ReleaseManifest) => ReleaseManifest = (manifest) =>
-    manifest
-): Promise<string> => {
-  const manifest = adjust(await release());
+const importedRelease = async (): Promise<string> => {
+  const manifest = await release();
   const now = new Date();
   await db.insert(releases).values({
     id: manifest.releaseId,
@@ -67,6 +64,37 @@ const importedRelease = async (
     importedAt: now,
   });
   return manifest.releaseId;
+};
+
+/** What Platform's Offboarded page `html` shows of client `clientId` alone. */
+const offboardedOf = (html: string, clientId: string): string => {
+  const at = html.indexOf(`(${clientId})`);
+  if (at === -1) {
+    return "";
+  }
+  // Up to the next client's item.
+  const next = html.indexOf("rounded-xl", at);
+  return html.slice(at, next === -1 ? undefined : next);
+};
+
+/** Whether the button saying `label` in `html` is off. */
+const buttonOff = (html: string, label: string): boolean | null => {
+  const at = html.indexOf(`${label}</button>`);
+  if (at === -1) {
+    return null;
+  }
+  const tag = html.slice(html.lastIndexOf("<button", at), at);
+  return tag.includes("disabled");
+};
+
+/** Whether the box confirming no export was made, in `html`, is off. */
+const confirmOff = (html: string): boolean | null => {
+  const at = html.indexOf('id="no-export-');
+  if (at === -1) {
+    return null;
+  }
+  const tag = html.slice(html.lastIndexOf("<", at), html.indexOf(">", at));
+  return tag.includes("disabled");
 };
 
 /** Client `clientId`'s hosting, as its page reads it. */
@@ -298,7 +326,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("tries a stopped provisioning again on the newest release that fits, a fix released since included", async () => {
+  it("tries a stopped provisioning again on the newest release, a fix released since included", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
@@ -319,25 +347,13 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: fixed, switched: [caller] });
   });
 
-  it("tries a stopped provisioning again on its own release when no newer release fits it", async () => {
+  it("tries a stopped provisioning again on its own release when no newer release is imported", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
-    // Newer, but its core calls a connect it doesn't ship: it fits no one.
-    await importedRelease((manifest) => ({
-      ...manifest,
-      compatibility: {
-        interfaces: {
-          connect: { serves: 1, calls: {} },
-          core: { calls: { connect: { min: 2, max: 2 } } },
-        },
-        workflowJournal: { min: 8, max: 9 },
-        sdkProtocols: { min: 2, max: 2 },
-      },
-    }));
 
     const retried = await retry(clientId);
     await latestStopped(attempts);
@@ -417,7 +433,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
 
     // Stopped with nothing live: a newer release takes its operation
-    // over, and resuming offers the newest that fits it; an older one,
+    // over, and resuming offers the newest; an older one,
     // or another destination, is refused.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);
@@ -475,13 +491,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
 
   it("discards nothing of a client that went live between the check and the discard, and audits no discard", async () => {
     const clientId = await client();
-    await db.insert(settings).values({
-      clientId,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db.insert(clientAdminReads).values({ clientId, askedAt: new Date() });
     // The client goes live just before the discard's batch runs.
     const racing = new Proxy(env.DB, {
       get: (target, name): unknown => {
@@ -516,15 +526,15 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .from(clients)
         .where(eq(clients.id, clientId))
         .get(),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, clientId)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, clientId)),
       audited: await actorsOf(clientId, "client.discard"),
     }).toStrictEqual({
       refusal: "not_provisioning",
       client: { status: "active" },
-      settings: [{ key: "AUDIT_RETENTION_DAYS" }],
+      reads: [{ clientId }],
       audited: [],
     });
   });
@@ -532,13 +542,9 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("discards a client never placed, audited, freeing its id, and refuses one placed, unknown or being worked on", async () => {
     const shared = await destination();
     const mistaken = await client();
-    await db.insert(settings).values({
-      clientId: mistaken,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db
+      .insert(clientAdminReads)
+      .values({ clientId: mistaken, askedAt: new Date() });
     const placed = await client();
     await placeClient(db, staff, {
       clientId: placed,
@@ -562,10 +568,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .select({ id: clients.id })
         .from(clients)
         .where(eq(clients.id, mistaken)),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, mistaken)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, mistaken)),
     };
 
     expect({
@@ -578,7 +584,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       kept: await placementOf(placed),
     }).toStrictEqual({
       discarded: { refused: null },
-      left: { client: [], settings: [] },
+      left: { client: [], reads: [] },
       discardedBy: [caller],
       placed: { refused: "placed" },
       unknown: { refused: "client_unknown" },
@@ -741,6 +747,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     // on Platform's Offboarded page.
     const gone = await page(`/organizations/${clientId}/setup`, caller);
     const after = await page("/platform/offboarded", caller);
+    const listed = offboardedOf(after.html, clientId);
 
     expect({
       offer: live.html.includes("Offboard it"),
@@ -748,16 +755,116 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       offboarded,
       early,
       gone: gone.status,
-      deleteOffer: after.html.includes("Delete its resources"),
-      kept: after.html.includes(`${clientId})`),
+      // Offered, but off until its retention is over, saying from when.
+      deleteOff: buttonOff(listed, "Delete its resources"),
+      confirm: confirmOff(listed),
+      from: listed.includes("It can be deleted from"),
+      kept: listed !== "",
     }).toStrictEqual({
       offer: true,
       refused: [true, true],
       offboarded: { refused: null, deletion: null },
       early: { refused: "retention_running", deletion: null },
       gone: 404,
-      deleteOffer: true,
+      deleteOff: true,
+      confirm: true,
+      from: true,
       kept: true,
+    });
+  });
+
+  it("lists every offboarded client, however many there are", async () => {
+    const destinationId = await destination();
+    const offboardedAt = new Date(Date.now() - 86_400_000);
+    // More than D1 binds in one statement (100).
+    const ids = await Promise.all(
+      Array.from({ length: 101 }, async () => {
+        const clientId = await client();
+        await placeClient(db, staff, { clientId, destinationId });
+        await db
+          .update(clients)
+          .set({ status: "offboarded", offboardedAt })
+          .where(eq(clients.id, clientId));
+        return clientId;
+      })
+    );
+
+    const { status, html } = await page("/platform/offboarded", caller);
+
+    expect({
+      status,
+      listed: ids.filter((id) => offboardedOf(html, id) !== "").length,
+    }).toStrictEqual({ status: 200, listed: 101 });
+  });
+
+  it("offers deleting an offboarded client's resources once its retention is over, and says on every read which bucket is still emptying", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    await placeClient(db, staff, { clientId, destinationId });
+    await allocateClientResources(db, staff, {
+      clientId,
+      manifest: await release(),
+      operationId: "op",
+    });
+    const offboardedAt = new Date(Date.now() - 31 * 86_400_000);
+    await db
+      .update(clients)
+      .set({ status: "offboarded", offboardedAt })
+      .where(eq(clients.id, clientId));
+    const [bucket] = await db
+      .select({
+        role: clientResources.role,
+        name: clientResources.physicalName,
+      })
+      .from(clientResources)
+      .where(
+        and(
+          eq(clientResources.clientId, clientId),
+          eq(clientResources.kind, "r2_bucket")
+        )
+      );
+    if (bucket === undefined) {
+      throw new Error("The release has no bucket");
+    }
+    // As a deletion that found it holding objects records it, two hours ago.
+    const emptiedAt = new Date(Date.now() - 2 * 3_600_000);
+    await db.insert(auditEvents).values({
+      id: crypto.randomUUID(),
+      at: emptiedAt,
+      actor: caller,
+      action: "client.empty_bucket",
+      clientId,
+      target: destinationId,
+      detail: JSON.stringify({ role: bucket.role, physicalName: bucket.name }),
+    });
+
+    const whileEmptying = await page("/platform/offboarded", caller);
+    const emptying = offboardedOf(whileEmptying.html, clientId);
+    // Its objects expired, and a later deletion deleted it.
+    await db
+      .update(clientResources)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(clientResources.clientId, clientId),
+          eq(clientResources.role, bucket.role)
+        )
+      );
+    const onceDeleted = await page("/platform/offboarded", caller);
+    const deleted = offboardedOf(onceDeleted.html, clientId);
+    const note = `${bucket.name} still held objects`;
+
+    expect({
+      // Its button waits only for staff to confirm no export was made.
+      confirm: confirmOff(emptying),
+      waits: emptying.includes("It can be deleted from"),
+      emptying: emptying.includes(note),
+      deleted: deleted.includes(note),
+    }).toStrictEqual({
+      confirm: false,
+      waits: false,
+      emptying: true,
+      deleted: false,
     });
   });
 });

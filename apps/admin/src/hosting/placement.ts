@@ -34,7 +34,7 @@ import type { RunStatus } from "../runners.ts";
 import { InventoryError, placeClient, placementOf } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import {
-  newestFittingRelease,
+  newestRelease,
   ProvisionOperationError,
   provisionOf,
 } from "./operation.ts";
@@ -107,9 +107,8 @@ export interface ClientHostingView {
     updatedAt: Date;
   } | null;
   /**
-   * The newest imported release it may be provisioned with
-   * (`newestFittingRelease`): what starting or resuming offers first;
-   * null when none fits.
+   * The newest imported release (`newestRelease`): what starting or
+   * resuming offers first; null when none is imported.
    */
   suggestedReleaseId: string | null;
   /**
@@ -325,7 +324,7 @@ export const getClientHosting = async (
       : { destinationId: placement.destinationId, reason: null };
   const suggestedReleaseId =
     client.status === "provisioning" && hosting.hosting === "grasp_cloud"
-      ? await newestFittingRelease(db, clientId)
+      ? await newestRelease(db)
       : null;
   return {
     clientId,
@@ -372,8 +371,8 @@ export const placementErrorCodes = [
    * its own): placing it would take that run's claim, so it could never resume.
    */
   "other_run_held",
-  /** No release was chosen, and no imported release fits the client (`newestFittingRelease`). */
-  "no_fitting_release",
+  /** No release was chosen, and none is imported (`newestRelease`). */
+  "no_release",
   /** It runs on its own premises: Grasp's cloud provisions nothing for it. */
   "hosted_on_prem",
 ] as const;
@@ -399,7 +398,7 @@ export type PlaceRefusal =
 
 /**
  * What staff ask: provision `clientId` with `releaseId` (null: the newest
- * that fits it), in `destinationId` or the automatic one (null).
+ * imported), in `destinationId` or the automatic one (null).
  */
 export const placeInputSchema = z.object({
   clientId: z.string().min(1),
@@ -411,11 +410,10 @@ export type PlaceInput = z.infer<typeof placeInputSchema>;
 
 /**
  * The release a provisioning started or tried again without one picked
- * runs with: the newest imported release that fits the client
- * (`newestFittingRelease`, every release looked through). For one with an
- * operation, the newest that fits among those built after its recorded
- * release, so a fix released since moves it forward; with none newer
- * that fits, its recorded release, so it is never left without one.
+ * runs with: the newest imported release (`newestRelease`). For one with
+ * an operation, the newest built after its recorded release, so a fix
+ * released since moves it forward; with none newer, its recorded release,
+ * so it is never left without one.
  */
 const resumeRelease = async (
   db: AdminDatabase,
@@ -423,14 +421,14 @@ const resumeRelease = async (
 ): Promise<string | null> => {
   const operation = await provisionOf(db, clientId);
   if (operation === undefined) {
-    return await newestFittingRelease(db, clientId);
+    return await newestRelease(db);
   }
   const recorded = await db
     .select({ id: releases.id, builtAt: releases.builtAt })
     .from(releases)
     .where(eq(releases.id, operation.releaseId))
     .get();
-  const newer = await newestFittingRelease(db, clientId, recorded);
+  const newer = await newestRelease(db, recorded);
   return newer ?? operation.releaseId;
 };
 
@@ -496,8 +494,8 @@ export const placeAndProvision = async (
   const releaseId = input.releaseId ?? (await resumeRelease(db, clientId));
   if (releaseId === null) {
     throw new PlacementError(
-      "no_fitting_release",
-      `No imported release fits ${clientId}`
+      "no_release",
+      `No release is imported to provision ${clientId} with`
     );
   }
   if ((await importedManifest(db, releaseId)) === null) {
@@ -545,7 +543,7 @@ export const placeAndProvision = async (
 /** What each placement refusal says of why provisioning didn't start. */
 const notStartedCodes: Readonly<Record<PlacementErrorCode, string>> = {
   no_automatic_destination: "no_destination",
-  no_fitting_release: "no_release",
+  no_release: "no_release",
   other_run_held: "other_run_held",
   hosted_on_prem: "on_prem",
 };
@@ -557,7 +555,7 @@ export const startDestination = async (
 
 /**
  * Starts provisioning client `clientId`, as `staff`, when nothing keeps
- * it: in the automatic destination, with the newest release that fits it
+ * it: in the automatic destination, with the newest release
  * (`placeAndProvision`). What adding a client does at once, so a client
  * with somewhere to go and a release to go with is never left waiting
  * for a click. Answers the attempt's id, or why it didn't start: no

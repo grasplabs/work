@@ -1144,7 +1144,7 @@ const toView = async (
     // None is asked with an empty description: one that is empty went with
     // its run's details (workflows/retention.ts), and says so.
     description:
-      decision.description === "" ? removedText(env) : decision.description,
+      decision.description === "" ? removedText : decision.description,
     ...(decision.input === null ? {} : { input: decision.input }),
     status: statusOf(found),
     expiresAt: decision.expiresAt.toISOString(),

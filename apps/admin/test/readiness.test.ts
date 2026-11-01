@@ -3,7 +3,7 @@
  * entry, written from how onboarding fails when nobody looked first: a
  * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
- * namespace, model spend undecided; and an optional feature left
+ * namespace, Grasp's AI on a provider it has no key for; and an optional feature left
  * unconfigured without saying so.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
@@ -29,7 +29,7 @@ mockAccess();
 
 /** Runs `run` with the admin's vars as `vars` set them, as a deploy would. */
 const withVars = async <T>(
-  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN" | "DISCORD_PUBLIC_KEY">>,
+  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN">>,
   run: () => Promise<T>
 ): Promise<T> => {
   const before = { ...env };
@@ -39,7 +39,6 @@ const withVars = async <T>(
   } finally {
     env.STAGE = before.STAGE;
     env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
-    env.DISCORD_PUBLIC_KEY = before.DISCORD_PUBLIC_KEY;
   }
 };
 
@@ -96,9 +95,6 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        model_spend: "ready",
-        rooms: "not_configured",
-        discord_bot: "ready",
         grasp_organization: "not_configured",
       },
       blocking: 3,
@@ -160,7 +156,6 @@ describe("Platform's Readiness", () => {
         release: "ready",
         secrets: "ready",
         deployer: "ready",
-        model_spend: "ready",
       },
       blocking: 0,
       destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
@@ -184,19 +179,6 @@ describe("Platform's Readiness", () => {
         "The deployer's token can't reach"
       ),
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
-  });
-
-  it("says every organization is held to the default model spend ceiling unless staff set another", async () => {
-    const read = await withVars(production, readiness);
-
-    expect({
-      status: statuses(read).model_spend,
-      words: wordsOf(read, "model_spend"),
-    }).toStrictEqual({
-      status: "ready",
-      words:
-        "Every organization is held to a model spend ceiling of €250 a month, its gateway's budget, unless staff set another on its Setup.",
-    });
   });
 
   it("checks the deployer against the one shared destination new organizations go in, of several", async () => {
@@ -233,35 +215,10 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("says the Discord bot is ready with a spaced public key, as the bot reads it", async () => {
-    const read = await withVars(
-      {
-        ...production,
-        DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""} `,
-      },
-      readiness
-    );
-
-    expect(statuses(read).discord_bot).toBe("ready");
-  });
-
-  it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
-    const read = await withVars(
-      { ...production, DISCORD_PUBLIC_KEY: "" },
-      readiness
-    );
-
+  it("reads only for staff", async () => {
     await expect(
       callServerFn(fetchReadiness, undefined, { email: null })
     ).rejects.toThrow("The server function answered 403");
-    expect({
-      status: statuses(read).discord_bot,
-      words: wordsOf(read, "discord_bot"),
-    }).toStrictEqual({
-      status: "not_configured",
-      words:
-        "Not configured: the Discord bot refuses everything. Set DISCORD_PUBLIC_KEY in apps/admin/wrangler.jsonc for this stage, then run Deploy platform.",
-    });
   });
 
   it("says whether Grasp's own organization is chosen, live, or gone, and not that onboarding waits on it", async () => {

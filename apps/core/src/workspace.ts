@@ -52,11 +52,6 @@ import type {
   DashboardWidgetId,
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
-import { defaultEmailPreferences } from "@grasp-os/shared/email-preferences";
-import type {
-  EmailPreferenceChanges,
-  EmailPreferences,
-} from "@grasp-os/shared/email-preferences";
 import {
   internalErrors,
   isExpectedError,
@@ -92,6 +87,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { agentApis } from "./agent-apis.ts";
+import { isMessage } from "./agent-messages.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -105,9 +101,7 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
-import { showThinking } from "./agent-thinking.ts";
 import type { ThinkingBrain } from "./agent-thinking.ts";
-import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
@@ -186,10 +180,10 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
-  emailPreferences,
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
+import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
   audienceMaxMembers,
@@ -202,7 +196,7 @@ import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
-import { gatewaySettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import { personRole } from "./permissions.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -1141,7 +1135,8 @@ export class Workspace extends DurableObject<Env> {
       message,
       createdAt,
       message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
-      thinkingMs ?? null
+      thinkingMs ?? null,
+      message.role === "assistant" && this.#asksIn(chatId)
     );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
@@ -1240,15 +1235,16 @@ export class Workspace extends DurableObject<Env> {
    * `fix`), made only if the deployment allows `model`, which its question
    * will name: a refused model leaves no chat without a question.
    */
-  createFixChat(
+  async createFixChat(
     title: string,
     personId: string,
     agentId: string,
     by: AuditActor,
     fix: RunToFix,
     model: string
-  ): Chat {
-    if (!gatewaySettings(this.env).models.includes(model)) {
+  ): Promise<Chat> {
+    const { models: allowed } = await modelSettings(this.env);
+    if (!allowed.includes(model)) {
       throw modelErrors.create("model.not_allowed");
     }
     return this.createChat(title, personId, agentId, by, fix);
@@ -1334,7 +1330,8 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.deleted"
       | "chat.moved"
-      | "chat.draft_restored",
+      | "chat.draft_restored"
+      | "chat.draft_discarded",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -1586,9 +1583,11 @@ export class Workspace extends DurableObject<Env> {
         platform,
         where?.thread
       );
-    const [model] = gatewaySettings(this.env).models;
+    const {
+      models: [model],
+    } = await modelSettings(this.env);
     if (model === undefined) {
-      throw modelErrors.create("model.unconfigured");
+      throw modelErrors.create("model.no_provider");
     }
     if (where !== undefined) {
       await keepAudience(
@@ -1732,6 +1731,9 @@ export class Workspace extends DurableObject<Env> {
       let answer: number | undefined;
       const textSoFar = onText === undefined ? undefined : throttled(onText);
       const readsBrain = await hasBrainGrant(this.env, authority);
+      // Loaded at the first turn, not as core starts: the loop brings Pi
+      // and TypeBox (GRA-1349).
+      const { runTurn } = await import("./agent.ts");
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1757,7 +1759,7 @@ export class Workspace extends DurableObject<Env> {
         // The Brain's recall before the first request, under the agent's
         // own grant, as its code would recall (GRA-1029).
         recallFirst: readsBrain,
-        ...this.#thinking(readsBrain, shared, personId),
+        ...(await this.#thinking(readsBrain, shared, personId)),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
@@ -2744,6 +2746,19 @@ export class Workspace extends DurableObject<Env> {
    * to the chat's code before it was stored (after an earlier message),
    * that the chat still keeps.
    */
+  /**
+   * Whether the chat's agent is offered `askQuestions`: in Grasp's own
+   * app, never in a chat app's chat (agent.ts), which can't show them.
+   */
+  #asksIn(chatId: ChatId): boolean {
+    const chat = this.#db
+      .select({ via: chats.via })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get();
+    return chat?.via === "web";
+  }
+
   #givenBy(
     chatId: ChatId
   ): (messageId: number) => (documentId: string) => boolean {
@@ -3372,47 +3387,6 @@ export class Workspace extends DurableObject<Env> {
     return removed;
   }
 
-  /**
-   * `personId`'s email preferences as they last saved them, or the
-   * defaults when they never did.
-   */
-  emailPreferences(personId: string): EmailPreferences {
-    const saved = this.#db
-      .select({
-        needsYou: emailPreferences.needsYou,
-        weeklySummary: emailPreferences.weeklySummary,
-        billingProblems: emailPreferences.billingProblems,
-      })
-      .from(emailPreferences)
-      .where(eq(emailPreferences.personId, personId))
-      .get();
-    return saved ?? defaultEmailPreferences;
-  }
-
-  /**
-   * Saves the email preferences `changes` names (checked by the caller,
-   * `emailPreferenceChangesSchema`) over what `personId` saved before, or
-   * the defaults: read and written with no await between, so a save
-   * running at the same time can't put back what this one changed.
-   */
-  saveEmailPreferences(
-    personId: string,
-    changes: EmailPreferenceChanges
-  ): void {
-    const before = this.emailPreferences(personId);
-    const row = {
-      needsYou: changes.needsYou ?? before.needsYou,
-      weeklySummary: changes.weeklySummary ?? before.weeklySummary,
-      billingProblems: changes.billingProblems ?? before.billingProblems,
-      updatedAt: new Date(),
-    };
-    this.#db
-      .insert(emailPreferences)
-      .values({ personId, ...row })
-      .onConflictDoUpdate({ target: emailPreferences.personId, set: row })
-      .run();
-  }
-
   /** Renames `personId`'s own chat, audited as `by`'s. */
   renameChat(
     chatId: unknown,
@@ -3804,6 +3778,8 @@ export class Workspace extends DurableObject<Env> {
         { userId: personId, actor: by },
         "chat_deleted"
       );
+      // Nor any workflow start its agent asked its person to confirm.
+      await dropHeldStarts(this.env, { chatId: id });
       // Every App it has a draft of, even one with no changes left: its
       // preview may still run.
       const drafted = this.#db
@@ -4468,6 +4444,34 @@ export class Workspace extends DurableObject<Env> {
     return restored;
   }
 
+  /**
+   * Discards `personId`'s own chat's draft of App `appId`, audited as
+   * `by`'s: its changes go, its versions stay (to restore one), and its
+   * revision goes on, so a write of the agent's that read the draft
+   * before lands on nothing (`saveDraft`). Whatever the draft is now, as
+   * the person chose it; a draft that changes nothing is discarded all the
+   * same, and audited once each time.
+   */
+  discardDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    // No await from here to the outbox: the drop and its event are
+    // written together, as one of the object's turns.
+    const { revision } = this.draft(id, appId);
+    if (!this.dropDraft(id, appId, { revision })) {
+      throw appErrors.create("app.conflict");
+    }
+    this.#outboxed(by, "chat.draft_discarded", id, {
+      app: appId,
+      revision: revision + 1,
+    });
+    this.#deliverAudit();
+  }
+
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
   #dropPreview(chatId: ChatId, appId: string): void {
     this.#sealedPreviews.drop(chatId, appId);
@@ -4954,6 +4958,7 @@ export class Workspace extends DurableObject<Env> {
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
     const givenBy = this.#givenBy(chatId);
+    const asking = this.#asksIn(chatId);
     return this.#db
       .select()
       .from(chatMessages)
@@ -4966,7 +4971,8 @@ export class Workspace extends DurableObject<Env> {
           storedMessageSchema.parse(JSON.parse(message)),
           createdAt,
           givenBy(id),
-          thinkingMs
+          thinkingMs,
+          asking
         );
         return shown === undefined ? [] : [shown];
       });
@@ -5021,14 +5027,19 @@ export class Workspace extends DurableObject<Env> {
    * The tool that shows the turn's thinking in the brain, as the person
    * reads the brain: only in their own chat, by an agent that may read it.
    */
-  #thinking(
+  async #thinking(
     readsBrain: boolean,
     shared: boolean,
     personId: string
-  ): { thinking?: AgentTool } {
-    return readsBrain && !shared
-      ? { thinking: showThinking(async () => await this.#brainOf(personId)) }
-      : {};
+  ): Promise<{ thinking?: AgentTool }> {
+    if (!readsBrain || shared) {
+      return {};
+    }
+    // Loaded with the turn, as the agent loop is: it brings TypeBox.
+    const { showThinking } = await import("./agent-thinking.ts");
+    return {
+      thinking: showThinking(async () => await this.#brainOf(personId)),
+    };
   }
 
   /**

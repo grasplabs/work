@@ -1,14 +1,15 @@
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
+import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
-import { Panel } from "../../../admin/panel.tsx";
 import {
   PlatformNav,
   platformCrumb,
   releasesCrumb,
 } from "../../../admin/platform-nav.tsx";
 import { ChangeList, Quiet } from "../../../admin/release-parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchComparison } from "../../../releases/functions.ts";
 
@@ -28,7 +29,7 @@ const ComparisonPage = () => {
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
-        <Panel
+        <Section
           description="The releases after the first, up to the second."
           title="Release notes"
         >
@@ -61,21 +62,21 @@ const ComparisonPage = () => {
               ) : null}
             </ul>
           )}
-        </Panel>
-        <Panel title="Platform">
+        </Section>
+        <Section title="Platform">
           <ChangeList
             changes={diff.platform}
             title="Compatibility date and packages"
           />
-        </Panel>
+        </Section>
         {diff.workers.map((worker) => (
-          <Panel key={worker.worker} title={worker.worker}>
+          <Section key={worker.worker} title={worker.worker}>
             <ChangeList changes={worker.modules} title="Code" />
             <ChangeList changes={worker.bindings} title="Bindings" />
             <ChangeList changes={worker.settings} title="Settings" />
             <ChangeList changes={worker.migrations} title="D1 migrations" />
             <ChangeList changes={worker.assets} title="Static assets" />
-          </Panel>
+          </Section>
         ))}
       </div>
     </AdminPage>
@@ -105,4 +106,5 @@ export const Route = createFileRoute("/platform/releases/diff")({
     return comparison;
   },
   component: ComparisonPage,
+  pendingComponent: PageLoading,
 });

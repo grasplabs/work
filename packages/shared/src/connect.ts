@@ -1,8 +1,11 @@
 import { z } from "zod";
 
+import type { AiProviderConnectApi } from "./ai-providers.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
+import { oauthProviderSchema } from "./connect-names.ts";
+import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -14,7 +17,6 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
-import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
@@ -22,24 +24,8 @@ import { isAdmin, roleSchema } from "./roles.ts";
 import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
-/**
- * The version of the interface connect serves core over the service
- * binding (its entrypoint's methods, and the calls and answers in this
- * file). A release's core and connect don't switch at once in a client
- * (the admin deploys connect first, and a rollback restores core
- * first), so a change a core of the release before couldn't call
- * correctly, or one that needs a connect of this release, is a new
- * version, with the range below moved to say which cores work with
- * which connects; a release declares both (scripts/release).
- */
-export const connectInterfaceVersion = 2;
-
-/**
- * The versions of connect's interface this core calls correctly. 2: a
- * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
- * strict schema refuses.
- */
-export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
+export { catalogGroups, oauthProviderSchema } from "./connect-names.ts";
+export type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -114,22 +100,14 @@ export interface PendingReference {
 // never leave it (threat model R1).
 
 /**
- * The suites a person connects through OAuth, pinned to the organization's
- * own tenant: the IdPs people sign in with.
- */
-export const oauthProviderSchema = z.enum(["microsoft", "google"]);
-export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
-
-/**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's, the directory's, the documents' and the HR
- * platform's admin connections (`./landscape.ts`, `./directory.ts`,
- * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * itself; the directory's, the documents' and the HR platform's admin
+ * connections (`./directory.ts`, `./document-places.ts`, `./hr.ts`),
+ * which no connector's calls may use;
  * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
-  ...landscapeProviderSchema.options,
   ...directoryProviderSchema.options,
   ...placesProviderSchema.options,
   ...hrProviderSchema.options,
@@ -209,12 +187,11 @@ export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
    * A connector's provider, or a read-only admin connection of a suite
-   * (the landscape's, the directory's, the documents'), which no
+   * (the directory's, the documents'), which no
    * connector's calls use.
    */
   provider: z.union([
     connectorProviderSchema,
-    landscapeProviderSchema,
     directoryProviderSchema,
     placesProviderSchema,
   ]),
@@ -356,10 +333,20 @@ export interface ConnectionSummary {
   /**
    * Those of `tools` on offer: the ones Grasp classed (connect's
    * composio-classes.ts). A tool nobody classed is never offered or run,
-   * whatever the admin allowed. Absent for a native connection, and from
-   * a connect that predates it, which runs every allowed tool.
+   * whatever the admin allowed. Absent for a native connection.
    */
   offeredTools?: string[];
+  /**
+   * Those of `tools` the admin marked as only reading, which run without
+   * asking. Absent for a native connection.
+   */
+  readTools?: string[];
+  /**
+   * The input property naming the one resource a call of each tool acts
+   * on, for the tools the admin gave one, by tool name: kept by whatever
+   * changes the tools. Absent for a native connection.
+   */
+  toolResources?: Record<string, string>;
 }
 
 /**
@@ -510,7 +497,7 @@ export const appRequestsListed = 200;
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
  * core's callback, which returns it to `returnTo` (a path on this origin)
- * with `connection=<id>` once it finished, or to the Connections page with
+ * with `connection=<id>` once it finished, or to the Integrations page with
  * `connectionError=<code>` when it didn't. Reconnecting a connection that
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
@@ -565,6 +552,20 @@ export interface ConnectionsApi extends StephenReachApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Changes which tools a shared Composio connection allows, and which of
+   * them only read, for an admin, audited (GRA-993): only tools the
+   * toolkit has. A held action of a tool taken away is dropped. Someone
+   * changing them at the same moment makes it `connection.tools_changed`.
+   * The tools it allows now.
+   */
+  changeTools: (request: {
+    connectionId: string;
+    /** The tools to allow, each by name or with its rule. */
+    tools: (string | ComposioToolRule)[];
+    /** The tools the page showed allowed, which the change was made from. */
+    expected: (string | ComposioToolRule)[];
+  }) => Promise<{ tools: string[] }>;
   /**
    * Asks for an app the catalog doesn't have, audited. An app asked for
    * already, by its name in any case, isn't asked for again: that
@@ -666,32 +667,6 @@ export interface CatalogEntry {
  * toolkit is refused (`connection.own_auth_required`).
  */
 export type CatalogAuth = "managed" | "own";
-
-/**
- * Grasp's kinds of app, in the order the Integrations page lists them. Each
- * id is the group's English name, which the web app translates; `Other` is
- * for an app none of the others fits.
- */
-export const catalogGroups = [
-  "Email and calendar",
-  "Files and documents",
-  "Chat",
-  "CRM",
-  "Finance and accounting",
-  "HR",
-  "Signing",
-  "Marketing",
-  "Support",
-  "Projects and tasks",
-  "Forms and surveys",
-  "Data and analytics",
-  "AI",
-  "Commerce",
-  "Design and media",
-  "Developer tools",
-  "Other",
-] as const;
-export type CatalogGroup = (typeof catalogGroups)[number];
 
 /**
  * Which group a category is in, by its words in lower case. The first
@@ -1108,6 +1083,19 @@ export const startToolkitConnectionSchema = z.strictObject({
 export type StartToolkitConnection = z.input<
   typeof startToolkitConnectionSchema
 >;
+
+/** Changes the tools a shared Composio connection allows (GRA-993). */
+export const changeToolkitToolsSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: identifierSchema,
+  tools: composioToolsSchema,
+  /**
+   * The tools the admin's page showed allowed: a change made from a page
+   * another change made stale is refused (`connection.tools_changed`).
+   */
+  expected: composioToolsSchema,
+});
+export type ChangeToolkitTools = z.input<typeof changeToolkitToolsSchema>;
 
 /** Lists one entry's tools. */
 export const catalogToolsRequestSchema = z.strictObject({
@@ -1685,7 +1673,8 @@ export interface ChannelApi {
  * npm registry among the rest (`PackageRegistryApi`), and the chat
  * platforms (`ChannelApi`).
  */
-export interface ConnectApi extends PackageRegistryApi, ChannelApi {
+export interface ConnectApi
+  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;
@@ -1777,6 +1766,15 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   startToolkitConnection: (
     request: StartToolkitConnection
   ) => Promise<{ url: string }>;
+  /**
+   * Changes the tools a shared Composio connection allows, for an admin:
+   * Composio's server first, then connect's own list, which every call
+   * goes by, only if it is still the one read (`connection.tools_changed`
+   * otherwise, Composio set back). Audited, failed attempts too.
+   */
+  changeToolkitTools: (
+    request: ChangeToolkitTools
+  ) => Promise<{ tools: string[] }>;
   /**
    * One catalog entry's tools, or `connect.catalog_entry_not_found` for
    * anything `catalog` doesn't list. Composio's toolkits are listed only if
@@ -1990,6 +1988,8 @@ export const connectionErrors = defineErrorFamily({
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
+  "connection.tools_changed":
+    "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
 });
 
 /** Which App's held actions of which binding to drop. */
@@ -2078,6 +2078,12 @@ export interface ConnectorContractAction {
    */
   input: string;
   output: string;
+  /**
+   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * which a workflow action may have core keep as a file of its run
+   * (GRA-886). Only a native connector's read declares it; never Composio's.
+   */
+  answersFile?: true;
 }
 
 /**
@@ -2101,6 +2107,8 @@ export interface NativeOperation {
   contract: string;
   /** Whether it only reads, as the connector declares. */
   readOnly: boolean;
+  /** That it answers a file, as the connector declares (GRA-886). */
+  answersFile?: true;
 }
 
 /** A generated contract, as connect serves it now. */

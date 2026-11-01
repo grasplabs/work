@@ -55,7 +55,6 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { whenShort } from "../chat/chat-history.ts";
 import {
   ChatMenu,
   chatTitleMaxLength,
@@ -72,7 +71,9 @@ import { DeleteChatDialog } from "../chat/delete-chat-dialog.tsx";
 import { ProjectDialog } from "../chat/project-dialog.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatDaysAgo } from "../format.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -82,7 +83,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // chat in it, and its chats under that; beside them what Grasp reads in
 // every one of them, its instructions (the project's goal) and its
 // documents, each changed in place, with how much of the project's room
-// the documents take. Its crumbs say Chat, and Chat stays lit in the
+// the documents take, in a page's wide frame under the serif title every
+// page has. Its crumbs say Chat, and Chat stays lit in the
 // sidebar; the corner chat keeps off it, as the box here starts the
 // project's chats (chat/chat-dock.tsx).
 
@@ -418,6 +420,8 @@ const ProjectChat = ({
   onDelete: () => void;
 }) => {
   const { t, i18n } = useLingui();
+  // As the prototype says it: "Updated yesterday", "Updated 4 days ago".
+  const when = formatDaysAgo(chat.lastAt, new Date(), i18n.locale);
   const [renaming, setRenaming] = useState(false);
   const { row, ended } = useRenameFocus<HTMLAnchorElement>(renaming);
   const { failure, rename, move } = useChatChanges(chat);
@@ -447,7 +451,7 @@ const ProjectChat = ({
       >
         <span className="truncate text-sm font-medium">{chat.title}</span>
         <span className="text-muted-foreground text-xs">
-          {whenShort(chat.lastAt, new Date(), i18n.locale)}
+          <Trans>Updated {when}</Trans>
         </span>
       </Link>
       <ChatMenu
@@ -533,89 +537,88 @@ const Project = () => {
         actions={<ChatSwitcherButton />}
         crumbs={[{ label: t`Chat`, to: "/" }, { label: name }]}
       />
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-4 text-sm md:p-6 lg:flex-row lg:items-start">
-        <div className="flex min-w-0 flex-1 flex-col gap-6">
-          <div className="flex items-start gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <h1 className="text-2xl font-medium tracking-tight">{name}</h1>
-              {goal === "" ? null : (
-                <p className="text-muted-foreground line-clamp-2 text-pretty">
-                  {goal}
+      <Page wide>
+        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+          <div className="flex min-w-0 flex-1 flex-col gap-6">
+            <PageHeading
+              action={
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label={t`More for the project ${name}`}
+                    render={<Button size="icon-sm" variant="ghost" />}
+                  >
+                    <EllipsisIcon />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setEditing(true);
+                      }}
+                    >
+                      <SlidersHorizontalIcon />
+                      <Trans>Edit project</Trans>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDeletingProject(true);
+                      }}
+                      variant="destructive"
+                    >
+                      <Trash2Icon />
+                      <Trans>Delete project</Trans>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              }
+              actionAt="start"
+              description={goal === "" ? undefined : goal}
+              title={name}
+            />
+            <ProjectBox efforts={efforts} models={models} project={project} />
+            <section
+              aria-labelledby="project-chats"
+              className="flex flex-col gap-1"
+            >
+              <h2 className="pb-1 text-sm font-medium" id="project-chats">
+                <Trans>Chats</Trans>
+              </h2>
+              {inside.length === 0 ? (
+                <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-6 text-center text-sm">
+                  <Trans>
+                    No chats yet. What is asked above starts one, and it stays
+                    in this project.
+                  </Trans>
                 </p>
+              ) : (
+                <ul className="flex flex-col divide-y rounded-xl border">
+                  {inside.map((chat) => (
+                    <ProjectChat
+                      chat={chat}
+                      key={chat.id}
+                      onDelete={() => {
+                        setDeletingChat(chat);
+                      }}
+                      onNewProject={() => {
+                        setNewFor(chat.id);
+                      }}
+                      projects={projects}
+                    />
+                  ))}
+                </ul>
               )}
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label={t`More for the project ${name}`}
-                render={<Button size="icon-sm" variant="ghost" />}
-              >
-                <EllipsisIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem
-                  onClick={() => {
-                    setEditing(true);
-                  }}
-                >
-                  <SlidersHorizontalIcon />
-                  <Trans>Edit project</Trans>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => {
-                    setDeletingProject(true);
-                  }}
-                  variant="destructive"
-                >
-                  <Trash2Icon />
-                  <Trans>Delete project</Trans>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <ErrorText>{failure}</ErrorText>
+            </section>
           </div>
-          <ProjectBox efforts={efforts} models={models} project={project} />
-          <section
-            aria-labelledby="project-chats"
-            className="flex flex-col gap-1"
+          <aside
+            aria-label={t`What Grasp reads in this project`}
+            className="flex flex-col gap-4 lg:sticky lg:top-20 lg:w-80 lg:flex-none"
           >
-            <h2 className="pb-1 font-medium" id="project-chats">
-              <Trans>Chats</Trans>
-            </h2>
-            {inside.length === 0 ? (
-              <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-6 text-center">
-                <Trans>
-                  No chats yet. What is asked above starts one, and it stays in
-                  this project.
-                </Trans>
-              </p>
-            ) : (
-              <ul className="flex flex-col divide-y rounded-xl border">
-                {inside.map((chat) => (
-                  <ProjectChat
-                    chat={chat}
-                    key={chat.id}
-                    onDelete={() => {
-                      setDeletingChat(chat);
-                    }}
-                    onNewProject={() => {
-                      setNewFor(chat.id);
-                    }}
-                    projects={projects}
-                  />
-                ))}
-              </ul>
-            )}
-            <ErrorText>{failure}</ErrorText>
-          </section>
+            <Instructions project={project} />
+            <Files project={project} />
+          </aside>
         </div>
-        <aside
-          aria-label={t`What Grasp reads in this project`}
-          className="flex flex-col gap-4 lg:sticky lg:top-20 lg:w-80 lg:flex-none"
-        >
-          <Instructions project={project} />
-          <Files project={project} />
-        </aside>
-      </div>
+      </Page>
       <ProjectDialog
         onOpenChange={setEditing}
         open={editing}

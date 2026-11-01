@@ -6,10 +6,10 @@ import { Button } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLinkIcon, MailIcon } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { AttioLink } from "../../../admin/attio-link.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { sourceNames } from "../../../admin/sections.ts";
 import {
   addSecretStep,
@@ -57,30 +57,6 @@ const initialsOf = (name: string): string =>
     .map((part) => part.charAt(0))
     .slice(0, 2)
     .join("") || name.charAt(0).toUpperCase();
-
-/** A part of the page: its title, what it is, and what it holds under them. */
-const Part = ({
-  title,
-  about,
-  action,
-  children,
-}: {
-  title: string;
-  about: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex items-start justify-between gap-4 px-5 py-4">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        <p className="text-muted-foreground">{about}</p>
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
 
 /** The company: its name, what it does and where, how many people, and its website. */
 const Company = () => {
@@ -131,8 +107,8 @@ const Company = () => {
 const Contacts = () => {
   const { view } = useOrganization();
   return (
-    <Part
-      about="One person for each thing. The interviews are with everyone else, and never show here."
+    <Section
+      description="One person for each thing. The interviews are with everyone else, and never show here."
       title="Who Grasp deals with"
     >
       <ul className="bg-border grid gap-px border-t sm:grid-cols-2">
@@ -190,7 +166,7 @@ const Contacts = () => {
           );
         })}
       </ul>
-    </Part>
+    </Section>
   );
 };
 
@@ -237,8 +213,8 @@ const Calls = () => {
   const deal = records === null ? undefined : mainDeal(records.deals);
   const fromNotes = records?.calls?.from === "notes";
   return (
-    <Part
-      about={
+    <Section
+      description={
         fromNotes
           ? "Every call with the company, from its notes in Attio."
           : "Every call with the company, with who was in it."
@@ -280,7 +256,7 @@ const Calls = () => {
           ))}
         </ul>
       )}
-    </Part>
+    </Section>
   );
 };
 
@@ -419,14 +395,14 @@ const CrmPart = () => {
   const { crm } = admin;
   const recordId = crm.state === "not_linked" ? null : crm.recordId;
   return (
-    <Part
-      about={crmLine(crm)}
+    <Section
+      description={crmLine(crm)}
       action={<Badge variant="outline">{sourceNames.attio}</Badge>}
       title="In the CRM"
     >
       {crm.state === "read" ? <CrmRecordLines records={crm.records} /> : null}
       <AttioLink clientId={admin.client.id} recordId={recordId} />
-    </Part>
+    </Section>
   );
 };
 
@@ -467,8 +443,8 @@ const Paper = ({
 const Papers = () => {
   const { company, unknown } = useOrganization().view;
   return (
-    <Part
-      about="As it stands on the contract and on every invoice."
+    <Section
+      description="As it stands on the contract and on every invoice."
       title="Its papers"
     >
       <dl className="grid gap-5 border-t px-5 py-5 sm:grid-cols-2">
@@ -482,7 +458,7 @@ const Papers = () => {
         <Paper label="VAT number" value={company.vat} />
         <Paper label="Address" value={company.address} wide />
       </dl>
-    </Part>
+    </Section>
   );
 };
 

@@ -16,6 +16,7 @@ import type {
 import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
+import type { RunAiProviderWait } from "./workflows.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -138,6 +139,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.branch_cancelled":
+    "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.item_keys_invalid":
@@ -175,6 +178,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+  "workflow.start_held_gone":
+    "That start no longer waits for you: it was confirmed, declined or let lapse, or isn't yours.",
+  "workflow.start_held_changed":
+    "What that start would send changed since you saw it. Look at it again, then confirm.",
+  "workflow.start_offer_only":
+    "In a chat app, offer the start on a card instead: the person presses Start there.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
   "workflow.start_conflict":
@@ -340,6 +349,12 @@ export const catalogContractSchema = z
            * it is taken for a write.
            */
           readOnly: z.boolean().optional(),
+          /**
+           * That the operation answers a file an action may keep as a file
+           * of its run (GRA-886): only on an operation described by its
+           * native connector's JSON Schemas, as connect confirms it.
+           */
+          answersFile: z.literal(true).optional(),
         })
       )
       .optional(),
@@ -495,6 +510,29 @@ export interface WorkflowBindingApproval {
   status: "active" | "revoked";
   approvedBy: string;
   approvedAt: string;
+}
+
+/**
+ * A version of a workflow that runs, or waits to go live, whose catalog
+ * bindings an admin hasn't approved, so its starts are refused
+ * (`workflow.binding_unapproved`): each binding, with the targets core can
+ * offer now that would serve it, each checked as an approval is. A
+ * binding with none offered is approved where its target is chosen in
+ * full (its workflow's page).
+ */
+export interface PendingWorkflowBindings {
+  workflow: { id: string; name: string };
+  version: number;
+  /** Whether it is the version that runs now, rather than the one asked to go live. */
+  live: boolean;
+  bindings: {
+    alias: string;
+    kind: CatalogBindingKind;
+    /** The catalog contract it calls. */
+    contractId: string;
+    /** Each target offered, with what it names: a model's ID, a collection's name; empty for one that names nothing. */
+    offered: { target: WorkflowBindingTarget; label: string }[];
+  }[];
 }
 
 const paramNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
@@ -666,12 +704,29 @@ export interface WorkflowResourceRun {
   buildHash: string;
   principal: string;
   status: WorkflowRunStatus;
+  /**
+   * While it runs, a step of it waiting for its AI provider: which, what it
+   * showed (refusing the key, not answering, limiting requests), and since
+   * when. It goes on by itself once calls work.
+   */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
   output?: unknown;
   /** Why it failed, for those who see its details. */
   error?: { code: string | null; message: string };
+}
+
+/**
+ * How a workflow is started by hand: the version a start runs, the one
+ * approved to go live or else the one published last (null before any is
+ * published), and the JSON Schema its input must match exactly (null when
+ * it can't be read).
+ */
+export interface WorkflowStartForm {
+  version: number | null;
+  input: Record<string, unknown> | null;
 }
 
 /** A workflow resource, as its members see it. */
@@ -841,6 +896,12 @@ export interface WorkflowVersionSource {
   files: Record<string, string>;
 }
 
+/** The organization's people and teams, by name, to share a workflow with. */
+export interface WorkflowShareCandidates {
+  people: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
+}
+
 /** Someone a workflow is shared with. */
 export interface WorkflowMember {
   type: "person" | "team";
@@ -863,6 +924,11 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
 
 /** A task's body: its single key's value, as the profile reads it. */
 const stepBodySchema = z.record(z.string(), z.json());
+
+/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
+export const workflowRunTraceOptionsSchema = z
+  .strictObject({ doors: z.boolean().default(true) })
+  .default({ doors: true });
 
 /**
  * One step of a draft edited from the canvas (`editStep`), as the next
@@ -933,6 +999,18 @@ export const maxLiveCandidateRuns = 5;
  * (`workflow.candidate_kept_limit`).
  */
 export const maxKeptCandidateRuns = 100;
+
+/**
+ * The most runs a workflow's list of runs answers: the newest. A page
+ * that counts them says "50+" when it has this many.
+ */
+export const workflowRunsListed = 50;
+
+/**
+ * The most files, or activity entries, a read of a workflow's answers:
+ * the newest. A page that counts them says "100+" when it has this many.
+ */
+export const workflowOwnListed = 100;
 
 /**
  * The longest a test run may wait or sleep, from its start: a wait past it
@@ -1053,7 +1131,11 @@ export interface WorkflowDraft {
   checkpoint: {
     revision: number;
     source: string;
-    /** Drawn from the checkpoint's own JSON, as it passed. */
+    /**
+     * Drawn from the checkpoint's own JSON, as it passed. An edit that
+     * didn't pass leaves an earlier edit the checkpoint, as the editor
+     * already holds it: its answer draws that diagram without doors.
+     */
     diagram: WorkflowDiagram;
   } | null;
   editedBy: string | null;
@@ -1168,6 +1250,12 @@ export interface WorkflowResourcesApi {
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
   /**
+   * Whom its builders may share it with: the organization's people and
+   * teams, by name and ID alone (no address, no role, no team's members).
+   * For whoever may share it (`share`), never Grasp staff.
+   */
+  shareCandidates: (id: string) => Promise<WorkflowShareCandidates>;
+  /**
    * Whether its owner lets people ask Stephen to start it in a chat app;
    * for anyone with a role in it.
    */
@@ -1194,6 +1282,11 @@ export interface WorkflowResourcesApi {
    * Starts an exact version of a workflow the caller has a role in, acting
    * for them (`workflowStartSchema`): its admitted receipt.
    */
+  /**
+   * How to start it by hand (`WorkflowStartForm`): the version a start
+   * from its page runs and the input it takes; for anyone with a role.
+   */
+  startForm: (id: string) => Promise<WorkflowStartForm>;
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
   /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
@@ -1218,8 +1311,17 @@ export interface WorkflowResourcesApi {
   activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
-  /** What run `runId` did, over its version's diagram, for builders. */
-  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
+  /**
+   * What run `runId` did, over its version's diagram, for builders. With
+   * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
+   * without its doors: a trace followed while the run goes keeps the
+   * diagram its first read drew, as the run's version never changes.
+   */
+  runTrace: (
+    id: string,
+    runId: string,
+    options?: unknown
+  ) => Promise<WorkflowRunTrace>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for
@@ -1259,10 +1361,21 @@ export interface WorkflowResourcesApi {
   ) => Promise<WorkflowBindingApproval>;
   /** Revokes a binding approval; for the organization's admins. */
   revokeBinding: (id: string, approval: string) => Promise<void>;
+  /**
+   * The versions of workflows that run or wait to go live whose bindings
+   * no admin approved, at most 50, each with the targets core can offer;
+   * for the organization's own admins, never Grasp staff.
+   */
+  pendingBindings: () => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */
   unbindFromApp: (binding: string) => Promise<void>;
+  /**
+   * The workflow versions App `app` binds, by alias: for the App's
+   * builders, archived or not, never Grasp staff.
+   */
+  appBindings: (app: string) => Promise<AppWorkflowBinding[]>;
   /** The host catalog's contracts, for builders. */
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */

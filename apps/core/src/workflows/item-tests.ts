@@ -114,7 +114,7 @@ const recentRuns = async (
     if (kept.length >= items) {
       break;
     }
-    if (row.input !== null && !detailsRemoved(env, row)) {
+    if (row.input !== null && !detailsRemoved(row)) {
       kept.push({
         id: row.id,
         version: row.version,

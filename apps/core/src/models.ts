@@ -10,17 +10,24 @@ import type {
   TranscriptContext,
   Usage,
 } from "@earendil-works/pi-ai";
+// From Pi's `models` entry, not its index: the index brings TypeBox and
+// every other part of Pi, which core would otherwise load as it starts.
 import {
   clampThinkingLevel,
   getSupportedThinkingLevels,
-} from "@earendil-works/pi-ai";
-import {
-  CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
-  createAiBindingFetch,
-} from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+} from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import {
+  aiProviderIdSchema,
+  aiProviders,
+  platformRouteOf,
+} from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderRoutes,
+  PlatformRoute,
+  ProviderTrouble,
+} from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -32,12 +39,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { jsonVar } from "@grasp-os/shared/config";
 import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
-import {
-  defaultGatewayModels,
-  defaultRoleModels,
-  modelGatewayConfigSchema as gatewayConfigSchema,
-  modelRulesConfigSchema as rulesConfigSchema,
-} from "@grasp-os/shared/deployment-config";
+import { modelRulesConfigSchema as rulesConfigSchema } from "@grasp-os/shared/deployment-config";
 import type { ModelRole, ModelRules } from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
@@ -62,14 +64,18 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
-import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
-import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
+import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { maxSpeechChars } from "@grasp-os/shared/voice";
 import type { Speech } from "@grasp-os/shared/voice";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import {
+  aiRoutesOf,
+  chosenModels,
+  readModelChoice,
+} from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   maxAskAgainSeconds,
@@ -85,17 +91,21 @@ import {
   hasBudget,
   limitedPersonOf,
   lineageModelRequests,
+  platformScopes,
   scopesFor,
 } from "./model-budgets.ts";
-import {
-  catalogWindowOf,
-  maxTokensOf,
-  parseModelRef,
-} from "./model-catalog.ts";
+import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
+import {
+  documentPartTypes,
+  takesDocuments,
+  withDocument,
+} from "./model-documents.ts";
+import type { ModelDocument } from "./model-documents.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   Admitted as LedgerAdmitted,
+  LedgerRoute,
   LedgerScope,
   LedgerScopeName,
   LimitedPerson,
@@ -114,17 +124,13 @@ import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
 import {
-  cloudflareAiGateway,
-  gatewayBase,
-  gatewayHeaders,
-  withRequestId,
-} from "./model-transport-cloudflare.ts";
-import { streamRoute } from "./model-transport.ts";
-import type {
-  ModelTransport,
-  RouteMetadata,
-  TransportRoute,
-} from "./model-transport.ts";
+  connectRequest,
+  connectSocket,
+  connectRoute,
+} from "./model-transport-connect.ts";
+import type { ConnectTarget } from "./model-transport-connect.ts";
+import { failureOfResponse, streamRoute } from "./model-transport.ts";
+import type { TransportFailure, TransportRoute } from "./model-transport.ts";
 import {
   charactersOf,
   hearingPricesOf,
@@ -135,34 +141,30 @@ import {
 } from "./voice-models.ts";
 import type { HearingRef, VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
-import { quotaPolicy } from "./workflows/quotas.ts";
+import { quotaLimits } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here,
-// and from here through the deployment's model transport
-// (model-transport.ts), never straight to a provider. Cloudflare AI Gateway
-// over the AI binding is the transport now (model-transport-cloudflare.ts):
-// core holds no provider key. Every request is audited as metadata only:
-// who or what asked, why, the model, tokens and cost, never the prompt or
-// the answer. The event goes through the audit outbox, so a request that
-// was answered (and paid for) is recorded even when the audit log can't
-// take it for a moment.
+// and from here through a model transport (model-transport.ts), never
+// straight to a provider: the provider's own API through connect, which
+// holds every key (model-transport-connect.ts). An organization's calls
+// go with its own key, once it connected an AI provider
+// (ai-model-choice.ts), and may use only the models its admins chose: its
+// default, then its fallbacks, tried in turn when a provider refuses a
+// call before anything could be billed. Until it connected one, and chose
+// a model of it, every call fails as `model.no_provider`. Platform
+// features go the same way with Grasp's own key
+// (`models(env).platformCall`). Core holds no provider key. Every request
+// is audited as metadata only: who or what asked, why, the model, tokens
+// and cost, never the prompt or the answer. The event goes through the
+// audit outbox, so a request that was answered (and paid for) is recorded
+// even when the audit log can't take it for a moment.
 //
 // Before anything is sent, a call is checked against the deployment's
-// allowlist and its other rules (model-rules.ts). A refused call is
-// audited too, with the reason, and nothing is sent. The transport only
-// says where an admitted request goes: the rules, the budgets, the
-// ledger's admission of every provider request and the audit log are the
-// gateway's, the same whatever the transport.
-//
-// Claude in the EU (GRA-702): Anthropic's own API can't be pinned to the
-// EU (its `inference_geo` is `us` or `global`). Claude in Amazon Bedrock
-// serves the same Messages API at
-// `https://bedrock-mantle.<region>.api.aws/anthropic`, so pi's Anthropic
-// adapter speaks to it unchanged, each model asked for by its EU inference
-// profile (`eu.anthropic.<model>`, model-catalog.ts), which routes only
-// within the EU's regions. Bedrock keeps neither prompts nor answers
-// unless the account turns invocation logging on: zero retention is the
-// AWS account's setting and the contract's, not a request's.
+// rules (model-rules.ts). A refused call is audited too, with the reason,
+// and nothing is sent. The transport only says where an admitted request
+// goes: the rules, the budgets, the ledger's admission of every provider
+// request and the audit log are the gateway's, the same whatever the
+// transport.
 
 /**
  * How long an answer may be when the call doesn't say: enough for a long
@@ -171,11 +173,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 const defaultMaxTokens = 16_384;
 
 /**
- * An answer takes at most one in this many of the model's window.
- * Providers such as Workers AI count the answer's cap against the window
- * and refuse a request whose total is over it, so on a small one (Llama
- * 3.3's 24,000 tokens) an answer of the whole window would leave nothing
- * for the request itself.
+ * An answer takes at most one in this many of the model's window. Some
+ * providers count the answer's cap against the window and refuse a request
+ * whose total is over it, so on a small one an answer of the whole window
+ * would leave nothing for the request itself.
  */
 const windowPerAnswer = 4;
 
@@ -206,17 +207,18 @@ const defaultTimeoutMs = 3 * 60_000;
 const maxTimeoutMs = 15 * 60_000;
 
 /**
- * Retries for a request the provider refused for a moment (429 or 5xx) or
- * that didn't connect; the provider SDKs back off in between.
+ * Retries for a request the provider refused for its rate (429), after
+ * the wait it asked for.
  */
 const maxRetries = 2;
 
 /**
- * A model the gateway offers: a text model of pi's catalog, a voice model
+ * A model the gateway offers: a text model of pi's catalog, a speech model
  * of our own (voice-models.ts), which only speech takes
  * (`models(env).speak`), or a transcription model of our own, which only
- * listening takes (`models(env).listen`). Each check stays its own, so no
- * call of one kind can name a model of another.
+ * listening takes (`models(env).listen`), so the rules can name each.
+ * Each check stays its own, so no call of one kind can name a model of
+ * another.
  */
 const modelRefSchema = z
   .string()
@@ -228,65 +230,21 @@ const modelRefSchema = z
     { message: "A <provider>/<model> the gateway offers" }
   );
 
-/** The allowlist in the `MODEL_GATEWAY` var, by the models pi offers. */
-const modelGatewayConfigSchema = gatewayConfigSchema(modelRefSchema);
-type ModelGatewayConfig = z.infer<typeof modelGatewayConfigSchema>;
-
-/**
- * The client's other rules, in the same var (model-rules.ts). Parsed apart
- * from the allowlist: a rule that doesn't parse refuses every call.
- */
+/** The client's rules, in the `MODEL_GATEWAY` var (model-rules.ts). */
 const modelRulesConfigSchema = rulesConfigSchema(modelRefSchema);
 
-/**
- * Core's env, with the AI binding as pi describes it. It is absent on plain
- * workerd (on-prem), where no call can be made.
- */
-export type ModelsEnv = Omit<Env, "AI"> & { AI?: AiBinding };
+/** The `MODEL_GATEWAY` var as set: no rules while it isn't. */
+const rulesVar = (env: Env): unknown =>
+  env.MODEL_GATEWAY === undefined ? {} : jsonVar(env.MODEL_GATEWAY);
 
 /**
- * The gateway config of a deployment whose `MODEL_GATEWAY` isn't set: the
- * account's default AI Gateway, which Cloudflare creates on its first use,
- * and Workers AI's models, which run on the account with no provider key.
- * So chat works on a new deployment, and in local development, where the
- * AI binding reaches Cloudflare with the developer's Wrangler login. The
- * var replaces all of it, to narrow the models or name another gateway.
+ * The deployment's rules: deployment config, set by the admin as the
+ * `MODEL_GATEWAY` var, never an in-product setting, so an admin session
+ * can't loosen what the client agreed to; none while it isn't set.
+ * `undefined` for rules that don't parse: every call then fails closed.
  */
-const defaultGatewayConfig = {
-  gateway: "default",
-  models: [...defaultGatewayModels],
-};
-
-/** The `MODEL_GATEWAY` var as set, or the default config without one. */
-const gatewayVar = (env: ModelsEnv): unknown =>
-  env.MODEL_GATEWAY === undefined
-    ? defaultGatewayConfig
-    : jsonVar(env.MODEL_GATEWAY);
-
-/**
- * The deployment's model gateway config: deployment config, set by the
- * admin as the `MODEL_GATEWAY` var, never an in-product setting, so an
- * admin session can't allow a model the client didn't agree to; the
- * default config while none is set. One that doesn't parse counts as none
- * at all: `undefined`, and every call fails closed.
- */
-const modelGatewayConfig = (env: ModelsEnv): ModelGatewayConfig | undefined => {
-  const parsed = modelGatewayConfigSchema.safeParse(gatewayVar(env));
-  if (!parsed.success) {
-    log.error("model.config_invalid", {
-      paths: parsed.error.issues.map(({ path }) => path.join(".")).join(" "),
-    });
-    return undefined;
-  }
-  return parsed.data;
-};
-
-/**
- * The deployment's rules. `undefined` for rules that don't parse: every
- * call then fails closed.
- */
-const modelRules = (env: ModelsEnv): ModelRules | undefined => {
-  const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
+export const modelRules = (env: Env): ModelRules | undefined => {
+  const parsed = modelRulesConfigSchema.safeParse(rulesVar(env));
   if (!parsed.success) {
     log.error("model.rules_invalid", {
       paths: parsed.error.issues.map(({ path }) => path.join(".")).join(" "),
@@ -296,68 +254,58 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
   return parsed.data;
 };
 
-/**
- * The allowlist and the rules as they apply now, for admins to read
- * (models-rpc.ts): the allowed text models, none while the config doesn't
- * parse, and apart from them the allowed voice models, which only speech
- * takes, so nothing that picks a model for text (a chat, a binding, the
- * kickoff's reading) is offered one; and the rules, `undefined` when they
- * don't parse.
- */
-export const gatewaySettings = (
-  env: ModelsEnv
-): {
-  /** The deployment's AI Gateway; `undefined` while the config doesn't parse. */
-  gateway: string | undefined;
+/** The models the organization's calls may use now, and the rules. */
+export interface ModelsNow {
+  /**
+   * The models its admins chose, its default first, each of a provider it
+   * still has connected: none until it connected one and chose.
+   */
   models: string[];
-  voices: string[];
-  roles: Partial<Record<ModelRole, string>>;
+  /** The deployment's rules; `undefined` when they don't parse. */
   rules: ModelRules | undefined;
-} => {
-  const config = modelGatewayConfig(env);
-  const allowed = config?.models ?? [];
+}
+
+/**
+ * The models the organization's calls may use now, for whatever picks one
+ * (a role's model, a chat's choices, a binding's approval), and the
+ * deployment's rules.
+ */
+export const modelSettings = async (env: Env): Promise<ModelsNow> => {
+  const routes = await aiRoutesOf(env);
   return {
-    gateway: config?.gateway,
-    models: allowed.filter((ref) => parseModelRef(ref) !== undefined),
-    voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
-    roles: config?.roles ?? {},
+    models: chosenModels(routes, await readModelChoice(env)),
     rules: modelRules(env),
   };
 };
 
 /**
- * The model for `role` (`MODEL_GATEWAY`'s `roles`), for a call that
- * carries sensitive data when `sensitive` is set: the one the deployment
- * named, or, for a role it left out, the role's default
- * ({@link defaultRoleModels}) where it is allowed and the rules let the
- * call use it, else the first allowed model they let it use. `undefined` when there is none, and when the rules refuse
- * the named model: a role never falls back to a model the deployment
- * didn't name for it. The gateway checks the rules again either way.
+ * The model for `role`, for a call that carries sensitive data when
+ * `sensitive` is set: the organization's default, else the first of its
+ * fallbacks, that the rules let the call use. Both roles resolve alike:
+ * an organization chooses its models, not one for each role. Throws
+ * `model.no_provider` while it has no model to use (no provider
+ * connected, or no model chosen), as every call would; `undefined` when
+ * the rules let the call use none of them. The gateway checks the rules
+ * again either way.
  */
 export const modelForRole = (
-  { models: allowed, roles, rules }: ReturnType<typeof gatewaySettings>,
+  { models: chosen, rules }: ModelsNow,
   role: ModelRole,
   { sensitive }: { sensitive: boolean }
 ): string | undefined => {
+  if (chosen.length === 0) {
+    throw modelErrors.create("model.no_provider");
+  }
   const fits = (model: string) =>
     (!sensitive ||
       rules?.sensitive === undefined ||
       rules.sensitive.models.includes(model)) &&
     (rules?.eu?.deployment !== true || rules.eu.models.includes(model));
-  const named = roles[role];
-  if (named === undefined) {
-    const fallback = defaultRoleModels[role];
-    return fallback !== undefined &&
-      allowed.includes(fallback) &&
-      fits(fallback)
-      ? fallback
-      : allowed.find(fits);
+  const model = chosen.find(fits);
+  if (model === undefined) {
+    log.error("model.role_refused", { role, sensitive: String(sensitive) });
   }
-  if (!fits(named)) {
-    log.error("model.role_refused", { role, model: named });
-    return undefined;
-  }
-  return named;
+  return model;
 };
 
 /**
@@ -400,23 +348,8 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
   };
 };
 
-/**
- * Whether the deployment's config keeps every call in the EU
- * (`eu.deployment`): for what sends data out of the Worker without being a model call,
- * such as Workers AI's document conversion (knowledge/extract.ts), which
- * then stays in the Worker. A config whose rules don't parse keeps it
- * there too: it fails closed. The default config has no EU rule.
- */
-export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
-  const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
-  return !parsed.success || parsed.data.eu?.deployment === true;
-};
-
 /** What a call is for, such as `workflow.step` or `chat.turn`. */
 const purposePattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
-
-/** Text without a slash. */
-const noSlash = /^[^/]+$/u;
 
 /**
  * What every request says about itself: its model and limits, and what the
@@ -499,13 +432,6 @@ const sessionShape = {
        */
       z.strictObject({ platform: z.literal("brain_recall") }),
       /**
-       * Core's own reading of a policy the company uploaded (policies.ts):
-       * its text, judged as onboarding's is, as carrying sensitive data,
-       * made for the admin who uploaded it, on their budget. Only core's
-       * own code makes such a call.
-       */
-      z.strictObject({ platform: z.literal("policy_reading") }),
-      /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
        * answer, into the company's topics; and its proposals for what an
@@ -514,23 +440,23 @@ const sessionShape = {
        * for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),
+      /**
+       * An admin's test of an AI provider the organization connected
+       * (ai-providers.ts): one fixed line of no one's data, judged as
+       * onboarding's is all the same, made for the admin, on their budget.
+       * Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("provider_test") }),
+      /**
+       * Core's own conversion of a PDF uploaded to the Brain into its text
+       * (knowledge/extract.ts), on Grasp's key: the company's own words,
+       * judged as onboarding's are, made for the person who uploaded it,
+       * on their budget. Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("document_conversion") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
-  /**
-   * For a workflow run's call: the run and the step it is made from, so the
-   * gateway's log, and a fixture provider behind it, can tell each step's
-   * requests apart (spec 28.2). Set by core's workflow hosts only, never
-   * by App code.
-   */
-  runStep: z
-    .strictObject({
-      // No slash: the gateway's entry splits the run from the step at
-      // the first one.
-      runId: z.string().min(1).max(128).regex(noSlash),
-      step: z.string().min(1).max(512),
-    })
-    .optional(),
   /**
    * For a call of an independent workflow's run, whose trigger names no
    * App's run (`system`): the run lineage its requests count against, by
@@ -645,8 +571,14 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    */
   onText?: (text: string) => void;
   /**
-   * Whether a request the provider refused for a moment (429 or 5xx), or
-   * that didn't connect, is sent again (the default, `maxRetries`). False
+   * A document the model reads as it is, beside `input`: a PDF, sent as
+   * its provider's own document part (model-documents.ts). Only for a
+   * platform feature (`platformCall`): Grasp's own conversion of uploads.
+   */
+  document?: ModelDocument;
+  /**
+   * Whether a request the provider refused for its rate (429) is sent
+   * again, after the wait it asked for (the default, `maxRetries`). False
    * where one call must be one request: a workflow run's model call, which
    * its run's limit of calls counts (resource-calls.ts).
    */
@@ -690,9 +622,7 @@ export interface ModelAnswer<Output> {
  */
 export const usableAnswerTokens = (model: string): number | undefined => {
   const ref = parseModelRef(model);
-  return ref === undefined
-    ? undefined
-    : usableAnswer({ ...ref.catalog, maxTokens: maxTokensOf(ref) });
+  return ref === undefined ? undefined : usableAnswer(ref.catalog);
 };
 
 const noUsage: Usage = {
@@ -814,6 +744,8 @@ interface Admitted {
   call: Session;
   ref: ModelRef;
   judged: Judged;
+  /** The way it goes, as the ledger and the audit log record it. */
+  way: LedgerRoute;
 }
 
 /** An admitted request's way to the model, through the deployment's transport. */
@@ -821,22 +753,35 @@ interface Route extends Admitted {
   model: Model<Api>;
   /** The way to the model: its endpoint, headers and fetch (model-transport.ts). */
   endpoint: TransportRoute;
-  /** Whether the transport's provider SDKs retry a refused request themselves. */
-  sdkRetries: boolean;
+  /**
+   * How the call was let through (`Via`), which a fallback's admission
+   * keeps.
+   */
+  via: Via;
+  /**
+   * The organization's models to try, in order, should the provider refuse
+   * this one before anything could be billed (`fallbackOf`); none for a
+   * call that may not fall back.
+   */
+  fallbacks: readonly string[];
+  /**
+   * Whether a provider request of this call may already have been billed
+   * (an answer came, or a request's fate is unknown): from then on the
+   * call never falls back (`fallbackOf`). Set as its requests end.
+   */
+  billed?: boolean;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
   /**
    * The scopes a provider request sent now counts against, in this month,
-   * its run lineage's limited by the quota policy in force now, and that
-   * policy's generation (none for a call with no lineage). Throws when the
-   * policy, or the teams of the person it is made for, can't be read:
-   * nothing is admitted without the limits they give.
+   * its run lineage's limited by the quota limits. Throws when the teams
+   * of the person it is made for can't be read: nothing is admitted
+   * without the limits they give.
    */
   scopesNow: () => Promise<{
     period: string;
     scopes: LedgerScope[];
-    policyGeneration: number | undefined;
-    /** Whose shares of the requests in flight it takes, under the policy now. */
+    /** Whose shares of the requests in flight it takes, under the quota limits. */
     fair: Fairness;
     /**
      * The person it is made for, and their teams, whose limit the ledger
@@ -852,7 +797,7 @@ interface Route extends Admitted {
    */
   perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
-  env: ModelsEnv;
+  env: Env;
   /** The call's ID: its place in the queue while it waits for a share. */
   place: string;
   /** What its refusals may tell it of others' calls (model-admission.ts). */
@@ -892,21 +837,22 @@ interface RequestBound {
  * What admitting a provider request takes of its route: a text model's
  * (`Route`), or a voice model's (`speak`).
  */
-type Admitting = Pick<
-  Route,
-  | "env"
-  | "call"
-  | "price"
-  | "perRequest"
-  | "scopesNow"
-  | "disclose"
-  | "beforeSend"
-  | "onQueued"
-  | "notes"
-  | "place"
-  | "bound"
-  | "leaseMs"
->;
+type Admitting = Partial<Pick<Route, "way">> &
+  Pick<
+    Route,
+    | "env"
+    | "call"
+    | "price"
+    | "perRequest"
+    | "scopesNow"
+    | "disclose"
+    | "beforeSend"
+    | "onQueued"
+    | "notes"
+    | "place"
+    | "bound"
+    | "leaseMs"
+  >;
 
 interface Request extends Route {
   /** Ends the call when it takes too long, retries included. */
@@ -943,6 +889,8 @@ interface GatewayResponse {
    * the last refusal was something else.
    */
   rateLimited: number | undefined;
+  /** How the last provider request failed, if it did (model-transport.ts). */
+  failure: TransportFailure | undefined;
 }
 
 /** A provider request the ledger admitted: its ID, and what it reserved. */
@@ -962,18 +910,52 @@ interface Sent extends GatewayResponse {
 /**
  * What the log keeps of a provider's refusal: the fields that name what
  * went wrong and can carry no content, never its message, which may quote
- * the prompt or a credential. Workers AI's `internalCode` and the JSON
- * pointers its message names, such as `/messages/2/content`, say which
- * part of the request it refused.
+ * the prompt or a credential.
  */
 interface ProviderRefusal {
   name: string | undefined;
   type: string | undefined;
   code: string | number | undefined;
-  internalCode: number | undefined;
-  /** The JSON pointers the message names, space-separated. */
-  paths: string | undefined;
+  /**
+   * Whether it says the key's account has no credit or quota left
+   * (`outOfCreditOf`): read off its type, its code or its message, and
+   * kept as this flag alone, never the message.
+   */
+  outOfCredit: boolean;
 }
+
+/**
+ * The types and codes providers name a refusal for an account with no
+ * credit or quota left by: OpenAI's (and OpenAI-compatible endpoints')
+ * `insufficient_quota` and `billing_hard_limit_reached`, Anthropic's
+ * `billing_error`, and OpenRouter's and Mistral's payment refusals.
+ */
+const outOfCreditCodes: ReadonlySet<string> = new Set([
+  "insufficient_quota",
+  "billing_hard_limit_reached",
+  "billing_not_active",
+  "billing_error",
+  "payment_required",
+  "insufficient_credits",
+]);
+
+/**
+ * What a refusal's message says when the account ran out, where its type
+ * doesn't: Anthropic answers a 400 `invalid_request_error` saying "Your
+ * credit balance is too low". Matched, never kept.
+ */
+const outOfCreditMessage =
+  /\b(?:credit balance is too low|insufficient (?:credits?|funds|balance|quota)|exceeded your current quota)\b/iu;
+
+/**
+ * Whether a refusal's body says its account has no credit or quota left:
+ * by one of its types or codes (`names`), or by its message.
+ */
+const outOfCreditOf = (names: readonly unknown[], message: unknown): boolean =>
+  names.some(
+    (name) => typeof name === "string" && outOfCreditCodes.has(name)
+  ) ||
+  (typeof message === "string" && outOfCreditMessage.test(message));
 
 /** An identifier or a number, as a provider names its errors. */
 const errorCodeSchema = z.union([
@@ -998,16 +980,6 @@ const identifierOf = (value: unknown): string | undefined => {
 const nestedOf = (error: unknown, field: "type" | "code"): unknown =>
   isRecord(error) ? error[field] : undefined;
 
-/**
- * A JSON pointer in quotes, as Workers AI's schema errors name the part
- * of the request they refuse: lowercase names and indexes only, so it
- * can't carry a prompt's words or a key.
- */
-const quotedPointerPattern = /'(?<path>(?:\/(?:[a-z_]{1,32}|\d{1,6})){1,8})'/gu;
-
-/** The most JSON pointers the log keeps of one refusal. */
-const maxLoggedPaths = 5;
-
 /** The most of a refusal's body that is read. */
 const maxRefusalChars = 64 * 1024;
 
@@ -1019,22 +991,21 @@ const refusalOf = (text: string): ProviderRefusal => {
     const value: unknown = JSON.parse(body);
     parsed = isRecord(value) ? value : undefined;
   } catch {
-    // Not JSON: only its pointers are kept.
+    // Not JSON: nothing of it is kept.
   }
-  const paths = [
-    ...new Set(
-      Array.from(body.matchAll(quotedPointerPattern), (match) => match[1])
-    ),
-  ].slice(0, maxLoggedPaths);
-  const internalCode = codeOf(parsed?.internalCode);
+  const type =
+    identifierOf(parsed?.type) ?? identifierOf(nestedOf(parsed?.error, "type"));
+  const code = codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code"));
+  const { error } = parsed ?? {};
   return {
     name: identifierOf(parsed?.name),
-    type:
-      identifierOf(parsed?.type) ??
-      identifierOf(nestedOf(parsed?.error, "type")),
-    code: codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code")),
-    internalCode: typeof internalCode === "number" ? internalCode : undefined,
-    paths: paths.length === 0 ? undefined : paths.join(" "),
+    type,
+    code,
+    // Anthropic nests its own type under a top-level `error` type.
+    outOfCredit: outOfCreditOf(
+      [type, code, nestedOf(error, "type"), nestedOf(error, "code")],
+      isRecord(error) ? error.message : parsed?.message
+    ),
   };
 };
 
@@ -1262,7 +1233,7 @@ const heldResponse = (): Response =>
  * its whole reservation when it comes due.
  */
 const settleRequest = async (
-  env: ModelsEnv,
+  env: Env,
   id: string,
   settlement: Settlement
 ): Promise<Settled | undefined> => {
@@ -1311,7 +1282,7 @@ const settleAdmitted = async (
   return { reservedMicros: admission.reservedMicros, settled };
 };
 
-/** `route`'s scopes now, or held back when the quota policy can't be read. */
+/** `route`'s scopes now, or held back when they can't be read. */
 const scopesRead = async (
   route: Admitting
 ): Promise<Awaited<ReturnType<Route["scopesNow"]>> | { held: Refusal }> => {
@@ -1426,24 +1397,47 @@ const textBound = (
 };
 
 /**
+ * The most a request carrying a document may use: its prompt bounded by
+ * the model's whole context window, as a document's pages are billed by
+ * what they hold rather than their bytes, and the provider refuses a
+ * prompt beyond the window unbilled; its answer as a text request's.
+ * Anything else the bound can't cover is refused as for any request.
+ */
+const documentBound = (
+  call: Session,
+  model: Model<Api>,
+  body: unknown,
+  part: string
+): RequestBound | { held: Refusal } => {
+  const unbounded = unboundedBy(body, new Set([part]));
+  if (unbounded !== undefined) {
+    log.error("model.unbounded_request", { model: call.model, unbounded });
+    return { held: { code: "model.unpriced" } };
+  }
+  const outputTokens = outputCapOf(body) ?? model.maxTokens;
+  if (!(model.contextWindow > 0 && outputTokens > 0)) {
+    // A model without a window can't be bounded with a document.
+    return { held: { code: "model.unpriced" } };
+  }
+  return { inputTokens: model.contextWindow, outputTokens };
+};
+
+/**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost (`Route.bound`), at the
- * model's pinned prices. Its ID, or why it is held back. Asked once
- * more, under the quota policy read again, when the ledger already
- * admitted under a newer one (`retried`).
+ * model's pinned prices. Its ID, or why it is held back.
  */
 const admitRequest = async (
   route: Admitting,
   body: unknown,
-  endsAt: number,
-  retried = false
+  endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
   const { env, call, price, perRequest } = route;
   const now = await scopesRead(route);
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, policyGeneration, fair, person } = now;
+  const { period, scopes, fair, person } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -1479,22 +1473,16 @@ const admitRequest = async (
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
       ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
-      ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
       ...(person === undefined ? {} : { person }),
+      ...(route.way === undefined ? {} : { route: route.way }),
     });
     if ("policyBehind" in admitted) {
-      if (!retried) {
-        return await admitRequest(route, body, endsAt, true);
-      }
-      // Never expected: core records a generation before any admission
-      // carries it, and reads the highest it recorded. A ledger ahead of
-      // core (core's database restored, say) holds back every workflow's
-      // call until core's policy passes it: logged with both generations,
-      // and refused for what it is, never as a ledger outage.
+      // Never expected: the ledger refuses this only for an admission that
+      // carries a policy generation, which none does. Logged, and refused
+      // for what it is, never as a ledger outage.
       log.error("model.quota_policy_behind", {
         model: call.model,
-        generation: policyGeneration,
         ledgerGeneration: admitted.highest,
       });
       return { held: { code: "model.quota_policy_behind" } };
@@ -1619,7 +1607,7 @@ const askUntilServed = async (
  * round (`onQueued`).
  *
  * One way out, however the wait ends (admitted, refused for anything, out
- * of time, cancelled, stopped by its caller, a policy that can't be read,
+ * of time, cancelled, stopped by its caller, scopes that can't be read,
  * a ledger that throws): a call that held a place and wasn't admitted
  * gives it up, so no abandoned place holds others back while it lapses,
  * and a caller told it waited is told it stopped.
@@ -1657,6 +1645,31 @@ const admitWaiting = async (
   }
 };
 
+/** The host a fetch is asked for, lowercase; none for a URL that isn't one. */
+const hostOf = (input: Parameters<FetchFunction>[0]): string | undefined => {
+  let href = "";
+  if (typeof input === "string") {
+    href = input;
+  } else {
+    href = input instanceof URL ? input.href : input.url;
+  }
+  return URL.parse(href)?.hostname.toLowerCase();
+};
+
+/** A failure as the ledger notes it for the provider's status. */
+const notedFailure = (
+  failure: TransportFailure
+):
+  | { kind: Exclude<TransportFailure["kind"], "budget">; status?: number }
+  | undefined => {
+  if (failure.kind === "budget") {
+    return undefined;
+  }
+  return failure.status === undefined
+    ? { kind: failure.kind }
+    : { kind: failure.kind, status: failure.status };
+};
+
 /**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
@@ -1667,7 +1680,7 @@ const open = async (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { endpoint } = route;
+  const { endpoint, call } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -1677,6 +1690,7 @@ const open = async (
     pending: undefined,
     settled: [],
     rateLimited: undefined,
+    failure: undefined,
   };
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
@@ -1685,9 +1699,18 @@ const open = async (
   // settled once the answer ends (`record`). Besides, the request's size
   // as sent, should what it used have to be estimated (`usedBy`); and
   // what a refusal's body says went wrong, which the provider SDKs drop
-  // when it isn't in their provider's shape (Workers AI's has no `error`,
-  // so OpenAI's SDK reports "400 status code (no body)").
-  const measured: FetchFunction = async (input, init) => {
+  // when it isn't in their provider's shape.
+  const sendOnce: FetchFunction = async (input, init) => {
+    // Only to the route's own host, whatever asks: a request anywhere
+    // else, after a redirect an SDK took or a base URL gone wrong, is
+    // never admitted or sent (a key's one destination).
+    if (hostOf(input) !== endpoint.host) {
+      log.error("model.route_host_mismatch", {
+        model: call.model,
+        transport: endpoint.transport,
+      });
+      throw new Error("The model request's host isn't its route's");
+    }
     const admitted = await admitWaiting(route, init?.body, { endsAt, signal });
     if ("held" in admitted) {
       response.held = admitted.held;
@@ -1715,30 +1738,53 @@ const open = async (
       response.rateLimited = undefined;
       answered = await endpoint.fetch(
         input,
-        endpoint.tagged(init, admitted.id)
+        endpoint.tagged(init, admitted.id, endsAt)
       );
     } catch (error) {
+      // Not answered at all: down, unless its caller cut it off.
+      const failure: TransportFailure = {
+        kind: "provider_down",
+        status: undefined,
+      };
+      response.failure = signal.aborted ? undefined : failure;
+      // Its deadline passed with no answer: the provider isn't answering,
+      // as its status says. Not one its caller cancelled.
+      const unanswered = !signal.aborted || Date.now() >= endsAt;
       response.settled.push(
-        await settleAdmitted(route, admitted, { by: "unknown" })
+        await settleAdmitted(route, admitted, {
+          by: "unknown",
+          ...(unanswered ? { failure: { kind: failure.kind } } : {}),
+        })
       );
       throw error;
     }
     response.refusal = undefined;
-    response.rateLimited =
-      answered.status === 429
-        ? rateLimitedSeconds(answered.headers)
-        : undefined;
+    response.rateLimited = undefined;
     if (!answered.ok) {
+      const refusal = refusalOf(await answered.clone().text());
+      const failure = failureOfResponse(
+        answered.status,
+        answered.status === 429 ? rateLimitedSeconds(answered.headers) : 0,
+        refusal.outOfCredit
+      );
+      response.failure = failure;
+      // Only a rate limit is waited out: an account out of credit (a 429
+      // too, at OpenAI) fails the same way however long it waits.
+      response.rateLimited =
+        failure.kind === "rate_limited" ? failure.retryAfterSeconds : undefined;
+      const noted = notedFailure(failure);
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
       response.settled.push(
         await settleAdmitted(route, admitted, {
           by: answered.status < 500 ? "refused" : "unknown",
+          ...(noted === undefined ? {} : { failure: noted }),
         })
       );
-      response.refusal = refusalOf(await answered.clone().text());
+      response.refusal = refusal;
       return answered;
     }
+    response.failure = undefined;
     if (response.pending !== undefined) {
       response.settled.push(
         await settleAdmitted(route, response.pending, { by: "unknown" })
@@ -1747,12 +1793,35 @@ const open = async (
     response.pending = admitted;
     return answered;
   };
-  const { model, call } = route;
+  // The gateway retries only a rate limit's refusal, which the provider made before
+  // taking anything on, after the wait it asked for, and only while that
+  // wait ends before the call's deadline. Never a server error or a
+  // request that got no answer: those may have been taken on, and billed.
+  // Each retry is admitted by the ledger on its own.
+  const measured: FetchFunction = async (input, init) => {
+    let answered = await sendOnce(input, init);
+    for (
+      let retry = 0;
+      retry < maxRetries &&
+      route.providerRetries !== false &&
+      answered.status === 429 &&
+      response.rateLimited !== undefined &&
+      Date.now() + response.rateLimited * 1000 < endsAt;
+      retry += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as asked
+      await answered.body?.cancel();
+      // oxlint-disable-next-line no-await-in-loop -- the wait the provider asked for
+      await pause(response.rateLimited * 1000, signal);
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      answered = await sendOnce(input, init);
+    }
+    return answered;
+  };
+  const { model } = route;
   const events = await streamRoute(endpoint, context, {
     fetch: measured,
     maxTokens: answerTokens(call, model),
-    maxRetries:
-      route.providerRetries === false || !route.sdkRetries ? 0 : maxRetries,
     // Without a level pi turns reasoning off.
     reasoning: thinkingOf(model, call.effort),
     signal,
@@ -1876,8 +1945,6 @@ const failureFields = (
   providerErrorName: refusal?.name,
   providerErrorType: refusal?.type,
   providerErrorCode: refusal?.code,
-  providerInternalCode: refusal?.internalCode,
-  providerErrorPaths: refusal?.paths,
 });
 
 /** A failure in our own words, for whoever reads the answer. */
@@ -2079,6 +2146,20 @@ const workflowRunOf = ({
 const platformOf = ({ work }: Session): { platform: string } | object =>
   work !== undefined && "platform" in work ? { platform: work.platform } : {};
 
+/**
+ * Which of Grasp's own features a text call on Grasp's key is for, as the
+ * ledger records it, so what each costs Grasp is told apart: converting a
+ * document is the only one today.
+ */
+const platformFeatureOf = ({
+  work,
+}: Session): { feature: PlatformAiFeature } | object =>
+  work !== undefined &&
+  "platform" in work &&
+  work.platform === "document_conversion"
+    ? { feature: "conversion" }
+    : {};
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -2125,7 +2206,7 @@ const bindingOf = ({
     : { binding: binding.alias, bindingApp: binding.app };
 
 const auditEntry = (
-  { call, ref, judged }: Admitted,
+  { call, ref, judged, way }: Admitted,
   recorded: Recorded
 ): AuditEntry => {
   const { logId } = recorded;
@@ -2154,6 +2235,11 @@ const auditEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      // The way it went: its transport, the provider's region, and whose
+      // key (the organization's own, or Grasp's for a platform feature).
+      transport: way.transport,
+      region: way.region,
+      credential: way.credential ?? null,
       // Never an ID so long that the event would be refused.
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -2195,6 +2281,14 @@ const largestRecord: Recorded = {
     charged: Number.MAX_VALUE,
     held: Number.MAX_VALUE,
   },
+};
+
+/** The longest way a call's audit event can name. */
+const largestWay: LedgerRoute = {
+  transport: "x".repeat(64),
+  provider: "x".repeat(32),
+  region: "x".repeat(32),
+  credential: "organization",
 };
 
 /** The most the rules can add to a call's audit event. */
@@ -2271,14 +2365,66 @@ const cutTokens = (
 const settlementOf = (
   pending: Admission,
   answer: AssistantMessage,
-  failure: Failure | undefined
+  failure: Failure | undefined,
+  shows: ProviderTrouble | undefined
 ): Settlement => {
+  // What it showed of its provider goes with it, for the provider's
+  // status alone: never what it is charged.
+  const seen = shows === undefined ? {} : { shows };
   if (failure?.stopped !== undefined) {
     const tokens = cutTokens(pending, answer);
-    return tokens === undefined ? { by: "unknown" } : { by: "cut", tokens };
+    return tokens === undefined
+      ? { by: "unknown", ...seen }
+      : { by: "cut", tokens, ...seen };
   }
   const tokens = hasFailed(answer) ? undefined : countedTokens(answer.usage);
-  return tokens === undefined ? { by: "unknown" } : { by: "usage", tokens };
+  return tokens === undefined
+    ? { by: "unknown", ...seen }
+    : { by: "usage", tokens };
+};
+
+/** What each way a request fails shows of its provider; none for the request's own fault. */
+const failureTroubles: Readonly<
+  Record<TransportFailure["kind"], ProviderTrouble | undefined>
+> = {
+  auth: "refused",
+  quota: "limiting",
+  rate_limited: "limiting",
+  provider_down: "not_answering",
+  refused: undefined,
+  budget: undefined,
+};
+
+/**
+ * What a failed request on the organization's own key showed of its
+ * provider, by the HTTP class seen, never a guess at why
+ * (`ProviderTrouble`): it refused the key (401, 403); it limited the
+ * request (429, an account's rate or spending limit); or it didn't answer
+ * (5xx, no answer, an answer that broke off, or the call's deadline
+ * passed with a request out).
+ * None for a call its caller cancelled, a refusal of the request itself,
+ * or one on Grasp's key, whose features say so in their own words.
+ */
+const troubleOf = (
+  route: Route,
+  { failure, settled, pending }: GatewayResponse,
+  stopped: Stopped | undefined
+): ProviderTrouble | undefined => {
+  if (route.way.credential !== "organization" || stopped === "cancelled") {
+    return undefined;
+  }
+  if (stopped === "timeout") {
+    // Only once a request went out: a call held back by the ledger till
+    // its deadline never reached the provider.
+    return settled.length > 0 || pending !== undefined
+      ? "not_answering"
+      : undefined;
+  }
+  if (failure === undefined) {
+    // An answer begun that broke off: the provider stopped answering.
+    return pending === undefined ? undefined : "not_answering";
+  }
+  return failureTroubles[failure.kind];
 };
 
 /**
@@ -2289,7 +2435,7 @@ const settlementOf = (
  * answer to a bookkeeping failure would ask (and pay) again.
  */
 const record = async (
-  env: ModelsEnv,
+  env: Env,
   admitted: Route,
   sent: Sent,
   attempt: number,
@@ -2301,10 +2447,20 @@ const record = async (
   const { pending, logId, status } = sent;
   let settled: Settled | undefined = undefined;
   if (pending !== undefined) {
+    // A request that broke off or ran out of time with its answer out
+    // shows its provider stopped answering (`troubleOf`): noted in the
+    // provider's status, so its admins are told, whatever it is charged.
+    // A refusal of the provider's own (a key refused, a limit) is noted
+    // where it is settled as refused, with what it said.
+    const trouble =
+      outcome === "failed"
+        ? troubleOf(admitted, sent, failure?.stopped)
+        : undefined;
+    const shows = trouble === "not_answering" ? trouble : undefined;
     ({ settled } = await settleAdmitted(
       admitted,
       pending,
-      settlementOf(pending, sent.answer, failure)
+      settlementOf(pending, sent.answer, failure, shows)
     ));
   }
   const used = usedBy(admitted, sent);
@@ -2362,7 +2518,7 @@ const refusedEntry = (
 
 /** Records a call the deployment's rules refused, with the reason, and refuses it. */
 const refuse = async (
-  env: ModelsEnv,
+  env: Env,
   call: Session,
   refusal: Refusal
 ): Promise<never> => {
@@ -2396,7 +2552,7 @@ const refuse = async (
 
 /** Records a refusal, as `refuse` does, without throwing it. */
 const refuseQuietly = async (
-  env: ModelsEnv,
+  env: Env,
   call: Session,
   refusal: Refusal
 ): Promise<void> => {
@@ -2425,38 +2581,6 @@ const parseCall = <Schema extends z.ZodType>(
 };
 
 /**
- * The last quota policy this isolate read, for a call's shares when the
- * policy can't be read for a moment: closer to what the operator set than
- * the platform's ceilings. Per isolate, never shared or stored: a lowered
- * policy read anywhere else applies here at the next read that works.
- */
-let lastPolicyRead: QuotaPolicy | undefined;
-
-/** The deployment's quota policy as it stands, remembered (`lastPolicyRead`). */
-const readPolicy = async (env: ModelsEnv): Promise<QuotaPolicy> => {
-  const read = await quotaPolicy(env);
-  lastPolicyRead = read;
-  return read;
-};
-
-/**
- * The deployment's quota policy; when it can't be read, the last this
- * isolate read, else the platform's own (its ceilings): for a call's
- * shares, which a policy only lowers, and which bound no spend.
- */
-const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
-  try {
-    return await readPolicy(env);
-  } catch (error) {
-    log.error("model.quota_policy_failed", {
-      ...errorFields(error),
-      fallback: lastPolicyRead === undefined ? "platform" : "last_read",
-    });
-    return lastPolicyRead ?? quotaPolicyOf();
-  }
-};
-
-/**
  * The scopes a provider request of `call` counts against once it is sent
  * (`Route.scopesNow`), by `scopesOn` for its day and its lineage's limit
  * of requests, and whose shares of the requests in flight it takes: from
@@ -2464,97 +2588,211 @@ const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
  * code.
  */
 const scopesNowOf = (
-  env: ModelsEnv,
+  env: Env,
   call: Session,
   place: string,
-  scopesOn: (day: string, lineageRequests: number) => LedgerScope[]
+  scopesOn:
+    | ((day: string, lineageRequests: number) => LedgerScope[])
+    | "platform"
 ): Route["scopesNow"] => {
   const { subject, resource } = shareIdentity(call);
   return async () => {
-    // A run lineage's request limit, as the policy stands for this
-    // request: lowered for runs already under way too (model-budgets.ts).
-    const lineage =
-      call.trigger.type === "workflow" || call.lineage !== undefined
-        ? await readPolicy(env)
-        : undefined;
-    // The shares, as the policy stands too; for a call with no lineage,
-    // the last read or the platform's own should the policy not be read.
-    const policy = lineage ?? (await policyOrPlatform(env));
+    const limits = quotaLimits(env);
+    const lineageRequests = limits.lineageModelRequests;
     // One clock for both, so a request at a month's last instant never
     // counts its day in one month and its month in the next.
     const { month, day } = budgetPeriods(env);
     // The person's teams as core's records have them now, so a person
     // moved between teams is held to the right limit from their next
     // request.
-    const person = await limitedPersonOf(env, budgetPersonOf(call));
+    // A call on Grasp's own key counts against none of the organization's
+    // budgets, a person's limit included (`platformScopes`).
+    const person =
+      scopesOn === "platform"
+        ? undefined
+        : await limitedPersonOf(env, budgetPersonOf(call));
     return {
       period: month,
-      scopes: scopesOn(
-        day,
-        lineage?.limits.lineageModelRequests ?? lineageModelRequests
-      ),
-      // The generation of the policy its shares come from, a fallback's
-      // too (the last read's, or the platform's own, 0), so the ledger
-      // refuses shares from a policy older than one it saw
-      // (`policyBehind`): the request reads it again, and is held back
-      // if it still can't. Shares from a fallback apply only while the
-      // ledger knows of no newer policy, so an operator's lowered share
-      // holds through an outage.
-      policyGeneration: policy.generation,
-      fair: { place, subject, resource, shares: modelSharesOf(policy) },
+      scopes:
+        scopesOn === "platform"
+          ? platformScopes(call, lineageRequests)
+          : scopesOn(day, lineageRequests),
+      fair: { place, subject, resource, shares: modelSharesOf(limits) },
       person,
     };
   };
 };
 
-/** What a request tells its transport about itself: identifiers only. */
-const metadataOf = (
-  call: Pick<Session, "purpose" | "trigger" | "requestId"> & {
-    runStep?: Session["runStep"];
-  }
-): RouteMetadata => ({
-  purpose: call.purpose,
-  actor: call.trigger.type,
-  requestId: call.requestId,
-  runStep: call.runStep,
-});
+/**
+ * How a call is let through to a model:
+ * - `chosen`: an ordinary call, to one of the models the organization's
+ *   admins chose, of an AI provider it connected, with its key.
+ * - `test`: an admin's test of a provider the organization connected
+ *   (ai-providers.ts): any of that provider's models, with its key.
+ * - `platform`: a platform feature of core's own: any model of a provider
+ *   Grasp has a key for, with Grasp's key (`models(env).platformCall`).
+ */
+type Via =
+  | { kind: "chosen" }
+  | { kind: "test"; provider: ConnectTarget["provider"] }
+  | { kind: "platform" };
+
+const chosenVia: Via = { kind: "chosen" };
+
+/** Where an admitted call goes, and how. */
+interface Routing {
+  endpoint: TransportRoute;
+  way: LedgerRoute;
+  /** The models to fall back to, in order (`Route.fallbacks`). */
+  fallbacks: readonly string[];
+}
 
 /**
- * The deployment's model transport: its AI Gateway over the AI binding.
- * None on plain workerd (on-prem), which has no AI binding.
+ * The route to `ref` through connect, on `target`'s key; refused as not
+ * allowed when the provider's API isn't one a route may speak.
  */
-const modelTransport = (
-  env: ModelsEnv,
-  config: ModelGatewayConfig
-): ModelTransport | undefined =>
-  typeof env.AI?.fetch === "function"
-    ? cloudflareAiGateway(env.AI, config.gateway)
-    : undefined;
-
-/**
- * Checks a request against the deployment's config and rules, before
- * anything is sent, and routes it to the model through the deployment's
- * transport.
- */
-const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
-  const config = modelGatewayConfig(env);
-  const rules = modelRules(env);
-  const transport =
-    config === undefined ? undefined : modelTransport(env, config);
-  if (config === undefined || rules === undefined || transport === undefined) {
-    throw modelErrors.create("model.unconfigured");
-  }
-  const ref = config.models.includes(call.model)
-    ? parseModelRef(call.model)
-    : undefined;
-  const endpoint =
-    ref === undefined ? undefined : transport.route(ref, metadataOf(call));
-  if (ref === undefined || endpoint === undefined) {
+const connectRouting = async (
+  env: Env,
+  call: Session,
+  ref: ModelRef,
+  target: ConnectTarget,
+  fallbacks: readonly string[]
+): Promise<Routing> => {
+  const endpoint = connectRoute(env, target, ref);
+  if (endpoint === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
+  return {
+    endpoint,
+    way: {
+      transport: endpoint.transport,
+      provider: target.provider,
+      region: target.platform?.region ?? aiProviders[target.provider].region,
+      credential: target.credential,
+      ...(target.credential === "platform" ? platformFeatureOf(call) : {}),
+    },
+    fallbacks,
+  };
+};
+
+/**
+ * Whether `call` may fall back to the organization's other models: only a
+ * call that names no model of its own approval, the organization's own
+ * chats, agents and core's features, which use whichever of its chosen
+ * models answers. A call through an App's model binding, or an App's or a
+ * workflow's own, goes to the model it was approved for, and to no other:
+ * its prompt never reaches a provider its approval didn't name.
+ */
+const mayFallBack = ({ binding, trigger }: Session): boolean =>
+  binding === undefined &&
+  trigger.type !== "app" &&
+  trigger.type !== "workflow";
+
+/** The organization's providers and Grasp's, from connect; failed when unread. */
+const routesOrFailed = async (env: Env): Promise<AiProviderRoutes> => {
+  try {
+    return await aiRoutesOf(env);
+  } catch (error) {
+    // Never a guess: without connect's word, no key is known to use.
+    log.error("model.routes_unreadable", errorFields(error));
+    throw modelErrors.create("model.failed");
+  }
+};
+
+/**
+ * Where `call` goes, as `via` lets it through (`Via`), or its refusal,
+ * audited: a model of a provider with no key for it is never routed.
+ */
+const routingOf = async (
+  env: Env,
+  call: Session,
+  via: Via
+): Promise<{ ref: ModelRef; routing: Routing }> => {
+  const routes = await routesOrFailed(env);
+  const ref = parseModelRef(call.model);
+  const provider = aiProviderIdSchema.safeParse(ref?.provider).data;
+  if (via.kind === "platform") {
+    if (
+      ref === undefined ||
+      provider === undefined ||
+      !routes.platform.includes(provider)
+    ) {
+      return await refuse(env, call, {
+        code: "model.not_allowed",
+        because: "platform",
+      });
+    }
+    const platform = platformRouteOf(provider);
+    if (platform === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    const target = {
+      credential: "platform",
+      provider,
+      baseUrl: null,
+      platform,
+    } as const;
+    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+  }
+  const connected = routes.organization.find(
+    (route) => route.provider === provider
+  );
+  if (via.kind === "test") {
+    if (
+      ref === undefined ||
+      connected === undefined ||
+      connected.provider !== via.provider
+    ) {
+      return await refuse(env, call, { code: "model.not_allowed" });
+    }
+    const target = { credential: "organization" as const, ...connected };
+    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+  }
+  const chosen = chosenModels(routes, await readModelChoice(env));
+  if (chosen.length === 0) {
+    return await refuse(env, call, {
+      code: "model.no_provider",
+      because: "model",
+    });
+  }
+  const at = chosen.indexOf(call.model);
+  if (at === -1 || ref === undefined || connected === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  const target = { credential: "organization" as const, ...connected };
+  return {
+    ref,
+    routing: await connectRouting(
+      env,
+      call,
+      ref,
+      target,
+      mayFallBack(call) ? chosen.slice(at + 1) : []
+    ),
+  };
+};
+
+/**
+ * Checks a request against the deployment's rules and the organization's
+ * providers, before anything is sent, and routes it to the model.
+ */
+const admit = async (
+  env: Env,
+  call: Session,
+  via: Via = chosenVia
+): Promise<Route> => {
+  const rules = modelRules(env);
+  if (rules === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const { ref, routing } = await routingOf(env, call, via);
+  const { endpoint } = routing;
   try {
     createAuditEvent(
-      auditEntry({ call, ref, judged: largestJudged }, largestRecord),
+      auditEntry(
+        { call, ref, judged: largestJudged, way: largestWay },
+        largestRecord
+      ),
       "core"
     );
   } catch {
@@ -2571,7 +2809,13 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
-  const verdict = await judgeCall(env, rules, call);
+  // Grasp's own features go to their provider's EU host (`judgeCall`).
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    routing.way.credential === "platform"
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -2604,15 +2848,23 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     call,
     ref,
     judged: verdict.judged,
+    way: routing.way,
     model,
     endpoint,
-    sdkRetries: transport.capabilities.sdkRetries,
+    via,
+    fallbacks: routing.fallbacks,
     bound: (body) => textBound(call, model, body),
     price,
     place,
     disclose,
     notes: Promise.resolve(),
-    scopesNow: scopesNowOf(env, call, place, scopesOn),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(
+      env,
+      call,
+      place,
+      routing.way.credential === "platform" ? "platform" : scopesOn
+    ),
     perRequest:
       requestMicros === undefined
         ? undefined
@@ -2621,9 +2873,224 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   };
 };
 
+/**
+ * Whether any provider request `response` covers may have been billed: one
+ * whose answer streams, or one settled at a charge or of unknown fate.
+ * Refusals and requests never sent can't have been.
+ */
+const mayHaveBilled = ({ pending, settled }: GatewayResponse): boolean =>
+  pending !== undefined ||
+  settled.some(
+    ({ settled: state }) =>
+      state?.state === "unknown" ||
+      state?.state === "quarantined" ||
+      (state?.state === "settled" && state.chargedMicros > 0)
+  );
+
+/**
+ * The route of the organization's next model for a call the provider
+ * refused (`Route.fallbacks`), admitted afresh by the rules, or none:
+ * only once the provider refused it before anything could be billed (its
+ * credentials, an account out of credit, or a rate limit its retries
+ * didn't outlast), never after a
+ * server error, no answer or an answer begun, never past its deadline or
+ * once its caller cancelled it, never once a request of the call may have
+ * been billed, never for a call that allows one provider request only
+ * (`providerRetries: false`), and never for a call bound to the model it
+ * was approved for (`mayFallBack`). A fallback model the rules refuse is
+ * audited as refused, and the call fails as the first did.
+ */
+const fallbackOf = async (
+  env: Env,
+  route: Route,
+  response: GatewayResponse,
+  stopped: Stopped | undefined
+): Promise<Route | undefined> => {
+  const { failure } = response;
+  const [next] = route.fallbacks;
+  if (
+    next === undefined ||
+    // A caller that allows no request beyond its first (a workflow step:
+    // one step, one provider request) gets no other model either.
+    route.providerRetries === false ||
+    !mayFallBack(route.call) ||
+    route.billed === true ||
+    mayHaveBilled(response) ||
+    failure === undefined ||
+    stopped !== undefined ||
+    response.held !== undefined ||
+    response.pending !== undefined ||
+    (failure.kind !== "auth" &&
+      failure.kind !== "quota" &&
+      failure.kind !== "rate_limited")
+  ) {
+    return undefined;
+  }
+  let admitted: Route;
+  try {
+    admitted = await admit(env, { ...route.call, model: next }, route.via);
+  } catch (error) {
+    if (
+      modelErrors.codeOf(error) === undefined &&
+      permissionErrors.codeOf(error) === undefined
+    ) {
+      throw error;
+    }
+    return undefined;
+  }
+  // The same call, on another model: it keeps what its requests already
+  // hold under its binding's cap per request, never a fresh count.
+  return { ...route, ...admitted, perRequest: route.perRequest };
+};
+
+/** The code a call fails with for what its provider showed. */
+const troubleCodes = {
+  refused: "model.provider_key_failed",
+  not_answering: "model.provider_unavailable",
+  limiting: "model.rate_limited",
+} as const satisfies Record<ProviderTrouble, ModelErrorCode>;
+
+/**
+ * Whether the call failed provably before anything of it could be billed,
+ * from what the gateway saw of its requests, never a guess: the provider
+ * answered its last request with an error and no part of an answer (a
+ * refusal: the key, a rate or spending limit; or a 5xx, which streams
+ * nothing), and every request before it was refused or never sent. Not a
+ * request that got no answer at all (connect couldn't reach the provider,
+ * or the deadline passed with it out: it may have been taken on), not an
+ * answer begun, and not a call cut off here or with a request of it
+ * already billed. The ledger still holds a 5xx's reservation charged
+ * (`settleAdmitted`, "unknown"), as a bound on spend; whether running the
+ * call again is safe is this rule's, which an exactly-once caller keeps to
+ * (workflows/resource-host.ts).
+ */
+const provablyUnbilled = (
+  route: Route,
+  response: GatewayResponse,
+  stopped: Stopped | undefined
+): boolean => {
+  const { failure, pending, settled } = response;
+  if (
+    stopped !== undefined ||
+    route.billed === true ||
+    pending !== undefined ||
+    failure === undefined
+  ) {
+    return false;
+  }
+  const answeredAnError =
+    failure.kind !== "provider_down" || failure.status !== undefined;
+  return (
+    answeredAnError &&
+    !mayHaveBilled({ ...response, settled: settled.slice(0, -1) })
+  );
+};
+
+/**
+ * The failure of a call whose provider showed `trouble`, naming it and
+ * the provider, so a workflow run can wait for it (workflows/host.ts),
+ * with the wait a rate limit asked for, where it did, and whether it
+ * provably billed nothing (`provablyUnbilled`), so a call tried once may
+ * be run again.
+ */
+const troubleError = (
+  route: Route,
+  trouble: ProviderTrouble,
+  waitSeconds: number | undefined,
+  unbilled: boolean
+) =>
+  modelErrors.create(troubleCodes[trouble], {
+    model: route.call.model,
+    provider: route.way.provider,
+    trouble,
+    ...(waitSeconds === undefined ? {} : { retryAfterSeconds: waitSeconds }),
+    ...(unbilled ? { unbilled: true } : {}),
+  });
+
+/** What a stream ends with for what its provider showed. */
+const troubleMessages: Readonly<Record<ProviderTrouble, string>> = {
+  refused: "Your AI provider is refusing your key (model.provider_key_failed).",
+  not_answering:
+    "Your AI provider isn't answering (model.provider_unavailable).",
+  limiting: "Your AI provider is limiting requests (model.rate_limited).",
+};
+
+/** Records that `from` fell back to `to`'s model, and why. Metadata only. */
+const auditFallback = async (
+  env: Env,
+  from: Route,
+  to: Route,
+  failure: TransportFailure | undefined
+): Promise<void> => {
+  const why = failure?.kind ?? "failed";
+  log.warn("model.fallback", {
+    from: from.call.model,
+    to: to.call.model,
+    why,
+  });
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: from.call.trigger,
+    action: "model.fallback",
+    requestId: from.call.requestId,
+    detail: {
+      purpose: from.call.purpose,
+      from:
+        from.call.model.length <= auditIdentifierMaxLength
+          ? from.call.model
+          : null,
+      to:
+        to.call.model.length <= auditIdentifierMaxLength ? to.call.model : null,
+      why,
+      status:
+        failure !== undefined && "status" in failure
+          ? (failure.status ?? null)
+          : null,
+      chat: chatOf(from.call),
+      ...workflowRunOf(from.call),
+      ...platformOf(from.call),
+    },
+  });
+};
+
+/**
+ * Sends `request`, and again to each of the organization's fallback
+ * models while the provider refuses it before anything could be billed
+ * (`fallbackOf`), each refused request recorded as `attempt`.
+ */
+const sendFallingBack = async (
+  env: Env,
+  request: Request,
+  limit: Deadline,
+  attempt: number
+): Promise<Sent> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one model after another
+    const sent = await send(request);
+    if (!hasFailed(sent.answer) || sent.held !== undefined) {
+      // Answered: whatever the call asks next (a second try at its
+      // schema) comes after a request that was billed.
+      request.billed = request.billed === true || mayHaveBilled(sent);
+      return sent;
+    }
+    const stopped = limit.stopped();
+    // oxlint-disable-next-line no-await-in-loop -- one model after another
+    const next = await fallbackOf(env, request, sent, stopped);
+    if (next === undefined) {
+      return sent;
+    }
+    const failure = failureOf(sent, stopped);
+    log.warn("model.failed", failureFields(request.call.model, sent, failure));
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await record(env, request, sent, attempt, "failed", failure);
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await auditFallback(env, request, next, sent.failure);
+    Object.assign(request, next);
+  }
+};
+
 /** A call's requests: one, or a second when the answer doesn't fit its schema. */
 const answerCall = async <Output>(
-  env: ModelsEnv,
+  env: Env,
   request: Request,
   schema: z.ZodType<Output> | undefined,
   limit: Deadline,
@@ -2644,7 +3111,7 @@ const answerCall = async <Output>(
     // provider requests is admitted by the ledger, in the month it is
     // sent in: one the ledger held back was never sent.
     // oxlint-disable-next-line no-await-in-loop
-    const sent = await send(request);
+    const sent = await sendFallingBack(env, request, limit, attempt);
     if (sent.held !== undefined) {
       // oxlint-disable-next-line no-await-in-loop
       await refuse(env, call, sent.held);
@@ -2667,7 +3134,17 @@ const answerCall = async <Output>(
       // took nothing on, and asking again after the wait may get through.
       // Not one cut off meanwhile, by its deadline or its caller: that is
       // what it failed of then.
-      if (sent.rateLimited !== undefined && limit.stopped() === undefined) {
+      const stopped = limit.stopped();
+      const trouble = troubleOf(request, sent, stopped);
+      if (trouble !== undefined) {
+        throw troubleError(
+          request,
+          trouble,
+          stopped === undefined ? sent.rateLimited : undefined,
+          provablyUnbilled(request, sent, stopped)
+        );
+      }
+      if (sent.rateLimited !== undefined && stopped === undefined) {
         throw modelErrors.create("model.rate_limited", {
           model: call.model,
           retryAfterSeconds: sent.rateLimited,
@@ -2712,8 +3189,42 @@ const answerCall = async <Output>(
   throw modelErrors.create("model.invalid_output");
 };
 
+/**
+ * A platform call's route with its document (model-documents.ts): added
+ * to each request's body as its API takes one, and bounded by the
+ * model's window. Refused, and audited, for a model whose API takes none.
+ */
+const withDocumentRoute = async (
+  route: Route,
+  document: ModelDocument
+): Promise<Pick<Route, "endpoint" | "bound">> => {
+  const { endpoint, env, call, model } = route;
+  const { api } = endpoint;
+  if (!takesDocuments(api)) {
+    return await refuse(env, call, {
+      code: "model.not_allowed",
+      because: "document",
+    });
+  }
+  return {
+    endpoint: {
+      ...endpoint,
+      onPayload: (payload) => {
+        const shaped = endpoint.onPayload?.(payload) ?? payload;
+        const attached = withDocument(api, shaped, document);
+        if (attached === undefined) {
+          // Never expected: pi's body always has the user's message.
+          throw new Error("The document couldn't be added to the request");
+        }
+        return attached;
+      },
+    },
+    bound: (body) => documentBound(call, model, body, documentPartTypes[api]),
+  };
+};
+
 const callModel = async <Output>(
-  env: ModelsEnv,
+  env: Env,
   {
     schema,
     askAgain,
@@ -2723,12 +3234,28 @@ const callModel = async <Output>(
     onText,
     signal,
     providerRetries = true,
+    document,
     ...fields
-  }: ModelCall<Output>
+  }: ModelCall<Output>,
+  via: Via = chosenVia
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
+  // Grasp's own key only for core's own platform features, never for work
+  // of an App's, a person's or an agent's; and a document only for one.
+  if (
+    (via.kind === "platform" || document !== undefined) &&
+    (via.kind !== "platform" ||
+      call.work === undefined ||
+      !("platform" in call.work))
+  ) {
+    throw modelErrors.create("model.invalid_call");
+  }
+  const admitted = await admit(env, call, via);
   const route: Route = {
-    ...(await admit(env, call)),
+    ...admitted,
+    ...(document === undefined
+      ? {}
+      : await withDocumentRoute(admitted, document)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
@@ -2819,12 +3346,12 @@ export const contextWindowOf = (model: string): number | undefined =>
  * is safe. A failure reaches the loop in our own words.
  */
 const relayEvents = async (
-  env: ModelsEnv,
+  env: Env,
   route: Route,
   { events, response }: Awaited<ReturnType<typeof open>>,
   out: AssistantMessageEventStream,
   limit: Deadline
-): Promise<void> => {
+): Promise<Route | undefined> => {
   // The answer as far as it came, as the adapter's last event had it.
   let partial: AssistantMessage | undefined = undefined;
   for await (const event of events) {
@@ -2842,7 +3369,7 @@ const relayEvents = async (
               : `The model call was refused (${code}). Try again in ${retryAfter} seconds.`,
         },
       });
-      return;
+      return undefined;
     }
     if (event.type === "error") {
       const sent: Sent = { answer: event.error, ...response };
@@ -2857,18 +3384,29 @@ const relayEvents = async (
         stopped === "cancelled" ? "cancelled" : "failed",
         failure
       );
-      const rateLimited =
-        response.rateLimited === undefined || stopped !== undefined
-          ? undefined
-          : `The model's provider is taking no more requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
+      // Refused before anything streamed: the loop never saw it, so it
+      // may go to the organization's next model.
+      const next =
+        partial === undefined
+          ? await fallbackOf(env, route, response, stopped)
+          : undefined;
+      if (next !== undefined) {
+        await auditFallback(env, route, next, response.failure);
+        return next;
+      }
+      const trouble = troubleOf(route, response, stopped);
+      let errorMessage =
+        trouble === undefined
+          ? failureMessage(failure)
+          : troubleMessages[trouble];
+      if (response.rateLimited !== undefined && stopped === undefined) {
+        errorMessage = `The model's provider is limiting requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
+      }
       out.push({
         ...event,
-        error: {
-          ...chargedAnswer(route, sent),
-          errorMessage: rateLimited ?? failureMessage(failure),
-        },
+        error: { ...chargedAnswer(route, sent), errorMessage },
       });
-      return;
+      return undefined;
     }
     if (event.type === "done") {
       const sent: Sent = { answer: event.message, ...response };
@@ -2880,7 +3418,7 @@ const relayEvents = async (
         event.reason === "length" ? "truncated" : "answered"
       );
       out.push({ ...event, message: chargedAnswer(route, sent) });
-      return;
+      return undefined;
     }
     ({ partial } = event);
     out.push(event);
@@ -2900,6 +3438,7 @@ const relayEvents = async (
     reason: "error",
     error: chargedAnswer(route, sent),
   });
+  return undefined;
 };
 
 /**
@@ -2908,7 +3447,7 @@ const relayEvents = async (
  * then sent and streamed to `out`.
  */
 const relay = async (
-  env: ModelsEnv,
+  env: Env,
   session: Session,
   model: Model<Api>,
   context: TranscriptContext,
@@ -2941,13 +3480,19 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(
-      env,
-      route,
-      await open(route, context, limit),
-      out,
-      limit
-    );
+    let current: Route | undefined = route;
+    while (current !== undefined) {
+      // One model after another, as the call falls back.
+      // oxlint-disable-next-line no-await-in-loop
+      current = await relayEvents(
+        env,
+        current,
+        // oxlint-disable-next-line no-await-in-loop
+        await open(current, context, limit),
+        out,
+        limit
+      );
+    }
   } finally {
     limit.clear();
   }
@@ -2958,7 +3503,7 @@ const relay = async (
  * the loop gets a failure instead of waiting for an answer forever.
  */
 const relayOrFail = async (
-  env: ModelsEnv,
+  env: Env,
   session: Session,
   model: Model<Api>,
   context: TranscriptContext,
@@ -2978,15 +3523,18 @@ const relayOrFail = async (
   }
 };
 
-// Speech: a voice model says a line (voice-models.ts). It goes through the
-// gateway like any model call, as the lines carry interview content: the
-// allowlist and the rules judge it, the ledger admits each provider
-// request against the budgets, at its price per character, and the audit
-// log records it, never the line. ElevenLabs is reached through AI Gateway
-// over the AI binding, with the key AI Gateway stores: core sends none.
-// The gateway reaches it at the path the deployment's config names
-// (`voice.provider`): ElevenLabs's native host, or its EU host through a
-// custom provider. Nothing reaches ElevenLabs but through the gateway.
+// Speech and listening: Grasp's own voice features, which Grasp pays for
+// (src/platform-ai.ts). A speech model says a line, and a
+// transcription model writes down what someone says (voice-models.ts),
+// each fixed in code at its provider's EU host. They go through the gateway
+// like any model call, as what is said and heard is interview content:
+// the rules judge it, the ledger admits each provider request against the
+// budgets, at its price per character or per second, and the audit log
+// records it, never anything said or heard. They go to the provider's own
+// API through connect, with Grasp's own key for it, which connect holds
+// (`platformSecret` in @grasp-os/shared/ai-providers): core holds no key,
+// and a provider Grasp has no key for is refused (`model.not_allowed`,
+// because `platform`), never served by another.
 
 /** Text without anything a URL's path would read apart: a voice's ID. */
 const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
@@ -3010,7 +3558,7 @@ const speechSchema = z.strictObject({
 });
 type SpeechSession = z.output<typeof speechSchema>;
 
-/** One line for a voice model to say. */
+/** One line for a speech model to say. */
 export type SpeechCall = z.input<typeof speechSchema> & {
   /** Where the call works: required, so no caller can leave it out. */
   work: NonNullable<z.input<typeof speechSchema>["work"]>;
@@ -3064,6 +3612,8 @@ const bytesOf = (base64: string): Uint8Array | undefined => {
 interface SpeechRecord {
   /** Characters charged; 0 when the provider said nothing. */
   characters: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   logId: string | undefined;
   outcome: Outcome;
@@ -3071,6 +3621,19 @@ interface SpeechRecord {
   errorType: string | undefined;
   ledger: Ledgered;
 }
+
+/** The way a platform voice feature goes, as the ledger and the audit log record it. */
+const platformWay = (
+  provider: ConnectTarget["provider"],
+  platform: PlatformRoute,
+  feature: PlatformAiFeature
+): LedgerRoute => ({
+  transport: "connect",
+  provider,
+  region: platform.region,
+  credential: "platform",
+  feature,
+});
 
 /** A line's audit entry: a `model.call`, as any model call's. */
 const speechEntry = (
@@ -3085,7 +3648,7 @@ const speechEntry = (
     action: "model.call",
     requestId: call.requestId,
     provenance,
-    // A voice model counts characters, not tokens (`characters`).
+    // A speech model counts characters, not tokens (`characters`).
     model: {
       provider: ref.provider,
       model: ref.id,
@@ -3106,6 +3669,9 @@ const speechEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      transport: "connect",
+      region: recorded.region,
+      credential: "platform",
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
@@ -3122,6 +3688,7 @@ const speechEntry = (
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
+  region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
   outcome: "invalid_output",
@@ -3130,44 +3697,58 @@ const largestSpeech: SpeechRecord = {
   ledger: largestRecord.ledger,
 };
 
-/** The gateway path to ElevenLabs's native host, unless the config names another. */
-const nativeVoiceProvider = "elevenlabs";
-
-/** A line's way to the voice model at the deployment's gateway. */
+/** A line's way to the speech model, through connect. */
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
   ref: VoiceRef;
   judged: Judged;
   price: PinnedPrice;
-  transport: FetchFunction;
-  url: string;
-  body: string;
-  /** What the line is charged as (`charactersOf`). */
+  /** Sends the line once, as the ledger admitted it (`id`). */
+  send: (id: string, limit: Deadline) => Promise<Response>;
+  /** What the line's text is charged as (`charactersOf`). */
   characters: number;
+  /** Where its requests go on Grasp's own key (`platformRouteOf`). */
+  platform: PlatformRoute;
 }
 
 /**
- * Checks a line against the deployment's config and rules, as `admit`
- * does a text model's call, before anything is sent: a voice model the
- * allowlist or the rules don't let it use is refused, and audited.
+ * Where a platform voice feature goes: Grasp's own key for `provider`,
+ * through connect; refused, and audited, when Grasp has no key for it.
  */
-const admitSpeech = async (
-  env: ModelsEnv,
-  call: SpeechSession
-): Promise<SpeechRoute> => {
-  const config = modelGatewayConfig(env);
-  const rules = modelRules(env);
-  // Plain workerd (on-prem) has no AI binding, so no voice either.
-  if (
-    config === undefined ||
-    rules === undefined ||
-    typeof env.AI?.fetch !== "function"
-  ) {
+const platformTarget = async (
+  env: Env,
+  call: Session,
+  provider: ConnectTarget["provider"]
+): Promise<ConnectTarget & { platform: PlatformRoute }> => {
+  const routes = await routesOrFailed(env);
+  if (!routes.platform.includes(provider)) {
+    return await refuse(env, call, {
+      code: "model.not_allowed",
+      because: "platform",
+    });
+  }
+  const platform = platformRouteOf(provider);
+  if (platform === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
-  const ref = config.models.includes(call.model)
-    ? parseVoiceRef(call.model)
-    : undefined;
+  return { credential: "platform", provider, baseUrl: null, platform };
+};
+
+/**
+ * Checks a line against the deployment's rules, as `admit` does a text
+ * model's call, before anything is sent: a model that isn't a speech
+ * model of the gateway's, one the rules don't let it use, or one whose
+ * provider Grasp has no key for is refused, and audited.
+ */
+const admitSpeech = async (
+  env: Env,
+  call: SpeechSession
+): Promise<SpeechRoute> => {
+  const rules = modelRules(env);
+  if (rules === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
@@ -3180,7 +3761,9 @@ const admitSpeech = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Said at ElevenLabs's EU host, as Grasp's own feature (`judgeCall`).
+  const verdict = await judgeCall(env, rules, call, true);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -3196,69 +3779,47 @@ const admitSpeech = async (
     enable_logging: "false",
     output_format: speechFormat.query,
   });
+  const path = `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`;
+  const body = JSON.stringify({
+    text: call.text,
+    model_id: ref.id,
+    language_code: call.language,
+    seed: voiceSeed,
+    voice_settings: voiceSettings,
+  });
   return {
     env,
     call,
     ref,
     judged: verdict.judged,
     price,
-    transport: createAiBindingFetch(env.AI),
-    url: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
-    body: JSON.stringify({
-      text: call.text,
-      model_id: ref.id,
-      language_code: call.language,
-      seed: voiceSeed,
-      voice_settings: voiceSettings,
-    }),
+    way: platformWay(ref.provider, target.platform, "speech"),
+    send: async (id, limit) =>
+      await connectRequest(
+        env,
+        target,
+        path,
+        {
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body,
+        },
+        { ledgerRequest: id, endsAt: limit.endsAt, signal: limit.signal }
+      ),
     characters,
+    platform: target.platform,
     // The line's characters are all it is billed for, known before it is
     // sent: what the ledger reserves is what it charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
     perRequest: undefined,
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,
   };
-};
-
-/**
- * The provider request for a line, as the ledger admitted it (`id`). It
- * carries the deployment's gateway token where one is set
- * (`AI_GATEWAY_TOKEN`) in place of the binding's placeholder: an
- * authenticated gateway asks for it on a realtime WebSocket, which
- * doesn't go over the AI binding, and strips it from the binding's
- * requests, which need none. Never logged.
- */
-const speechRequest = (
-  route: SpeechRoute,
-  id: string,
-  signal: AbortSignal
-): RequestInit => {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json",
-  };
-  // The gateway's own headers, without the auth placeholders pi's SDKs
-  // need dropped: this request has none of theirs.
-  for (const [name, value] of Object.entries(
-    gatewayHeaders(metadataOf(route.call))
-  )) {
-    if (value !== null) {
-      headers[name] = value;
-    }
-  }
-  const token = route.env.AI_GATEWAY_TOKEN;
-  if (token !== undefined && token !== "") {
-    headers["cf-aig-authorization"] = `Bearer ${token}`;
-  }
-  return withRequestId(
-    { method: "POST", headers, body: route.body, signal },
-    id
-  );
 };
 
 /** What one line's provider requests came to. */
@@ -3282,7 +3843,7 @@ const sendSpeechOnce = async (
   limit: Deadline,
   sent: SpeechSent
 ): Promise<"again" | "done"> => {
-  const admitted = await admitWaiting(route, route.body, limit);
+  const admitted = await admitWaiting(route, null, limit);
   if ("held" in admitted) {
     sent.held = admitted.held;
     return "done";
@@ -3294,10 +3855,7 @@ const sendSpeechOnce = async (
   }
   let answered: Response | undefined = undefined;
   try {
-    answered = await route.transport(
-      route.url,
-      speechRequest(route, admitted.id, limit.signal)
-    );
+    answered = await route.send(admitted.id, limit);
   } catch {
     sent.settled.push(await settleAdmitted(route, admitted, { by: "unknown" }));
     return "done";
@@ -3375,8 +3933,8 @@ const characterCounts = (characters: number): TokenCounts => ({
 
 /**
  * The line the provider answered with, read, and its provider request
- * settled: charged the line's characters, which ElevenLabs bills once it
- * answered, whether its answer could be read or not.
+ * settled: charged the line's characters, which the provider bills once
+ * it answered, whether its answer could be read or not.
  */
 const heardSpeech = async (
   route: SpeechRoute,
@@ -3413,6 +3971,10 @@ const speechOutcome = (
   // Said, but not as a line can be read.
   return said && stopped === undefined ? "invalid_output" : "failed";
 };
+
+/** The provider's own ID for a request, as its log names it. */
+const providerLogIdOf = (headers: Headers | undefined): string | undefined =>
+  headers?.get("x-request-id") ?? headers?.get("request-id") ?? undefined;
 
 /** Records a line that was sent in the audit log, however it ended. */
 const recordSpeech = async (
@@ -3451,8 +4013,9 @@ const recordSpeech = async (
     drizzle(env.DB),
     speechEntry(call, route.ref, route.judged, {
       characters,
+      region: route.platform.region,
       cost: costDollars(route.price, characterCounts(characters)),
-      logId: sent.answered?.headers.get("cf-aig-log-id") ?? undefined,
+      logId: providerLogIdOf(sent.answered?.headers),
       outcome,
       status,
       errorType,
@@ -3462,15 +4025,15 @@ const recordSpeech = async (
 };
 
 // Listening: a transcription model writes down what someone says
-// (voice-models.ts), live over a socket (transcription.ts), or from a
-// recording. It goes through the gateway as speech does, as what is heard
-// is interview content: the allowlist and the rules judge it before
-// anything is sent, failing closed; the ledger admits it against the
-// budgets at its price per second, for the most it may hear, before the
-// upstream is opened; and the audit log records it once it ended, with
-// the seconds heard and what they cost, never anything heard. The caller
-// reaches the provider only through the route its admission hands it
-// (`Listening.route`), and is held to the seconds admitted.
+// (voice-models.ts), live over the provider's realtime socket
+// (transcription.ts), or from a recording (onboarding/hear.ts). The rules
+// judge it before anything is sent, failing closed; the ledger admits it
+// against the budgets at its price per second, for the most it may hear,
+// before anything is opened; and the audit log records it once it ended,
+// with the seconds heard and what they cost, never anything heard. The
+// caller reaches the provider only through what its admission hands it
+// (`Listening.send`, `Listening.socket`), each through connect with
+// Grasp's key, and is held to the seconds admitted.
 //
 // One provider request a listening, whatever its length: its reservation
 // is all it may hear, charged what it heard once it ended (`heard`), or
@@ -3478,42 +4041,8 @@ const recordSpeech = async (
 // text model's request it holds no share of the requests in flight while
 // it is open (`listeningLeaseMs`): a socket open for minutes would
 // otherwise keep Stephen's own turns, and every chat, from the client's
-// share. ElevenLabs's own limit on sockets at once, the relay's per link,
-// and the router's per address bound how many are open.
-
-/** How the gateway reaches the voice provider, for a request of one's own. */
-export interface VoiceGatewayRoute {
-  /** `https://workers-binding.ai/ai-gateway/gateways/<gateway>/<provider>`. */
-  base: string;
-  transport: FetchFunction;
-  /** The gateway's own headers: its token where one is set. Never logged. */
-  headers: Record<string, string>;
-}
-
-/**
- * Where a listening the gateway admitted reaches ElevenLabs at the
- * deployment's gateway: the path speech takes (`voice.provider`), over
- * the AI binding, with the gateway's token where one is set
- * (`speechRequest`).
- */
-const voiceGatewayRoute = (
-  env: ModelsEnv,
-  ai: AiBinding,
-  config: ModelGatewayConfig
-): VoiceGatewayRoute => {
-  const token = env.AI_GATEWAY_TOKEN;
-  return {
-    base: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}`,
-    transport: createAiBindingFetch(ai),
-    headers: {
-      "cf-aig-authorization": `Bearer ${
-        token === undefined || token === ""
-          ? CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL
-          : token
-      }`,
-    },
-  };
-};
+// share. The provider's own limit on sockets at once, the relay's per
+// link, and the router's per address bound how many are open.
 
 /** The most seconds one listening may hear: above any socket's or recording's. */
 const maxListeningSeconds = 60 * 60;
@@ -3557,9 +4086,24 @@ export type ListeningOutcome = "answered" | "failed" | "cancelled";
 
 /** A listening the gateway admitted: the way to the provider, and how it is charged. */
 export interface Listening {
-  /** The model as its provider's API names it, such as `scribe_v2_realtime`. */
+  /** The model as its provider's API names it, such as `gpt-4o-transcribe`. */
   modelId: string;
-  route: VoiceGatewayRoute;
+  /**
+   * Sends one request of it to `path` at the provider (a recording to
+   * write down), through connect with Grasp's key, until it may no longer
+   * be open. Throws when no answer came.
+   */
+  send: (
+    path: string,
+    init: { headers: Record<string, string>; body: BodyInit },
+    signal?: AbortSignal
+  ) => Promise<Response>;
+  /**
+   * Opens its realtime socket to `pathAndQuery` at the provider, through
+   * connect, which relays it with Grasp's key until it may no longer be
+   * open. Throws when it won't open.
+   */
+  socket: (pathAndQuery: string, signal?: AbortSignal) => Promise<WebSocket>;
   /** The seconds admitted: the most it may hear. */
   seconds: number;
   /**
@@ -3575,6 +4119,8 @@ export interface Listening {
 interface HeardRecord {
   /** Seconds charged. */
   seconds: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   outcome: Outcome;
   ledger: Ledgered;
@@ -3609,6 +4155,9 @@ const listeningEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      transport: "connect",
+      region: recorded.region,
+      credential: "platform",
       euOnly: judged.euOnly ?? null,
       sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
@@ -3620,6 +4169,7 @@ const listeningEntry = (
 /** The most a listening can add to its audit event (`largestRecord`). */
 const largestHeard: HeardRecord = {
   seconds: maxListeningSeconds,
+  region: "custom",
   cost: Number.MAX_VALUE,
   outcome: "invalid_output",
   ledger: largestRecord.ledger,
@@ -3638,34 +4188,25 @@ const chargedSeconds = (heard: number, most: number): number =>
   Number.isFinite(heard) ? Math.min(most, Math.ceil(Math.max(0, heard))) : most;
 
 /**
- * Checks a listening against the deployment's config and rules, as
- * `admitSpeech` does a line, and has the ledger admit it for the most it
- * may hear, before anything is sent. A transcription model the allowlist
- * doesn't list (or a voice model, or a text model), one the rules don't
- * let it use, or a budget with no room refuses it, audited as a refused
- * model call. Fails closed: a config or rules that don't parse, or no AI
- * binding (plain workerd), send nothing.
+ * Checks a listening against the deployment's rules, as `admitSpeech`
+ * does a line, and has the ledger admit it for the most it may hear,
+ * before anything is sent. A model that isn't a transcription model of
+ * the gateway's (a speech model, or a text model), one the rules don't
+ * let it use, one whose provider Grasp has no key for, or a budget with
+ * no room refuses it, audited as a refused model call. Fails closed:
+ * rules that don't parse send nothing.
  */
 const listenThrough = async (
-  env: ModelsEnv,
+  env: Env,
   fields: ListeningCall,
   signal: AbortSignal | undefined
 ): Promise<Listening> => {
   const call = parseCall(listeningSchema, fields);
-  const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  const ai = env.AI;
-  if (
-    config === undefined ||
-    rules === undefined ||
-    ai === undefined ||
-    typeof ai.fetch !== "function"
-  ) {
+  if (rules === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
-  const ref = config.models.includes(call.model)
-    ? parseHearingRef(call.model)
-    : undefined;
+  const ref = parseHearingRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
@@ -3678,19 +4219,11 @@ const listenThrough = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Heard at OpenAI's EU host, as Grasp's own feature (`judgeCall`).
+  const verdict = await judgeCall(env, rules, call, true);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
-  }
-  // The config already keeps an EU model off ElevenLabs's native host
-  // (deployment-config.ts); a call that must stay in the EU never reaches
-  // it either, whatever the config says.
-  const { euOnly } = verdict.judged;
-  if (
-    euOnly !== undefined &&
-    (config.voice?.provider ?? nativeVoiceProvider) === nativeVoiceProvider
-  ) {
-    return await refuse(env, call, { code: "model.eu_only", because: euOnly });
   }
   const price = await pinnedPrice(hearingPricesOf(ref));
   if (price === undefined) {
@@ -3702,28 +4235,37 @@ const listenThrough = async (
     env,
     call,
     price,
+    way: platformWay(ref.provider, target.platform, "transcription"),
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,
     leaseMs: listeningLeaseMs,
   };
+  const endsAt = Date.now() + call.openMs;
   const admitted = await admitWaiting(admitting, null, {
-    endsAt: Date.now() + call.openMs,
+    endsAt,
     signal: signal ?? new AbortController().signal,
   });
   if ("held" in admitted) {
     return await refuse(env, call, admitted.held);
   }
+  const sentBy = (stop: AbortSignal | undefined) => ({
+    ledgerRequest: admitted.id,
+    endsAt,
+    ...(stop === undefined ? {} : { signal: stop }),
+  });
   let ended = false;
   return {
     modelId: ref.id,
-    route: voiceGatewayRoute(env, ai, config),
+    send: async (path, init, stop) =>
+      await connectRequest(env, target, path, init, sentBy(stop)),
+    socket: async (pathAndQuery, stop) =>
+      await connectSocket(env, target, pathAndQuery, sentBy(stop)),
     seconds: call.seconds,
     heard: async (heard, outcome) => {
       if (ended) {
@@ -3741,6 +4283,7 @@ const listenThrough = async (
           drizzle(env.DB),
           listeningEntry(call, ref, verdict.judged, {
             seconds,
+            region: target.platform.region,
             cost: costDollars(price, secondCounts(seconds)),
             outcome,
             ledger: ledgerOf([settled]),
@@ -3755,11 +4298,11 @@ const listenThrough = async (
 
 /**
  * Says a line through the gateway: refused, audited, before anything is
- * sent when the allowlist, the rules or a budget don't let it through;
+ * sent when the rules, Grasp's keys or a budget don't let it through;
  * otherwise sent, charged its characters and audited, however it ended.
  */
 const speakLine = async (
-  env: ModelsEnv,
+  env: Env,
   fields: SpeechCall,
   signal: AbortSignal | undefined
 ): Promise<Speech> => {
@@ -3826,7 +4369,7 @@ export type AgentSession = z.input<typeof sessionSchema> & {
 };
 
 const agentModel = async (
-  env: ModelsEnv,
+  env: Env,
   fields: AgentSession,
   provenance: () => readonly string[]
 ): Promise<AgentModel> => {
@@ -3855,8 +4398,10 @@ const agentModel = async (
 
 /**
  * The model gateway for core: `await models(env).call({ model, input,
- * purpose, trigger })`. Refuses a model the deployment doesn't allow or
- * its rules don't let the call use, sends the call through AI Gateway, and
+ * purpose, trigger })`. Refuses a model the organization didn't choose
+ * or its rules don't let the call use, sends the call to the provider
+ * through connect, falling back to the organization's next model
+ * when the provider refuses it before anything could be billed, and
  * records every request it makes, and every refusal, in the audit log. With a `schema`, the answer is JSON that matches it.
  *
  * `await models(env).agent({ model, purpose, trigger, work }, provenance)`
@@ -3867,21 +4412,45 @@ const agentModel = async (
  * by then, the budgets), sent and audited like a call's.
  *
  * `await models(env).speak({ model, text, voice, language, purpose,
- * trigger, work }, signal)` has a voice model say a line: judged by the
- * same rules, charged per character against the same budgets, and
- * audited like a call. It returns the audio and when each word is said.
+ * trigger, work }, signal)` has a speech model say a line, with Grasp's
+ * key for its provider: judged by the same rules, charged per character
+ * against the same budgets, and audited like a call. It returns the audio
+ * and when each word is said.
  *
  * `await models(env).listen({ model, seconds, openMs, purpose, trigger,
  * work }, signal)` admits a transcription model to hear at most `seconds`
- * of audio: judged by the same rules, reserved per second against the
- * same budgets, refused and audited like a call when they don't let it
- * through. It returns the way to the provider, and `heard`, which charges
- * what was heard and audits it once it ended.
+ * of audio, with Grasp's key for its provider: judged by the same rules,
+ * reserved per second against the same budgets, refused and audited like
+ * a call when they don't let it through. It returns the way to the
+ * provider, and `heard`, which charges what was heard and audits it once
+ * it ended.
  */
-export const models = (env: ModelsEnv) => ({
+export const models = (env: Env) => ({
   call: async <Output = undefined>(
     call: ModelCall<Output>
   ): Promise<ModelAnswer<Output>> => await callModel(env, call),
+  /**
+   * A call of one of core's own platform features (its `work` names the
+   * feature), to `<provider>/<model>` with Grasp's own key for the
+   * provider, which connect holds (`OPENAI_API_KEY` and the like): judged
+   * by the rules, admitted against the budgets and audited like any call,
+   * never falling back. Refused as `model.not_allowed` when Grasp has no
+   * key for the provider. Only a platform call may carry a `document`.
+   */
+  platformCall: async <Output = undefined>(
+    call: ModelCall<Output>
+  ): Promise<ModelAnswer<Output>> =>
+    await callModel(env, call, { kind: "platform" }),
+  /**
+   * An admin's test of a provider the organization connected: a call to
+   * any of its models with the organization's key, whether or not chosen,
+   * metered and audited like any (ai-providers.ts).
+   */
+  providerTest: async (
+    call: ModelCall<undefined>,
+    provider: ConnectTarget["provider"]
+  ): Promise<ModelAnswer<undefined>> =>
+    await callModel(env, call, { kind: "test", provider }),
   agent: async (
     session: AgentSession,
     provenance: () => readonly string[] = () => []

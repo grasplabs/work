@@ -346,14 +346,14 @@ describe("provisioning that heals itself", () => {
     });
   });
 
-  it("waits on a release that can't go there until a newer one fits, then resumes onto it", async () => {
+  it("waits on a release that can't go there until a newer one is imported, then resumes onto it", async () => {
     const clientId = await added();
     const runId = await startedByStaff(clientId);
     const [operation] = await db
       .select({ releaseId: clientProvisions.releaseId })
       .from(clientProvisions)
       .where(eq(clientProvisions.clientId, clientId));
-    await stopped(clientId, runId, "release_incompatible");
+    await stopped(clientId, runId, "unknown_worker");
     using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const waiting = await reconcileClient(env, clientId, later());
@@ -489,7 +489,7 @@ describe("what a stopped provisioning needs", () => {
         "unexpected",
         "cloudflare_503_10013",
         "cloudflare_429",
-        "release_incompatible",
+        "unknown_worker",
         "resource_outside_jurisdiction",
         "foreign_resource",
         "sign_in_incomplete",

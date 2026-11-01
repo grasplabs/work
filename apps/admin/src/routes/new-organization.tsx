@@ -21,6 +21,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { PageLoading } from "../admin/failure.tsx";
 import { domainOfEmail, slugOf } from "../admin/new-organization.ts";
 import { AdminPage } from "../admin/page.tsx";
 import { HostingChoice } from "../hosting/hosting-choice.tsx";
@@ -267,7 +268,7 @@ const signInOf = (
  * as it is typed, the platform's domain shown after it), its company's
  * email domains, whose first one tells how its people sign in, its first
  * admin, and where it is hosted. Everything else (its ring, its model
- * spend ceiling, Teams and Rooms) has a default, put right later on its
+ * spend ceiling, Teams) has a default, put right later on its
  * Setup. Creating it starts setting it up at once, and opens its Setup,
  * where its progress shows.
  */
@@ -479,4 +480,5 @@ export const Route = createFileRoute("/new-organization")({
   loader: async () => await fetchCreateOptions(),
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
+  pendingComponent: PageLoading,
 });

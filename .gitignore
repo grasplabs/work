@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.compiler-lock*/
 .wrangler/
+*.cpuprofile
 .dev.vars*
 !.dev.vars.example
 .env*
@@ -16,6 +17,7 @@ test-results/
 .vite-hooks/_/
 release-out/
 wrangler.deploy.jsonc
+wrangler.local.jsonc
 scripts/lab/out/
 
 # Cloudflare cf CLI build output and generated types (apps/admin)

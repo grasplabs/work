@@ -162,15 +162,15 @@ const BillingPage = () => {
         >
           <Nothing />
         </SettingsRow>
+        {page.data.requests.state === "refused" ? null : (
+          <RequestsRow requests={page.data.requests} />
+        )}
         <SettingsRow
           description={t`Nothing is due while the plan is not running.`}
           label={t`Next invoice`}
         >
           <Nothing />
         </SettingsRow>
-        {page.data.requests.state === "refused" ? null : (
-          <RequestsRow requests={page.data.requests} />
-        )}
       </SettingsSection>
 
       <SettingsSection

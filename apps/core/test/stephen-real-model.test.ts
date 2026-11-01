@@ -1,12 +1,10 @@
-import { jsonVar } from "@grasp-os/shared/config";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { gatewaySettings } from "../src/models.ts";
-import { gatewayProvider } from "./brain-gateway-provider.ts";
-import type { AiFetch, ModelExchange } from "./brain-gateway-provider.ts";
+import { parseModelRef } from "../src/model-catalog.ts";
 import { charged } from "./brain-harness.ts";
+import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import type { ModelExchange } from "./brain-real-provider.ts";
 import { stephenCases } from "./fixtures/stephen-cases.ts";
 import { mockIdp } from "./idp.ts";
 import { runStephenEval, setUpStephenCompany } from "./stephen-harness.ts";
@@ -16,8 +14,10 @@ import { testBinding } from "./test-env.ts";
 // Stephen's eval against a real model (GRA-720), on request only:
 // vite.stephen-model.config.ts says how to run it. The harness runs as in
 // CI; only the provider differs, the Brain baseline's real one
-// (brain-gateway-provider.ts), with the model the run names listed first
-// in its gateway, and the run's budget as the ledger's deployment limit.
+// (brain-real-provider.ts): the provider's own API, with the real key the
+// run was given (`STEPHEN_MODEL_KEY`), the model the run names the one the
+// organization chose, and the run's budget as the ledger's deployment
+// limit, the only cap on what it spends.
 // It reports on the run's output as JSON lines, then fails if a hard rule
 // broke (GRA-739): run by hand (stephen-eval.yml) or weekly.
 
@@ -34,21 +34,12 @@ const settings = z
   })
   .parse(testBinding("STEPHEN_MODEL"));
 
-// Taken before the harness points any object at its stand-in gateway:
-// objects share the env, so `env.AI` is the stand-in from then on.
-const realAi: unknown = Reflect.get(env, "AI");
-
-const isAiFetch = (value: unknown): value is AiFetch =>
-  typeof value === "object" &&
-  value !== null &&
-  "fetch" in value &&
-  typeof value.fetch === "function";
-
-/** The deployment's gateway config, as core reads it. */
-const deploymentGateway = z
-  .object({ gateway: z.string(), models: z.array(z.string()).min(1) })
-  .loose()
-  .parse(jsonVar(Reflect.get(env, "MODEL_GATEWAY")));
+/** The provider's real key: never committed. */
+const realKey = z
+  .string()
+  .min(1)
+  .optional()
+  .parse(testBinding("STEPHEN_MODEL_KEY"));
 
 /** Micros in a US dollar. */
 const micros = 1_000_000;
@@ -56,11 +47,11 @@ const micros = 1_000_000;
 /** What the model said to each request, by the case or judge it was for. */
 type Exchange = ModelExchange & { caseId?: string; judging?: boolean };
 
-/** The real model behind the gateway, each exchange logged by its case. */
+/** The real model behind connect, each exchange logged by its case. */
 const realModel =
-  (ai: AiFetch, log: (exchange: Exchange) => void): StephenProvider =>
+  (key: string, log: (exchange: Exchange) => void): StephenProvider =>
   (turn) =>
-    gatewayProvider(ai, (exchange) => {
+    realProvider(key, (exchange) => {
       const current = turn();
       log({
         ...exchange,
@@ -73,10 +64,14 @@ const idp = mockIdp();
 
 describe("Stephen's eval against a real model", () => {
   it(`runs the cases against ${settings.model}, within its budget`, async () => {
-    const [firstAllowed] = gatewaySettings(env).models;
-    if (firstAllowed !== settings.model) {
+    if (parseModelRef(settings.model) === undefined) {
       throw new Error(
         `The gateway doesn't offer ${settings.model}: name one of its catalog as <provider>/<model>`
+      );
+    }
+    if (!realProviderTakes(settings.model)) {
+      throw new Error(
+        `A real run reaches Anthropic, Mistral and OpenRouter models, not ${settings.model}`
       );
     }
     // The identity pins a commit: changes on top of it aren't in it.
@@ -85,8 +80,10 @@ describe("Stephen's eval against a real model", () => {
         "Commit your changes first: a run pins the commit it ran"
       );
     }
-    if (!isAiFetch(realAi)) {
-      throw new TypeError("The AI binding isn't remote");
+    if (realKey === undefined) {
+      throw new Error(
+        `A real-model run needs STEPHEN_MODEL_KEY, the key of ${settings.model}'s provider`
+      );
     }
     const unknown = settings.cases.filter(
       (id) => !stephenCases.some((item) => item.id === id)
@@ -100,15 +97,14 @@ describe("Stephen's eval against a real model", () => {
         settings.cases.length === 0
           ? stephenCases
           : stephenCases.filter(({ id }) => settings.cases.includes(id)),
-      respond: realModel(realAi, (exchange) => {
+      respond: realModel(realKey, (exchange) => {
         exchanges.push(exchange);
       }),
-      providerName: `ai-gateway/${deploymentGateway.gateway}`,
+      providerName: settings.model.slice(0, settings.model.indexOf("/")),
       modelSetup: {
         model: settings.model,
-        config: {
-          ...deploymentGateway,
-          // The run's budget, as the ledger enforces it on every request.
+        // The run's budget, as the ledger enforces it on every request.
+        rules: {
           budgets: { deployment: { limit: settings.budgetUsd, alertAt: 99 } },
         },
       },

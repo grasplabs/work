@@ -1,11 +1,9 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import {
-  auditActionPrefixSchema,
   auditExportPath,
   auditEventTypeSchema,
 } from "@grasp-os/shared/audit-log";
 import type {
-  AuditEventType,
   AuditExportFormat,
   AuditFilter,
   AuditPage,
@@ -35,13 +33,11 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
-import { z } from "zod";
 
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
@@ -49,70 +45,14 @@ import type { Directory } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { actionWords } from "./audit-words.ts";
+import { logSearchOf } from "./log-search.ts";
+import type { LogSearch } from "./log-search.ts";
+import { typeLabels } from "./type-labels.ts";
 
 // The audit log, for admins: its events newest first, narrowed by the
 // filters in the page's address, a page at a time, each with its details
 // and whether it verified, and an export of everything the filters match.
 // Core records every search and export in the log itself.
-
-/** The log's filters, as the page's address holds them. */
-export interface LogSearch {
-  type?: AuditEventType;
-  action?: string;
-  /** A person's, agent's, App's or run's ID. */
-  actor?: string;
-  target?: string;
-  /** Days (`yyyy-mm-dd`), in the viewer's time zone, both included. */
-  from?: string;
-  to?: string;
-}
-
-const daySchema = z.iso.date();
-
-/** A text filter as typed: trimmed, identifier-sized, and none when empty. */
-const textFilter = (value: unknown): string | undefined => {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const text = value.trim().slice(0, identifierMaxLength);
-  return text === "" ? undefined : text;
-};
-
-const trailingDots = /\.+$/u;
-
-/**
- * An action filter as typed, as core takes it: lower case, without a
- * trailing dot (`Connection.` finds `connection.call`), and none for text
- * that can't start an action, rather than a search core refuses whole.
- */
-const actionFilter = (value: unknown): string | undefined => {
-  const text = textFilter(value)?.toLowerCase().replace(trailingDots, "");
-  return auditActionPrefixSchema.safeParse(text).data;
-};
-
-/**
- * A day as the date inputs give it (`yyyy-mm-dd`), and none for anything
- * else, a day no calendar has (`2024-02-30`) included: a date rolls it on
- * into the next month, which the filter would search while showing the
- * day typed.
- */
-const dayFilter = (value: unknown): string | undefined =>
-  daySchema.safeParse(value).data;
-
-/**
- * The log's filters in `search`, each one `undefined` where the address
- * has none or one that isn't a filter: every key is there, as the router
- * merges what a route validates over the address's own search, and a key
- * left out would keep the address's value.
- */
-export const logSearchOf = (search: Record<string, unknown>): LogSearch => ({
-  type: auditEventTypeSchema.safeParse(search.type).data,
-  action: actionFilter(search.action),
-  actor: textFilter(search.actor),
-  target: textFilter(search.target),
-  from: dayFilter(search.from),
-  to: dayFilter(search.to),
-});
 
 /** Midnight starting `day`, `days` later, in the viewer's time zone. */
 const midnight = (day: string, days = 0): string => {
@@ -153,16 +93,6 @@ export const readLog = async (
     readDirectory(session),
   ]);
   return { page, directory };
-};
-
-export const typeLabels: Record<AuditEventType, MessageDescriptor> = {
-  read: msg`Read`,
-  action: msg`Action`,
-  decision: msg`Decision`,
-  permission: msg`Permission`,
-  model_call: msg`Model call`,
-  config: msg`Configuration`,
-  platform_update: msg`Platform update`,
 };
 
 const anyType = "any";
@@ -257,9 +187,13 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
       <Button type="submit">
         <Trans>Filter</Trans>
       </Button>
-      <Link className="text-sm underline" search={{}} to="/settings/audit">
+      <Button
+        nativeButton={false}
+        render={<Link search={{}} to="/settings/audit" />}
+        variant="ghost"
+      >
         <Trans>Clear</Trans>
-      </Link>
+      </Button>
     </form>
   );
 };
@@ -268,9 +202,17 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
  * Where the browser downloads what `search` matches as `format`: core's
  * export route, which it writes to disk as it arrives, however long.
  */
-const exportHref = (search: LogSearch, format: AuditExportFormat): string => {
+export const exportHref = (
+  search: LogSearch,
+  format: AuditExportFormat,
+  archive = false
+): string => {
   const params = new URLSearchParams();
   params.set("format", format);
+  if (archive) {
+    // With what retention archived, in the chain's order (`AuditApi.export`).
+    params.set("archive", "1");
+  }
   for (const [name, value] of Object.entries(auditFilterOf(search) ?? {})) {
     if (typeof value === "string") {
       params.set(name, value);
@@ -613,10 +555,13 @@ export const LogRecords = ({
   first,
   search,
   directory,
+  archive = false,
 }: {
   first: AuditPage;
   search: LogSearch;
   directory: Directory;
+  /** Pages of the archive, where retention moved older events, not of the log. */
+  archive?: boolean;
 }) => {
   const [older, setOlder] = useState<AuditRecord[]>([]);
   const [next, setNext] = useState(first.next);
@@ -624,9 +569,10 @@ export const LogRecords = ({
   const { t } = useLingui();
   const records = [...first.records, ...older];
   const loadOlder = async (before: number): Promise<void> => {
-    const page = await run(
-      async (session) =>
-        await session.audit.search(auditFilterOf(search), before)
+    const page = await run(async ({ audit }) =>
+      archive
+        ? await audit.searchArchive(auditFilterOf(search), before)
+        : await audit.search(auditFilterOf(search), before)
     );
     if (page !== undefined) {
       setOlder((shown) => [...shown, ...page.records]);

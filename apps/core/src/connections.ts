@@ -17,6 +17,7 @@ import type {
   CatalogSource,
   ConnectionScope,
   CatalogTool,
+  ComposioToolRule,
   ConnectionOwner,
   ConnectionPerson,
   ConnectionSummary,
@@ -443,6 +444,25 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  /**
+   * Changes which tools a shared Composio connection allows, as the
+   * signed-in person: connect checks the rest (the role, the connection,
+   * the tools), and audits it (GRA-993).
+   */
+  async changeTools(request: {
+    connectionId: string;
+    tools: (string | ComposioToolRule)[];
+    expected: (string | ComposioToolRule)[];
+  }): Promise<{ tools: string[] }> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.changeToolkitTools({
+      person,
+      connectionId: request.connectionId,
+      tools: request.tools,
+      expected: request.expected,
+    });
+  }
+
   async list(): Promise<ListedConnection[]> {
     const person = await this.#person();
     const listed = await this.#env.CONNECT.listConnections(person);
@@ -705,13 +725,13 @@ export const handleConnectionCallback = async (
   if (request.method !== "GET" || config === undefined) {
     return undefined;
   }
-  // A flow that fails returns to the Connections page, where people start
+  // A flow that fails returns to the Integrations page, where people start
   // connecting and can read why: its own `returnTo` stays with connect,
   // which may never have found the flow.
-  const connectionsPage = new URL("/connections", config.origin);
+  const integrationsPage = new URL("/integrations", config.origin);
   const failed = (code: string): Response => {
-    connectionsPage.searchParams.set("connectionError", code);
-    return redirect(connectionsPage);
+    integrationsPage.searchParams.set("connectionError", code);
+    return redirect(integrationsPage);
   };
   const params = new URL(request.url).searchParams;
   const state = params.get("state");
@@ -740,7 +760,7 @@ export const handleConnectionCallback = async (
   }
   // A chat app may be waiting on it (channels/connect-own.ts).
   onConnected?.(identity.userId);
-  const back = onOrigin(config.origin, finished.returnTo) ?? connectionsPage;
+  const back = onOrigin(config.origin, finished.returnTo) ?? integrationsPage;
   back.searchParams.set("connection", finished.connectionId);
   return redirect(back);
 };

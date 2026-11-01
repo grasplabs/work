@@ -86,18 +86,18 @@ catalog:
   better-auth: 1.7.5
   # The admin's Cloudflare Access check.
   jose: 6.2.12
-  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, WhatsApp and
   # the rest, its state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
-  "@chat-adapter/discord": 4.43.0
   "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
   "@chat-adapter/telegram": 4.43.0
   "@chat-adapter/whatsapp": 4.43.0
   chat: 4.43.0
-  # What the Teams and Slack adapters send through; packages/chat's tests
-  # check its fix against it (src/workerd.ts). On the version they resolve.
+  # What the Teams and Slack adapters send through, on the version they
+  # resolve; core types its hook on their requests with it
+  # (apps/core/src/channels/through-connect.ts).
   axios: 1.20.0
 
   # Frontend
@@ -151,6 +151,9 @@ catalog:
   happy-dom: 21.0.3
   # The kit's one-time-code input.
   input-otp: 1.5.0
+  # The CSS parser the motion lint (scripts/lint) works a duration out with,
+  # as Vite and Tailwind already resolve it.
+  lightningcss: 1.33.0
   lucide-react: 1.47.0
   # The kit's motion, as the prototype animates (components/shimmer).
   motion: 14.3.0

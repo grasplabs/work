@@ -30,14 +30,14 @@ const notTurnedOn =
 describe("a member Stephen doesn't reach", setUpTime, () => {
   it("is told so, and nothing is read, until he reaches them again", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { userId, teams, gateway } = await member(idp, says("Hello."));
+    const { userId, teams, provider } = await member(idp, says("Hello."));
     try {
       await admin.api.connections.setStephenReach(false, { who: "everyone" });
       await post(messageFrom(teams, { text: "Anyone there?" }));
 
       await expect(kept(teams.conversation)).resolves.toStrictEqual([]);
       const { lines } = await reached(teams.conversation);
-      expect({ lines, asked: gateway.requests.length }).toStrictEqual({
+      expect({ lines, asked: provider.requests.length }).toStrictEqual({
         lines: [notTurnedOn],
         asked: 0,
       });
@@ -50,12 +50,12 @@ describe("a member Stephen doesn't reach", setUpTime, () => {
     await expect(kept(teams.conversation)).resolves.toStrictEqual([
       { platform: "teams", userId },
     ]);
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 
   it("is told so when Teams is narrowed to people they aren't among", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { teams, gateway } = await member(idp);
+    const { teams, provider } = await member(idp);
     // A team of nobody: the member isn't in it.
     const team = crypto.randomUUID();
     await env.DB.prepare(
@@ -72,7 +72,7 @@ describe("a member Stephen doesn't reach", setUpTime, () => {
       await post(messageFrom(teams));
 
       const { lines } = await reached(teams.conversation);
-      expect({ lines, asked: gateway.requests.length }).toStrictEqual({
+      expect({ lines, asked: provider.requests.length }).toStrictEqual({
         lines: [notTurnedOn],
         asked: 0,
       });

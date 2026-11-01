@@ -16,14 +16,14 @@ import { z } from "zod";
 
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings } from "../models.ts";
+import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
-import { gatewaySpeech } from "../speech.ts";
+import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
-import { speakerVoices, spokenOf, voiceModels } from "./spoken-lines.ts";
+import { spokenOf } from "./spoken-lines.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -32,10 +32,10 @@ import type { Took } from "./store.ts";
 // the words up as they are said. Ported from the prototype (grasplabs/
 // prototype, packages/grasp: worker/speech.ts).
 //
-// Said through speech synthesis behind its interface (speech.ts: the
-// provider now, on-prem later), which goes through the model gateway: the
-// deployment's allowlist and rules judge every line, its budgets are
-// charged, and the audit log records it, never the line.
+// Said through speech synthesis behind its interface (speech.ts): the
+// ElevenLabs voices fixed in src/platform-ai.ts, through the model
+// gateway: the deployment's rules judge every line, its
+// budgets are charged, and the audit log records it, never the line.
 //
 // What it must not do, and what stops it:
 //
@@ -124,19 +124,6 @@ const failed = (error: unknown, requestId: string): Response => {
     code: "speech.failed",
   };
   return refused(refusal.status, speechErrors.create(refusal.code), requestId);
-};
-
-/**
- * The voice model a line is said in: v4 Turbo for a quick line where the
- * deployment allows it, else v4, else the first voice model it allows;
- * `undefined` where it allows none.
- */
-const voiceModelFor = (env: Env, quick: boolean): string | undefined => {
-  const { voices } = gatewaySettings(env);
-  const wanted = quick
-    ? [voiceModels.quick, voiceModels.said]
-    : [voiceModels.said];
-  return wanted.find((model) => voices.includes(model)) ?? voices[0];
 };
 
 /**
@@ -277,7 +264,7 @@ const keepUnlessPurged = async (
   await keep(env, key, answer, requestId);
   const store = onboardingStore(env);
   if ((await store.purgeMark()) !== purges) {
-    await store.forgetSpoken(await storedKeysOf([key]));
+    await store.forgetSpoken(await storedKeysOf([key.text]));
   }
 };
 
@@ -315,14 +302,13 @@ const say = async (
   listener: Listener,
   requestId: string
 ): Promise<Response> => {
-  const model = voiceModelFor(env, asked.quick);
-  if (model === undefined) {
-    return refused(503, speechErrors.create("speech.unavailable"), requestId);
-  }
+  const model = speechModelOf(asked.quick);
+  const voice = platformAi.speech.voices[asked.speaker];
   const spoken = spokenOf(asked.text, asked.language, asked.tone);
   const key: SpokenKey = {
+    text: asked.text,
     spoken,
-    voice: speakerVoices[asked.speaker],
+    voice,
     model,
     language: asked.language,
   };
@@ -339,14 +325,14 @@ const say = async (
   // taken it out of the cache already: taken before the request, the
   // mark says whether one did (`keepUnlessPurged`).
   const purges = await onboardingStore(env).purgeMark();
-  let speech: Awaited<ReturnType<ReturnType<typeof gatewaySpeech>["speak"]>>;
+  let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
   try {
-    speech = await gatewaySpeech(env, {
+    speech = await platformSpeech(env, {
       purpose,
       trigger: listener.trigger,
       work: { onboarding: true },
       requestId,
-    }).speak({ text: spoken, voice: key.voice, language: key.language, model });
+    }).speak({ text: spoken, voice, language: asked.language, model });
   } catch (error) {
     return failed(error, requestId);
   }

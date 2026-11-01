@@ -75,6 +75,15 @@ describe("the figures over the runs", () => {
     ).toStrictEqual({ runs: 10, alone: 0.6, waiting: 2 });
   });
 
+  it("takes the share that asked no one as core counted it, like the totals beside it", () => {
+    const activity = {
+      ...activityOf([day(1, { completed: 10, withPerson: 5 })]),
+      // Core's own count of the window's runs, which the days only chart.
+      runs: { total: 10, withPerson: 3, withoutPerson: 7 },
+    };
+    expect(runFiguresOf(activity).alone).toBe(0.7);
+  });
+
   it("has no share without runs, rather than none of them", () => {
     expect(runFiguresOf(activityOf([day(1), day(2)]))).toStrictEqual({
       runs: 0,

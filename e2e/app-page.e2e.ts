@@ -5,8 +5,9 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
-// An App's own page at /apps/<id>: its bar with its name, status, screens
-// as tabs, settings, Edit and the Publish menu; its screen under the bar;
+// An App's own page at /apps/<id>: its bar with its name, screens as
+// tabs, settings and the Publish menu, which says whether it is published;
+// its screen under the bar;
 // that it is only described while it has no screen; and, once archived,
 // a notice with Restore. Only its builders edit, publish or restore it,
 // and a draft is theirs alone.
@@ -106,7 +107,6 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await page.getByRole("button", { name: "Published" }).click();
   await page.getByRole("menuitem", { name: /^Unpublish/u }).click();
   await expect(page.getByRole("button", { name: "Publish" })).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Publish" }).click();
   await page.getByRole("menuitem", { name: /^Publish/u }).click();
   await expect(page.getByRole("button", { name: "Published" })).toBeVisible();
@@ -126,9 +126,94 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   );
   await appChat.getByRole("button", { name: "Fold the chat away" }).click();
 
-  // Its settings are its domain's page.
+  // Its settings are a page of its own.
   await page.getByRole("link", { name: `Settings of ${name}` }).click();
-  await expect(page).toHaveURL(new RegExp(`/domains/${app}$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/settings$`, "u"));
+});
+
+test("a builder renames an App and says what it is for in its settings, archives it there, and restores it", async ({
+  pageOf,
+}) => {
+  const { builder, user } = peopleIn("appPage");
+  const name = `Settings ${crypto.randomUUID()}`;
+  const renamed = `Renamed ${crypto.randomUUID()}`;
+  const app = await newApp(builder, name, twoScreens);
+  const page = await pageOf(builder);
+  await page.goto(`/apps/${app}/settings`);
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${name}` })
+  ).toBeVisible();
+  // Saved as the field is left, through core's audited update.
+  await page.getByLabel("Name").fill(renamed);
+  await page.getByLabel("Name").press("Enter");
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${renamed}` })
+  ).toBeVisible();
+  await page.getByLabel("What it is for").fill("Where the boards are kept.");
+  await page.getByLabel("What it is for").blur();
+  await expect(page.getByLabel("What it is for")).toHaveValue(
+    "Where the boards are kept."
+  );
+
+  // Its integrations: none yet for a new App, which its builder adds to.
+  const integrations = page.getByRole("region", { name: "Integrations" });
+  await expect(integrations.getByText("No integrations yet.")).toBeVisible();
+  await expect(
+    integrations.getByRole("button", { name: "Add an integration" })
+  ).toBeVisible();
+
+  // Archived only once asked, and restored as a draft.
+  await page.getByRole("button", { name: "Archive and take offline" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive" })
+    .click();
+  await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+
+  // Someone who only uses Apps reads nothing of a draft.
+  const other = await pageOf(user);
+  await other.goto(`/apps/${app}/settings`);
+  await expect(
+    other.getByRole("heading", { name: "Domain not found" })
+  ).toBeVisible();
+});
+
+test("someone an App is shared with as a user reads its settings and changes none of them, though they build in the organization", async ({
+  pageOf,
+}) => {
+  const { builder, colleague } = peopleIn("appPage");
+  const name = `Read ${crypto.randomUUID()}`;
+  const app = await newApp(builder, name, twoScreens);
+  const { core, api } = apiOf(builder);
+  try {
+    await api.apps.members.add(app, {
+      type: "person",
+      id: colleague.userId,
+      role: "user",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(colleague);
+  await page.goto(`/apps/${app}/settings`);
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${name}` })
+  ).toBeVisible();
+  // Their role in this App decides, not their role in the organization.
+  await expect(page.getByLabel("Name")).toHaveAttribute("readonly", "");
+  await expect(page.getByLabel("What it is for")).toHaveAttribute(
+    "readonly",
+    ""
+  );
+  await expect(page.getByLabel("Made for")).toBeDisabled();
+  await expect(
+    page.getByText("Only its builders change these settings.")
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Archive/u })).toHaveCount(0);
 });
 
 test("an App with no screen yet is only described, and its builder designs it in the chat", async ({
@@ -141,7 +226,6 @@ test("an App with no screen yet is only described, and its builder designs it in
   await page.goto(`/apps/${app}`);
 
   await expect(page.getByText("Only described")).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   // Nothing to publish before it has a version.
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
   await page.getByRole("button", { name: "Design it in the chat" }).click();
@@ -184,7 +268,6 @@ test("an archived App says so under its bar, opens no screen, and its builder re
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
 
   await page.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await expect(page.getByText("This app is archived.")).toHaveCount(0);
   await screenShowing(page, "board", "The board");
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();

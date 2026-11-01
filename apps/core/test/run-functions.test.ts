@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import {
   appIdSchema,
   runIdSchema,
@@ -10,7 +9,14 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
@@ -28,13 +34,13 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { isolationFiles } from "./isolation-app.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { endLiveRuns, finished, runObject, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -50,8 +56,8 @@ import { hitsOf, runEvents, sampleApp } from "./workflow-apps.ts";
 // run of one App reaching another's bindings, a model request escaping
 // the run's budgets, a retried step repeating a side effect, a held side
 // effect completing the step without the person. Everything runs for
-// real, through the dispatcher, the engine and connect; only AI Gateway,
-// Microsoft's sign-in and Graph are faked.
+// real, through the dispatcher, the engine and connect; only the model
+// provider behind connect, Microsoft's sign-in and Graph are faked.
 
 const idp = mockIdp();
 
@@ -60,8 +66,8 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** The model the tests' deployment allows. */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose. */
+const chosenModel = "mistral/mistral-large-latest";
 /** Hosted in the EU, as the tests' config says: its provider's EU region. */
 const euModel = "openai/gpt-5.4";
 
@@ -532,7 +538,7 @@ const appWith = async (
   return id;
 };
 
-/** `admin`'s approval of the App's `writer` to the allowed model. */
+/** `admin`'s approval of the App's `writer` to the chosen model. */
 const bindWriter = async (
   admin: Person,
   app: string,
@@ -541,20 +547,25 @@ const bindWriter = async (
   await admin.api.resourceBindings.approve({
     app,
     alias: "writer",
-    target: { kind: "model", model: allowedModel },
+    target: { kind: "model", model: chosenModel },
     reviewed: { version: 1 },
     ...(budget === undefined ? {} : { budget }),
   });
 
-/** AI Gateway answering `replies` in turn, behind the AI binding. */
-const gatewayAnswering = (...replies: GatewayReply[]) => {
-  const gateway = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  return gateway;
+/**
+ * The organization chooses the model the tests bind, as an admin binds
+ * only a model it chose, with a provider that answers nothing: a test
+ * whose calls reach it connects its own (`providerAnswering`, `callEnv`).
+ */
+const chooseModel = async (): Promise<void> => {
+  await fakeProviderFor([chosenModel]);
 };
 
-const answer = (text: string): GatewayReply => ({
+/** The chosen model's provider answering `replies` in turn. */
+const providerAnswering = async (...replies: ProviderReply[]) =>
+  await fakeProviderFor([chosenModel], ...replies);
+
+const answer = (text: string): ProviderReply => ({
   text,
   inputTokens: 100,
   outputTokens: 20,
@@ -785,25 +796,16 @@ const startedBefore = (
 };
 
 /**
- * Core's env with AI Gateway answering `replies` behind the AI binding,
- * the model gateway's `rules`, and `db` as its database.
+ * Core's env with the model gateway's `rules` and `db` as its database,
+ * and the chosen model's provider answering `replies` in turn.
  */
-const callEnv = (
-  replies: GatewayReply[],
+const callEnv = async (
+  replies: ProviderReply[],
   { rules = {}, db = env.DB }: { rules?: object; db?: D1Database } = {}
 ) => {
-  const gateway = fakeGateway(...replies);
-  const changed: Env = {
-    ...env,
-    DB: db,
-    MODEL_GATEWAY: {
-      gateway: "grasp-os-test",
-      models: [allowedModel],
-      ...rules,
-    },
-  };
-  Reflect.set(changed, "AI", gateway.binding);
-  return { gateway, env: changed };
+  const provider = await fakeProviderFor([chosenModel], ...replies);
+  const changed: Env = { ...env, DB: db, MODEL_GATEWAY: rules };
+  return { provider, env: changed };
 };
 
 /**
@@ -862,7 +864,7 @@ const twoStepApp = async () => {
 /**
  * A run of the two-step workflow (`twoStepApp`) `starter` starts, with
  * `change` made while it waits between its steps: its output, as
- * `reader`, an admin, sees it, and how many requests reached the gateway.
+ * `reader`, an admin, sees it, and how many requests reached the provider.
  */
 const changedBetween = async (
   reader: Person,
@@ -870,17 +872,22 @@ const changedBetween = async (
   app: string,
   change: () => Promise<void>
 ) => {
-  const gateway = gatewayAnswering(answer("One."), answer("Never sent."));
+  const provider = await providerAnswering(
+    answer("One."),
+    answer("Never sent.")
+  );
   const run = await starter.api.workflows.start(app, "assist");
   await sleeping(run.id, "go");
   await change();
   await woken(run.id);
   await finished(run.id);
   const { status, output } = await reader.api.workflows.status(run.id);
-  return { status, output, asked: gateway.requests.length };
+  return { status, output, asked: provider.requests.length };
 };
 
 describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
+  beforeEach(chooseModel);
+
   afterEach(async () => {
     vi.restoreAllMocks();
     await endLiveRuns();
@@ -919,7 +926,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       ]),
     });
     await bindWriter(admin, app, { perDay: 1 });
-    const gateway = gatewayAnswering(answer("Hello."));
+    const provider = await providerAnswering(answer("Hello."));
     const run = await builder.api.workflows.start(app, "assist");
     const ended = await endedRun(builder, run.id);
     const [runSpend] = await modelLedger(env).spendOfKeys(
@@ -937,7 +944,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const { bindings } = await admin.api.models.settings();
     expect({
       ended,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
       runSpent: (runSpend?.spentMicros ?? 0) > 0,
       calls: calls.map(({ actor, detail }) => ({
         actor,
@@ -1235,11 +1242,11 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         },
       ]),
     });
-    const gateway = gatewayAnswering(answer("Never sent."));
+    const provider = await providerAnswering(answer("Never sent."));
     const run = await builder.api.workflows.start(app, "assist");
     expect({
       ended: await endedRun(builder, run.id),
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toMatchObject({
       ended: {
         status: "completed",
@@ -1274,14 +1281,14 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
     await bindWriter(admin, app);
     const gate = Promise.withResolvers<unknown>();
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       { ...answer("first"), pause: { at: 2, until: gate.promise } },
       answer("Never sent.")
     );
     const run = await builder.api.workflows.start(app, "assist");
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 20_000, interval: 50 }
     );
@@ -1302,7 +1309,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       { timeout: 20_000, interval: 200 }
     );
     const { status } = await endedRun(builder, run.id);
-    expect({ status, asked: gateway.requests.length }).toStrictEqual({
+    expect({ status, asked: provider.requests.length }).toStrictEqual({
       status: "cancelled",
       asked: 1,
     });
@@ -1501,7 +1508,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     await bindWriter(asleep.admin, asleep.app);
     const lease = { holds: true };
     // The call's start reads the membership once, the request again.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("members", 2, () => {
         lease.holds = false;
       }),
@@ -1515,7 +1522,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1524,7 +1531,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     await bindWriter(asleep.admin, asleep.app);
     const lease = { holds: true };
     // After the gate: the request reads its binding, then asks.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("app_resource_bindings", 1, () => {
         lease.holds = false;
       }),
@@ -1538,7 +1545,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1546,7 +1553,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const asleep = await sleepingRun(mailFiles());
     const lease = { holds: true };
     // The call's start reads the membership once, the commit again.
-    const { env: racing } = callEnv([], {
+    const { env: racing } = await callEnv([], {
       db: racingRead("members", 2, () => {
         lease.holds = false;
       }),
@@ -1578,7 +1585,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const asleep = await sleepingRun(modelFiles());
     await bindWriter(asleep.admin, asleep.app);
     // The first answer costs far more than the run lineage may spend.
-    const { gateway, env: budgeted } = callEnv(
+    const { provider, env: budgeted } = await callEnv(
       [
         { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
         // The run's second request never reaches it: the screen's does.
@@ -1618,7 +1625,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       first,
       second: second.ok ? null : second.error.code,
       screen: screen.result,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toMatchObject({
       first: { ok: true, value: "Costly." },
       second: "resource.budget_exhausted",
@@ -1635,7 +1642,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const lease = { holds: true };
     // The binding's grant is read as it is resolved, then the permission
     // again as the call is signed: the lease goes during the signing.
-    const { env: racing } = callEnv([], {
+    const { env: racing } = await callEnv([], {
       db: racingRead("permissions", 2, () => {
         lease.holds = false;
       }),
@@ -1659,7 +1666,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const lease = { holds: true };
     // The gateway's rules read the run as they judge the request, after
     // the binding was resolved and before the request is sent.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("workflow_runs", 1, () => {
         lease.holds = false;
       }),
@@ -1673,7 +1680,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1698,14 +1705,14 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       ),
     });
     await bindWriter(admin, app);
-    const gateway = gatewayAnswering(answer("One."), answer("Two."));
+    const provider = await providerAnswering(answer("One."), answer("Two."));
     const run = await builder.api.workflows.start(app, "assist");
     const ended = await endedRun(admin, run.id);
     expect({
       status: ended.status,
       code: ended.failure?.error.code,
       // Each attempt asked once before its function failed.
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({
       status: "failed",
       code: "internal.unexpected",
@@ -1718,6 +1725,8 @@ describe(
   "a workflow run's calls of its App's functions, beside other callers'",
   { timeout: 120_000 },
   () => {
+    beforeEach(chooseModel);
+
     afterEach(async () => {
       await endLiveRuns();
     });
@@ -1852,6 +1861,8 @@ describe(
   "a workflow run's call on a version no admin approved",
   { timeout: 120_000 },
   () => {
+    beforeEach(chooseModel);
+
     afterEach(async () => {
       await endLiveRuns();
     });
@@ -1908,7 +1919,7 @@ describe(
 
     it("refuse the resource request of a call started before an admin granted for a later version", async () => {
       const { asleep, grant } = await unapprovedRun();
-      const { gateway, env: calling } = callEnv([answer("Never sent.")]);
+      const { provider, env: calling } = await callEnv([answer("Never sent.")]);
       const result = await callRunFunction(
         calling,
         startedBefore(stepOf(asleep, { holds: true }), grant),
@@ -1918,7 +1929,7 @@ describe(
       );
       expect({
         failed: result.ok ? null : result.error.code,
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
       }).toStrictEqual({ failed: "permission.denied", asked: 0 });
     });
   }
@@ -1961,6 +1972,8 @@ const screenCall = async (
 };
 
 describe("another App's functions an App calls", { timeout: 120_000 }, () => {
+  beforeEach(chooseModel);
+
   afterEach(async () => {
     await endLiveRuns();
   });
@@ -1971,7 +1984,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     await bindWriter(asleep.admin, assistant);
     await bindAssistant(asleep.admin, asleep.app, assistant);
     // The first answer costs far more than the run lineage may spend.
-    const { gateway, env: budgeted } = callEnv(
+    const { provider, env: budgeted } = await callEnv(
       [
         { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
         // The run's second request never reaches it: the screen's does.
@@ -2000,7 +2013,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
       first,
       second,
       screen,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({
       first: { ok: true, value: "Costly." },
       second: {
@@ -2071,11 +2084,10 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     });
     // The connection's data must stay with a model hosted in the EU; the
     // Assistant's writer isn't one.
-    const { gateway, env: euOnly } = callEnv(
+    const { provider, env: euOnly } = await callEnv(
       [answer("Nothing read."), answer("Never sent.")],
       {
         rules: {
-          models: [allowedModel, euModel],
           eu: { models: [euModel], connections: [connectionId] },
         },
       }
@@ -2090,7 +2102,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     expect({
       plain,
       afterReading,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({
       plain: { ok: true, value: "Nothing read." },
       afterReading: { ok: true, value: "error:resource.unavailable" },

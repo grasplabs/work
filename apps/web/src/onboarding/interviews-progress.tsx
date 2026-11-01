@@ -24,9 +24,9 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { downloadCsv } from "../csv.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
-import { downloadCsv } from "../landscape/download.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FailedMailNotice } from "./failed-mail.tsx";
 import { fullLink, linksCsv, linksOf } from "./links-to-send.ts";

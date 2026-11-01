@@ -5,9 +5,8 @@
 # main with the release's id (`YY.MM.N`, such as 26.10.42, as the staging
 # admin shows it) once staging's clients run it well; production gets it
 # under the same id. It builds nothing: the release is checked against
-# its manifest when fetched and again before it's uploaded, with the
-# limit evidence CI published beside it, which production's admin checks
-# again on import. A release already in
+# its manifest when fetched and again before it's uploaded, and
+# production's admin checks it again on import. A release already in
 # production's bucket stays as it is.
 #
 # It runs in the production GitHub environment, whose required reviewers

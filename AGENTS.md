@@ -34,6 +34,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
 - `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
 - `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, engines with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
+- `vp run seed:onboarding`: on a fresh `vp run dev` instead of `vp run seed`, the same company halfway through its onboarding (`scripts/seed-onboarding.ts`): day 8 of 14 of the interviews, most leads heard, one team quiet, Grasp at 75% of the 80% go. Admin at `/setup` as admin@acme.test, Grasp's side at `/onboarding` as staff@grasp.test
 - `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`
 - `vp run -r db:generate`: generate migrations after changing a schema
 
@@ -91,7 +92,8 @@ One design, from `@grasp-os/ui`, in `apps/web`, `apps/admin` and App screens. Th
 - **Colour**: tokens only. Lime (`highlight`, `Button variant="highlight"`) once a page, for the one action it is for. Amber (`status-attention`, `Badge variant="attention"`) for what needs someone; green (`status-agreed`, `variant="passed"`) for what is done. Red (`destructive`) for errors, a form's error or something that failed, and for actions that can't be undone.
 - **Type**: Geist (`font-sans`) for the product; Newsreader (`font-serif`) for page titles (`PageHeaderTitle`), the titles of dialogs, sheets and drawers, key figures (`Stat`) and what Grasp says (`type-display`).
 - **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/ui`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page and App screen to layout classes on a component. Inside `packages/ui/src/components` only `no-restyle`, `no-arbitrary-values` and `require-static-classes` are off; `no-raw-colors`, `no-inline-styles` and `no-unknown-classes` hold there too.
-- **Motion**: on the house curve (`ease-house`, the default), each answer over within 300 ms. Under reduced motion nothing slides, grows or glides.
+- **Painted fields** (`PaintedField`, always a painting and a pattern) stand only behind the one or two things on a screen that matter most; two side by side never share a painting or a pattern. Like any component it takes layout classes only: its padding and corners are its own props and variants.
+- **Motion**: on the house curve (`ease-house`, the default), each answer over within 300 ms; `grasp/no-slow-motion` holds it for Tailwind's `duration-*` classes and Motion's `transition` and `animate` durations, turned off only for what is seen once or rare, with the reason, in `vite.config.ts`. A stylesheet's own animations and keyframes are checked by review. Under reduced motion nothing slides, grows or glides.
 
 ## Translations
 

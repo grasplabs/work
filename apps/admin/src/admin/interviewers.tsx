@@ -22,8 +22,9 @@ import { Progress } from "@grasp-os/ui/components/progress";
 import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 
-import { BarList, Empty, Figure, Panel } from "./interview-parts.tsx";
+import { BarList, Figure } from "./interview-parts.tsx";
 import { noInterviewsYet } from "./interviews.tsx";
+import { EmptySection, Section } from "./section.tsx";
 import { interviewerNames, interviewPhaseWords } from "./words.ts";
 
 /**
@@ -99,7 +100,7 @@ const Rating = ({ stats }: { stats: StephenStats }) => {
 const Chose = ({ stats }: { stats: StephenStats }) => {
   const most = Math.max(1, ...stats.chose.map((each) => each.count));
   return (
-    <Panel
+    <Section
       description="Everyone chooses at the start of their interview. The questions are the same, whoever asks them."
       title="Who people chose"
     >
@@ -124,7 +125,7 @@ const Chose = ({ stats }: { stats: StephenStats }) => {
           );
         })}
       </ul>
-    </Panel>
+    </Section>
   );
 };
 
@@ -157,7 +158,7 @@ const lengthRows = (stats: StephenStats) =>
 export const InterviewersDoing = ({ view }: { view: OrgView }) => {
   const stats = stephenOf(view);
   if (stats.started === 0) {
-    return <Empty>{noInterviewsYet(view)}</Empty>;
+    return <EmptySection>{noInterviewsYet(view)}</EmptySection>;
   }
   const lead = Math.round(stats.length.lead);
   const employee = Math.round(stats.length.employee);
@@ -206,7 +207,7 @@ export const InterviewersDoing = ({ view }: { view: OrgView }) => {
       <Chose stats={stats} />
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
-        <Panel description={stops} title="Where people stop">
+        <Section description={stops} title="Where people stop">
           {stopped > 0 ? (
             <div className="border-t px-5 py-4">
               <BarList
@@ -219,15 +220,15 @@ export const InterviewersDoing = ({ view }: { view: OrgView }) => {
               />
             </div>
           ) : null}
-        </Panel>
-        <Panel
+        </Section>
+        <Section
           description="The interviews people agreed to, by how many minutes they took."
           title="How long they take"
         >
           <div className="border-t px-5 py-4">
             <BarList label="How long they take" rows={lengthRows(stats)} />
           </div>
-        </Panel>
+        </Section>
       </div>
     </>
   );
@@ -286,7 +287,7 @@ export const InterviewersSetup = ({ view }: { view: OrgView }) => {
   const wanted = org.wanted ?? "";
   return (
     <>
-      <Panel
+      <Section
         description="From the first conversation with the sponsor. It holds for Stephen and Claire alike."
         title="How Stephen and Claire are set up here"
       >
@@ -316,8 +317,8 @@ export const InterviewersSetup = ({ view }: { view: OrgView }) => {
           none="None yet."
           short
         />
-      </Panel>
-      <Panel
+      </Section>
+      <Section
         description="A line each, from the first conversation, the research and what the company connected."
         title="What they know before they say hello"
       >
@@ -334,7 +335,7 @@ export const InterviewersSetup = ({ view }: { view: OrgView }) => {
             ))}
           </ul>
         )}
-      </Panel>
+      </Section>
     </>
   );
 };

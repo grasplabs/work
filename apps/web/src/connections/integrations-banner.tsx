@@ -94,9 +94,10 @@ export const IntegrationsBanner = ({
   }));
   return (
     <PaintedField
-      className="h-44 rounded-2xl"
+      className="h-44"
       painting="mist"
       pattern="horizon"
+      shape="band"
     >
       <IntegrationsNerves
         lines={lines}

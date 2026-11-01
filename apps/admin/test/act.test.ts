@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { act, actIfChanged, adminDatabase } from "../src/db/act.ts";
-import { auditEvents, clients, settings } from "../src/db/schema.ts";
+import { auditEvents, clientAdminReads, clients } from "../src/db/schema.ts";
 
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
@@ -96,16 +96,8 @@ describe(act, () => {
       act(
         db,
         staff,
-        [
-          db.insert(settings).values({
-            clientId,
-            key: "AUDIT_RETENTION_DAYS",
-            value: "90",
-            updatedBy: staff.email,
-            updatedAt: new Date(),
-          }),
-        ],
-        { action: "setting.update", clientId, target: "AUDIT_RETENTION_DAYS" }
+        [db.insert(clientAdminReads).values({ clientId, askedAt: new Date() })],
+        { action: "client.read", clientId }
       )
     ).rejects.toThrow("FOREIGN KEY constraint failed");
 

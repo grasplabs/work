@@ -7,6 +7,15 @@
 // `grasp-theme` holds the one applied last, so the first paint already has
 // it, and the app writes it again once it knows who is signed in. It tells
 // this script with a `grasp-theme` event; another tab, through `storage`.
+//
+// It also keeps Zod jitless. The page's CSP (core's src/security-headers.ts)
+// allows no eval, and Zod probes for it with `new Function` when a schema is
+// built, which the browser reports as a violation even though Zod catches
+// the error. Zod reads this global when it loads, so set here, before any
+// module runs, it holds for every schema whichever chunk builds it, without
+// making the bundler run modules in import order.
+globalThis.__zod_globalConfig = { jitless: true };
+
 {
   const dark = matchMedia("(prefers-color-scheme: dark)");
   const apply = () => {

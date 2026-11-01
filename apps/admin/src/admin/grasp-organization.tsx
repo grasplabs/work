@@ -22,7 +22,7 @@ import type {
   PlatformSettingsView,
 } from "../platform-settings.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
-import { Panel } from "./panel.tsx";
+import { Section } from "./section.tsx";
 
 /** What a refusal says. */
 const refusals: Readonly<Record<GraspClientRefusal, string>> = {
@@ -55,7 +55,7 @@ export const GraspOrganization = ({
   const router = useRouter();
   const { busy, failure, run } = useAction(refusals);
   return (
-    <Panel
+    <Section
       description={standingWords(settings)}
       title="Grasp's own organization"
     >
@@ -112,6 +112,6 @@ export const GraspOrganization = ({
           )}
         </div>
       </form>
-    </Panel>
+    </Section>
   );
 };

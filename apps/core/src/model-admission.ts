@@ -1,11 +1,12 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Authority } from "@grasp-os/shared/permissions";
-import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
+
+import type { QuotaLimits } from "./workflows/quotas.ts";
 
 // Fair admission of model requests (spec 18.3, 40.5): how many of the
 // client's provider requests to models are in flight at once, in all, for
-// one person and of one App, each against its share in the quota policy
+// one person and of one App, each against its share in the quota limits
 // (`modelClientRequests`, `modelPersonRequests`, `modelAppRequests`), and
 // in what order the calls waiting get a share. The same design as fair
 // admission of workflow attempts (workflows/admission.ts), applied where
@@ -90,10 +91,6 @@ import { z } from "zod";
 //   never takes a person's first place in an App, so Apps' backlogs that
 //   fill it never keep a new App or person from a place, and its turn:
 //   first places are bounded by the per-person cap instead.
-// - A policy change missed: shares are read from the policy for every
-//   provider request (models.ts, `scopesNow`), as the run lineage's
-//   request limit is. A policy that can't be read is the last one read in
-//   that isolate, else the platform's own ceilings: a policy only lowers.
 //
 // What a waiting call shows: `model.queued`, with the share it waits for
 // and when to ask again, to whoever made it; for a workflow run, `queued`
@@ -111,18 +108,18 @@ export interface ModelShares {
   queuedPerApp: number;
 }
 
-/** The shares of `policy`: an App's and a person's below the client's. */
-export const modelSharesOf = (policy: QuotaPolicy): ModelShares => {
-  const client = policy.limits.modelClientRequests;
+/** The shares of `limits`: an App's and a person's below the client's. */
+export const modelSharesOf = (limits: QuotaLimits): ModelShares => {
+  const client = limits.modelClientRequests;
   // With one request at once for the whole client there is nothing to
   // leave over: that one is anyone's.
   const most = Math.max(1, client - 1);
   return {
     client,
-    person: Math.min(policy.limits.modelPersonRequests, most),
-    app: Math.min(policy.limits.modelAppRequests, most),
-    queuedPerPerson: policy.limits.modelQueuedPerPerson,
-    queuedPerApp: policy.limits.modelQueuedPerApp,
+    person: Math.min(limits.modelPersonRequests, most),
+    app: Math.min(limits.modelAppRequests, most),
+    queuedPerPerson: limits.modelQueuedPerPerson,
+    queuedPerApp: limits.modelQueuedPerApp,
   };
 };
 
@@ -285,8 +282,9 @@ interface FairInput {
           | "brain_upkeep"
           | "dashboard_widgets"
           | "brain_recall"
-          | "policy_reading"
-          | "stephen_requests";
+          | "stephen_requests"
+          | "provider_test"
+          | "document_conversion";
       };
   binding?: { app: string };
   /** For a workflow run's call: whose share it takes (models.ts). */

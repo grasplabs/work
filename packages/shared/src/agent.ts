@@ -7,6 +7,17 @@ import {
 } from "./chat.ts";
 import { defineErrorFamily } from "./errors.ts";
 
+/** Each place a thousands comma goes in a whole number's digits. */
+const thousands = /\B(?=(?:\d{3})+$)/gu;
+
+/**
+ * `count` as English writes it, `4,000`, without `toLocaleString`: this
+ * module loads as core starts, and ICU's first number format costs about
+ * 15 ms of CPU there.
+ */
+const grouped = (count: number): string =>
+  String(count).replaceAll(thousands, ",");
+
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
@@ -26,7 +37,7 @@ export const agentErrors = defineErrorFamily({
   "agent.run_ended":
     "This code run has ended, so its APIs don't answer any more.",
   "agent.project_not_found": "There's no such project.",
-  "agent.invalid_project": `A project's name is 1 to ${projectNameMaxLength} characters, and its goal at most ${projectGoalMaxLength.toLocaleString("en")}.`,
+  "agent.invalid_project": `A project's name is 1 to ${projectNameMaxLength} characters, and its goal at most ${grouped(projectGoalMaxLength)}.`,
   "agent.too_many_projects": `You have ${projectsMax} projects, the most a person keeps. Delete one to make another.`,
   "agent.invalid_project_document": `A project document is a .md, .txt, .csv or .json file of at most ${projectDocumentMaxKb} KB, named once in its project.`,
   "agent.too_many_project_documents": `A project has at most ${projectDocumentsMax} documents. Remove one to add another.`,

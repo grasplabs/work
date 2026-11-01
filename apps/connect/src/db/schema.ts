@@ -20,23 +20,6 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * Every migration so far only expands.
- */
-export const compatibleFromMigration = 0;
-
-/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -100,6 +83,25 @@ export const connections = sqliteTable(
     composioServerId: text("composio_server_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
     tools: text(),
+    /**
+     * Sends of a tool list to Composio, counted: the count goes up before
+     * each send (src/composio-connections.ts `sendTools`), so a send a
+     * crash cuts short is still counted.
+     */
+    toolsSentSeq: integer("tools_sent_seq").notNull().default(0),
+    /**
+     * The send after which Composio was seen to match `tools`. Out of sync
+     * while below `tools_sent_seq`: connect's clock reconciles it.
+     */
+    toolsSettledSeq: integer("tools_settled_seq").notNull().default(0),
+    /** Reconciles that failed in a row since Composio last matched. */
+    toolsSyncFailures: integer("tools_sync_failures").notNull().default(0),
+    /**
+     * Not before when connect's clock reconciles it again: after a failure,
+     * backing off as failures add up, or while a send Composio didn't
+     * answer may still land there; null for one not yet tried.
+     */
+    toolsSyncRetryAt: timestamp("tools_sync_retry_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -426,6 +428,23 @@ export const composioCleanups = sqliteTable(
 );
 
 /**
+ * Sends of a tool list to Composio not yet answered, by connection and
+ * count (`connections.tools_sent_seq`): one may still land at Composio
+ * after a later send, so a send counted while one sent shortly before it
+ * is here settles nothing (src/composio-connections.ts). Removed once
+ * answered, or once a later send settles.
+ */
+export const composioToolSends = sqliteTable(
+  "composio_tool_sends",
+  {
+    connectionId: text("connection_id").notNull(),
+    seq: integer().notNull(),
+    sentAt: timestamp("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectionId, table.seq] })]
+);
+
+/**
  * A connection's OAuth tokens, sealed with AES-GCM (src/vault.ts): nothing
  * here is readable without the key, which only connect holds. The sealed
  * value names the key that sealed it, so a rotated key can still open it.
@@ -617,4 +636,21 @@ export const connectorEvents = sqliteTable(
 export const erasedPeople = sqliteTable("erased_people", {
   userId: text("user_id").primaryKey(),
   beganAt: timestamp("began_at").notNull(),
+});
+
+/**
+ * The organization's own key for each AI provider (ai-providers.ts),
+ * sealed with the vault, bound to its provider and, for an
+ * OpenAI-compatible endpoint, the base URL it goes to: a key moved to
+ * another row, or a base URL changed in the database, doesn't open. Never
+ * read back to core: only its mask, its first and last characters.
+ */
+export const aiProviderKeys = sqliteTable("ai_provider_keys", {
+  provider: text().primaryKey(),
+  sealed: text().notNull(),
+  mask: text().notNull(),
+  /** Only for an OpenAI-compatible endpoint: the base URL its key goes to. */
+  baseUrl: text("base_url"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });

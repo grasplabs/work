@@ -42,7 +42,9 @@ const visit = async (page: Page, path: string): Promise<void> => {
  */
 const startRollout = async (page: Page, releaseId: string): Promise<void> => {
   await visit(page, "/platform/rollouts");
-  await expect(page.getByLabel("Release")).toHaveValue(releaseId);
+  await expect(page.getByLabel("Release", { exact: true })).toHaveValue(
+    releaseId
+  );
   await expect(
     page.getByText(
       "Only Alpha has active clients, so this reaches only our own deployments."

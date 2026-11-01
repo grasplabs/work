@@ -1,6 +1,6 @@
 import { createRouter } from "@tanstack/react-router";
 
-import { RouteFailure } from "./admin/failure.tsx";
+import { NotFound, RouteFailure } from "./admin/failure.tsx";
 import { routeTree } from "./routeTree.gen.ts";
 
 declare module "@tanstack/react-router" {
@@ -20,4 +20,6 @@ export const getRouter = () =>
     scrollRestoration: true,
     // A route that fails shows so where it would be, never the router's own page.
     defaultErrorComponent: RouteFailure,
+    // A page there isn't says so in the admin's frame, under its bar.
+    defaultNotFoundComponent: NotFound,
   });

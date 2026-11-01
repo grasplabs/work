@@ -27,6 +27,14 @@ import {
   NavigationMenuTrigger,
 } from "@grasp-os/ui/components/navigation-menu";
 import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -45,6 +53,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@grasp-os/ui/components/sidebar";
+import { SiteHeader } from "@grasp-os/ui/components/site-header";
 import {
   Tabs,
   TabsContent,
@@ -52,6 +61,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { BookOpenIcon, MessagesSquareIcon } from "lucide-react";
+import { useState } from "react";
 
 const BreadcrumbDemo = () => (
   <Breadcrumb>
@@ -163,6 +173,65 @@ const BrandHeaderDemo = () => (
   </SidebarProvider>
 );
 
+const SiteHeaderDemo = () => (
+  <SidebarProvider className="min-h-0">
+    <div className="w-full overflow-hidden rounded-lg border">
+      <SiteHeader
+        crumbs={[
+          {
+            label: "Knowledge",
+            // Its text is the crumb's label, which the header puts inside it.
+            link: <a aria-label="Knowledge" href="#knowledge" />,
+          },
+          { label: "Policies" },
+        ]}
+        triggerLabel="Show or hide the sidebar"
+      />
+    </div>
+  </SidebarProvider>
+);
+
+const PageSidebarDemo = () => {
+  const [folded, setFolded] = useState(false);
+  return (
+    <div className="flex h-64 overflow-hidden rounded-lg border">
+      <PageSidebar folded={folded} label="Knowledge">
+        {folded ? (
+          <>
+            <PageSidebarRailExpand
+              label="Expand the sidebar"
+              onExpand={() => {
+                setFolded(false);
+              }}
+            />
+            <PageSidebarRailDivider />
+            <PageSidebarRailButton active label="Policies">
+              <BookOpenIcon />
+            </PageSidebarRailButton>
+          </>
+        ) : (
+          <>
+            <PageSidebarTop
+              fold={{
+                label: "Fold the sidebar",
+                onFold: () => {
+                  setFolded(true);
+                },
+              }}
+            >
+              <span className="font-medium">Knowledge</span>
+            </PageSidebarTop>
+            <PageSidebarBody>
+              <span>Policies</span>
+              <span>Handbook</span>
+            </PageSidebarBody>
+          </>
+        )}
+      </PageSidebar>
+    </div>
+  );
+};
+
 const TabsDemo = () => (
   <Tabs defaultValue="account">
     <TabsList>
@@ -183,7 +252,9 @@ export const navigationDemos = {
   breadcrumb: BreadcrumbDemo,
   command: CommandDemo,
   "navigation-menu": NavigationMenuDemo,
+  "page-sidebar": PageSidebarDemo,
   pagination: PaginationDemo,
   sidebar: SidebarDemo,
+  "site-header": SiteHeaderDemo,
   tabs: TabsDemo,
 };

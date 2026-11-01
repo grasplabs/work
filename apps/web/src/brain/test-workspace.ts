@@ -1,5 +1,4 @@
 import type {
-  LandscapeApp,
   Source,
   Statement,
   Transcript,
@@ -542,7 +541,6 @@ const sources: Source[] = [
     who: "COO",
     how: "Upload",
     step: 2,
-    policyId: "policy-ai-data",
   },
   {
     id: "src-tools-decision",
@@ -599,20 +597,6 @@ const sources: Source[] = [
     step: 5,
   },
 ];
-
-/** Applications only Pulse saw, none with AI, so ChatGPT stays the AI tool most used that nobody named. */
-const extraApps: LandscapeApp[] = Array.from({ length: 13 }, (_, index) => ({
-  id: `extra-${index + 1}`,
-  name: `Extra app ${index + 1}`,
-  vendor: "Vendor",
-  category: "Utility",
-  ai: "none",
-  people: 3 + index,
-  seenThrough: ["pulse"],
-  owner: index % 2 === 0 ? null : "IT",
-  matches: [],
-  permissions: [],
-}));
 
 /** The company the brain's tests read. */
 export const testWorkspace = (): Workspace => ({
@@ -892,7 +876,7 @@ export const testWorkspace = (): Workspace => ({
       question: "Who allowed ChatGPT?",
       owner: "Head of IT",
       sourceId: "src-pulse",
-      about: ["app-chatgpt"],
+      about: [],
     },
     {
       id: "gap-invoice-limit",
@@ -955,93 +939,6 @@ export const testWorkspace = (): Workspace => ({
       status: "available",
       via: "composio",
       matches: ["CRM"],
-    },
-  ],
-  landscape: [
-    {
-      id: "microsoft-365",
-      name: "Microsoft 365",
-      vendor: "Microsoft",
-      category: "Office suite",
-      logoSrc: "/v1/logos/microsoft-365.svg",
-      ai: "builtIn",
-      people: 38,
-      seenThrough: ["microsoftSso", "pulse"],
-      owner: "IT",
-      matches: ["Outlook", "Excel", "Word"],
-      permissions: ["Read and send mail"],
-    },
-    {
-      id: "salesforce",
-      name: "Salesforce",
-      vendor: "Salesforce",
-      category: "CRM",
-      logoSrc: "",
-      ai: "builtIn",
-      people: 15,
-      seenThrough: ["microsoftSso"],
-      owner: "Customer service",
-      matches: ["CRM"],
-      permissions: ["Read contacts"],
-    },
-    {
-      id: "copilot",
-      name: "Microsoft Copilot",
-      vendor: "Microsoft",
-      category: "Chat assistant",
-      ai: "tool",
-      people: 20,
-      seenThrough: ["pulse"],
-      owner: "IT",
-      matches: [],
-      permissions: [],
-    },
-    {
-      id: "exact",
-      name: "Exact Online",
-      vendor: "Exact",
-      category: "Accounting",
-      ai: "none",
-      people: 6,
-      seenThrough: ["microsoftSso"],
-      owner: "Finance",
-      matches: [],
-      permissions: ["Read invoices"],
-    },
-    {
-      id: "chatgpt",
-      name: "ChatGPT",
-      vendor: "OpenAI",
-      category: "Chat assistant",
-      logoSrc: "/v1/logos/chatgpt.png",
-      ai: "tool",
-      people: 47,
-      seenThrough: ["pulse"],
-      owner: "Revenue",
-      matches: [],
-      permissions: [],
-    },
-    ...extraApps,
-  ],
-  policies: [
-    {
-      id: "policy-ai-data",
-      title: "AI and data guideline",
-      uploadedAt: "2026-09-05T10:12",
-      status: "published",
-      summary: "What AI tools may do with client data.",
-      proposals: [
-        {
-          excerpt: "Client data stays in the EU.",
-          decision: "accepted",
-        },
-        {
-          excerpt: "A new AI tool is approved by the COO.",
-          decision: "open",
-        },
-      ],
-      unchecked: [{ excerpt: "Staff are trained once a year." }],
-      publishedAt: "2026-09-08T09:00",
     },
   ],
 });

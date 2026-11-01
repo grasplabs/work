@@ -1,5 +1,6 @@
 import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 
+import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
@@ -9,12 +10,11 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
-import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
+import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
 import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
-import { LandscapeRpc } from "./landscape.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
@@ -26,10 +26,8 @@ import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
-import { PoliciesRpc } from "./policies.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { ScreenSubmissionsRpc } from "./screen-submissions.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
@@ -67,11 +65,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #resourceBindings: ResourceBindingsRpc;
   readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
-  readonly #landscape: LandscapeRpc;
-  readonly #policies: PoliciesRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
   readonly #decisions: DecisionsRpc;
+  readonly #heldStarts: HeldStartsRpc;
   readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
   readonly #screenTrust: ScreenTrustRpc;
@@ -81,14 +78,13 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #stephenRequests: StephenRequestsRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
+  readonly #aiProviders: AiProvidersRpc;
   readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #unknownOutcomes: UnknownOutcomesRpc;
-  readonly #screenSubmissions: ScreenSubmissionsRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
-  readonly #emailPreferences: EmailPreferencesRpc;
   readonly #sessions: SessionsRpc;
   readonly #channelAccounts: ChannelAccountsRpc;
   readonly #notifications: NotificationsRpc;
@@ -116,11 +112,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
-    this.#landscape = new LandscapeRpc(env, full);
-    this.#policies = new PoliciesRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
+    this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
@@ -130,13 +125,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#stephenRequests = new StephenRequestsRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
+    this.#aiProviders = new AiProvidersRpc(env, full);
     this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
-    this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
-    this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
@@ -151,8 +145,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       notifications: this.#notifications,
       connections: this.#connections,
       decisions: this.#decisions,
+      heldStarts: this.#heldStarts,
       chats: this.#chats,
       lifecycles: this.#workflowResources.lifecycle,
+      bindings: this.#workflowResources,
     });
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
@@ -183,6 +179,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#waiting;
   }
 
+  get heldStarts(): HeldStartsRpc {
+    return this.#heldStarts;
+  }
+
   get onboarding(): OnboardingRpc {
     return this.#onboarding;
   }
@@ -201,10 +201,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get dashboard(): DashboardRpc {
     return this.#dashboard;
-  }
-
-  get emailPreferences(): EmailPreferencesRpc {
-    return this.#emailPreferences;
   }
 
   get apps(): AppsRpc {
@@ -245,14 +241,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get connections(): ConnectionsRpc {
     return this.#connections;
-  }
-
-  get landscape(): LandscapeRpc {
-    return this.#landscape;
-  }
-
-  get policies(): PoliciesRpc {
-    return this.#policies;
   }
 
   get workflows(): WorkflowsRpc {
@@ -303,6 +291,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#models;
   }
 
+  get aiProviders(): AiProvidersRpc {
+    return this.#aiProviders;
+  }
+
   get stores(): StoresRpc {
     return this.#stores;
   }
@@ -313,10 +305,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get unknownOutcomes(): UnknownOutcomesRpc {
     return this.#unknownOutcomes;
-  }
-
-  get screenSubmissions(): ScreenSubmissionsRpc {
-    return this.#screenSubmissions;
   }
 
   get signals(): SignalsRpc {

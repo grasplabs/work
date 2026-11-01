@@ -9,11 +9,8 @@ import { loopbackHosts } from "./router.ts";
 // (with `deploymentConfig`, @grasp-os/shared/config) and the admin
 // validates them before it deploys: one schema for both, so the admin
 // never sets a value core would refuse. Each var is deployment config,
-// never an in-product setting, so no admin session can change it. The
-// `MEMORY_LIMITS` var's schema is `memoryLimitsSchema` in
-// @grasp-os/shared/memory, `QUOTA_LIMITS`'s is `quotaLimitsSchema` in
-// @grasp-os/shared/quota-policy, and `PLATFORM_CHANGE`'s is in
-// @grasp-os/shared/platform-change.
+// never an in-product setting, so no admin session can change it.
+// `PLATFORM_CHANGE`'s schema is in @grasp-os/shared/platform-change.
 
 // SIGN_IN (core's src/auth/config.ts)
 
@@ -169,107 +166,23 @@ export const staffWindowOpen = (
 
 // MODEL_GATEWAY (core's src/models.ts and src/model-rules.ts)
 //
-// Its model references are checked against the models the gateway offers,
-// which only core knows (its provider catalogs): each schema here takes
-// that check as `modelRef`.
-
-/** An AI Gateway ID: lowercase letters, digits and dashes. */
-const gatewayIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
-
-/**
- * The provider the allowlist names voice models by, `elevenlabs/<model>`,
- * whichever way the gateway reaches it (`voiceGatewayProviders`).
- */
-export const voiceModelProvider = "elevenlabs";
-
-/**
- * How AI Gateway reaches ElevenLabs, by the gateway path it takes: its
- * native `elevenlabs` provider, or `custom-elevenlabs-eu`, a custom
- * provider in the deployment's gateway for ElevenLabs's EU host
- * (`https://api.eu.residency.elevenlabs.io`), as AI Gateway has no EU
- * endpoint of its own. The ElevenLabs key stays in the gateway either way.
- */
-export const voiceGatewayProviders = [
-  "elevenlabs",
-  "custom-elevenlabs-eu",
-] as const;
-
-/** The `voice` part of the `MODEL_GATEWAY` var: the native provider unless set. */
-const voiceGatewaySchema = z
-  .strictObject({ provider: z.enum(voiceGatewayProviders) })
-  .optional();
-
-/**
- * The allowlist's part of the `MODEL_GATEWAY` var: the deployment's AI
- * Gateway, the models it allows, and how it reaches the voice models.
- * `modelRef` checks one `<provider>/<model>` the gateway offers.
- */
-export const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
-  z
-    .object({
-      /** The deployment's AI Gateway, in the deployment's own account. */
-      gateway: z.string().regex(gatewayIdPattern),
-      /** The models this deployment allows; every other model is refused. */
-      models: z.array(modelRef).min(1),
-      /**
-       * The model that plays each role (`modelRoles`), one of the allowed
-       * models. A role left out goes to the first allowed model the
-       * call's rules let it use, as every call did before roles.
-       */
-      roles: z
-        .strictObject({
-          quick: modelRef.optional(),
-          careful: modelRef.optional(),
-        } satisfies Record<ModelRole, z.ZodType>)
-        .optional(),
-      /** How the gateway reaches ElevenLabs: its native provider unless set. */
-      voice: voiceGatewaySchema,
-    })
-    .refine(
-      ({ models: allowed, roles }) =>
-        Object.values(roles ?? {}).every(
-          (ref) => ref === undefined || allowed.includes(ref)
-        ),
-      { message: "A role's model is an allowed model", path: ["roles"] }
-    );
+// The client's rules for model calls: which models may take a call kept
+// in the EU or one that carries sensitive data, and what calls may cost.
+// Which models a call may use at all is the organization's own choice,
+// among the providers it connected (core's src/ai-model-choice.ts), never
+// this var. Its model references are checked against the models the
+// gateway offers, which only core knows (its provider catalogs): each
+// schema here takes that check as `modelRef`.
 
 /**
  * What core's own features ask the gateway for, rather than a model:
  * `quick` for a line someone is waiting to hear, `careful` for reading and
- * writing that must be right. The deployment names the model for each in
- * `MODEL_GATEWAY`'s `roles`.
+ * writing that must be right. Each resolves against the organization's
+ * chosen models, its default first, then its fallbacks (core's
+ * `modelForRole`).
  */
 export const modelRoles = ["quick", "careful"] as const;
 export type ModelRole = (typeof modelRoles)[number];
-
-/**
- * The model a role gets on a deployment that names none for it, where its
- * allowlist has that model and the rules let the call use it; otherwise
- * the role takes the first allowed model the rules let it use. `quick`
- * defaults to GLM 5.3 Flash, which thinks at low effort, as quick lines
- * ask: DeepSeek V4.1 Flash, chat's default and the first allowed, thinks
- * at high at least, too slow for a line someone is waiting to hear.
- */
-export const defaultRoleModels: Readonly<Partial<Record<ModelRole, string>>> = {
-  quick: "workers-ai/@cf/zai-org/glm-5.3-flash",
-};
-
-/**
- * The models a new deployment allows until staff change its
- * `MODEL_GATEWAY`, and core allows while none is set: Workers AI's, which
- * AI Gateway runs on the client's own account with no provider key, so a
- * client can call a model on day one. The first is chat's default.
- *
- * Chosen on the Brain baseline's real-model runs: DeepSeek V4.1 Flash
- * answered best and followed the answer protocol, well within the cost
- * target; GLM 5.3 Flash is the cheapest to complete a task with. Both
- * search Knowledge with tools, which Llama 3.3, the earlier default, never
- * did.
- */
-export const defaultGatewayModels = [
-  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
-  "workers-ai/@cf/zai-org/glm-5.3-flash",
-] as const;
 
 const budgetSchema = z.strictObject({
   /**
@@ -306,7 +219,7 @@ export const budgetsSchema = z
 const modelRulesShape = (modelRef: z.ZodType<string>) => ({
   eu: z
     .strictObject({
-      /** The allowed models hosted in the EU. */
+      /** The models hosted in the EU. */
       models: z.array(modelRef).min(1),
       /** Every call of the deployment must stay in the EU. */
       deployment: z.boolean().default(false),
@@ -320,7 +233,7 @@ const modelRulesShape = (modelRef: z.ZodType<string>) => ({
     .optional(),
   sensitive: z
     .strictObject({
-      /** The allowed models that may take sensitive data. */
+      /** The models that may take sensitive data. */
       models: z.array(modelRef).min(1),
       /** Connections whose data is sensitive. */
       connections: z.array(connectionIdSchema).default([]),
@@ -334,116 +247,18 @@ export type ModelRules = z.output<
 >;
 
 /**
- * The client's other rules, in the same var as the allowlist. Core parses
- * them apart from it: a rule that doesn't parse refuses every call.
+ * The `MODEL_GATEWAY` var: the client's rules. A rule that doesn't parse
+ * refuses every call (core's src/models.ts).
  */
 export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
-  z
-    .object({
-      models: z.array(z.string()),
-      voice: voiceGatewaySchema,
-      ...modelRulesShape(modelRef),
-    })
-    .refine(
-      ({ models: allowed, eu }) =>
-        eu === undefined || eu.models.every((ref) => allowed.includes(ref)),
-      { message: "EU models are allowed models", path: ["eu", "models"] }
-    )
-    .refine(
-      ({ models: allowed, sensitive }) =>
-        sensitive === undefined ||
-        sensitive.models.every((ref) => allowed.includes(ref)),
-      {
-        message: "Models for sensitive data are allowed models",
-        path: ["sensitive", "models"],
-      }
-    )
-    // ElevenLabs's native host isn't in the EU: a voice model listed as
-    // hosted there is one the gateway reaches at ElevenLabs's EU host.
-    .refine(
-      ({ eu, voice }) =>
-        voice?.provider === "custom-elevenlabs-eu" ||
-        eu === undefined ||
-        !eu.models.some((ref) => ref.startsWith(`${voiceModelProvider}/`)),
-      {
-        message: "EU voice models are reached at ElevenLabs's EU host",
-        path: ["voice", "provider"],
-      }
-    );
-
-// AUDIT_RETENTION_DAYS and AUDIT_ARCHIVE_RETENTION_DAYS (core's
-// src/audit-log.ts)
-
-/** Days the audit log keeps an event where admins search it, unless set. */
-export const auditRetentionDefaultDays = 180;
-
-/**
- * `AUDIT_RETENTION_DAYS`: at least 30 days (so an admin always has the
- * last month to search), at most ten years.
- */
-export const auditRetentionSchema = z.int().min(30).max(3650);
-
-/**
- * `AUDIT_ARCHIVE_RETENTION_DAYS`: how long archived stretches are kept, in
- * days from when the log received their last event: at least a year, at
- * most ten. Core also refuses one shorter than the retention.
- */
-export const auditArchiveRetentionSchema = z.int().min(365).max(3650);
-
-/**
- * Days an event is kept in all, archive included, unless set: seven years
- * (Nick's decision on GRA-903), or the log's own retention if that is
- * longer, so an unset archive retention is never shorter than it.
- */
-export const auditArchiveRetentionDefaultDays = 7 * 365;
-
-// RUN_RETENTION_DAYS (core's src/workflows/retention.ts)
-
-/** Days an ended workflow run keeps its details, unless set. */
-export const runRetentionDefaultDays = 30;
-
-/**
- * `RUN_RETENTION_DAYS`: how long a workflow run keeps its details (its
- * input, what its steps returned, its output, why it failed) once it has
- * ended, in days: at least one, at most 30. Most of those details are the
- * engine's record of the run, and core has Cloudflare Workflows keep it
- * for this long (each instance's `retention`), which can be no longer
- * than the 30 days it keeps an ended instance on the Workers Paid plan.
- */
-export const runRetentionSchema = z.int().min(1).max(30);
-
-// INBOUND_MAIL_DOMAIN (core's src/workflows/overview.ts)
-
-/**
- * `INBOUND_MAIL_DOMAIN`: the domain the deployment receives mail at, as
- * its Email Routing catch-all rule sends it to core (set up outside core),
- * so an email trigger's address shows whole: `<local part>@<domain>`. A
- * lowercase hostname of at most 253 characters, its labels at most 63,
- * none starting or ending with a hyphen.
- * Unset, triggers show their local part alone.
- */
-export const inboundMailDomainSchema = domainSchema
-  .max(253)
-  .refine(
-    (domain) =>
-      domain
-        .split(".")
-        .every(
-          (label) =>
-            label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")
-        ),
-    {
-      message:
-        "Each part of the domain is at most 63 characters, and starts and ends with a letter or digit",
-    }
-  );
+  z.object(modelRulesShape(modelRef));
 
 // MAIL_FROM (core's src/mail.ts)
 
 /**
  * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
  * an address on the deployment's sending domain, set up for Email Sending
- * outside core (the admin's src/deploy/resources.ts, which also locks
+ * outside core (the admin's src/hosting/operation.ts, which also locks
  * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
  * quotes or angle brackets, so it can't change the header it goes in.
  * Unset, core sends no mail: each one fails, and says why.
@@ -458,20 +273,3 @@ export const mailFromSchema = z.strictObject({
   address: z.email().max(254),
 });
 export type MailFrom = z.infer<typeof mailFromSchema>;
-
-/**
- * The names of the deployment config vars above, the only settings the
- * admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
- * on every version it deploys, never a setting.
- */
-export const deploymentConfigVars = [
-  "SIGN_IN",
-  "MODEL_GATEWAY",
-  "MEMORY_LIMITS",
-  "AUDIT_RETENTION_DAYS",
-  "AUDIT_ARCHIVE_RETENTION_DAYS",
-  "RUN_RETENTION_DAYS",
-  "QUOTA_LIMITS",
-  "INBOUND_MAIL_DOMAIN",
-  "MAIL_FROM",
-] as const;

@@ -17,8 +17,7 @@
  *
  * With --assign-id (CI's publish) the release gets its id here, from the
  * bucket (@grasp-os/shared/release-id): the next `YY.MM.N` of the month,
- * claimed by writing its first key under `releases/<id>/` only if absent
- * (the limit evidence, or the manifest of a release without one). When
+ * claimed by writing its manifest only if absent. When
  * another publish claimed that id first, it takes the next one, so two
  * publishes never share an id. Once published, `commits/<sha>` records the
  * id, and a re-run of the same commit's publish publishes nothing again.
@@ -38,18 +37,13 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import {
-  commitKey,
-  limitEvidenceKey,
-  manifestKey,
-} from "@grasp-os/shared/release";
+import { commitKey, manifestKey } from "@grasp-os/shared/release";
 import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { z } from "zod";
 
 import { stampReleaseId } from "./assign-lib.ts";
 import { releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
-import { readLimitEvidence } from "./evidence-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
 
 /** What a published manifest is read for when looking for a commit's release. */
@@ -77,7 +71,6 @@ if (args.release === undefined) {
 const releaseDir = path.resolve(args.release);
 
 const { manifest, manifestBytes, blobs } = await verifyRelease(releaseDir);
-const evidenceBytes = readLimitEvidence(releaseDir, manifest);
 
 /** SHA-256, base64: the form of R2's `x-amz-checksum-sha256`. */
 const sha256Base64 = (bytes: Uint8Array): string =>
@@ -179,9 +172,6 @@ const putFile = async (
     headers: {
       "Content-Type": contentType,
       "x-amz-checksum-sha256": sha256Base64(bytes),
-      // The same SHA-256, hex, as the admin's import reads it when R2
-      // doesn't report the checksum to a Worker.
-      "x-amz-meta-sha256": createHash("sha256").update(bytes).digest("hex"),
       ...(onlyIfAbsent ? { "If-None-Match": "*" } : {}),
     },
   });
@@ -196,22 +186,13 @@ const putFile = async (
 
 /**
  * Publishes the release under the id it has (Promote release). Published
- * already, by an earlier attempt: it stands, its evidence with it.
+ * already, by an earlier attempt: it stands.
  */
 const publishAsBuilt = async (bucket: ReleasesBucket): Promise<void> => {
   const published = manifestKey(manifest.releaseId);
   if ((await storedSha256(bucket, published)) !== undefined) {
     console.warn(`::warning::${published} is already published; left as it is`);
     return;
-  }
-  // The limit evidence, just before the manifest: nothing reads it until
-  // the manifest is there, so one an attempt that stopped left behind is
-  // replaced. R2 checks its SHA-256 on write, and the admin checks it
-  // again on import, before it stores anything.
-  if (evidenceBytes !== undefined) {
-    await putFile(bucket, limitEvidenceKey(manifest.releaseId), evidenceBytes, {
-      onlyIfAbsent: false,
-    });
   }
   if (
     !(await putFile(bucket, published, manifestBytes, { onlyIfAbsent: true }))
@@ -295,22 +276,13 @@ const publishWithNextId = async (bucket: ReleasesBucket): Promise<void> => {
   for (let attempt = 1; attempt <= MAX_ID_ATTEMPTS; attempt += 1) {
     const id = nextReleaseId(taken, new Date());
     taken.add(id);
-    const stamped = stampReleaseId(manifestBytes, evidenceBytes, id);
+    const stamped = stampReleaseId(manifestBytes, id);
     const published = manifestKey(id);
-    // The evidence, when there is one, is the claim; then the manifest,
-    // last, only if absent too.
-    const evidenceClaimed =
-      stamped.evidenceBytes === undefined ||
-      // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-      (await putFile(bucket, limitEvidenceKey(id), stamped.evidenceBytes, {
-        onlyIfAbsent: true,
-      }));
-    const claimed =
-      evidenceClaimed &&
-      // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-      (await putFile(bucket, published, stamped.manifestBytes, {
-        onlyIfAbsent: true,
-      }));
+    // The manifest is the claim, only if absent.
+    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
+    const claimed = await putFile(bucket, published, stamped.manifestBytes, {
+      onlyIfAbsent: true,
+    });
     if (claimed) {
       // oxlint-disable-next-line no-await-in-loop -- once, when published
       await putFile(bucket, marker, Buffer.from(`${id}\n`), {

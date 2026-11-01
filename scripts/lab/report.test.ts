@@ -30,7 +30,7 @@ const run = (
   bench: "ask",
   set,
   stephen: version(talks),
-  via: { gateway: "local", quick: "q", careful: "c" },
+  via: { quick: "q", careful: "c" },
   cases: Object.entries(right).map(([moment, value]) => ({
     id: moment,
     scores: { right: value },

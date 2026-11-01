@@ -578,18 +578,39 @@ function SidebarMenuAction({
   });
 }
 
+const sidebarMenuBadgeVariants = cva(
+  "text-sidebar-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden",
+  {
+    variants: {
+      /**
+       * `beside`: after its menu button, as shadcn's, set by the button's
+       * size. `inside`: in the button, so the count is part of its name;
+       * placed for a button of the default size.
+       */
+      placement: {
+        beside:
+          "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
+        inside: "top-1.5",
+      },
+    },
+    defaultVariants: {
+      placement: "beside",
+    },
+  }
+);
+
 function SidebarMenuBadge({
   className,
+  placement = "beside",
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof sidebarMenuBadgeVariants>) {
   return (
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      className={cn(
-        "text-sidebar-foreground peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
-        className
-      )}
+      data-placement={placement}
+      className={cn(sidebarMenuBadgeVariants({ placement }), className)}
       {...props}
     />
   );

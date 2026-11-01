@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
@@ -10,7 +9,7 @@ import { encode } from "@grasp-os/workerflow/codec";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
 import { modelLedger } from "../src/model-ledger.ts";
@@ -37,8 +36,9 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import { withQuotas } from "./quota-policies.ts";
+import { connectModels, fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { withQuotas } from "./quota-limits.ts";
 import {
   admittedFreely,
   liveStatus,
@@ -149,8 +149,14 @@ const greetEach = (id: string, child: string, who: string) => ({
   },
 });
 
-/** The model the tests' deployment allows. */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+// Chosen before any binding to it is approved; each test's provider
+// answers for the same model.
+const chooseModel = async (): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
+};
 
 /** A model's answer greeting with `greeting`, to a child's schema. */
 const greetingAnswer = (greeting: string) => ({
@@ -384,20 +390,9 @@ const askingChild = async (admin: Identity) => {
   return child;
 };
 
-/** AI Gateway answering `replies` in turn, behind the AI binding, until restored. */
-const gatewayAnswering = (...replies: Parameters<typeof fakeGateway>) => {
-  const gateway = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const fetching = vi
-    .spyOn(ai, "fetch")
-    .mockImplementation(gateway.binding.fetch);
-  return {
-    gateway,
-    restore: () => {
-      fetching.mockRestore();
-    },
-  };
-};
+/** The provider of the chosen model answering `replies` in turn. */
+const providerAnswering = async (...replies: ProviderReply[]) =>
+  await fakeProviderFor([allowedModel], ...replies);
 
 /** What the model ledger keeps of lineage `root`: its spend rows. */
 const lineageSpendOf = async (root: string): Promise<number> =>
@@ -434,6 +429,8 @@ const childWaiting = async (parentId: string): Promise<string> =>
   );
 
 describe("run tasks", { timeout: 180_000 }, () => {
+  beforeAll(chooseModel);
+
   it("start the exact version their binding pins, as a child in the parent's lineage, and take its output", async () => {
     const admin = await person("admin");
     // Version 2 says something else: the parent's binding pins 1.0.0.
@@ -888,7 +885,7 @@ describe("run tasks", { timeout: 180_000 }, () => {
       runChild("first", child.name),
       runChild("second", child.name),
     ]);
-    const { gateway, restore } = gatewayAnswering(
+    const provider = await providerAnswering(
       greetingAnswer("Hello, Ada"),
       greetingAnswer("Never sent")
     );
@@ -896,18 +893,14 @@ describe("run tasks", { timeout: 180_000 }, () => {
     // One request for the lineage: each child alone may make one, as its
     // own limit of model calls allows, but not both.
     const result = await withQuotas({ lineageModelRequests: 1 }, async () => {
-      try {
-        const runId = await started(admin, parent.id);
-        const run = await endOf(admin, parent.id, runId);
-        const children = await childrenOf(runId);
-        return {
-          end: endStateOf(run),
-          children: children.map(({ status }) => status),
-          requests: gateway.requests.length,
-        };
-      } finally {
-        restore();
-      }
+      const runId = await started(admin, parent.id);
+      const run = await endOf(admin, parent.id, runId);
+      const children = await childrenOf(runId);
+      return {
+        end: endStateOf(run),
+        children: children.map(({ status }) => status),
+        requests: provider.requests.length,
+      };
     });
 
     expect(result).toStrictEqual({
@@ -923,14 +916,9 @@ describe("run tasks", { timeout: 180_000 }, () => {
     const { parent } = await parentOf(admin, child, [
       runChild("ask-child", child.name),
     ]);
-    const { restore } = gatewayAnswering(greetingAnswer("Hello, Ada"));
-    let runId = "";
-    try {
-      runId = await started(admin, parent.id);
-      await endOf(admin, parent.id, runId);
-    } finally {
-      restore();
-    }
+    await providerAnswering(greetingAnswer("Hello, Ada"));
+    const runId = await started(admin, parent.id);
+    await endOf(admin, parent.id, runId);
     const [asked] = await childrenOf(runId);
     // Ended just now: kept, in case a late delivery starts a run in it.
     await ledgerSwept();
@@ -1137,6 +1125,8 @@ const hostOf = async (
 const data = { input: { input: { who: "Ada" }, context: {} } };
 
 describe("a run task's host", { timeout: 60_000 }, () => {
+  beforeAll(chooseModel);
+
   it("starts only the child its build sealed, on what the host builds, and waits only once its enter step started it", async () => {
     const admin = await person("admin");
     const child = await greeter(admin);

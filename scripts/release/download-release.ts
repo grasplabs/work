@@ -6,9 +6,9 @@
  *
  * The manifest is read first and every blob it names is checked against it
  * as it arrives (`verifyReleaseBlobs`); one that is missing or doesn't
- * match stops the download. The manifest and the limit evidence (when the
- * release has one) are written as they are stored, never re-encoded, so
- * what's promoted is what staging published. Reads only.
+ * match stops the download. The manifest is written as it is stored,
+ * never re-encoded, so what's promoted is what staging published. Reads
+ * only.
  *
  * Env: R2_ENDPOINT, R2_BUCKET (the bucket to read), R2_ACCESS_KEY_ID,
  *      R2_SECRET_ACCESS_KEY
@@ -19,8 +19,6 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 
 import {
-  limitEvidenceFile,
-  limitEvidenceKey,
   manifestKey,
   releaseManifestSchema,
   verifyReleaseBlobs,
@@ -109,9 +107,5 @@ await verifyReleaseBlobs(manifest, async (key) => {
   }
   return bytes;
 });
-const evidence = await read(limitEvidenceKey(releaseId));
-if (evidence !== undefined) {
-  write(limitEvidenceFile, evidence);
-}
 write("manifest.json", manifestBytes);
 console.info(`Release ${releaseId} fetched from ${bucket} and verified`);

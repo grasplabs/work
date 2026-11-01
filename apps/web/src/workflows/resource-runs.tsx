@@ -15,6 +15,7 @@ import { formatDateTime } from "../format.ts";
 import type { Names } from "./activity-bar.tsx";
 import { RunSheet } from "./run-detail.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { WaitingForAiProvider } from "./runs.tsx";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
 // as core lists them for the reader: every run for its builders, their own
@@ -101,6 +102,11 @@ export const ResourceRuns = ({
                       />
                       {t(runStatusLabels[run.status])}
                     </span>
+                    {run.aiProvider === undefined ? null : (
+                      <span className="text-muted-foreground block text-xs">
+                        <WaitingForAiProvider wait={run.aiProvider} />
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell variant="roomy">{run.version}</TableCell>
                   <TableCell variant="roomy">

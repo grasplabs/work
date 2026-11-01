@@ -406,12 +406,6 @@ export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
   delivery: () => Promise<ScreenDelivery>;
   /**
-   * Tells core the page got the answer of `request`, a keyed submission
-   * the frame sent (spec 10.7.8): core forgets it from the person's
-   * recovery index. Anything else is forgotten nothing.
-   */
-  received: (request: string) => Promise<void>;
-  /**
    * Starts a run of the App's workflow, for the person: anyone with a role
    * in the App. Audited as started on a screen (`via: "screen"`).
    */

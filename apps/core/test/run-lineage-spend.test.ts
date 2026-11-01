@@ -14,6 +14,7 @@ import {
   draftingFiles,
   eventsNow,
   failedWith,
+  lineageModel,
   llmStep,
   named,
   refusalsOf,
@@ -24,8 +25,7 @@ import {
   statusOf,
   stepCall,
   times,
-  withGateway,
-  workersAi,
+  withProvider,
 } from "./run-lineages.ts";
 import { finished, woken } from "./runs.ts";
 import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
@@ -55,9 +55,9 @@ ${llmStep()}`,
       ),
     });
 
-    // $0.50 a lineage: the root's and its child's answers spend $0.586.
-    const result = await withGateway(
-      { run: { limit: 0.5 } },
+    // $1 a lineage: the root's and its child's answers spend $1.0003.
+    const result = await withProvider(
+      { run: { limit: 1 } },
       times(3, dearTotal),
       async (fake) => {
         const root = await builder.api.workflows.start(app, "reader");
@@ -119,8 +119,8 @@ ${llmStep()}`,
     const root = await builder.api.workflows.start(app, "idle");
     await finished(root.id);
     // Calls under way of the root and of a run beside the next, until
-    // released: each reserves some $0.014 (Llama's default 6,000-token
-    // answer), as a step does.
+    // released: each reserves some $0.01 (a step's 6,000-token answer), as
+    // a step does.
     const release = Promise.withResolvers<boolean>();
     const held = { ...cheapAnswer, pause: { at: 1, until: release.promise } };
     const branches = [
@@ -133,11 +133,10 @@ ${llmStep()}`,
       }),
     ];
 
-    // $0.03 a lineage fits two such calls at once, not a third beside
-    // them: the child's step, which reserves some $0.007 (half its
-    // binding's 6,000 tokens).
-    const result = await withGateway(
-      { run: { limit: 0.03 } },
+    // $0.022 a lineage fits two such calls at once, not a third beside
+    // them: the child's step.
+    const result = await withProvider(
+      { run: { limit: 0.022 } },
       [...times(2, held), dearTotal],
       async (fake) => {
         const holding = Promise.all(
@@ -186,10 +185,10 @@ ${llmStep()}`,
     const root = await builder.api.workflows.start(appX, "idle");
     await finished(root.id);
 
-    // $0.30 a lineage's account: one dear answer ($0.293) leaves no room
-    // for a second step's request (some $0.014) beside it.
-    const result = await withGateway(
-      { run: { limit: 0.3 } },
+    // $0.505 a lineage's account: one dear answer ($0.50015) leaves no
+    // room for a second step's request (some $0.01) beside it.
+    const result = await withProvider(
+      { run: { limit: 0.505 } },
       times(2, dearTotal),
       async (fake) => {
         const first = await startedByMail(appY, "reader", root.id);
@@ -312,11 +311,11 @@ ${llmStep()}`,
       workflowFiles("idle", "  return null;")
     );
     const appY = await serverAppWith(builder, draftingFiles());
-    await bindModel(appY, "reader", workersAi);
+    await bindModel(appY, "reader", lineageModel);
     const root = await builder.api.workflows.start(appX, "idle");
     await finished(root.id);
 
-    const result = await withGateway(
+    const result = await withProvider(
       { run: { limit: 1 } },
       [cheapAnswer],
       async (fake) => {
@@ -426,9 +425,9 @@ ${llmStep()}`,
     const joined = await startedByMail(appY, "idle", root.id);
     await finished(joined);
 
-    // $0.30 an account: one dear answer leaves no room for a second.
-    const result = await withGateway(
-      { run: { limit: 0.3 } },
+    // $0.505 an account: one dear answer leaves no room for a second.
+    const result = await withProvider(
+      { run: { limit: 0.505 } },
       times(3, dearTotal),
       async (fake) => {
         // App Y's mail starts App X's runs again, under Y's run: they
@@ -564,10 +563,10 @@ ${llmStep()}`,
       return [code, details.because, details.retryAfterSeconds];
     };
 
-    // $0.02 a lineage fits one call reserving Llama's whole answer, not a
-    // second beside it.
-    const result = await withGateway(
-      { run: { limit: 0.02 } },
+    // $0.015 a lineage fits one call reserving a step's whole answer, not
+    // a second beside it.
+    const result = await withProvider(
+      { run: { limit: 0.015 } },
       [held],
       async (fake) => {
         // The root's call may take 15 minutes: a wait derived from it

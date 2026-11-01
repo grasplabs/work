@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelForRole, modelSettings, models } from "../models.ts";
 import type { Took } from "./store.ts";
 import { NoDrawingModelError } from "./team-map.ts";
 
@@ -92,7 +92,7 @@ export const referralOf = async (
   brief: ReferralBrief,
   count: (took: Took) => void
 ): Promise<ReferralFound> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

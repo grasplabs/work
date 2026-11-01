@@ -15,39 +15,6 @@ import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import type { ReactNode } from "react";
 
-/** A block of the section: its title, a line under it, something beside it, and what it holds. */
-export const Panel = ({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description?: ReactNode;
-  action?: ReactNode;
-  children?: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-5 py-4">
-      <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        {description === undefined ? null : (
-          <p className="text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
-/** A line where a panel has nothing to show yet. */
-export const Empty = ({ children }: { children: ReactNode }) => (
-  <p className="bg-card text-muted-foreground rounded-xl border px-5 py-4">
-    {children}
-  </p>
-);
-
 /** Where a share is kept between nothing and all of it. */
 const shareOf = (value: number, of: number): number =>
   of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;

@@ -23,11 +23,23 @@ import { formatPercent } from "../../format.ts";
 // counts by id, marks for the tools and places, a row that opens what it
 // is about, and what grew.
 
-/** Logos the deployment serves, by the platform or provider they are of. */
+/**
+ * Logos the deployment serves, by the platform or provider they are of
+ * (`apps/web/public/logos`). Where each comes from:
+ * - microsoft-teams.svg, slack.svg, whatsapp.svg and gmail.svg: the
+ *   gilbarbara/logos set, through @iconify-json/logos, CC0, as the
+ *   prototype bundles them.
+ * - microsoft.svg and google.svg: the marks of Microsoft's and Google's own
+ *   sign-in button guidelines, drawn as plain SVG.
+ * The trademarks stay with their owners; they are shown only to name the
+ * place or provider.
+ */
 const logos: Readonly<Record<string, string>> = {
-  teams: "/logos/microsoft.svg",
+  teams: "/logos/microsoft-teams.svg",
+  slack: "/logos/slack.svg",
+  whatsapp: "/logos/whatsapp.svg",
   microsoft: "/logos/microsoft.svg",
-  gmail: "/logos/google.svg",
+  gmail: "/logos/gmail.svg",
   google: "/logos/google.svg",
 };
 
@@ -40,7 +52,7 @@ export const PlaceLogo = ({
   size = "xs",
 }: {
   place: string;
-  size?: "xs" | "inline" | "sm";
+  size?: "xs" | "inline" | "sm" | "default";
 }) => (
   <AppLogo logo={logos[place] ?? null} name={placeName(place)} size={size} />
 );

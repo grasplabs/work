@@ -12,17 +12,17 @@ import {
   codeResults,
   codeStep,
   model,
-  pointAtGateway,
+  configureObject,
   says,
   transcript,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import type { ToolkitServer } from "./mail-server.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
@@ -86,7 +86,7 @@ const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
 
 /** The person, the mail connection the agent was granted, and a chat of theirs. */
-const setUp = async (via: "teams" | "web", ...replies: GatewayReply[]) => {
+const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const admin = await signedInApi(idp, "admin");
   const mail = await mailConnection(
@@ -112,7 +112,8 @@ const setUp = async (via: "teams" | "web", ...replies: GatewayReply[]) => {
     undefined,
     via
   );
-  await pointAtGateway(stub, fakeGateway(...replies));
+  await fakeProvider(...replies);
+  await configureObject(stub);
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: id },
     object: { type: "connection", connectionId: mail.id },

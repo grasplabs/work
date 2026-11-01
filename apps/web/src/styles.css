@@ -898,42 +898,24 @@
   }
 }
 
-/* The line down between two blocks on a narrow canvas, where the chain stands top to bottom
-   (`thread-dots`), and the same dots for a line of any length: down (`dots-down`, the rail a
-   question's answers hang on) and across (`dots-across`, from that rail to an answer). */
-@utility thread-dots {
-  width: 2px;
-  height: 1rem;
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 2px 6.5px;
-  background-repeat: repeat-y;
-}
-
+/* A line of dots, down a page in the colour of the text it is set in (`text-*`). One rule draws
+   every size of it: `dots-down` is the fine line, `dots-down-wide` beside it the larger, softer
+   dots of the spine the brain's log hangs its days on (brain/brain-log.tsx), as the prototype
+   draws it. */
 @utility dots-down {
-  color: var(--wire);
   background-image: radial-gradient(
     circle,
-    currentColor 0.8px,
-    transparent 1px
+    currentColor var(--dots-dot, 0.8px),
+    transparent var(--dots-fade, 1px)
   );
-  background-size: 2px 6.5px;
+  background-size: var(--dots-tile, 2px 6.5px);
   background-repeat: repeat-y;
 }
 
-@utility dots-across {
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 6.5px 2px;
-  background-repeat: repeat-x;
+@utility dots-down-wide {
+  --dots-dot: 0.8px;
+  --dots-fade: 1.3px;
+  --dots-tile: 4px 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1218,14 +1200,6 @@
 }
 @utility stage-columns {
   grid-template-columns: 11rem minmax(0, 1fr);
-}
-
-/*
- * From the prototype's Landscape (components/landscape/insight.tsx): what
- * Grasp read about a value, as labels and values side by side.
- */
-@utility grid-label-value {
-  grid-template-columns: auto 1fr;
 }
 
 /*

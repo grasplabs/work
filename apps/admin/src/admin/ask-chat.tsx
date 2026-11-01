@@ -15,6 +15,12 @@ import {
   InputGroupAddon,
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+} from "@grasp-os/ui/components/item";
 import { PromptInputSubmit } from "@grasp-os/ui/components/prompt-input";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { ChevronRightIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
@@ -256,30 +262,32 @@ export const AskChat = ({
           </h2>
           <div className="flex flex-col gap-3">
             <Composer onSend={send} onStop={stop} waiting={waiting} />
-            <ul
+            <ItemGroup
               aria-label="Questions to start from"
-              className="bg-card overflow-hidden rounded-xl border"
+              render={<ul />}
+              variant="card"
             >
               {startersFor(about).map((starter) => (
-                <li className="border-b last:border-b-0" key={starter}>
-                  <button
-                    className="hover:bg-muted/60 focus-visible:bg-muted/60 flex w-full items-center gap-3 px-3.5 py-2.5 text-left outline-none"
+                <li key={starter}>
+                  <Item
                     onClick={() => {
                       send(starter);
                     }}
-                    type="button"
+                    render={<button aria-label={starter} type="button" />}
+                    size="sm"
+                    variant="row"
                   >
-                    <span className="min-w-0 flex-1 text-pretty">
-                      {starter}
-                    </span>
-                    <ChevronRightIcon
-                      aria-hidden="true"
-                      className="text-muted-foreground size-4 flex-none"
-                    />
-                  </button>
+                    <ItemContent>{starter}</ItemContent>
+                    <ItemActions>
+                      <ChevronRightIcon
+                        aria-hidden="true"
+                        className="text-muted-foreground"
+                      />
+                    </ItemActions>
+                  </Item>
                 </li>
               ))}
-            </ul>
+            </ItemGroup>
           </div>
         </div>
       </div>

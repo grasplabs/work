@@ -16,7 +16,7 @@ import { recordOutcome } from "@grasp-os/brain/outcomes";
  * gateway and ledger, with the same model, tools, memory, permissions and
  * answer protocol; the harness reads Knowledge for the last two arms as the
  * person, through their own API, never past what they may read. Only the
- * model provider behind AI Gateway is swapped: brain-stub-model.ts in CI.
+ * model provider behind connect is swapped: brain-stub-model.ts in CI.
  *
  * Each trial records what reached the model, the answer, whether stored
  * state changed, its latency and its charged cost; brain-scoring.ts turns
@@ -48,14 +48,11 @@ import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import {
-  gatewayConfig,
+  configureObject,
   model,
-  pointAtGateway,
   setObjectEnv,
   transcript,
 } from "./agent-chat.ts";
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
@@ -107,6 +104,8 @@ import {
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
@@ -525,12 +524,9 @@ const grantedKeys = (company: BrainCompany): string[] => [
 export const brainBudgetMonth = "2400-01";
 export const brainBudgetDay = "2400-01-01";
 
-/** Points `stub` at the provider, its calls counted in the run's month. */
-const pointAt = async (
-  stub: Workspace["stub"],
-  gateway: Provider["gateway"]
-) => {
-  await pointAtGateway(stub, gateway, { config: gateway.config });
+/** Gives `stub` the run's model rules, its calls counted in the run's month. */
+const pointAt = async (stub: Workspace["stub"], sent: Provider["sent"]) => {
+  await configureObject(stub, { rules: sent.rules });
   await setObjectEnv(stub, {
     MODEL_BUDGET_MONTH: brainBudgetMonth,
     MODEL_BUDGET_DAY: brainBudgetDay,
@@ -945,10 +941,10 @@ const revokeAccess = async (
 const elsewhereOf = async (
   company: BrainCompany,
   place: Workspace,
-  gateway: Provider["gateway"]
+  sent: Provider["sent"]
 ) => {
   const other = await workspaceOf(company, place.persona);
-  await pointAt(other.stub, gateway);
+  await pointAt(other.stub, sent);
   const chat = await other.stub.createChat(
     "Baseline elsewhere",
     company.people[place.persona].userId,
@@ -961,19 +957,18 @@ const elsewhereOf = async (
   };
 };
 
-/** A model provider: what it answers each gateway request with, in a turn. */
+/** A model provider: what it answers each request with, in a turn. */
 export type BrainProvider = (
   turn: () => StubTurn
 ) => (
-  requests: readonly GatewayRequest[]
-) => GatewayReply | Promise<GatewayReply>;
+  requests: readonly SentRequest[]
+) => ProviderReply | Promise<ProviderReply>;
 
 /**
  * An answer to stop mid-stream: after `at` characters, until `until`.
  * `reached` turns true once its stream has delivered those characters and
- * stopped: a flag, not a promise, as the gateway answers in the Workspace
- * object's I/O context, and a test resumed from there would do its own
- * I/O in it.
+ * stopped: a flag, not a promise, so a test waiting on the turn reads it
+ * between its own steps rather than being resumed from the provider's.
  */
 interface Hold {
   at: number;
@@ -984,28 +979,35 @@ interface Hold {
 }
 
 /**
- * The gateway config a run's objects get (`MODEL_GATEWAY`), and the model
- * its chats ask: the test gateway's by default.
+ * The model the organization chose and its chats ask, and the model rules
+ * a run's objects get (`MODEL_GATEWAY`): the tests' model, with no rules,
+ * by default.
  */
 export interface BrainModelSetup {
   model: string;
-  config: { gateway: string; models: readonly string[] } & Record<
-    string,
-    unknown
-  >;
+  rules: Record<string, unknown>;
 }
 
-const testModelSetup: BrainModelSetup = { model, config: gatewayConfig };
+const testModelSetup: BrainModelSetup = { model, rules: {} };
 
 /**
  * The run's one model provider, behind every persona's object: trials run
  * one at a time, so it answers for the trial under way.
  */
-const providerOf = (respond: BrainProvider, setup: BrainModelSetup) => {
+const providerOf = async (respond: BrainProvider, setup: BrainModelSetup) => {
   let turn: StubTurn = { phase: "prior" };
   let hold: Hold | undefined;
   const answer = respond(() => turn);
-  const gateway = answeringGateway(async (requests) => {
+  // What the audit log recorded between one request and the next, by
+  // request: the reads the step before each request made, in log order,
+  // not by clock. A request comes only after its step's code has ended.
+  const recorded: AuditEvent[][] = [];
+  let head = 0;
+  // The time this takes is the harness's, not the trial's: kept apart.
+  let observingMs = 0;
+  const replyTo = async (
+    requests: readonly SentRequest[]
+  ): Promise<ProviderReply> => {
     const reply = await answer(requests);
     const pending = hold;
     // Only an answer, not a step's call for code: the turn's last reply.
@@ -1029,28 +1031,34 @@ const providerOf = (respond: BrainProvider, setup: BrainModelSetup) => {
         },
       },
     };
-  });
-  // What the audit log recorded between one request and the next, by
-  // request: the reads the step before each request made, in log order,
-  // not by clock. A request comes only after its step's code has ended.
-  const recorded: AuditEvent[][] = [];
-  let head = 0;
-  // The time this takes is the harness's, not the trial's: kept apart.
-  let observingMs = 0;
-  const { fetch } = gateway.binding;
-  const binding = {
-    ...gateway.binding,
-    fetch: async (input: Request | string | URL, init?: RequestInit) => {
+  };
+  // Read one request at a time, in the order they reached the provider:
+  // each read starts where the one before it ended.
+  let observed: Promise<unknown> = Promise.resolve();
+  const observe = async (index: number): Promise<void> => {
+    const before = observed;
+    const done = Promise.withResolvers<boolean>();
+    observed = done.promise;
+    try {
+      await before;
       const started = performance.now();
       const read = await eventsAfterWithHead(head);
-      recorded.push(read.events);
+      recorded[index] = read.events;
       ({ head } = read);
       observingMs += performance.now() - started;
-      return await fetch(input, init);
-    },
+    } finally {
+      done.resolve(true);
+    }
   };
+  const provider = await answeringProvider(
+    async (requests) => {
+      await observe(requests.length - 1);
+      return await replyTo(requests);
+    },
+    { models: [setup.model] }
+  );
   return {
-    gateway: { ...gateway, binding, ...setup },
+    sent: { requests: provider.requests, ...setup },
     recorded,
     /** How long reading the audit log took the harness so far. */
     observingMs: () => observingMs,
@@ -1083,7 +1091,7 @@ const providerOf = (respond: BrainProvider, setup: BrainModelSetup) => {
   };
 };
 
-type Provider = ReturnType<typeof providerOf>;
+type Provider = Awaited<ReturnType<typeof providerOf>>;
 
 type Workspace = Awaited<ReturnType<typeof workspaceOf>>;
 
@@ -1454,7 +1462,7 @@ const filesDigest = async (): Promise<string> => {
  * that step ran that one call alone.
  */
 export const transcriptWithReads = (
-  requests: readonly GatewayRequest[],
+  requests: readonly SentRequest[],
   reads: readonly (readonly string[])[]
 ): TranscriptPart[] => {
   const backings = new Map<string, readonly string[]>();
@@ -1528,7 +1536,7 @@ const chatKeeper = async (place: Workspace, chatId: string) => {
 
 /** Every string the model was sent in the requests from `firstRequest` on. */
 const modelInputFrom = (provider: Provider, firstRequest: number): string =>
-  provider.gateway.requests
+  provider.sent.requests
     .slice(firstRequest)
     .flatMap(({ body }) => modelStrings(body))
     .join("\n");
@@ -1543,7 +1551,7 @@ const reachedFrom = async (
   place: Workspace,
   firstRequest: number
 ): Promise<Pick<TrialObservation, "modelInput" | "transcript">> => {
-  const requests = provider.gateway.requests.slice(firstRequest);
+  const requests = provider.sent.requests.slice(firstRequest);
   return {
     modelInput: modelInputFrom(provider, firstRequest),
     // Every request in order: a long turn's last request may leave out
@@ -1629,7 +1637,7 @@ const changedInTrial = ({
 const earlierTurns = async (
   company: BrainCompany,
   place: Workspace,
-  { setTurn, gateway: { model: asked } }: Provider,
+  { setTurn, sent: { model: asked } }: Provider,
   {
     chatId,
     plan: { arm, task },
@@ -1683,10 +1691,10 @@ const runTrial = async (
 ): Promise<TrialObservation> => {
   const { task, arm, repeat, cold } = plan;
   const person = company.people[task.persona];
-  const { gateway, setTurn } = provider;
+  const { sent, setTurn } = provider;
   // Every object of the class may share one env, and an evicted one gets
   // a new one: pointed at the provider before each trial.
-  await pointAt(place.stub, gateway);
+  await pointAt(place.stub, sent);
   const chat = await place.stub.createChat(
     `Baseline ${task.id}`,
     person.userId,
@@ -1696,7 +1704,7 @@ const runTrial = async (
   // there first: set up before the trial, as it isn't the trial's change.
   const elsewhere =
     arm === "readElsewhereFirst"
-      ? await elsewhereOf(company, place, gateway)
+      ? await elsewhereOf(company, place, sent)
       : undefined;
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
@@ -1707,7 +1715,7 @@ const runTrial = async (
   let revoked: MidRun | undefined;
   let restore: (() => Promise<void>) | undefined;
   await provider.mark();
-  const firstRequest = gateway.requests.length;
+  const firstRequest = sent.requests.length;
   // Where what a revocation took away stops being allowed to reach the
   // model: the whole trial, unless the revocation went through.
   let revokedAt = firstRequest;
@@ -1740,7 +1748,7 @@ const runTrial = async (
               },
               asked
             );
-      revokedAt = gateway.requests.length;
+      revokedAt = sent.requests.length;
       spentBefore = await charged();
       // A cold question starts in a just-evicted object, its caches and
       // memory gone, after any earlier turns of its chat. Its timer starts
@@ -1750,7 +1758,7 @@ const runTrial = async (
       if (cold) {
         await evictDurableObject(place.stub);
         started = performance.now();
-        await pointAt(place.stub, gateway);
+        await pointAt(place.stub, sent);
       } else {
         started = performance.now();
       }
@@ -1766,7 +1774,7 @@ const runTrial = async (
       setTurn({ phase: "question", task, searches: arm === "agent", arm });
       const reply = await place.stub.ask(chat.id, {
         text: renderPrompt(task.question, handed.sources),
-        model: gateway.model,
+        model: sent.model,
       });
       ({ answer } = reply);
       if (reply.outcome !== "answered") {
@@ -1960,8 +1968,8 @@ const runDurabilityCase = async (
   }
 ): Promise<DurabilityCase> => {
   const person = company.people[task.persona];
-  const { gateway, setTurn } = provider;
-  await pointAt(place.stub, gateway);
+  const { sent, setTurn } = provider;
+  await pointAt(place.stub, sent);
   const chat = await place.stub.createChat(
     `Durability ${kind} ${task.id}`,
     person.userId,
@@ -1971,7 +1979,7 @@ const runDurabilityCase = async (
   setTurn({ phase: "prior" });
   for (const said of task.priorTurns ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- in order, as said
-    await place.stub.ask(chat.id, { text: said, model: gateway.model });
+    await place.stub.ask(chat.id, { text: said, model: sent.model });
   }
   // The same input both times: the prompt, its sources read once.
   const { sources } = await sourcesFor(company, place, { arm, task });
@@ -1982,7 +1990,7 @@ const runDurabilityCase = async (
     const stateBefore = await trialStateOf(place, chat.id, knowledge);
     const requestsBefore = await ledgerRequests();
     await provider.mark();
-    const firstRequest = gateway.requests.length;
+    const firstRequest = sent.requests.length;
     const spentBefore = await charged();
     const started = performance.now();
     const observedBefore = provider.observingMs();
@@ -2012,7 +2020,7 @@ const runDurabilityCase = async (
       try {
         const reply = await place.stub.ask(chat.id, {
           text,
-          model: gateway.model,
+          model: sent.model,
         });
         ({ answer } = reply);
         if (reply.outcome !== "answered") {
@@ -2054,7 +2062,7 @@ const runDurabilityCase = async (
     const latencyMs =
       performance.now() - started - (provider.observingMs() - observedBefore);
     // Woken again, as the next call to the object would.
-    await pointAt(place.stub, gateway);
+    await pointAt(place.stub, sent);
     await chatRows.keep();
     const stateAfter = await trialStateOf(place, chat.id, knowledge);
     const changedTables = [
@@ -2092,7 +2100,7 @@ const runDurabilityCase = async (
     // A restart of an object at rest, as a deploy between two turns makes:
     // its memory goes, its storage stays.
     await evictDurableObject(place.stub);
-    await pointAt(place.stub, gateway);
+    await pointAt(place.stub, sent);
   }
   const afterRestart = await lastSaid(place, chat.id);
   const chatAfterRestart = JSON.stringify(
@@ -2125,7 +2133,7 @@ const runDurabilityCase = async (
 };
 
 /** A field of a request's body, or `null` without it. */
-const fieldOf = (request: GatewayRequest, field: string): unknown =>
+const fieldOf = (request: SentRequest, field: string): unknown =>
   typeof request.body === "object" &&
   request.body !== null &&
   field in request.body
@@ -2146,7 +2154,7 @@ const ownSections =
  * them, without the memory and skills sections, which differ by person
  * and run and are pinned apart (sources and skills).
  */
-const promptOf = (request: GatewayRequest): string =>
+const promptOf = (request: SentRequest): string =>
   systemTextOf(request.body).replaceAll(ownSections, "<$<section>/>");
 
 /** A seeded shuffle, so arms take turns going first without luck deciding. */
@@ -2174,7 +2182,7 @@ export interface RunIdentity {
   retrieval: Partial<Record<BrainWindow, string>>;
   /** The stored corpus at the start of each window it ran. */
   sources: Partial<Record<BrainWindow, string>>;
-  model: { id: string; provider: string; gateway: string };
+  model: { id: string; provider: string };
   /**
    * The build that ran, for a run outside CI: its commit, whether the
    * tree had changes on top, and where it ran.
@@ -2186,7 +2194,7 @@ export interface RunIdentity {
   prompt: string[];
   /** The skills the personas' catalogs list, and each one's text. */
   skills: string;
-  /** Access, grants, gateway, protocol and budgets. */
+  /** Access, grants, model rules, protocol and budgets. */
   policy: string;
   harness: string;
   split: BrainSplit;
@@ -2260,7 +2268,7 @@ export interface BrainRunOptions {
   respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
-  /** The model the chats ask and the gateway config: the test gateway's by default. */
+  /** The model the chats ask and the model rules: the tests' model, no rules, by default. */
   modelSetup?: BrainModelSetup;
   /** The build, pinned in the identity of a run outside CI. */
   build?: BrainBuild;
@@ -2426,7 +2434,7 @@ const warmUp = async (
 ) => {
   for (const place of places.values()) {
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    await pointAt(place.stub, provider.gateway);
+    await pointAt(place.stub, provider.sent);
     provider.setTurn({ phase: "prior" });
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
     const chat = await place.stub.createChat(
@@ -2437,7 +2445,7 @@ const warmUp = async (
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
     await place.stub.ask(chat.id, {
       text: "Warm-up: just say noted.",
-      model: provider.gateway.model,
+      model: provider.sent.model,
     });
   }
 };
@@ -2473,7 +2481,7 @@ export const runBrainBaseline = async (
   }
   const providerId = providerName ?? brainStubModel;
   const random = seededRandom(seed);
-  const provider = providerOf(respond, modelSetup);
+  const provider = await providerOf(respond, modelSetup);
   const places = new Map<BrainPersona, Workspace>();
   for (const persona of brainPersonas) {
     // oxlint-disable-next-line no-await-in-loop -- one workspace at a time
@@ -2573,11 +2581,11 @@ export const runBrainBaseline = async (
     ["fullText", "agent"],
     ["fullContext", "fullText"],
   ];
-  const contracts = async (of: (request: GatewayRequest) => unknown) =>
+  const contracts = async (of: (request: SentRequest) => unknown) =>
     [
       ...new Set(
         await Promise.all(
-          provider.gateway.requests.map(
+          provider.sent.requests.map(
             async (request) => await digestOf(of(request))
           )
         )
@@ -2609,11 +2617,7 @@ export const runBrainBaseline = async (
       },
       sources,
       retrieval,
-      model: {
-        id: modelSetup.model,
-        provider: providerId,
-        gateway: modelSetup.config.gateway,
-      },
+      model: { id: modelSetup.model, provider: providerId },
       ...buildIdentity(build),
       tools: await contracts((request) => fieldOf(request, "tools")),
       prompt: await contracts(promptOf),
@@ -2625,7 +2629,7 @@ export const runBrainBaseline = async (
           key,
           actions: ["read"],
         })),
-        gateway: modelSetup.config,
+        rules: modelSetup.rules,
         protocol: answerProtocol,
         budgets: { searchedSections, fullContextChars },
       }),

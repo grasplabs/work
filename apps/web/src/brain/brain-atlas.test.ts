@@ -50,10 +50,8 @@ describe(atlasOf, () => {
       teamPath: region("parietal").notes.find(
         (note) => note.id === "team-service"
       )?.path,
-      // Systems, applications and questions have no region of their own: they sit beside the work.
-      unplaced: ["company", "app-chatgpt", "gap-budget"].filter((id) =>
-        atlas.home.has(id)
-      ),
+      // Systems and questions have no region of their own: they sit beside the work.
+      unplaced: ["company", "gap-budget"].filter((id) => atlas.home.has(id)),
     }).toStrictEqual({
       homes: {
         vision: "frontal",

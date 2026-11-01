@@ -14,7 +14,7 @@ import {
   appTestRuns,
   businessStores,
 } from "../db/core/schema.ts";
-import { gatewaySettings } from "../models.ts";
+import { modelSettings } from "../models.ts";
 import { callOperation } from "../operations.ts";
 import { hostedRelease } from "../release-runner.ts";
 import { consumerFailure, fenced, servedIn } from "../store-operations.ts";
@@ -289,10 +289,12 @@ export const fixtureCall = async (
     // hold an explicit model to, as a real call does (resource-calls.ts).
     // It is held to what any binding could be approved for: a model the
     // deployment allows (workflow-bindings.ts).
+    const settings =
+      call.model === undefined ? undefined : await modelSettings(env);
+    const allowed: readonly string[] = settings?.models ?? [];
     if (
       call.model !== undefined &&
-      (typeof call.model !== "string" ||
-        !gatewaySettings(env).models.includes(call.model))
+      (typeof call.model !== "string" || !allowed.includes(call.model))
     ) {
       throw workflowResourceErrors.create("workflow.call_invalid", {
         issues: ["model: The deployment doesn't allow it."],

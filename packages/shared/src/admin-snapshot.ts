@@ -345,8 +345,8 @@ export const adminSnapshotSchema = z.object({
     openedAt: isoTime.nullable(),
   }),
   /**
-   * The contract and its papers: null until core holds them, from Rooms
-   * and Stripe, with the issue that brings them.
+   * The contract and its papers: null until core holds them, with the
+   * issue that brings them.
    */
   contract: notYetHeld,
   /** The organization's members, by name. */

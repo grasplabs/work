@@ -1,7 +1,11 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
-import type { DrawnWork, WorkRecord } from "@grasp-os/shared/admin/org-record";
+import type {
+  DrawnWork,
+  Told,
+  WorkRecord,
+} from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -556,13 +560,72 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
     ? null
     : (drawnWorkSchema.safeParse(JSON.parse(stored)).data ?? null);
 
-/** The questions earlier interviews left open, for Stephen to ask when they come up. */
-const openKnown = (drawn: DrawnWork | null): string[] =>
-  drawn === null || drawn.open.length === 0
+/**
+ * What nobody who told a piece of work has said yet, each as a kind of
+ * answer in words of the store's own (GRA-330): the next interview asks
+ * about these when they come up. Never the drawing's own open questions,
+ * which the model writes from what as few as one colleague said, so they
+ * could carry that colleague's words, paraphrased, into someone else's
+ * interview; what fewer than five people said reaches nobody but them.
+ * Only that an answer is missing is told, never what anyone answered.
+ */
+const unknownAnswers: readonly {
+  missing: (told: Told[]) => boolean;
+  ask: string;
+}[] = [
+  {
+    missing: (told) => told.every(({ volume }) => volume === null),
+    ask: "how many come in, in a week or a month",
+  },
+  {
+    missing: (told) =>
+      told.every(
+        ({ takes, stepMinutes }) =>
+          takes === null && (stepMinutes ?? []).length === 0
+      ),
+    ask: "how long one takes",
+  },
+  {
+    missing: (told) => told.every(({ wrong }) => wrong === null),
+    ask: "how many come in wrong or incomplete",
+  },
+  {
+    missing: (told) => told.every((said) => said.waits.length === 0),
+    ask: "where it waits, and for what",
+  },
+  {
+    missing: (told) =>
+      told.every(({ differently }) => differently.length === 0),
+    ask: "what is done when a case is off the normal path",
+  },
+  {
+    missing: (told) => told.every(({ decides }) => !decides),
+    ask: "what they look at to decide",
+  },
+  {
+    missing: (told) => told.every(({ next }) => !next),
+    ask: "who gets it after them",
+  },
+  {
+    missing: (told) => told.every(({ right }) => !right),
+    ask: "what done right looks like",
+  },
+];
+
+/** What nobody has said yet of a piece of work, for Stephen to ask when it comes up. */
+const stillUnknown = (drawn: DrawnWork | null): string[] => {
+  const told = Object.values(drawn?.told ?? {});
+  if (told.length === 0) {
+    return [];
+  }
+  const asks = unknownAnswers
+    .filter(({ missing }) => missing(told))
+    .map(({ ask }) => ask)
+    .slice(0, 4);
+  return asks.length === 0
     ? []
-    : [
-        `What earlier interviews left open, to ask when it comes up: ${drawn.open.slice(0, 4).join(" ")}`,
-      ];
+    : [`Nobody has said yet, so ask when it comes up: ${asks.join("; ")}.`];
+};
 
 const doersSchema = z.array(z.string());
 
@@ -1660,7 +1723,7 @@ export class Onboarding extends DurableObject<Env> {
     const gone =
       said === null
         ? []
-        : await spokenKeysOf(this.env, {
+        : await spokenKeysOf({
             ...said,
             texts: said.texts.filter((text) => !kept.has(text)),
           });
@@ -2367,7 +2430,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(kind === "lead" ? [] : openKnown(this.#drawingAskedOf(person.id))),
+      ...(kind === "lead" ? [] : stillUnknown(this.#drawingAskedOf(person.id))),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
@@ -4038,19 +4101,66 @@ export class Onboarding extends DurableObject<Env> {
     return this.choices();
   }
 
-  /** The documents the admin shared, the newest first. */
-  documents(): OnboardingDocument[] {
+  /**
+   * The documents the admin shared, the newest first: those checked
+   * against the purges since their reading started (`checkDocument`), or,
+   * for a purge, `unchecked` too.
+   */
+  documents(unchecked = false): OnboardingDocument[] {
     return this.#db
       .select()
       .from(documents)
+      .where(unchecked ? undefined : isNull(documents.checkMark))
       .orderBy(desc(documents.at))
       .all()
       .map(documentOf);
   }
 
-  /** Keeps a shared document's reading; in the log and the audit log without its words. */
+  /**
+   * The documents still waiting to be checked that were added before
+   * `before`, each with the erasure mark its reading started at: their writer never
+   * checked them.
+   */
+  uncheckedDocuments(
+    before: Date
+  ): { id: string; name: string; checkMark: number }[] {
+    return this.#db
+      .select({
+        id: documents.id,
+        name: documents.name,
+        checkMark: documents.checkMark,
+      })
+      .from(documents)
+      .where(
+        and(
+          isNotNull(documents.checkMark),
+          lt(documents.at, before.toISOString())
+        )
+      )
+      .all()
+      .flatMap(({ checkMark, ...rest }) =>
+        checkMark === null ? [] : [{ ...rest, checkMark }]
+      );
+  }
+
+  /** Serves a document checked against the purges since its reading started. */
+  checkDocument(id: string): void {
+    this.#db
+      .update(documents)
+      .set({ checkMark: null })
+      .where(eq(documents.id, id))
+      .run();
+  }
+
+  /**
+   * Keeps a shared document's reading, which started at erasure mark
+   * `checkMark`,
+   * unchecked (`checkDocument`); in the log and the audit log without its
+   * words.
+   */
   addDocument(
     kept: { id: string; name: string; reading: DocumentReading },
+    checkMark: number,
     by: AuditActor
   ): OnboardingDocument {
     const row = {
@@ -4060,6 +4170,7 @@ export class Onboarding extends DurableObject<Env> {
       by: whoIs(by),
       reading: JSON.stringify(kept.reading),
       answer: null,
+      checkMark,
     };
     this.ctx.storage.transactionSync(() => {
       this.#db.insert(documents).values(row).run();
@@ -4072,7 +4183,7 @@ export class Onboarding extends DurableObject<Env> {
     return documentOf(row);
   }
 
-  /** Keeps the admin's answer to a document's question; null for no such document. */
+  /** Keeps the admin's answer to a checked document's question; null for no such document. */
   answerDocument(
     id: string,
     answer: string,
@@ -4081,7 +4192,7 @@ export class Onboarding extends DurableObject<Env> {
     const [row] = this.#db
       .select()
       .from(documents)
-      .where(eq(documents.id, id))
+      .where(and(eq(documents.id, id), isNull(documents.checkMark)))
       .all();
     if (row === undefined) {
       return null;
@@ -4192,6 +4303,7 @@ export class Onboarding extends DurableObject<Env> {
     return this.#db
       .select({ id: documents.id })
       .from(documents)
+      .where(isNull(documents.checkMark))
       .all()
       .map(({ id }) => id);
   }
@@ -7306,7 +7418,7 @@ export class Onboarding extends DurableObject<Env> {
       const said = this.#saidIn(person);
       if (said !== null) {
         // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-        keys.set(person, await spokenKeysOf(this.env, said));
+        keys.set(person, await spokenKeysOf(said));
       }
     }
     return keys;
@@ -7336,7 +7448,7 @@ export class Onboarding extends DurableObject<Env> {
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
     const each = await Promise.all(
       said.map(async (lines) =>
-        lines === null ? [] : await spokenKeysOf(this.env, lines)
+        lines === null ? [] : await spokenKeysOf(lines)
       )
     );
     const keys = each.flat();
@@ -7367,17 +7479,24 @@ export class Onboarding extends DurableObject<Env> {
     await this.#armDrawing();
   }
 
-  /** Most stored lines one try takes out of the cache. */
-  static readonly #linesPerTry = 1000;
+  /**
+   * Most stored lines one try takes out of the cache: each is a line's
+   * folder, listed before its objects go (speech-cache.ts).
+   */
+  static readonly #linesPerTry = 100;
+
+  /** Most tries one call makes; the alarm takes the rest. */
+  static readonly #triesPerCall = 5;
 
   /**
    * Takes the voice's lines still waiting (`linesToForget`) out of the
    * cache, a page at a time, each forgotten here once the cache confirms
-   * it. What fails waits for the alarm. Returns how many went.
+   * it. What fails, or is left past this call's tries, waits for the
+   * alarm. Returns how many went.
    */
   async forgetLinesNow(): Promise<number> {
     let gone = 0;
-    for (;;) {
+    for (let tries = 0; tries < Onboarding.#triesPerCall; tries += 1) {
       const page = this.#db
         .select({ key: linesToForget.key })
         .from(linesToForget)
@@ -7403,6 +7522,7 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       gone += page.length;
     }
+    return gone;
   }
 
   /**

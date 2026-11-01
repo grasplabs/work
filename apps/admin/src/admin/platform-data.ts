@@ -37,7 +37,7 @@ export const staffActions = [
   "client.create",
   "client.discard",
   "client.ring",
-  "client.model_spend_ceiling",
+  "platform.ai",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",

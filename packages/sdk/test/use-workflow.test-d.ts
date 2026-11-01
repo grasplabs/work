@@ -266,3 +266,42 @@ export const useSendChecks = (): void => {
     style: "short",
   });
 };
+
+/**
+ * `respond` (spec 10.4.5, 10.7.2): a decision wait of the hook's own
+ * workflow, narrowed by its key, and that decision's value inferred from
+ * the wait alone; an event wait, another workflow's decision, a wrong or
+ * missing value and an untyped one are refused.
+ */
+export const useRespondChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote, { runId });
+  const archive = useWorkflow(workflows.archiveNotes, { runId });
+  for (const wait of summary.waits) {
+    if (wait.kind === "decision" && wait.key === "approveSummary") {
+      expectTypeOf(
+        summary.respond(wait, { approved: true, value: { comment: "Fine" } })
+      ).toEqualTypeOf<Promise<void>>();
+      void summary.respond(wait, {
+        approved: false,
+        value: { comment: "Too long", rating: 2 },
+      });
+      // @ts-expect-error -- chooseLength's value, not approveSummary's
+      void summary.respond(wait, { approved: true, value: "short" });
+      // @ts-expect-error -- no value where one is declared
+      void summary.respond(wait, { approved: true });
+      // @ts-expect-error -- untyped where the decision declares its value
+      void summary.respond(wait, { approved: true, value: anything });
+      // @ts-expect-error -- another workflow's hook answers none of this one's
+      void archive.respond(wait, { approved: true, value: null });
+    }
+    if (wait.kind === "decision" && wait.key === "chooseLength") {
+      void summary.respond(wait, { approved: true, value: "long" });
+      // @ts-expect-error -- outside the enum
+      void summary.respond(wait, { approved: true, value: "medium" });
+    }
+    if (wait.kind === "event") {
+      // @ts-expect-error -- an event wait is no decision to answer
+      void summary.respond(wait, { approved: true, value: null });
+    }
+  }
+};

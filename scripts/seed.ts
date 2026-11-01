@@ -482,6 +482,10 @@ const seedEngine = async (
     console.warn(`${app.name} is archived: the seed leaves it as it is.`);
     return { id: app.id, runs: 0 };
   }
+  // The process it serves, unless someone set one already.
+  if (app.process === null) {
+    await owner.api.apps.update(app.id, { process: seed.process });
+  }
   const screens = Object.fromEntries(
     Object.entries(engineScreens[seed.name] ?? {}).map(([name, code]) => [
       `screens/${name}.tsx`,

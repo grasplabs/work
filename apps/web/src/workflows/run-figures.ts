@@ -1,7 +1,5 @@
 import type { RunActivity } from "@grasp-os/shared/workflows";
 
-import { withoutPerson } from "../dashboard/runs.ts";
-
 // The figures over the runs (prototype `components/workflow-runs.tsx`
 // `Big`, `builder-runs.tsx` `Stats`), from what core counted
 // (`workflows.activity`): the runs of the domains' workflows started over
@@ -21,14 +19,18 @@ export interface RunFigures {
 
 /**
  * Every workflow's runs together: those started in the window, the share
- * that asked no one for a decision (as the dashboard's Runs widget says
- * it), and those of them waiting for a decision now.
+ * that asked no one for a decision, as core counted it (`runs`, never
+ * counted again here from the days), and those of them waiting for a
+ * decision now.
  */
-export const runFiguresOf = (activity: RunActivity): RunFigures => ({
-  runs: activity.runs.total,
-  alone: withoutPerson(activity.days).share,
-  waiting: activity.days.reduce((total, day) => total + day.waiting, 0),
-});
+export const runFiguresOf = (activity: RunActivity): RunFigures => {
+  const { total, withoutPerson } = activity.runs;
+  return {
+    runs: total,
+    alone: total === 0 ? null : withoutPerson / total,
+    waiting: activity.days.reduce((sum, day) => sum + day.waiting, 0),
+  };
+};
 
 /**
  * One App workflow's runs: those started in the window and the share of

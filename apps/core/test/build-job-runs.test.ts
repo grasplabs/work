@@ -17,11 +17,10 @@ import {
   codeStep,
   model,
   pausedReply,
-  pointAtGateway,
+  configureObject,
   says,
   transcript,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import type { jobRowSchema } from "./build-jobs.ts";
 import {
@@ -45,6 +44,7 @@ import {
 } from "./build-jobs.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { runInstance } from "./runs.ts";
 import { signedIn, signedInApi, staffPerson, whoami } from "./sign-in.ts";
 
@@ -155,10 +155,10 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const answer = await answering;
     const messages = await transcript(chat.stub, chat.chat.id);
     const { app, versions } = await createdApp(builder);
-    const lastRequest = JSON.stringify(chat.gateway.requests.at(-1)?.body);
+    const lastRequest = JSON.stringify(chat.provider.requests.at(-1)?.body);
     // A later turn of the chat.
-    const later = fakeGateway(says("Anything else?"));
-    await pointAtGateway(chat.stub, later);
+    const later = await fakeProvider(says("Anything else?"));
+    await configureObject(chat.stub);
     await chat.ask("Thanks.");
     expect({
       answer,
@@ -216,7 +216,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       answering = chat.ask("Anything else?");
       await vi.waitFor(
         () => {
-          expect(chat.gateway.requests).toHaveLength(3);
+          expect(chat.provider.requests).toHaveLength(3);
         },
         { timeout: 30_000, interval: 50 }
       );
@@ -233,7 +233,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     await expect(
       jobEvents(chat.stub, chat.chat.id, job.id)
     ).resolves.toStrictEqual([]);
-    expect(chat.gateway.requests).toHaveLength(3);
+    expect(chat.provider.requests).toHaveLength(3);
     // What it came to is on its record, for the agent to read.
     const { versions } = await createdApp(builder);
     expect(versions).toHaveLength(1);
@@ -536,15 +536,13 @@ describe("build jobs", { timeout: 180_000 }, () => {
       id: builder.userId,
       role: "user",
     });
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(`export default async (self, env) => {
+    await fakeProvider(
+      codeStep(`export default async (self, env) => {
           try { return (await env.build.job(${JSON.stringify(job.id)})).status; } catch (error) { return error.message; }
         };`),
-        says("You no longer build that App.")
-      )
+      says("You no longer build that App.")
     );
+    await configureObject(chat.stub);
 
     await chat.ask("How did that check go?");
 
@@ -752,15 +750,13 @@ describe("build jobs", { timeout: 180_000 }, () => {
       chat.personId,
       chat.agent.agentId
     );
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(`export default async (self, env) => {
+    await fakeProvider(
+      codeStep(`export default async (self, env) => {
           try { return (await env.build.job(${JSON.stringify(job.id)})).status; } catch (error) { return error.message; }
         };`),
-        says("There's no such job here.")
-      )
+      says("There's no such job here.")
     );
+    await configureObject(chat.stub);
 
     await chat.stub.ask(another.id, { text: "How's that build?", model });
 

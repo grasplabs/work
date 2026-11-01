@@ -20,6 +20,7 @@ import {
   BrainIcon,
   CogIcon,
   ClipboardCheckIcon,
+  LayoutGridIcon,
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -43,6 +44,7 @@ interface Section {
     | "/"
     | "/brain"
     | "/domains"
+    | "/apps"
     | "/workflows"
     | "/integrations"
     | "/onboarding";
@@ -54,6 +56,7 @@ const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/brain", label: msg`Brain`, icon: BrainIcon },
   { to: "/domains", label: msg`Domains`, icon: CogIcon },
+  { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];

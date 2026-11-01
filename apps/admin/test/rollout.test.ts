@@ -8,7 +8,6 @@ import { z } from "zod";
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
-import { deployVersion } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
   clientPlacements,
@@ -17,7 +16,6 @@ import {
   clients,
   clientWorkers,
   hostingDestinations,
-  releases as releaseRows,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -41,21 +39,15 @@ import type { StartRolloutInput } from "../src/rollout/control.ts";
 import { driftOf } from "../src/rollout/drift.ts";
 import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
 import { checkRevocation } from "../src/rollout/shared-secrets.ts";
-import {
-  isConfigPending,
-  skipReason,
-  targetClient,
-  targetClients,
-} from "../src/rollout/targets.ts";
+import { isConfigPending } from "../src/rollout/targets.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { AdminWorkflow } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, destination, staff } from "./hosting.ts";
+import { db, staff } from "./hosting.ts";
 import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
-import { evidenceFor, testLimits } from "./releases.ts";
 import {
   deliverAlarm,
   followAdminRuns,
@@ -1458,10 +1450,18 @@ describe("rolling a release out to placed clients", () => {
       .get();
     const scriptName = connect?.scriptName ?? "";
     const [first] = client.account.scripts.get(scriptName)?.versions ?? [];
-    await deployVersion(api, client.account.id, scriptName, first?.id ?? "", {
-      message: "by hand",
-      force: true,
-    });
+    await api.call(
+      {
+        method: "POST",
+        path: `/accounts/${client.account.id}/workers/scripts/${scriptName}/deployments`,
+        query: { force: "true" },
+        json: {
+          strategy: "percentage",
+          versions: [{ version_id: first?.id ?? "", percentage: 100 }],
+        },
+      },
+      z.unknown()
+    );
     const changed = await driftOf(api, db, client.clientId);
 
     expect({
@@ -2658,330 +2658,4 @@ describe("a rollout's run dying on a client, and staff acting on the client afte
       });
     }
   );
-});
-
-/** How many rollouts were ever started. */
-const rolloutCount = async (): Promise<number> => {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(rollouts);
-  return row?.count ?? 0;
-};
-
-/** The ring of the `index`th of 200 clients: one in ring 0, the last alone in ring 3. */
-const fleetRingOf = (index: number): number => {
-  if (index === 0) {
-    return 0;
-  }
-  return index === 199 ? 3 : 1 + (index % 2);
-};
-
-describe("rolling out a release that raises a platform limit", () => {
-  useStoreSecrets({ deployer: token });
-  beforeEach(setAsideEarlierTests);
-
-  const raised = { ...testLimits, workflowSteps: 2000 };
-
-  /** A release raising `workflowSteps` over `previous`, with evidence on `profiles`. */
-  const raising = async (
-    previous: string,
-    profiles: ("cloudflare" | "workerd")[]
-  ): Promise<string> =>
-    await placedRelease("feat(core): more workflow steps", {
-      platformLimits: raised,
-      previousRelease: { releaseId: previous, platformLimits: testLimits },
-      limitEvidence: (release) =>
-        profiles.map((profile) =>
-          evidenceFor(release, "workflowSteps", 2000, profile)
-        ),
-    });
-
-  /** A release after `previous` that keeps its limits. */
-  const keeping = async (previous: string): Promise<string> =>
-    await placedRelease("feat(core): keeps the limits", {
-      platformLimits: raised,
-      previousRelease: { releaseId: previous, platformLimits: raised },
-    });
-
-  it("refuses to start one whose raise has evidence only for another profile than its clients', starting nothing", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    const onPremOnly = await raising(before, ["workerd"]);
-    const created = await rolloutCount();
-
-    const refused = await codeOf(rollOut(onPremOnly, { scope: "all" }));
-
-    expect({
-      refused,
-      created: (await rolloutCount()) - created,
-    }).toStrictEqual({ refused: "limit_evidence_missing", created: 0 });
-  });
-
-  it("refuses one that skips the release whose raise has no evidence for the client's profile", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    const skipped = await raising(before, ["workerd"]);
-    const later = await keeping(skipped);
-
-    await expect(codeOf(rollOut(later, { scope: "all" }))).resolves.toBe(
-      "limit_evidence_missing"
-    );
-  });
-
-  it("rolls out a release past a raise it skips when the skipped release's evidence covers the client's profile", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    const covered = await raising(before, ["cloudflare", "workerd"]);
-    const later = await keeping(covered);
-    await using run = await followRollouts();
-
-    const rolloutId = await rollOut(later, { scope: "all" });
-    await run.waitForStatus("complete");
-
-    expect({
-      target: await targetOf(rolloutId, clientId),
-      releases: await releasesOf(clientId),
-    }).toStrictEqual({
-      target: { ring: 0, status: "done", error: null },
-      releases: on(later),
-    });
-  });
-
-  it("refuses nothing of a release it skips every client of, as it checks only the clients it reaches", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    await pinClient(env, staff, { clientId, releaseId: before });
-    // Recorded before platform limits were: refused for a client it reaches.
-    const preLimits = await placedRelease("feat(core): no limits recorded", {
-      platformLimits: null,
-    });
-    await using run = await followRollouts();
-
-    const started = await codeOf(
-      rollOut(preLimits, { scope: "ring", ring: 0 })
-    );
-    await run.waitForStatus("complete");
-
-    expect({
-      started,
-      releases: await releasesOf(clientId),
-    }).toStrictEqual({ started: "resolved", releases: on(before) });
-  });
-
-  it("refuses one past a release on the way the admin hasn't imported, whatever older evidence there is", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    // Raised with evidence for Cloudflare, then lowered again.
-    const covered = await raising(before, ["cloudflare"]);
-    await placedRelease("feat(core): fewer workflow steps", {
-      platformLimits: testLimits,
-      previousRelease: { releaseId: covered, platformLimits: raised },
-    });
-    // Raised again by a release the admin never imported, then kept.
-    const later = await placedRelease("feat(core): keeps a raise", {
-      platformLimits: raised,
-      previousRelease: {
-        releaseId: "26.01.999999999",
-        platformLimits: raised,
-      },
-    });
-
-    await expect(codeOf(rollOut(later, { scope: "all" }))).resolves.toBe(
-      "release_history_incomplete"
-    );
-  });
-
-  it("refuses a rollback to a release from before platform limits were recorded, and changes nothing", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    const preLimits = await placedRelease("feat(core): no limits recorded", {
-      platformLimits: null,
-    });
-    const release = await placedRelease("feat(core): records limits");
-    await using run = await followRollouts();
-    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
-    await run.waitForStatus("complete");
-    // What it ran before, as the rollout recorded it, made the release
-    // that records no limits.
-    const [target] = await db
-      .select({ previous: rolloutTargets.previous })
-      .from(rolloutTargets)
-      .where(
-        and(
-          eq(rolloutTargets.rolloutId, rolloutId),
-          eq(rolloutTargets.clientId, clientId)
-        )
-      );
-    const previous = z
-      .looseObject({})
-      .parse(JSON.parse(target?.previous ?? "{}"));
-    await db
-      .update(rolloutTargets)
-      .set({ previous: JSON.stringify({ ...previous, release: preLimits }) })
-      .where(
-        and(
-          eq(rolloutTargets.rolloutId, rolloutId),
-          eq(rolloutTargets.clientId, clientId)
-        )
-      );
-
-    expect({
-      refused: await codeOf(rollbackClient(env, staff, rolloutId, clientId)),
-      releases: await releasesOf(clientId),
-      runner: await runnerOf(clientId),
-    }).toStrictEqual({
-      refused: "release_without_limits",
-      releases: on(release),
-      runner: null,
-    });
-  });
-
-  it("checks a rollout to hundreds of clients within the reads one request may make, refusing the last one's raise", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    // Raised with evidence for on-premises only: a client on it already
-    // goes on, one from before it can't go past it.
-    const onPremOnly = await raising(before, ["workerd"]);
-    const later = await keeping(onPremOnly);
-    // 199 clients on the raise, one of them in ring 0, and one, in the
-    // last ring, from before it: only that one is refused, after every
-    // other is checked. As many as the rollout's step budget takes.
-    const destinationId = await destination({ kind: "dedicated" });
-    const now = new Date();
-    const fleet = Array.from({ length: 200 }, (_, index) => ({
-      id: `fleet-${crypto.randomUUID().slice(0, 8)}`,
-      ring: fleetRingOf(index),
-      runs: index === 199 ? before : onPremOnly,
-    }));
-    for (const { id, ring, runs } of fleet) {
-      // oxlint-disable-next-line no-await-in-loop -- one client at a time
-      await db.batch([
-        db.insert(clients).values({
-          id,
-          name: id,
-          ring,
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-        }),
-        db.insert(clientPlacements).values({
-          clientId: id,
-          deploymentId: id.replace("fleet-", "d"),
-          destinationId,
-          placedBy: staff.email,
-          placedAt: now,
-        }),
-        ...(["core", "connect"] as const).map((worker) =>
-          db.insert(clientWorkers).values({
-            clientId: id,
-            worker,
-            scriptName: `${id}-grasp-os-${worker}`,
-            releaseId: runs,
-            versionId: crypto.randomUUID(),
-            deployedAt: now,
-          })
-        ),
-      ]);
-    }
-    // D1 counts every statement a request prepares against its limit.
-    let reads = 0;
-    const counted = new Proxy(env.DB, {
-      get: (target, property) => {
-        if (property === "prepare") {
-          return (query: string) => {
-            reads += 1;
-            return target.prepare(query);
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-
-    const refused = await codeOf(
-      startRollout({ ...env, DB: counted }, staff, {
-        kind: "release",
-        releaseId: later,
-        scope: { scope: "all" },
-      })
-    );
-
-    expect({ refused, withinLimit: reads < 1000 }).toStrictEqual({
-      refused: "limit_evidence_missing",
-      withinLimit: true,
-    });
-  });
-});
-
-describe("reading every client at once, as a rollout checks them", () => {
-  useStoreSecrets({ deployer: token });
-  beforeEach(setAsideEarlierTests);
-
-  it("reads each client as reading it alone does, so both skip alike", async () => {
-    const before = await placedRelease("feat(core): before");
-    const release = await placedRelease("feat(core): rolled out");
-    const settled = await live(0, before);
-    const changed = await live(1, before);
-    const pinned = await live(1, before);
-    const running = await live(1, before);
-    // Its sign-in changed since core went live; another pinned; another
-    // mid-change on the release, its operation not done.
-    await db
-      .update(clients)
-      .set({ configChangedAt: new Date() })
-      .where(eq(clients.id, changed.clientId));
-    await pinClient(env, staff, {
-      clientId: pinned.clientId,
-      releaseId: before,
-    });
-    await db
-      .update(clientProvisions)
-      .set({ status: "running", releaseId: release })
-      .where(eq(clientProvisions.clientId, running.clientId));
-    const [row] = await db
-      .select({ id: releaseRows.id, builtAt: releaseRows.builtAt })
-      .from(releaseRows)
-      .where(eq(releaseRows.id, release));
-    if (row === undefined) {
-      throw new Error("The release was imported");
-    }
-    const all = await targetClients(db);
-
-    const read = await Promise.all(
-      [settled, changed, pinned, running].map(async ({ clientId }) => {
-        const alone = await targetClient(db, clientId);
-        const together = all.get(clientId);
-        return {
-          equal: together,
-          alone,
-          skips: [
-            alone === undefined ? null : skipReason(alone, row),
-            together === undefined ? null : skipReason(together, row),
-          ],
-        };
-      })
-    );
-
-    for (const { alone, equal } of read) {
-      expect(equal).toStrictEqual(alone);
-    }
-    expect(read.map(({ skips }) => skips)).toStrictEqual([
-      [null, null],
-      [null, null],
-      ["pinned", "pinned"],
-      [null, null],
-    ]);
-    expect(
-      read.map(({ alone }) => ({
-        configPending: alone?.configPending,
-        operation: alone?.operation?.status,
-      }))
-    ).toStrictEqual([
-      { configPending: false, operation: "done" },
-      { configPending: true, operation: "done" },
-      { configPending: false, operation: "done" },
-      { configPending: false, operation: "running" },
-    ]);
-  });
 });

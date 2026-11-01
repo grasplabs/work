@@ -76,7 +76,6 @@ export const release = async (
         bindings: [
           ...core.bindings.filter((binding) => binding.type !== "workflow"),
           { type: "worker_loader", name: "LOADER" },
-          { type: "ai", name: "AI" },
           { type: "send_email", name: "EMAIL" },
         ],
       },

@@ -185,7 +185,7 @@ export interface RequestsReport extends RequestSpan {
   }[];
   /** Every tool he called for five or more people, the rest folded: how often, how often it failed. */
   byTool: { key: RequestTool; calls: number; failed: number; people: number }[];
-  /** How many people asked him something each week of the span, oldest first. */
+  /** How many people asked him something each week of the span, oldest first, every week however quiet. */
   weeks: { week: string; people: number }[];
   /** How the requests spread over the people who made them. */
   spread: { least: number; most: number | null; people: number }[];
@@ -391,23 +391,41 @@ const toolsOf = (shown: readonly StephenRequest[]) => {
   ];
 };
 
+/**
+ * The tools he called most for `topic`: only those he called for five or
+ * more of its people, as `byTool` names them, so a topic's row never names
+ * what one or two people had done.
+ */
 const topicTools = (
   shown: readonly StephenRequest[],
   topic: string
 ): { key: RequestTool; calls: number }[] => {
-  const calls = new Map<RequestTool, number>();
+  const tools = new Map<RequestTool, { calls: number; people: Set<string> }>();
   for (const request of shown) {
     if (request.topic !== topic) {
       continue;
     }
-    for (const tool of request.tools) {
-      calls.set(tool.id, (calls.get(tool.id) ?? 0) + 1);
+    for (const call of request.tools) {
+      const tool = tools.get(call.id) ?? { calls: 0, people: new Set() };
+      tool.calls += 1;
+      tool.people.add(request.personId);
+      tools.set(call.id, tool);
     }
   }
-  return [...calls]
-    .map(([key, count]) => ({ key, calls: count }))
+  return [...tools]
+    .filter(([, { people }]) => people.size >= fewestPeople)
+    .map(([key, { calls }]) => ({ key, calls }))
     .toSorted((a, b) => b.calls - a.calls)
     .slice(0, 3);
+};
+
+/** The Mondays from the week `from` is in to the week `to` is in, oldest first. */
+const mondaysOf = (from: string, to: string): string[] => {
+  const mondays: string[] = [];
+  for (let at = weekOf(from); at <= to; at = dayFrom(at, 7)) {
+    mondays.push(at);
+  }
+  return mondays;
 };
 
 const missingOf = (group: readonly StephenRequest[]): MissingTool[] => {
@@ -522,9 +540,13 @@ export const requestsReport = (
       ({ group: _group, ...row }) => row
     ),
     byTool: toolsOf(shown),
-    weeks: [...groupBy(shown, ({ day }) => weekOf(day))]
-      .map(([week, group]) => ({ week, people: peopleIn(group) }))
-      .toSorted((a, b) => a.week.localeCompare(b.week)),
+    // Every week of the span, a quiet one as none, so no gap closes up.
+    weeks: mondaysOf(span.from, span.to).map((week) => ({
+      week,
+      people: peopleIn(
+        shown.filter(({ day }) => day >= week && day <= dayFrom(week, 6))
+      ),
+    })),
     spread: spreadBuckets.map(([least, most]) => ({
       least,
       most,
@@ -543,6 +565,39 @@ export const requestsReport = (
       : null,
   };
 };
+
+/**
+ * A report of one person's requests as an owner may see it: counts only.
+ * How many they made and were billed, each day's or month's billed and
+ * not billed, and where; never what kind each was, what it was about, the
+ * tools he called for them, their thumbs, or why one wasn't billed.
+ */
+export const countsOnly = (report: RequestsReport): RequestsReport => ({
+  from: report.from,
+  to: report.to,
+  by: report.by,
+  total: report.total,
+  notBilled: { unanswered: 0, notPossible: 0, stopped: 0, failed: 0 },
+  bars: report.bars.map((bar) => ({
+    at: bar.at,
+    kinds: emptyKinds(),
+    places: bar.places,
+    notBilled: bar.notBilled,
+  })),
+  byKind: [],
+  byPlace: [],
+  byTeam: [],
+  byTopic: [],
+  questions: [],
+  thumbs: { up: 0, down: 0 },
+  poorAnswers: [],
+  notPossible: [],
+  unanswered: [],
+  byTool: [],
+  weeks: [],
+  spread: [],
+  byPerson: null,
+});
 
 const billedIn = (bar: RequestBar): number =>
   Object.values(bar.kinds).reduce((sum, each) => sum + each, 0);

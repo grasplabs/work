@@ -20,7 +20,7 @@ import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
 import { listeningOf, stepIndex } from "./setup.ts";
-import type { SetupStep } from "./setup.ts";
+import type { AiReadiness, SetupStep } from "./setup.ts";
 import { noteHeard } from "./visit.ts";
 
 // What the onboarding's step tells the company's admin while Stephen talks
@@ -84,6 +84,8 @@ interface Shown {
   context?: OnboardingContext;
   /** Whether Grasp sends mail where it runs: it does unless said. */
   mailSends?: boolean;
+  /** What Grasp's AI has to call: one provider, ready, unless said; null when core can't say. */
+  ai?: AiReadiness | null;
   /** The domain core says its mail is from; a sender is set unless said. */
   mailDomain?: string | null;
 }
@@ -100,6 +102,7 @@ const drawn = (
     choices = noChoices,
     documents = [],
     mailSends = true,
+    ai = { providers: ["Anthropic"], ready: true },
     mailDomain = "mail.example.test",
   }: Shown
 ): string => {
@@ -131,6 +134,7 @@ const drawn = (
     places: null,
     choices,
     signIn: ["microsoft"],
+    ai,
     identity: {
       userId: "ada",
       email: "ada@acme.test",
@@ -211,6 +215,37 @@ describe("what needs the admin", () => {
         done.includes("Continue"),
       ],
     }).toStrictEqual({ open: [true, false], done: [true, true, true] });
+  });
+
+  it("asks them to connect an AI provider until a model is ready for calls, and holds them until then", () => {
+    const none = said("review", {
+      settled: ["mail"],
+      ai: { providers: [], ready: false },
+    });
+    const connected = said("review", { settled: ["mail"] });
+    const unknown = said("review", { settled: ["mail"], ai: null });
+    expect({
+      none: [
+        none.includes("Just one thing for you"),
+        none.includes("Connect a provider"),
+        none.includes("Continue"),
+      ],
+      connected: [
+        connected.includes("Connected: Anthropic"),
+        connected.includes("Continue"),
+      ],
+      unknown: [
+        unknown.includes("Connect an AI provider"),
+        unknown.includes("Continue"),
+      ],
+    }).toStrictEqual({
+      none: [true, true, false],
+      connected: [true, true],
+      unknown: [false, true],
+    });
+    expect(
+      drawn("review", { ai: { providers: ["OpenAI"], ready: false } })
+    ).toContain('href="/settings/ai-providers"');
   });
 
   it("names no domain where core has no sender for Grasp's mail, says so, and leaves nothing to settle for it", () => {

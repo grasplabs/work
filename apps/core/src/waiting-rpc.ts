@@ -30,6 +30,7 @@ import type { ChatsRpc } from "./chats-rpc.ts";
 import type { ConnectionsRpc } from "./connections.ts";
 import type { DecisionsRpc } from "./decisions/rpc.ts";
 import type { DependenciesRpc } from "./dependencies/rpc.ts";
+import type { HeldStartsRpc } from "./held-starts-rpc.ts";
 import type { NotificationsRpc } from "./notifications.ts";
 import type { PendingActionsRpc } from "./pending-actions.ts";
 import type { PermissionsRpc } from "./permissions-rpc.ts";
@@ -39,6 +40,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import type { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
+import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 
 // What waits on a person, in one feed (@grasp-os/shared/waiting). It
 // keeps nothing of its own: each part is read through the namespace the
@@ -65,9 +67,12 @@ export interface WaitingSources {
   notifications: NotificationsRpc;
   connections: ConnectionsRpc;
   decisions: DecisionsRpc;
+  heldStarts: HeldStartsRpc;
   chats: ChatsRpc;
   /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
   lifecycles: WorkflowLifecycleRpc;
+  /** Independent workflows' bindings that wait on an admin (`workflowResources.pendingBindings`). */
+  bindings: Pick<WorkflowResourcesRpc, "pendingBindings">;
 }
 
 /** Who reads the feed: whom each item is for follows from it. */
@@ -363,6 +368,25 @@ const parts: Parts = {
   },
   notifications: notificationItems,
   connections: connectionItems,
+  // Workflow versions whose bindings no admin approved: their starts are
+  // refused, so the live version's are urgent.
+  bindings: async ({ bindings }, { admin }) => {
+    if (!admin) {
+      return { items: [] };
+    }
+    const pending = await bindings.pendingBindings();
+    return {
+      items: pending.map((each) => ({
+        kind: "bindingApproval",
+        id: `bindingApproval:${each.workflow.id}:${each.version}`,
+        at: null,
+        urgent: each.live,
+        waitsOn: { type: "admin" },
+        verdicts: [],
+        pending: each,
+      })),
+    };
+  },
   decisions: async ({ decisions }, { forMe }) => {
     const waiting = await decisions.waiting();
     return {
@@ -375,6 +399,21 @@ const parts: Parts = {
         waitsOn: forMe,
         verdicts: [],
         decision,
+      })),
+    };
+  },
+  heldStarts: async ({ heldStarts }, { forMe }) => {
+    const held = await heldStarts.list();
+    return {
+      items: held.map((start) => ({
+        kind: "heldStart",
+        id: `heldStart:${start.id}`,
+        at: start.requestedAt,
+        // The chat's agent waits on the answer.
+        urgent: true,
+        waitsOn: forMe,
+        verdicts: ["confirm", "decline"],
+        start,
       })),
     };
   },
@@ -483,6 +522,12 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
         await (verdict.verdict === "approve"
           ? sources.pendingActions.confirm(verdict.id, verdict.inputHash)
           : sources.pendingActions.decline(verdict.id));
+        return { kind: verdict.kind };
+      }
+      case "heldStart": {
+        await (verdict.verdict === "confirm"
+          ? sources.heldStarts.confirm(verdict.id, verdict.inputHash)
+          : sources.heldStarts.decline(verdict.id));
         return { kind: verdict.kind };
       }
       case "unknownOutcome": {

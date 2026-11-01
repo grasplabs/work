@@ -8,7 +8,7 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import { describe, expect, it } from "vite-plus/test";
 
-import { integrationsOf } from "../connections/integrations.ts";
+import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import { workflowAppsOf } from "./workflow-apps.ts";
 
 // The apps a workflow's Files and apps tab lists: only the apps whose
@@ -103,6 +103,39 @@ describe(workflowAppsOf, () => {
     });
     expect(apps.connected.map(({ name }) => name)).toStrictEqual(["HubSpot"]);
     expect(apps.unconnected).toStrictEqual([]);
+  });
+
+  it("says how an app stands by the accounts that serve this workflow, never another account of it", () => {
+    const expired: ListedConnection = {
+      ...connection("c-hubspot-old", "hubspot"),
+      status: "needs_reauth",
+    };
+    const apps = workflowAppsOf({
+      workflow: "w1",
+      integrations: integrationsOf(
+        [entry("hubspot", "HubSpot")],
+        [connection("c-hubspot", "hubspot"), expired]
+      ),
+      uses: [
+        {
+          connectionId: "c-hubspot",
+          workflows: [{ kind: "independent", id: "w1", name: "invoices" }],
+        },
+        {
+          connectionId: "c-hubspot-old",
+          workflows: [{ kind: "independent", id: "w2", name: "other" }],
+        },
+      ],
+      currentVersion: 2,
+      bindings: [binding("crm")],
+      approvals: [approval("crm", 2)],
+    });
+    expect(
+      apps.connected.map((integration) => ({
+        name: integration.name,
+        state: stateOf(integration),
+      }))
+    ).toStrictEqual([{ name: "HubSpot", state: "shared" }]);
   });
 
   it("keeps a binding no approval for the current version serves as not connected", () => {

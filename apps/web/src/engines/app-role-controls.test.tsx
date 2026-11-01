@@ -132,7 +132,8 @@ const statusFor = async ({
   const names = await buttonsOf(
     <AppStatusControls app={appAs(role)} identity={{ staff: isStaff }} />
   );
-  return names.includes("Archive");
+  // A draft: Publish on the bar, the rest under its "…" menu.
+  return names.includes("Publish");
 };
 
 describe("an App's changes, offered on its pages", () => {

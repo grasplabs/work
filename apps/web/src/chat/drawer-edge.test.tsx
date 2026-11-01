@@ -181,4 +181,18 @@ describe(DrawerEdge, () => {
       width: dockDrawer.normal,
     });
   });
+
+  it("comes back no wider than the window allows after it was pulled closed", async () => {
+    await act(async () => {
+      Reflect.set(window, "innerWidth", 800);
+      window.dispatchEvent(new Event("resize"));
+      await Promise.resolve();
+    });
+    await pointer("pointerdown", dockDrawerWidth());
+    await pointer("pointermove", 200);
+    expect({ closed, width: dockDrawerWidth() }).toStrictEqual({
+      closed: 1,
+      width: 360,
+    });
+  });
 });

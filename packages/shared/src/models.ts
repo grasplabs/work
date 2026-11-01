@@ -8,6 +8,12 @@ import type { ModelBindingBudget } from "./resource-bindings.ts";
 export const modelErrors = defineErrorFamily({
   "model.invalid_call": "That isn't a valid model call.",
   "model.unconfigured": "Models aren't set up for this deployment yet.",
+  "model.no_provider":
+    "No AI provider is connected yet. Connect an AI provider to use models.",
+  "model.provider_key_failed":
+    "Your AI provider is refusing your key. An admin can check or replace it in Settings › AI providers.",
+  "model.provider_unavailable":
+    "The AI provider isn't answering, so this call wasn't answered. This is usually an outage on their side; try again in a while.",
   "model.not_allowed": "This deployment doesn't allow that model.",
   "model.eu_only":
     "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
@@ -22,7 +28,7 @@ export const modelErrors = defineErrorFamily({
   "model.queued":
     "Other model calls running now fill this share of the model requests that may run at once, so this one waits its turn. Try again after the wait it names: it isn't a fault, and it goes on once a share comes free.",
   "model.rate_limited":
-    "The model's provider is taking no more requests from this deployment for now, so this call wasn't answered. Try again after the wait it names.",
+    "Your AI provider is limiting requests (a rate or spending limit at the provider), so this call wasn't answered. Try again after a while.",
   "model.unpriced":
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.answer_too_long":
@@ -267,8 +273,6 @@ export interface ModelSettings {
   month: string;
   /** The UTC day a model binding's daily cap counts in now, such as `2026-09-30`. */
   day: string;
-  /** Reservations held for review (`HeldRequest`), oldest first. */
-  held: HeldRequest[];
   /**
    * The Apps' active model bindings, by App name and alias, with their
    * caps and what each spent: at most {@link bindingSpendListed}, and
@@ -310,54 +314,6 @@ export interface ModelBindingSpend {
   thisMonth: number;
   alert: ModelBindingAlert;
 }
-
-/**
- * A model request's reservation the model ledger couldn't read to settle:
- * it stays held against its budgets until an admin releases it or charges
- * it in full.
- */
-export interface HeldRequest {
-  id: string;
-  /** `<provider>/<model>`. */
-  model: string;
-  /** The UTC month it counts in. */
-  period: string;
-  /** What it holds, in US dollars: the most it could have cost. */
-  amount: number;
-  /** When it was sent, as an ISO timestamp. */
-  sentAt: string;
-  /**
-   * A budget record it counts against is damaged, so it can only be
-   * released: a charge would count against a wrong total.
-   */
-  releaseOnly: boolean;
-}
-
-/** What an admin decides about a held reservation. */
-export type HeldHow = "release" | "charge";
-
-/**
- * What an admin's decision on a held reservation came to. `decided`: done
- * now, `amount` charged in US dollars. `already_decided`: an earlier
- * decision, someone else's maybe, stands, and this one changed nothing.
- * `release_only`: a charge refused, as the budget records it counts
- * against are damaged; it is still held, and can be released. `not_held`:
- * there is no such held reservation.
- */
-export type HeldDecision =
-  | { state: "decided"; how: HeldHow; amount: number }
-  | {
-      state: "already_decided";
-      how: HeldHow;
-      amount: number;
-      /** When it was decided, as an ISO timestamp. */
-      decidedAt: string;
-    }
-  | { state: "release_only" }
-  | { state: "not_held" };
-
-/** Most held requests listed at once. */
-export const heldListed = 100;
 
 /** A workflow's model spend this month, and its runs. */
 export interface WorkflowMonthSpend extends SpendingWorkflow {
@@ -487,14 +443,6 @@ export interface ModelsApi {
    * calls, and the workflows that spent most with their runs.
    */
   spend: () => Promise<ModelMonthSpend>;
-  /** The reservations held for review, oldest first. */
-  held: () => Promise<HeldRequest[]>;
-  /**
-   * Settles a held reservation: `release` charges nothing, `charge` all it
-   * holds. Audited. One already decided is left as it is, and answered
-   * with that decision.
-   */
-  resolveHeld: (id: string, how: HeldHow) => Promise<HeldDecision>;
   /** The limits per person, and what each person spent against theirs. */
   limits: () => Promise<PersonLimits>;
   /** Sets the limit for `subject`, never above Grasp's budgets. Audited. */
