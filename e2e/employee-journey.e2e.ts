@@ -79,9 +79,7 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
   await expect(
     page.getByRole("heading", { name: "Thank you, Mila." })
   ).toBeVisible();
-  await expect
-    .poll(async () => await personIn(staff, person))
-    .toBe("completed");
+  await expect.poll(async () => await personIn(person)).toBe("completed");
 
   // Deleting is held, then asked, then done.
   const remove = page.getByRole("button", { name: "Delete my interview" });
@@ -101,7 +99,7 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
   ).toBeVisible();
 
   // Nothing of it is kept in core, nor on the page opened again.
-  await expect.poll(async () => await personIn(staff, person)).toBeUndefined();
+  await expect.poll(async () => await personIn(person)).toBeUndefined();
   await page.reload();
   await expect(page.getByRole("heading").first()).toBeVisible();
   await expect(page.getByText(said)).toHaveCount(0);

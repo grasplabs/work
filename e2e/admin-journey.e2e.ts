@@ -2,6 +2,7 @@ import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { expect } from "@playwright/test";
 
 import { localAdmin } from "../apps/core/test/sign-in-config.ts";
+import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
 import { apiOf, signInAs, signInStaff } from "./people.ts";
@@ -208,7 +209,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   const { core, api } = apiOf(staff);
   try {
     const { roster } = await api.onboarding.view();
-    const { links } = await api.onboardingStaff.interviews();
+    const { links } = await adminSnapshot();
     const out = new Set(
       links.filter(({ sentAt }) => sentAt !== null).map(({ person }) => person)
     );

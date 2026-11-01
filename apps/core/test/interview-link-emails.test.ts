@@ -289,14 +289,13 @@ describe("the interview link emails", () => {
       };
     };
     const toldFailed = await told();
-    const byAdmin = await outcome(api.onboardingStaff.sendMailAgain("oli"));
     const audited = await auditedDuring(async () => {
       await adminCommands().sendMailAgain("oli");
       await store.deliverMail();
     });
     const nothingFailed = await outcome(adminCommands().sendMailAgain("ona"));
     const toldSent = await told();
-    const { entries } = await staff.onboardingStaff.log({ what: "mail" });
+    const { entries } = await store.staffLog({ what: "mail" });
     const resent = audited.filter(
       ({ action }) => action === "onboarding.mail.resent"
     );
@@ -318,7 +317,6 @@ describe("the interview link emails", () => {
     });
     expect({
       failed,
-      byAdmin,
       nothingFailed,
       sent: mail.sent.map(({ to }) => to),
       log: entries.map(({ what, person: one }) => [what, one?.id]).toReversed(),
@@ -326,7 +324,6 @@ describe("the interview link emails", () => {
       audited: JSON.stringify(resent).includes("oli"),
     }).toStrictEqual({
       failed: 1,
-      byAdmin: "onboarding.staff_only",
       nothingFailed: "onboarding.no_failed_mail",
       sent: ["ona@acme.test", "oli@acme.test"],
       log: [

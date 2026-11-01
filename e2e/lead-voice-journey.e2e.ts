@@ -11,6 +11,7 @@ import { expect } from "@playwright/test";
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
+import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import {
@@ -221,15 +222,12 @@ const salesLedBy = async (staff: Person, run: string) => {
 };
 
 /** Whose links are out, of `people`. */
-const outOf = async (staff: Person, people: string[]): Promise<string[]> => {
-  const { core, api } = apiOf(staff);
-  try {
-    const { links } = await api.onboardingStaff.interviews();
+const outOf = async (people: string[]): Promise<string[]> => {
+  const { links } = await adminSnapshot();
+  {
     return people.filter((person) =>
       links.some((link) => link.person === person && link.sentAt !== null)
     );
-  } finally {
-    core[Symbol.dispose]();
   }
 };
 
@@ -287,9 +285,7 @@ test("a lead has their interview by voice, agrees to the read-back by saying so,
   );
   // The team's map can't be drawn on the stack (above): Lea's interview
   // is kept as agreed, and Sam waits for the map.
-  await expect
-    .poll(async () => await personIn(staff, ids.lea))
-    .toBe("completed");
+  await expect.poll(async () => await personIn(ids.lea)).toBe("completed");
   expect({
     heard: {
       live: heard.starts > 0,
@@ -300,7 +296,7 @@ test("a lead has their interview by voice, agrees to the read-back by saying so,
     answered: asks.some((text = "") => text.includes(recordedAnswer)),
     turns: asked.turns.map(({ event }) => event),
     refused: asked.refused,
-    out: await outOf(staff, [ids.lea, ids.sam]),
+    out: await outOf([ids.lea, ids.sam]),
     csp: cspViolations,
   }).toStrictEqual({
     heard: { live: true, refused: [], answer: true, yes: true },

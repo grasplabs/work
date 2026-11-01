@@ -1,25 +1,15 @@
-import { authErrors } from "@grasp-os/shared/errors";
 import type { KickoffInput } from "@grasp-os/shared/kickoff";
 import { modelErrors } from "@grasp-os/shared/models";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { modelForRole } from "../src/models.ts";
-import { OnboardingStaffRpc } from "../src/onboarding/staff-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { SessionCheck } from "../src/session-check.ts";
+import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor, testModel } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // The kickoff (GRA-318): staff bring in Grasp's first conversation with
 // the sponsor, it is read through the model gateway for what Stephen needs,
@@ -30,8 +20,9 @@ import {
 // - A field kept whose quote the transcript doesn't hold: the model made
 //   it up, and Stephen would act on it.
 // - The transcript taken as instructions.
-// - Anyone but staff reading or changing it; its words in the audit log,
-//   which the company's admin reads.
+// - Its words in the audit log, which the company's admin reads. Who may
+//   bring it in, and Grasp shut out while it is read, are the admin
+//   route's (admin-kickoff.test.ts).
 
 const idp = mockIdp();
 
@@ -114,13 +105,6 @@ const answering = async <T>(
   return { requests: provider.requests, result: await run() };
 };
 
-/** Grasp's staff, on a connection of their own. */
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
-
 const pasted = (text: string): KickoffInput => ({
   locale: "nl",
   transcript: { text },
@@ -136,17 +120,17 @@ const file = (name: string, text: string): KickoffInput => ({
 describe("the kickoff", { timeout: 60_000 }, () => {
   // First in the file: no test has connected a provider yet.
   it("is not read while the company connected no AI provider", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     await expect(
-      outcome(staff.onboardingStaff.saveKickoff(pasted(dutch)))
+      outcome(staff.saveKickoff(pasted(dutch)))
     ).resolves.toBe("model.no_provider");
   });
 
   it("is read for what Stephen needs, keeping only what its quotes show was said, and his context holds the pain and what to leave alone", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     const { result: view, requests } = await answering(
       [answer(reading)],
-      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+      async () => await staff.saveKickoff(pasted(dutch))
     );
     const brief = await onboardingStore(env).kickoffBrief();
     const [request] = requests;
@@ -185,10 +169,10 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   });
 
   it("is read by the organization's default model", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     const { requests } = await answering(
       [answer(reading)],
-      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
+      async () => await staff.saveKickoff(pasted(dutch)),
       { models: [euModel, mistral] }
     );
     expect(
@@ -216,7 +200,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   });
 
   it("takes a subtitle file, without its numbers and timings, and refuses what isn't a transcript", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     const vtt = `WEBVTT
 
 1
@@ -229,7 +213,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     const { requests, result: view } = await answering(
       [answer(reading)],
       async () =>
-        await staff.onboardingStaff.saveKickoff(file("kickoff.vtt", vtt))
+        await staff.saveKickoff(file("kickoff.vtt", vtt))
     );
     const sent = JSON.stringify(requests[0]?.body);
     expect({
@@ -239,10 +223,10 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       // A number said on its own line is something said, not a cue's number.
       spoken: sent.includes(String.raw`\n12\n</transcript>`),
       pdf: await outcome(
-        staff.onboardingStaff.saveKickoff(file("kickoff.pdf", dutch))
+        staff.saveKickoff(file("kickoff.pdf", dutch))
       ),
       short: await outcome(
-        staff.onboardingStaff.saveKickoff(pasted("Hallo, dit is kort."))
+        staff.saveKickoff(pasted("Hallo, dit is kort."))
       ),
     }).toStrictEqual({
       file: "kickoff.vtt",
@@ -255,24 +239,24 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   });
 
   it("keeps the sponsor's answers beside it, for Stephen too, on record without their words", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     await answering(
       [answer(reading)],
-      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+      async () => await staff.saveKickoff(pasted(dutch))
     );
     const answered = "Nederlands, en Engels voor IT.";
     const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.answerKickoff("languages", answered);
+      await staff.answerKickoff("languages", answered);
     });
     const brief = await onboardingStore(env).kickoffBrief();
-    const back = await staff.onboardingStaff.answerKickoff("languages", " ");
+    const back = await staff.answerKickoff("languages", " ");
     expect({
       inBrief: brief.includes(answered),
       actions: events.map(({ action, actor }) => [action, actor.type]),
       words: JSON.stringify(events).includes("Engels"),
       back: back.answers.languages,
       unknown: await outcome(
-        staff.onboardingStaff.answerKickoff(
+        staff.answerKickoff(
           // SAFETY: a field that isn't one, as a client could send it.
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
           "salary" as "languages",
@@ -284,12 +268,13 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       actions: [["onboarding.kickoff.answered", "staff"]],
       words: false,
       back: undefined,
-      unknown: "kickoff.invalid",
+      // An ask the admin couldn't have made is refused whole.
+      unknown: "request.forbidden",
     });
   });
 
   it("gives the company's admin the suites and places the company named, and Stephen's words about its work, only as far as the kickoff said it", async () => {
-    const staff = await asStaff();
+    const staff = adminKickoff();
     const { api: admin } = await signedInApi(idp, "admin");
     const example = {
       role: "Mortgage advice",
@@ -320,18 +305,18 @@ describe("the kickoff", { timeout: 60_000 }, () => {
           ],
         }),
       ],
-      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+      async () => await staff.saveKickoff(pasted(dutch))
     );
     const { context: before } = await admin.onboarding.view();
     // The sponsor's answer about their tools names the suite and the place.
-    await staff.onboardingStaff.answerKickoff(
+    await staff.answerKickoff(
       "systems",
       "Google Workspace, with our procedures in Notion."
     );
     const { context } = await admin.onboarding.view();
     /** The suites and places named once the sponsor's answer about their tools is `said`. */
     const namedBy = async (said: string) => {
-      await staff.onboardingStaff.answerKickoff("systems", said);
+      await staff.answerKickoff("systems", said);
       const { context: named } = await admin.onboarding.view();
       return [named.suites, named.sources];
     };
@@ -372,11 +357,11 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   ])(
     "names the sponsor to the company's admin only as the transcript names them ($given)",
     async ({ given, named }) => {
-      const staff = await asStaff();
+      const staff = adminKickoff();
       const { api: admin } = await signedInApi(idp, "admin");
       const { result: view } = await answering(
         [answer({ ...reading, sponsor: given })],
-        async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+        async () => await staff.saveKickoff(pasted(dutch))
       );
       const { sponsor } = await admin.onboarding.view();
       expect({ staff: view.reading?.sponsor ?? null, sponsor }).toStrictEqual({
@@ -386,48 +371,4 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     }
   );
 
-  it("keeps nothing when the company ends Grasp's access while it is read", async () => {
-    const before = await onboardingStore(env).kickoff();
-    // A session that is staff's when the call comes in, and no longer once
-    // the reading is back: the company ended Grasp's access meanwhile.
-    const staff: Identity = {
-      userId: "staff-ended",
-      email: "staff@grasp.example",
-      name: "Grasp staff",
-      role: "admin",
-      teams: [],
-      staff: true,
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const check = vi
-      .fn<SessionCheck>()
-      .mockResolvedValueOnce(staff)
-      .mockRejectedValue(authErrors.create("auth.unauthenticated"));
-    const { result, requests } = await answering(
-      [answer(reading)],
-      async () =>
-        await outcome(
-          new OnboardingStaffRpc(env, check).saveKickoff(pasted(dutch))
-        )
-    );
-    const after = await onboardingStore(env).kickoff();
-    expect({
-      read: requests.length,
-      result,
-      kept: after.transcript?.at === before.transcript?.at,
-    }).toStrictEqual({ read: 1, result: "auth.unauthenticated", kept: true });
-  });
-
-  it("is staff's alone: a member and the company's admin get nothing from it", async () => {
-    const { api: admin } = await signedInApi(idp, "admin");
-    const { api: user } = await signedInApi(idp, "user");
-    const refused = await Promise.all(
-      [admin, user].flatMap((api) => [
-        outcome(api.onboardingStaff.kickoff()),
-        outcome(api.onboardingStaff.saveKickoff(pasted(dutch))),
-        outcome(api.onboardingStaff.answerKickoff("pain", "x")),
-      ])
-    );
-    expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
-  });
 });

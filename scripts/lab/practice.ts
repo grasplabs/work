@@ -23,6 +23,7 @@ import {
 import type { InterviewLocale, Roster } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
+import { adminCommand } from "../seed/admin-command.ts";
 import { origin } from "../seed/local.ts";
 import { ask, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
@@ -280,7 +281,7 @@ export const makePractice = async (
     start: new Date().toISOString().slice(0, 10),
     days: 14,
   });
-  await api.onboardingStaff.resume();
+  await adminCommand({ type: "onboarding.resume", payload: {} });
   await api.onboardingStaff.setAgreements({
     processing: true,
     assessment: true,
