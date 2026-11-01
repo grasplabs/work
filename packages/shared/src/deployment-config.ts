@@ -305,20 +305,3 @@ export const mailFromSchema = z.strictObject({
   address: z.email().max(254),
 });
 export type MailFrom = z.infer<typeof mailFromSchema>;
-
-/**
- * The names of the deployment config vars above, the only settings the
- * admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
- * on every version it deploys, never a setting.
- */
-export const deploymentConfigVars = [
-  "SIGN_IN",
-  "MODEL_GATEWAY",
-  "MEMORY_LIMITS",
-  "AUDIT_RETENTION_DAYS",
-  "AUDIT_ARCHIVE_RETENTION_DAYS",
-  "RUN_RETENTION_DAYS",
-  "QUOTA_LIMITS",
-  "INBOUND_MAIL_DOMAIN",
-  "MAIL_FROM",
-] as const;

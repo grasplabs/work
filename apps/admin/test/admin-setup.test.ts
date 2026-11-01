@@ -79,7 +79,6 @@ describe("an organization's Setup", () => {
     const header = textOf(sectionOf(status.html, "How it stands"));
     const checklist = textOf(sectionOf(status.html, "From contract to go"));
     const howItRuns = textOf(sectionOf(status.html, "How it runs"));
-    const quotaPolicy = textOf(sectionOf(status.html, "Quota policy"));
 
     expect({
       statuses: [status, history, resources, releases, settings].map(
@@ -107,13 +106,6 @@ describe("an organization's Setup", () => {
       ].map((text) =>
         sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
-      // Its core asked which quota policy it applies: the platform's own,
-      // as the admin sets none.
-      quotaPolicy: [
-        "In sync",
-        "Core applies the platform's own, as the admin sets.",
-        "The admin sets no policy",
-      ].map((text) => quotaPolicy.includes(text)),
       howItRuns: [
         "Router",
         "Core",
@@ -165,7 +157,6 @@ describe("an organization's Setup", () => {
       toOldPages: false,
       needs: false,
       numbers: [true, true],
-      quotaPolicy: [true, true, true],
       howItRuns: [true, true, true, true, true],
       gateway: false,
       checklist: [true, true, true],
@@ -343,6 +334,17 @@ describe("an organization's Setup", () => {
 
     expect(textOf(sectionOf(html, "AI"))).toContain(
       "AI: OpenAI connected · working · last used 5 min ago"
+    );
+  });
+
+  it("reads the AI of a core that answers with a redirect elsewhere as unknown, never following it", async () => {
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    client.account.aiRedirect = true;
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: couldn’t be read just now."
     );
   });
 

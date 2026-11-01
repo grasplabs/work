@@ -67,16 +67,6 @@ import {
   provisionProbeRequestSchema,
 } from "@grasp-os/shared/provision-probe";
 import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
-import {
-  quotaLimitsHash,
-  quotaLimitsSchema,
-} from "@grasp-os/shared/quota-policy";
-import {
-  quotaPolicyReportPath,
-  quotaPolicyReportPurpose,
-  quotaPolicyReportRequestSchema,
-} from "@grasp-os/shared/quota-policy-report";
-import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { z } from "zod";
 
 import {
@@ -435,6 +425,16 @@ const answerAiStatus = async (
   live: VersionState,
   request: Request
 ): Promise<Response> => {
+  if (account.aiRedirect === true) {
+    // As fetch does: a request that follows redirects gets what the other
+    // end answers, here a report that reads as working.
+    return request.redirect === "manual"
+      ? new Response(null, {
+          status: 302,
+          headers: { location: "https://elsewhere.test/ai" },
+        })
+      : Response.json(account.ai ?? aiStatusOf());
+  }
   const body = await request.text();
   const key = await hkdfHmacKey(
     live.secrets.get("BETTER_AUTH_SECRET") ?? "",
@@ -454,109 +454,6 @@ const answerAiStatus = async (
     return new Response("Forbidden", { status: 403 });
   }
   return Response.json(account.ai ?? aiStatusOf());
-};
-
-/** The `QUOTA_LIMITS` a version was deployed with, if one core takes. */
-const quotaLimitsOf = (version: VersionState) => {
-  const bindings = z
-    .array(
-      z
-        .object({
-          type: z.string(),
-          name: z.string(),
-          json: z.unknown().optional(),
-        })
-        .loose()
-    )
-    .safeParse(version.metadata.bindings);
-  const binding = bindings.success
-    ? bindings.data.find(
-        ({ type, name }) => type === "json" && name === "QUOTA_LIMITS"
-      )
-    : undefined;
-  const parsed = quotaLimitsSchema.safeParse(binding?.json);
-  return parsed.success ? parsed.data : undefined;
-};
-
-/**
- * What a client's core answers the console's quota policy report request
- * with, as core does (core's src/workflows/quota-report.ts): the policy it
- * applies, the highest generation any of its versions was deployed with,
- * since core records each and refuses a lower one; the platform's own
- * (generation 0) when none set one. 403 unless the signature, with the key
- * its live version's auth secret gives, checks out and the request parses;
- * 404 from a core from before the report.
- */
-const answerQuotaPolicy = async (
-  account: AccountState,
-  script: ScriptState,
-  live: VersionState,
-  request: Request
-): Promise<Response> => {
-  if (account.quotaPolicy === "absent") {
-    return new Response("Not found", { status: 404 });
-  }
-  if (account.quotaPolicy === "redirect") {
-    // As fetch does: a request that follows redirects gets what the other
-    // end answers, here a policy that matches anything none is set for.
-    return request.redirect === "manual"
-      ? new Response(null, {
-          status: 302,
-          headers: { location: "https://elsewhere.test/quota" },
-        })
-      : Response.json({
-          generation: 0,
-          lowered: {},
-          limitsHash: null,
-          recordedAt: null,
-        } satisfies QuotaPolicyReport);
-  }
-  const body = await request.text();
-  const key = await hkdfHmacKey(
-    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
-    quotaPolicyReportPurpose,
-    ["sign"]
-  );
-  const expected = toHex(
-    new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
-    )
-  );
-  const asked = quotaPolicyReportRequestSchema.safeParse(JSON.parse(body));
-  if (
-    request.headers.get(platformUpdateSignatureHeader) !== expected ||
-    !asked.success
-  ) {
-    return new Response("Forbidden", { status: 403 });
-  }
-  // Only the versions that went live: core records a generation as it
-  // runs under it, never one uploaded and left without traffic. Each
-  // generation keeps the limits it first went live with, as core records
-  // them; a later version under it with other limits changes nothing.
-  const ranLive = new Set(
-    script.deployments.flatMap(({ versions }) =>
-      versions.map(({ version_id: id }) => id)
-    )
-  );
-  let highest: QuotaPolicyReport = {
-    generation: 0,
-    lowered: {},
-    limitsHash: null,
-    recordedAt: null,
-  };
-  for (const version of script.versions.filter(({ id }) => ranLive.has(id))) {
-    const limits = quotaLimitsOf(version);
-    if (limits !== undefined && limits.generation > highest.generation) {
-      highest = {
-        generation: limits.generation,
-        lowered: limits.limits,
-        // oxlint-disable-next-line no-await-in-loop -- versions in order
-        limitsHash: await quotaLimitsHash(limits.limits),
-        recordedAt: new Date().toISOString(),
-      };
-    }
-  }
-  return Response.json(highest);
 };
 
 /** Two hex characters at a time. */
@@ -1327,7 +1224,7 @@ export const fakeCloudflareApi = (token: string) => {
   const workerAnswer = async (
     request: Request,
     url: URL,
-    { account, script, live }: NonNullable<ReturnType<typeof workerAt>>
+    { account, live }: NonNullable<ReturnType<typeof workerAt>>
   ): Promise<Response> => {
     if (account.unhealthy !== undefined && account.unhealthy > 0) {
       account.unhealthy -= 1;
@@ -1344,9 +1241,6 @@ export const fakeCloudflareApi = (token: string) => {
       request.method === "POST" ? signedPosts.get(url.pathname) : undefined;
     if (signed !== undefined) {
       return await signed(account, live, request);
-    }
-    if (url.pathname === quotaPolicyReportPath && request.method === "POST") {
-      return await answerQuotaPolicy(account, script, live, request);
     }
     if (url.pathname === adminSnapshotPath && request.method === "POST") {
       adminReads.now += 1;

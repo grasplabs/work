@@ -327,25 +327,6 @@ export const rolloutTargets = sqliteTable(
 );
 
 /**
- * A client's deployment config (sign-in, model gateway), one row
- * per setting. Never a secret: those go straight to the client's Worker.
- */
-export const settings = sqliteTable(
-  "settings",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    key: text().notNull(),
-    /** JSON. */
-    value: text().notNull(),
-    updatedBy: text("updated_by").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.key] })]
-);
-
-/**
  * A secret of a client's own that can't be derived, such as its Teams
  * bot's client secret, minted in the client's own Entra
  * (src/deploy/sealed-secrets.ts): sealed with a key derived from

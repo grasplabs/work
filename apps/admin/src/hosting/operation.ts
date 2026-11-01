@@ -1454,13 +1454,13 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 
 /**
  * Core's vars: its derived sign-in and runtime profile, the platform's AI
- * settings, checked against the AI provider keys connect gets, the
- * client's settings, and the change core records.
+ * settings, checked against the AI provider keys connect gets, and the
+ * change core records.
  */
-const coreVarsOf = async (
+const coreVarsOf = (
   context: ProvisionContext,
   loaded: Loaded
-): Promise<Record<string, unknown>> => {
+): Record<string, unknown> => {
   const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
@@ -1470,21 +1470,15 @@ const coreVarsOf = async (
       ? {}
       : { oauthRelay: context.router.oauthRelay }),
   });
-  return await configuredCoreVars(
-    context.db,
-    loaded.held.clientId,
-    derived,
-    {
-      by: loaded.operation.startedBy,
-      // What started it: a release, or new settings or secrets on the
-      // release it runs, as its core records it in its Activity.
-      what: loaded.operation.what ?? "release",
-      release: loaded.operation.releaseId,
-      // When the operation started: the same however often it's resumed.
-      at: loaded.operation.createdAt.toISOString(),
-    },
-    mailSenderOf(context, loaded.held.clientId)
-  );
+  return configuredCoreVars(loaded.held.clientId, derived, {
+    by: loaded.operation.startedBy,
+    // What started it: a release, or new settings or secrets on the
+    // release it runs, as its core records it in its Activity.
+    what: loaded.operation.what ?? "release",
+    release: loaded.operation.releaseId,
+    // When the operation started: the same however often it's resumed.
+    at: loaded.operation.createdAt.toISOString(),
+  });
 };
 
 /**
@@ -1636,7 +1630,7 @@ const validate = async (
   const { db } = context;
   const { manifest, held } = loaded;
   const order = appsOf(manifest);
-  const vars = await coreVarsOf(context, loaded);
+  const vars = coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);
     assertRunnable(loaded, worker);
@@ -1838,7 +1832,7 @@ const upload = async (
   const vars = varsOf(
     loaded,
     app,
-    app === "core" ? await coreVarsOf(context, loaded) : {}
+    app === "core" ? coreVarsOf(context, loaded) : {}
   );
   const fingerprint = await keyedHash(
     await hkdfHmacKey(context.secrets.clientKey, uploadFingerprintPurpose, [

@@ -1,16 +1,7 @@
 import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
-
-import { clients, settings } from "../src/db/schema.ts";
-import { signInApps } from "../src/deploy/context.ts";
-import {
-  derivedCoreConfig,
-  onboardingSender,
-} from "../src/deploy/core-config.ts";
-import { configuredCoreVars } from "../src/deploy/core-vars.ts";
 
 // The admin's migrations on a database with rows in it, as staging's and
 // production's have, rather than the empty one every other test starts
@@ -112,64 +103,5 @@ describe("the admin's migrations, on rows", () => {
       runs: [{ client_id: "beta", kind: "rollout" }],
       dangling: [],
     });
-  });
-
-  it("drop a client's saved PLATFORM_AI setting with the setting itself, so its next deploy takes the rest", async () => {
-    const db = migrationDb();
-    const { before, it: dropPlatformAi } = upTo("0043_drop_platform_ai.sql");
-    await applyD1Migrations(db, before);
-    const orm = drizzle(db);
-    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-    const signIn = JSON.stringify({
-      domains: ["acme.test"],
-      admins: ["ada@acme.test"],
-      googleHostedDomain: "acme.test",
-    });
-    const now = new Date();
-    await orm.insert(clients).values({
-      id: clientId,
-      name: clientId,
-      ring: 0,
-      signIn,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await orm.insert(settings).values(
-      [
-        ["PLATFORM_AI", JSON.stringify({ conversion: { provider: "local" } })],
-        ["AUDIT_RETENTION_DAYS", JSON.stringify(90)],
-      ].map(([key, value]) => ({
-        clientId,
-        key: key ?? "",
-        value: value ?? "",
-        updatedBy: "staff@grasp.test",
-        updatedAt: now,
-      }))
-    );
-
-    await applyD1Migrations(db, [dropPlatformAi]);
-    const domain = "grasp.test";
-    const vars = await configuredCoreVars(
-      orm,
-      clientId,
-      derivedCoreConfig({
-        clientId,
-        signIn,
-        domain,
-        apps: signInApps(env),
-      }),
-      {
-        by: "staff@grasp.test",
-        what: "release",
-        release: "26.01.100000001",
-        at: now.toISOString(),
-      },
-      onboardingSender(clientId, domain).address
-    );
-
-    expect({
-      platformAi: "PLATFORM_AI" in vars,
-      kept: vars.AUDIT_RETENTION_DAYS,
-    }).toStrictEqual({ platformAi: false, kept: 90 });
   });
 });
