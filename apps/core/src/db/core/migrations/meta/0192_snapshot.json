@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f9908803-239b-499f-a422-8f8ee68e5925",
+  "id": "f5393f9e-0635-4028-b718-06e74fc3ee29",
   "prevId": "219636a8-cf68-48b8-b90a-e4b0134a0ec4",
   "tables": {
     "access_revocations": {
@@ -268,44 +268,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "admin_commands": {
-      "name": "admin_commands",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -1902,14 +1864,6 @@
         },
         "workflow_calls": {
           "name": "workflow_calls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'{}'"
-        },
-        "exports": {
-          "name": "exports",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
