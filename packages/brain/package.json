@@ -13,7 +13,6 @@
     "./contract": "./src/contract.ts",
     "./documents": "./src/documents.ts",
     "./entities": "./src/entities.ts",
-    "./eval-suites": "./src/eval-suites.ts",
     "./errors": "./src/errors.ts",
     "./events": "./src/events.ts",
     "./frontmatter": "./src/frontmatter.ts",
