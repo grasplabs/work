@@ -29,8 +29,6 @@ import {
 import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
-import { platformSettingsView } from "../platform-settings.ts";
-import type { PlatformSettingsView } from "../platform-settings.ts";
 
 /**
  * How a check stands:
@@ -43,7 +41,7 @@ import type { PlatformSettingsView } from "../platform-settings.ts";
 export type CheckStatus = "ready" | "blocked" | "waiting" | "not_configured";
 
 /** Where a check's next step is done in the admin, when it's done there. */
-export type CheckLink = "releases" | "platform" | "organizations";
+export type CheckLink = "releases" | "organizations";
 
 /** One line of the checklist. */
 export interface ReadinessCheck {
@@ -320,61 +318,14 @@ const deployerCheck = async (
   };
 };
 
-/**
- * Grasp's own organization (src/platform-settings.ts): optional, as only
- * Ask Grasp needs it, and ready once the one chosen is live.
- */
-const graspOrganizationCheck = ({
-  graspClientId,
-  graspClientName,
-  candidates,
-}: PlatformSettingsView): ReadinessCheck => {
-  const check = {
-    id: "grasp_organization",
-    title: "Grasp's own organization",
-    required: false,
-    link: "platform",
-  } as const;
-  if (graspClientId === null) {
-    return {
-      ...check,
-      status: "not_configured",
-      words:
-        "None is chosen, so Ask Grasp isn't set up. Choose it under Grasp's own organization on this page.",
-    };
-  }
-  if (graspClientName === null) {
-    return {
-      ...check,
-      status: "not_configured",
-      words: `The one chosen (${graspClientId}) is gone or offboarded, so Ask Grasp isn't set up. Choose it again under Grasp's own organization on this page.`,
-    };
-  }
-  const live = candidates.some(
-    ({ id, status }) => id === graspClientId && status === "active"
-  );
-  return live
-    ? {
-        ...check,
-        status: "ready",
-        words: `${graspClientName} answers Ask Grasp.`,
-      }
-    : {
-        ...check,
-        status: "waiting",
-        words: `${graspClientName} is chosen, and answers Ask Grasp once it's live.`,
-      };
-};
-
 /** The checklist, as this admin stands now. */
 export const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
-  const [choices, [imported], newestId, missing, settings] = await Promise.all([
+  const [choices, [imported], newestId, missing] = await Promise.all([
     destinationChoices(db),
     db.select({ n: count() }).from(releases),
     newestRelease(envOf),
     missingSecrets(envOf, requiredSecrets),
-    platformSettingsView(db),
   ]);
   // The one new organizations go in: what the deployer must reach.
   const automatic = automaticChoice(choices).destinationId;
@@ -390,7 +341,6 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       placeable,
       missing.includes("DEPLOYER_API_TOKEN")
     ),
-    graspOrganizationCheck(settings),
   ];
   return {
     checks,
