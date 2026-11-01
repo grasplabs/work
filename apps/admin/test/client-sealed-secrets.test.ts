@@ -26,7 +26,8 @@ import {
 import { targetClient } from "../src/rollout/targets.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { clientScripts, mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts } from "./grasp-account.ts";
 import { callServerFn } from "./pages.ts";
 import {
   deployPlaced,

@@ -66,11 +66,8 @@ import type { HeldClient } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall, CoreState } from "./cloudflare-api-kit.ts";
-import {
-  clientScripts,
-  graspAccount,
-  mockCloudflareApi,
-} from "./cloudflare-api-mock.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts, graspAccount } from "./grasp-account.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";

@@ -67,6 +67,8 @@ import {
   provisionProbeRequestSchema,
 } from "@grasp-os/shared/provision-probe";
 import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
+import { routerHostKey, routerHostSchema } from "@grasp-os/shared/router";
+import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import {
@@ -1270,27 +1272,33 @@ export const fakeCloudflareApi = (token: string) => {
 
   /**
    * The live core a client's hostname reaches, as the router routes it:
-   * the core script in a namespace whose live version runs as the client
-   * the hostname's first label names; undefined for any other host.
+   * the hostname's entry in the router's map (`ROUTER_HOSTS`), the script
+   * it names in a namespace, and that script's live version, which must
+   * run as the client the entry names. Undefined for a hostname the map
+   * doesn't route, an entry to an origin, a script no namespace has, or
+   * one running as another client: a deleted or wrong route never answers.
    */
-  const routedCore = (
+  const routedCore = async (
     url: URL
-  ): { account: AccountState; live: VersionState } | undefined => {
-    const [clientId] = url.hostname.split(".");
+  ): Promise<{ account: AccountState; live: VersionState } | undefined> => {
+    const stored: unknown = await env.ROUTER_HOSTS.get(
+      routerHostKey(url.hostname),
+      "json"
+    );
+    const entry = routerHostSchema.safeParse(stored);
+    if (!entry.success || !("script" in entry.data)) {
+      return undefined;
+    }
+    const { script: scriptName, clientId } = entry.data;
     const routed = [...accounts.values()].flatMap((account) =>
-      [...account.namespaces.values()].flatMap((scripts) =>
-        [...scripts]
-          .filter(([name]) => name.endsWith("-core"))
-          .flatMap(([, script]) => {
-            const [only] = script.deployments[0]?.versions ?? [];
-            const live = script.versions.find(
-              ({ id }) => id === only?.version_id
-            );
-            return live === undefined || clientOf(live) !== clientId
-              ? []
-              : [{ account, live }];
-          })
-      )
+      [...account.namespaces.values()].flatMap((scripts) => {
+        const script = scripts.get(scriptName);
+        const [only] = script?.deployments[0]?.versions ?? [];
+        const live = script?.versions.find(({ id }) => id === only?.version_id);
+        return live === undefined || clientOf(live) !== clientId
+          ? []
+          : [{ account, live }];
+      })
     );
     return routed[0];
   };
@@ -1303,7 +1311,7 @@ export const fakeCloudflareApi = (token: string) => {
     const request = new Request(input, init);
     if (!request.url.startsWith(`${base}/`)) {
       const url = new URL(request.url);
-      const core = routedCore(url);
+      const core = await routedCore(url);
       if (core === undefined) {
         throw new Error(`Unexpected outbound request to ${request.url}`);
       }

@@ -29,8 +29,8 @@ import {
 } from "../src/hosting/placement.ts";
 import { claimRun } from "../src/runners.ts";
 import type { AccountState, CoreState } from "./cloudflare-api-kit.ts";
-import { graspAccount, testStage } from "./cloudflare-api-mock.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
+import { graspAccount, testStage } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";

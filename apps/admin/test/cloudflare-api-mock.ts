@@ -8,11 +8,8 @@ import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
-import type { AccountState, ScriptState } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
-
-/** The stage the tests' admin serves, as its wrangler.jsonc sets it. */
-export const testStage = "production";
+import { testStage } from "./grasp-account.ts";
 
 /**
  * A fake Cloudflare API that lets `token` (the deployer's) in, for each
@@ -40,24 +37,3 @@ export const mockCloudflareApi = (token: string) => {
   });
   return fake;
 };
-
-/**
- * Grasp's own account on `cloudflare`, with the tests' stage's clients'
- * namespace in it: where every client's scripts run.
- */
-export const graspAccount = (
-  cloudflare: ReturnType<typeof fakeCloudflareApi>
-) => {
-  const account = cloudflare.addAccount("Grasp", undefined, platformAccountId);
-  if (!account.namespaces.has(clientsNamespace(testStage))) {
-    account.namespaces.set(clientsNamespace(testStage), new Map());
-  }
-  return account;
-};
-
-/** The clients' scripts in `account`'s namespace for the tests' stage, by name. */
-export const clientScripts = (
-  account: AccountState
-): Map<string, ScriptState> =>
-  account.namespaces.get(clientsNamespace(testStage)) ??
-  new Map<string, ScriptState>();
