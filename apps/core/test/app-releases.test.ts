@@ -1643,6 +1643,8 @@ JSON.stringify = (value, ...rest) => {
       kind: "workflow",
       id: crypto.randomUUID(),
     });
+    // A workflow's store is managed by the organization's admins alone
+    // (data-stores.ts): its creator, a builder, can't seal onto it.
     await expect(
       failure(
         async () =>
@@ -1653,7 +1655,7 @@ JSON.stringify = (value, ...rest) => {
             by: fixture.owner,
           })
       )
-    ).resolves.toBe("version.store_bound_elsewhere");
+    ).resolves.toBe("data.store_unavailable");
     const opened = await openStore(env, store);
     await expect(opened.generations(["gamma"])).rejects.toThrow(
       /wasn't handed/u
