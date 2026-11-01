@@ -675,7 +675,7 @@ export const publicOperationOf = (
  *   call without a lease, an agent's, another App's or a workflow's names
  *   the version that runs.
  */
-export const pinnedReference = async (
+const pinnedReference = async (
   env: Env,
   release: Release,
   reference: FunctionRequest["reference"],
@@ -736,20 +736,6 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
-  /**
-   * Told the fence of the receipt the call's mutation claimed, before its
-   * handler runs (`Invocation.observeClaim`).
-   */
-  readonly observeClaim?: (fence: number) => void;
-  /**
-   * Told of the call once it is resolved to `path`, a public function of
-   * `release`, before it runs (a screen's, to note its keyed submission).
-   */
-  readonly onAdmitted?: (
-    release: Release,
-    call: FunctionRequest,
-    path: string
-  ) => Promise<void>;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -1026,13 +1012,12 @@ const answeredPreferences = async (
 /** `callAppFunction`, with all of its options. */
 /**
  * `invocation`, telling `observeReads` what a query read of `release`'s
- * store and `observeClaim` the fence its mutation claimed, where given.
+ * store, where given.
  */
 const observedInvocation = (
   invocation: Invocation,
   release: Release,
-  observeReads: FunctionCallOptions["observeReads"],
-  observeClaim: FunctionCallOptions["observeClaim"]
+  observeReads: FunctionCallOptions["observeReads"]
 ): Invocation => {
   const { store } = release;
   return {
@@ -1044,7 +1029,6 @@ const observedInvocation = (
             observeReads(storeIdSchema.parse(store.storeId), readSet);
           },
         }),
-    ...(observeClaim === undefined ? {} : { observeClaim }),
   };
 };
 
@@ -1055,23 +1039,6 @@ const observedInvocation = (
  */
 export type StaffMarked = Pick<Identity, "userId" | "role" | "teams"> & {
   readonly staff?: boolean;
-};
-
-/**
- * Tells `onAdmitted` of `call` once it resolved to `path`, one of the
- * release's public functions, before it runs: a screen's keyed submission
- * is noted for recovery (screen-submissions.ts). A paginated window's read
- * is no submission.
- */
-const toldAdmitted = async (
-  onAdmitted: FunctionCallOptions["onAdmitted"],
-  release: Release,
-  call: FunctionRequest,
-  path: string
-): Promise<void> => {
-  if (call.window === undefined) {
-    await onAdmitted?.(release, call, path);
-  }
 };
 
 const callFunction = async (
@@ -1087,7 +1054,6 @@ const callFunction = async (
     parentSession,
     kind,
     observeReads,
-    observeClaim,
     chargeWindow,
     pinnedVersion,
     agent,
@@ -1097,7 +1063,6 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
-    onAdmitted,
     sources = invocationSources(),
     byStaff,
   } = options;
@@ -1173,7 +1138,6 @@ const callFunction = async (
       deadline,
     });
   }
-  await toldAdmitted(onAdmitted, release, call, path);
   try {
     const invocation = await invocationFor(env, release, {
       by,
@@ -1197,12 +1161,7 @@ const callFunction = async (
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),
     });
-    const observed = observedInvocation(
-      invocation,
-      release,
-      observeReads,
-      observeClaim
-    );
+    const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
     const result =
@@ -1369,10 +1328,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<
-    FunctionCallOptions,
-    "onAdmitted" | "observeClaim" | "pinnedVersion"
-  > = {}
+  options: Pick<FunctionCallOptions, "pinnedVersion"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)

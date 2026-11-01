@@ -19,8 +19,6 @@ import {
 } from "@grasp-os/shared/stores";
 import type {
   ClaimInput,
-  ReceiptLookup,
-  ReceiptStanding,
   Claimed,
   Commit,
   Committed,
@@ -149,13 +147,6 @@ export interface OpenStore {
   ) => Promise<DefinedTables>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
-  /**
-   * Where a mutation's receipt stands, never claiming it
-   * (`StoreHost.receiptStanding`).
-   */
-  receiptStanding: (
-    lookup: Omit<ReceiptLookup, "storeId">
-  ) => Promise<ReceiptStanding>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
   /**
    * One read for `scope`, which the caller resolved for the invocation
@@ -852,8 +843,6 @@ const storeClient = (
       await stub.defineTables(storeId, manifest, consumer, migrations),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
-    receiptStanding: async (lookup) =>
-      await stub.receiptStanding({ ...lookup, storeId }),
     commit: async (commit) =>
       committedSchema.parse(
         JSON.parse(await stub.commit({ ...commit, storeId }))

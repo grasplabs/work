@@ -436,7 +436,6 @@
   "@grasp-os/core:screens test/screen-sandbox.test.ts": 10,
   "@grasp-os/core:screens test/screen-shared-frames.test.ts": 15.2,
   "@grasp-os/core:screens test/screen-stream.test.ts": 89,
-  "@grasp-os/core:screens test/screen-submissions.test.ts": 51.4,
   "@grasp-os/core:screens test/screen-surfaces.test.ts": 46.5,
   "@grasp-os/core:screens test/screen-trust.test.ts": 101.9,
   "@grasp-os/core:screens test/screen-typed-workflows.test.ts": 46.1,

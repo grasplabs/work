@@ -33,7 +33,6 @@ import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
@@ -304,11 +303,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "apps.test_fixtures",
     period: "quarterHour",
     run: sweepTestFixtures,
-  },
-  {
-    name: "screens.submissions",
-    period: "quarterHour",
-    run: sweepScreenSubmissions,
   },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
   // The audit log's retention alarm armed, if it isn't yet: retention
