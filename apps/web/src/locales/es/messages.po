@@ -102,10 +102,6 @@ msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
 
 #: src/brain/brain.ts
-msgid "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
-msgstr "{ai, select, tool {Una herramienta de IA, según Grasp} builtIn {Con IA integrada, según Grasp} other {Sin IA, según Grasp}}"
-
-#: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Una herramienta de IA, según el equipo} builtIn {Con IA integrada, según el equipo} other {Sin IA, según el equipo}}"
 
@@ -258,14 +254,6 @@ msgstr "{browser} en {system}"
 msgid "{cached} of them from a cache"
 msgstr "{cached} de ellos desde una caché"
 
-#: src/brain/brain.ts
-msgid "{category} by {vendor}"
-msgstr "{category} de {vendor}"
-
-#: src/brain/brain.ts
-msgid "{category} by {vendor}, with AI built in"
-msgstr "{category} de {vendor}, con IA integrada"
-
 #: src/routes/_shell.workflows.index.tsx
 msgid "{chosen} (no longer in this domain)"
 msgstr "{chosen} (ya no está en este dominio)"
@@ -317,10 +305,6 @@ msgstr "{count, plural, one {{name} tiene # aplicación cuyo código nadie ha ap
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} trabajan aquí, en # trabajo que salió en lo que contó la gente.} other {{names} trabajan aquí, en # trabajos que salieron en lo que contó la gente.}}"
-
-#: src/brain/brain.ts
-msgid "{count, plural, one {# application} other {# applications}}"
-msgstr "{count, plural, one {# aplicación} other {# aplicaciones}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
@@ -1164,28 +1148,12 @@ msgid "{path}, which would no longer run"
 msgstr "{path}, que dejaría de ejecutarse"
 
 #: src/brain/brain.ts
-msgid "{people, plural, one {{app} is used by # person, and nobody mentioned it in an interview. No team owns it.} other {{app} is used by # people, and nobody mentioned it in an interview. No team owns it.}}"
-msgstr "{people, plural, one {# persona usa {app}, pero no salió en ninguna entrevista. Ningún equipo se hace cargo.} other {# personas usan {app}, pero no salió en ninguna entrevista. Ningún equipo se hace cargo.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {{app} is used by # person, and nobody mentioned it in an interview.} other {{app} is used by # people, and nobody mentioned it in an interview.}}"
-msgstr "{people, plural, one {# persona usa {app}, pero no salió en ninguna entrevista.} other {# personas usan {app}, pero no salió en ninguna entrevista.}}"
-
-#: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.}}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
 msgstr "{people, plural, one {# persona tiene acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.} other {# personas tienen acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {# person uses it, seen through {channels}. No team has named it yet.} other {# people use it, seen through {channels}. No team has named it yet.}}"
-msgstr "{people, plural, one {La usa # persona, según se ha visto en {channels}. Ningún equipo la ha mencionado aún.} other {La usan # personas, según se ha visto en {channels}. Ningún equipo la ha mencionado aún.}}"
-
-#: src/brain/brain.ts
-msgid "{people, plural, one {# person, as {app}} other {# people, as {app}}}"
-msgstr "{people, plural, one {# persona, como {app}} other {# personas, como {app}}}"
 
 #: src/brain/brain.ts
 #: src/onboarding/interview-teams.tsx
@@ -1383,10 +1351,6 @@ msgstr "{score} de 5"
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "Aplicación {screen}"
-
-#: src/brain/brain.ts
-msgid "{seen, select, microsoftSso {Seen in use through Microsoft sign-in} googleSso {Seen in use through Google sign-in} other {Seen in use through Pulse}}"
-msgstr "{seen, select, microsoftSso {En uso, según el inicio de sesión de Microsoft} googleSso {En uso, según el inicio de sesión de Google} other {En uso, según Pulse}}"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "{share} not helpful"
@@ -2406,10 +2370,6 @@ msgstr "Aporta"
 msgid "Added a member to a domain"
 msgstr "Añadió un miembro a un dominio"
 
-#: src/brain/brain.ts
-msgid "Added as an open question"
-msgstr "Añadida como pregunta abierta"
-
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Added by hand"
@@ -2966,7 +2926,6 @@ msgstr "Aprobación de aplicaciones"
 msgid "App not found"
 msgstr "Aplicación no encontrada"
 
-#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Aplicación"
@@ -2974,14 +2933,6 @@ msgstr "Aplicación"
 #: src/brain/brain.ts
 msgid "Applications"
 msgstr "Aplicaciones"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications in use on devices"
-msgstr "Aplicaciones en uso en los dispositivos"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications signed in to"
-msgstr "Aplicaciones con inicio de sesión"
 
 #: src/onboarding/review-parts.tsx
 msgid "Apply it if the sender’s domain is {domain}."
@@ -3650,11 +3601,6 @@ msgstr "Proceso de negocio"
 msgid "By {by}"
 msgstr "Por {by}"
 
-#. Column value: a team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By a team"
-msgstr "Por un equipo"
-
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "By day"
 msgstr "Por día"
@@ -3674,11 +3620,6 @@ msgstr "Por nombre, solo para Grasp. Un nombre abre a esa persona: su enlace, so
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "By name, for Grasp only. A name opens that person."
 msgstr "Por nombre, solo para Grasp. Un nombre abre a esa persona."
-
-#. Column value: no team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By nobody"
-msgstr "Por nadie"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "By person"
@@ -6390,10 +6331,6 @@ msgstr "Objetivos, y por qué IA ahora"
 msgid "Good. Now say something, so I can hear you too."
 msgstr "Bien. Ahora di algo, para que yo también te oiga."
 
-#: src/brain/brain.ts
-msgid "Google sign-in"
-msgstr "Inicio de sesión de Google"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Got it."
 msgstr "Entendido."
@@ -8337,10 +8274,6 @@ msgstr "Mensajes que envían a Grasp en una app de chat."
 msgid "Microphone: {name}"
 msgstr "Micrófono: {name}"
 
-#: src/brain/brain.ts
-msgid "Microsoft sign-in"
-msgstr "Inicio de sesión de Microsoft"
-
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Middle"
 msgstr "Mediana"
@@ -8573,22 +8506,9 @@ msgstr "Nombre de un nuevo flujo de trabajo"
 msgid "Name of your HR platform"
 msgstr "Nombre de tu plataforma de RR. HH."
 
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: whether a team named the application in a conversation"
-msgid "Named"
-msgstr "Mencionada"
-
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Mencionada por"
-
-#: src/brain/brain.ts
-msgid "Named by {teams, plural, one {# team} other {# teams}}, and seen in use by {people, plural, one {# person} other {# people}} through {channels}."
-msgstr "Mencionada por {teams, plural, one {# equipo} other {# equipos}} y vista en uso por {people, plural, one {# persona} other {# personas}} a través de {channels}."
-
-#: src/brain/brain.ts
-msgid "Named by a team"
-msgstr "Mencionada por un equipo"
 
 #: src/brain/brain.ts
 msgid "Named in {source}"
@@ -9254,10 +9174,6 @@ msgstr "Sin comité de empresa"
 #: src/activity/audit-log.tsx
 msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "No: su hash o su enlace con el evento anterior no coincide."
-
-#: src/brain/brain.ts
-msgid "Nobody"
-msgstr "Nadie"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Nobody answered in time, so this decision has closed."
@@ -10309,10 +10225,6 @@ msgstr "Abrir enlace"
 msgid "Open now"
 msgstr "Abierto ahora"
 
-#: src/brain/brain.ts
-msgid "Open question"
-msgstr "Pregunta abierta"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Open question"
@@ -10554,11 +10466,6 @@ msgstr "Eres responsable"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: who owns a workflow"
-msgid "Owner"
-msgstr "Responsable"
-
-#: src/brain/brain.ts
-msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Responsable"
 
@@ -10893,11 +10800,6 @@ msgstr "Permiso para las estadísticas de la plataforma"
 msgid "Permission to invite guests"
 msgstr "Permiso para invitar a invitados"
 
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: the OAuth permissions granted to an application"
-msgid "Permissions"
-msgstr "Permisos"
-
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Permisos pedidos"
@@ -11120,7 +11022,6 @@ msgstr "Publicado"
 msgid "Published as version {0}."
 msgstr "Publicado como versión {0}."
 
-#. Product name: keep it as it is
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
 #: src/brain/brain.ts
@@ -15623,10 +15524,6 @@ msgstr "Usó una herramienta conectada"
 msgid "Used by"
 msgstr "Usado por"
 
-#: src/brain/brain.ts
-msgid "Used in a workflow"
-msgstr "Usada en un flujo"
-
 #: src/labels.ts
 msgid "User"
 msgstr "Usuario"
@@ -16201,7 +16098,6 @@ msgstr "Qué hizo"
 msgid "What it does, in a few words"
 msgstr "Qué hace, en pocas palabras"
 
-#: src/brain/brain.ts
 #: src/brain/remember-dialog.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "What it is"

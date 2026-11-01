@@ -284,7 +284,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       gaps: [],
       workflows: [],
       connections: true,
-      landscape: [],
     });
   });
 
