@@ -4,7 +4,20 @@ import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -14,6 +27,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appIntegrations,
   appMembers,
+  appVersions,
   appResourceBindings,
   appWorkflowBindings,
   apps,
@@ -244,8 +258,15 @@ export const removeApp = async (
  */
 export const abandonedAfterMs = 7 * 24 * 3_600_000;
 
-/** Most Apps one reaping run looks at. */
+/** Most Apps one reaping run reaps. */
 const reapedPerRun = 20;
+
+/**
+ * Most candidates one reaping run looks at, oldest first: ones kept for
+ * now (a draft written since, say) are passed over, so they never stand
+ * in the way of abandoned Apps behind them.
+ */
+const examinedPerRun = 200;
 
 /**
  * When the chat draft an App was created in was last written, or
@@ -269,10 +290,79 @@ const draftWrittenAt = async (
 };
 
 /**
+ * Reaps `app` unless its chat's draft was written since `before` or can't
+ * be read: whether it was.
+ */
+const reapIfAbandoned = async (
+  env: Env,
+  db: DrizzleD1Database & { $client: D1Database },
+  app: {
+    id: string;
+    name: string;
+    workspaceId: string | null;
+    chatId: string | null;
+  },
+  before: Date
+): Promise<boolean> => {
+  if (app.workspaceId === null || app.chatId === null) {
+    return false;
+  }
+  const written = await draftWrittenAt(
+    env,
+    app.workspaceId,
+    app.chatId,
+    app.id
+  );
+  // Its draft unreadable, or written since: kept for now.
+  if (
+    written === undefined ||
+    (written !== null && written > before.getTime())
+  ) {
+    return false;
+  }
+  const now = new Date();
+  const [[removed]] = await auditedBatch(env, db, [
+    db
+      .update(apps)
+      .set({
+        status: "archived",
+        removedAt: now,
+        removedBy: "system",
+        // A release it put up for review goes with it, as `removeApp`'s.
+        pendingVersion: null,
+        provisionalWorkspaceId: null,
+        provisionalChatId: null,
+      })
+      .where(
+        and(
+          eq(apps.id, app.id),
+          isNotNull(apps.provisionalChatId),
+          isNull(apps.currentVersion),
+          isNull(apps.removedAt)
+        )
+      )
+      .returning({ id: apps.id }),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "app.removed",
+      target: { type: "app", id: app.id },
+      detail: { name: app.name, reason: "provisional_abandoned" },
+    }),
+    ...endedWith(db, app.id, "system", now),
+  ]);
+  if (removed === undefined) {
+    return false;
+  }
+  await afterRemoval(env, app.id);
+  return true;
+};
+
+/**
  * Reaps the Apps chats created that nobody accepted and nobody works on
  * (GRA-161): provisional, never made current, created before
  * `abandonedAfterMs` ago, and their chat's draft unwritten as long (or
- * gone). Each is removed as `removeApp` removes one, by the platform,
+ * gone), and no version committed since (`apps.files.commit`). Each is
+ * removed as `removeApp` removes one, by the platform,
  * recorded as `app.removed` with reason `provisional_abandoned`, in one
  * batch that requires it still provisional, never made current and not
  * removed: an acceptance meanwhile keeps it. Run by the cron trigger,
@@ -281,73 +371,62 @@ const draftWrittenAt = async (
 export const reapAbandonedApps = async (env: Env, at: Date): Promise<void> => {
   const db = drizzle(env.DB);
   const before = new Date(at.getTime() - abandonedAfterMs);
-  const candidates = await db
-    .select({
-      id: apps.id,
-      name: apps.name,
-      workspaceId: apps.provisionalWorkspaceId,
-      chatId: apps.provisionalChatId,
-    })
-    .from(apps)
-    .where(
-      and(
-        isNotNull(apps.provisionalChatId),
-        isNull(apps.currentVersion),
-        isNull(apps.removedAt),
-        lt(apps.createdAt, before)
-      )
-    )
-    .limit(reapedPerRun);
-  for (const app of candidates) {
-    if (app.workspaceId === null || app.chatId === null) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const written = await draftWrittenAt(
-      env,
-      app.workspaceId,
-      app.chatId,
-      app.id
-    );
-    // Its draft unreadable, or written since: kept for now.
-    if (
-      written === undefined ||
-      (written !== null && written > before.getTime())
-    ) {
-      continue;
-    }
-    const now = new Date();
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    const [[removed]] = await auditedBatch(env, db, [
-      db
-        .update(apps)
-        .set({
-          status: "archived",
-          removedAt: now,
-          removedBy: "system",
-          provisionalWorkspaceId: null,
-          provisionalChatId: null,
-        })
-        .where(
-          and(
-            eq(apps.id, app.id),
-            isNotNull(apps.provisionalChatId),
-            isNull(apps.currentVersion),
-            isNull(apps.removedAt)
-          )
+  let after: { createdAt: Date; id: string } | undefined;
+  let reaped = 0;
+  for (let examined = 0; examined < examinedPerRun;) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, oldest first
+    const page = await db
+      .select({
+        id: apps.id,
+        name: apps.name,
+        createdAt: apps.createdAt,
+        workspaceId: apps.provisionalWorkspaceId,
+        chatId: apps.provisionalChatId,
+      })
+      .from(apps)
+      .where(
+        and(
+          isNotNull(apps.provisionalChatId),
+          isNull(apps.currentVersion),
+          isNull(apps.removedAt),
+          lt(apps.createdAt, before),
+          // A version committed since, through `apps.files.commit` or a
+          // chat: someone works on it.
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(appVersions)
+              .where(
+                and(
+                  eq(appVersions.appId, apps.id),
+                  gte(appVersions.createdAt, before)
+                )
+              )
+          ),
+          after === undefined
+            ? undefined
+            : or(
+                gt(apps.createdAt, after.createdAt),
+                and(eq(apps.createdAt, after.createdAt), gt(apps.id, after.id))
+              )
         )
-        .returning({ id: apps.id }),
-      outboxedIfChanged(db, {
-        actor: { type: "system" },
-        action: "app.removed",
-        target: { type: "app", id: app.id },
-        detail: { name: app.name, reason: "provisional_abandoned" },
-      }),
-      ...endedWith(db, app.id, "system", now),
-    ]);
-    if (removed !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await afterRemoval(env, app.id);
+      )
+      .orderBy(asc(apps.createdAt), asc(apps.id))
+      .limit(reapedPerRun);
+    const last = page.at(-1);
+    if (last === undefined) {
+      return;
+    }
+    examined += page.length;
+    after = last;
+    for (const app of page) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      if (await reapIfAbandoned(env, db, app, before)) {
+        reaped += 1;
+        if (reaped >= reapedPerRun) {
+          return;
+        }
+      }
     }
   }
 };

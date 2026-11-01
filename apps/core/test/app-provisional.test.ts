@@ -52,9 +52,18 @@ describe("an App a chat creates", slow, () => {
       { workspaceId: chat.id, chatId: chat.chat.id }
     );
     await createdAt(app.id, longAgo());
+    // A release it put up for review goes with it.
+    await env.DB.prepare("UPDATE apps SET pending_version = 1 WHERE id = ?")
+      .bind(app.id)
+      .run();
     const events = await auditedDuring(async () => {
       await reapAbandonedApps(env, new Date());
     });
+    const row = await env.DB.prepare(
+      "SELECT pending_version AS pending FROM apps WHERE id = ?"
+    )
+      .bind(app.id)
+      .first<{ pending: number | null }>();
 
     expect({
       reaped: events
@@ -67,10 +76,84 @@ describe("an App a chat creates", slow, () => {
           reason: detail?.reason,
         })),
       get: await outcome(builder.api.apps.get(app.id)),
+      pending: row?.pending,
     }).toStrictEqual({
       reaped: [{ actor: "system", reason: "provisional_abandoned" }],
       get: "app.not_found",
+      pending: null,
     });
+  });
+
+  it("reaches an abandoned App behind more than a run's worth of older ones kept for now", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const chat = await chatOf(builder.userId);
+    const origin = { workspaceId: chat.id, chatId: chat.chat.id };
+    const drafting: string[] = [];
+    for (let at = 0; at < 21; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const made = await createApp(
+        env,
+        acting(builder.userId),
+        { name: `Drafting ${unique()}` },
+        undefined,
+        origin
+      );
+      drafting.push(made.id);
+      // Older than the abandoned one: looked at first.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await createdAt(made.id, longAgo() - 60_000 + at);
+    }
+    const abandoned = await createApp(
+      env,
+      acting(builder.userId),
+      { name: `Abandoned ${unique()}` },
+      undefined,
+      origin
+    );
+    await createdAt(abandoned.id, longAgo());
+    // Their drafts written now: authoring goes on.
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    await runInDurableObject(chat.stub, (instance) => {
+      for (const id of drafting) {
+        const run = instance.openCodeRun(chatId, testRunOpening);
+        instance.saveDraft(
+          chatId,
+          id,
+          null,
+          { "AGENTS.md": "# Draft\n" },
+          [],
+          0,
+          run
+        );
+      }
+    });
+    await reapAbandonedApps(env, new Date());
+
+    expect({
+      abandoned: await outcome(builder.api.apps.get(abandoned.id)),
+      drafting: await outcome(builder.api.apps.get(drafting[0] ?? "")),
+    }).toStrictEqual({ abandoned: "app.not_found", drafting: "ok" });
+  });
+
+  it("is kept while a person commits to it outside its chat", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const chat = await chatOf(builder.userId);
+    const app = await createApp(
+      env,
+      acting(builder.userId),
+      { name: `Taken over ${unique()}` },
+      undefined,
+      { workspaceId: chat.id, chatId: chat.chat.id }
+    );
+    await builder.api.apps.files.commit(
+      app.id,
+      { "AGENTS.md": "# Mine now\n" },
+      "Mine now"
+    );
+    await createdAt(app.id, longAgo());
+    await reapAbandonedApps(env, new Date());
+
+    await expect(outcome(builder.api.apps.get(app.id))).resolves.toBe("ok");
   });
 
   it("is kept while its draft is being written, once accepted, and when a person made it", async () => {
