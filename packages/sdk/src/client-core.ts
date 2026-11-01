@@ -229,6 +229,32 @@ export interface ClientTransport {
    * screens (client-navigation.ts); a client without it navigates nowhere.
    */
   navigation?: NavigationTransport;
+  /**
+   * How the client asks the trusted host to answer a decision, after the
+   * person confirms it in the host's own UI (the page, for a frame); a
+   * client without it answers none.
+   */
+  decisions?: DecisionTransport;
+}
+
+/**
+ * How a client reaches the trusted host to answer a person's decision
+ * (spec 10.7.2). The host shows the decision's review context and the
+ * answer as it will be recorded, asks the person to confirm it there,
+ * and only then records it with a one-use confirmation of its own: the
+ * client never sees nor holds that confirmation.
+ */
+export interface DecisionTransport {
+  /**
+   * Answers decision `decision` of run `run` with `answer`: resolves once
+   * it is the recorded decision, rejects with the host's refusal
+   * (`decision.cancelled` when the person cancels the confirmation).
+   */
+  readonly respond: (
+    run: string,
+    decision: string,
+    answer: { readonly approved: boolean; readonly payload: unknown }
+  ) => Promise<unknown>;
 }
 
 /**
@@ -887,8 +913,17 @@ export interface WorkflowLink {
       readonly read: (value: unknown) => unknown;
     }
   ) => Promise<unknown>;
-  /** Clears everything the client holds: the person or build lost access. */
-  readonly fence: (refusal: GraspError) => void;
+  /** How decisions are answered through the trusted host; none without one. */
+  readonly decisions: DecisionTransport | undefined;
+  /**
+   * Clears everything the client holds: the person or build lost access.
+   * Given `startedUnder`, the generation a request began under
+   * (`generation`), only if no fence came since: a late refusal of an
+   * older request would clear what was recovered after it.
+   */
+  readonly fence: (refusal: GraspError, startedUnder?: number) => void;
+  /** The fence generation now: what a request begins under. */
+  readonly generation: () => number;
   /** Calls `listener` at every fence; answers what stops calling it. */
   readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
 }
@@ -1627,6 +1662,7 @@ export class GraspClient {
         await client.#stream(reference, args, options, events),
       workflowLink: {
         watch: client.#transport?.watch,
+        decisions: client.#transport?.decisions,
         command: async (target, request, key, events) =>
           await client.#send(
             target,
@@ -1641,9 +1677,15 @@ export class GraspClient {
             },
             events
           ),
-        fence: (refusal) => {
-          client.#fence(refusal);
+        fence: (refusal, startedUnder) => {
+          if (
+            startedUnder === undefined ||
+            startedUnder === client.#generation
+          ) {
+            client.#fence(refusal);
+          }
         },
+        generation: () => client.#generation,
         onFence: (listener) => {
           client.#fenceListeners.add(listener);
           return () => {
