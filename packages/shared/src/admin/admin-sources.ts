@@ -1,7 +1,7 @@
 /**
  * Where Grasp's admin gets what it knows about a company, and where what it knows goes. Every
  * outside system is reached through its own MCP server, the same way an AI app reaches Grasp, so
- * one chat (Grasp's own, Claude, ChatGPT, a Discord bot) can work across all of them; the admin
+ * one chat (Grasp's own, Claude, ChatGPT) can work across all of them; the admin
  * then fills in by itself what is now typed by hand. Which ones are connected is `state`: the rest
  * is the plan, in the order they come. Pure data.
  */
@@ -27,8 +27,6 @@ export type SourceReads =
   | "needs"
   | "deployments"
   | "releases"
-  | "proposals"
-  | "signatures"
   | "companies"
   | "people"
   | "deals"
@@ -38,25 +36,17 @@ export type SourceReads =
   | "invoices"
   | "connections"
   | "toolkits"
-  | "digest"
-  | "questions";
+  | "digest";
 
 export interface AdminSource {
-  id:
-    | "grasp"
-    | "console"
-    | "rooms"
-    | "attio"
-    | "stripe"
-    | "composio"
-    | "discord";
+  id: "grasp" | "console" | "attio" | "stripe" | "composio";
   /** Grasp's own systems, or another company's. */
   ours: boolean;
   /** Connected and read now, or still to connect. */
   state: "live" | "planned";
   /** The order the planned ones come in: the one that saves the most typing first. */
   order: number;
-  /** Which way round: the admin reads from it, or it reads from the admin (a chat in Discord asks the admin). */
+  /** Which way round: the admin reads from it, or it reads from the admin (a chat asks the admin). */
   direction: "in" | "out";
   reads: SourceReads[];
   feeds: SourceFeeds[];
@@ -90,19 +80,6 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // Where Grasp writes its proposals and the company signs them. Read
-    // through Rooms' read-only service route with one token, not its MCP
-    // server, whose OAuth grant would need renewing every week.
-    id: "rooms",
-    ours: true,
-    state: "planned",
-    order: 2,
-    direction: "in",
-    reads: ["proposals", "signatures"],
-    feeds: ["contract", "log"],
-    tools: [],
-  },
-  {
     // The CRM: every call with a company is there, with who was in it, and
     // the deals Grasp won, to start an organization from. Read through
     // Attio's REST API with one read-only key, as Stripe is, not its MCP
@@ -110,7 +87,7 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     id: "attio",
     ours: false,
     state: "planned",
-    order: 3,
+    order: 2,
     direction: "in",
     reads: ["companies", "people", "deals", "calls"],
     feeds: ["details", "portfolio", "log"],
@@ -120,7 +97,7 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     id: "stripe",
     ours: false,
     state: "planned",
-    order: 4,
+    order: 3,
     direction: "in",
     reads: ["customers", "subscriptions", "invoices"],
     feeds: ["invoices", "contract", "portfolio"],
@@ -131,21 +108,10 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     id: "composio",
     ours: false,
     state: "planned",
-    order: 5,
+    order: 4,
     direction: "in",
     reads: ["connections", "toolkits"],
     feeds: ["integrations", "workflows"],
-    tools: [],
-  },
-  {
-    // Grasp's own server: a bot that posts the morning digest and answers questions through the admin's MCP.
-    id: "discord",
-    ours: false,
-    state: "planned",
-    order: 6,
-    direction: "out",
-    reads: ["digest", "questions"],
-    feeds: ["ask"],
     tools: [],
   },
 ];
