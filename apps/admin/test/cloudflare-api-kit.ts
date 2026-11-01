@@ -3,10 +3,6 @@
  * account's state, the API's envelope, and how a route answers.
  */
 import type {
-  AdminAskAnswer,
-  AdminAskRequest,
-} from "@grasp-os/shared/admin-ask";
-import type {
   AdminKickoffRequest,
   AdminKickoffView,
 } from "@grasp-os/shared/admin-kickoff";
@@ -179,15 +175,6 @@ export interface AccountState {
   adminHeld?: () => Promise<void>;
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
-  /**
-   * What its core answers Ask Grasp's signed question with
-   * (@grasp-os/shared/admin-ask), as Grasp's own core: an answer, or
-   * `no_model` for a core with no model it may send the document to (503).
-   * Unset, it answers "An answer.".
-   */
-  ask?: AdminAskAnswer | "no_model";
-  /** The questions its core took, as each signed request sent them. */
-  asked: AdminAskRequest[];
   /**
    * What its core answers the admin's signed kickoff request with
    * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
