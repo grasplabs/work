@@ -50,8 +50,6 @@ interface __BaseEnv_Env {
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
   MODEL_GATEWAY?: unknown;
-  /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
-  MEMORY_LIMITS?: unknown;
   /**
    * Lower limits on an App's npm packages than the defaults
    * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
@@ -63,14 +61,6 @@ interface __BaseEnv_Env {
    * deploys.
    */
   PLATFORM_CHANGE?: unknown;
-  /** Days the audit log keeps events before archiving (src/audit-log.ts, `retainAuditLog`). */
-  AUDIT_RETENTION_DAYS?: unknown;
-  /** Days archived audit events are kept before they're purged (src/audit-log.ts). */
-  AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
-  /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
-  RUN_RETENTION_DAYS?: unknown;
-  /** The domain the deployment receives mail at (src/workflows/overview.ts). */
-  INBOUND_MAIL_DOMAIN?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**

@@ -125,8 +125,8 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   it: the status says nothing of when, and the end's own notification
 //   follows. A terminate asks the engine, and takes the end the engine
 //   confirms in answer, at once, as a cancel of an App run does.
-// - Readers go by the row and the deployment's retention as it is now
-//   (`detailsRemoved`), never by what the engine still holds.
+// - Readers go by the row and the run retention (`detailsRemoved`),
+//   never by what the engine still holds.
 //
 // Threat model, and how each is closed:
 //
@@ -1153,7 +1153,7 @@ export const resultOf = async (
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, row.id))
     .get();
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: row.endedAt,
     detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
   });
@@ -1172,7 +1172,7 @@ export const resultOf = async (
   // any: the engine, which may be unreachable, or no longer hold it, isn't
   // asked.
   if (removed) {
-    return { error: { code: row.failureCode, message: removedText(env) } };
+    return { error: { code: row.failureCode, message: removedText } };
   }
   let engine: Pick<WorkflowResourceRun, "output" | "error">;
   try {

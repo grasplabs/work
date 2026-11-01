@@ -2403,10 +2403,6 @@ msgstr "Added: it reads and rewrites every record of {table}, whoever owns it"
 msgid "Address"
 msgstr "Address"
 
-#: src/workflows/triggers.tsx
-msgid "Address copied"
-msgstr "Address copied"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -4606,10 +4602,6 @@ msgstr "Copied"
 msgid "Copy"
 msgstr "Copy"
 
-#: src/workflows/triggers.tsx
-msgid "Copy address"
-msgstr "Copy address"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copy as Markdown"
@@ -4663,10 +4655,6 @@ msgstr "Corrected by"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Could be better"
-
-#: src/workflows/triggers.tsx
-msgid "Could not copy the address"
-msgstr "Could not copy the address"
 
 #: src/activity/pending.tsx
 msgid "couldn't be read"
@@ -16400,10 +16388,6 @@ msgstr "When a task keeps failing the same way, the Brain notes it here as a les
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
 msgstr "When a workflow is known"
-
-#: src/workflows/triggers.tsx
-msgid "When an email arrives at {address}"
-msgstr "When an email arrives at {address}"
 
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"

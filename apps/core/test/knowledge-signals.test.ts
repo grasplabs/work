@@ -535,37 +535,6 @@ describe("Knowledge usage signals", () => {
     });
   });
 
-  it("count unread documents over the audit log's retention, where that's shorter", async () => {
-    const owner = await newOwner();
-    const collectionId = await newCollection(owner);
-    const day = nextDay();
-    const older = await newDocument(owner, collectionId, "older.md");
-    const newer = await newDocument(owner, collectionId, "newer.md");
-    await changedAgo(older, day, 40 * dayMs);
-    await changedAgo(newer, day, 20 * dayMs);
-
-    await refreshDailySignals({ ...env, AUDIT_RETENTION_DAYS: "30" }, day);
-
-    const [computed] = await computationsOf(day);
-    expect({
-      signals: await signalsOf(owner, collectionId),
-      unreadDays: computed?.detail.unreadDays,
-    }).toStrictEqual({
-      signals: [
-        {
-          kind: "unread_document",
-          value: 40,
-          evidence: {
-            document: { id: older, path: "older.md", title: "older.md" },
-            updatedAt: new Date(day.getTime() - 40 * dayMs).toISOString(),
-            days: 30,
-          },
-        },
-      ],
-      unreadDays: 30,
-    });
-  });
-
   it("keep a dismissed signal away until there is something new", async () => {
     const owner = await newOwner();
     const [first, second] = [await newReader(), await newReader()];

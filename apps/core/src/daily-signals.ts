@@ -121,8 +121,7 @@ export const refreshDailySignals = async (
   );
   const failures = [firstFailure(claims)];
   if (improvement !== undefined || knowledge !== undefined) {
-    const window =
-      knowledge === undefined ? undefined : knowledgeWindow(env, now);
+    const window = knowledge === undefined ? undefined : knowledgeWindow(now);
     const totals = {
       signals: improvement === undefined ? undefined : noSignalTotals(),
       knowledge: window?.totals(),

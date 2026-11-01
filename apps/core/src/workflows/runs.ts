@@ -194,7 +194,7 @@ export const toRun = (env: Env, row: RunFields): WorkflowRun => ({
   status: shownStatus(row.status),
   createdAt: row.createdAt.toISOString(),
   endedAt: iso(row.endedAt),
-  ...(detailsRemoved(env, row) ? { detailsRemoved: true } : {}),
+  ...(detailsRemoved(row) ? { detailsRemoved: true } : {}),
 });
 
 /** What runs need of their App: its current version and its owner. */
@@ -973,7 +973,7 @@ export const runFor = (
     failure: {
       ...row.failure,
       step: step === null ? null : (step.split(":", 1)[0] ?? step),
-      error: { ...error, message: removedText(env) },
+      error: { ...error, message: removedText },
     },
   };
 };

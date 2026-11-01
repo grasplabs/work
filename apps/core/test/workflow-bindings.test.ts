@@ -1901,7 +1901,7 @@ describe("retention", () => {
       },
       { timeout: 30_000, interval: 100 }
     );
-    // Run retention, past the deployment's retention (30 days).
+    // Past the run retention (30 days).
     await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 3_600_000));
     const receipt = await receiptRow(first.id);
     const revisions = await env.DB.prepare(

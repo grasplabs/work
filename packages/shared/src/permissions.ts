@@ -243,9 +243,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "APPS",
   "ASSETS",
   "AUDIT_ARCHIVE",
-  "AUDIT_ARCHIVE_RETENTION_DAYS",
   "AUDIT_LOG",
-  "AUDIT_RETENTION_DAYS",
   "BETTER_AUTH_SECRET",
   // The Chat SDK's state for Stephen's door (core's @grasp-os/chat/state).
   "CHAT_STATE",
@@ -287,13 +285,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Google client (connect's providers.ts).
   "GOOGLE_DOCUMENTS_CLIENT_ID",
   "GOOGLE_DOCUMENTS_CLIENT_SECRET",
-  // Where the deployment receives mail (core's src/workflows/overview.ts).
-  "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
   "LOADER",
   // Who core's mail is from (core's src/mail.ts).
   "MAIL_FROM",
-  "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
   // The directory's Entra app (connect's providers.ts).
@@ -316,7 +311,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "RELEASE_READ_MS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
-  "RUN_RETENTION_DAYS",
   // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
   "RUNTIME_PROFILE",
   // The on-prem sandbox for untrusted isolates (core's src/sandboxed.ts).

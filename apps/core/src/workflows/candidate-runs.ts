@@ -58,7 +58,7 @@ import {
 } from "../workflow-resources.ts";
 import { acceptedInput } from "../workflow-starts.ts";
 import { runDequeued } from "./admission.ts";
-import { runEngine, runRetentionDays } from "./engine.ts";
+import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
@@ -105,27 +105,17 @@ import type { EngineStatus } from "./runs.ts";
 //   `maxKeptCandidateRuns` kept of a workflow; a test run waits at most
 //   `maxCandidateWaitMs` at a time and goes on at most
 //   `maxCandidateLifetimeMs` in all, and its builders can stop it. Its rows and builds
-//   are kept a week, or the deployment's run retention if shorter
-//   (`sweepCandidateRuns`, release-retention.ts).
+//   are kept a week (`sweepCandidateRuns`, release-retention.ts).
 // - Its record. Every row of its own is immutable but its status
 //   (migration 0110), and what the audit log keeps of it says it was a
 //   test run (`candidate: true`).
 
-/** How long a test run is kept once it started, at most. */
-const candidateKeptMs = 7 * 24 * 60 * 60 * 1000;
-
 /**
- * How long the deployment keeps a test run: a week, or less when it keeps
- * runs for less (`RUN_RETENTION_DAYS`), so its row never outlives what the
- * engine keeps of it, and nothing of it is kept longer than the client
- * chose.
+ * How long a test run is kept once it started: a week, less than the run
+ * retention (`runRetentionDays`), so its row never outlives what the
+ * engine keeps of it.
  */
-const keptMsOf = (env: Env): number => {
-  const days = runRetentionDays(env);
-  return days === undefined
-    ? candidateKeptMs
-    : Math.min(candidateKeptMs, days * 24 * 60 * 60 * 1000);
-};
+const candidateKeptMs = 7 * 24 * 60 * 60 * 1000;
 
 /** How long past its lifetime a test run still `running` is let be. */
 const overdueGraceMs = 15 * 60 * 1000;
@@ -951,7 +941,7 @@ export const sweepCandidateRuns = async (
   at = new Date()
 ): Promise<void> => {
   const until = Date.now() + sweepBudgetMs;
-  const cutoff = new Date(at.getTime() - keptMsOf(env));
+  const cutoff = new Date(at.getTime() - candidateKeptMs);
   await settleUnconfirmed(env, at);
   // No test run goes on past its lifetime: one still `running` a grace
   // after it lost its end, and is settled now rather than when it goes.

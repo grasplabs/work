@@ -5,7 +5,10 @@ import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import { memoryMaxLimit } from "@grasp-os/shared/memory";
+import {
+  memoryCharactersPerToken,
+  memoryLimits,
+} from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
@@ -1370,15 +1373,13 @@ describe("chat agent turns", () => {
         ifVersion: current?.currentVersion ?? 0,
       });
     };
-    // The largest a deployment may let a memory file be: 128,000
-    // characters, which every request of the chat carries.
-    const limits = env.MEMORY_LIMITS;
-    const raised = { "AGENTS.md": memoryMaxLimit };
-    const rules = `# Rules\n\n${"m".repeat(127_000)} the last rule`;
+    // As large as the company's AGENTS.md may be, which every request of
+    // the chat carries.
+    const rules = `# Rules\n\n${"m".repeat(
+      memoryLimits["AGENTS.md"] * memoryCharactersPerToken - 100
+    )} the last rule`;
     let sent = "";
     try {
-      Reflect.set(env, "MEMORY_LIMITS", raised);
-      await configureObject(stub, { memoryLimits: raised });
       await saveRules(rules);
       await addTurns(stub, chat.id, 40);
 
@@ -1387,7 +1388,6 @@ describe("chat agent turns", () => {
       ).resolves.toMatchObject({ outcome: "answered" });
       sent = JSON.stringify(provider.requests.at(-1)?.body);
     } finally {
-      Reflect.set(env, "MEMORY_LIMITS", limits);
       // The company's memory is every later chat's too.
       await saveRules("# Rules");
     }
