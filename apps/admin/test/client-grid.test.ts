@@ -1,4 +1,3 @@
-import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
@@ -19,9 +18,8 @@ import {
 import type { GridRow, LiveOptions } from "../src/clients/grid.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
+import { livePlacedClient, placedRelease, scriptsOf } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-grid-4b7d21";
@@ -33,11 +31,10 @@ const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 const importedRelease = async (notes: string): Promise<string> =>
   await placedRelease(notes);
 
-/** A client recorded as provisioning leaves it, on a new account in the fake. */
+/** A client recorded as provisioning leaves it. */
 const recordClient = async (
   status: "provisioning" | "active"
-): Promise<{ clientId: string; account: AccountState }> => {
-  const account = cloudflare.addAccount();
+): Promise<{ clientId: string }> => {
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date();
   await act(
@@ -55,10 +52,10 @@ const recordClient = async (
     ],
     { action: "client.create", clientId }
   );
-  return { clientId, account };
+  return { clientId };
 };
 
-/** An active client placed in a destination of its own, live on `releaseId`. */
+/** An active client placed in the stage's destination, live on `releaseId`. */
 const liveClient = async (releaseId: string) =>
   await livePlacedClient(cloudflare, 2, releaseId);
 
@@ -66,17 +63,14 @@ const liveClient = async (releaseId: string) =>
 const rowOf = (grid: GridRow[], clientId: string): GridRow | undefined =>
   grid.find(({ id }) => id === clientId);
 
-/** How many calls the fake got for `account`'s Workers in this test. */
-const callsFor = (account: AccountState): number =>
-  cloudflare.calls.filter(({ path }) =>
-    path.startsWith(`/accounts/${account.id}/workers`)
-  ).length;
+/** How many requests `client`'s core got in this test. */
+const requestsTo = (client: { clientId: string }): number =>
+  cloudflare
+    .coreRequests()
+    .filter(({ clientId }) => clientId === client.clientId).length;
 
 /** Reading live columns as the grid does, answers not kept between tests. */
 const uncached: LiveOptions = { ...defaultLiveOptions, cache: false };
-
-/** The account a call to the API is about, from its path. */
-const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
 
 describe("the client grid", () => {
   useStoreSecrets({ deployer: token });
@@ -150,33 +144,7 @@ describe("the client grid", () => {
     const host = `${acme.clientId}.grasp.test`;
     const entry = await env.ROUTER_HOSTS.get(host, "json");
     const { generation } = z.object({ generation: z.int() }).parse(entry);
-    // Its core moved into the namespace, its hostname's entry naming it there.
-    const script = [...acme.account.scripts.keys()].find((name) =>
-      name.endsWith("core")
-    );
-    const state = acme.account.scripts.get(script ?? "");
-    if (script === undefined || state === undefined) {
-      throw new Error("The deploy left no core script");
-    }
-    acme.account.namespaces.set(
-      clientsNamespace("production"),
-      new Map([[script, state]])
-    );
-    acme.account.scripts.delete(script);
-    await env.ROUTER_HOSTS.put(
-      host,
-      JSON.stringify({ clientId: acme.clientId, script, generation })
-    );
-    const namespace = cloudflare.dispatcher(
-      acme.account.id,
-      clientsNamespace("production")
-    );
-    vi.spyOn(env.DISPATCHER, "get").mockImplementation(
-      (name) =>
-        // SAFETY: a stand-in user Worker: only `fetch`, which the admin calls.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        namespace.get(name) as Fetcher
-    );
+    const { core: script } = await scriptsOf(acme.clientId);
 
     const reached = await gridLive(env, uncached);
     // Then its entry names a script the namespace doesn't have.
@@ -232,86 +200,58 @@ describe("the client grid", () => {
         { headers: { "cache-control": "max-age=60" } }
       )
     );
-    // The slow client's account doesn't answer until the test lets it.
+    // The slow client's core doesn't answer until the test lets it.
     const held = Promise.withResolvers<boolean>();
     const slowArrived = Promise.withResolvers<boolean>();
-    cloudflare.beforeAnswering(
-      ({ path }) =>
-        path.startsWith(`/accounts/${slow?.account.id ?? ""}/workers`),
-      async () => {
+    if (slow !== undefined) {
+      slow.core.held = async () => {
         slowArrived.resolve(true);
         await held.promise;
-      }
-    );
-    // The fake answers every other call at once, so two clients' reads
-    // overlap only if one is held open: the first call of another of
-    // these accounts waits until a second account's call has arrived (the
-    // slow one's, or another's), whichever order the clients are read in.
-    // Two reads at a time hold two accounts at once; one at a time never
-    // lets the second arrive, and the held row fails its deadline.
-    const accountOf = (path: string): string | undefined =>
-      accountPath.exec(path)?.groups?.id;
-    const others = new Set(
-      [unread, ...whole].map((client) => client?.account.id)
-    );
+      };
+    }
+    // The fake answers every other request at once, so two clients' reads
+    // overlap only if one is held open: the first request to another of
+    // these cores waits until a second client's has arrived (the slow
+    // one's, or another's), whichever order the clients are read in. Two
+    // reads at a time hold two cores at once; one at a time never lets the
+    // second arrive, and the held row fails its deadline.
     let firstOther: string | undefined;
     const secondArrived = Promise.withResolvers<boolean>();
-    cloudflare.beforeAnswering(
-      ({ path }) => {
-        firstOther = accountOf(path);
-        return others.has(firstOther);
-      },
-      async () => {
+    const heldFirst = (clientId: string) => async () => {
+      firstOther ??= clientId;
+      if (firstOther === clientId) {
         await Promise.race([slowArrived.promise, secondArrived.promise]);
-      }
-    );
-    cloudflare.beforeAnswering(
-      ({ path }) => {
-        const account = accountOf(path);
-        return others.has(account) && account !== firstOther;
-      },
-      async () => {
+      } else {
         secondArrived.resolve(true);
-        await secondArrived.promise;
       }
-    );
-    // Another's account refuses one Worker's deployments listing, once.
-    cloudflare.failNext(
-      ({ path }) =>
-        path.startsWith(
-          `/accounts/${unread?.account.id ?? ""}/workers/scripts/`
-        ) && path.endsWith("/deployments"),
-      400
-    );
+    };
+    for (const other of [unread, ...whole]) {
+      if (other !== undefined) {
+        other.core.held = heldFirst(other.clientId);
+      }
+    }
+    // Another's core names no version for its connect, once: its drift
+    // can't be told.
+    if (unread !== undefined) {
+      unread.core.connectAnswersFirst = [null];
+    }
     const options: LiveOptions = {
       ...defaultLiveOptions,
       concurrency: 2,
-      rowDeadlineMs: 200,
+      // Long enough for any client that answers, on a busy machine too.
+      rowDeadlineMs: 2000,
       cache: true,
     };
 
-    // The deadlines run on a clock the test moves: on the real one, a
-    // client that answers but is read slowly on a busy machine would run
-    // out of time too.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = gridLive(env, options);
-    // Every other client read, each deadline cleared as it answered: the
-    // slow client's, waiting on its account, is the only one left.
-    // (Not `vi.waitFor`: under fake timers it moves the clock as it polls.)
-    await slowArrived.promise;
-    while (vi.getTimerCount() !== 1) {
-      // oxlint-disable-next-line no-await-in-loop -- until the others are read
-      await scheduler.wait(1);
-    }
-    await vi.advanceTimersByTimeAsync(options.rowDeadlineMs);
     const first = await reading;
-    const peak = cloudflare.peakAccounts();
-    const aborted = cloudflare.abortedCalls();
-    // Both accounts answer from here on.
+    const peak = cloudflare.peakCores();
+    const aborted = cloudflare.abortedCoreRequests();
+    // Every core answers at once from here on.
     held.resolve(true);
-    const callsBefore = whole.map(({ account }) => callsFor(account));
+    const callsBefore = whole.map((client) => requestsTo(client));
     const again = await gridLive(env, options);
-    const callsAfter = whole.map(({ account }) => callsFor(account));
+    const callsAfter = whole.map((client) => requestsTo(client));
 
     expect({
       peak,
@@ -328,7 +268,7 @@ describe("the client grid", () => {
         unread: again[unread?.clientId ?? ""],
         whole: whole.map(({ clientId }) => again[clientId]?.reach),
       },
-      // Kept: the second read asked their accounts nothing.
+      // Kept: the second read asked their cores nothing.
       calls: callsAfter.map(
         (count, index) => count - (callsBefore[index] ?? 0)
       ),
@@ -354,54 +294,27 @@ describe("the client grid", () => {
     });
   });
 
-  it("reads the deployer's token once, so Secrets Store failing after that still leaves every client's live answers", async () => {
-    const release = await importedRelease("feat(core): one token read");
-    const acme = await liveClient(release);
-    const globex = await liveClient(release);
-    let reads = 0;
-    // The first read answers as the store does; any after it fails, as a
-    // store gone bad would.
-    vi.spyOn(env.DEPLOYER_API_TOKEN, "get").mockImplementation(async () => {
-      reads += 1;
-      return reads === 1
-        ? await Promise.resolve(token)
-        : await Promise.reject(new Error("store unavailable"));
-    });
-
-    const live = await gridLive(env, uncached);
-
-    expect({
-      reads,
-      acme: live[acme.clientId],
-      globex: live[globex.clientId],
-    }).toMatchObject({
-      reads: 1,
-      acme: { drift: "in_sync", reach: "reachable" },
-      globex: { drift: "in_sync", reach: "reachable" },
-    });
-  });
-
   it("reads a client's onboarding from its core, signed for, numbers only, says when its core can't be asked, and never follows one that redirects", async () => {
     const release = await importedRelease("feat(core): onboarding on the grid");
     const onboarding = await liveClient(release);
     const older = await liveClient(release);
     const moved = await liveClient(release);
-    moved.account.onboarding = {
+    moved.core.onboarding = {
       stage: "interviews",
       day: 1,
       days: 14,
       known: 2,
       needs: 0,
     };
-    moved.account.redirectsTo = "https://elsewhere.example";
-    onboarding.account.onboarding = {
+    moved.core.redirectsTo = "https://elsewhere.example";
+    onboarding.core.onboarding = {
       stage: "interviews",
       day: 4,
       days: 14,
       known: 48,
       needs: 1,
     };
-    older.account.onboarding = "absent";
+    older.core.onboarding = "absent";
 
     const live = await gridLive(env, uncached);
 
@@ -441,28 +354,18 @@ describe("the client grid", () => {
     });
   });
 
-  it("shows a client whose core doesn't answer as unreachable, one changed outside the admin as drifted, and shared secrets as unknown, never behind, when its deployments can't be read", async () => {
+  it("shows a client whose core doesn't answer as unreachable, one changed outside the admin as drifted, and shared secrets as unknown, never behind, when its connect's version can't be read", async () => {
     const release = await importedRelease("feat(core): trouble");
     const down = await liveClient(release);
     const changed = await liveClient(release);
     const unread = await liveClient(release);
-    down.account.unhealthy = 100;
-    // Someone deployed another version of each Worker by hand.
-    for (const script of changed.account.scripts.values()) {
-      script.deployments.unshift({
-        id: crypto.randomUUID(),
-        created_on: new Date().toISOString(),
-        versions: [{ version_id: crypto.randomUUID(), percentage: 100 }],
-        annotations: {},
-      });
-    }
-    // Its account refuses one Worker's deployments listing.
-    cloudflare.failNext(
-      ({ path }) =>
-        path.startsWith(`/accounts/${unread.account.id}/workers/scripts/`) &&
-        path.endsWith("/deployments"),
-      400
-    );
+    down.core.unhealthy = 100;
+    // Someone deployed another version of each Worker by hand: core names
+    // them.
+    changed.core.answeringVersion = crypto.randomUUID();
+    changed.core.connectAnswering = crypto.randomUUID();
+    // Its core names no version for its connect.
+    unread.core.connectAnswering = null;
 
     const live = await gridLive(env, uncached);
 
@@ -471,7 +374,7 @@ describe("the client grid", () => {
       changed: live[changed.clientId],
       unread: live[unread.clientId],
     }).toMatchObject({
-      down: { reach: "unreachable", drift: "in_sync" },
+      down: { reach: "unreachable", drift: "unknown" },
       changed: { drift: "drifted" },
       unread: { drift: "unknown", sharedSecretsCurrent: null },
     });

@@ -1,4 +1,3 @@
-import { clientsNamespace } from "@grasp-os/shared/names";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -7,19 +6,16 @@ import { z } from "zod";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
-import { cloudflareApi } from "../src/cloudflare/api.ts";
 import {
   auditEvents,
-  clientPlacements,
   clientProvisions,
   clientRuns,
   clients,
   clientWorkers,
-  hostingDestinations,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
+import { deployContext, deploySecrets } from "../src/deploy/context.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import {
   runClientProvision,
@@ -44,7 +40,8 @@ import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { AdminWorkflow } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts, mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { deploymentOfPath } from "./cloudflare-api.ts";
 import { db, staff } from "./hosting.ts";
 import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
@@ -108,13 +105,6 @@ const heldAfter = (matches: (call: ApiCall) => boolean) => {
 const ringChecked = { evalPassed: true, demoSent: true };
 
 /** A live client in `ring` on release `releaseId`. */
-/** The account a call to the API is about, from its path. */
-const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
-
-/** The account `path`, a call to the API, is about. */
-const accountOf = (path: string): string | undefined =>
-  accountPath.exec(path)?.groups?.id;
-
 /**
  * How long a held call waits for another client's to arrive before it
  * goes on alone, as it would if clients were deployed one at a time.
@@ -298,9 +288,15 @@ const rolloutActions = async (rolloutId: string): Promise<string[]> => {
   return rows.map(({ action }) => action);
 };
 
-/** How many uploads each of `client`'s scripts has had. */
+/** How many uploads `client`'s scripts have had. */
 const uploadsOf = (client: PlacedClient): number =>
-  client.account.scriptUploads.length;
+  client.account.scriptUploads.filter(({ script }) =>
+    script.startsWith(`grasp-${client.deploymentId}-`)
+  ).length;
+
+/** Whether `path` names one of `client`'s resources. */
+const ofClient = (client: PlacedClient, path: string): boolean =>
+  deploymentOfPath(path) === client.deploymentId;
 
 /** The code `promise` is refused with, or `resolved` if it isn't. */
 const codeOf = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -502,7 +498,7 @@ describe("rolling a release out to placed clients", () => {
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${internal.account.id}/`) &&
+        ofClient(internal, call.path) &&
         call.path.endsWith("-connect"),
       400
     );
@@ -531,15 +527,15 @@ describe("rolling a release out to placed clients", () => {
     const release = await placedRelease("feat(core): broken once live");
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
-      call.path.startsWith(`/accounts/${internal.account.id}/`) &&
+      ofClient(internal, call.path) &&
       call.path.endsWith("-connect");
     // The release's core answers the probe as another client; the
     // rollback's connect upload finds it answering as it should again.
-    internal.account.coreProbe = { asClient: "someone-else" };
+    internal.core.coreProbe = { asClient: "someone-else" };
     // oxlint-disable require-await -- the fake waits on these; nothing to wait for
     cloudflare.beforeAnswering(isConnectUpload, async () => {
       cloudflare.beforeAnswering(isConnectUpload, async () => {
-        delete internal.account.coreProbe;
+        delete internal.core.coreProbe;
       });
     });
     // oxlint-enable require-await
@@ -574,7 +570,7 @@ describe("rolling a release out to placed clients", () => {
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+        ofClient(acme, call.path) &&
         call.path.endsWith("-connect"),
       400
     );
@@ -744,13 +740,13 @@ describe("rolling a release out to placed clients", () => {
     // waits until another fleet client's call has arrived. Side by side,
     // that comes at once; one at a time, it never does, and the held call
     // goes on after `serialGraceMs`, alone.
-    const fleetAccounts = new Set(fleet.map(({ account }) => account.id));
+    const fleetClients = new Set(fleet.map(({ deploymentId }) => deploymentId));
     let firstClient: string | undefined;
     const secondArrived = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
       ({ path }) => {
-        firstClient = accountOf(path);
-        return firstClient !== undefined && fleetAccounts.has(firstClient);
+        firstClient = deploymentOfPath(path);
+        return firstClient !== undefined && fleetClients.has(firstClient);
       },
       async () => {
         await Promise.race([
@@ -761,11 +757,11 @@ describe("rolling a release out to placed clients", () => {
     );
     cloudflare.beforeAnswering(
       ({ path }) => {
-        const account = accountOf(path);
+        const client = deploymentOfPath(path);
         return (
-          account !== undefined &&
-          fleetAccounts.has(account) &&
-          account !== firstClient
+          client !== undefined &&
+          fleetClients.has(client) &&
+          client !== firstClient
         );
       },
       async () => {
@@ -775,9 +771,9 @@ describe("rolling a release out to placed clients", () => {
     );
     await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
-    // Each client's account its own: how many had a call being answered at
+    // How many clients had a call about their resources being answered at
     // once is how many ran side by side (ring 0's alone, before).
-    const peak = cloudflare.peakAccounts();
+    const peak = cloudflare.peakClients();
     const children = run.childRuns();
 
     expect({
@@ -807,7 +803,7 @@ describe("rolling a release out to placed clients", () => {
     // going when it's terminated from the dashboard.
     const held = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
-      (call) => call.path.startsWith(`/accounts/${acme.account.id}/`),
+      (call) => ofClient(acme, call.path),
       async () => {
         await held.promise;
       }
@@ -864,7 +860,7 @@ describe("rolling a release out to placed clients", () => {
     // read reaches its account: the first client's rollback lands then.
     let landed = false;
     cloudflare.beforeAnswering(
-      (call) => call.path.startsWith(`/accounts/${second.account.id}/`),
+      (call) => ofClient(second, call.path),
       async () => {
         landed = true;
         await rollbackClient(env, staff, await openRollout(), first.clientId);
@@ -911,7 +907,7 @@ describe("rolling a release out to placed clients", () => {
     }
     const release = await placedRelease("feat(core): paused, then cancelled");
     cloudflare.beforeAnswering(
-      (call) => call.path.startsWith(`/accounts/${second.account.id}/`),
+      (call) => ofClient(second, call.path),
       async () => {
         await pauseRollout(env, staff, await openRollout());
       }
@@ -1160,7 +1156,7 @@ describe("rolling a release out to placed clients", () => {
     // first times out there, and its retry starts.
     const uploaded = (call: ApiCall): boolean =>
       call.method === "PUT" &&
-      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      ofClient(client, call.path) &&
       scriptPath.test(call.path);
     const first = heldAfter(uploaded);
     const retry = heldAfter(uploaded);
@@ -1366,7 +1362,7 @@ describe("rolling a release out to placed clients", () => {
     // first times out there, and its retry starts.
     const uploaded = (call: ApiCall): boolean =>
       call.method === "PUT" &&
-      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      ofClient(client, call.path) &&
       scriptPath.test(call.path);
     const first = heldAfter(uploaded);
     const retry = heldAfter(uploaded);
@@ -1427,17 +1423,18 @@ describe("rolling a release out to placed clients", () => {
   it("reads a client's drift live: in sync once its operation is done, off its pin, and drifted once changed outside the admin", async () => {
     const before = await placedRelease("feat(core): before");
     const client = await live(0, before);
-    const api = cloudflareApi({ token, retryDelayMs: 0 });
-    const synced = await driftOf(api, db, client.clientId);
+    // As the admin reads it: through core's health, which names each version.
+    const health = { fetch, secrets: await deploySecrets(env) };
+    const synced = await driftOf(db, client.clientId, health);
     const other = await placedRelease("feat(core): pinned to");
     await pinClient(env, staff, {
       clientId: client.clientId,
       releaseId: other,
     });
-    const pinned = await driftOf(api, db, client.clientId);
+    const pinned = await driftOf(db, client.clientId, health);
     await pinClient(env, staff, { clientId: client.clientId, releaseId: null });
-    // Someone sends connect back to its first version from the dashboard:
-    // its upload's, before its secrets' versions.
+    // Someone deploys connect's first version outside the admin: its
+    // upload's, before its secrets' versions, which core then names.
     const connect = await db
       .select({ scriptName: clientWorkers.scriptName })
       .from(clientWorkers)
@@ -1449,26 +1446,16 @@ describe("rolling a release out to placed clients", () => {
       )
       .get();
     const scriptName = connect?.scriptName ?? "";
-    const [first] = client.account.scripts.get(scriptName)?.versions ?? [];
-    await api.call(
-      {
-        method: "POST",
-        path: `/accounts/${client.account.id}/workers/scripts/${scriptName}/deployments`,
-        query: { force: "true" },
-        json: {
-          strategy: "percentage",
-          versions: [{ version_id: first?.id ?? "", percentage: 100 }],
-        },
-      },
-      z.unknown()
-    );
-    const changed = await driftOf(api, db, client.clientId);
+    const [first] =
+      clientScripts(client.account).get(scriptName)?.versions ?? [];
+    client.core.connectAnswering = first?.id ?? null;
+    const changed = await driftOf(db, client.clientId, health);
 
     expect({
       synced: synced?.state,
       pinned: pinned?.state,
       changed: changed?.state,
-      nobody: await driftOf(api, db, "nobody"),
+      nobody: await driftOf(db, "nobody", health),
     }).toStrictEqual({
       synced: "in_sync",
       pinned: "off_pin",
@@ -1640,7 +1627,7 @@ const crashedRollout = async (
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${client.account.id}/`) &&
+        ofClient(client, call.path) &&
         call.path.endsWith("-core"),
       400
     );
@@ -1675,7 +1662,7 @@ const coreScriptOf = async (clientId: string): Promise<string> => {
 
 /** The `PLATFORM_CHANGE` core's live version in `account` runs with. */
 const platformChangeOf = (account: PlacedClient["account"], script: string) => {
-  const state = account.scripts.get(script);
+  const state = clientScripts(account).get(script);
   const [only] = state?.deployments[0]?.versions ?? [];
   const version = state?.versions.find(({ id }) => id === only?.version_id);
   const bindings = z
@@ -1720,15 +1707,15 @@ describe("a client's changes, counted", () => {
     const release = await placedRelease("feat(core): broken, then fixed");
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
-      call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+      ofClient(acme, call.path) &&
       call.path.endsWith("-connect");
     // Its first try's core answers the probe as another client; the
     // rollback's upload finds it answering as it should again.
-    acme.account.coreProbe = { asClient: "someone-else" };
+    acme.core.coreProbe = { asClient: "someone-else" };
     // oxlint-disable require-await -- the fake waits on these; nothing to wait for
     cloudflare.beforeAnswering(isConnectUpload, async () => {
       cloudflare.beforeAnswering(isConnectUpload, async () => {
-        delete acme.account.coreProbe;
+        delete acme.core.coreProbe;
       });
     });
     // oxlint-enable require-await
@@ -1764,7 +1751,7 @@ describe("a client's changes, counted", () => {
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+        ofClient(acme, call.path) &&
         call.path.endsWith("-core"),
       400
     );
@@ -1923,7 +1910,7 @@ describe("a client's changes, counted", () => {
     // Staff change the sign-in once the run read the client, as its first
     // call reaches the client's account; nothing refuses a claimed client.
     cloudflare.beforeAnswering(
-      (call) => call.path.startsWith(`/accounts/${internal.account.id}/`),
+      (call) => ofClient(internal, call.path),
       async () => {
         await setSignIn(env, staff, {
           clientId: internal.clientId,
@@ -2149,7 +2136,7 @@ describe("a client's changes, counted", () => {
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+        ofClient(acme, call.path) &&
         call.path.endsWith("-connect"),
       400
     );
@@ -2260,7 +2247,7 @@ describe("a client's changes, counted", () => {
     const acme = await live(1, before);
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
-      call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+      ofClient(acme, call.path) &&
       call.path.endsWith("-connect");
     await using run = await followRollouts();
     await using rollbacks = await followRollbacks();
@@ -2308,7 +2295,7 @@ describe("a client's changes, counted", () => {
     cloudflare.failNext(
       (call) =>
         call.method === "PUT" &&
-        call.path.startsWith(`/accounts/${internal.account.id}/`) &&
+        ofClient(internal, call.path) &&
         call.path.endsWith("-connect"),
       400
     );
@@ -2373,20 +2360,8 @@ describe("a client's changes, counted", () => {
           shared: z.record(z.string(), z.record(z.string(), z.string())),
         })
         .parse(JSON.parse(operation?.progress ?? "{}"));
-      // Its connect in a namespace: drift reads it, as its core, through
+      // Its connect in the namespace: drift reads it, as its core, through
       // core's health, which names the version connect answers as.
-      const placement = await db
-        .select({ destinationId: clientPlacements.destinationId })
-        .from(clientPlacements)
-        .where(eq(clientPlacements.clientId, clientId))
-        .get();
-      await db
-        .update(hostingDestinations)
-        .set({
-          kind: "workers_for_platforms",
-          namespace: clientsNamespace("production"),
-        })
-        .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
       // A secrets rollout that rotated connect's Composio key: its operation
       // delivered the store's value, as on record.
       const rolloutId = crypto.randomUUID();
@@ -2430,10 +2405,10 @@ describe("a client's changes, counted", () => {
           )
           .get();
         const [first] =
-          internal.account.scripts.get(connect?.scriptName ?? "")?.versions ??
-          [];
+          clientScripts(internal.account).get(connect?.scriptName ?? "")
+            ?.versions ?? [];
         if (answering === "earlier") {
-          internal.account.connectAnswering = first?.id ?? null;
+          internal.core.connectAnswering = first?.id ?? null;
         } else {
           await db
             .update(clientWorkers)
@@ -2446,7 +2421,7 @@ describe("a client's changes, counted", () => {
             );
         }
       } else if (answering === null) {
-        internal.account.connectAnswering = null;
+        internal.core.connectAnswering = null;
       }
 
       await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({

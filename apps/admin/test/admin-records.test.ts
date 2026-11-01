@@ -24,12 +24,12 @@ const liveClient = async () => {
   const release = await placedRelease("feat(core): the records");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date();
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, name: `Acme ${clientId}`, account, added: now };
+  return { clientId, name: `Acme ${clientId}`, core, added: now };
 };
 
 /** A person on the roster. */
@@ -185,7 +185,7 @@ describe("an organization's records", () => {
 
   it("says in Data what is kept of the interviews, who had theirs deleted, and what the company sees, only for a team big enough", async () => {
     const bakery = await liveClient();
-    bakery.account.admin = bakerySnapshot("Bakkerij");
+    bakery.core.admin = bakerySnapshot("Bakkerij");
 
     const { status, html } = await page(
       `/organizations/${bakery.clientId}/data`
@@ -227,7 +227,7 @@ describe("an organization's records", () => {
 
   it("says in Data that nothing is there yet for a company with no roster, no interviews and no first conversation", async () => {
     const empty = await liveClient();
-    empty.account.admin = emptyAdminSnapshot("Empty");
+    empty.core.admin = emptyAdminSnapshot("Empty");
 
     const { html } = await page(`/organizations/${empty.clientId}/data`);
 
@@ -246,9 +246,9 @@ describe("an organization's records", () => {
 
   it("lists in the Log what happened at the company and that Grasp added it here, the newest first, and nothing of another organization", async () => {
     const bakery = await liveClient();
-    bakery.account.admin = bakerySnapshot("Bakkerij");
+    bakery.core.admin = bakerySnapshot("Bakkerij");
     const other = await liveClient();
-    other.account.admin = emptyAdminSnapshot("Other");
+    other.core.admin = emptyAdminSnapshot("Other");
 
     const { status, html } = await page(
       `/organizations/${bakery.clientId}/log`

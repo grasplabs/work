@@ -100,10 +100,6 @@ export const routerTargetOf = (host: RouterHost): RouterTarget =>
     ? { kind: "dispatch", script: host.script }
     : { kind: "origin", origin: new URL(host.coreUrl).origin };
 
-/** Checks `origin` is a core's https `*.workers.dev` origin, as the map takes one. */
-export const isCoreOrigin = (origin: string): boolean =>
-  coreUrlSchema.safeParse(origin).success;
-
 /**
  * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
  * is the admin's own host (`ADMIN_HOST`), `auth` the auth relay's, and

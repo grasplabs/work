@@ -1,8 +1,9 @@
 /**
  * Placed clients as the admin's tests start from them: a release a placed
- * client runs, imported, and a client provisioned on it in a dedicated
- * destination of its own on the fake Cloudflare API, live, as staff leave
- * it once its operation is done (src/hosting/operation.ts).
+ * client runs, imported, and a client provisioned on it in the stage's
+ * destination (Grasp's account's clients' namespace on the fake Cloudflare
+ * API), live, as staff leave it once its operation is done
+ * (src/hosting/operation.ts).
  */
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
@@ -22,10 +23,15 @@ import {
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import {
+  ensureStageDestination,
+  stageDestinationId,
+} from "../src/hosting/placement.ts";
 import { claimRun } from "../src/runners.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import type { AccountState, CoreState } from "./cloudflare-api-kit.ts";
+import { graspAccount, testStage } from "./cloudflare-api-mock.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { db, destination, staff } from "./hosting.ts";
+import { db, staff } from "./hosting.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
@@ -39,14 +45,16 @@ let built = 0;
 /**
  * A release a placed client runs, imported as the admin imports one: core
  * binds its own Durable Object classes, and none of the Workflows binding
- * a placed client has no resource for. `adjust` changes core.
+ * a placed client has no resource for, and no Worker has cron triggers,
+ * which a Workers for Platforms namespace doesn't run. `adjust` changes
+ * core.
  */
 export const placedRelease = async (
   notes: string,
   spec: Omit<ReleaseSpec, "notes"> = {},
   adjust: (core: WorkerEntry) => WorkerEntry = (core) => core
 ): Promise<string> => {
-  const release = await buildRelease({ notes, ...spec });
+  const release = await buildRelease({ notes, crons: [], ...spec });
   const { core } = release.manifest.workers;
   if (core === undefined) {
     throw new Error("The test release has no core");
@@ -87,17 +95,22 @@ export interface PlacedClientOptions {
   signIn?: Record<string, unknown> | null;
 }
 
-/** A live placed client, and the account its dedicated destination is on. */
+/** A live placed client: its core on the fake, and the account its scripts run in. */
 export interface PlacedClient {
   clientId: string;
+  /** Its core, as the fake answers for it: a test sets how. */
+  core: CoreState;
+  /** Grasp's account, whose clients' namespace its scripts run in. */
   account: AccountState;
   destinationId: string;
+  /** What its resources' names are made from: `grasp-<deploymentId>-…`. */
+  deploymentId: string;
 }
 
 /**
- * A client in `ring`, placed in a dedicated destination of its own on a
- * new account in `cloudflare`, and not provisioned yet: as staff leave it
- * once they've added and placed it.
+ * A client in `ring`, placed in the stage's destination on `cloudflare`,
+ * and not provisioned yet: as staff leave it once they've added and
+ * placed it.
  */
 export const placedClientRecord = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -112,13 +125,12 @@ export const placedClientRecord = async (
     },
   }: PlacedClientOptions = {}
 ): Promise<PlacedClient> => {
-  const account = cloudflare.addAccount(name);
-  const destinationId = await destination({
-    kind: "dedicated",
-    accountId: account.id,
-    namespace: null,
-  });
+  const account = graspAccount(cloudflare);
+  await ensureStageDestination(env, db);
+  const destinationId = stageDestinationId(testStage);
   const clientId = id;
+  const core = cloudflare.coreOf(clientId);
+  core.name = name;
   const now = new Date();
   await act(
     db,
@@ -135,11 +147,11 @@ export const placedClientRecord = async (
     ],
     { action: "client.create", clientId }
   );
-  await placeClient(db, staff, {
+  const { deploymentId } = await placeClient(db, staff, {
     clientId,
     destinationId,
   });
-  return { clientId, account, destinationId };
+  return { clientId, core, account, destinationId, deploymentId };
 };
 
 /**
@@ -184,9 +196,9 @@ export const deployPlaced = async (
 };
 
 /**
- * A client in `ring` on `releaseId`, placed in a dedicated destination of
- * its own on a new account in `cloudflare`, and provisioned there: live,
- * its operation done and its runner released.
+ * A client in `ring` on `releaseId`, placed in the stage's destination on
+ * `cloudflare`, and provisioned there: live, its operation done and its
+ * runner released.
  */
 export const livePlacedClient = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,

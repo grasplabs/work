@@ -30,7 +30,7 @@ import worker from "../src/server.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, destination, release, staff } from "./hosting.ts";
+import { db, release, staff } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -165,7 +165,6 @@ const startedByStaff = async (clientId: string): Promise<string> => {
 describe("provisioning that heals itself", () => {
   useStoreSecrets({ deployer: token });
   beforeAll(async () => {
-    await destination();
     await importedRelease();
   });
   beforeEach(() => {

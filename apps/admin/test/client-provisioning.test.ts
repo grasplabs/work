@@ -246,33 +246,6 @@ describe("provisioning a client's resources", () => {
     await expect(unobserved(clientId)).resolves.toBeTruthy();
   });
 
-  it("creates nothing in a workerd destination, which its operator sets up", async () => {
-    const destinationId = await destination({
-      kind: "workerd",
-      accountId: null,
-      namespace: null,
-    });
-    const { clientId } = await placedClient(destinationId);
-    const runId = await claimRun(
-      db,
-      staff,
-      clientId,
-      null,
-      { action: "client.provision", clientId },
-      {
-        kind: "provision_placed",
-        runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
-      }
-    );
-    const before = cloudflare.calls.length;
-    await expect(
-      errorOf(
-        ensureClientResources(api, db, staff, { clientId, runId: runId ?? "" })
-      )
-    ).resolves.toMatchObject({ code: "destination_unsupported" });
-    expect(cloudflare.calls).toHaveLength(before);
-  });
-
   it("keeps a client with the retry once an attempt that timed out finishes late, and lets the retry release it", async () => {
     const account = cloudflare.addAccount();
     const { held: run } = await allocated(account, await release());

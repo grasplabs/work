@@ -24,7 +24,7 @@ import { auditEvents, clients } from "../src/db/schema.ts";
 import { targetClient } from "../src/rollout/targets.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts, mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn, page } from "./pages.ts";
 import {
   deployPlaced,
@@ -79,7 +79,7 @@ const redeploy = async (clientId: string, releaseId: string) => {
 
 /** The version all of `script`'s traffic goes to in `account`. */
 const liveVersionOf = (account: AccountState, script: string) => {
-  const state = account.scripts.get(script);
+  const state = clientScripts(account).get(script);
   const [only] = state?.deployments[0]?.versions ?? [];
   return state?.versions.find(({ id }) => id === only?.version_id);
 };

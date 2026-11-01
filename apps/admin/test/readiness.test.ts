@@ -6,18 +6,18 @@
  * namespace, Grasp's AI on a provider it has no key for; and an optional feature left
  * unconfigured without saying so.
  */
-import { clientsNamespace } from "@grasp-os/shared/names";
+import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fetchReadiness } from "../src/admin/readiness.ts";
 import type { Readiness } from "../src/admin/readiness.ts";
-import { clients, hostingDestinations, releases } from "../src/db/schema.ts";
+import { clients, releases } from "../src/db/schema.ts";
 import { setGraspClientFn } from "../src/platform-settings.ts";
 import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { client, db, destination } from "./hosting.ts";
+import { graspAccount, mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { client, db } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { placedRelease } from "./placed.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
@@ -64,10 +64,9 @@ const wordsOf = ({ checks }: Readiness, id: string): string =>
 
 describe("Platform's Readiness", () => {
   useStoreSecrets({ deployer: token });
-  // The database outlives each test: each starts with no destination or
-  // release, as an admin set up from nothing.
+  // The database outlives each test: each starts with no release, as an
+  // admin set up from nothing.
   beforeEach(async () => {
-    await db.delete(hostingDestinations);
     await db.delete(releases);
   });
 
@@ -91,13 +90,13 @@ describe("Platform's Readiness", () => {
       statuses: {
         stage: "ready",
         client_domain: "ready",
-        destination: "blocked",
         release: "blocked",
         secrets: "ready",
-        deployer: "waiting",
+        // No account of Grasp's on the fake: the token reaches nothing.
+        deployer: "blocked",
         grasp_organization: "not_configured",
       },
-      blocking: 3,
+      blocking: 2,
       release:
         "No release is imported yet. CI publishes one for every merge to main, and the admin imports it within five minutes; Releases lists any it couldn't import, and why.",
       banner: true,
@@ -133,10 +132,8 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("is ready once a shared destination exists, a release is imported and the deployer reaches its namespace, and Home's banner goes", async () => {
-    const account = cloudflare.addAccount("Grasp clients");
-    account.namespaces.set(clientsNamespace("production"), new Map());
-    const destinationId = await destination({ accountId: account.id });
+  it("is ready once a release is imported and the deployer reaches the stage's namespace in Grasp's account, and Home's banner goes", async () => {
+    graspAccount(cloudflare);
     await placedRelease("feat(core): ready");
 
     const read = await withVars(production, readiness);
@@ -145,30 +142,30 @@ describe("Platform's Readiness", () => {
     expect({
       statuses: statuses(read),
       blocking: read.blocking,
-      destination: wordsOf(read, "destination"),
       deployer: wordsOf(read, "deployer"),
       banner: home.html.includes("Grasp can&#x27;t onboard"),
     }).toMatchObject({
       statuses: {
         stage: "ready",
         client_domain: "ready",
-        destination: "ready",
         release: "ready",
         secrets: "ready",
         deployer: "ready",
       },
       blocking: 0,
-      destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
-      deployer: `The deployer's token reaches ${clientsNamespace("production")} in ${destinationId}'s account.`,
+      deployer: `The deployer's token reaches ${clientsNamespace("production")} in Grasp's account.`,
       banner: false,
     });
   });
 
   it("blocks on a deployer token that can't reach the namespace", async () => {
-    // The deployer isn't a member of this account.
-    const account = cloudflare.addAccount("Not ours", "someone@else.test");
+    // The deployer isn't a member of Grasp's account.
+    const account = cloudflare.addAccount(
+      "Grasp",
+      "someone@else.test",
+      platformAccountId
+    );
     account.namespaces.set(clientsNamespace("production"), new Map());
-    await destination({ accountId: account.id });
     await placedRelease("feat(core): unreachable");
 
     const read = await withVars(production, readiness);
@@ -179,40 +176,6 @@ describe("Platform's Readiness", () => {
         "The deployer's token can't reach"
       ),
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
-  });
-
-  it("checks the deployer against the one shared destination new organizations go in, of several", async () => {
-    const theirs = cloudflare.addAccount("Not ours", "someone@else.test");
-    theirs.namespaces.set(clientsNamespace("production"), new Map());
-    const ours = cloudflare.addAccount("Grasp clients");
-    ours.namespaces.set(clientsNamespace("production"), new Map());
-    const unreachable = await destination({ accountId: theirs.id });
-    const reachable = await destination({ accountId: ours.id });
-    // The reachable one recorded first: new organizations go in it.
-    await db
-      .update(hostingDestinations)
-      .set({ createdAt: new Date(Date.now() - 86_400_000) })
-      .where(eq(hostingDestinations.id, reachable));
-
-    const first = await withVars(production, readiness);
-    // Now the unreachable one is the older: it's where they'd go.
-    await db
-      .update(hostingDestinations)
-      .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
-      .where(eq(hostingDestinations.id, unreachable));
-    const second = await withVars(production, readiness);
-
-    expect({
-      first: [statuses(first).destination, statuses(first).deployer],
-      firstWords: wordsOf(first, "deployer"),
-      second: [statuses(second).destination, statuses(second).deployer],
-      secondWords: wordsOf(second, "deployer").includes(unreachable),
-    }).toStrictEqual({
-      first: ["ready", "ready"],
-      firstWords: `The deployer's token reaches ${clientsNamespace("production")} in ${reachable}'s account.`,
-      second: ["ready", "blocked"],
-      secondWords: true,
-    });
   });
 
   it("reads only for staff", async () => {

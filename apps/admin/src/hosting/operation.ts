@@ -20,11 +20,7 @@
  *    admin's signed probe (src/hosting/probe.ts): it runs as this
  *    client, each private binding the release gives core and connect
  *    answers, and its clock and connect's are armed.
- * 8. `mail`, then `route`: for a release that sends mail, the client's
- *    sending domain (`clientMailDomain`) with Email Sending on in the
- *    destination's account (`ensureSendingDomain`), as a deploy sets it
- *    up, so core's `EMAIL` sends from the onboarding sender it's locked
- *    to; only then the client's hostname in the router's map.
+ * 8. `route`: the client's hostname in the router's map.
  * 9. `done`: the operation recorded complete, the client active and the
  *    runner's claim released, in one batch.
  *
@@ -98,13 +94,9 @@ import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
-import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import {
-  liveVersion,
-  putSchedules,
   deleteTargetSecret,
   putTargetSecret,
-  setScriptSubdomain,
   targetMigrationState,
   targetSecretNames,
   uploadTargetScript,
@@ -118,20 +110,13 @@ import {
   clientWorkers,
   releases,
 } from "../db/schema.ts";
-import { clientMailDomain, derivedCoreConfig } from "../deploy/core-config.ts";
+import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { sendsMail } from "../deploy/resources.ts";
-import {
-  coreOrigin,
-  registerHostname,
-  smokeAnswering,
-  smokeCheck,
-  workersSubdomain,
-} from "../deploy/router.ts";
+import { registerHostname, smokeAnswering } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
 import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import {
@@ -270,7 +255,6 @@ export const provisionSteps = [
   "core",
   "secrets",
   "probe",
-  "mail",
   "route",
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
@@ -382,11 +366,6 @@ const progressSchema = z.object({
    * past, rather than what a release that never uploaded declared.
    */
   migrated: z.record(z.string(), z.string().nullable()).default({}),
-  /**
-   * The sending domain's zone, for a release that sends mail, and whether
-   * it was active (its name servers delegated) when last ensured.
-   */
-  mail: z.object({ zoneId: z.string(), active: z.boolean() }).optional(),
 });
 type Progress = z.infer<typeof progressSchema>;
 
@@ -420,8 +399,7 @@ const wfpBindings: ReadonlySet<string> = new Set([
  * without its `send_email` bindings, as whether a user Worker can send
  * mail at all is GRA-965's spike, still open. Its core then has no `EMAIL`
  * and sends nothing, saying why (core's src/mail.ts), and the operation
- * sets up no sending domain (`setUpMail`). A dedicated destination keeps
- * its mail.
+ * sets up no sending domain.
  */
 const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
   ...manifest,
@@ -444,10 +422,9 @@ const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
 const renderOptionsOf = (loaded: Loaded): RenderOptions => {
   const stage = stageOfNamespace(loaded.ownNamespace);
   return {
-    ...(loaded.destination.kind === "workers_for_platforms" &&
-    stage !== undefined
-      ? { connectGateway: platformWorkerName("connect-gateway", stage) }
-      : {}),
+    ...(stage === undefined
+      ? {}
+      : { connectGateway: platformWorkerName("connect-gateway", stage) }),
     durableObjects: loaded.client.jurisdiction,
   };
 };
@@ -980,6 +957,8 @@ interface Loaded {
   placement: ClientPlacement;
   destination: Awaited<ReturnType<typeof destinationOf>>;
   accountId: string;
+  /** Its Workers for Platforms dispatch namespace. */
+  namespace: string;
   client: {
     generation: number;
     rotationLiveAt: Date | null;
@@ -1120,12 +1099,8 @@ const noteRecordedBefore = async (
   db: AdminDatabase,
   loaded: Loaded,
   progress: Progress,
-  app: App,
-  target: ScriptTarget
+  app: App
 ): Promise<void> => {
-  if (target.namespace === null) {
-    return;
-  }
   const versionId = await recordedVersionOf(db, loaded, app);
   if (versionId === null || progress.recordedBefore[app] === versionId) {
     return;
@@ -1145,12 +1120,8 @@ const noteSuperseded = async (
   db: AdminDatabase,
   loaded: Loaded,
   progress: Progress,
-  app: App,
-  target: ScriptTarget
+  app: App
 ): Promise<void> => {
-  if (target.namespace === null) {
-    return;
-  }
   const versionId =
     (await recordedVersionOf(db, loaded, app)) ??
     progress.recordedBefore[app] ??
@@ -1410,10 +1381,7 @@ const targetOf = (
       inventory,
       renderOptionsOf(loaded)
     ).scriptName,
-    namespace:
-      loaded.destination.kind === "workers_for_platforms"
-        ? loaded.destination.namespace
-        : null,
+    namespace: loaded.namespace,
   };
 };
 
@@ -1423,16 +1391,13 @@ const targetOf = (
  * no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
-  if (loaded.destination.kind !== "workers_for_platforms") {
-    return;
-  }
   // The admin's own stage's namespace alone: a staging admin never places
   // a client among production's, nor production's among staging's, with
   // the deployer token they'd share (@grasp-os/shared/names).
-  if (loaded.destination.namespace !== loaded.ownNamespace) {
+  if (loaded.namespace !== loaded.ownNamespace) {
     throw new ProvisionOperationError(
       "destination_other_stage",
-      `${loaded.destination.id}'s namespace ${String(loaded.destination.namespace)} isn't this admin's own, ${loaded.ownNamespace}`
+      `${loaded.destination.id}'s namespace ${loaded.namespace} isn't this admin's own, ${loaded.ownNamespace}`
     );
   }
   const unqualified = worker.bindings.find(
@@ -1567,27 +1532,20 @@ const load = async (
     throw new InventoryError("not_placed", `${held.clientId} isn't placed`);
   }
   const destination = await destinationOf(db, placement.destinationId);
-  const usable =
-    destination.accountId !== null &&
-    (destination.kind === "dedicated" ||
-      (destination.kind === "workers_for_platforms" &&
-        destination.namespace !== null));
-  if (!usable || destination.accountId === null) {
+  if (destination.accountId === null || destination.namespace === null) {
     throw new InventoryError(
       "destination_unsupported",
-      `${destination.id} isn't a Cloudflare destination the admin provisions in`
+      `${destination.id} has no Cloudflare account and namespace recorded`
     );
   }
   return {
     operation,
     held,
-    manifest:
-      destination.kind === "workers_for_platforms"
-        ? withoutMail(manifest)
-        : manifest,
+    manifest: withoutMail(manifest),
     placement,
     destination,
     accountId: destination.accountId,
+    namespace: destination.namespace,
     client,
     readAt,
   };
@@ -1878,7 +1836,7 @@ const upload = async (
       worker.durableObjectMigrations
     );
   }
-  await noteRecordedBefore(db, loaded, progress, app, target);
+  await noteRecordedBefore(db, loaded, progress, app);
   if (!done) {
     const migrations = pendingMigrations(
       worker.durableObjectMigrations,
@@ -1891,7 +1849,7 @@ const upload = async (
       rendered.bindings,
       vars
     );
-    await noteSuperseded(db, loaded, progress, app, target);
+    await noteSuperseded(db, loaded, progress, app);
     // Delivered secrets go with the next delivery, whatever this upload
     // keeps.
     const { [app]: _delivered, ...secrets } = progress.secrets;
@@ -1933,29 +1891,6 @@ const upload = async (
       ...progress,
       uploads: { ...progress.uploads, [app]: fingerprint },
       migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
-    });
-  }
-  if (target.namespace === null) {
-    // An account's own Worker: its cron triggers, and whether it's on
-    // workers.dev (how the probe reaches core). Each a PUT or a set, sent
-    // marked as an upload is (`sendHolding`).
-    await sendHolding(context, loaded, async (signal) => {
-      await putSchedules(
-        api,
-        target.accountId,
-        target.scriptName,
-        worker.crons,
-        { signal }
-      );
-    });
-    await sendHolding(context, loaded, async (signal) => {
-      await setScriptSubdomain(
-        api,
-        target.accountId,
-        target.scriptName,
-        { enabled: worker.workersDev, previewsEnabled: false },
-        { signal }
-      );
     });
   }
   if (app === "core") {
@@ -2123,7 +2058,7 @@ const deliverSecrets = async (
       }
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    await noteSuperseded(db, loaded, progress, app, target);
+    await noteSuperseded(db, loaded, progress, app);
     for (const secret of secrets) {
       // oxlint-disable-next-line no-await-in-loop -- one secret at a time
       await sendHolding(context, loaded, async (signal) => {
@@ -2178,22 +2113,12 @@ const deliverSecrets = async (
 const recordLiveVersions = async (
   context: ProvisionContext,
   loaded: Loaded,
-  inventory: readonly ClientResource[],
   answered: { core: string; connect: string | null }
 ): Promise<void> => {
-  const { api, db } = context;
+  const { db } = context;
   const { held } = loaded;
   for (const app of appsOf(loaded.manifest)) {
-    const target = targetOf(loaded, inventory, app);
-    let version: string | null = answered.core;
-    if (app !== "core") {
-      version =
-        target.namespace === null
-          ? // oxlint-disable-next-line no-await-in-loop -- two Workers
-            ((await liveVersion(api, target.accountId, target.scriptName)) ??
-            null)
-          : answered.connect;
-    }
+    const version = app === "core" ? answered.core : answered.connect;
     // oxlint-disable-next-line no-await-in-loop -- two Workers
     await db
       .update(clientWorkers)
@@ -2251,30 +2176,17 @@ const probeTimeoutMs = 10_000;
 
 /**
  * Where the client's core answers for the probe and the router: its user
- * Worker through the dispatch namespace the router and the admin bind, for
- * a Workers for Platforms destination; its account's workers.dev origin
- * otherwise. A namespace other than the bound one can't be reached through
+ * Worker through the dispatch namespace the router and the admin bind. A
+ * namespace other than the bound one can't be reached through
  * the binding, so it is refused (`probe_unqualified`), never probed or
  * routed some other way. What the router's map entry names, too.
  */
-const reachableCore = async (
+const reachableCore = (
   context: ProvisionContext,
   loaded: Loaded,
   target: ScriptTarget
-): Promise<{ core: CoreAddress; entry: RouterTarget }> => {
+): { core: CoreAddress; entry: RouterTarget } => {
   const { held } = loaded;
-  if (target.namespace === null) {
-    const subdomain = await workersSubdomain(
-      context.api,
-      target.accountId,
-      held.clientId
-    );
-    const origin = coreOrigin(target.scriptName, subdomain);
-    return {
-      core: { origin, fetch: context.router.smoke?.fetch ?? fetch },
-      entry: { kind: "origin", origin },
-    };
-  }
   const entry: RouterTarget = { kind: "dispatch", script: target.scriptName };
   const core =
     target.namespace === context.router.namespace
@@ -2305,10 +2217,10 @@ const probe = async (
   loaded: Loaded,
   inventory: readonly ClientResource[]
 ): Promise<RouterTarget> => {
-  const { api, db } = context;
+  const { db } = context;
   const { held } = loaded;
   const target = targetOf(loaded, inventory, "core");
-  const { core, entry } = await reachableCore(context, loaded, target);
+  const { core, entry } = reachableCore(context, loaded, target);
   const { origin } = core;
   const routerSecret = await deriveRouterSecret(
     context.secrets.routerKey,
@@ -2316,38 +2228,16 @@ const probe = async (
     loaded.client.generation
   );
   const smoke = { ...context.router.smoke, fetch: core.fetch };
-  // An account's own Worker: the version its deployment has live, which
-  // core must answer as. One in the namespace: live at once on upload, its
-  // versions not listed by the documented API, so the version answering,
-  // never the one this run superseded, is the one the probe is held to.
-  let version: string;
-  let attempts: number;
-  if (target.namespace === null) {
-    // Read back through Cloudflare's lag (#1360): the upload may not show yet.
-    const live = await observed(
-      context,
-      async () => await liveVersion(api, target.accountId, target.scriptName),
-      (seen) => seen !== undefined
-    );
-    if (live === undefined) {
-      throw new ProvisionOperationError(
-        "upload_unobserved",
-        `${target.scriptName} has no version live`
-      );
-    }
-    version = live;
-    attempts = await smokeCheck(origin, routerSecret, live, smoke);
-  } else {
-    // Never the version recorded before this run's writes to core: an
-    // isolate of it still answering is asked again until another answers.
-    // The probe then answers as the same version, or the run stops: two
-    // reads apart the same.
-    const { superseded } = await progressNow(db, loaded.operation.id);
-    ({ version, attempts } = await smokeAnswering(origin, routerSecret, {
-      ...smoke,
-      refuses: superseded.core,
-    }));
-  }
+  // Live at once on upload, its versions not listed by the documented API,
+  // so the version answering, never the one this run superseded, is the
+  // one the probe is held to: an isolate of the superseded one still
+  // answering is asked again until another answers. The probe then
+  // answers as the same version, or the run stops: two reads apart the same.
+  const { superseded } = await progressNow(db, loaded.operation.id);
+  const { version, attempts } = await smokeAnswering(origin, routerSecret, {
+    ...smoke,
+    refuses: superseded.core,
+  });
   const asking = {
     origin,
     routerSecret,
@@ -2378,16 +2268,13 @@ const probe = async (
     throw new ProvisionOperationError(fault.code, fault.message);
   }
   const before = await progressNow(db, loaded.operation.id);
-  const connect =
-    target.namespace === null
-      ? null
-      : await freshConnectVersion(
-          context,
-          asking,
-          answer.connectVersion ?? null,
-          before.superseded.connect
-        );
-  await recordLiveVersions(context, loaded, inventory, {
+  const connect = await freshConnectVersion(
+    context,
+    asking,
+    answer.connectVersion ?? null,
+    before.superseded.connect
+  );
+  await recordLiveVersions(context, loaded, {
     core: version,
     connect,
   });
@@ -2405,49 +2292,10 @@ const probe = async (
     "probe",
     // No version of connect's recorded: none settled but the one this run
     // replaced, or none at all.
-    target.namespace === null || connect !== null
-      ? { attempts }
-      : { attempts, connectUnrecorded: 1 },
+    connect === null ? { attempts, connectUnrecorded: 1 } : { attempts },
     { ...progress, origin }
   );
   return entry;
-};
-
-/**
- * Step 8, first part: for a release that sends mail, the client's sending
- * domain in the destination's account with Email Sending on, found before
- * anything is created (`ensureSendingDomain`); a release that sends none
- * sets up nothing. Before the hostname is published, so no client is
- * reachable whose mail has nowhere to send from.
- */
-const setUpMail = async (
-  context: ProvisionContext,
-  loaded: Loaded
-): Promise<void> => {
-  const { db } = context;
-  if (!sendsMail(loaded.manifest)) {
-    await recordStep(db, loaded, "mail");
-    return;
-  }
-  await assertHolds(db, loaded.held);
-  const sending = await ensureSendingDomain(
-    context.api,
-    loaded.accountId,
-    clientMailDomain(loaded.held.clientId, context.router.domain)
-  );
-  const progress = await progressNow(db, loaded.operation.id);
-  await recordStep(
-    db,
-    loaded,
-    "mail",
-    // Mail sends only once the zone is delegated, which happens outside
-    // the operation: on record for staff to see, as a deploy records it.
-    { mailDomainActive: sending.active ? 1 : 0 },
-    {
-      ...progress,
-      mail: { zoneId: sending.zoneId, active: sending.active },
-    }
-  );
 };
 
 /** Step 8: the client's hostname in the router's map, only after the probe passed. */
@@ -2725,9 +2573,6 @@ const runOperation = async (
 
     step = "probe";
     const target = await probe(context, loaded, inventory);
-
-    step = "mail";
-    await setUpMail(context, loaded);
 
     step = "route";
     await route(context, loaded, target);

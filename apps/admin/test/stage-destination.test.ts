@@ -68,7 +68,6 @@ describe("a new admin's own shared destination", () => {
       destination: await db
         .select({
           id: hostingDestinations.id,
-          kind: hostingDestinations.kind,
           accountId: hostingDestinations.accountId,
           namespace: hostingDestinations.namespace,
         })
@@ -79,7 +78,6 @@ describe("a new admin's own shared destination", () => {
       destination: [
         {
           id: ownId,
-          kind: "workers_for_platforms",
           accountId: platformAccountId,
           namespace: "grasp-clients",
         },

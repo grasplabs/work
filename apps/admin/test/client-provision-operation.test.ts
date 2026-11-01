@@ -1,5 +1,6 @@
 import {
   clientsNamespace,
+  platformAccountId,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -22,6 +23,7 @@ import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
   clientWorkers,
+  clientPlacements,
   clientProvisions,
   clientResources,
   clientRuns,
@@ -29,10 +31,6 @@ import {
   releases,
 } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
-import {
-  clientMailDomain,
-  onboardingSender,
-} from "../src/deploy/core-config.ts";
 import { mappedRoute } from "../src/deploy/router.ts";
 import { rotationWindowMs } from "../src/deploy/secrets.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
@@ -67,8 +65,12 @@ import {
 import type { HeldClient } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
-import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import type { AccountState, ApiCall, CoreState } from "./cloudflare-api-kit.ts";
+import {
+  clientScripts,
+  graspAccount,
+  mockCloudflareApi,
+} from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
@@ -114,47 +116,61 @@ const context = {
     smoke: { retryDelayMs: 0 },
     // The stage these tests' admin serves (deploy/context.ts sets it).
     namespace: clientsNamespace("production"),
+    dispatcher: cloudflare.dispatcher(
+      platformAccountId,
+      clientsNamespace("production")
+    ),
   },
   observe: { retryDelayMs: 0 },
 };
 const namespace = clientsNamespace("production");
+/**
+ * The operation as an admin without its dispatcher binding runs it: it
+ * uploads and delivers, and stops at the probe it can't qualify.
+ */
+const unbound = {
+  ...context,
+  router: { ...context.router, dispatcher: undefined },
+};
 /** The namespace the admin and the router bind in these tests. */
 const clientDispatchNamespace = clientsNamespace("production");
 
-type Kind = "dedicated" | "workers_for_platforms";
-
-/** The binding kinds Workers for Platforms documents for user Workers. */
+/**
+ * The binding kinds a Workers for Platforms user Worker takes, as the
+ * operation qualifies them (src/hosting/operation.ts, `wfpBindings`).
+ */
 const documented = new Set([
   "d1",
   "r2_bucket",
   "durable_object_namespace",
   "assets",
+  "worker_loader",
+  "version_metadata",
+  "service",
 ]);
 
 /** Core binding its connect, as the real one does (`adjust` for `importRelease`). */
 const bindsConnect = (core: WorkerEntry): WorkerEntry => ({
   ...core,
   bindings: [
-    ...core.bindings,
+    ...core.bindings.filter(({ name }) => name !== "CONNECT"),
     { type: "service", name: "CONNECT", service: "grasp-os-connect" },
   ],
 });
 
 /**
  * A release imported for a placed client: core binds its own Durable
- * Object classes, as the real one does, and nothing a placed client
- * refuses outright (Workflows). For a Workers for Platforms
- * destination, only the bindings its documentation lists for user
- * Workers, and no cron triggers. `adjust` changes core.
+ * Object classes, as the real one does, only the bindings Workers for
+ * Platforms documents for user Workers, and no cron triggers. `adjust`
+ * changes core.
  */
 const importRelease = async (
-  kind: Kind,
   spec: Partial<ReleaseSpec> = {},
   adjust: (core: WorkerEntry) => WorkerEntry = (core) => core
 ): Promise<ReleaseManifest> => {
   const built = await buildRelease({
     notes: "feat(core): place me",
-    ...(kind === "workers_for_platforms" ? { crons: [] } : {}),
+    crons: [],
     ...spec,
   });
   const { core } = built.manifest.workers;
@@ -170,11 +186,7 @@ const importRelease = async (
         durableObjectMigrations: [
           { tag: "v1", new_sqlite_classes: ["Workspace", "AuditLog"] },
         ],
-        bindings: core.bindings.filter(({ type }) =>
-          kind === "workers_for_platforms"
-            ? documented.has(type)
-            : type !== "workflow"
-        ),
+        bindings: core.bindings.filter(({ type }) => documented.has(type)),
       }),
     },
   };
@@ -264,22 +276,18 @@ const placedOperation = async (
   return { clientId, operationId, held };
 };
 
-/** A client placed in a new destination of `kind` on a new account, its operation started and claimed. */
-const setUp = async (
-  kind: Kind,
-  manifest: ReleaseManifest,
-  inNamespace = namespace
-) => {
-  const account = cloudflare.addAccount();
-  if (kind === "workers_for_platforms") {
+/**
+ * A client placed in a destination on Grasp's account, in `inNamespace`
+ * (the stage's clients' namespace unless said), its operation started
+ * and claimed.
+ */
+const setUp = async (manifest: ReleaseManifest, inNamespace = namespace) => {
+  const account = graspAccount(cloudflare);
+  if (!account.namespaces.has(inNamespace)) {
     account.namespaces.set(inNamespace, new Map());
   }
   const destinationId = await destination(
-    {
-      kind,
-      accountId: account.id,
-      namespace: kind === "workers_for_platforms" ? inNamespace : null,
-    },
+    { accountId: account.id, namespace: inNamespace },
     stageOfNamespace(inNamespace) ?? "production"
   );
   const placed = await placedOperation(destinationId, manifest);
@@ -329,18 +337,17 @@ const laggingUploads = (stale: number): Map<string, number> => {
   return answeredStale;
 };
 
-/** A Worker's own script in an account: where its secrets and deployments are read. */
-const ownScriptPath = /\/workers\/scripts\/(?<script>[^/]+)\/(?<rest>.+)$/u;
+/** What a user Worker's script in a dispatch namespace has: where its secrets are read. */
+const scriptPartPath =
+  /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/(?<script>[^/]+)\/(?<rest>.+)$/u;
 
 /**
- * Cloudflare's read-after-write lag on what the secrets step and the
- * probe read back: after each `PUT` of an account Worker's secret, the
- * next `stale` reads of its `read` (`secrets` or `deployments`) answer
- * `staleAnswer`, as from before it. Returns how many reads were answered
- * so, by script.
+ * Cloudflare's read-after-write lag on what the secrets step reads back:
+ * after each `PUT` of a user Worker's secret, the next `stale` reads of
+ * its secrets answer `staleAnswer`, as from before it. Returns how many
+ * reads were answered so, by script.
  */
 const laggingAfterSecrets = (
-  read: "secrets" | "deployments",
   stale: number,
   staleAnswer: unknown
 ): Map<string, number> => {
@@ -348,14 +355,14 @@ const laggingAfterSecrets = (
   const answeredStale = new Map<string, number>();
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const request = new Request(input, init);
-    const found = ownScriptPath.exec(new URL(request.url).pathname)?.groups;
+    const found = scriptPartPath.exec(new URL(request.url).pathname)?.groups;
     if (found?.script !== undefined) {
       const { script, rest } = found;
       if (request.method === "PUT" && rest === "secrets") {
         behind.set(script, stale);
       } else if (
         request.method === "GET" &&
-        rest === read &&
+        rest === "secrets" &&
         (behind.get(script) ?? 0) > 0
       ) {
         behind.set(script, (behind.get(script) ?? 0) - 1);
@@ -369,10 +376,13 @@ const laggingAfterSecrets = (
 };
 
 /** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
-const failing = async (held: HeldClient): Promise<unknown> => {
+const failing = async (
+  held: HeldClient,
+  running: Parameters<typeof runClientProvision>[0] = context
+): Promise<unknown> => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
-    return await runClientProvision(context, held).then(
+    return await runClientProvision(running, held).then(
       () => null,
       (error: unknown) => error
     );
@@ -437,7 +447,7 @@ const scriptsOf = async (clientId: string) => {
 
 /** A script's live version's bindings, by name. */
 const liveBindings = (account: AccountState, script: string) => {
-  const versions = account.scripts.get(script)?.versions ?? [];
+  const versions = clientScripts(account).get(script)?.versions ?? [];
   const bindings = z
     .array(z.object({ name: z.string() }).loose())
     .parse(versions.at(-1)?.metadata.bindings ?? []);
@@ -448,18 +458,28 @@ const liveBindings = (account: AccountState, script: string) => {
 const holdings = (account: AccountState) => ({
   d1: account.d1.map(({ name }) => name).toSorted(),
   buckets: account.buckets.map(({ name }) => name).toSorted(),
-  scripts: [...account.scripts.keys()].toSorted(),
+  scripts: [...clientScripts(account).keys()].toSorted(),
 });
 
-/** Every zone in `account`, with the domains Email Sending sends from there. */
-const zonesOf = (account: AccountState) =>
-  account.zones.map(({ name, sending }) => ({
-    name,
-    sending: sending.map((entry) => ({
-      name: entry.name,
-      enabled: entry.enabled,
-    })),
-  }));
+/**
+ * What the account holds of client `clientId`'s own, as names: every
+ * client shares the account, each named for its deployment.
+ */
+const holdingsOf = async (account: AccountState, clientId: string) => {
+  const placement = await db
+    .select({ deploymentId: clientPlacements.deploymentId })
+    .from(clientPlacements)
+    .where(eq(clientPlacements.clientId, clientId))
+    .get();
+  const own = (name: string) =>
+    name.startsWith(`grasp-${placement?.deploymentId ?? ""}-`);
+  const all = holdings(account);
+  return {
+    d1: all.d1.filter(own),
+    buckets: all.buckets.filter(own),
+    scripts: all.scripts.filter(own),
+  };
+};
 
 /** A migration sent, with its record (`applyD1Migrations`). */
 const isMigration = (call: ApiCall): boolean =>
@@ -470,11 +490,6 @@ const isMigration = (call: ApiCall): boolean =>
 const readMigrations = (call: ApiCall): boolean =>
   call.path.endsWith("/query") &&
   JSON.stringify(call.body).includes("SELECT name FROM d1_migrations");
-
-/** A call that creates a zone or turns Email Sending on for a domain. */
-const isMailCreate = ({ method, path }: ApiCall): boolean =>
-  method === "POST" &&
-  (path === "/zones" || path.endsWith("/email/sending/subdomains"));
 
 const isUpload = (script: string) => (call: ApiCall) =>
   call.method === "PUT" && call.path.endsWith(`/scripts/${script}`);
@@ -538,7 +553,6 @@ const provisioned = async (account: AccountState, clientId: string) => {
       .where(eq(clientRuns.clientId, clientId)),
     route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
     holdings: holdings(account),
-    zones: zonesOf(account),
     uploads: account.scriptUploads.map(({ script }) => script),
     coreMigrations: await migrationsRun(core),
     applied: Object.values(await appliedMigrations(account)).map(
@@ -548,12 +562,17 @@ const provisioned = async (account: AccountState, clientId: string) => {
     missingSecrets: [
       ...wanted.core.filter(
         (name) =>
-          account.scripts.get(core)?.versions.at(-1)?.secrets.has(name) !== true
+          clientScripts(account)
+            .get(core)
+            ?.versions.at(-1)
+            ?.secrets.has(name) !== true
       ),
       ...wanted.connect.filter(
         (name) =>
-          account.scripts.get(connect)?.versions.at(-1)?.secrets.has(name) !==
-          true
+          clientScripts(account)
+            .get(connect)
+            ?.versions.at(-1)
+            ?.secrets.has(name) !== true
       ),
     ],
   };
@@ -565,8 +584,6 @@ const once = (clientId: string) => ({
   status: "active",
   claims: [],
   route: { clientId, generation: 1 },
-  // No mail, so no sending domain.
-  zones: [],
   coreMigrations: 1,
   applied: [1, 1, 1],
   missingSecrets: [],
@@ -640,16 +657,16 @@ const stops: Stop[] = [
     step: "probe",
     stopped: "secrets",
     code: "smoke_check_failed",
-    plan: (account) => {
+    plan: (_account, clientId) => {
       // As many failed health checks as the smoke check tries.
-      account.unhealthy = 5;
+      cloudflare.coreOf(clientId).unhealthy = 5;
     },
   },
 ];
 
 interface ProbeFailure {
   name: string;
-  probe: NonNullable<AccountState["coreProbe"]>;
+  probe: NonNullable<CoreState["coreProbe"]>;
   code: string;
 }
 
@@ -709,7 +726,6 @@ const probeFailures: ProbeFailure[] = [
 
 interface Refusal {
   name: string;
-  kind: Kind;
   adjust?: (core: WorkerEntry) => WorkerEntry;
   code: string;
 }
@@ -717,7 +733,6 @@ interface Refusal {
 const refusals: Refusal[] = [
   {
     name: "a release with a binding Workers for Platforms doesn't document",
-    kind: "workers_for_platforms",
     adjust: (core) => ({
       ...core,
       bindings: [...core.bindings, { type: "kv_namespace", name: "CACHE" }],
@@ -726,9 +741,9 @@ const refusals: Refusal[] = [
   },
 ];
 
-/** A client provisioned in a dedicated destination with `first`, and its account. */
+/** A client provisioned in the stage's destination with `first`, and its account. */
 const liveClient = async (first: ReleaseManifest) => {
-  const set = await setUp("dedicated", first);
+  const set = await setUp(first);
   await runClientProvision(context, set.held);
   return set;
 };
@@ -838,8 +853,8 @@ describe("provisioning a placed client", () => {
   it.each(["", "Production", "prod", "staging "])(
     "runs no operation for an admin whose STAGE is %j, before any Cloudflare call",
     async (stage) => {
-      const manifest = await importRelease("dedicated");
-      const { clientId, held } = await setUp("dedicated", manifest);
+      const manifest = await importRelease();
+      const { clientId, held } = await setUp(manifest);
       const before = cloudflare.calls.length;
 
       // The admin as its deploy left it, its STAGE misconfigured: never
@@ -866,8 +881,8 @@ describe("provisioning a placed client", () => {
   );
 
   it("provisions a fresh client end to end, its hostname published last", async () => {
-    const manifest = await importRelease("dedicated");
-    const { account, clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
 
     await runClientProvision(context, held);
 
@@ -883,14 +898,16 @@ describe("provisioning a placed client", () => {
       resourceOf(clientId, "d1:grasp-os-core"),
       resourceOf(clientId, "r2:grasp-os-files"),
     ]);
-    const live = account.scripts.get(core)?.versions.at(-1);
+    const live = clientScripts(account).get(core)?.versions.at(-1);
     expect({
       bindings: liveBindings(account, core),
       routerSecret: live?.secrets.get("ROUTER_SECRET"),
     }).toMatchObject({
       bindings: {
         DB: { id: database.providerId },
-        CONNECT: { service: connect },
+        CONNECT: {
+          service: platformWorkerName("connect-gateway", "production"),
+        },
         FILES: { bucket_name: bucket.physicalName },
         CLIENT_ID: { type: "json", json: clientId },
       },
@@ -907,7 +924,6 @@ describe("provisioning a placed client", () => {
       "provision.core",
       "provision.secrets",
       "provision.probe",
-      "provision.mail",
       "provision.route",
       "provision.done",
     ]);
@@ -926,90 +942,9 @@ describe("provisioning a placed client", () => {
     ).toStrictEqual([]);
   });
 
-  it("sets up a placed client's sending domain in its destination's account before publishing it, and locks its mail to the onboarding sender, whatever the release allows", async () => {
-    const manifest = await importRelease(
-      "dedicated",
-      { sendsMail: true },
-      (core) => ({
-        ...core,
-        bindings: core.bindings.map((binding) =>
-          binding.type === "send_email"
-            ? { ...binding, allowed_sender_addresses: ["ceo@acme.test"] }
-            : binding
-        ),
-      })
-    );
-    const { account, clientId, held } = await setUp("dedicated", manifest);
-
-    await runClientProvision(context, held);
-
-    const { core } = await scriptsOf(clientId);
-    const mailDomain = clientMailDomain(clientId, domain);
-    const actions = await actionsOf(clientId);
-    const operation = await operationOf(clientId);
-    const progress: unknown = JSON.parse(operation?.progress ?? "{}");
-    expect({
-      zones: zonesOf(account),
-      email: liveBindings(account, core).EMAIL,
-      progress,
-      mailThenRoute: actions.slice(-3),
-    }).toMatchObject({
-      zones: [
-        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
-      ],
-      email: {
-        type: "send_email",
-        name: "EMAIL",
-        allowed_sender_addresses: [onboardingSender(clientId, domain).address],
-      },
-      // Not yet delegated, so not yet sending: on record for staff.
-      progress: { mail: { zoneId: account.zones[0]?.id, active: false } },
-      mailThenRoute: ["provision.mail", "provision.route", "provision.done"],
-    });
-  });
-
-  it("sets up a placed client's sending domain once, resumed after its answer was lost", async () => {
-    const manifest = await importRelease("dedicated", { sendsMail: true });
-    const { account, clientId, held } = await setUp("dedicated", manifest);
-    // Email Sending is turned on, and the answer never arrives.
-    cloudflare.failNext(
-      ({ method, path }) =>
-        method === "POST" && path.endsWith("/email/sending/subdomains"),
-      "lost"
-    );
-
-    await failing(held);
-    await expect(
-      Promise.all([operationOf(clientId), routed(clientId)])
-    ).resolves.toMatchObject([
-      { status: "failed", step: "probe", error: "cloudflare_0" },
-      false,
-    ]);
-
-    await runClientProvision(context, held);
-    const mailDomain = clientMailDomain(clientId, domain);
-    expect({
-      operation: await operationOf(clientId),
-      routed: await routed(clientId),
-      zones: zonesOf(account),
-      // The zone's and the domain's, each once across both runs.
-      creates: cloudflare.calls.filter(isMailCreate).map(({ path }) => path),
-    }).toMatchObject({
-      operation: { status: "done", step: "route" },
-      routed: true,
-      zones: [
-        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
-      ],
-      creates: [
-        "/zones",
-        `/zones/${account.zones[0]?.id}/email/sending/subdomains`,
-      ],
-    });
-  });
-
   it("does nothing once done", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     await runClientProvision(context, held);
 
     const before = cloudflare.calls.length;
@@ -1021,16 +956,16 @@ describe("provisioning a placed client", () => {
   });
 
   it("starting it again resumes the client's one operation, switched to a newer release while nothing is live, and refuses an older one", async () => {
-    const older = await importRelease("dedicated");
-    const manifest = await importRelease("dedicated");
-    const { clientId, operationId, held } = await setUp("dedicated", manifest);
+    const older = await importRelease();
+    const manifest = await importRelease();
+    const { clientId, operationId, held } = await setUp(manifest);
     await expect(
       startClientProvision(db, staff, held, manifest.releaseId)
     ).resolves.toBe(operationId);
     await expect(
       startClientProvision(db, staff, held, older.releaseId)
     ).rejects.toMatchObject({ code: "operation_release_changed" });
-    const newer = await importRelease("dedicated");
+    const newer = await importRelease();
     await expect(
       startClientProvision(db, staff, held, newer.releaseId)
     ).resolves.toBe(operationId);
@@ -1046,10 +981,10 @@ describe("provisioning a placed client", () => {
   });
 
   it("keeps a live client's operation on its release: provisioning never switches what runs", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     await runClientProvision(context, held);
-    const newer = await importRelease("dedicated");
+    const newer = await importRelease();
 
     await expect(
       startClientProvision(db, staff, held, newer.releaseId)
@@ -1063,8 +998,8 @@ describe("provisioning a placed client", () => {
   it.each(stops)(
     "resumes after stopping at $step, creating nothing twice",
     async ({ stopped, code, plan }) => {
-      const manifest = await importRelease("dedicated");
-      const { account, clientId, held } = await setUp("dedicated", manifest);
+      const manifest = await importRelease();
+      const { account, clientId, held } = await setUp(manifest);
       // Allocated first, so a plan can name the client's scripts: the
       // operation's own allocation finds it.
       await allocateClientResources(db, "system", {
@@ -1082,7 +1017,7 @@ describe("provisioning a placed client", () => {
       });
       await expect(routed(clientId)).resolves.toBeFalsy();
 
-      account.unhealthy = 0;
+      cloudflare.coreOf(clientId).unhealthy = 0;
       await runClientProvision(context, held);
 
       const state = await provisioned(account, clientId);
@@ -1100,12 +1035,8 @@ describe("provisioning a placed client", () => {
   );
 
   it("stops a runner that lost the client, which writes nothing more, and its successor finishes", async () => {
-    const manifest = await importRelease("dedicated");
-    const {
-      account,
-      clientId,
-      held: stale,
-    } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { account, clientId, held: stale } = await setUp(manifest);
     await allocateClientResources(db, "system", {
       clientId,
       manifest,
@@ -1149,9 +1080,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("leaves the hostname unpublished while core fails its probe", async () => {
-    const manifest = await importRelease("dedicated");
-    const { account, clientId, held } = await setUp("dedicated", manifest);
-    account.unhealthy = 1000;
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    cloudflare.coreOf(clientId).unhealthy = 1000;
 
     await expect(failing(held)).resolves.toMatchObject({
       code: "smoke_check_failed",
@@ -1181,9 +1112,9 @@ describe("provisioning a placed client", () => {
   it.each(probeFailures)(
     "leaves the hostname unpublished while core's signed probe finds $name, and resumes once it checks out",
     async ({ probe, code }) => {
-      const manifest = await importRelease("dedicated");
-      const { account, clientId, held } = await setUp("dedicated", manifest);
-      account.coreProbe = probe;
+      const manifest = await importRelease();
+      const { account, clientId, held } = await setUp(manifest);
+      cloudflare.coreOf(clientId).coreProbe = probe;
 
       await expect(failing(held)).resolves.toMatchObject({ code });
       expect({
@@ -1194,7 +1125,7 @@ describe("provisioning a placed client", () => {
         routed: false,
       });
 
-      delete account.coreProbe;
+      delete cloudflare.coreOf(clientId).coreProbe;
       await runClientProvision(context, held);
       await expect(provisioned(account, clientId)).resolves.toMatchObject(
         once(clientId)
@@ -1203,73 +1134,56 @@ describe("provisioning a placed client", () => {
   );
 
   it("delivers a secret again on retry when it was deleted after its delivery", async () => {
-    const manifest = await importRelease("dedicated");
-    const { account, clientId, held } = await setUp("dedicated", manifest);
-    account.unhealthy = 1000;
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    cloudflare.coreOf(clientId).unhealthy = 1000;
     await expect(failing(held)).resolves.toMatchObject({
       code: "smoke_check_failed",
     });
     const { core } = await scriptsOf(clientId);
-    account.scripts.get(core)?.versions.at(-1)?.secrets.delete("ROUTER_SECRET");
+    clientScripts(account)
+      .get(core)
+      ?.versions.at(-1)
+      ?.secrets.delete("ROUTER_SECRET");
 
-    account.unhealthy = 0;
+    cloudflare.coreOf(clientId).unhealthy = 0;
     await runClientProvision(context, held);
     await expect(
       Promise.all([operationOf(clientId), routed(clientId)])
     ).resolves.toMatchObject([{ status: "done" }, true]);
     expect(
-      account.scripts.get(core)?.versions.at(-1)?.secrets.get("ROUTER_SECRET")
+      clientScripts(account)
+        .get(core)
+        ?.versions.at(-1)
+        ?.secrets.get("ROUTER_SECRET")
     ).toBe(await deriveRouterSecret(secrets.routerKey, clientId, 1));
   });
 
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
-    async ({ kind, adjust, code }) => {
-      const manifest = await importRelease(kind, {}, adjust);
-      const { account, clientId, held } = await setUp(kind, manifest);
+    async ({ adjust, code }) => {
+      const manifest = await importRelease({}, adjust);
+      const { account, clientId, held } = await setUp(manifest);
 
       await expect(failing(held)).resolves.toMatchObject({ code });
       expect({
         operation: await operationOf(clientId),
         databases: account.d1.length,
-        zones: account.zones.length,
         uploads: account.scriptUploads.length,
         inventory: await clientInventory(db, clientId),
       }).toMatchObject({
         operation: { status: "failed", step: null, error: code },
         databases: 0,
-        zones: 0,
         uploads: 0,
         inventory: [],
       });
     }
   );
 
-  it("delivers nothing to an on-prem (workerd) destination, which its operator runs: no Worker, no secret, never Grasp's AI keys", async () => {
-    const manifest = await importRelease("dedicated");
-    const destinationId = await destination({
-      kind: "workerd",
-      accountId: null,
-      namespace: null,
-    });
-    const { held } = await placedOperation(destinationId, manifest);
-    const before = cloudflare.calls.length;
-
-    await expect(failing(held)).resolves.toMatchObject({
-      code: "destination_unsupported",
-    });
-    expect(cloudflare.calls.slice(before)).toStrictEqual([]);
-  });
-
   it("probes a core in the namespace the router binds through that binding, its connect through the gateway, and routes its hostname to its script", async () => {
     // Core binds its connect, as the real one does: through the gateway.
-    const manifest = await importRelease(
-      "workers_for_platforms",
-      {},
-      bindsConnect
-    );
+    const manifest = await importRelease({}, bindsConnect);
     const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
       manifest,
       clientDispatchNamespace
     );
@@ -1394,13 +1308,8 @@ describe("provisioning a placed client", () => {
   )(
     "never records a namespace connect as the version it ran before a $change change when its old isolates $isolates",
     async ({ change, stale, recordsNew }) => {
-      const manifest = await importRelease(
-        "workers_for_platforms",
-        {},
-        bindsConnect
-      );
+      const manifest = await importRelease({}, bindsConnect);
       const { account, clientId, held } = await setUp(
-        "workers_for_platforms",
         manifest,
         clientDispatchNamespace
       );
@@ -1435,7 +1344,6 @@ describe("provisioning a placed client", () => {
       // isolates of the one before still answering core for a moment.
       if (change === "release") {
         const second = await importRelease(
-          "workers_for_platforms",
           { notes: "feat(core): second" },
           bindsConnect
         );
@@ -1453,9 +1361,9 @@ describe("provisioning a placed client", () => {
         });
       }
       if (stale === "always") {
-        account.connectAnswering = before;
+        cloudflare.coreOf(clientId).connectAnswering = before;
       } else {
-        account.connectAnswersFirst = Array.from(
+        cloudflare.coreOf(clientId).connectAnswersFirst = Array.from(
           { length: stale },
           () => before
         );
@@ -1513,13 +1421,8 @@ describe("provisioning a placed client", () => {
   ])(
     "records a namespace $worker only as its latest version when its isolates answer $answers",
     async ({ worker }) => {
-      const manifest = await importRelease(
-        "workers_for_platforms",
-        {},
-        bindsConnect
-      );
+      const manifest = await importRelease({}, bindsConnect);
       const { account, clientId, held } = await setUp(
-        "workers_for_platforms",
         manifest,
         clientDispatchNamespace
       );
@@ -1548,7 +1451,6 @@ describe("provisioning a placed client", () => {
       };
       const before = await recordedOf();
       const second = await importRelease(
-        "workers_for_platforms",
         { notes: "feat(core): second" },
         bindsConnect
       );
@@ -1560,12 +1462,14 @@ describe("provisioning a placed client", () => {
       let whileOld: string | null = null;
       if (worker === "connect") {
         // Its upload's version, made before its secrets': not the latest.
-        account.connectAnswersFirst = ["made-earlier-in-this-run"];
+        cloudflare.coreOf(clientId).connectAnswersFirst = [
+          "made-earlier-in-this-run",
+        ];
       } else {
         // Its old isolates answer its health and its probe alike: the run
         // stops rather than record what it superseded, and goes on once
         // they're gone.
-        account.answeringVersion = before.core ?? "none";
+        cloudflare.coreOf(clientId).answeringVersion = before.core ?? "none";
         const errors = vi.spyOn(console, "error").mockImplementation(() => {});
         stopped = await runClientProvision(namespaced, rerun).then(
           () => null,
@@ -1574,7 +1478,7 @@ describe("provisioning a placed client", () => {
         errors.mockRestore();
         const meanwhile = await recordedOf();
         whileOld = meanwhile.core ?? null;
-        delete account.answeringVersion;
+        delete cloudflare.coreOf(clientId).answeringVersion;
       }
       await runClientProvision(namespaced, rerun);
       const scripts = await scriptsOf(clientId);
@@ -1601,13 +1505,8 @@ describe("provisioning a placed client", () => {
   );
 
   it("still refuses what a run superseded on its retry, after its probe recorded none of connect's and a later step failed", async () => {
-    const manifest = await importRelease(
-      "workers_for_platforms",
-      {},
-      bindsConnect
-    );
+    const manifest = await importRelease({}, bindsConnect);
     const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
       manifest,
       clientDispatchNamespace
     );
@@ -1634,7 +1533,6 @@ describe("provisioning a placed client", () => {
     };
     const before = await recordedConnect();
     const second = await importRelease(
-      "workers_for_platforms",
       { notes: "feat(core): second" },
       bindsConnect
     );
@@ -1644,7 +1542,7 @@ describe("provisioning a placed client", () => {
     const rerun = await attempt(clientId);
     // Its probe: only the old isolates answer, so none is recorded; then
     // publishing its hostname fails.
-    account.connectAnswering = before;
+    cloudflare.coreOf(clientId).connectAnswering = before;
     const put = vi
       .spyOn(env.ROUTER_HOSTS, "put")
       .mockRejectedValueOnce(new Error("the router's map is down"));
@@ -1658,8 +1556,8 @@ describe("provisioning a placed client", () => {
     const afterFailure = await recordedConnect();
     // Retried: nothing uploaded or delivered again, and an old isolate
     // answers first, twice.
-    delete account.connectAnswering;
-    account.connectAnswersFirst = [before, before];
+    delete cloudflare.coreOf(clientId).connectAnswering;
+    cloudflare.coreOf(clientId).connectAnswersFirst = [before, before];
     await runClientProvision(namespaced, rerun);
     const { connect } = await scriptsOf(clientId);
     const live = account.namespaces.get(clientDispatchNamespace)?.get(connect)
@@ -1682,18 +1580,13 @@ describe("provisioning a placed client", () => {
   });
 
   it("goes live on a core of a release from before connect's version, recording none of connect's", async () => {
-    const manifest = await importRelease(
-      "workers_for_platforms",
-      {},
-      bindsConnect
-    );
+    const manifest = await importRelease({}, bindsConnect);
     const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
       manifest,
       clientDispatchNamespace
     );
     // Its core names no version of connect's: not in its probe, nor asked.
-    account.coreProbe = { noConnectVersion: true };
+    cloudflare.coreOf(clientId).coreProbe = { noConnectVersion: true };
 
     await runClientProvision(
       {
@@ -1743,12 +1636,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("can't reach a core uploaded to the same namespace in another account, its hostname unpublished", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest,
-      clientDispatchNamespace
-    );
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest, clientDispatchNamespace);
     // The router's own account, whose namespace of that name lacks the core.
     const routers = cloudflare.addAccount("Router");
     routers.namespaces.set(clientDispatchNamespace, new Map());
@@ -1785,15 +1674,11 @@ describe("provisioning a placed client", () => {
   });
 
   it("places a client only in its own stage's namespace, in either direction, before anything is created or uploaded", async () => {
-    const manifest = await importRelease("workers_for_platforms");
+    const manifest = await importRelease();
     // A production destination, run by a staging admin...
-    const production = await setUp("workers_for_platforms", manifest);
+    const production = await setUp(manifest);
     // ...and a staging one, recorded by a staging admin, run by production's.
-    const staging = await setUp(
-      "workers_for_platforms",
-      manifest,
-      clientsNamespace("staging")
-    );
+    const staging = await setUp(manifest, clientsNamespace("staging"));
     const runAs = async (held: HeldClient, stage: Stage): Promise<unknown> => {
       const errors = vi.spyOn(console, "error").mockImplementation(() => {});
       try {
@@ -1840,8 +1725,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("builds a retry's Durable Object migrations from what an earlier attempt's upload left, once that upload landed", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { held: claim } = await setUp("workers_for_platforms", manifest);
+    const manifest = await importRelease();
+    const { held: claim } = await setUp(manifest);
     // The first attempt's core upload, carrying core's migration, is held
     // on its way when the step's retry takes the client.
     const held = Promise.withResolvers<boolean>();
@@ -1871,18 +1756,17 @@ describe("provisioning a placed client", () => {
       // The one that timed out is refused once its upload answered.
       first: codeFrom(firstOutcome),
       // The retry's upload goes on from the migration that landed, and the
-      // run stops only where it must, at the probe.
+      // client goes live.
       retry: codeFrom(retryOutcome),
     }).toStrictEqual({
       first: "runner_replaced",
-      retry: "probe_unqualified",
+      retry: null,
     });
   });
 
   it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
       real,
       clientDispatchNamespace
     );
@@ -1926,12 +1810,10 @@ describe("provisioning a placed client", () => {
       modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
       // Grasp's key goes to connect, which makes every provider call, never core.
       keys: { core: aiKeys(core), connect: aiKeys(connect) },
-      // Its core goes live without `EMAIL`, so it sends nothing and says
-      // so, and no sending domain is set up for it.
+      // Its core goes live without `EMAIL`, so it sends nothing and says so.
       mail: coreBindings.filter(
         ({ type, name }) => type === "send_email" || name === "EMAIL"
       ),
-      zones: account.zones.length,
       routed: await routed(clientId),
     }).toMatchObject({
       operation: { status: "done" },
@@ -1940,7 +1822,6 @@ describe("provisioning a placed client", () => {
       modelGateway: false,
       keys: { core: [], connect: ["OPENAI_API_KEY"] },
       mail: [],
-      zones: 0,
       routed: true,
     });
   });
@@ -1948,7 +1829,6 @@ describe("provisioning a placed client", () => {
   it("takes the real release live with no AI provider key of Grasp's at all, its connect given none", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
       real,
       clientDispatchNamespace
     );
@@ -1996,13 +1876,10 @@ describe("provisioning a placed client", () => {
   });
 
   it("uploads into a Workers for Platforms namespace, and stops at the probe it can't qualify", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest
-    );
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
 
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { core, connect } = await scriptsOf(clientId);
@@ -2033,7 +1910,7 @@ describe("provisioning a placed client", () => {
 
     // Run again, it uploads and delivers nothing again.
     const before = cloudflare.calls.length;
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     expect(
@@ -2050,8 +1927,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("holds a rollback while marks it can't read are fresh, and lets it go once they age out", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId } = await setUp(manifest);
     const operation = await operationOf(clientId);
     const change = operation?.change ?? 0;
     const mark = async (updatedAt: Date) => {
@@ -2070,8 +1947,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("aborts an upload left unanswered past its limit, and keeps it marked sent, as it may still land", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     // Connect's upload goes unanswered until the test ends.
     const answered = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
@@ -2124,26 +2001,24 @@ describe("provisioning a placed client", () => {
   });
 
   it("reads an upload back through Cloudflare's lag, and goes on", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { held, clientId } = await setUp("workers_for_platforms", manifest);
+    const manifest = await importRelease();
+    const { held, clientId } = await setUp(manifest);
     const stale = laggingUploads(3);
 
-    await expect(failing(held)).resolves.toMatchObject({
-      code: "probe_unqualified",
-    });
+    await runClientProvision(context, held);
     expect({
       operation: await operationOf(clientId),
       staleReads: [...stale.values()],
     }).toMatchObject({
-      operation: { status: "failed", error: "probe_unqualified" },
+      operation: { status: "done" },
       // Each Worker's upload read back once the lag passed.
       staleReads: [3, 3],
     });
   });
 
   it("stops at an upload that never reads back, after a bounded number of tries", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { held, clientId } = await setUp("workers_for_platforms", manifest);
+    const manifest = await importRelease();
+    const { held, clientId } = await setUp(manifest);
     const stale = laggingUploads(Number.POSITIVE_INFINITY);
 
     await expect(failing(held)).resolves.toMatchObject({
@@ -2160,10 +2035,10 @@ describe("provisioning a placed client", () => {
   });
 
   it("reads delivered secrets back through Cloudflare's lag, and goes on", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     // The secrets listed as before the last delivery: none of them.
-    const stale = laggingAfterSecrets("secrets", 3, []);
+    const stale = laggingAfterSecrets(3, []);
 
     await runClientProvision(context, held);
 
@@ -2177,34 +2052,16 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("reads core's live version back through Cloudflare's lag, and goes on", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
-    // Its deployments as before its upload: none live.
-    const stale = laggingAfterSecrets("deployments", 3, { deployments: [] });
-
-    await runClientProvision(context, held);
-    const { core } = await scriptsOf(clientId);
-
-    expect({
-      operation: await operationOf(clientId),
-      staleReads: stale.get(core),
-    }).toMatchObject({ operation: { status: "done" }, staleReads: 3 });
-  });
-
   it("removes the secrets a placed client's scripts are no longer given, once the ones they are given are there", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest
-    );
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
     // Rotated, and not live yet: each key that rotates goes with its
     // previous value too.
     await db
       .update(clients)
       .set({ generation: 2, rotatedAt: new Date() })
       .where(eq(clients.id, clientId));
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { core, connect } = await scriptsOf(clientId);
@@ -2224,7 +2081,7 @@ describe("provisioning a placed client", () => {
       .where(eq(clients.id, clientId));
     secretsOn(core).set("STRAY_KEY", "stray-value");
     const before = cloudflare.calls.length;
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const writes = cloudflare.calls
@@ -2316,12 +2173,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("keeps every secret it gives when a removal fails partway, and a retry finishes the removal", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest
-    );
-    await expect(failing(held)).resolves.toMatchObject({
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { core } = await scriptsOf(clientId);
@@ -2355,7 +2209,7 @@ describe("provisioning a placed client", () => {
     await expect(failing(held)).resolves.toBeDefined();
     const afterFailure = new Set(onCore().keys());
     vi.mocked(globalThis.fetch).mockImplementation(cloudflare.fetch);
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
 
@@ -2371,18 +2225,15 @@ describe("provisioning a placed client", () => {
   });
 
   it("removes a secret it doesn't give from a script it already delivered to, while a rotation keeps connect's previous vault key", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest
-    );
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
     // Rotating: connect is given TOKEN_ENCRYPTION_KEY_PREVIOUS, the key
     // it would keep anyway.
     await db
       .update(clients)
       .set({ generation: 2, rotatedAt: new Date() })
       .where(eq(clients.id, clientId));
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { connect } = await scriptsOf(clientId);
@@ -2392,7 +2243,7 @@ describe("provisioning a placed client", () => {
 
     // Delivered already, and recorded so: one secret more on connect.
     secretsOn(connect).set("STRAY_KEY", "stray-value");
-    await expect(failing(held)).resolves.toMatchObject({
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
 
@@ -2400,12 +2251,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("records each secret it removes as it removes it, so a run that fails after one keeps its name", async () => {
-    const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      manifest
-    );
-    await expect(failing(held)).resolves.toMatchObject({
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { core } = await scriptsOf(clientId);
@@ -2478,8 +2326,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("marks a rotated client's generation live once its hostname is published, and audits it", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     await db
       .update(clients)
       .set({ generation: 2, rotatedAt: new Date() })
@@ -2512,15 +2360,11 @@ describe("provisioning a placed client", () => {
   });
 
   it("keeps two clients in one destination to their own resources", async () => {
-    const manifest = await importRelease("dedicated");
-    const {
-      account,
-      destinationId,
-      held: firstRun,
-    } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { account, destinationId, held: firstRun } = await setUp(manifest);
     await runClientProvision(context, firstRun);
     const firstVersions = Object.fromEntries(
-      [...account.scripts].map(([name, script]) => [
+      [...clientScripts(account)].map(([name, script]) => [
         name,
         script.versions.length,
       ])
@@ -2537,7 +2381,7 @@ describe("provisioning a placed client", () => {
       versions: Object.fromEntries(
         Object.keys(firstVersions).map((name) => [
           name,
-          account.scripts.get(name)?.versions.length,
+          clientScripts(account).get(name)?.versions.length,
         ])
       ),
       migrations: await appliedMigrations(account),
@@ -2549,20 +2393,23 @@ describe("provisioning a placed client", () => {
       migrations: firstMigrations,
       bindings: {
         DB: { id: database.providerId },
-        CONNECT: { service: connect },
+        CONNECT: {
+          service: platformWorkerName("connect-gateway", "production"),
+          props: { script: connect },
+        },
       },
       databases: 6,
     });
   });
 
   it("refuses an inventory id that is another client's database, before migrating or binding it", async () => {
-    const manifest = await importRelease("dedicated");
+    const manifest = await importRelease();
     const {
       account,
       clientId: first,
       destinationId,
       held: firstRun,
-    } = await setUp("dedicated", manifest);
+    } = await setUp(manifest);
     await runClientProvision(context, firstRun);
     const firstMigrations = await appliedMigrations(account);
     const victim = await resourceOf(first, "d1:grasp-os-core");
@@ -2598,13 +2445,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("runs as a workflow, and starting it again resumes the one operation", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // The first attempt is refused connect's upload, and stops.
@@ -2631,13 +2474,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("records why an attempt stopped before its operation could run, a secret missing from Secrets Store by name, for Setup to say, and resumes once it's back", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
@@ -2685,8 +2524,8 @@ describe("provisioning a placed client", () => {
   });
 
   it("records a failure before the operation ran as that attempt alone: an old attempt's never lands over the retry that took the client over", async () => {
-    const manifest = await importRelease("dedicated");
-    const { clientId, held } = await setUp("dedicated", manifest);
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
     const attemptKey = `${held.runId}-provision`;
     const old = { ...held, attempt: 1, attemptKey };
     const retry = { ...held, attempt: 2, attemptKey };
@@ -2721,13 +2560,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("migrates a client once when its attempt times out mid-migration and its retry runs", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // Each attempt is held once it read which migrations a database still
@@ -2784,13 +2619,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("reports a provision done when its attempt loses the step's result after the operation completed", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     let held: LostWrite | undefined;
     // Held once the operation is done: its last write, which also gave the
@@ -2828,13 +2659,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("sends no migration again from an attempt that timed out while it waited out a 429", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // The first attempt's first migration is refused with a 429, and the
@@ -2880,13 +2707,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("provisions a client once when its attempt loses its step's result after the step's first write", async () => {
-    const manifest = await importRelease("dedicated");
-    const account = cloudflare.addAccount();
-    const destinationId = await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    });
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
     const { clientId } = await placedClient(destinationId);
     let held: LostWrite | undefined;
     using attempts = startsOf(
@@ -2944,11 +2767,11 @@ describe("provisioning a placed client", () => {
   //   rollback doesn't finish.
 
   it("releases a live client to a later release on its stable scripts, migrating its databases and probing it before it's done", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const scripts = await scriptsOf(clientId);
     const uploadsBefore = account.scriptUploads.length;
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
       migrations: {
         "0000_init.sql": "CREATE TABLE a (id TEXT);",
@@ -2989,12 +2812,12 @@ describe("provisioning a placed client", () => {
   });
 
   it("rolls a live client back to the release it ran before, and refuses past a Durable Object migration or with nothing before", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const nothing = await codeOf(
       startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
-    const second = await importRelease("dedicated", {
+    const second = await importRelease({
       notes: "feat(core): second",
     });
     await startClientRelease(db, staff, await attempt(clientId), {
@@ -3013,7 +2836,6 @@ describe("provisioning a placed client", () => {
 
     // A release that adds a Durable Object migration can't be rolled back.
     const third = await importRelease(
-      "dedicated",
       { notes: "feat(core): new class" },
       (core) => ({
         ...core,
@@ -3061,13 +2883,12 @@ describe("provisioning a placed client", () => {
   });
 
   it("rolls back a release that stopped before any script ran its new Durable Object migration", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
     // Declares a new class; stops at connect's upload, before any script
     // ran the class's migration.
     const later = await importRelease(
-      "dedicated",
       {
         notes: "feat(core): new class, new table",
         migrations: {
@@ -3097,11 +2918,10 @@ describe("provisioning a placed client", () => {
   });
 
   it("never lowers what a script ran on a stale read: an upload whose answer was lost still keeps a rollback from going back past its migration", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const { core } = await scriptsOf(clientId);
     const later = await importRelease(
-      "dedicated",
       { notes: "feat(core): new class", core: "export default { core: 9 };" },
       (entry) => ({
         ...entry,
@@ -3127,7 +2947,7 @@ describe("provisioning a placed client", () => {
       .where(eq(clientProvisions.clientId, clientId));
     // Resumed: core reads at the migration before, as a stale read would,
     // and the upload stops before it's sent (its module gone from the store).
-    const script = account.scripts.get(core);
+    const script = clientScripts(account).get(core);
     if (script === undefined) {
       throw new Error("core isn't in the fake");
     }
@@ -3145,9 +2965,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("refuses a release of a client not live yet, and a start by a runner that lost the client, changing nothing; the holder takes an operation left running", async () => {
-    const first = await importRelease("dedicated");
-    const pending = await setUp("dedicated", first);
-    const later = await importRelease("dedicated", {
+    const first = await importRelease();
+    const pending = await setUp(first);
+    const later = await importRelease({
       notes: "feat(core): later",
     });
 
@@ -3201,9 +3021,9 @@ describe("provisioning a placed client", () => {
   });
 
   it("resumes a release that stopped part way, leaving its hostname where it was until it passes its probe", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
     });
     await startClientRelease(db, staff, await attempt(clientId), {
@@ -3251,20 +3071,20 @@ describe("provisioning a placed client", () => {
   });
 
   it("rolls a release that fails its probe once live back to the release before on its own, audited, and records a rollback that fails too", async () => {
-    const first = await importRelease("dedicated");
-    const { account, clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
+    const first = await importRelease();
+    const { clientId } = await liveClient(first);
+    const later = await importRelease({
       notes: "feat(core): broken once live",
     });
     const { connect } = await scriptsOf(clientId);
     // The release's core answers as another client; once the release's
     // connect went, the next upload of connect (the rollback's) finds core
     // answering as it should again.
-    account.coreProbe = { asClient: "someone-else" };
+    cloudflare.coreOf(clientId).coreProbe = { asClient: "someone-else" };
     // oxlint-disable require-await -- the fake waits on these; nothing to wait for
     cloudflare.beforeAnswering(isUpload(connect), async () => {
       cloudflare.beforeAnswering(isUpload(connect), async () => {
-        delete account.coreProbe;
+        delete cloudflare.coreOf(clientId).coreProbe;
       });
     });
     // oxlint-enable require-await
@@ -3294,7 +3114,7 @@ describe("provisioning a placed client", () => {
     await startClientRelease(db, staff, await attempt(stuck.clientId), {
       releaseId: later.releaseId,
     });
-    stuck.account.coreProbe = { asClient: "someone-else" };
+    cloudflare.coreOf(stuck.clientId).coreProbe = { asClient: "someone-else" };
     const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
     const stuckError = await runClientProvision(
       context,
@@ -3331,15 +3151,15 @@ describe("provisioning a placed client", () => {
   });
 
   it("releases a live client through its run, as staff start it, and a start at the same moment that loses the claim changes nothing", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
     });
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // Another release asked for at once: it claims nothing, so it never
     // changes the operation the winning attempt runs.
-    const other = await importRelease("dedicated", {
+    const other = await importRelease({
       notes: "feat(core): other",
     });
     const [won, lost] = await Promise.all([
@@ -3375,10 +3195,10 @@ describe("provisioning a placed client", () => {
   // the threat model is in its header.
 
   it("offboards a live client at once, unrouting it and deleting nothing, and no later release routes it again", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const before = holdings(account);
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
     });
 
@@ -3412,10 +3232,10 @@ describe("provisioning a placed client", () => {
   });
 
   it("deletes an offboarded client's resources only after its retention, with staff confirming no export, and only its own", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const other = await liveClient(first);
-    const others = holdings(other.account);
+    const others = await holdingsOf(other.account, other.clientId);
     await offboardPlacedClient(env, staff, clientId);
 
     const early = await codeOf(
@@ -3428,7 +3248,7 @@ describe("provisioning a placed client", () => {
     const live = await codeOf(
       deletePlacedClient(env, staff, other.clientId, { exportConfirmed: true })
     );
-    const kept = holdings(account);
+    const kept = await holdingsOf(account, clientId);
     const deletion = await deletePlacedClient(env, staff, clientId, {
       exportConfirmed: true,
     });
@@ -3450,13 +3270,13 @@ describe("provisioning a placed client", () => {
       live,
       kept: kept.d1.length > 0 && kept.scripts.length > 0,
       deletion: deletion.emptying,
-      gone: holdings(account),
+      gone: await holdingsOf(account, clientId),
       recorded: inventory.every((row) => row.deletedAt !== null),
       // Each resource audited as it went, then the whole, with what staff
       // confirmed.
       audited: deletedEvents.length,
       summary: z.unknown().parse(JSON.parse(summary?.detail ?? "null")),
-      others: holdings(other.account),
+      others: await holdingsOf(other.account, other.clientId),
     }).toMatchObject({
       early: "retention_running",
       unconfirmed: "export_unconfirmed",
@@ -3472,7 +3292,7 @@ describe("provisioning a placed client", () => {
   });
 
   it("empties a bucket that still holds objects and deletes it on a later run, and keeps a database whose name another id has", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     await offboardPlacedClient(env, staff, clientId);
     await offboardedDaysAgo(clientId, 31);
@@ -3514,18 +3334,19 @@ describe("provisioning a placed client", () => {
     if (swapped !== undefined) {
       swapped.uuid = crypto.randomUUID();
     }
-    const before = holdings(next.account);
+    const before = await holdingsOf(next.account, next.clientId);
     const notOwned = await codeOf(
       deletePlacedClient(env, staff, next.clientId, { exportConfirmed: true })
     );
+    const left = await holdingsOf(account, clientId);
 
     expect({
       emptying,
       second: secondRun.emptying,
-      bucketGone: account.buckets.length,
+      bucketGone: left.buckets.length,
       notOwned,
       // Refused before anything went: its scripts and their objects too.
-      untouched: holdings(next.account),
+      untouched: await holdingsOf(next.account, next.clientId),
     }).toStrictEqual({
       emptying: {
         emptying: [files.physicalName],
@@ -3541,7 +3362,7 @@ describe("provisioning a placed client", () => {
   });
 
   it("refuses deleting a row not named for its deployment, or a database whose id was never recorded, before anything goes", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const misnamed = await liveClient(first);
     const unrecorded = await liveClient(first);
     for (const { clientId } of [misnamed, unrecorded]) {
@@ -3570,8 +3391,8 @@ describe("provisioning a placed client", () => {
         )
       );
     const before = {
-      misnamed: holdings(misnamed.account),
-      unrecorded: holdings(unrecorded.account),
+      misnamed: await holdingsOf(misnamed.account, misnamed.clientId),
+      unrecorded: await holdingsOf(unrecorded.account, unrecorded.clientId),
     };
 
     const refused = {
@@ -3590,8 +3411,8 @@ describe("provisioning a placed client", () => {
     expect({
       refused,
       untouched: {
-        misnamed: holdings(misnamed.account),
-        unrecorded: holdings(unrecorded.account),
+        misnamed: await holdingsOf(misnamed.account, misnamed.clientId),
+        unrecorded: await holdingsOf(unrecorded.account, unrecorded.clientId),
       },
     }).toStrictEqual({
       refused: {
@@ -3603,7 +3424,7 @@ describe("provisioning a placed client", () => {
   });
 
   it("refuses offboarding with no client domain set, or a hostname the router gives another client, and leaves the route", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
     const other = await liveClient(first);
     const hostname = `${clientId}.${domain}`;
@@ -3789,13 +3610,12 @@ const expectedOf = (
  */
 const crashedAt = async (point: CrashPoint) => {
   const { started, claimed, plan } = point;
-  const a = await importRelease("dedicated");
+  const a = await importRelease();
   const { clientId } = await liveClient(a);
   const scripts = await scriptsOf(clientId);
   // B adds a class (a Durable Object migration) and a table; C keeps
   // both and adds a table of its own.
   const b = await importRelease(
-    "dedicated",
     {
       notes: "feat(core): b",
       core: "export default { core: 'b' };",
@@ -3807,7 +3627,6 @@ const crashedAt = async (point: CrashPoint) => {
     withExtraClass
   );
   const c = await importRelease(
-    "dedicated",
     {
       notes: "feat(core): c",
       core: "export default { core: 'c' };",
@@ -3874,14 +3693,14 @@ describe("a release's runner crashing, and another action on the client after", 
   });
 
   it("keeps the way back across two forward moves that each stop part way, so a rollback takes it back to the last whole release", async () => {
-    const a = await importRelease("dedicated");
+    const a = await importRelease();
     const { clientId } = await liveClient(a);
     const { core } = await scriptsOf(clientId);
-    const b = await importRelease("dedicated", {
+    const b = await importRelease({
       notes: "feat(core): b",
       core: "export default { core: 'b2' };",
     });
-    const l = await importRelease("dedicated", {
+    const l = await importRelease({
       notes: "feat(core): l",
       core: "export default { core: 'l' };",
     });
@@ -3981,9 +3800,9 @@ describe("a release's runner crashing, and another action on the client after", 
   );
 
   it("offboards or releases a client asked for both at once, never both: the loser changes nothing", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
     });
     const hostname = `${clientId}.${domain}`;
@@ -4024,9 +3843,9 @@ describe("a release's runner crashing, and another action on the client after", 
   });
 
   it("holds the client while it offboards: a release asked for as its hostname is deleted can't claim it, and starts nothing", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
+    const later = await importRelease({
       notes: "feat(core): later",
     });
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
@@ -4062,7 +3881,7 @@ describe("a release's runner crashing, and another action on the client after", 
   });
 
   it("keeps a client it couldn't unroute as it was, the route and its claim given back, and offboards it when tried again", async () => {
-    const first = await importRelease("dedicated");
+    const first = await importRelease();
     const { clientId } = await liveClient(first);
     const hostname = `${clientId}.${domain}`;
     const deleting = vi

@@ -30,12 +30,12 @@ const db = adminDatabase(env.DB);
 const liveClient = async () => {
   const release = await placedRelease("feat(core): workflows");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 const { 0: noordkade, 3: hartog } = SAMPLE_ORGS;
@@ -72,7 +72,7 @@ describe("an organization's workflows", () => {
 
   it("says the work isn't known yet while the company's own Grasp doesn't draw it", async () => {
     const acme = await liveClient();
-    acme.account.admin = { ...emptyAdminSnapshot("Acme"), told: true };
+    acme.core.admin = { ...emptyAdminSnapshot("Acme"), told: true };
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/workflows`

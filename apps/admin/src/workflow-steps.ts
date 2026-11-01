@@ -35,7 +35,6 @@ export const deployStepConfig = {
 /** Deploy failures a retry can fix: a new version still starting, a name race, a flaky query. */
 const retryableDeployCodes: ReadonlySet<DeployErrorCode> = new Set([
   "smoke_check_failed",
-  "subdomain_unavailable",
   "d1_migration_failed",
 ]);
 

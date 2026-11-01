@@ -1,14 +1,12 @@
 /**
- * Choosing where a client runs, and starting its provisioning there (spec
- * 37.3, 40.1): every hosting destination, the one the admin picks by
- * itself, and placing the client and starting (or resuming) its one
- * operation.
+ * Where a client runs, and starting its provisioning there (spec 37.3,
+ * 40.1): placing the client and starting (or resuming) its one operation.
  *
- * Destination allocation is automatic: a Grasp Cloud organization goes in
- * this admin's own shared destination (Workers for Platforms). Dedicated
- * hosting is never picked by itself: it stays a capability underneath,
- * unused by the admin's pages. An on-prem organization is placed nowhere:
- * its install sets itself up (GRA-1291).
+ * There is one hosting destination per stage, fixed in code: Grasp's
+ * account and the stage's clients' Workers for Platforms namespace
+ * (@grasp-os/shared/names). Every Grasp Cloud organization goes there. An
+ * on-prem organization is placed nowhere: its install sets itself up
+ * (GRA-1291).
  */
 import {
   clientsNamespace,
@@ -16,17 +14,12 @@ import {
   stageNamed,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { asc, count, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import {
-  clientPlacements,
-  clients,
-  hostingDestinations,
-  releases,
-} from "../db/schema.ts";
+import { clients, hostingDestinations, releases } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
@@ -43,39 +36,6 @@ import { clientHostingOf } from "./organization.ts";
 import type { OrganizationHosting } from "./organization.ts";
 import { provisionPlacedClient } from "./workflow.ts";
 
-type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
-
-/**
- * What keeps a destination from taking a client (`not_provisionable`): it
- * isn't somewhere the admin creates resources: a workerd destination, set
- * up by its operator, or one without the account or namespace a
- * provisioning operation needs (`load`, src/hosting/operation.ts).
- */
-export interface DestinationProblem {
-  kind: "not_provisionable";
-}
-
-/** A destination as staff choose among them. */
-export interface DestinationChoice {
-  id: string;
-  kind: DestinationKind;
-  /** Shared by several clients (Workers for Platforms): what allocation picks from. */
-  shared: boolean;
-  /** Empty when it can take the client. */
-  problems: DestinationProblem[];
-  /** How many clients are placed in it. */
-  clients: number;
-  createdAt: Date;
-}
-
-/**
- * The destination the admin picks by itself, or why there's none:
- * `none` when no shared destination can take it.
- */
-export type AutomaticChoice =
-  | { destinationId: string; reason: null }
-  | { destinationId: null; reason: "none" };
-
 /** A client's hosting, as its page shows it. */
 export interface ClientHostingView {
   clientId: string;
@@ -86,9 +46,11 @@ export interface ClientHostingView {
     placedBy: string;
     placedAt: Date;
   } | null;
-  /** Shared ones first, then dedicated, then the rest, each by id. */
-  destinations: DestinationChoice[];
-  automatic: AutomaticChoice;
+  /**
+   * Where it goes, or is: its placement's destination, else its stage's
+   * (`stageDestinationId`); null on an admin whose STAGE names no stage.
+   */
+  destinationId: string | null;
   /** Whether it's live: its later releases and rollbacks run the operation again. */
   active: boolean;
   /** When staff offboarded it; null while they haven't (src/hosting/offboarding.ts). */
@@ -113,8 +75,7 @@ export interface ClientHostingView {
   suggestedReleaseId: string | null;
   /**
    * Why its provisioning hasn't started, while it has no operation: no
-   * shared destination to place it in by itself, or no release it may be
-   * provisioned with. Null once it has one, or when nothing keeps it.
+   * destination to place it in, or no release it may be provisioned with. Null once it has one, or when nothing keeps it.
    */
   notStarted: NotStarted | null;
   /**
@@ -128,25 +89,15 @@ export interface ClientHostingView {
   going: boolean;
 }
 
-const kindOrder: Readonly<Record<DestinationKind, number>> = {
-  workers_for_platforms: 0,
-  dedicated: 1,
-  workerd: 2,
-};
-
-/** Whether the admin can run a provisioning operation in a destination like `row`. */
-const provisionable = (row: {
-  kind: DestinationKind;
-  accountId: string | null;
-  namespace: string | null;
-}): boolean =>
-  row.accountId !== null &&
-  (row.kind === "dedicated" ||
-    (row.kind === "workers_for_platforms" && row.namespace !== null));
-
 /** The id of `stage`'s own shared destination, as its admin records it. */
 export const stageDestinationId = (stage: Stage): string =>
   `workers-for-platforms-${stage}`;
+
+/** This admin's stage's destination; null when its STAGE names no stage. */
+export const stageDestinationOf = (env: Pick<Env, "STAGE">): string | null => {
+  const stage = stageNamed(env.STAGE);
+  return stage === undefined ? null : stageDestinationId(stage);
+};
 
 /**
  * Records this admin's own stage's shared destination when it has none:
@@ -158,8 +109,8 @@ export const stageDestinationId = (stage: Stage): string =>
  * depends on (the hosting view and placing itself), rather than at a
  * deploy or a start: a Worker has no start to hook, a deploy can't write
  * the admin's database through its audit log, and this path is the one
- * no placement can skip. It runs once: a destination in that namespace,
- * recorded here or by staff, is left as it is.
+ * no placement can skip. It runs once: the destination, once recorded,
+ * is left as it is.
  *
  * An admin whose STAGE names no stage
  * records nothing, and the namespace is the stage's own, so a staging
@@ -175,18 +126,21 @@ export const ensureStageDestination = async (
   }
   const namespace = clientsNamespace(stage);
   const id = stageDestinationId(stage);
-  const now = Date.now();
-  // Insert only, in one statement: while no destination is in the
-  // namespace, and never over one with its id. Two reads at once create
-  // it once, audited once; nothing already there is ever overwritten.
+  const now = new Date();
+  // Insert only, never over the one with its id: two reads at once create
+  // it once, audited once.
   await actIfChanged(
     db,
     "system",
     db
       .insert(hostingDestinations)
-      .select(
-        sql`SELECT ${id}, ${"workers_for_platforms"}, ${platformAccountId}, ${namespace}, ${now}, ${now} WHERE NOT EXISTS (SELECT 1 FROM ${hostingDestinations} WHERE ${hostingDestinations.namespace} = ${namespace})`
-      )
+      .values({
+        id,
+        accountId: platformAccountId,
+        namespace,
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoNothing(),
     {
       action: "destination.create",
@@ -194,65 +148,6 @@ export const ensureStageDestination = async (
       detail: { namespace },
     }
   );
-};
-
-/** Every destination, and what keeps each from taking a client. */
-export const destinationChoices = async (
-  db: AdminDatabase
-): Promise<DestinationChoice[]> => {
-  const rows = await db
-    .select()
-    .from(hostingDestinations)
-    .orderBy(asc(hostingDestinations.id))
-    .all();
-  const placed = await db
-    .select({
-      destinationId: clientPlacements.destinationId,
-      placedClients: count(),
-    })
-    .from(clientPlacements)
-    .groupBy(clientPlacements.destinationId);
-  const clientsIn = new Map(
-    placed.map(({ destinationId, placedClients }) => [
-      destinationId,
-      placedClients,
-    ])
-  );
-  return rows
-    .map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      shared: row.kind === "workers_for_platforms",
-      problems: provisionable(row)
-        ? []
-        : [{ kind: "not_provisionable" as const }],
-      clients: clientsIn.get(row.id) ?? 0,
-      createdAt: row.createdAt,
-    }))
-    .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
-};
-
-/**
- * The destination the admin picks by itself from `choices`: of the
- * shared ones it provisions in, the one with the fewest clients, the
- * oldest on a tie, then by id, so the pick is the same however often it
- * is asked and never left to staff. With none, nothing is picked:
- * dedicated hosting is never a fallback.
- */
-export const automaticChoice = (
-  choices: readonly DestinationChoice[]
-): AutomaticChoice => {
-  const [picked] = choices
-    .filter((choice) => choice.shared && choice.problems.length === 0)
-    .toSorted(
-      (a, b) =>
-        a.clients - b.clients ||
-        a.createdAt.getTime() - b.createdAt.getTime() ||
-        a.id.localeCompare(b.id)
-    );
-  return picked === undefined
-    ? { destinationId: null, reason: "none" }
-    : { destinationId: picked.id, reason: null };
 };
 
 /**
@@ -272,22 +167,22 @@ const attemptOf = (
 
 /**
  * Why a client's provisioning hasn't started by itself: it runs on its
- * own premises, which Grasp's cloud doesn't provision (`on_prem`); no
- * shared destination for the admin to pick (`no_destination`); or no
- * imported release fits it (`no_release`).
+ * own premises, which Grasp's cloud doesn't provision (`on_prem`); the
+ * admin's STAGE names no stage, so it has no destination
+ * (`no_destination`); or no imported release fits it (`no_release`).
  */
 export type NotStarted = "on_prem" | "no_destination" | "no_release";
 
 /** What keeps client `clientId`'s provisioning from starting, given what it would start with. */
 export const notStartedOf = (
   hosting: OrganizationHosting,
-  automatic: AutomaticChoice,
+  destinationId: string | null,
   suggestedReleaseId: string | null
 ): NotStarted | null => {
   if (hosting.hosting !== "grasp_cloud") {
     return "on_prem";
   }
-  if (automatic.destinationId === null) {
+  if (destinationId === null) {
     return "no_destination";
   }
   return suggestedReleaseId === null ? "no_release" : null;
@@ -311,17 +206,12 @@ export const getClientHosting = async (
   if (client === undefined) {
     return null;
   }
-  await ensureStageDestination(env, db);
   const placement = await placementOf(db, clientId);
   const hosting = await clientHostingOf(db, clientId);
-  const destinations = await destinationChoices(db);
   const operation = await provisionOf(db, clientId);
   const current = await currentRun(env, clientId);
   const attempt = attemptOf(current, operation?.status);
-  const automatic =
-    placement === undefined
-      ? automaticChoice(destinations)
-      : { destinationId: placement.destinationId, reason: null };
+  const destinationId = placement?.destinationId ?? stageDestinationOf(env);
   const suggestedReleaseId =
     client.status === "provisioning" && hosting.hosting === "grasp_cloud"
       ? await newestRelease(db)
@@ -337,8 +227,7 @@ export const getClientHosting = async (
             placedBy: placement.placedBy,
             placedAt: placement.placedAt,
           },
-    destinations,
-    automatic,
+    destinationId,
     active: client.status === "active",
     offboardedAt: client.offboardedAt,
     operation:
@@ -356,7 +245,7 @@ export const getClientHosting = async (
     suggestedReleaseId,
     notStarted:
       operation === undefined && client.status === "provisioning"
-        ? notStartedOf(hosting, automatic, suggestedReleaseId)
+        ? notStartedOf(hosting, destinationId, suggestedReleaseId)
         : null,
     run: attempt,
     going: attempt !== null && !hasEnded(attempt),
@@ -364,8 +253,8 @@ export const getClientHosting = async (
 };
 
 export const placementErrorCodes = [
-  /** No destination was chosen, and there's no clear one to pick (`automaticChoice`). */
-  "no_automatic_destination",
+  /** The admin's STAGE names no stage, so it has no destination to place in. */
+  "no_destination",
   /**
    * The client's last run was another kind's (provisioning in an account of
    * its own): placing it would take that run's claim, so it could never resume.
@@ -398,12 +287,11 @@ export type PlaceRefusal =
 
 /**
  * What staff ask: provision `clientId` with `releaseId` (null: the newest
- * imported), in `destinationId` or the automatic one (null).
+ * imported), in its stage's destination.
  */
 export const placeInputSchema = z.object({
   clientId: z.string().min(1),
   releaseId: z.string().min(1).nullable(),
-  destinationId: z.string().min(1).nullable(),
 });
 
 export type PlaceInput = z.infer<typeof placeInputSchema>;
@@ -435,13 +323,12 @@ const resumeRelease = async (
 /**
  * Places client `input.clientId`, as `staff`, unless it's placed already,
  * and starts provisioning it with `input.releaseId`, or resumes the
- * operation it has (`provisionPlacedClient`). Without a destination, the
- * automatic one (`automaticChoice`); a placed client stays where it is,
- * and another destination is refused (`placement_changed`). Everything is
+ * operation it has (`provisionPlacedClient`). An unplaced client goes in
+ * its stage's destination; a placed one stays where it is. Everything is
  * checked before the client is placed, since a placement is for good:
  * that it runs in Grasp's cloud, is still being provisioned and isn't
- * being worked on, that the release is imported, and that the
- * destination is one the admin provisions in. Returns the attempt's id.
+ * being worked on, and that the release is imported. Returns the
+ * attempt's id.
  */
 export const placeAndProvision = async (
   env: Env,
@@ -504,58 +391,31 @@ export const placeAndProvision = async (
       `Release ${releaseId} isn't imported`
     );
   }
-  const placed = await placementOf(db, clientId);
-  if (placed === undefined) {
-    await ensureStageDestination(env, db);
-    const choices = await destinationChoices(db);
-    const destinationId =
-      input.destinationId ?? automaticChoice(choices).destinationId;
+  if ((await placementOf(db, clientId)) === undefined) {
+    const destinationId = stageDestinationOf(env);
     if (destinationId === null) {
       throw new PlacementError(
-        "no_automatic_destination",
-        `No one shared destination can take ${clientId}`
+        "no_destination",
+        "This admin's STAGE names no stage, so it has no destination"
       );
     }
-    const chosen = choices.find(({ id }) => id === destinationId);
-    if (chosen === undefined) {
-      throw new InventoryError(
-        "destination_unknown",
-        `No destination ${destinationId}`
-      );
-    }
-    if (chosen.problems.some(({ kind }) => kind === "not_provisionable")) {
-      throw new InventoryError(
-        "destination_unsupported",
-        `${destinationId} isn't a Cloudflare destination the admin provisions in`
-      );
-    }
+    await ensureStageDestination(env, db);
     await placeClient(db, staff, { clientId, destinationId });
-  } else {
-    // Placed already: where it is is no change; anything else is refused.
-    await placeClient(db, staff, {
-      clientId,
-      destinationId: input.destinationId ?? placed.destinationId,
-    });
   }
   return await provisionPlacedClient(env, staff, clientId, releaseId);
 };
 
 /** What each placement refusal says of why provisioning didn't start. */
 const notStartedCodes: Readonly<Record<PlacementErrorCode, string>> = {
-  no_automatic_destination: "no_destination",
+  no_destination: "no_destination",
   no_release: "no_release",
   other_run_held: "other_run_held",
   hosted_on_prem: "on_prem",
 };
 
-/** The destination the admin picks by itself for a client starting now. */
-export const startDestination = async (
-  db: AdminDatabase
-): Promise<AutomaticChoice> => automaticChoice(await destinationChoices(db));
-
 /**
  * Starts provisioning client `clientId`, as `staff`, when nothing keeps
- * it: in the automatic destination, with the newest release
+ * it: in its stage's destination, with the newest release
  * (`placeAndProvision`). What adding a client does at once, so a client
  * with somewhere to go and a release to go with is never left waiting
  * for a click. Answers the attempt's id, or why it didn't start: no
@@ -572,7 +432,6 @@ export const provisionIfReady = async (
     const runId = await placeAndProvision(env, staff, {
       clientId,
       releaseId: null,
-      destinationId: null,
     });
     return { runId, notStarted: null };
   } catch (error) {

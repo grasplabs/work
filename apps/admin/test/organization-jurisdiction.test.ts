@@ -68,11 +68,7 @@ const provisioned = async (jurisdiction: Jurisdiction) => {
   const manifest = await namespaceRelease();
   const account = cloudflare.addAccount();
   account.namespaces.set(namespace, new Map());
-  const destinationId = await destination({
-    kind: "workers_for_platforms",
-    accountId: account.id,
-    namespace,
-  });
+  const destinationId = await destination({ accountId: account.id, namespace });
   const { clientId } = await placedClient(destinationId);
   await db
     .update(clients)
@@ -222,7 +218,7 @@ describe("an organization's jurisdiction", () => {
     );
     const placed = await callServerFn(
       placeAndProvisionFn,
-      { clientId, releaseId: null, destinationId: null },
+      { clientId, releaseId: null },
       { email: staff.email }
     );
     const hosting = await callServerFn(

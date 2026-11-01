@@ -37,13 +37,13 @@ const liveClient = async () => {
   const release = await placedRelease("feat(core): kickoff");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name,
     signIn: null,
   });
-  account.admin = emptyAdminSnapshot("Noordkade");
-  return { clientId, account };
+  core.admin = emptyAdminSnapshot("Noordkade");
+  return { clientId, core };
 };
 
 const transcript = "Anna (COO): Wij zijn een hypotheekadviseur in Utrecht.";
@@ -101,7 +101,7 @@ describe("the kickoff from an organization's Steps", () => {
   });
 
   it("goes to no core for a caller Access doesn't vouch for, a file too large, or an organization not deployed", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     const offboarded = await liveClient();
     await db
       .update(clients)
@@ -122,7 +122,7 @@ describe("the kickoff from an organization's Steps", () => {
     ]);
     expect({
       outcomes,
-      sent: account.kickoffAsks.length + offboarded.account.kickoffAsks.length,
+      sent: core.kickoffAsks.length + offboarded.core.kickoffAsks.length,
     }).toStrictEqual({
       outcomes: [
         "refused",
@@ -137,15 +137,15 @@ describe("the kickoff from an organization's Steps", () => {
   it("goes to the organization asked for alone, signed with its own key, naming the staff member, and says what it brought", async () => {
     const asked = await liveClient();
     const other = await liveClient();
-    asked.account.kickoff = brought;
+    asked.core.kickoff = brought;
 
     const answer = await bringIn(asked.clientId, fileOf(transcript));
-    const [sent] = asked.account.kickoffAsks;
+    const [sent] = asked.core.kickoffAsks;
     expect({
       answer,
       staff: sent?.staff.email,
       ask: sent?.ask,
-      other: other.account.kickoffAsks.length,
+      other: other.core.kickoffAsks.length,
     }).toStrictEqual({
       answer: { kickoff: brought, refused: null },
       staff: staff.email,
@@ -161,8 +161,8 @@ describe("the kickoff from an organization's Steps", () => {
   });
 
   it("says when the company keeps Grasp's staff out", async () => {
-    const { clientId, account } = await liveClient();
-    account.kickoff = "shut_out";
+    const { clientId, core } = await liveClient();
+    core.kickoff = "shut_out";
     const [read, answered] = await Promise.all([
       callServerFn(
         kickoffFn,

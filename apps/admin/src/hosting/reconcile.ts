@@ -122,7 +122,6 @@ export const resumeProvisioning = async (
     // The newest release, else the one it runs: as a retry
     // from Setup picks it (src/hosting/placement.ts).
     releaseId: null,
-    destinationId: null,
   });
 
 /**
