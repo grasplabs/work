@@ -2397,6 +2397,9 @@ export const sameAsFor = async <C>(
   reader: C,
   entityId: string
 ): Promise<string[]> => {
+  // The Brain's own read first, as every entity read: before anything of
+  // a match is read.
+  await requireBrainRead(brain, reader);
   // Every direct decision, a page at a time, so none is dropped before
   // the visibility check.
   const readable: string[] = [];
