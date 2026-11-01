@@ -351,14 +351,7 @@ const TeamCard = ({
 };
 
 /** Where the list of people comes from, under the company's name. */
-const sourceLine = (view: OrgView): string => {
-  if (view.org.real !== undefined) {
-    return "The list as the company’s admin shared it.";
-  }
-  return view.state.client === "directory"
-    ? "From the company’s sign-in. The team leads are not named yet."
-    : "From the company’s sign-in. The team leads come from its HR platform.";
-};
+const SOURCE_LINE = "The list as the company’s admin shared it.";
 
 /** The company's figures: its teams, its people, its team leads and its pieces of work. */
 const Figures = ({
@@ -438,14 +431,10 @@ const Figures = ({
 /** Before anyone is on the list: the teams the sponsor named, if any, by name and size. */
 const NoTeams = ({ view }: { view: OrgView }) => {
   const named = view.vision?.teams ?? [];
-  let line = "Nothing is known yet. It starts with the first conversation.";
-  if (named.length > 0) {
-    line =
-      "The teams as the sponsor named them. The real teams, with everyone in them, come with the company’s own list.";
-  } else if (view.org.real !== undefined) {
-    line =
-      "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding.";
-  }
+  const line =
+    named.length > 0
+      ? "The teams as the sponsor named them. The real teams, with everyone in them, come with the company’s own list."
+      : "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding.";
   return (
     <>
       <Section description={line} title={view.org.name} />
@@ -626,7 +615,7 @@ const AllTeams = ({
                   .join(" · ")}
               </p>
             )}
-            <p className="text-xs">{sourceLine(view)}</p>
+            <p className="text-xs">{SOURCE_LINE}</p>
           </>
         }
         title={view.org.name}
