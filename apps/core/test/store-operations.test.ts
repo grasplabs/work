@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import type { StaffMarked } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
+import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { activeStaffRole } from "../src/auth/identity.ts";
@@ -564,6 +565,48 @@ describe("an App calling another App's store", () => {
       later: [resolved(1), resolved(2)],
       revoked: [declaredRow(1), declaredRow(2)],
       secondVersion: 2,
+    });
+  });
+
+  it("names no definition for the store once its owner's current release binds another store", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    // The CRM still owns its store, but its current release binds another.
+    const other = await createStore(env, crm.owner);
+    const files = crmFiles();
+    await commitFiles(
+      env,
+      crm.owner,
+      crm.app,
+      {
+        ...files,
+        "operations/crm.ts": `// Version 2.\n${files["operations/crm.ts"] ?? ""}`,
+      },
+      "Another store"
+    );
+    await sealRelease(env, {
+      app: crm.app,
+      version: 2,
+      store: other,
+      by: crm.owner,
+    });
+    await setCurrentVersion(env, crm.owner, crm.app, 2);
+    await nextVersion(desk, deskVersion(2), 2);
+    const row = await env.DB.prepare(
+      `SELECT target_id AS target, target_version AS definition, approval_id AS approval
+        FROM sdk_resource_bindings
+        WHERE resource_id = ? AND resource_version = 2 AND alias = 'resources.crm'`
+    )
+      .bind(desk.app)
+      .first();
+    expect(row).toStrictEqual({
+      target: crm.store,
+      // Never the other store's definition, recorded against this one.
+      definition: null,
+      approval: approval.id,
     });
   });
 

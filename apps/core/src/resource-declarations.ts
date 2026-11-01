@@ -67,6 +67,7 @@ const definitionOf = (store: SQL): SQL =>
     JOIN apps ON apps.id = owner.app_id
       AND apps.current_version = own.resource_version
     WHERE owner.store_id = ${store} AND own.kind = 'store'
+      AND own.target_id = owner.store_id
       AND own.alias = 'default')`;
 
 /**
