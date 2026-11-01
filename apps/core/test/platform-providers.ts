@@ -1,6 +1,6 @@
 /**
  * The AI providers behind connect, as tests of Grasp's own AI features
- * reach them (@grasp-os/shared/platform-ai): plan how a provider answers
+ * reach them (core's src/platform-ai.ts): plan how a provider answers
  * Grasp's key, read what reached it, and the realtime sockets OpenAI's
  * fake took (test/ai-providers-fake.ts). Connect, core's gateway, the
  * ledger and the audit log are real.
@@ -109,3 +109,27 @@ export const release = async (name: string): Promise<void> => {
     body: JSON.stringify({ release: name }),
   });
 };
+
+/**
+ * `real`, connect's binding, answering that it holds no key of Grasp's,
+ * as on premises or a stack without them: Grasp's own features are then
+ * unavailable, and documents are read in the Worker. Connect is a Worker
+ * of its own, the boundary to the providers; everything else of it as is.
+ */
+export const connectWithoutGraspKeys = (real: Env["CONNECT"]): Env["CONNECT"] =>
+  new Proxy(real, {
+    get: (target, name) => {
+      if (name === "aiProviderRoutes") {
+        return async () => ({
+          ...(await real.aiProviderRoutes()),
+          platform: [],
+        });
+      }
+      // Any other method as connect has it: an RPC stub binds nothing.
+      const method: unknown = Reflect.get(target, name);
+      return typeof method === "function"
+        ? async (...args: unknown[]): Promise<unknown> =>
+            await Reflect.apply(method, target, args)
+        : method;
+    },
+  });

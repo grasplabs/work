@@ -6,7 +6,6 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
-import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
@@ -19,6 +18,7 @@ import {
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformElevenLabsKey } from "./connect-providers.ts";
@@ -57,7 +57,7 @@ import { wordFile } from "./word-file.ts";
 // - A drawing under way as the document goes, kept as it ends.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "elevenlabs/eleven_v4";
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -916,7 +916,7 @@ const writers: Writer[] = [
       const kept = await keptLine(env, {
         text: told.text,
         spoken: told.text,
-        voice: defaultPlatformAi.speech.voices.stephen,
+        voice: platformAi.speech.voices.stephen,
         model: speechModel,
         language: "en",
       });

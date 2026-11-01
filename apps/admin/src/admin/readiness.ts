@@ -9,7 +9,6 @@
  * Nothing secret leaves here: a secret is named, never its value, and an
  * API failure is its code.
  */
-import { aiProviders } from "@grasp-os/shared/ai-providers";
 import {
   clientDomain as stageDomain,
   stageNamed,
@@ -25,13 +24,11 @@ import {
   clientDomain,
   deployerApi,
   ifStored,
-  platformKeyProviders,
   storeSecret,
 } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
-import { platformAiOf, platformAiProviders } from "../platform-ai.ts";
 import { platformSettingsView } from "../platform-settings.ts";
 import type { PlatformSettingsView } from "../platform-settings.ts";
 import { discordPublicKey, staffIds } from "./discord-settings.ts";
@@ -47,11 +44,7 @@ import { discordPublicKey, staffIds } from "./discord-settings.ts";
 export type CheckStatus = "ready" | "blocked" | "waiting" | "not_configured";
 
 /** Where a check's next step is done in the admin, when it's done there. */
-export type CheckLink =
-  | "releases"
-  | "platform"
-  | "platform_ai"
-  | "organizations";
+export type CheckLink = "releases" | "platform" | "organizations";
 
 /** One line of the checklist. */
 export interface ReadinessCheck {
@@ -206,65 +199,6 @@ const releaseCheck = (
         words: `${imported} ${imported === 1 ? "release is" : "releases are"} imported, the newest ${newest}.`,
         link: "releases",
       };
-
-/** `items` in a sentence: "a", "a and b", "a, b and c". */
-const listed = (items: readonly string[]): string =>
-  items.length < 2
-    ? items.join("")
-    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-
-/** Each platform AI feature, as a sentence names it. */
-const platformFeatureWords = {
-  conversion: "document conversion",
-  transcription: "transcription",
-  speech: "speech",
-} as const;
-
-/**
- * Grasp's own AI features (conversion, transcription, speech): whether
- * Secrets Store has Grasp's key for each provider Platform → AI chose.
- * Optional: provisioning and deploys go on without a key, and connect
- * then has no route for that provider, so only the features on it say
- * they aren't configured yet until the key is there.
- */
-const platformAiCheck = async (envOf: Env): Promise<ReadinessCheck> => {
-  const [settings, keyed] = await Promise.all([
-    platformAiOf(adminDatabase(envOf.DB)),
-    platformKeyProviders(envOf),
-  ]);
-  const unkeyed = platformAiProviders(settings).filter(
-    ({ provider }) => !keyed.has(provider)
-  );
-  const missing = [
-    ...new Set(
-      unkeyed
-        .map(({ provider }) => aiProviders[provider].platformSecret)
-        .filter((name) => name !== undefined)
-    ),
-  ];
-  const check = {
-    id: "platform_ai",
-    title: "Grasp's AI",
-    required: false,
-    link: "platform_ai",
-  } as const;
-  if (missing.length === 0) {
-    return {
-      ...check,
-      status: "ready",
-      words:
-        "Secrets Store has Grasp's key for every provider Platform → AI chose.",
-    };
-  }
-  const features = [
-    ...new Set(unkeyed.map(({ feature }) => platformFeatureWords[feature])),
-  ];
-  return {
-    ...check,
-    status: "not_configured",
-    words: `Secrets Store has no ${listed(missing)}, so ${listed(features)} ${features.length === 1 ? "isn't" : "aren't"} configured yet in any organization; everything else works. ${secretStep([listed(missing)])} Or choose another provider on Platform → AI.`,
-  };
-};
 
 /** The names of `names` Secrets Store doesn't have. */
 const missingSecrets = async (
@@ -518,7 +452,6 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       placeable,
       missing.includes("DEPLOYER_API_TOKEN")
     ),
-    await platformAiCheck(envOf),
     await roomsCheck(envOf),
     discordBotCheck(envOf),
     graspOrganizationCheck(settings),

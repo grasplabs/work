@@ -302,6 +302,13 @@
       "when": 1793454188298,
       "tag": "0042_platform_ai_without_spend_ceiling",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1793496689835,
+      "tag": "0043_drop_platform_ai",
+      "breakpoints": true
     }
   ]
 }

@@ -50,12 +50,6 @@ interface __BaseEnv_Env {
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
   MODEL_GATEWAY?: unknown;
-  /**
-   * Each of Grasp's own AI features' provider and model, as shared's
-   * platform-ai.ts describes it (src/platform-ai.ts): JSON, OpenAI's
-   * defaults while unset.
-   */
-  PLATFORM_AI?: unknown;
   /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**

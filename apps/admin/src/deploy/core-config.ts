@@ -31,7 +31,6 @@ import { memoryLimitsSchema } from "@grasp-os/shared/memory";
 import { clientDomain } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
-import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
 
@@ -284,12 +283,10 @@ const modelRefShape = z.string().regex(/^[^/\s]+\/\S+$/u);
 
 /**
  * What core parses each deployment config var with, `SIGN_IN` apart
- * (`checkDeployedSignIn`): `MODEL_GATEWAY` as the client's model rules,
- * `PLATFORM_AI` as the platform's AI settings.
+ * (`checkDeployedSignIn`): `MODEL_GATEWAY` as the client's model rules.
  */
 const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
   MODEL_GATEWAY: [modelRulesConfigSchema(modelRefShape)],
-  PLATFORM_AI: [platformAiSchema],
   MEMORY_LIMITS: [memoryLimitsSchema],
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],

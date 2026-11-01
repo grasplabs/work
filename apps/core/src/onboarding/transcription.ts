@@ -39,8 +39,8 @@ import type { Took } from "./store.ts";
 // its microphone to its own origin over a WebSocket, as `connect-src
 // 'self'` allows and nothing else; core relays it to live transcription
 // behind its interface (src/transcription.ts), which reaches the provider
-// the platform's settings name (@grasp-os/shared/platform-ai), OpenAI's
-// realtime transcription by default, through connect with Grasp's own key.
+// fixed in src/platform-ai.ts, OpenAI's realtime transcription at its EU
+// host, through connect with Grasp's own key.
 // No provider token or host ever reaches the browser (GRA-361, A2).
 //
 // The socket's protocol, one session per socket:
@@ -120,17 +120,8 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
  */
 export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
 
-/**
- * The transcription model sockets and recordings are written down with,
- * as the gateway names it: the one the platform's settings name;
- * `undefined` while they don't parse.
- */
-export const transcriptionModelOf = (env: Env): string | undefined => {
-  const transcription = platformAi(env)?.transcription;
-  return transcription === undefined
-    ? undefined
-    : `${transcription.provider}/${transcription.model}`;
-};
+/** The transcription model sockets and recordings are written down with, as the gateway names it. */
+export const transcriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.model}`;
 
 /** What the gateway is told every socket is for. */
 const purpose = "onboarding.transcription";
@@ -495,12 +486,8 @@ class Relay {
   ): Promise<Listening | undefined> {
     let listening: Listening;
     try {
-      const model = transcriptionModelOf(this.#env);
-      if (model === undefined) {
-        throw modelErrors.create("model.unconfigured");
-      }
       listening = await models(this.#env).listen({
-        model,
+        model: transcriptionModel,
         seconds,
         // Open at most `maxOpenMs`, ended by the check after it.
         openMs: maxOpenMs + sessionRecheckMs,

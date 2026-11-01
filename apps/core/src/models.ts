@@ -18,7 +18,11 @@ import {
 } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import {
+  aiProviderIdSchema,
+  aiProviders,
+  platformRouteOf,
+} from "@grasp-os/shared/ai-providers";
 import type {
   AiProviderRoutes,
   PlatformRoute,
@@ -129,7 +133,6 @@ import {
 import type { ConnectTarget } from "./model-transport-connect.ts";
 import { failureOfResponse, streamRoute } from "./model-transport.ts";
 import type { TransportFailure, TransportRoute } from "./model-transport.ts";
-import { platformRouteFor } from "./platform-ai.ts";
 import {
   charactersOf,
   hearingPricesOf,
@@ -345,18 +348,6 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
     levels,
     default: levels.find((effort) => effort === fallback) ?? null,
   };
-};
-
-/**
- * Whether the deployment's config keeps every call in the EU
- * (`eu.deployment`): for what is routed before any model call is made,
- * such as an upload's text (knowledge/extract.ts), which then stays in
- * the Worker. A config whose rules don't parse keeps it
- * there too: it fails closed. The default config has no EU rule.
- */
-export const deploymentStaysInEu = (env: Env): boolean => {
-  const parsed = modelRulesConfigSchema.safeParse(rulesVar(env));
-  return !parsed.success || parsed.data.eu?.deployment === true;
 };
 
 /** What a call is for, such as `workflow.step` or `chat.turn`. */
@@ -2794,7 +2785,7 @@ const routingOf = async (
         because: "platform",
       });
     }
-    const platform = platformRouteFor(env, provider);
+    const platform = platformRouteOf(provider);
     if (platform === undefined) {
       throw modelErrors.create("model.unconfigured");
     }
@@ -2881,15 +2872,12 @@ const admit = async (
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
-  // A platform feature's route decides whether an EU-only call may take
-  // it (`judgeCall`): its region, never a list of models.
+  // Grasp's own features go to their provider's EU host (`judgeCall`).
   const verdict = await judgeCall(
     env,
     rules,
     call,
     routing.way.credential === "platform"
-      ? routing.way.region === "eu"
-      : undefined
   );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
@@ -3599,9 +3587,9 @@ const relayOrFail = async (
 };
 
 // Speech and listening: Grasp's own voice features, which Grasp pays for
-// (@grasp-os/shared/platform-ai). A speech model says a line, and a
+// (src/platform-ai.ts). A speech model says a line, and a
 // transcription model writes down what someone says (voice-models.ts),
-// each the one the platform's settings name. They go through the gateway
+// each fixed in code at its provider's EU host. They go through the gateway
 // like any model call, as what is said and heard is interview content:
 // the rules judge it, the ledger admits each provider request against the
 // budgets, at its price per character or per second, and the audit log
@@ -3802,7 +3790,7 @@ const platformTarget = async (
       because: "platform",
     });
   }
-  const platform = platformRouteFor(env, provider);
+  const platform = platformRouteOf(provider);
   if (platform === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
@@ -3837,13 +3825,8 @@ const admitSpeech = async (
     throw modelErrors.create("model.invalid_call");
   }
   const target = await platformTarget(env, call, ref.provider);
-  // Its route's region decides whether an EU-only line may be said.
-  const verdict = await judgeCall(
-    env,
-    rules,
-    call,
-    target.platform.region === "eu"
-  );
+  // Said at ElevenLabs's EU host, as Grasp's own feature (`judgeCall`).
+  const verdict = await judgeCall(env, rules, call, true);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -4300,13 +4283,8 @@ const listenThrough = async (
     throw modelErrors.create("model.invalid_call");
   }
   const target = await platformTarget(env, call, ref.provider);
-  // Its route's region decides whether an EU-only listening may open.
-  const verdict = await judgeCall(
-    env,
-    rules,
-    call,
-    target.platform.region === "eu"
-  );
+  // Heard at OpenAI's EU host, as Grasp's own feature (`judgeCall`).
+  const verdict = await judgeCall(env, rules, call, true);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }

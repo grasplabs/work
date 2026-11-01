@@ -87,24 +87,18 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns under the deployment's rules `config` and the platform's
- * AI settings `platform`, budgets counted in `month`.
+ * What `run` returns under the deployment's rules `config`, budgets
+ * counted in `month`.
  */
 const hearing = async <T>(
   run: () => Promise<T>,
-  {
-    config = noRules,
-    platform,
-    month,
-  }: { config?: unknown; platform?: unknown; month?: string } = {}
+  { config = noRules, month }: { config?: unknown; month?: string } = {}
 ): Promise<T> => {
   const before = {
     gateway: env.MODEL_GATEWAY,
-    platform: env.PLATFORM_AI,
     month: env.MODEL_BUDGET_MONTH,
   };
   Reflect.set(env, "MODEL_GATEWAY", config);
-  Reflect.set(env, "PLATFORM_AI", platform);
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
@@ -112,7 +106,6 @@ const hearing = async <T>(
     return await run();
   } finally {
     env.MODEL_GATEWAY = before.gateway;
-    env.PLATFORM_AI = before.platform;
     env.MODEL_BUDGET_MONTH = before.month;
   }
 };
@@ -432,40 +425,14 @@ describe(
       });
     });
 
-    it("says when listening isn't set up, and when the upstream failed", async () => {
+    it("says when the upstream failed", async () => {
       const { link } = await openedFor();
-      const unparsed = newAudio();
-      const unoffered = newAudio();
       const failed = newAudio();
-      const unset = await hearing(
-        async () =>
-          await codeOf(await hear(recording(link, { audio: unparsed }))),
-        // Settings that don't parse: no transcription at all.
-        { platform: { transcription: { provider: "elevenlabs" } } }
-      );
-      const notOffered = await hearing(
-        async () =>
-          await codeOf(await hear(recording(link, { audio: unoffered }))),
-        // A model the gateway doesn't offer.
-        {
-          platform: {
-            transcription: { provider: "openai", model: "gpt-9-transcribe" },
-          },
-        }
-      );
       await plan(platformOpenAiKey, [{ status: 500 }]);
       const failing = await hearing(
         async () => await codeOf(await hear(recording(link, { audio: failed })))
       );
-      expect({
-        unset: [...unset, await sentCount(unparsed)],
-        notOffered: [...notOffered, await sentCount(unoffered)],
-        failing,
-      }).toStrictEqual({
-        unset: [503, "hear.unavailable", 0],
-        notOffered: [503, "hear.unavailable", 0],
-        failing: [502, "hear.failed"],
-      });
+      expect(failing).toStrictEqual([502, "hear.failed"]);
     });
 
     it("charges what was heard to Grasp's own key, never to the deployment's budget, which doesn't stop it", async () => {

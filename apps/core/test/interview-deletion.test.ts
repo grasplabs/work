@@ -5,13 +5,13 @@ import type {
   InterviewLine,
   InterviewProgress,
 } from "@grasp-os/shared/interview-links";
-import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine, sweepSpokenLines } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
 import { mockIdp } from "./idp.ts";
@@ -82,7 +82,7 @@ import {
 //   old words in what landed.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "elevenlabs/eleven_v4";
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 /** Words only one person says, to look for where they must not be. */
@@ -744,7 +744,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const keyOf = (words: string): SpokenKey => ({
       text: stephenSays(words),
       spoken: `[warm] ${stephenSays(words)}`,
-      voice: defaultPlatformAi.speech.voices.stephen,
+      voice: platformAi.speech.voices.stephen,
       model: speechModel,
       language: "en",
     });
@@ -778,7 +778,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const fresh: SpokenKey = {
       text: "Hello, I'm Stephen.",
       spoken: "Hello, I'm Stephen.",
-      voice: defaultPlatformAi.speech.voices.stephen,
+      voice: platformAi.speech.voices.stephen,
       model: speechModel,
       language: "en",
     };
@@ -900,7 +900,7 @@ describe(
       const keyOf = (words: string): SpokenKey => ({
         text: stephenSays(words),
         spoken: `[warm] ${stephenSays(words)}`,
-        voice: defaultPlatformAi.speech.voices.stephen,
+        voice: platformAi.speech.voices.stephen,
         model: speechModel,
         language: "en",
       });
@@ -1100,7 +1100,7 @@ describe(
       const key: SpokenKey = {
         text: stephenSays(said.max),
         spoken: `[warm] ${stephenSays(said.max)}`,
-        voice: defaultPlatformAi.speech.voices.stephen,
+        voice: platformAi.speech.voices.stephen,
         model: speechModel,
         language: "en",
       };

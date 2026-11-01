@@ -8,8 +8,6 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
-import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
@@ -243,26 +241,6 @@ const sharedValues = async (env: Env): Promise<DeploySecrets["shared"]> => {
       ),
     ])
   );
-};
-
-/**
- * The providers Grasp has its own key for in Secrets Store: the ones
- * Platform → AI offers, and the ones a deploy's `PLATFORM_AI` may name.
- * Read to tell, never answered: no value leaves here.
- */
-export const platformKeyProviders = async (
-  env: Env
-): Promise<ReadonlySet<AiProviderId>> => {
-  const present = await Promise.all(
-    aiProviderIds.map(async (provider) => {
-      const name = aiProviders[provider].platformSecret;
-      return name !== undefined &&
-        (await optionalStoreSecret(env, name)) !== undefined
-        ? [provider]
-        : [];
-    })
-  );
-  return new Set(present.flat());
 };
 
 /** Every secret a deploy gives the Workers, read from Secrets Store. */

@@ -66,13 +66,6 @@
   // own (which its admins add in Settings) and Grasp's. Until an admin
   // connects an AI provider, model calls fail as `model.no_provider`.
   //
-  // So is `PLATFORM_AI` (src/platform-ai.ts, @grasp-os/shared/platform-ai):
-  // the provider and model of each of Grasp's own AI features (converting
-  // PDFs for the Brain, transcription, speech), OpenAI's and, for speech,
-  // ElevenLabs's while unset. They
-  // go through the model gateway with Grasp's own keys, which connect holds
-  // as its secrets.
-  //
   // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
   // version, and what they changed, which the clock records in the audit log
   // once per version.

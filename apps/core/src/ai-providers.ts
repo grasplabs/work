@@ -6,6 +6,7 @@ import {
   organizationProviderIdSchema,
   organizationProviderIds,
   aiProviders,
+  platformRouteOf,
   providerTroubles,
 } from "@grasp-os/shared/ai-providers";
 import type {
@@ -49,8 +50,8 @@ import { orgSettings } from "./db/core/schema.ts";
 import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
-import { deploymentStaysInEu, models } from "./models.ts";
-import { platformAi, platformRouteFor } from "./platform-ai.ts";
+import { models } from "./models.ts";
+import { platformAi } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -179,72 +180,49 @@ const refusalOf = (error: unknown): Error => {
 
 /**
  * `provider` as the listing names it, on Grasp's own key: its name, and
- * where its project's region sends the requests (`platformRouteFor`).
+ * where it runs, its EU data residency host where it has one
+ * (`platformRouteOf`).
  */
 const platformProvider = (
-  env: Env,
   provider: AiProviderId
 ): NonNullable<AiPlatformUse["provider"]> => ({
   id: provider,
   label: aiProviders[provider].label,
   whereItRuns:
-    platformRouteFor(env, provider)?.whereItRuns ??
-    aiProviders[provider].whereItRuns,
+    platformRouteOf(provider)?.whereItRuns ?? aiProviders[provider].whereItRuns,
 });
-
-/**
- * Whether a platform feature on `provider` is off for this deployment: it
- * keeps everything in the EU, and Grasp's project for the provider isn't
- * there (models.ts refuses such a call as `model.eu_only`).
- */
-const offOutsideEu = (env: Env, provider: AiProviderId): boolean =>
-  deploymentStaysInEu(env) && platformRouteFor(env, provider)?.region !== "eu";
 
 /**
  * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
  * on Grasp's keys whatever the organization connected: its admins can't
- * switch them off here, but they see where that data goes, and which are
- * off because the deployment keeps everything in the EU and Grasp's
- * project isn't there. Document conversion stays on the deployment where
- * knowledge/extract.ts keeps it there (`local`, or an EU-only deployment
- * whose conversion provider isn't in the EU); none at all while the
- * settings don't parse, as every feature is then off.
+ * switch them off here, but they see where that data goes. Document
+ * conversion stays on the deployment while Grasp has no key for its
+ * provider (knowledge/extract.ts, `extractorFor`).
  */
-const platformUses = (env: Env): AiPlatformUse[] => {
-  const settings = platformAi(env);
-  if (settings === undefined) {
-    return [];
-  }
-  const { conversion, transcription, speech } = settings;
+const platformUses = (keyed: readonly AiProviderId[]): AiPlatformUse[] => {
+  const { conversion, transcription, speech } = platformAi;
   return [
     {
       feature: "conversion",
-      provider:
-        conversion.provider === "local" ||
-        offOutsideEu(env, conversion.provider)
-          ? null
-          : platformProvider(env, conversion.provider),
-      off: false,
+      provider: keyed.includes(conversion.provider)
+        ? platformProvider(conversion.provider)
+        : null,
     },
     {
       feature: "transcription",
-      provider: platformProvider(env, transcription.provider),
-      off: offOutsideEu(env, transcription.provider),
+      provider: platformProvider(transcription.provider),
     },
-    {
-      feature: "speech",
-      provider: platformProvider(env, speech.provider),
-      off: offOutsideEu(env, speech.provider),
-    },
+    { feature: "speech", provider: platformProvider(speech.provider) },
   ];
 };
 
 /** The organization's providers, as its admins see them. */
 const listing = async (env: Env): Promise<AiProvidersListing> => {
-  const [keys, health, choice] = await Promise.all([
+  const [keys, health, choice, routes] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
     modelLedger(env).providerHealth(),
     readModelChoice(env),
+    env.CONNECT.aiProviderRoutes(),
   ]);
   return {
     providers: keys.map((key) => listed(key, health)),
@@ -258,7 +236,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       keys.map(({ provider }) => provider),
       choice
     ),
-    platform: platformUses(env),
+    platform: platformUses(routes.platform),
   };
 };
 
