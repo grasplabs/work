@@ -928,7 +928,9 @@ export interface ChatsApi {
   /**
    * Removes a file attached to the chat that no question carries yet,
    * freeing its place among the chat's {@link chatFilesMax}. A file a
-   * question carried stays: refused as `agent.file_not_found`. Audited.
+   * question carried stays: refused as `agent.file_not_found`. Refused as
+   * `agent.busy` while the chat's agent works, as a starting question may
+   * carry it. Audited.
    */
   removeFile: (chatId: string, fileId: string) => Promise<void>;
   /**

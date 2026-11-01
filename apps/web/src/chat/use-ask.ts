@@ -137,6 +137,11 @@ export const useAsk = (
     );
   };
   const removeFile = (id: string): void => {
+    // Not while the question is on its way: its files are being attached
+    // and named, so one taken out now would still be sent.
+    if (sending.current) {
+      return;
+    }
     setFiles((now) => now.filter((each) => each.id !== id));
     // Core took it already (a send that failed after it): removed there
     // too, so it holds none of the chat's places for files.

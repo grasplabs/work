@@ -1465,7 +1465,8 @@ export class Workspace extends DurableObject<Env> {
    * carries yet (one taken out of the box after a send that failed), so
    * it holds none of the chat's {@link chatFilesMax}. A file a question
    * carried stays with it: refused as `agent.file_not_found`, as one the
-   * chat never had. Audited with its ID.
+   * chat never had; and none is removed while the chat has a turn
+   * (`agent.busy`). Audited with its ID.
    */
   removeFile(
     chatId: unknown,
@@ -1474,6 +1475,13 @@ export class Workspace extends DurableObject<Env> {
     by: AuditActor
   ): void {
     const { id } = this.#ownChat(chatId, personId);
+    // A question starting in the chat may have chosen it already, and
+    // binds it only once it is kept, after awaits (`#turn`): no file of
+    // the chat is removed while it has a turn, which is taken before its
+    // first await.
+    if (this.#turns.has(id)) {
+      throw agentErrors.create("agent.busy");
+    }
     this.ctx.storage.transactionSync(() => {
       const removed = this.#db
         .delete(chatFiles)

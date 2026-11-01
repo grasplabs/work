@@ -16,6 +16,7 @@ import {
   codeStep,
   configureObject,
   model,
+  pausedReply,
   says,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
@@ -400,6 +401,49 @@ describe("files attached to a question", slow, () => {
       again: "agent.file_not_found",
       freed: "ok",
       audited: [unsent.id],
+    });
+  });
+
+  it("aren't removed while their chat's agent works, as a starting question may carry them", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Busy");
+    const [carried, waiting] = await Promise.all(
+      ["plan.md", "notes.md"].map(
+        async (name) =>
+          await ann.api.chats.attachFile(chat.id, {
+            name,
+            bytes: utf8(`# ${name}`),
+          })
+      )
+    );
+    if (carried === undefined || waiting === undefined) {
+      throw new Error("No files");
+    }
+    const held = pausedReply(says("Reading it now."), 3);
+    await answering(ann, held.reply);
+    await ann.api.chats.send(chat.id, {
+      text: "Read the plan.",
+      model,
+      files: [carried.id],
+    });
+
+    const whileWorking = {
+      carried: await outcome(ann.api.chats.removeFile(chat.id, carried.id)),
+      waiting: await outcome(ann.api.chats.removeFile(chat.id, waiting.id)),
+    };
+    held.release();
+    await settled(ann, chat.id);
+
+    expect({
+      whileWorking,
+      afterwards: await outcome(ann.api.chats.removeFile(chat.id, waiting.id)),
+      carriedStays: await outcome(
+        ann.api.chats.removeFile(chat.id, carried.id)
+      ),
+    }).toStrictEqual({
+      whileWorking: { carried: "agent.busy", waiting: "agent.busy" },
+      afterwards: "ok",
+      carriedStays: "agent.file_not_found",
     });
   });
 

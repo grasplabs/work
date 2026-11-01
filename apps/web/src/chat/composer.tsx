@@ -488,7 +488,11 @@ export const Composer = ({
         <InputGroup size="prompt">
           {files.length === 0 ? null : (
             <PromptInputHeader>
-              <FileCards files={files} onRemove={onRemoveFile} />
+              {/* Not removable while the question is on its way with them. */}
+              <FileCards
+                files={files}
+                onRemove={busy ? undefined : onRemoveFile}
+              />
             </PromptInputHeader>
           )}
           <PromptInputAttachmentsContext value={attachments}>
