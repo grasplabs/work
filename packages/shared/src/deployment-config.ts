@@ -10,9 +10,7 @@ import { loopbackHosts } from "./router.ts";
 // validates them before it deploys: one schema for both, so the admin
 // never sets a value core would refuse. Each var is deployment config,
 // never an in-product setting, so no admin session can change it.
-// `QUOTA_LIMITS`'s schema is `quotaLimitsSchema` in
-// @grasp-os/shared/quota-policy, and `PLATFORM_CHANGE`'s is in
-// @grasp-os/shared/platform-change.
+// `PLATFORM_CHANGE`'s schema is in @grasp-os/shared/platform-change.
 
 // SIGN_IN (core's src/auth/config.ts)
 
@@ -254,36 +252,6 @@ export type ModelRules = z.output<
  */
 export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
   z.object(modelRulesShape(modelRef));
-
-// AUDIT_RETENTION_DAYS, AUDIT_ARCHIVE_RETENTION_DAYS, RUN_RETENTION_DAYS
-// and INBOUND_MAIL_DOMAIN: core no longer reads them (its retention is
-// fixed in code: src/audit-log.ts, src/workflows/engine.ts; and it has no
-// inbound mail domain). Left for the admin's deploy check (apps/admin's
-// src/deploy/core-config.ts) until it drops them (#1765); delete them then.
-
-export const auditRetentionDefaultDays = 180;
-
-export const auditRetentionSchema = z.int().min(30).max(3650);
-
-export const auditArchiveRetentionSchema = z.int().min(365).max(3650);
-
-export const runRetentionSchema = z.int().min(1).max(30);
-
-export const inboundMailDomainSchema = domainSchema
-  .max(253)
-  .refine(
-    (domain) =>
-      domain
-        .split(".")
-        .every(
-          (label) =>
-            label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")
-        ),
-    {
-      message:
-        "Each part of the domain is at most 63 characters, and starts and ends with a letter or digit",
-    }
-  );
 
 // MAIL_FROM (core's src/mail.ts)
 

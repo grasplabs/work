@@ -2060,6 +2060,14 @@ msgctxt "lesson scope"
 msgid "A shared chat"
 msgstr "A shared chat"
 
+#: src/brain/share-record.tsx
+msgid "A shared chat with {people}"
+msgstr "A shared chat with {people}"
+
+#: src/brain/share-record.tsx
+msgid "A shared chat with only you in it"
+msgstr "A shared chat with only you in it"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
@@ -2365,6 +2373,10 @@ msgstr "Added"
 msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Added"
+
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Added {at}"
 
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
@@ -3678,6 +3690,10 @@ msgstr "Calls {tools} (any of their methods): may change things"
 msgid "Came in"
 msgstr "Came in"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Came in {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Came up in {source}"
@@ -3691,6 +3707,7 @@ msgstr "Can’t be read"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3857,6 +3874,10 @@ msgstr "Change: {text}"
 msgid "Changed"
 msgstr "Changed"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Changed {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Changed a chat"
@@ -3948,6 +3969,10 @@ msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Changes since {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -4610,6 +4635,10 @@ msgstr "Copy as Markdown"
 msgid "Copy code"
 msgstr "Copy code"
 
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "Copy into Our skills"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Copy table"
@@ -5043,6 +5072,18 @@ msgstr "Did this happen? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Discard"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Discard draft"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Discard this draft?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -5792,6 +5833,10 @@ msgstr "Export"
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Export CSV"
 msgstr "Export CSV"
+
+#: src/engines/app-definition.tsx
+msgid "Export definition"
+msgstr "Export definition"
 
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
@@ -9649,6 +9694,10 @@ msgstr "Nothing found."
 msgid "Nothing happened that matches."
 msgstr "Nothing happened that matches."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Nothing has changed since {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -10395,6 +10444,10 @@ msgstr "Our email didn’t reach {names}. Send them their link yourself from Lin
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Our first conversation gave me the big picture. Now I need the details."
+
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "Our skills has a skill at {path} already: adapt that one."
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
@@ -11621,6 +11674,10 @@ msgstr "Resources"
 msgid "Restore"
 msgstr "Restore"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Restore this version"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restore version {number}"
@@ -12578,6 +12635,7 @@ msgstr "Show in the log"
 msgid "Show less"
 msgstr "Show less"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12780,6 +12838,10 @@ msgstr "Signing in happens at {app}. It takes about a minute."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Since you last looked"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
@@ -14038,6 +14100,10 @@ msgstr "The domains and workflows that may use approved npm packages. Open one t
 msgid "The domains this chat builds didn't load."
 msgstr "The domains this chat builds didn't load."
 
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
 msgstr "The earlier wording stays in the goal's history."
@@ -14643,6 +14709,10 @@ msgstr "There is no workflow here by that name any more. A team's map may have b
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "There is nobody in this list."
+
+#: src/brain/share-record.tsx
+msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
+msgstr "There's nowhere to share it yet: you're in no team, and in no chat others share."
 
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."

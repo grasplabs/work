@@ -6,7 +6,7 @@ import type {
   DocumentSummary,
   VersionSummary,
 } from "@grasp-os/shared/knowledge";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Empty,
   EmptyDescription,
@@ -24,6 +24,7 @@ import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
+import { CopySkill, isSkill } from "../knowledge/copy-skill.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
@@ -360,6 +361,15 @@ const CollectionView = () => {
           resolve={(path) => paths.get(path)}
           versions={open.data.versions}
           writable={writable}
+          actions={
+            // A skill Grasp ships, for an admin to adapt in Our skills.
+            collection.state === "ready" &&
+            collection.data.collection.source === "grasp" &&
+            isSkill(open.data.doc) &&
+            isAdmin(identity.role) ? (
+              <CopySkill doc={open.data.doc} />
+            ) : null
+          }
         />
       ) : null}
     </KnowledgeFrame>

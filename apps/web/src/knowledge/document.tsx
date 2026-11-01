@@ -362,6 +362,7 @@ export const DocumentView = ({
   resolve,
   me,
   writable,
+  actions,
 }: {
   doc: DocumentRead;
   /** The name of the collection it is in. */
@@ -372,6 +373,8 @@ export const DocumentView = ({
   resolve: ResolveLink;
   me: string;
   writable: boolean;
+  /** What else the page offers on it, beside Edit and Export. */
+  actions?: ReactNode;
 }) => {
   const { t } = useLingui();
   const [editing, setEditing] = useState(false);
@@ -412,6 +415,7 @@ export const DocumentView = ({
                       <Trans>Edit</Trans>
                     </Button>
                   ) : null}
+                  {actions}
                   <ExportMenu
                     file={{
                       name: fileNameOf(doc),

@@ -2060,6 +2060,14 @@ msgctxt "lesson scope"
 msgid "A shared chat"
 msgstr "Un chat compartido"
 
+#: src/brain/share-record.tsx
+msgid "A shared chat with {people}"
+msgstr "Un chat compartido con {people}"
+
+#: src/brain/share-record.tsx
+msgid "A shared chat with only you in it"
+msgstr "Un chat compartido en el que solo estás tú"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Una lista de personal es la vía más rápida: nombres, correos, equipos y puestos, en un archivo CSV o Excel. Solo la uso para saber con quién hablar."
@@ -2365,6 +2373,10 @@ msgstr "Añadido"
 msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Aporta"
+
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Añadido {at}"
 
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
@@ -3678,6 +3690,10 @@ msgstr "Llama a {tools} (cualquiera de sus métodos): puede cambiar algo"
 msgid "Came in"
 msgstr "Recibida"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Llegó {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Surgió en {source}"
@@ -3691,6 +3707,7 @@ msgstr "No se puede leer"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3857,6 +3874,10 @@ msgstr "Cambiar: {text}"
 msgid "Changed"
 msgstr "Cambiado"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Cambiado {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Cambió un chat"
@@ -3948,6 +3969,10 @@ msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Cambios que Grasp envió por alguien cuya respuesta se perdió, así que nadie sabe si surtieron efecto. Solo esa persona puede decir qué pasó, en su panel; haz el seguimiento con ella."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Cambios desde {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -4610,6 +4635,10 @@ msgstr "Copiar como Markdown"
 msgid "Copy code"
 msgstr "Copiar código"
 
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "Copiar a Our skills"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Copiar tabla"
@@ -5043,6 +5072,18 @@ msgstr "¿Ocurrió esto? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directorio"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Descartar"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Descartar borrador"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "¿Descartar este borrador?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -5792,6 +5833,10 @@ msgstr "Exportar"
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Export CSV"
 msgstr "Exportar CSV"
+
+#: src/engines/app-definition.tsx
+msgid "Export definition"
+msgstr "Exportar definición"
 
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
@@ -9649,6 +9694,10 @@ msgstr "No se ha encontrado nada."
 msgid "Nothing happened that matches."
 msgstr "No pasó nada que coincida."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "No ha cambiado nada desde {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -10395,6 +10444,10 @@ msgstr "Nuestro correo no llegó a {names}. Envíales tú su enlace desde Enlace
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Nuestra primera conversación me dio la visión general. Ahora necesito los detalles."
+
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "Our skills ya tiene una skill en {path}: adapta esa."
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
@@ -11621,6 +11674,10 @@ msgstr "Recursos"
 msgid "Restore"
 msgstr "Restaurar"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Restaurar esta versión"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restaurar la versión {number}"
@@ -12578,6 +12635,7 @@ msgstr "Mostrar en el registro"
 msgid "Show less"
 msgstr "Mostrar menos"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12780,6 +12838,10 @@ msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "No se pudo cerrar la sesión"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Desde la última vez que miraste"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
@@ -14038,6 +14100,10 @@ msgstr "Los dominios y flujos de trabajo que pueden usar paquetes npm aprobados.
 msgid "The domains this chat builds didn't load."
 msgstr "Los dominios que crea este chat no se cargaron."
 
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "Los cambios del borrador se pierden, y el próximo cambio del agente empieza de nuevo desde la app tal como está. Sus versiones se conservan, así que puedes restaurar una."
+
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
 msgstr "La redacción anterior queda en el historial del objetivo."
@@ -14643,6 +14709,10 @@ msgstr "Ya no hay ningún flujo de trabajo con ese nombre. Puede que se haya vue
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "No hay nadie en esta lista."
+
+#: src/brain/share-record.tsx
+msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
+msgstr "Aún no hay dónde compartirlo: no estás en ningún equipo ni en ningún chat que otros compartan."
 
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
