@@ -82,6 +82,10 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
+import {
+  runFileResponse,
+  runFileRouteOf,
+} from "./workflows/run-file-downloads.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -319,6 +323,11 @@ const appCallResponse = async (
   }
   if (linkRoute !== undefined) {
     return await appLinkResponse(request, env, linkRoute, requestId);
+  }
+  // A run's finished file, downloaded from its run sheet.
+  const runFile = runFileRouteOf(pathname);
+  if (runFile !== undefined) {
+    return await runFileResponse(request, env, runFile, requestId);
   }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {

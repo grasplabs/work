@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
 import { formatDateTime } from "../format.ts";
@@ -11,17 +11,22 @@ import {
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import { historyPageSize, RunHistory } from "../workflows/history-view.tsx";
 import { RunResult } from "../workflows/runs.tsx";
+import { StopRun } from "../workflows/stop-run.tsx";
 
 // One run of a workflow, reached from the runs log: how it stands, and
 // what its engine journaled, step by step and attempt by attempt, a page
 // at a time. Core checks every page again; the page shows what it gets.
+// The App's builders may stop a run that hasn't ended, asked again first.
 
 const RunPage = () => {
-  const { status, history } = Route.useLoaderData();
+  const { status, history, builds } = Route.useLoaderData();
   const { app, workflow, run } = Route.useParams();
   const { t } = useLingui();
+  const core = useCore();
+  const router = useRouter();
   const crumbs = [
     { label: t`Workflows`, to: "/workflows" },
     {
@@ -42,6 +47,12 @@ const RunPage = () => {
     );
   }
   const { data: summary } = status;
+  const stop = async (): Promise<void> => {
+    await core.withSession(
+      async (session) => await session.workflows.cancel(run)
+    );
+    await router.invalidate();
+  };
   return (
     <>
       <SiteHeader crumbs={crumbs} />
@@ -62,6 +73,9 @@ const RunPage = () => {
             </>
           }
           title={t`Run of ${workflow}`}
+          {...(builds && summary.endedAt === null
+            ? { action: <StopRun stop={stop} /> }
+            : {})}
         />
         {summary.detailsRemoved ? (
           <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
@@ -93,8 +107,8 @@ export const Route = createFileRoute(
   pendingComponent: PageLoading,
   // The run and its history are read on their own: each says on its
   // own why it failed.
-  loader: async ({ context: { core }, params: { run } }) => {
-    const [status, history] = await Promise.all([
+  loader: async ({ context: { core }, params: { app, workflow, run } }) => {
+    const [status, history, detail] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflows.status(run)
@@ -107,8 +121,17 @@ export const Route = createFileRoute(
             cursor: null,
           })
       ),
+      // Whether the person builds the App, so may stop its runs.
+      loadFromCore(
+        core,
+        async (session) => await session.workflows.get(app, workflow)
+      ),
     ]);
-    return { status, history };
+    return {
+      status,
+      history,
+      builds: detail.state === "ready" && detail.data.setsParams,
+    };
   },
   component: RunPage,
 });
