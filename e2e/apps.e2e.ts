@@ -369,7 +369,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     section === "Workflows" ? [section, "Requests"] : [section]
   );
   const menu = ["Settings", "Sign out"];
-  const account = ["Profile", "Notifications", "Security"];
+  const account = ["Profile", "Security"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),
@@ -390,7 +390,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Brain",
         // Who can reach Stephen and what he may do for whom.
         "Stephen",
-        "Pulse",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
         "Audit trail",

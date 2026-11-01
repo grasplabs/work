@@ -15,6 +15,7 @@ const chat = (id: string, projectId: string | null): ChatSummary => ({
   running: false,
   projectId,
   appId: null,
+  via: "web",
 });
 
 describe("a project's documents", () => {
