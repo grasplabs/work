@@ -3,7 +3,7 @@ import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 // The keys a channel's provider signs its webhook calls with (Teams'
-// activities, Gmail's pushes), as one isolate holds them: fetched through
+// activities), as one isolate holds them: fetched through
 // connect, kept an hour, and fetched again sooner for a key id they don't
 // have, at most once a minute. Every request the isolate serves checks
 // against them, so a wrong set lets forged messages in or keeps genuine

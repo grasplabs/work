@@ -26,7 +26,7 @@ import { formatPercent } from "../../format.ts";
 /**
  * Logos the deployment serves, by the platform or provider they are of
  * (`apps/web/public/logos`). Where each comes from:
- * - microsoft-teams.svg, slack.svg and gmail.svg: the
+ * - microsoft-teams.svg and slack.svg: the
  *   gilbarbara/logos set, through @iconify-json/logos, CC0, as the
  *   prototype bundles them.
  * - microsoft.svg and google.svg: the marks of Microsoft's and Google's own
@@ -38,7 +38,6 @@ const logos: Readonly<Record<string, string>> = {
   teams: "/logos/microsoft-teams.svg",
   slack: "/logos/slack.svg",
   microsoft: "/logos/microsoft.svg",
-  gmail: "/logos/gmail.svg",
   google: "/logos/google.svg",
 };
 

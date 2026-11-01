@@ -274,10 +274,10 @@ export const personErasureAreas = sqliteTable(
 
 /**
  * A person's account on a chat platform that carries no Entra object id
- * (Slack, Gmail), linked to them (`channels/accounts.ts`):
+ * (Slack), linked to them (`channels/accounts.ts`):
  * one person per platform account, by the platform's own verified sender
  * id. Its id names it to the person and in the audit log, which never
- * holds the platform id itself (a Gmail id is an email address).
+ * holds the platform id itself.
  */
 export const channelAccounts = sqliteTable(
   "channel_accounts",

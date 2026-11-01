@@ -6,13 +6,6 @@ CAPABILITY_SIGNING_KEY=
 # adds in Settings, without which no model call can be made. 32 random
 # bytes, base64, e.g. `openssl rand -base64 32`.
 TOKEN_ENCRYPTION_KEY=
-# Optional: Stephen's own Gmail mailbox (src/channels.ts), and the Google
-# OAuth client and refresh token connect reads and sends its mail with.
-# Every Gmail request is refused until all four are set.
-GMAIL_MAILBOX=
-GMAIL_CLIENT_ID=
-GMAIL_CLIENT_SECRET=
-GMAIL_REFRESH_TOKEN=
 # Optional: Grasp's own keys at the AI providers, for platform features
 # (src/ai-providers.ts). A provider whose key is unset isn't offered for
 # them; an organization's own keys are added in the product, not here.

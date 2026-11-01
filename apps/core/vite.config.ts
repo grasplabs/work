@@ -20,8 +20,6 @@ import {
   platformElevenLabsKey,
   directoryClient,
   documentsClient,
-  gmailAccount,
-  gmailPush,
   googleConnectClient,
   platformOpenAiKey,
   slackApp,
@@ -229,12 +227,6 @@ export const coreProject = (
             TEAMS_BOT_ID: teamsBot.id,
             // The client's Slack app, so its door is open too.
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
-            // Stephen's Gmail mailbox and its push, so its door is open too.
-            GMAIL_MAILBOX: gmailAccount.mailbox,
-            GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,
-            GMAIL_PUBSUB_SERVICE_ACCOUNT: gmailPush.serviceAccount,
-            GMAIL_PUBSUB_SUBSCRIPTION: gmailPush.subscription,
-            GMAIL_PUBSUB_TOPIC: gmailPush.topic,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -346,11 +338,6 @@ export const coreProject = (
                 OPENAI_API_KEY: platformOpenAiKey,
                 ANTHROPIC_API_KEY: platformAnthropicKey,
                 ELEVENLABS_API_KEY: platformElevenLabsKey,
-                // Stephen's Gmail mailbox, which the fake Google there knows.
-                GMAIL_MAILBOX: gmailAccount.mailbox,
-                GMAIL_CLIENT_ID: gmailAccount.clientId,
-                GMAIL_CLIENT_SECRET: gmailAccount.clientSecret,
-                GMAIL_REFRESH_TOKEN: gmailAccount.refreshToken,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).
