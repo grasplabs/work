@@ -9,6 +9,7 @@ import type {
   AppMemberRef,
   AppMembersApi,
   NewAppMember,
+  ShareCandidates,
 } from "@grasp-os/shared/apps";
 import {
   actorOf,
@@ -279,6 +280,42 @@ export const listMembers = async (
 };
 
 /**
+ * Whom `by` may share an App with: the organization's people, members now,
+ * and its teams, each by name and ID alone. For whoever may share it
+ * (`addMember`): a builder of the App, while it isn't archived, never
+ * Grasp staff. A builder isn't an admin, so this, not the organization's
+ * member list, is what they pick from; it says no more than a share names.
+ */
+export const shareCandidates = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<ShareCandidates> => {
+  await editableApp(env, by, app);
+  requireNotStaff(by);
+  const db = drizzle(env.DB);
+  const [people, organizationTeams] = await Promise.all([
+    db
+      .select({ id: users.id, name: users.name })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          notRemoved(members.userId)
+        )
+      )
+      .orderBy(asc(users.name), asc(users.id)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.organizationId, organizationId))
+      .orderBy(asc(teams.name), asc(teams.id)),
+  ]);
+  return { people, teams: organizationTeams };
+};
+
+/**
  * Shares an App with a person or team, or gives someone it is shared with
  * another role. Sharing again in the same role changes and records
  * nothing.
@@ -448,5 +485,12 @@ export class AppMembersRpc extends CoreRpcTarget implements AppMembersApi {
     await withPerson(this.#check, async (by) => {
       await removeMember(this.#env, by, app, member);
     });
+  }
+
+  async candidates(app: string): Promise<ShareCandidates> {
+    return await withPerson(
+      this.#check,
+      async (by) => await shareCandidates(this.#env, by, app)
+    );
   }
 }
