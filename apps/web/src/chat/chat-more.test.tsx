@@ -40,6 +40,7 @@ const chatIn = (projectId: string | null): ChatSummary => ({
   running: false,
   projectId,
   appId: null,
+  via: "web",
 });
 
 const projects: ChatProject[] = [

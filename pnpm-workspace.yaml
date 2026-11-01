@@ -86,10 +86,9 @@ catalog:
   better-auth: 1.7.5
   # The admin's Cloudflare Access check.
   jose: 6.2.12
-  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, WhatsApp and
   # the rest, its state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
-  "@chat-adapter/discord": 4.43.0
   "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
