@@ -3702,6 +3702,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
 
+#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -4201,6 +4202,10 @@ msgctxt "shut every part of a workflow's overview"
 msgid "Close all"
 msgstr "Alles sluiten"
 
+#: src/brain/gap-actions.tsx
+msgid "Close it"
+msgstr "Sluiten"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Sluiten voor de onboarding"
@@ -4208,6 +4213,15 @@ msgstr "Sluiten voor de onboarding"
 #: src/screens/app-panel.tsx
 msgid "Close panel"
 msgstr "Paneel sluiten"
+
+#: src/brain/gap-actions.tsx
+msgid "Close this question without an answer?"
+msgstr "Deze vraag zonder antwoord sluiten?"
+
+#: src/brain/gap-actions.tsx
+#: src/chat/brain-questions.tsx
+msgid "Close without an answer"
+msgstr "Sluiten zonder antwoord"
 
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
@@ -7361,6 +7375,10 @@ msgstr "Ze wordt met niemand gedeeld."
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "Het weet wie welk team leidt, zodat ik eerst met de teamleiders kan praten. We koppelen het samen met jou."
+
+#: src/brain/gap-actions.tsx
+msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
+msgstr "Ze verdwijnt uit de open vragen, zonder antwoord, en niemand wordt er nog naar gevraagd. Ze kan niet opnieuw worden geopend."
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -11367,6 +11385,18 @@ msgstr "Record-to-Report"
 msgid "Records checked: {scanned}. Filled in: {filled}."
 msgstr "Gecontroleerde records: {scanned}. Ingevuld: {filled}."
 
+#: src/brain/gap-actions.tsx
+msgid "Redact it"
+msgstr "Weglakken"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact the answer"
+msgstr "Antwoord weglakken"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact this answer?"
+msgstr "Dit antwoord weglakken?"
+
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
 msgid "Redesign"
@@ -13875,6 +13905,10 @@ msgstr "De afspraak tussen het bedrijf en Grasp over de omgang met gegevens, get
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "Het antwoord is afgekapt op de limiet van het model."
+
+#: src/brain/gap-actions.tsx
+msgid "The answer, and who gave it, are taken away for good. The question stays closed."
+msgstr "Het antwoord, en wie het gaf, worden definitief weggehaald. De vraag blijft gesloten."
 
 #: src/screens/screen-frame.tsx
 msgid "The app couldn't be loaded."

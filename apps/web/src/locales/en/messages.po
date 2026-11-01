@@ -3702,6 +3702,7 @@ msgstr "Came up in {source}"
 msgid "Can’t be read"
 msgstr "Can’t be read"
 
+#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -4201,6 +4202,10 @@ msgctxt "shut every part of a workflow's overview"
 msgid "Close all"
 msgstr "Close all"
 
+#: src/brain/gap-actions.tsx
+msgid "Close it"
+msgstr "Close it"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Close it for the onboarding"
@@ -4208,6 +4213,15 @@ msgstr "Close it for the onboarding"
 #: src/screens/app-panel.tsx
 msgid "Close panel"
 msgstr "Close panel"
+
+#: src/brain/gap-actions.tsx
+msgid "Close this question without an answer?"
+msgstr "Close this question without an answer?"
+
+#: src/brain/gap-actions.tsx
+#: src/chat/brain-questions.tsx
+msgid "Close without an answer"
+msgstr "Close without an answer"
 
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
@@ -7361,6 +7375,10 @@ msgstr "It isn't shared with anyone."
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "It knows who leads which team, so I can talk to the leads first. We connect it with you."
+
+#: src/brain/gap-actions.tsx
+msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
+msgstr "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -11367,6 +11385,18 @@ msgstr "Record-to-Report"
 msgid "Records checked: {scanned}. Filled in: {filled}."
 msgstr "Records checked: {scanned}. Filled in: {filled}."
 
+#: src/brain/gap-actions.tsx
+msgid "Redact it"
+msgstr "Redact it"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact the answer"
+msgstr "Redact the answer"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact this answer?"
+msgstr "Redact this answer?"
+
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
 msgid "Redesign"
@@ -13875,6 +13905,10 @@ msgstr "The agreement between the company and Grasp on handling data, signed in 
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "The answer was cut off at the model's limit."
+
+#: src/brain/gap-actions.tsx
+msgid "The answer, and who gave it, are taken away for good. The question stays closed."
+msgstr "The answer, and who gave it, are taken away for good. The question stays closed."
 
 #: src/screens/screen-frame.tsx
 msgid "The app couldn't be loaded."
