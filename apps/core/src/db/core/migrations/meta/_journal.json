@@ -1289,6 +1289,13 @@
       "when": 1793492720459,
       "tag": "0183_consumer_store_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "6",
+      "when": 1793492840524,
+      "tag": "0184_store_resource_projection",
+      "breakpoints": true
     }
   ]
 }
