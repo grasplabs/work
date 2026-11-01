@@ -852,6 +852,14 @@
   --icon-wait: 0.3s;
 }
 
+/* The slash is drawn through the ring. */
+.lucide-circle-slash > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+}
+
 /* The head comes up and the shoulders are drawn. */
 .lucide-circle-user > :nth-child(2) {
   --icon-move: icon-pop;
