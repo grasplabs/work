@@ -34,6 +34,12 @@ export const releases = sqliteTable("releases", {
   manifestSha256: text("manifest_sha256").notNull(),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
+  /**
+   * When its bundle files left the releases bucket: a release never
+   * promoted past Edge, 14 days on (src/releases/retention.ts). Null while
+   * they're kept; the record itself is kept for good.
+   */
+  bundleDeletedAt: timestamp("bundle_deleted_at"),
   /** Read by nothing since release channels (src/rollout/): dropped once
    * the admin that stopped reading it is live (expand, then contract). */
   feature: integer({ mode: "boolean" }),

@@ -4,6 +4,8 @@ export const rolloutErrorCodes = [
   "domain_not_set",
   /** The release isn't imported. */
   "release_not_imported",
+  /** The release's bundle left the bucket (src/releases/retention.ts): it can't be deployed. */
+  "bundle_deleted",
   /**
    * Not a move a channel may make: a release goes Edge, then Beta, then
    * Stable, and a channel goes back only to a release it had.
