@@ -851,6 +851,10 @@ msgstr "{match} of {matches}"
 msgid "{measured} a month measured return"
 msgstr "{measured} a month measured return"
 
+#: src/workflows/share-workflow.tsx
+msgid "{memberName} (team)"
+msgstr "{memberName} (team)"
+
 #: src/knowledge/purge.tsx
 msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
 msgstr "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
@@ -984,7 +988,7 @@ msgstr "{name} is signed out everywhere."
 msgid "{name} logo"
 msgstr "{name} logo"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} may write. Change to Read"
 
@@ -996,7 +1000,7 @@ msgstr "{name} no longer changes the domain's data (write → read)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} now changes the domain's data (read → write)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} reads only. Change to Write"
 
@@ -1965,6 +1969,10 @@ msgstr "A project takes Markdown, text, CSV and JSON files."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "A question"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3956,6 +3964,10 @@ msgstr "Changed: it acts for whoever uses the domain, with everything the domain
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Changes"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -4123,6 +4135,10 @@ msgstr "Choose your language"
 msgid "Choose your staff list"
 msgstr "Choose your staff list"
 
+#: src/workflows/share-workflow.tsx
+msgid "Choose…"
+msgstr "Choose…"
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Chosen at run time: {options}"
@@ -4177,6 +4193,7 @@ msgstr "Clear filters"
 #: src/settings/stephen-settings.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Close"
 msgstr "Close"
 
@@ -5606,8 +5623,8 @@ msgid "European Union"
 msgstr "European Union"
 
 #: src/settings/audit-archive.tsx
-msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
-msgstr "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
@@ -5817,6 +5834,7 @@ msgstr "Export"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "Export CSV"
 
@@ -5825,6 +5843,7 @@ msgid "Export definition"
 msgstr "Export definition"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "Export JSON"
 
@@ -5835,6 +5854,10 @@ msgstr "Export report"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Export the audit trail"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Export with archive"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -7352,6 +7375,11 @@ msgstr "It isn't offered to your organization."
 msgid "It isn't shared with anyone."
 msgstr "It isn't shared with anyone."
 
+#: src/workflows/share-workflow.tsx
+msgctxt "a workflow"
+msgid "It isn't shared with anyone."
+msgstr "It isn't shared with anyone."
+
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "It knows who leads which team, so I can talk to the leads first. We connect it with you."
@@ -7556,6 +7584,10 @@ msgstr "its output is larger than a record may be"
 #: src/engines/store-change-errors.ts
 msgid "its output isn't what the fixture expects"
 msgstr "its output isn't what the fixture expects"
+
+#: src/workflows/share-workflow.tsx
+msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
+msgstr "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -8615,7 +8647,7 @@ msgstr "Needs your own sign-in app"
 msgid "Never"
 msgstr "Never"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Never"
@@ -8953,6 +8985,10 @@ msgstr "No link yet"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "No longer declared"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "No longer offered"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -10641,6 +10677,7 @@ msgstr "Pending"
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
+#: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "People"
 
@@ -11144,7 +11181,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Read"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Read"
@@ -11263,6 +11300,10 @@ msgstr "Reading who can own it…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Reading your staff list"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Reads"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11392,6 +11433,7 @@ msgstr "Remember something"
 msgid "Reminded on {date}"
 msgstr "Reminded on {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11416,6 +11458,10 @@ msgstr "Remove {label}"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "Remove {label}?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Remove {name}"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -11817,9 +11863,17 @@ msgstr "Risk-to-Compliance"
 msgid "Role"
 msgstr "Role"
 
+#: src/workflows/share-workflow.tsx
+msgid "Role of {shown}"
+msgstr "Role of {shown}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Role of {who}"
+
+#: src/workflows/share-workflow.tsx
+msgid "Role to share with"
+msgstr "Role to share with"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12460,6 +12514,19 @@ msgstr "Settled: {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Several workflows run with AI, across most of its work by hand."
 
+#: src/workflows/share-workflow.tsx
+msgid "Share"
+msgstr "Share"
+
+#: src/workflows/share-workflow.tsx
+msgctxt "share a workflow with someone"
+msgid "Share"
+msgstr "Share"
+
+#: src/workflows/share-workflow.tsx
+msgid "Share {name}"
+msgstr "Share {name}"
+
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Share it"
@@ -12473,6 +12540,7 @@ msgid "Share this record"
 msgstr "Share this record"
 
 #: src/brain/share-record.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Share with"
 
@@ -12493,6 +12561,7 @@ msgid "Shared mailboxes, registers and the company's records, after they press a
 msgstr "Shared mailboxes, registers and the company's records, after they press a card."
 
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Shared with"
 msgstr "Shared with"
 
@@ -13223,6 +13292,10 @@ msgstr "Stop and ask"
 msgid "Stop for now"
 msgstr "Stop for now"
 
+#: src/workflows/share-workflow.tsx
+msgid "Stop sharing with {shown}"
+msgstr "Stop sharing with {shown}"
+
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
 msgid "Stopped"
@@ -13552,6 +13625,7 @@ msgstr "Team: {name}"
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 #: src/settings/teams.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -15441,6 +15515,10 @@ msgstr "Unreadable event"
 msgid "Unsaved changes"
 msgstr "Unsaved changes"
 
+#: src/workflows/share-workflow.tsx
+msgid "Unshare"
+msgstr "Unshare"
+
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Until"
@@ -17052,7 +17130,7 @@ msgstr "Workspace"
 msgid "Would run after approval"
 msgstr "Would run after approval"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Write"

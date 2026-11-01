@@ -851,6 +851,10 @@ msgstr "{match} sur {matches}"
 msgid "{measured} a month measured return"
 msgstr "{measured} par mois de gain mesuré"
 
+#: src/workflows/share-workflow.tsx
+msgid "{memberName} (team)"
+msgstr "{memberName} (équipe)"
+
 #: src/knowledge/purge.tsx
 msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
 msgstr "{memories, plural, one {# souvenir caviardé ou supprimé} other {# souvenirs caviardés ou supprimés}}"
@@ -984,7 +988,7 @@ msgstr "{name} : déconnexion partout effectuée."
 msgid "{name} logo"
 msgstr "Logo {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} peut écrire. Passer en Lecture"
 
@@ -996,7 +1000,7 @@ msgstr "{name} ne modifie plus les données du domaine (écriture → lecture)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} modifie désormais les données du domaine (lecture → écriture)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} ne fait que lire. Passer en Écriture"
 
@@ -1965,6 +1969,10 @@ msgstr "Un projet accepte les fichiers Markdown, texte, CSV et JSON."
 #: src/workflows/requests/request-parts.tsx
 msgid "A question"
 msgstr "Une question"
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Un outil en Lecture s'exécute sans demander. Un appel d'un outil en Écriture depuis le chat, ou par une personne qui utilise un domaine, attend que cette personne le confirme. Appuyez sur le badge d'un outil pour le changer. Ne mettez un outil en Lecture que s'il ne modifie rien : mal marqué, il modifie des choses sans demander."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3956,6 +3964,10 @@ msgstr "Modifié : il agit pour quiconque utilise le domaine, avec tout ce que d
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Modifiée : lit et réécrit chaque enregistrement de {table}, quel qu'en soit le propriétaire"
 
+#: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Modifie"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Des modifications envoyées par Grasp pour quelqu'un dont la réponse s'est perdue : personne ne sait si elles ont pris effet. Seule cette personne peut dire ce qui s'est passé, sur son tableau de bord ; faites le suivi avec elle."
@@ -4123,6 +4135,10 @@ msgstr "Choisissez votre langue"
 msgid "Choose your staff list"
 msgstr "Choisir votre liste du personnel"
 
+#: src/workflows/share-workflow.tsx
+msgid "Choose…"
+msgstr "Choisir…"
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Choisi pendant l’exécution : {options}"
@@ -4177,6 +4193,7 @@ msgstr "Effacer les filtres"
 #: src/settings/stephen-settings.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Close"
 msgstr "Fermer"
 
@@ -5606,8 +5623,8 @@ msgid "European Union"
 msgstr "Union européenne"
 
 #: src/settings/audit-archive.tsx
-msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
-msgstr "Les événements plus anciens que ce que conserve le journal d’audit, déplacés vers l’archive. La recherche utilise les filtres ci-dessus."
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Les événements plus anciens que ce que conserve le journal d’audit, déplacés vers l’archive. La recherche et l’export utilisent les filtres ci-dessus."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
@@ -5817,6 +5834,7 @@ msgstr "Exporter"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "Exporter en CSV"
 
@@ -5825,6 +5843,7 @@ msgid "Export definition"
 msgstr "Exporter la définition"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "Exporter en JSON"
 
@@ -5835,6 +5854,10 @@ msgstr "Exporter le rapport"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exporter le journal d’audit"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Exporter avec l’archive"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -7352,6 +7375,11 @@ msgstr "Il n’est pas proposé à votre organisation."
 msgid "It isn't shared with anyone."
 msgstr "Elle n’est partagée avec personne."
 
+#: src/workflows/share-workflow.tsx
+msgctxt "a workflow"
+msgid "It isn't shared with anyone."
+msgstr "Il n’est partagé avec personne."
+
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "Elle sait qui dirige quelle équipe, pour que je parle d’abord aux responsables. Nous la connectons avec vous."
@@ -7556,6 +7584,10 @@ msgstr "sa sortie est plus grande qu'un enregistrement ne peut l'être"
 #: src/engines/store-change-errors.ts
 msgid "its output isn't what the fixture expects"
 msgstr "sa sortie n'est pas ce qu'attend l'enregistrement de test"
+
+#: src/workflows/share-workflow.tsx
+msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
+msgstr "Son propriétaire et les administrateurs l’ont toujours. Un utilisateur le suit et le démarre ; un concepteur le modifie, le partage et le supprime aussi."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -8615,7 +8647,7 @@ msgstr "Nécessite votre propre application de connexion"
 msgid "Never"
 msgstr "Jamais"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Jamais"
@@ -8953,6 +8985,10 @@ msgstr "Pas encore de lien"
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Plus déclarées"
+
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "N’est plus proposé"
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -10641,6 +10677,7 @@ msgstr "En attente"
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
+#: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personnes"
 
@@ -11144,7 +11181,7 @@ msgctxt "permission group"
 msgid "Read"
 msgstr "Lire"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lecture"
@@ -11263,6 +11300,10 @@ msgstr "Lecture de qui peut en être responsable…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Lecture de votre liste du personnel"
+
+#: src/connections/tool-permissions.tsx
+msgid "Reads"
+msgstr "Lit"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -11392,6 +11433,7 @@ msgstr "Retenir quelque chose"
 msgid "Reminded on {date}"
 msgstr "Relancé le {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -11416,6 +11458,10 @@ msgstr "Retirer {label}"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "Retirer {label} ?"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Retirer {name}"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
@@ -11817,9 +11863,17 @@ msgstr "Risk-to-Compliance"
 msgid "Role"
 msgstr "Rôle"
 
+#: src/workflows/share-workflow.tsx
+msgid "Role of {shown}"
+msgstr "Rôle de {shown}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rôle de {who}"
+
+#: src/workflows/share-workflow.tsx
+msgid "Role to share with"
+msgstr "Rôle à attribuer"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12460,6 +12514,19 @@ msgstr "Réglé : {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Plusieurs workflows tournent avec l’IA, sur l’essentiel du travail manuel."
 
+#: src/workflows/share-workflow.tsx
+msgid "Share"
+msgstr "Partager"
+
+#: src/workflows/share-workflow.tsx
+msgctxt "share a workflow with someone"
+msgid "Share"
+msgstr "Partager"
+
+#: src/workflows/share-workflow.tsx
+msgid "Share {name}"
+msgstr "Partager {name}"
+
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Le partager"
@@ -12473,6 +12540,7 @@ msgid "Share this record"
 msgstr "Partager cet enregistrement"
 
 #: src/brain/share-record.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Partager avec"
 
@@ -12493,6 +12561,7 @@ msgid "Shared mailboxes, registers and the company's records, after they press a
 msgstr "Boîtes partagées, registres et données de l'entreprise, après avoir appuyé sur une carte."
 
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Shared with"
 msgstr "Partagée avec"
 
@@ -13223,6 +13292,10 @@ msgstr "S’arrêter et demander"
 msgid "Stop for now"
 msgstr "Arrêter pour l’instant"
 
+#: src/workflows/share-workflow.tsx
+msgid "Stop sharing with {shown}"
+msgstr "Ne plus partager avec {shown}"
+
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
 msgid "Stopped"
@@ -13552,6 +13625,7 @@ msgstr "Équipe : {name}"
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 #: src/settings/teams.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Teams"
 msgstr "Équipes"
 
@@ -15441,6 +15515,10 @@ msgstr "Événement illisible"
 msgid "Unsaved changes"
 msgstr "Modifications non enregistrées"
 
+#: src/workflows/share-workflow.tsx
+msgid "Unshare"
+msgstr "Ne plus partager"
+
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Jusqu’au"
@@ -17052,7 +17130,7 @@ msgstr "Espace de travail"
 msgid "Would run after approval"
 msgstr "S’exécuterait après approbation"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Écriture"

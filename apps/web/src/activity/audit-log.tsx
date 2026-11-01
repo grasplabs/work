@@ -202,9 +202,17 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
  * Where the browser downloads what `search` matches as `format`: core's
  * export route, which it writes to disk as it arrives, however long.
  */
-const exportHref = (search: LogSearch, format: AuditExportFormat): string => {
+export const exportHref = (
+  search: LogSearch,
+  format: AuditExportFormat,
+  archive = false
+): string => {
   const params = new URLSearchParams();
   params.set("format", format);
+  if (archive) {
+    // With what retention archived, in the chain's order (`AuditApi.export`).
+    params.set("archive", "1");
+  }
   for (const [name, value] of Object.entries(auditFilterOf(search) ?? {})) {
     if (typeof value === "string") {
       params.set(name, value);

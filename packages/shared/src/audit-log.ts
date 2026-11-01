@@ -57,6 +57,8 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // An admin changing which tools a connected app allows (GRA-993).
+  { action: "connection.tools", type: "config" },
   // Connect sending, editing or deleting a message as the client's own bot
   // on a chat platform, or refusing a request core's chat adapters sent.
   { action: "channel.call", type: "action" },
@@ -345,6 +347,15 @@ export interface AuditPage {
 export const auditExportFormatSchema = z.enum(["json", "csv"]);
 export type AuditExportFormat = z.infer<typeof auditExportFormatSchema>;
 
+/**
+ * How an export reads: `archive` takes in what retention moved to the
+ * archive, as `export` describes. Without it, what the log holds alone.
+ */
+export const auditExportOptionsSchema = z
+  .strictObject({ archive: z.boolean().optional() })
+  .optional();
+export type AuditExportOptions = z.input<typeof auditExportOptionsSchema>;
+
 /** Why the chain breaks at a position: see core's src/audit-chain.ts. */
 export type ChainBreak = "missing" | "unlinked" | "altered";
 
@@ -428,10 +439,22 @@ export interface AuditApi {
    * with `audit.export_too_large` past {@link auditExportMaxRecords}, and
    * with `audit.export_interrupted` if retention archives events it hasn't
    * read yet.
+   *
+   * With `{ archive: true }` (`archive=1` on the download), it takes in
+   * the archive too: every record, archived or held, in one order, by its
+   * position in the chain, oldest first, so archived ones come before the
+   * ones the log holds. Retention archiving under it is no interruption:
+   * what moved is read from the archive. A stretch purged by archive
+   * retention has nothing left: it is passed over, and JSON names it in
+   * `archive.purged` (`[{ from, through }]`, positions). An archived
+   * stretch that can't be read stops it with `audit.archive_unreadable`.
+   * The export is recorded with `archive: true` and `purged`, how many
+   * purged stretches it passes over as it begins.
    */
   export: (
     filter: AuditFilter | undefined,
-    format: AuditExportFormat
+    format: AuditExportFormat,
+    options?: AuditExportOptions
   ) => Promise<ReadableStream<Uint8Array>>;
   /** One step of verifying the whole chain, archived stretches included. */
   verify: (after?: number) => Promise<ChainVerification>;

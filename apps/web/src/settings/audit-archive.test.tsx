@@ -17,7 +17,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AuditArchive } from "./audit-archive.tsx";
 
@@ -197,6 +197,40 @@ describe("Settings › Audit trail › Archive and retention", () => {
       first: 1,
       older: 2,
     });
+  });
+
+  it("downloads the audit trail with its archive, filtered as shown, as CSV or JSON", async () => {
+    const { session } = fakeAudit({ stretches: [], retention: kept });
+    await shown(session, "test.b");
+    const opened: string[] = [];
+    const assign = vi
+      .spyOn(window.location, "assign")
+      .mockImplementation((url: string | URL) => {
+        opened.push(String(url));
+      });
+    try {
+      for (const format of ["CSV", "JSON"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one menu at a time
+        await press("Export with archive");
+        const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+          (each) => each.textContent?.trim() === `Export ${format}`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await act(async () => {
+          if (item instanceof HTMLElement) {
+            item.click();
+          }
+          await Promise.resolve();
+        });
+      }
+    } finally {
+      assign.mockRestore();
+    }
+
+    expect(opened).toStrictEqual([
+      "/api/audit/export?format=csv&archive=1&action=test.b",
+      "/api/audit/export?format=json&archive=1&action=test.b",
+    ]);
   });
 
   it("shows how long Grasp keeps events and run details", async () => {
