@@ -72,12 +72,7 @@
  * person linked to themselves goes on; someone on the client's own domains
  * who hasn't linked theirs is sent the link, once a day, and anyone else
  * nothing, so a forged sender never draws a reply.
- *
- * Teams' and Slack's adapters send through axios, which workerd refuses
- * as it builds its requests: `@grasp-os/chat/workerd` puts the fix in, so
- * it is imported before any adapter loads.
  */
-import "@grasp-os/chat/workerd";
 import { durableObjectState } from "@grasp-os/chat/state";
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import { requestErrors } from "@grasp-os/shared/errors";

@@ -95,8 +95,9 @@ catalog:
   "@chat-adapter/telegram": 4.43.0
   "@chat-adapter/whatsapp": 4.43.0
   chat: 4.43.0
-  # What the Teams and Slack adapters send through; packages/chat's tests
-  # check its fix against it (src/workerd.ts). On the version they resolve.
+  # What the Teams and Slack adapters send through, on the version they
+  # resolve; core types its hook on their requests with it
+  # (apps/core/src/channels/through-connect.ts).
   axios: 1.20.0
 
   # Frontend
