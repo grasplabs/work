@@ -97,6 +97,11 @@ const fakeApps = ({
         await Promise.resolve();
         return [version(3), version(2), version(1)];
       },
+      // No version sealed: nothing revoked or held.
+      releases: async (): Promise<[]> => {
+        await Promise.resolve();
+        return [];
+      },
       setCurrent: async (
         id: string,
         to: number,
@@ -252,19 +257,6 @@ describe("A domain's versions", () => {
     await press(button("Make current"));
 
     expect(asked).toStrictEqual([["setCurrent", appId, 3, 2]]);
-  });
-
-  it("shows someone who only uses the domain its versions, with nothing to change", async () => {
-    const { session } = fakeApps({ role: "user" });
-    await shown(session, person("user-ann", "user"));
-
-    expect({
-      listed: listed(),
-      actions: button("Actions for version 1"),
-    }).toStrictEqual({
-      listed: ["3Up for review", "2Current", "1"],
-      actions: undefined,
-    });
   });
 });
 

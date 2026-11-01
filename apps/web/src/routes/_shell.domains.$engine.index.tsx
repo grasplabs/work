@@ -542,7 +542,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     packages,
     surfaces,
   } = Route.useLoaderData();
-  const { tab } = Route.useSearch();
+  const { tab: asked } = Route.useSearch();
   const entry = useRouterState({
     select: ({ location }) => location.state.__TSR_key,
   });
@@ -558,6 +558,10 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   // its workflows, where its work is; one made for something else on its
   // apps, which are what fill it.
   const first = app.process === null ? "apps" : "workflows";
+  // Versions are for its builders, Grasp staff among them: core lists them
+  // to no one else, so the tab isn't there for a user.
+  const readsVersions = app.role === "builder";
+  const tab = asked === "versions" && !readsVersions ? undefined : asked;
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
       <div className="flex flex-wrap items-start gap-4">
@@ -638,9 +642,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
-          <TabsTrigger value="versions">
-            <Trans>Versions</Trans>
-          </TabsTrigger>
+          {readsVersions ? (
+            <TabsTrigger value="versions">
+              <Trans>Versions</Trans>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="workflows">
           <div className="pt-4">
@@ -707,11 +713,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </Await>
           </div>
         </TabsContent>
-        <TabsContent value="versions">
-          <div className="pt-4">
-            <AppVersions app={app} identity={identity} />
-          </div>
-        </TabsContent>
+        {readsVersions ? (
+          <TabsContent value="versions">
+            <div className="pt-4">
+              <AppVersions app={app} identity={identity} />
+            </div>
+          </TabsContent>
+        ) : null}
         <TabsContent value="members">
           <div className="pt-4">
             <Members app={app} identity={identity} members={members} />

@@ -158,7 +158,9 @@ const VersionActions = ({
   onAsk: (action: ReleaseAction) => void;
 }) => {
   const { t } = useLingui();
-  const moves = builds && version !== current;
+  // A revoked version can't be made current again: core refuses it.
+  const moves =
+    builds && version !== current && (release?.revokedAt ?? null) === null;
   if (!moves && release === undefined) {
     return null;
   }
@@ -209,6 +211,7 @@ export const VersionsView = ({
   versions,
   releases,
   next,
+  more = false,
   onMore,
   onRelease,
 }: {
@@ -219,6 +222,8 @@ export const VersionsView = ({
   releases: ReadonlyMap<number, AppRelease>;
   /** Where an older page starts; null once every version is listed. */
   next: number | null;
+  /** An older page is being read. */
+  more?: boolean;
   onMore: () => void;
   /** A release as core answered a change to it. */
   onRelease: (release: AppRelease) => void;
@@ -334,7 +339,7 @@ export const VersionsView = ({
       </div>
       {next === null ? null : (
         <div>
-          <Button onClick={onMore} size="sm" variant="outline">
+          <Button disabled={more} onClick={onMore} size="sm" variant="outline">
             <Trans>Show older versions</Trans>
           </Button>
         </div>
@@ -367,7 +372,8 @@ export const VersionsView = ({
 
 /**
  * The releases of a page of the App's versions, from before `before`, for
- * an admin; none for anyone else, or when core refuses.
+ * an admin; none for anyone else. A refusal stays one: unknown releases
+ * aren't shown as none.
  */
 const releasesOf = async (
   core: Pick<CoreConnection, "withSession">,
@@ -375,16 +381,15 @@ const releasesOf = async (
   admin: boolean,
   before: number | undefined,
   left?: AbortSignal
-): Promise<AppRelease[]> => {
+): Promise<Loaded<AppRelease[]>> => {
   if (!admin) {
-    return [];
+    return { state: "ready", data: [] };
   }
-  const loaded = await loadFromCore(
+  return await loadFromCore(
     core,
     async (session) => await session.apps.versions.releases(app, before),
     left
   );
-  return loaded.state === "ready" ? loaded.data : [];
 };
 
 /** The domain's versions, read when its tab opens, a page at a time. */
@@ -397,6 +402,9 @@ export const AppVersions = ({
 }) => {
   const core = useCore();
   const [pages, setPages] = useState<Loaded<AppVersion[]>[]>([]);
+  // The releases' reads, a page at a time, kept to show one that failed.
+  const [releaseReads, setReleaseReads] = useState<Loaded<AppRelease[]>[]>([]);
+  const [reading, setReading] = useState(false);
   const [releases, setReleases] = useState<ReadonlyMap<number, AppRelease>>(
     new Map()
   );
@@ -425,8 +433,14 @@ export const AppVersions = ({
       ]);
       if (!left.signal.aborted) {
         setPages([loaded]);
+        setReleaseReads([found]);
         setReleases(
-          new Map(found.map((release) => [release.version, release]))
+          new Map(
+            (found.state === "ready" ? found.data : []).map((release) => [
+              release.version,
+              release,
+            ])
+          )
         );
       }
     };
@@ -440,8 +454,10 @@ export const AppVersions = ({
   if (first === undefined) {
     return <LoadingLines lines={3} />;
   }
-  if (pages.some((page) => page.state !== "ready")) {
-    const failed = pages.find((page) => page.state !== "ready") ?? first;
+  const failed = [...pages, ...releaseReads].find(
+    (page) => page.state !== "ready"
+  );
+  if (failed !== undefined) {
     return <NotLoaded page={failed} />;
   }
   const versions = pages.flatMap((page) =>
@@ -451,9 +467,11 @@ export const AppVersions = ({
   const oldest = versions.at(-1)?.version ?? null;
   const full = last?.state === "ready" && last.data.length === pageSize;
   const more = async (): Promise<void> => {
-    if (oldest === null) {
+    // One older page at a time: a second click would read the same one.
+    if (oldest === null || reading) {
       return;
     }
+    setReading(true);
     const [loaded, read] = await Promise.all([
       loadFromCore(
         core,
@@ -462,12 +480,17 @@ export const AppVersions = ({
       releasesOf(core, app.id, admin, oldest),
     ]);
     setPages((held) => [...held, loaded]);
-    keep(read);
+    setReleaseReads((held) => [...held, read]);
+    if (read.state === "ready") {
+      keep(read.data);
+    }
+    setReading(false);
   };
   return (
     <VersionsView
       app={app}
       identity={identity}
+      more={reading}
       next={full ? oldest : null}
       onMore={() => {
         void more();

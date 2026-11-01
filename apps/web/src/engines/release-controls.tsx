@@ -200,7 +200,9 @@ export const ReleaseDialog = ({
   return (
     <Dialog
       onOpenChange={(open) => {
-        if (!open) {
+        // Not while core is answering: its answer closes this dialog, and
+        // would close the next one opened meanwhile.
+        if (!open && !busy) {
           onClose();
         }
       }}

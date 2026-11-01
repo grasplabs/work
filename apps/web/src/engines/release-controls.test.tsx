@@ -361,6 +361,39 @@ describe("A domain's releases, revoked or held, for its admins", () => {
     });
   });
 
+  it("offers no rollback to a version once it is revoked", async () => {
+    const { session } = fakeVersions();
+    await shown(session, person("admin"));
+
+    const before = await menuOf(1);
+    await press(menuItem("Revoke this version"));
+    await type("Why", "It leaks the customer list.");
+    await press(button("Revoke"));
+
+    expect({ before, after: await menuOf(1) }).toStrictEqual({
+      before: [
+        "Roll back to this version",
+        "Revoke this version",
+        "Place a legal hold",
+      ],
+      after: ["Place a legal hold"],
+    });
+  });
+
+  it("says so when the releases can't be read, rather than showing none revoked or held", async () => {
+    const { session } = fakeVersions();
+    session.apps.versions.releases = async (): Promise<AppRelease[]> => {
+      await Promise.resolve();
+      throw new Error("Grasp couldn't read the releases.");
+    };
+    await shown(session, person("admin"));
+
+    expect({
+      listed: listed(),
+      actions: button("Actions for version 1"),
+    }).toStrictEqual({ listed: [], actions: undefined });
+  });
+
   it("offers none of it to a builder who isn't an admin, or to Grasp staff", async () => {
     const seen = {
       builder: await seenBy(person("builder")),
