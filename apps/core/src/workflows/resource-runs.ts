@@ -45,6 +45,7 @@ import {
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
   storedEvent,
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
@@ -331,7 +332,9 @@ export const settleControl = async (
   env: Env,
   run: RunRow,
   control: Pick<ResourceControlRow, "id" | "kind" | "principalId">,
-  state: "applied" | "superseded"
+  state: "applied" | "superseded",
+  /** What else settling it records, once, with its own event. */
+  also?: AuditEntry
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const entry = runEntry(run, `workflow.run.control_${state}`);
@@ -359,6 +362,10 @@ export const settleControl = async (
       ),
     // Stored only if the update just before it changed the row.
     outboxedEventWhere(db, event, sql`changes() > 0`),
+    // And what else it records, with it, once.
+    ...(also === undefined
+      ? []
+      : [outboxedWhere(db, also, storedEvent(event.id))]),
     db
       .update(workflowResourceRuns)
       .set({
@@ -381,8 +388,9 @@ export const settleControl = async (
  * receipt asked its stop, `superseded` when it ended otherwise first (on
  * its own, or by a builder's terminate before the receipt's stop went
  * out); a pause or resume still admitted, overtaken by the end. A run
- * that hasn't ended settles none. What a cancel asked of the engine was
- * audited as it asked (`applyCancel`).
+ * that hasn't ended settles none. A cancel applied is audited as the
+ * screen's termination now, once, with its receipt: only a stop the engine
+ * took and that ended the run is recorded as one (`applyCancel`).
  */
 const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   if (unended.includes(row.status)) {
@@ -400,12 +408,32 @@ const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   for (const control of admitted) {
     // Applied only when it was cancelled and this receipt's stop was
     // asked: one a builder's terminate, say, ended first is superseded.
+    // A stop core asks never rolls back (engine.ts terminates with
+    // `rollback: false`), so one it took ends the run cancelled; a run
+    // that failed in a compensation was rolled back by something else.
     const applied =
       control.kind === "cancel" &&
       row.status === "cancelled" &&
       control.stopRequestedAt !== null;
+    const entry = runEntry(row, "workflow.run.terminated");
     // oxlint-disable-next-line no-await-in-loop -- one run's, a few
-    await settleControl(env, row, control, applied ? "applied" : "superseded");
+    await settleControl(
+      env,
+      row,
+      control,
+      applied ? "applied" : "superseded",
+      applied
+        ? {
+            ...entry,
+            actor: {
+              type: "app",
+              appId: appIdSchema.parse(control.appId),
+              part: "screen",
+            },
+            detail: { ...entry.detail, onBehalfOf: control.principalId },
+          }
+        : undefined
+    );
   }
 };
 
@@ -1620,7 +1648,7 @@ const stopResourceRun = async (
    * its receipt settles (`settleCancels`), however often it is applied.
    */
   audited = true
-): Promise<void> => {
+): Promise<"taken" | "rolling_back"> => {
   if (
     row.status === "starting" &&
     (await cancelStarting(env, actor, row, audited))
@@ -1634,12 +1662,12 @@ const stopResourceRun = async (
         ...errorFields(error),
       });
     }
-    return;
+    return "taken";
   }
   // A run rolling back isn't cut short (spec 10.7.3): nothing was
   // terminated, so nothing is audited as terminated.
   if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
-    throw workflowErrors.create("workflow.control_refused");
+    return "rolling_back";
   }
   // The engine took the terminate: audited below whatever this lookup
   // does, the row left to the end's notification if it can't be read.
@@ -1670,7 +1698,7 @@ const stopResourceRun = async (
     });
   }
   if (!audited) {
-    return;
+    return "taken";
   }
   const now = await runOf(env, row.id);
   // Whoever asked, whatever the row took: the engine tells the run's
@@ -1680,6 +1708,22 @@ const stopResourceRun = async (
   await auditedBatch(env, db, [
     outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
   ]);
+  return "taken";
+};
+
+/**
+ * Stops run `row` as `stopResourceRun` does, refusing
+ * (`workflow.control_refused`) a run the engine is rolling back: a
+ * builder's stop or an archive's, which aren't left for a repair.
+ */
+const stopOrRefuse = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow
+): Promise<void> => {
+  if ((await stopResourceRun(env, actor, row)) === "rolling_back") {
+    throw workflowErrors.create("workflow.control_refused");
+  }
 };
 
 /**
@@ -1748,7 +1792,7 @@ export const stopRunsStartedBy = async (
         return false;
       }
       try {
-        await stopResourceRun(env, actor, run);
+        await stopOrRefuse(env, actor, run);
         return false;
       } catch (error) {
         log.error("workflow.archive_stop_failed", {
@@ -1827,34 +1871,30 @@ export const applyCancel = async (
 ): Promise<void> => {
   const before = await runOf(env, runId);
   if (before !== undefined && unended.includes(before.status)) {
-    // The stop it asks for audited once, as it is first asked, whichever
-    // request or repair asks it: under the App's screen, naming the person
-    // who asked (`onBehalfOf`). A run that ended on its own first, before
-    // any stop went out, is audited as nothing of the screen's.
-    const db = drizzle(env.DB);
-    const entry = runEntry(before, "workflow.run.terminated");
     const actor: AuditActor = {
       type: "app",
       appId: appIdSchema.parse(receipt.appId),
       part: "screen",
     };
-    await auditedBatch(env, db, [
-      db
-        .update(workflowResourceRunControls)
-        .set({ stopRequestedAt: new Date() })
-        .where(
-          and(
-            eq(workflowResourceRunControls.id, receipt.id),
-            eq(workflowResourceRunControls.state, "admitted"),
-            isNull(workflowResourceRunControls.stopRequestedAt)
-          )
-        ),
-      outboxedIfChanged(db, {
-        ...entry,
-        actor,
-        detail: { ...entry.detail, onBehalfOf: receipt.principalId },
-      }),
-    ]);
+    // Noted as asked before the engine is, so the run's end, which the
+    // engine may tell before this call goes on, finds the receipt asked
+    // and settles it applied (`settleCancels`), audited then, once.
+    const asked = new Date();
+    const db = drizzle(env.DB);
+    await db
+      .update(workflowResourceRunControls)
+      .set({ stopRequestedAt: asked })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, receipt.id),
+          eq(workflowResourceRunControls.state, "admitted"),
+          isNull(workflowResourceRunControls.stopRequestedAt)
+        )
+      );
+    // A run the engine rolls back isn't cut short (spec 10.7.3), though the
+    // cancel was admitted on what the engine said before its rollback
+    // began: nothing is recorded as terminated now, and the run's end
+    // settles the receipt, superseded unless it ended cancelled.
     await stopResourceRun(env, actor, before, false);
   }
   const after = await runOf(env, runId);
@@ -2121,6 +2161,6 @@ export const terminateResourceRun = async (
   if (!unended.includes(row.status)) {
     throw workflowResourceErrors.create("workflow.run_ended");
   }
-  await stopResourceRun(env, actorOf(by), row);
+  await stopOrRefuse(env, actorOf(by), row);
   return await resourceRunFor(env, by, workflow.id, row.id);
 };
