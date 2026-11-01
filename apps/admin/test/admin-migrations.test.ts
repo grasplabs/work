@@ -1,7 +1,6 @@
 import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { signInApps } from "../src/deploy/context.ts";
@@ -112,7 +111,7 @@ describe("the admin's migrations, on rows", () => {
 
   it("drop every client's saved settings with their table, so a client that had them still deploys with only what the admin derives", async () => {
     const db = migrationDb();
-    const { before, it: dropSettings } = upTo("0043_drop_client_settings.sql");
+    const { before, it: dropSettings } = upTo("0044_drop_client_settings.sql");
     await applyD1Migrations(db, before);
     const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
     const signIn = JSON.stringify({
@@ -162,12 +161,7 @@ describe("the admin's migrations, on rows", () => {
       release: "26.01.100000001",
       at: new Date(now).toISOString(),
     } as const;
-    const vars = await configuredCoreVars(
-      drizzle(db),
-      clientId,
-      derived,
-      change
-    );
+    const vars = configuredCoreVars(clientId, derived, change);
     const tables = await db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
@@ -182,7 +176,6 @@ describe("the admin's migrations, on rows", () => {
       names: [
         "CLIENT_ID",
         "MAIL_FROM",
-        "PLATFORM_AI",
         "PLATFORM_CHANGE",
         "RUNTIME_PROFILE",
         "SIGN_IN",
