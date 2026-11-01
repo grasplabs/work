@@ -6,8 +6,10 @@ import {
   purgeAttemptLeaseMs,
   purgeStatus,
   runStep,
+  stillHeld,
   whileHeld,
 } from "@grasp-os/brain/purge-ledger";
+import { collections } from "@grasp-os/brain/schema";
 import {
   owedWritesDoneWhile,
   rebuildOwedWhile,
@@ -21,6 +23,7 @@ import {
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -999,6 +1002,22 @@ const stateOf = (status: {
     ])
   );
 
+/** How many collections have id `id`: one, or none. */
+const collectionsWithId = async (id: string) => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS n FROM collections WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ n: number }>();
+  return row?.n;
+};
+
+/** What step `step` of a purge's status counted. */
+const stepCounts = (
+  status: { steps: readonly { step: string; counts: unknown }[] },
+  step: string
+) => status.steps.find((each) => each.step === step)?.counts;
+
 describe("a purge's record", setUpTime, () => {
   // GRA-1122 (GRA-309's S1; the threat model is on the issue): each purge
   // is a durable erasure, one step per projection it reaches. The ways it
@@ -1347,6 +1366,234 @@ describe("a purge's record", setUpTime, () => {
       old: { state: "superseded", supersededBy: fresh.purgeId },
       oldSearch: "blocked: knowledge.purge_index_pending",
       now: "complete",
+    });
+  });
+
+  it("refuses to begin a purge fresh while a run holds it, and a run that lost it deletes nothing", async () => {
+    const admin = await personOf("admin");
+    let now = Date.now();
+    const real = brainOf(env);
+    const brain = {
+      ...real,
+      ports: { ...real.ports, clock: () => new Date(now) },
+    };
+    const db = drizzle(env.KNOWLEDGE);
+    const by = {
+      actor: { type: "person", userId: admin.userId },
+      userId: admin.userId,
+    };
+    const input = {
+      type: "content" as const,
+      documentIds: [documentIdSchema.parse(crypto.randomUUID())],
+      terms: [`term${unique()}`],
+      reason: "other" as const,
+    };
+    const open = async (fresh: boolean) =>
+      await openPurge(
+        brain,
+        by,
+        input,
+        ["records"],
+        {},
+        () => [],
+        () => [],
+        fresh
+      );
+    const created = async (name: string) =>
+      await admin.api.knowledge.createCollection({ name, access: "everyone" });
+    const gone = await created("Gone");
+    const kept = await created("Kept");
+    /** A data batch of the step: deletes collection `id`, guarded. */
+    const deleting = async (held: typeof running, id: string) => {
+      await db.batch([
+        stillHeld(brain, held),
+        db.delete(collections).where(eq(collections.id, id)),
+      ]);
+    };
+    const running = await open(false);
+    const whileRunning = await outcome(open(true));
+    let replacement = "";
+    const late = await outcome(
+      runStep(brain, running, "records", async () => {
+        // While it holds the purge, its batch deletes.
+        await deleting(running, gone.id);
+        // Stalled past its lease mid-step; an admin begins it fresh.
+        now += purgeAttemptLeaseMs + 1000;
+        const replacing = await open(true);
+        replacement = replacing.purgeId;
+        // The stalled run's next batch.
+        await deleting(running, kept.id);
+      })
+    );
+
+    expect({
+      whileRunning,
+      late,
+      replaced: replacement !== running.purgeId,
+      gone: await collectionsWithId(gone.id),
+      kept: await collectionsWithId(kept.id),
+    }).toStrictEqual({
+      whileRunning: "knowledge.conflict",
+      late: "knowledge.conflict",
+      replaced: true,
+      gone: 0,
+      kept: 1,
+    });
+  });
+
+  it("keeps what each committed batch of a step counted when the step then fails, and adds a run again's", async () => {
+    const admin = await personOf("admin");
+    const brain = brainOf(env);
+    const by = {
+      actor: { type: "person", userId: admin.userId },
+      userId: admin.userId,
+    };
+    const input = {
+      type: "content" as const,
+      documentIds: [documentIdSchema.parse(crypto.randomUUID())],
+      terms: [`term${unique()}`],
+      reason: "other" as const,
+    };
+    const open = async () =>
+      await openPurge(
+        brain,
+        by,
+        input,
+        ["versions"],
+        {},
+        () => [],
+        () => []
+      );
+    const first = await open();
+    const failed = await outcome(
+      runStep(brain, first, "versions", async (save) => {
+        // A page of versions rewritten, its count with it; the next fails.
+        await brain.db.batch([save({ versions: 5 })]);
+        throw new Error("D1 is unavailable");
+      })
+    );
+    const blocked = await purgeStatus(brain, first.purgeId);
+    const again = await open();
+    const total = await runStep(brain, again, "versions", async (save) => {
+      await brain.db.batch([save({ versions: 2 })]);
+      return { versions: 2 };
+    });
+
+    expect({
+      failed,
+      blocked: blocked.steps.map(({ state, counts }) => ({ state, counts })),
+      total,
+    }).toStrictEqual({
+      failed: "Error: D1 is unavailable",
+      blocked: [{ state: "blocked", counts: { versions: 5 } }],
+      total: { versions: 7 },
+    });
+  });
+
+  it("counts what each step changed, and a person's documents across runs", async () => {
+    const admin = await personOf("admin");
+    const secret = `jansen${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    await rememberAs(admin, `${secret.toUpperCase()}!`);
+    const content = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    });
+    const contentStatus = await admin.api.knowledge.purgeStatus(
+      content.result.purgeId
+    );
+    const { leaver } = await leaverWith({ "notes.md": "# Notes\nOne." });
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const { token } = await admin.api.knowledge.preparePurge(input);
+    await outcome(failing.knowledge.purge(input, token));
+    // Written before the run again, in a Personal collection made anew:
+    // it goes too, and counts.
+    const agent = newAgent();
+    await saveUserMemory(
+      env,
+      actingFor(agent, leaver.userId),
+      await newChat(agent),
+      { type: "own" },
+      { text: "# About me\nTwo.", ifVersion: 0 }
+    );
+    const person = await purged(admin, input);
+    const personStatus = await admin.api.knowledge.purgeStatus(
+      person.result.purgeId
+    );
+    expect({
+      statements: stepCounts(contentStatus, "statements"),
+      document: stepCounts(contentStatus, `document:${document.id}`),
+      records: stepCounts(personStatus, "records"),
+      result: {
+        documents: person.result.documents,
+        versions: person.result.versions,
+      },
+    }).toStrictEqual({
+      statements: { redacted: 0, deleted: 1 },
+      document: { documents: 1, versions: 1 },
+      records: { documents: 2, versions: 2 },
+      result: { documents: 2, versions: 2 },
+    });
+  });
+
+  it("finishes an unfinished purge run again whose document another purge deleted meanwhile", async () => {
+    const admin = await personOf("admin");
+    const secret = `meijer${unique()}`;
+    const { leaver, personal } = await leaverWith({});
+    const named = await saveOver(
+      leaver,
+      personal,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [named.id],
+      terms: [secret],
+      reason: "other",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const first = await admin.api.knowledge.preparePurge(input);
+    await outcome(failing.knowledge.purge(input, first.token));
+    // The leaver's own purge deletes the document the first one names.
+    await purged(admin, {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    });
+    const resumed = await purged(admin, input);
+    const status = await admin.api.knowledge.purgeStatus(
+      resumed.result.purgeId
+    );
+    // Strict as ever for a purge not begun: the document is gone.
+    const other = await outcome(
+      admin.api.knowledge.preparePurge({ ...input, terms: [`${secret}x`] })
+    );
+
+    expect({
+      state: status.state,
+      step: stateOf(status)[`document:${named.id}`],
+      other,
+    }).toStrictEqual({
+      state: "complete",
+      step: "complete",
+      other: "knowledge.not_found",
     });
   });
 

@@ -55,7 +55,9 @@ import {
   finishPurge,
   keepHold,
   openPurge,
+  purgeUnfinished,
   runStep,
+  stillHeld,
   whileHeld,
 } from "./purge-ledger.ts";
 import type { StepCounts } from "./purge-ledger.ts";
@@ -552,12 +554,15 @@ const purgePersonal = async <C>(
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
+  // What the records step deleted, over every run of it (purge-ledger.ts).
+  let deleted: StepCounts = {};
   try {
     await runStep(brain, open, "host_files", async () => {
       await onErase.forgetFiles(by, { collectionId });
     });
-    await runStep(brain, open, "records", async () => {
-      const [first, ...rest]: BatchItem<"sqlite">[] = [
+    deleted = await runStep(brain, open, "records", async (save) => {
+      const writes: BatchItem<"sqlite">[] = [
+        save({ ...counts }),
         ...(plan.kind === "keys"
           ? [
               rebuildOwedIfChanged(
@@ -583,9 +588,9 @@ const purgePersonal = async <C>(
         ...released.after,
         ...forgetPerson(db, input.userId, brain.ports.clock()),
       ];
-      if (first !== undefined) {
-        await db.batch([first, ...rest]);
-      }
+      // Nothing of it, unless this run still holds the purge.
+      await db.batch([stillHeld(brain, open), ...writes]);
+      return { ...counts };
     });
   } finally {
     // A rebuild from now on covers this purge's writes, also when they
@@ -609,8 +614,8 @@ const purgePersonal = async <C>(
   await finishPurge(brain, open);
   return {
     purgeId,
-    documents: open.counts.documents ?? 0,
-    versions: open.counts.versions ?? 0,
+    documents: deleted.documents ?? 0,
+    versions: deleted.versions ?? 0,
   };
 };
 
@@ -1104,7 +1109,13 @@ interface Named {
  */
 const documentsNamed = async (
   db: DrizzleD1Database,
-  { documentIds }: ContentPurge
+  { documentIds }: ContentPurge,
+  /**
+   * The purge was begun and isn't finished: a document named that is gone
+   * since (another purge deleted it) has nothing left to erase, and is
+   * left out, so the purge can go on and finish.
+   */
+  begun = false
 ): Promise<Named[]> => {
   const found = await db
     .select({ document: documents, collection: collections })
@@ -1114,7 +1125,7 @@ const documentsNamed = async (
     .orderBy(asc(documents.id));
   const existing = new Set(found.map(({ document }) => document.id));
   const missing = documentIds.filter((id) => !existing.has(id));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !begun) {
     throw knowledgeErrors.create("knowledge.not_found", {
       documentIds: missing,
     });
@@ -1299,7 +1310,9 @@ const repointVersions = async <C>(
     number: number;
     changed: { text: string; message: string | null; unreadable: boolean };
   }[],
-  actor: Json
+  actor: Json,
+  /** What its batch carries besides (the purge's hold, its count). */
+  also: readonly BatchItem<"sqlite">[] = []
 ): Promise<void> => {
   const stage = async () =>
     await Promise.all(
@@ -1355,6 +1368,7 @@ const repointVersions = async <C>(
       ...updates,
       ...released.after,
       ...replaced,
+      ...also,
     ]);
   };
   // A payload it reuses can be let go of and collected before the batch
@@ -1391,7 +1405,9 @@ const rewriteVersions = async <C>(
   /** Who the purge is by, to write; only counted without. */
   write?: Json,
   /** Awaited before each page after the first: the purge renews its hold. */
-  keep?: () => Promise<void>
+  keep?: () => Promise<void>,
+  /** What each page's batch carries besides, given how many it changed so far. */
+  also: (changedSoFar: number) => BatchItem<"sqlite">[] = () => []
 ): Promise<{
   changed: number;
   removed: number;
@@ -1461,7 +1477,14 @@ const rewriteVersions = async <C>(
     changedVersions += changes.length;
     if (write !== undefined && changes.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
-      await repointVersions(brain, db, document, changes, write);
+      await repointVersions(
+        brain,
+        db,
+        document,
+        changes,
+        write,
+        also(changedVersions)
+      );
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
@@ -1557,7 +1580,12 @@ const purgeDocument = async <C>(
   onErase: OnErase,
   purgeId: string,
   /** Renews the purge's hold between pages of versions (`keepHold`). */
-  keep: () => Promise<void>
+  keep: () => Promise<void>,
+  /**
+   * What each of its batches carries besides: given what it changed with
+   * it, in all, so far (the purge's hold on its step, and its count).
+   */
+  also: (soFar: Counts) => BatchItem<"sqlite">[]
 ): Promise<Counts> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
@@ -1572,7 +1600,8 @@ const purgeDocument = async <C>(
     at - 1,
     matcher,
     actor,
-    keep
+    keep,
+    (changed) => also({ documents: 1, versions: changed })
   );
   const current = await versionOf(brain, db, document, at);
   const changed = current && purgeChangeOf(current, matcher);
@@ -1598,6 +1627,7 @@ const purgeDocument = async <C>(
         target: { type: "document", id: document.id },
         detail: { purgeId, version: transcript.version },
       }),
+      ...also(counts),
     ]);
   }
   if (current === undefined || changedVersions === 0) {
@@ -1636,6 +1666,8 @@ const purgeDocument = async <C>(
             ? [outboxed(brain, replacedEntry(actor, document, at))]
             : []),
         ];
+  // The version it saves carries the document's count, in all.
+  pointCurrent.push(...also(counts));
   await writeVersion(brain, by, {
     collection,
     path: document.path,
@@ -1765,7 +1797,11 @@ const purgeContent = async <C>(
   fresh: boolean
 ): Promise<PurgeResult> => {
   const { db } = brain;
-  const named = await documentsNamed(db, input);
+  const named = await documentsNamed(
+    db,
+    input,
+    await purgeUnfinished(brain, input)
+  );
   const matcher = matcherOf(input.terms, { countLeft: false });
   // Read before anything changes: whether a term is part of a longer
   // token anywhere, so the index needs rebuilding, is recorded with the
@@ -1795,7 +1831,9 @@ const purgeContent = async <C>(
     brain,
     by,
     input,
-    contentSteps(scope.documentIds),
+    // Every document named, those gone since a run before too: their
+    // steps finish with nothing to erase.
+    contentSteps(input.documentIds),
     { documents: named.length },
     (id) => [
       outboxed(
@@ -1823,11 +1861,19 @@ const purgeContent = async <C>(
     // The Brain's records hold people's words too, everyone's, whatever
     // documents the purge names: before its documents, so one whose purge
     // fails doesn't leave them holding a term.
-    await runStep(brain, held, "statements", async () => {
-      await eraseStatements(brain, by.actor, purgeId, (statement) =>
-        erasedStatement(statement, matcher)
-      );
-    });
+    await runStep(
+      brain,
+      held,
+      "statements",
+      async (save) =>
+        await eraseStatements(
+          brain,
+          by.actor,
+          purgeId,
+          (statement) => erasedStatement(statement, matcher),
+          (soFar) => [stillHeld(brain, held), save(soFar)]
+        )
+    );
     // The host's copies hold people's words too: every one is rewritten,
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
@@ -1853,26 +1899,32 @@ const purgeContent = async <C>(
         }))
       );
     });
-    for (const one of named) {
+    for (const documentId of input.documentIds) {
+      const one = named.find(({ document }) => document.id === documentId);
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       const counts = await runStep(
         brain,
         held,
-        documentStep(one.document.id),
-        async () => ({
-          ...(await purgeDocument(
-            brain,
-            db,
-            by,
-            one,
-            matcher,
-            onErase,
-            purgeId,
-            async () => {
-              await keepHold(brain, held);
-            }
-          )),
-        })
+        documentStep(documentId),
+        async (save) =>
+          // Gone since a run before: nothing of it is left to erase.
+          one === undefined
+            ? {}
+            : {
+                ...(await purgeDocument(
+                  brain,
+                  db,
+                  by,
+                  one,
+                  matcher,
+                  onErase,
+                  purgeId,
+                  async () => {
+                    await keepHold(brain, held);
+                  },
+                  (soFar) => [stillHeld(brain, held), save({ ...soFar })]
+                )),
+              }
       );
       done.push(counts);
     }
@@ -1970,7 +2022,11 @@ export const preparePurge = async <C>(
         ? 0
         : await onErase.countFiles([{ collectionId: scope.collectionId }]);
   } else {
-    const named = await documentsNamed(db, parsed);
+    const named = await documentsNamed(
+      db,
+      parsed,
+      await purgeUnfinished(brain, parsed)
+    );
     originals = await onErase.countFiles(
       named.map(({ document }) => filesNamed(document))
     );

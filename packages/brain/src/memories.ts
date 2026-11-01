@@ -262,6 +262,14 @@ const recordsPerScanPage = 200;
  */
 const recordsPerEraseBatch = 50;
 
+/** How many of `changes` redact a record, and how many delete one. */
+const erasedCounts = (
+  changes: readonly { now: string | null }[]
+): { redacted: number; deleted: number } => {
+  const deleted = changes.filter(({ now }) => now === null).length;
+  return { redacted: changes.length - deleted, deleted };
+};
+
 interface StatementRow {
   id: string;
   revision: number;
@@ -338,7 +346,15 @@ export const eraseStatements = async <C>(
   brain: Brain<C>,
   actor: Json,
   purgeId: string,
-  erase: (statement: string) => string | null
+  erase: (statement: string) => string | null,
+  /**
+   * What each batch carries besides: given what was changed with it, in
+   * all, so far (a purge's hold on its step, and its count).
+   */
+  also: (soFar: {
+    redacted: number;
+    deleted: number;
+  }) => BatchItem<"sqlite">[] = () => []
 ): Promise<{ redacted: number; deleted: number }> => {
   const { db } = brain;
   const changes: { id: string; revision: number; now: string | null }[] = [];
@@ -406,16 +422,18 @@ export const eraseStatements = async <C>(
     ] as const;
   };
   for (let at = 0; at < changes.length; at += recordsPerEraseBatch) {
-    const [first, ...rest] = changes
-      .slice(at, at + recordsPerEraseBatch)
-      .flatMap(write);
+    const batch = changes.slice(at, at + recordsPerEraseBatch);
+    const [first, ...rest] = batch.flatMap(write);
     if (first !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await auditedBatch(brain.ports, db, [first, ...rest]);
+      await auditedBatch(brain.ports, db, [
+        first,
+        ...rest,
+        ...also(erasedCounts(changes.slice(0, at + batch.length))),
+      ]);
     }
   }
-  const deleted = changes.filter(({ now }) => now === null).length;
-  return { redacted: changes.length - deleted, deleted };
+  return erasedCounts(changes);
 };
 
 /**
