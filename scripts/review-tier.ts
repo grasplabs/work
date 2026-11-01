@@ -34,10 +34,10 @@ export interface Assessment {
 }
 
 /** Written by tools, reviewed through what generates them. */
-export const generated =
+const generated =
   /(?:^|\/)(?:pnpm-lock\.yaml|worker-configuration\.d\.ts|routeTree\.gen\.ts|messages\.po|catalog\.d\.ts)$|\/migrations\/meta\/|^scripts\/(?:test|e2e)-durations\.json$/u;
 
-export const testFile = /\.(?:test|e2e)\.tsx?$|(?:^|\/)(?:test|e2e)\//u;
+const testFile = /\.(?:test|e2e)\.tsx?$|(?:^|\/)(?:test|e2e)\//u;
 
 /**
  * Where a change is a security change whatever it does: sign-in, and what
@@ -52,9 +52,9 @@ const securityPaths: readonly RegExp[] = [
   /^\.secretlintrc\.json$/u,
   // What's installed, and what may run while installing (`allowBuilds`).
   /^(?:pnpm-workspace\.yaml|pnpm-lock\.yaml|\.npmrc)$/u,
-  // This classifier and the model's: a PR that weakens one is classified
-  // by main's copy, which this rule makes Security.
-  /^scripts\/review-tier(?:-model)?\.ts$/u,
+  // This classifier: a PR that weakens it is classified by main's copy,
+  // which this rule makes Security.
+  /^scripts\/review-tier\.ts$/u,
 ];
 
 /**
