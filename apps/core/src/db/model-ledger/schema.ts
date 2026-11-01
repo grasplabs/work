@@ -68,19 +68,10 @@ export const requests = sqliteTable(
     }).notNull(),
     /**
      * How it settled: by its usage, by what it used until it was cut off,
-     * refused, never sent, or in full; or as a person decided a held
-     * request, released or charged.
+     * refused, never sent, or in full.
      */
     settledBy: text("settled_by", {
-      enum: [
-        "usage",
-        "cut",
-        "refused",
-        "unsent",
-        "reconciled",
-        "released",
-        "charged",
-      ],
+      enum: ["usage", "cut", "refused", "unsent", "reconciled"],
     }),
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),
@@ -224,10 +215,9 @@ export const requestScopes = sqliteTable(
      * The spend period it reserved against: the request's month, or
      * `lineage` for a run lineage (model-ledger.ts). The request settles,
      * is rebuilt and is summed against exactly this, never one worked out
-     * again later. Null for a request admitted before it was recorded,
-     * which reserved every scope under its own month (`requests.period`).
+     * again later.
      */
-    period: text(),
+    period: text().notNull(),
     /** The most requests its scope may admit, when admitted; null for none. */
     limitRequests: integer("limit_requests"),
     /**
@@ -235,10 +225,9 @@ export const requestScopes = sqliteTable(
      * reservation, or none where it holds no money (model-ledger.ts,
      * `holdsMoney`). It settles, is rebuilt and is summed by exactly this,
      * never by a rule worked out again later, so a change of rule never
-     * strands money. Null for a request admitted before it was recorded,
-     * which reserved its whole reservation on every scope.
+     * strands money.
      */
-    reservedMicros: integer("reserved_micros"),
+    reservedMicros: integer("reserved_micros").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),

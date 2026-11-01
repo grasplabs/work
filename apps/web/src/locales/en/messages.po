@@ -1627,10 +1627,6 @@ msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision
 msgid "{total, plural, one {# person} other {# people}}"
 msgstr "{total, plural, one {# person} other {# people}}"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
-msgstr "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
-
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} of {total} not interviewed yet"
@@ -2694,10 +2690,6 @@ msgstr "Almost done: is this your organization?"
 #: src/onboarding/setup-frame.tsx
 msgid "Almost there"
 msgstr "Almost there"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Already decided: {model}"
-msgstr "Already decided: {model}"
 
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
@@ -4035,14 +4027,6 @@ msgstr "Changes the domain's data"
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Changes to the domain's stores"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge"
-msgstr "Charge"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge {amount} for this model call?"
-msgstr "Charge {amount} for this model call?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -6792,10 +6776,6 @@ msgstr "Heard from enough people"
 msgid "Held by"
 msgstr "Held by"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Held for review"
-msgstr "Held for review"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hello"
@@ -7336,10 +7316,6 @@ msgstr "it answered something that isn't its records"
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "It can be sent once more, exactly as before. Nothing is undone."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
-msgstr "It counts against the budgets as spent: the most it could have cost. This can't be undone."
-
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "It declares no tasks."
@@ -7404,10 +7380,6 @@ msgstr "It has recorded no step yet."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It is no longer held."
-msgstr "It is no longer held."
-
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "It is not one of these"
@@ -7431,10 +7403,6 @@ msgstr "It knows who leads which team, so I can talk to the leads first. We conn
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "It may have been renamed or removed."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
-msgstr "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -7495,14 +7463,6 @@ msgstr "It waits on your role, {role}, since {since}."
 #: src/workflows/today-lanes.tsx
 msgid "It waits on your team, {team}, since {since}."
 msgstr "It waits on your team, {team}, since {since}."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was charged {amount} on {when}."
-msgstr "It was charged {amount} on {when}."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was released on {when}, charging nothing."
-msgstr "It was released on {when}, charging nothing."
 
 #: src/workflows/today-lanes.tsx
 msgid "It went through no other workflow today."
@@ -9070,10 +9030,6 @@ msgstr "No link yet"
 msgid "No longer declared"
 msgstr "No longer declared"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "No longer held: {model}"
-msgstr "No longer held: {model}"
-
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "No longer runs {how}"
@@ -9818,10 +9774,6 @@ msgstr "Nothing here yet."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
 msgstr "Nothing is due while the plan is not running."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Nothing is held for review now."
-msgstr "Nothing is held for review now."
 
 #: src/onboarding/work-record.tsx
 msgid "Nothing is missing."
@@ -11566,14 +11518,6 @@ msgstr "Rejected: {rejected}"
 #: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Rejected: {who}."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release"
-msgstr "Release"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release the {amount} held for this model call?"
-msgstr "Release the {amount} held for this model call?"
 
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
@@ -15132,10 +15076,6 @@ msgstr "This month so far"
 msgid "This note can't be opened"
 msgstr "This note can't be opened"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
-msgstr "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
-
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
@@ -17481,10 +17421,6 @@ msgstr "Your company’s name in Grasp. An admin changes it."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
 msgstr "Your company’s VAT number, as invoices show it."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Your decision changed nothing."
-msgstr "Your decision changed nothing."
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

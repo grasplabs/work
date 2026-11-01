@@ -1627,10 +1627,6 @@ msgstr "{total, plural, one {Bei {withPerson} von # Lauf war die Entscheidung ei
 msgid "{total, plural, one {# person} other {# people}}"
 msgstr "{total, plural, one {# Person} other {# Personen}}"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
-msgstr "{total} ist für diese Modellaufrufe zurückgehalten, bis du entscheidest: was jeder hätte kosten können. Gib es frei oder berechne es vollständig."
-
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} von {total} noch nicht interviewt"
@@ -2694,10 +2690,6 @@ msgstr "Fast geschafft: Ist das Ihre Organisation?"
 #: src/onboarding/setup-frame.tsx
 msgid "Almost there"
 msgstr "Fast geschafft"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Already decided: {model}"
-msgstr "Bereits entschieden: {model}"
 
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
@@ -4035,14 +4027,6 @@ msgstr "Ändert die Daten der Domäne"
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Änderungen an den Speichern der Domäne"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge"
-msgstr "Berechnen"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Charge {amount} for this model call?"
-msgstr "{amount} für diesen Modellaufruf berechnen?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -6792,10 +6776,6 @@ msgstr "Von genug Menschen gehört"
 msgid "Held by"
 msgstr "Geführt von"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Held for review"
-msgstr "Zur Prüfung zurückgehalten"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hallo"
@@ -7336,10 +7316,6 @@ msgstr "sie hat etwas geantwortet, das nicht ihre Datensätze sind"
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "Es kann noch einmal gesendet werden, genau wie zuvor. Nichts wird rückgängig gemacht."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
-msgstr "Es zählt als ausgegeben gegen die Budgets: das Meiste, was es hätte kosten können. Das lässt sich nicht rückgängig machen."
-
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "Er deklariert keine Aufgaben."
@@ -7404,10 +7380,6 @@ msgstr "Er hat noch keinen Schritt aufgezeichnet."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Es ist endgültig weg und lässt sich nicht zurückholen. Das Audit-Protokoll hält fest, dass und von wem es entfernt wurde, nie, was es war."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "It is no longer held."
-msgstr "Er wird nicht mehr zurückgehalten."
-
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "Es ist keine davon"
@@ -7431,10 +7403,6 @@ msgstr "Sie weiß, wer welches Team leitet, damit ich zuerst mit den Teamleitung
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Es wurde vielleicht umbenannt oder entfernt."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
-msgstr "Es zählt nicht mehr gegen die Budgets, als hätte es nichts gekostet. Das lässt sich nicht rückgängig machen."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -7495,14 +7463,6 @@ msgstr "Es wartet seit {since} auf deine Rolle, {role}."
 #: src/workflows/today-lanes.tsx
 msgid "It waits on your team, {team}, since {since}."
 msgstr "Es wartet seit {since} auf dein Team, {team}."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was charged {amount} on {when}."
-msgstr "Am {when} wurden {amount} dafür berechnet."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "It was released on {when}, charging nothing."
-msgstr "Er wurde am {when} freigegeben, ohne Kosten."
 
 #: src/workflows/today-lanes.tsx
 msgid "It went through no other workflow today."
@@ -9070,10 +9030,6 @@ msgstr "Noch kein Link"
 msgid "No longer declared"
 msgstr "Nicht mehr deklariert"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "No longer held: {model}"
-msgstr "Nicht mehr zurückgehalten: {model}"
-
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Läuft nicht mehr {how}"
@@ -9818,10 +9774,6 @@ msgstr "Hier ist noch nichts."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
 msgstr "Solange der Tarif nicht läuft, ist nichts fällig."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Nothing is held for review now."
-msgstr "Derzeit wird nichts zur Prüfung zurückgehalten."
 
 #: src/onboarding/work-record.tsx
 msgid "Nothing is missing."
@@ -11566,14 +11518,6 @@ msgstr "Abgelehnt: {rejected}"
 #: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Abgelehnt: {who}."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release"
-msgstr "Freigeben"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Release the {amount} held for this model call?"
-msgstr "Die {amount} freigeben, die für diesen Modellaufruf zurückgehalten werden?"
 
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
@@ -15132,10 +15076,6 @@ msgstr "Bisher in diesem Monat"
 msgid "This note can't be opened"
 msgstr "Diese Notiz lässt sich nicht öffnen"
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
-msgstr "Dieser kann nur freigegeben werden: Ein Budgeteintrag, auf den er angerechnet wird, ist beschädigt, sodass eine Berechnung auf eine falsche Summe angerechnet würde. Wenden Sie sich an Grasp."
-
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
@@ -17481,10 +17421,6 @@ msgstr "Der Name Ihres Unternehmens in Grasp. Ein Admin ändert ihn."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
 msgstr "Die USt-IdNr. Ihres Unternehmens, wie sie auf Rechnungen steht."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Your decision changed nothing."
-msgstr "Ihre Entscheidung hat nichts geändert."
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

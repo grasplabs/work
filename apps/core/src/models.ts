@@ -124,7 +124,7 @@ import type { Judged, Refusal } from "./model-rules.ts";
 import {
   connectRequest,
   connectSocket,
-  connectTransport,
+  connectRoute,
 } from "./model-transport-connect.ts";
 import type { ConnectTarget } from "./model-transport-connect.ts";
 import { failureOfResponse, streamRoute } from "./model-transport.ts";
@@ -2730,8 +2730,7 @@ const connectRouting = async (
   target: ConnectTarget,
   fallbacks: readonly string[]
 ): Promise<Routing> => {
-  const transport = connectTransport(env, target);
-  const endpoint = transport.route(ref);
+  const endpoint = connectRoute(env, target, ref);
   if (endpoint === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
