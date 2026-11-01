@@ -10,7 +10,9 @@
  * are served from the root.
  *
  * The cron imports newly published releases (src/releases/import.ts),
- * each taken to Edge as it's saved (src/rollout/channels.ts), deploys each client
+ * each taken to Edge as it's saved (src/rollout/channels.ts), deletes the
+ * bundles of releases never promoted past Edge after 14 days
+ * (src/releases/retention.ts), deploys each client
  * whose Workers run something other than its target
  * (src/rollout/reconciler.ts), then resumes provisioning that isn't
  * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads
@@ -37,6 +39,7 @@ import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
+import { deleteExpiredBundles } from "./releases/retention.ts";
 import { reconcile } from "./rollout/reconciler.ts";
 
 export { AdminRuns } from "./run-object.ts";
@@ -69,6 +72,16 @@ export default {
       await importReleases(env.RELEASES, adminDatabase(env.DB));
     } catch (error) {
       log.error("releases.import_failed", { error: errorCode(error) });
+    }
+    // Bundles of releases never promoted past Edge go after 14 days.
+    try {
+      await deleteExpiredBundles(
+        adminDatabase(env.DB),
+        env.RELEASES,
+        new Date(controller.scheduledTime)
+      );
+    } catch (error) {
+      log.error("releases.retention_failed", { error: errorCode(error) });
     }
     // Each client to its target: Edge's new release among them.
     try {

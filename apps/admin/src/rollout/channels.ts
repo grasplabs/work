@@ -104,13 +104,16 @@ export const promotionHistory = async (
   });
 };
 
-/** Release `releaseId` refused unless the admin imported it. */
+/**
+ * Release `releaseId` refused unless the admin imported it and still has
+ * its bundle to deploy (src/releases/retention.ts).
+ */
 const assertDeployable = async (
   db: AdminDatabase,
   releaseId: string
 ): Promise<void> => {
   const release = await db
-    .select({ id: releases.id })
+    .select({ bundleDeletedAt: releases.bundleDeletedAt })
     .from(releases)
     .where(eq(releases.id, releaseId))
     .get();
@@ -118,6 +121,12 @@ const assertDeployable = async (
     throw new RolloutError(
       "release_not_imported",
       `Release ${releaseId} isn't imported`
+    );
+  }
+  if (release.bundleDeletedAt !== null) {
+    throw new RolloutError(
+      "bundle_deleted",
+      `Release ${releaseId}'s bundle was deleted`
     );
   }
 };
@@ -177,8 +186,9 @@ export type PromoteInput = z.infer<typeof promoteSchema>;
  * promotion from the channel before it (Edge to Beta, Beta to Stable), or
  * a rollback to a release the channel had before. Refused for any other
  * move (`promotion_not_allowed`), for the release it has already
- * (`promotion_not_allowed`), for a release the admin doesn't have, and
- * when the channel changed as it was set (`channel_changed`).
+ * (`promotion_not_allowed`), for a release the admin doesn't have or no
+ * longer has the bundle of, and when the channel changed as it was set
+ * (`channel_changed`).
  */
 export const promoteRelease = async (
   env: Env,
