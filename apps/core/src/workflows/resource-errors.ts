@@ -310,6 +310,9 @@ export const retryable = (failure: Failure, task: SealedTask): boolean => {
   }
   // A call whose effect runs once runs again only after a failure that
   // says nothing was sent, as a busy store or a provider's rate limit do.
+  // An action's says so only when none of its calls before took effect:
+  // after one did, it fails as `workflow.failed_after_effect` instead,
+  // which no catch takes (resource-action.ts, `callAction`).
   if (task.kind === "call" && onceCalls.has(task.call.name)) {
     return code !== undefined && isRetryableCode(code);
   }
