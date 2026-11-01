@@ -135,7 +135,7 @@ import type {
   SealedPackageManifest,
   SealedPackages,
 } from "./workflows/package-seal.ts";
-import { quotaPolicy } from "./workflows/quotas.ts";
+import { quotaLimits } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
 // each a resource of its own, with its own owner, members and immutable
@@ -170,7 +170,7 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   builder
 //   learns whether a name is held (`workflow.name_taken`), nothing else
 //   of it. Refused creations are audited, and each person may
-//   create at most the quota policy's `workflowResourcesPerPerson`,
+//   create at most the quota limits' `workflowResourcesPerPerson`,
 //   deleted ones included, so names can't be hoarded without trace.
 // - Disclosure through bindings. A binding resolves only to a workflow
 //   the publisher has a role in; any other is "no such contract", exactly
@@ -487,7 +487,7 @@ const entry = (
  * Creates a workflow named `name`, owned by `by`, who must build: its ID
  * minted here, at random, audited with its row. A name any workflow has
  * had is `workflow.name_taken`; a person who has created as many as the
- * quota policy allows, deleted ones included, gets
+ * quota limits allow, deleted ones included, gets
  * `workflow.resource_limit`. Both refusals are audited.
  */
 export const createWorkflowResource = async (
@@ -503,8 +503,7 @@ export const createWorkflowResource = async (
     workflowNameSchema,
     name
   );
-  const policy = await quotaPolicy(env);
-  const cap = policy.limits.workflowResourcesPerPerson;
+  const cap = quotaLimits(env).workflowResourcesPerPerson;
   const id = crypto.randomUUID();
   const createdAt = new Date();
   const db = drizzle(env.DB);
@@ -1150,7 +1149,7 @@ const inspectDefinition = async (
       resolved.set(key, found);
     }
   }
-  const policy = await quotaPolicy(env);
+  const limits = quotaLimits(env);
   const result = await validateWorkflow(definition, {
     catalog: (key) => {
       const contract =
@@ -1161,9 +1160,9 @@ const inspectDefinition = async (
     // `local:` keys resolve against the workflow's own modules only.
     modules: moduleLookup(modules),
     ceilings: {
-      maxSteps: policy.limits.workflowSteps,
-      maxModelCalls: policy.limits.lineageModelRequests,
-      maxActiveMs: policy.limits.workflowActiveMs,
+      maxSteps: limits.workflowSteps,
+      maxModelCalls: limits.lineageModelRequests,
+      maxActiveMs: limits.workflowActiveMs,
     },
   });
   if (!result.ok) {

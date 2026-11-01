@@ -7,7 +7,6 @@ import {
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
-import { quotaPolicyReportPurpose } from "@grasp-os/shared/quota-policy-report";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -315,13 +314,13 @@ describe("the organization's AI, for the admin", () => {
     const statuses = await Promise.all([
       ask(fresh, null),
       ask(fresh, await signatureOf(fresh, "another-secret")),
-      // The quota policy report's key reads nothing here.
+      // A key derived for another purpose reads nothing here.
       ask(
         fresh,
         await signatureOf(
           fresh,
           env.BETTER_AUTH_SECRET,
-          quotaPolicyReportPurpose
+          "grasp-os another report key"
         )
       ),
       ask(old, await signatureOf(old)),

@@ -1818,7 +1818,7 @@ export const workflowRuns = sqliteTable(
      * How deep in its lineage the run is: 0 for a root, its parent's depth
      * and one more for a run another started (src/workflows/quotas.ts).
      * Written once, with the row, from the parent's row, never from what
-     * the run is given: a lineage nests no deeper than the quota policy
+     * the run is given: a lineage nests no deeper than its limits
      * allows however its runs start one another.
      */
     depth: integer().notNull().default(0),
@@ -1877,7 +1877,7 @@ export const workflowRuns = sqliteTable(
  * run and every run started under it, at any depth, keyed by the root.
  * Created with the root's row, or with the lineage's first admission
  * after it, from the root's row. Every admission of the lineage's work
- * checks these against the quota policy as it is then, in one statement
+ * checks these against the quota limits, in one statement
  * that changes them only if the work fits, so admissions racing each
  * other never pass a limit, and nothing a retry, a restart, a child or a
  * branch does starts them afresh: they only grow (but for `active_held_ms`,
@@ -1891,8 +1891,6 @@ export const workflowRuns = sqliteTable(
  * - `active_used_ms`: wall time its steps' attempts used, settled.
  * - `active_held_ms`: what attempts under way hold, each its whole
  *   allowance until it settles (`run_lineage_attempts`).
- * - `policy_generation`: the quota policy's generation at the latest
- *   admission.
  * - `host_calls`: host calls its attempts reserved, in blocks; once an
  *   attempt settles, only those it made.
  */
@@ -1907,7 +1905,6 @@ export const runLineages = sqliteTable("run_lineages", {
   descendants: integer().notNull().default(0),
   activeUsedMs: integer("active_used_ms").notNull().default(0),
   activeHeldMs: integer("active_held_ms").notNull().default(0),
-  policyGeneration: integer("policy_generation").notNull().default(0),
   hostCalls: integer("host_calls").notNull().default(0),
 });
 
@@ -1944,7 +1941,6 @@ export const runLineageAttempts = sqliteTable(
     usedMs: integer("used_ms"),
     admittedAt: timestamp("admitted_at").notNull(),
     settledAt: timestamp("settled_at"),
-    policyGeneration: integer("policy_generation").notNull(),
     /**
      * Host calls the attempt reserved of its lineage while it runs, then,
      * once it settled, those it made; all it reserved if it never did.
@@ -2056,7 +2052,7 @@ export const workflowAdmissionQueue = sqliteTable(
 /**
  * The build jobs building now, a lease each (src/build-admission.ts): the
  * client's share of build jobs at once, and each App's, held to the quota
- * policy (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
+ * limits (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
  * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
  * of the step that took it. One row per lease a job's step took, in the
  * order of the job's own sequence (`seq`): its step, the round it waited
@@ -2074,7 +2070,6 @@ export const buildLeases = sqliteTable(
     admittedAt: timestamp("admitted_at").notNull(),
     reservedMs: integer("reserved_ms").notNull(),
     settledAt: timestamp("settled_at"),
-    policyGeneration: integer("policy_generation").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.jobId, table.seq] }),
@@ -2368,23 +2363,6 @@ export const runLineageChildren = sqliteTable("run_lineage_children", {
 export const mailDomains = sqliteTable("mail_domains", {
   domain: text().primaryKey(),
   firstSeenAt: timestamp("first_seen_at").notNull(),
-});
-
-/**
- * Each quota policy generation core has applied (src/workflows/quotas.ts):
- * the limits the deployment's `QUOTA_LIMITS` set under it, as canonical
- * JSON, and their SHA-256. Written the first time core sees a generation,
- * never changed after: a later var that sets other limits under a
- * generation recorded here, or a lower generation than the highest, is
- * refused, and core keeps the highest generation's limits. So two
- * policies never share a generation, and none goes back to an older one,
- * whatever is deployed.
- */
-export const quotaPolicies = sqliteTable("quota_policies", {
-  generation: integer().primaryKey(),
-  limits: text().notNull(),
-  limitsHash: text("limits_hash").notNull(),
-  recordedAt: timestamp("recorded_at").notNull(),
 });
 
 /**

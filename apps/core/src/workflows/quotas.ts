@@ -1,29 +1,14 @@
 import { deploymentConfig } from "@grasp-os/shared/config";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import {
-  canonicalLimits,
-  lowerableLimits,
-  quotaLimitsHash,
-  quotaLimitsSchema,
-  quotaPolicyOf,
-} from "@grasp-os/shared/quota-policy";
-import type {
-  LowerableLimit,
-  QuotaPolicy,
-} from "@grasp-os/shared/quota-policy";
-import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
-import type { OutboxEnv } from "../audit-outbox.ts";
 import {
-  quotaPolicies,
   runLineageAccounts,
   runLineageAttempts,
   runLineageChildren,
@@ -47,7 +32,7 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how long its steps' attempts run in all and how old it may grow, each
-// against the deployment's quota policy (@grasp-os/shared/quota-policy),
+// against the platform's limits (`quotaLimits`),
 // counted durably in core's database (`run_lineages`,
 // `run_lineage_attempts`), and checked as each piece of work is admitted:
 // a child run as it starts (`admitChild`), a step's attempt before its
@@ -97,17 +82,8 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 // - A resource declaring wider limits: none reaches here. What a workflow
 //   declares can only lower what applies to it (host.ts,
 //   `doOptionsSchema`).
-// - The operator raising a limit: the policy's schema refuses a value
-//   above the platform's (quota-policy.ts); a var that doesn't parse is
-//   never one without limits.
-// - Two policies under one generation, or a policy going back to an
-//   older one (a deploy that failed after core went live, then another):
-//   core records each generation's limits the first time it sees it, and
-//   applies only the highest recorded, as recorded (`quotaPolicy`).
-// - A policy change missed: the policy is read at each admission and
-//   compared with the counters as they are; nothing admitted keeps the
-//   limits it was admitted under. Each admission records the policy's
-//   generation.
+// - A limit raised: the limits are the platform's, in code; nothing a
+//   deployment sets raises one.
 // - A database that can't answer: nothing is admitted. The attempt fails
 //   as the platform's unexpected error, which its step may retry.
 //
@@ -149,208 +125,82 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 // time is held by attempts still under way, which a retry after the
 // seconds it names may find room in (`workflow.lineage_busy`).
 
-/** Limits as `quota_policies` keeps them: names to whole numbers. */
-const storedLimitsSchema = z.record(z.string(), z.int().min(1));
+/**
+ * The limits core reads as it admits work, each a ceiling: a run's steps,
+ * a step's attempts (its first included), the levels and descendant runs
+ * of a run lineage, the lineage's active execution and age, the provider
+ * requests it sends to models (core's model ledger, model-budgets.ts), the
+ * host calls its attempts make, the attempts running at once in the
+ * client, for one person and of one App, the steps waiting for a share,
+ * for one person and of one App, how long one step waits, the independent
+ * workflows and live triggers one person creates (workflow-resources.ts,
+ * trigger-resources.ts), the provider requests to models in flight at once
+ * in the client, for one person and of one App, with the calls waiting for
+ * a share (model-admission.ts), and the build jobs building at once in the
+ * client and of one App (build-admission.ts).
+ */
+const quotaLimitNames = [
+  "workflowSteps",
+  "workflowAttemptsPerStep",
+  "workflowNestingLevels",
+  "workflowDescendantRuns",
+  "workflowActiveMs",
+  "workflowAgeMs",
+  "lineageModelRequests",
+  "lineageHostCalls",
+  "workflowResourcesPerPerson",
+  "workflowClientAttempts",
+  "workflowPersonAttempts",
+  "workflowAppAttempts",
+  "workflowQueuedPerPerson",
+  "workflowQueuedPerApp",
+  "workflowQueuedStepMs",
+  "triggerResourcesPerPerson",
+  "modelClientRequests",
+  "modelPersonRequests",
+  "modelAppRequests",
+  "modelQueuedPerPerson",
+  "modelQueuedPerApp",
+  "tenantBuildJobs",
+  "keyBuildJobs",
+] as const;
+
+type QuotaLimit = (typeof quotaLimitNames)[number];
+
+/** The limits in force: each a whole number, at most the platform's. */
+export type QuotaLimits = Readonly<Record<QuotaLimit, number>>;
+
+/** `TEST_QUOTA_LIMITS`: some of {@link quotaLimitNames}, lowered. */
+const testQuotaLimitsSchema = z.partialRecord(
+  z.enum(quotaLimitNames),
+  z.int().min(1)
+);
 
 /**
- * The policy of a generation `quota_policies` recorded: its limits, each
- * no higher than the platform's now (a later release may have lowered
- * one), the platform's for any it doesn't set.
+ * The limits core admits work by: the platform's (platform-limits.ts),
+ * the same in every deployment; raising or lowering one is a release.
+ * Tests lower some (`TEST_QUOTA_LIMITS`) to reach them cheaply, never
+ * above the platform's. Read at each admission, so a test's change applies
+ * to every admission after it.
  */
-const recordedPolicy = (row: {
-  generation: number;
-  limits: string;
-}): QuotaPolicy => {
-  const stored = storedLimitsSchema.safeParse(JSON.parse(row.limits)).data;
-  const { limits } = quotaPolicyOf();
-  const lowered = Object.fromEntries(
-    lowerableLimits.map((name): [LowerableLimit, number] => [
-      name,
-      Math.min(stored?.[name] ?? limits[name], limits[name]),
-    ])
-  );
-  return {
-    generation: row.generation,
-    limits: { ...limits, ...lowered },
-  };
-};
-
-/** The generation `quota_policies` recorded highest, if any. */
-const highestRecorded = async (db: DrizzleD1Database) =>
-  await db
-    .select({
-      generation: quotaPolicies.generation,
-      limits: quotaPolicies.limits,
-      limitsHash: quotaPolicies.limitsHash,
-      recordedAt: quotaPolicies.recordedAt,
-    })
-    .from(quotaPolicies)
-    .orderBy(desc(quotaPolicies.generation))
-    .limit(1)
-    .get();
-
-/** The refusals of a `QUOTA_LIMITS` logged in this isolate, once each. */
-const refusalsLogged = new Set<string>();
-
-/**
- * Records `generation` with its `limits` (canonical) and their `hash`,
- * and its audit event, unless a generation as high or higher is recorded
- * already: an isolate that read the highest before a newer one went in
- * records, and logs, nothing. The event holds the limits as deployed; what
- * applies is each no higher than the platform's (`recordedPolicy`).
- */
-export const recordGeneration = async (
-  env: QuotaEnv,
-  configured: z.output<typeof quotaLimitsSchema>,
-  limits: string,
-  hash: string
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  // Recorded with its audit event, which only the isolate whose insert
-  // recorded it writes: a generation is logged once, as it is recorded.
-  await auditedBatch(env, db, [
-    db
-      .insert(quotaPolicies)
-      .select(
-        sql`SELECT ${configured.generation}, ${limits}, ${hash}, ${Date.now()}
-          WHERE NOT EXISTS (SELECT 1 FROM ${quotaPolicies}
-            WHERE ${quotaPolicies.generation} >= ${configured.generation})`
-      )
-      .onConflictDoNothing(),
-    outboxedIfChanged(db, {
-      actor: { type: "system" },
-      action: "quota_policy.recorded",
-      target: {
-        type: "quota_policy",
-        id: String(configured.generation),
-      },
-      detail: {
-        generation: configured.generation,
-        limitsHash: hash,
-        ...configured.limits,
-      },
-    }),
-  ]);
-};
-
-/**
- * The policy core applies now, and the recorded generation it decided on
- * (none for the platform's own, or before any is recorded).
- */
-const decidedPolicy = async (
-  env: QuotaEnv
-): Promise<{
-  policy: QuotaPolicy;
-  recorded: Awaited<ReturnType<typeof highestRecorded>>;
-}> => {
-  const configured = deploymentConfig(
-    quotaLimitsSchema,
-    "QUOTA_LIMITS",
-    env.QUOTA_LIMITS
-  );
-  const db = drizzle(env.DB);
-  const limits =
-    configured === undefined ? undefined : canonicalLimits(configured.limits);
-  const hash =
-    configured === undefined
-      ? undefined
-      : await quotaLimitsHash(configured.limits);
-  let highest = await highestRecorded(db);
-  if (
-    configured !== undefined &&
-    limits !== undefined &&
-    hash !== undefined &&
-    (highest === undefined || configured.generation > highest.generation)
-  ) {
-    await recordGeneration(env, configured, limits, hash);
-    highest = await highestRecorded(db);
+export const quotaLimits = (
+  env: Pick<Env, "TEST_QUOTA_LIMITS">
+): QuotaLimits => {
+  const lowered =
+    deploymentConfig(
+      testQuotaLimitsSchema,
+      "TEST_QUOTA_LIMITS",
+      env.TEST_QUOTA_LIMITS
+    ) ?? {};
+  const limits: Record<QuotaLimit, number> = { ...platformLimits };
+  for (const name of quotaLimitNames) {
+    limits[name] = Math.min(lowered[name] ?? limits[name], limits[name]);
   }
-  if (highest === undefined) {
-    return { policy: quotaPolicyOf(configured), recorded: undefined };
-  }
-  if (
-    configured !== undefined &&
-    highest.generation === configured.generation &&
-    highest.limitsHash === hash
-  ) {
-    return { policy: quotaPolicyOf(configured), recorded: highest };
-  }
-  const refusal = `${String(configured?.generation)}:${hash ?? ""}:${String(highest.generation)}`;
-  if (!refusalsLogged.has(refusal)) {
-    refusalsLogged.add(refusal);
-    const behind =
-      configured !== undefined && configured.generation < highest.generation;
-    log.error("config.invalid", {
-      var: "QUOTA_LIMITS",
-      reason: behind ? "generation_behind" : "generation_conflict",
-      ...(configured === undefined
-        ? {}
-        : { generation: configured.generation }),
-      kept: highest.generation,
-    });
-  }
-  return { policy: recordedPolicy(highest), recorded: highest };
+  return limits;
 };
 
-/**
- * The deployment's quota policy now: the platform's, as its operator
- * lowered it with `QUOTA_LIMITS`, and as core recorded it. Core is the
- * authority on which policy applies, as it admits the work, whatever was
- * deployed:
- * - The first time it sees a generation higher than any it recorded, it
- *   records the generation with its limits (`quota_policies`), once,
- *   whichever isolate is first: one that loses the race reads the
- *   winner's.
- * - A var under the highest recorded generation with the limits recorded
- *   for it applies.
- * - Anything else (a lower generation, the highest with other limits, or
- *   no var or one that doesn't parse once a generation is recorded) is
- *   refused: logged as `config.invalid` at error level, once per isolate,
- *   and the highest recorded generation's policy applies. A conflicting
- *   policy never applies, and none goes back to an older one.
- * With nothing recorded and no var, or one that doesn't parse
- * (`deploymentConfig` logs it), the platform's own policy applies.
- */
-export const quotaPolicy = async (env: QuotaEnv): Promise<QuotaPolicy> => {
-  const { policy } = await decidedPolicy(env);
-  return policy;
-};
-
-/**
- * The policy core applies now, as the admin reads it (GRA-600): its
- * generation, each limit it lowers below the platform's, as applied
- * (where its audit event holds them as deployed), and when core recorded
- * it. Read as any admission reads it (`quotaPolicy`), so a
- * generation deployed and not yet seen is recorded now, as the next
- * admission would.
- */
-export const quotaPolicyReport = async (
-  env: QuotaEnv
-): Promise<QuotaPolicyReport> => {
-  // From the row the policy was decided on, never a second read.
-  const { policy, recorded } = await decidedPolicy(env);
-  const lowered = Object.fromEntries(
-    lowerableLimits.flatMap((name) =>
-      policy.limits[name] < platformLimits[name]
-        ? [[name, policy.limits[name]]]
-        : []
-    )
-  );
-  // The recorded hash only when the recorded generation is the one that
-  // applies: the platform's own, none recorded, has none.
-  return {
-    generation: policy.generation,
-    lowered,
-    limitsHash: recorded?.limitsHash ?? null,
-    recordedAt: recorded?.recordedAt.toISOString() ?? null,
-  };
-};
-
-/**
- * What reading the quota policy takes: its database and var, and the audit
- * log a newly recorded generation is written to.
- */
-export type QuotaEnv = Pick<Env, "DB" | "QUOTA_LIMITS"> & OutboxEnv;
+/** What admitting work against the quota limits takes. */
+export type QuotaEnv = Pick<Env, "DB" | "TEST_QUOTA_LIMITS">;
 
 /** The limits a lineage reaches, as a refusal names them. */
 const lineageLimits = {
@@ -360,16 +210,15 @@ const lineageLimits = {
   activeTime: "workflowActiveMs",
   age: "workflowAgeMs",
   hostCalls: "lineageHostCalls",
-} as const satisfies Record<string, LowerableLimit>;
+} as const satisfies Record<string, QuotaLimit>;
 
 type LineageLimit = keyof typeof lineageLimits;
 
-/** The refusal of work past a lineage's `limit`, under `policy`. */
-const limitReached = (limit: LineageLimit, policy: QuotaPolicy) =>
+/** The refusal of work past a lineage's `limit`, under `limits`. */
+const limitReached = (limit: LineageLimit, limits: QuotaLimits) =>
   workflowErrors.create("workflow.lineage_limit", {
     limit,
-    max: policy.limits[lineageLimits[limit]],
-    generation: policy.generation,
+    max: limits[lineageLimits[limit]],
   });
 
 /** The App of run `id`, as SQL: null for a run of no App's. */
@@ -429,7 +278,7 @@ export const accountClaimed = (
     db
       .insert(runLineages)
       .select(
-        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0, 0 FROM ${accounts} WHERE ${ofKind} AND ${accounts.accountRunId} = ${run.id}`
+        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0 FROM ${accounts} WHERE ${ofKind} AND ${accounts.accountRunId} = ${run.id}`
       )
       .onConflictDoNothing(),
     db
@@ -468,9 +317,9 @@ export const lineageCreated = (db: DrizzleD1Database, root: string) =>
   db
     .insert(runLineages)
     .select(
-      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}
-        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}
-        UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${root}`
+      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}
+        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}
+        UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${root}`
     )
     .onConflictDoNothing();
 
@@ -539,28 +388,6 @@ const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
       ),
   ] as const;
 
-/**
- * That `policy`'s generation is still the highest `quota_policies`
- * recorded, as SQL: a condition of each admission's statement, so a
- * policy read just before a newer generation was recorded admits nothing
- * under it (`policyStill`).
- */
-export const stillCurrent = (policy: QuotaPolicy): SQL =>
-  sql`${policy.generation} >= coalesce((SELECT max(${quotaPolicies.generation}) FROM ${quotaPolicies}), 0)`;
-
-/**
- * Whether `policy` is still the one to admit by: no higher generation was
- * recorded since it was read. One that isn't is read again, and the
- * admission tried again under it, once.
- */
-export const policyStill = async (
-  db: DrizzleD1Database,
-  policy: QuotaPolicy
-): Promise<boolean> => {
-  const highest = await highestRecorded(db);
-  return highest === undefined || highest.generation <= policy.generation;
-};
-
 /** Where a child run sits: its lineage's root, and its depth under it. */
 export interface ChildPlace {
   rootRunId: string;
@@ -571,17 +398,13 @@ export interface ChildPlace {
 const admittedUnkeyed = async (
   db: DrizzleD1Database,
   { root, depth }: { root: string; depth: number },
-  policy: QuotaPolicy,
   fits: SQL | undefined
 ): Promise<ChildPlace | undefined> => {
   const [, taken] = await db.batch([
     lineageCreated(db, root),
     db
       .update(runLineages)
-      .set({
-        descendants: sql`${runLineages.descendants} + 1`,
-        policyGeneration: policy.generation,
-      })
+      .set({ descendants: sql`${runLineages.descendants} + 1` })
       .where(fits)
       .returning({ descendants: runLineages.descendants }),
   ]);
@@ -598,7 +421,6 @@ const admittedUnkeyed = async (
 const admittedKeyed = async (
   db: DrizzleD1Database,
   { root, depth, key }: { root: string; depth: number; key: string },
-  policy: QuotaPolicy,
   fits: SQL | undefined
 ): Promise<ChildPlace | undefined> => {
   const children = runLineageChildren;
@@ -615,10 +437,7 @@ const admittedKeyed = async (
     // Its slot, only if that statement claimed it.
     db
       .update(runLineages)
-      .set({
-        descendants: sql`${runLineages.descendants} + 1`,
-        policyGeneration: policy.generation,
-      })
+      .set({ descendants: sql`${runLineages.descendants} + 1` })
       .where(and(eq(runLineages.rootRunId, root), sql`changes() > 0`)),
     db
       .select({ rootRunId: children.rootRunId, depth: children.depth })
@@ -629,51 +448,6 @@ const admittedKeyed = async (
     3: [claimed],
   } = admitted;
   return claimed;
-};
-
-/** `admitChild` under `policy`; `retried` once read again (`policyStill`). */
-const admitChildOnce = async (
-  env: QuotaEnv,
-  parent: { id: string; rootRunId: string | null; depth: number },
-  key: string | undefined,
-  policy: QuotaPolicy,
-  retried: boolean
-): Promise<ChildPlace> => {
-  const root = parent.rootRunId ?? parent.id;
-  const depth = parent.depth + 1;
-  // Depth 0 is the lineage's first level.
-  if (depth >= policy.limits.workflowNestingLevels) {
-    throw limitReached("nesting", policy);
-  }
-  const db = drizzle(env.DB);
-  const bornAfter = new Date(Date.now() - policy.limits.workflowAgeMs);
-  const fits = and(
-    eq(runLineages.rootRunId, root),
-    lt(runLineages.descendants, policy.limits.workflowDescendantRuns),
-    gt(runLineages.createdAt, bornAfter),
-    stillCurrent(policy)
-  );
-  const taken = await (key === undefined
-    ? admittedUnkeyed(db, { root, depth }, policy, fits)
-    : admittedKeyed(db, { root, depth, key }, policy, fits));
-  if (taken !== undefined) {
-    return taken;
-  }
-  if (!retried && !(await policyStill(db, policy))) {
-    return await admitChildOnce(env, parent, key, await quotaPolicy(env), true);
-  }
-  const lineage = await db
-    .select({ createdAt: runLineages.createdAt })
-    .from(runLineages)
-    .where(eq(runLineages.rootRunId, root))
-    .get();
-  if (lineage === undefined) {
-    throw new Error(`No run ${root} to start a run under`);
-  }
-  throw limitReached(
-    lineage.createdAt <= bornAfter ? "age" : "descendants",
-    policy
-  );
 };
 
 /**
@@ -689,8 +463,40 @@ export const admitChild = async (
   env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key?: string
-): Promise<ChildPlace> =>
-  await admitChildOnce(env, parent, key, await quotaPolicy(env), false);
+): Promise<ChildPlace> => {
+  const limits = quotaLimits(env);
+  const root = parent.rootRunId ?? parent.id;
+  const depth = parent.depth + 1;
+  // Depth 0 is the lineage's first level.
+  if (depth >= limits.workflowNestingLevels) {
+    throw limitReached("nesting", limits);
+  }
+  const db = drizzle(env.DB);
+  const bornAfter = new Date(Date.now() - limits.workflowAgeMs);
+  const fits = and(
+    eq(runLineages.rootRunId, root),
+    lt(runLineages.descendants, limits.workflowDescendantRuns),
+    gt(runLineages.createdAt, bornAfter)
+  );
+  const taken = await (key === undefined
+    ? admittedUnkeyed(db, { root, depth }, fits)
+    : admittedKeyed(db, { root, depth, key }, fits));
+  if (taken !== undefined) {
+    return taken;
+  }
+  const lineage = await db
+    .select({ createdAt: runLineages.createdAt })
+    .from(runLineages)
+    .where(eq(runLineages.rootRunId, root))
+    .get();
+  if (lineage === undefined) {
+    throw new Error(`No run ${root} to start a run under`);
+  }
+  throw limitReached(
+    lineage.createdAt <= bornAfter ? "age" : "descendants",
+    limits
+  );
+};
 
 /** A step's attempt, as the engine claimed it and its host knows it. */
 export interface QuotaAttempt {
@@ -739,7 +545,7 @@ export interface QuotaAttempt {
  * settles it, once its code has returned.
  */
 export interface AttemptAdmission {
-  /** The attempts the quota policy admits at the step: none after this many. */
+  /** The attempts the quota limits admit at the step: none after this many. */
   attemptsAllowed: number;
   /**
    * The attempts of the step the lineage admitted, this one included: the
@@ -874,34 +680,26 @@ const settleAttempt = async (
   }
 };
 
-/**
- * Refusals of host calls made under the policy still current as they were
- * made: only these an attempt keeps giving (`hostCallsOf`), as a later
- * policy may allow what an older one refused.
- */
-const spentUnderCurrent = new WeakSet<Error>();
-
 /** The most host calls an attempt reserves of its lineage at once. */
 const hostCallBlockMax = 32;
 
 /**
  * Reserves up to `block` host calls of the lineage of `root` for its
- * attempt `identity`, under `policy`: no more than the lineage has left,
+ * attempt `identity`, under `limits`: no more than the lineage has left,
  * and none once the attempt has settled. Answers how many it reserved, at
  * least one; throws `workflow.lineage_limit` when the lineage has none
  * left, or `execution.stale_attempt` for a settled attempt.
  */
-const reserveHostCallsOnce = async (
+const reserveHostCalls = async (
   env: QuotaEnv,
   lineage: { root: string; identity: ReturnType<typeof and> },
   block: number,
-  policy: QuotaPolicy,
-  retried: boolean
+  limits: QuotaLimits
 ): Promise<number> => {
   const { root, identity } = lineage;
   const db = drizzle(env.DB);
   const held = runLineageAttempts;
-  const limit = policy.limits.lineageHostCalls;
+  const limit = limits.lineageHostCalls;
   const ofLineage = eq(runLineages.rootRunId, root);
   const grant = sql`min(${block}, ${limit} - ${runLineages.hostCalls})`;
   // One batch, so one transaction: what the lineage had before is what
@@ -912,7 +710,7 @@ const reserveHostCallsOnce = async (
       .from(runLineages)
       .where(ofLineage),
     // The attempt's receipt first, while it is open and the lineage has
-    // calls left under a policy still current...
+    // calls left...
     db
       .update(held)
       .set({
@@ -922,17 +720,14 @@ const reserveHostCallsOnce = async (
         and(
           identity,
           isNull(held.settledAt),
-          sql`EXISTS (SELECT 1 FROM ${runLineages} WHERE ${ofLineage} AND ${runLineages.hostCalls} < ${limit} AND ${stillCurrent(policy)})`
+          sql`EXISTS (SELECT 1 FROM ${runLineages} WHERE ${ofLineage} AND ${runLineages.hostCalls} < ${limit})`
         )
       )
       .returning({ hostCalls: held.hostCalls }),
     // ...then the lineage, by as much, only if that took.
     db
       .update(runLineages)
-      .set({
-        hostCalls: sql`${runLineages.hostCalls} + ${grant}`,
-        policyGeneration: policy.generation,
-      })
+      .set({ hostCalls: sql`${runLineages.hostCalls} + ${grant}` })
       .where(
         and(ofLineage, lt(runLineages.hostCalls, limit), sql`changes() > 0`)
       ),
@@ -944,24 +739,8 @@ const reserveHostCallsOnce = async (
   if (granted.length > 0) {
     return Math.min(block, limit - had);
   }
-  // Refused: by the policy as it is now, never by one an operator has
-  // changed since it was read (a limit raised meanwhile admits the call).
-  const still = await policyStill(db, policy);
-  if (!still && !retried) {
-    return await reserveHostCallsOnce(
-      env,
-      lineage,
-      block,
-      await quotaPolicy(env),
-      true
-    );
-  }
   if (had >= limit) {
-    const refusal = limitReached("hostCalls", policy);
-    if (still) {
-      spentUnderCurrent.add(refusal);
-    }
-    throw refusal;
+    throw limitReached("hostCalls", limits);
   }
   throw executionErrors.create("execution.stale_attempt");
 };
@@ -999,12 +778,11 @@ const hostCallsOf = (
   const reserve = async (): Promise<void> => {
     try {
       const block = Math.min(hostCallBlockMax, Math.max(1, reserved));
-      const granted = await reserveHostCallsOnce(
+      const granted = await reserveHostCalls(
         env,
         { root, identity },
         block,
-        await quotaPolicy(env),
-        false
+        quotaLimits(env)
       );
       // A grant of none would have `take` ask again without end.
       if (!Number.isInteger(granted) || granted < 1) {
@@ -1012,7 +790,10 @@ const hostCallsOf = (
       }
       reserved += granted;
     } catch (error) {
-      if (error instanceof Error && spentUnderCurrent.has(error)) {
+      if (
+        error instanceof Error &&
+        workflowErrors.codeOf(error) === "workflow.lineage_limit"
+      ) {
         exhausted = error;
       }
       throw error;
@@ -1107,7 +888,7 @@ const fencedSettled = (
  * computation no one waits on. In the same transaction, the run's row
  * records the fence
  * (`shares_fenced_through`): an attempt of those generations whose
- * admission lands later takes nothing (`admitAttemptOnce`).
+ * admission lands later takes nothing (`admitAttemptUnder`).
  *
  * Only `run`'s attempts, and only of generations the engine fenced:
  * `through` only grows, so a call however late, or made again, gives back
@@ -1145,18 +926,17 @@ export interface AttemptOwner extends AdmissionScope {
  * always, for one that collects a held call's outcome (`collecting`),
  * which takes none.
  */
-const hostCallsLeftSql = (attempt: QuotaAttempt, policy: QuotaPolicy): SQL =>
+const hostCallsLeftSql = (attempt: QuotaAttempt, limits: QuotaLimits): SQL =>
   attempt.collecting === true
     ? sql`1`
-    : sql`${runLineages.hostCalls} < ${policy.limits.lineageHostCalls}`;
+    : sql`${runLineages.hostCalls} < ${limits.lineageHostCalls}`;
 
 /** Whether the lineage, having made `made`, has none left for `attempt`. */
 const outOfHostCalls = (
   attempt: QuotaAttempt,
   made: number,
-  policy: QuotaPolicy
-): boolean =>
-  attempt.collecting !== true && made >= policy.limits.lineageHostCalls;
+  limits: QuotaLimits
+): boolean => attempt.collecting !== true && made >= limits.lineageHostCalls;
 
 /**
  * The attempts of `attempt`'s step run `run`'s lineage admitted before it:
@@ -1182,31 +962,25 @@ const ranBefore = async (
   return row?.ran ?? 0;
 };
 
-/** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
-const admitAttemptOnce = async (
+/** `admitAttempt` under `limits`, its place in the queue kept on a refusal. */
+const admitAttemptUnder = async (
   env: QuotaEnv,
   owner: AttemptOwner,
   attempt: QuotaAttempt,
-  policy: QuotaPolicy,
-  retried: boolean
+  limits: QuotaLimits
 ): Promise<AttemptAdmission> => {
-  // The run's steps, by the policy as it is now: the limit an activation
-  // counts by may be a fallback while the policy couldn't be read
-  // (host.ts, `stepLimitOf`), and lets the run load, never admits work
-  // past the live one.
-  if (
-    attempt.ordinal !== undefined &&
-    attempt.ordinal > policy.limits.workflowSteps
-  ) {
-    throw limitReached("steps", policy);
+  // The run's steps, as the limits are now: the limit an activation
+  // counted by when it loaded (host.ts, `stepLimitOf`) never admits work
+  // past them.
+  if (attempt.ordinal !== undefined && attempt.ordinal > limits.workflowSteps) {
+    throw limitReached("steps", limits);
   }
   // Counted by the attempts that ran (`ran`), never by the engine's
   // numbers: one core cut off unadmitted ran nothing (GRA-1097).
   const ran = await ranBefore(env, owner.run, attempt);
-  if (ran + 1 > policy.limits.workflowAttemptsPerStep) {
+  if (ran + 1 > limits.workflowAttemptsPerStep) {
     throw workflowErrors.create("workflow.too_many_attempts", {
-      max: policy.limits.workflowAttemptsPerStep,
-      generation: policy.generation,
+      max: limits.workflowAttemptsPerStep,
     });
   }
   const now = Date.now();
@@ -1215,27 +989,27 @@ const admitAttemptOnce = async (
   if (attempt.deadline <= now) {
     throw executionErrors.create("execution.stale_attempt");
   }
-  // Waited for load as long as a step may, by the policy as it is now,
+  // Waited for load as long as a step may, by the limits as they are now,
   // whatever cap the step waited under: it fails before taking a lease,
   // so none of its code runs.
   if (
     attempt.waitedMs !== undefined &&
-    attempt.waitedMs >= policy.limits.workflowQueuedStepMs
+    attempt.waitedMs >= limits.workflowQueuedStepMs
   ) {
     throw workflowErrors.create("workflow.queue_timeout", {
-      maxWaitMs: policy.limits.workflowQueuedStepMs,
+      maxWaitMs: limits.workflowQueuedStepMs,
     });
   }
   const { run, root } = owner;
   const db = drizzle(env.DB);
-  const shares = sharesOf(policy);
+  const shares = sharesOf(limits);
   const place = await queuePlaceOf(run, attempt.step, attempt.deadline);
   const standing = await standingOf(db, owner, place, now);
   const reserved = Math.min(
     attempt.deadline - now,
     platformLimits.workflowAttemptWallMs
   );
-  const bornAfter = now - policy.limits.workflowAgeMs;
+  const bornAfter = now - limits.workflowAgeMs;
   const held = runLineageAttempts;
   const identity = and(
     eq(held.runId, run),
@@ -1254,7 +1028,7 @@ const admitAttemptOnce = async (
   // of this generation hold no more (`sharesReleased`), or a newer
   // activation's attempt was admitted. However late its call lands.
   const fencedOut = sql`(${fencedRun(run, attempt.generation)} OR EXISTS (SELECT 1 FROM ${held} WHERE ${held.runId} = ${run} AND ${held.generation} > ${attempt.generation}))`;
-  const hostCallsLeft = hostCallsLeftSql(attempt, policy);
+  const hostCallsLeft = hostCallsLeftSql(attempt, limits);
   const written = await db.batch([
     lineageCreated(db, root),
     db
@@ -1293,16 +1067,13 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${hostCallsLeft} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(attemptPool, owner, place, standing, now, shares)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${limits.workflowActiveMs} AND ${hostCallsLeft} AND ${runLineages.createdAt} > ${bornAfter} AND ${roomFor(attemptPool, owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
     db
       .update(runLineages)
-      .set({
-        activeHeldMs: sql`${runLineages.activeHeldMs} + ${reserved}`,
-        policyGeneration: policy.generation,
-      })
+      .set({ activeHeldMs: sql`${runLineages.activeHeldMs} + ${reserved}` })
       .where(and(eq(runLineages.rootRunId, root), sql`changes() > 0`)),
     // Admitted, it waits in the queue no more.
     ...dequeued(db, place, receiptHeld),
@@ -1341,7 +1112,7 @@ const admitAttemptOnce = async (
     }
     const hostCalls = hostCallsOf(env, root, identity);
     return {
-      attemptsAllowed: policy.limits.workflowAttemptsPerStep,
+      attemptsAllowed: limits.workflowAttemptsPerStep,
       ran: ran + 1,
       hostCall: hostCalls.take,
       settle: async (itRan = true) => {
@@ -1360,35 +1131,26 @@ const admitAttemptOnce = async (
   if (fencedRuns.length > 0) {
     throw executionErrors.create("execution.stale_attempt");
   }
-  if (!retried && !(await policyStill(db, policy))) {
-    return await admitAttemptOnce(
-      env,
-      owner,
-      attempt,
-      await quotaPolicy(env),
-      true
-    );
-  }
   const [found] = lineages;
   if (found === undefined) {
     throw new Error(`No run ${root} to admit an attempt of`);
   }
   if (found.createdAt.getTime() <= bornAfter) {
-    throw limitReached("age", policy);
+    throw limitReached("age", limits);
   }
   // A lineage with no host calls left admits no attempt: its calls would
   // all be refused, and a step catching them would only spin. But for one
   // collecting a held call's outcome, which takes none.
-  if (outOfHostCalls(attempt, found.hostCalls, policy)) {
-    throw limitReached("hostCalls", policy);
+  if (outOfHostCalls(attempt, found.hostCalls, limits)) {
+    throw limitReached("hostCalls", limits);
   }
-  if (found.used >= policy.limits.workflowActiveMs) {
-    throw limitReached("activeTime", policy);
+  if (found.used >= limits.workflowActiveMs) {
+    throw limitReached("activeTime", limits);
   }
-  if (found.used + found.held >= policy.limits.workflowActiveMs) {
+  if (found.used + found.held >= limits.workflowActiveMs) {
     throw workflowErrors.create("workflow.lineage_busy", {
       retryAfterSeconds: await busyFor(db, root, now),
-      maxWaitMs: policy.limits.workflowQueuedStepMs,
+      maxWaitMs: limits.workflowQueuedStepMs,
     });
   }
   // The lineage had room: the client's shares hadn't, as the batch that
@@ -1396,7 +1158,7 @@ const admitAttemptOnce = async (
   throw await queuedRefusal(db, owner, place, now, shares, sharesFound, {
     waited: attempt.waited ?? 0,
     waitedMs: attempt.waitedMs ?? 0,
-    maxWaitMs: policy.limits.workflowQueuedStepMs,
+    maxWaitMs: limits.workflowQueuedStepMs,
   });
 };
 
@@ -1446,13 +1208,7 @@ export const admitAttempt = async (
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> => {
   try {
-    return await admitAttemptOnce(
-      env,
-      owner,
-      attempt,
-      await quotaPolicy(env),
-      false
-    );
+    return await admitAttemptUnder(env, owner, attempt, quotaLimits(env));
   } catch (error) {
     // Queued, it keeps its place.
     if (workflowErrors.codeOf(error) !== "workflow.queued") {

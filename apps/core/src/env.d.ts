@@ -64,12 +64,6 @@ interface __BaseEnv_Env {
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**
-   * The limits the operator lowered, with the policy's generation
-   * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
-   * src/workflows/quotas.ts).
-   */
-  QUOTA_LIMITS?: unknown;
-  /**
    * `cloudflare` where core runs on Cloudflare's runtime, which enforces
    * Code Mode's CPU limit; anything else, unset included, is taken as a
    * runtime that doesn't (src/code-mode.ts). Tests, local development and
@@ -122,6 +116,11 @@ interface __BaseEnv_Env {
    * effect (src/workflows/host.ts).
    */
   WORKFLOW_OFF_WAIT_MS?: string;
+  /**
+   * Tests only: lower quota limits than the platform's, so a test reaches
+   * one cheaply (src/workflows/quotas.ts, `quotaLimits`): JSON, partial.
+   */
+  TEST_QUOTA_LIMITS?: unknown;
   /**
    * Tests only: a shorter deadline for a run waiting on an unknown outcome
    * its person hasn't resolved (src/workflows/host.ts).

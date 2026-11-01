@@ -4,8 +4,7 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { modelLedger } from "../src/model-ledger.ts";
@@ -164,85 +163,6 @@ export const withProvider = async <Result>(
     env.MODEL_BUDGET_MONTH = month;
   }
 };
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-export const configuredLimits = quotaLimitsSchema.parse(
-  env.QUOTA_LIMITS
-).limits;
-
-/**
- * The generation of the next quota policy a test sets: each higher than
- * any before, as an operator's must be.
- */
-let generations = 100;
-
-/** The generation the latest quota policy was set under. */
-export const policyGeneration = (): number => generations;
-
-/**
- * Sets the operator's quota policy to `limits`, under a new generation,
- * which it returns.
- */
-export const setPolicy = (limits: Record<string, number>): number => {
-  generations += 1;
-  env.QUOTA_LIMITS = { generation: generations, limits };
-  return generations;
-};
-
-/**
- * The quota policy generations the model ledger recorded the provider
- * requests of the lineage of `root` under, and how many under each.
- */
-export const generationsOf = async (root: string) =>
-  await runInDurableObject(modelLedger(env), (_instance, state) =>
-    state.storage.sql
-      .exec<{ generation: number | null; requests: number }>(
-        "SELECT policy_generation AS generation, count(*) AS requests FROM requests WHERE actor LIKE ? GROUP BY policy_generation ORDER BY policy_generation",
-        `%${root}%`
-      )
-      .toArray()
-  );
-
-/**
- * Sets the model ledger's highest quota policy generation to
- * `generation`, as a ledger ahead of core would have it; none clears it.
- */
-export const setLedgerGeneration = async (
-  generation?: number
-): Promise<void> => {
-  await runInDurableObject(modelLedger(env), (_instance, state) => {
-    state.storage.sql.exec("DELETE FROM policy");
-    if (generation !== undefined) {
-      state.storage.sql.exec(
-        "INSERT INTO policy (id, generation) VALUES (0, ?)",
-        generation
-      );
-    }
-  });
-};
-
-/**
- * Core's database, with `onRead` run as each statement on the quota
- * policy's table is prepared: one that throws is a table that can't be
- * read.
- */
-export const onPolicyRead = (onRead: () => void): D1Database =>
-  new Proxy(env.DB, {
-    get: (target, property) => {
-      const value: unknown = Reflect.get(target, property);
-      if (property === "prepare") {
-        return (query: string): unknown => {
-          if (query.includes("quota_policies")) {
-            onRead();
-          }
-          return target.prepare(query);
-        };
-      }
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
-    },
-  });
 
 /** `count` of `item`. */
 export const times = <Item>(count: number, item: Item): Item[] =>

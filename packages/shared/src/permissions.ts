@@ -306,8 +306,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
-  // The deployment's quota policy (core's src/workflows/quotas.ts).
-  "QUOTA_LIMITS",
   "RELEASE_READ_MS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
@@ -334,6 +332,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // connect's src/channels.ts).
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_WEBHOOK_SECRET",
+  // Tests' lowered quota limits (core's src/workflows/quotas.ts).
+  "TEST_QUOTA_LIMITS",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   // The client's own WhatsApp number (core's src/channels/whatsapp.ts,

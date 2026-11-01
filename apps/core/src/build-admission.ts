@@ -1,6 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -30,12 +29,12 @@ import type {
   Shares,
   Standing,
 } from "./workflows/admission.ts";
-import { policyStill, quotaPolicy, stillCurrent } from "./workflows/quotas.ts";
-import type { QuotaEnv } from "./workflows/quotas.ts";
+import { quotaLimits } from "./workflows/quotas.ts";
+import type { QuotaEnv, QuotaLimits } from "./workflows/quotas.ts";
 
 // Fair admission of build jobs (spec 18.3, 40.5): how many of the client's
 // build jobs build at once, in all and of one App, each against its share
-// in the quota policy (`tenantBuildJobs`, `keyBuildJobs`), and in what
+// in the quota limits (`tenantBuildJobs`, `keyBuildJobs`), and in what
 // order the jobs waiting get one. Not a mechanism of its own: the pool of
 // workflow attempts' (workflows/admission.ts), with tables of its own. A
 // lease is a row of `build_leases`, taken by one conditional statement
@@ -107,10 +106,6 @@ import type { QuotaEnv } from "./workflows/quotas.ts";
 //   holds; asking sooner moves no one up the queue. What a job's view shows
 //   is its own place only (`queuedJob`): never who else waits, nor how
 //   many, nor where.
-// - A policy change missed: the shares are read from the policy at each
-//   admission, and the statement that takes a lease takes none under a
-//   policy a newer generation replaced since it was read (`stillCurrent`):
-//   it reads the policy again and tries again, once.
 //
 // What a job waiting for a share shows: `queued` in its view, with the
 // share it waits for and when it asks again, and once each time it joins
@@ -154,19 +149,19 @@ const buildPool: Pool = {
 };
 
 /**
- * The shares of `policy`: a person's and an App's below the client's, so
+ * The shares of `limits`: a person's and an App's below the client's, so
  * neither one person, however many Apps they build, nor one App takes
  * every build at once.
  */
-export const buildSharesOf = (policy: QuotaPolicy): Shares => {
-  const client = policy.limits.tenantBuildJobs;
+export const buildSharesOf = (limits: QuotaLimits): Shares => {
+  const client = limits.tenantBuildJobs;
   // With one build at once for the whole client there is nothing to leave
   // over: that one is anyone's.
   const most = Math.max(1, client - 1);
   return {
     client,
     person: most,
-    app: Math.min(policy.limits.keyBuildJobs, most),
+    app: Math.min(limits.keyBuildJobs, most),
     queuedPerPerson: buildQueuedPerPerson,
     queuedPerApp: buildQueuedPerKey,
   };
@@ -635,20 +630,14 @@ export interface BuildAsk {
   waitedMs: number;
 }
 
-/**
- * `admitBuild` under `policy`: refused under a policy a newer generation
- * replaced since it was read, it reads the policy again and tries again
- * under it, once.
- */
-const admitBuildOnce = async (
+/** `admitBuild`, its wait for a share checked already. */
+const admitBuildUnder = async (
   env: QuotaEnv,
   owner: BuildOwner,
-  { seq, waited, waitedMs }: BuildAsk,
-  policy: QuotaPolicy,
-  retried: boolean
+  { seq, waited, waitedMs }: BuildAsk
 ): Promise<{ lease: BuildLease } | { wait: BuildWait }> => {
   const db = drizzle(env.DB);
-  const shares = buildSharesOf(policy);
+  const shares = buildSharesOf(quotaLimits(env));
   // The database's clock, as renewals and the commit's fence read it
   // (`stillHolds`), never the Worker's: so what admission counts as held
   // and what a holder counts as held agree, whatever the Worker's clock
@@ -667,7 +656,7 @@ const admitBuildOnce = async (
     db
       .insert(buildLeases)
       .select(
-        sql`SELECT ${owner.job}, ${seq}, ${owner.subject}, ${owner.resource}, ${now}, ${renewedForMs}, NULL, ${policy.generation} WHERE NOT ${newerThan(owner, seq)} AND ${stillCurrent(policy)} AND ${roomFor(buildPool, owner, place, standing, now, shares)}`
+        sql`SELECT ${owner.job}, ${seq}, ${owner.subject}, ${owner.resource}, ${now}, ${renewedForMs}, NULL WHERE NOT ${newerThan(owner, seq)} AND ${roomFor(buildPool, owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Admitted, it waits in the queue no more.
@@ -693,15 +682,6 @@ const admitBuildOnce = async (
   ]);
   if (written[5].length > 0) {
     return { lease: leaseOf(db, owner, seq) };
-  }
-  if (!retried && !(await policyStill(db, policy))) {
-    return await admitBuildOnce(
-      env,
-      owner,
-      { seq, waited, waitedMs },
-      await quotaPolicy(env),
-      true
-    );
   }
   return {
     wait: await queued(db, {
@@ -735,7 +715,7 @@ export const admitBuild = async (
     await buildDequeued(env, owner, ask.seq);
     throw agentErrors.create("agent.build_queue_timeout");
   }
-  return await admitBuildOnce(env, owner, ask, await quotaPolicy(env), false);
+  return await admitBuildUnder(env, owner, ask);
 };
 
 /** A job's wait for a share, as its view shows it. */

@@ -1,4 +1,5 @@
 import { runActorOf } from "@grasp-os/shared/audit";
+import { runIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
@@ -9,12 +10,14 @@ import {
   cheapAnswer,
   countOf,
   dearTotal,
+  eventsNow,
   failedWith,
   inTurn,
   llmStep,
   newMonth,
   refusalsOf,
   startChild,
+  statusOf,
   times,
   withProvider,
 } from "./run-lineages.ts";
@@ -128,4 +131,53 @@ describe("run lineages", { timeout: 90_000 }, () => {
       });
     }
   );
+
+  it("count a run's calls against its own lineage, whatever lineage or root its input names", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llmStep(), { extract: { total: 1234 } })
+    );
+    const work = { app, person: builder.userId };
+    const victim = runIdSchema.parse(`run-${crypto.randomUUID()}`);
+    const victimActor = runActorOf({ runId: victim, app, workflow: "reader" });
+
+    const result = await withProvider(
+      undefined,
+      [...times(100, cheapAnswer), dearTotal],
+      async () => {
+        // The victim's lineage used all of its requests.
+        const used = await inTurn(times(100, victimActor), work);
+        const forged = await builder.api.workflows.start(app, "reader", {
+          rootRunId: victim,
+          root: victim,
+          parent: victim,
+          lineage: victim,
+          parentRunId: victim,
+        });
+        await finished(forged.id);
+        const events = await eventsNow();
+        return {
+          used: countOf(used, "ok"),
+          forged: await statusOf(builder, forged.id),
+          // Its own root: no `rootRunId` at all.
+          ownActor: runActorOf({ runId: forged.id, app, workflow: "reader" }),
+          actor: events.find(
+            ({ action, actor }) =>
+              action === "model.call" &&
+              actor.type === "workflow" &&
+              actor.runId === forged.id
+          )?.actor,
+          victimAgain: await callFor(work, victimActor),
+        };
+      }
+    );
+
+    expect(result).toMatchObject({
+      used: 100,
+      forged: "completed",
+      victimAgain: "model.run_limit",
+    });
+    expect(result.actor).toStrictEqual(result.ownActor);
+  });
 });

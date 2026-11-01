@@ -38,7 +38,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { withQuotas } from "./quota-policies.ts";
+import { withQuotas } from "./quota-limits.ts";
 import {
   admittedFreely,
   liveStatus,
