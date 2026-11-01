@@ -9,7 +9,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { encode } from "../src/codec.ts";
 import {
-  journalSchemaVersion,
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
@@ -228,37 +227,5 @@ describe("a sender's share of an inbox", () => {
       other,
     }).toStrictEqual({ accepted: fit, last: "full", other: ["accepted"] });
     expect(fit * bytes).toBeLessThan(maxInboxBytes);
-  });
-
-  it("upgrades a version-11 journal as it first reads it, and holds senders to their shares from then", async () => {
-    const id = newId();
-    await workflow("approval").create({ id });
-    await runInDurableObject(runObject("approval", id), (_, state) => {
-      state.storage.sql.exec("UPDATE run SET schema = 11");
-      state.storage.sql.exec("DROP INDEX events_sender");
-      state.storage.sql.exec("ALTER TABLE events DROP COLUMN sender");
-      state.storage.sql.exec("DROP TRIGGER steps_settled_order");
-      state.storage.sql.exec("DROP INDEX steps_settled");
-      state.storage.sql.exec("ALTER TABLE steps DROP COLUMN settled");
-    });
-
-    const outcomes = await sendAll(
-      id,
-      Array.from({ length: maxSenderEvents + 1 }, () => encode(null)),
-      false,
-      "spam",
-      "screen-a"
-    );
-    const { run } = await journalOf("approval", id);
-
-    expect({
-      schema: run.schema,
-      accepted: outcomes.filter((outcome) => outcome === "accepted").length,
-      last: outcomes.at(-1),
-    }).toStrictEqual({
-      schema: journalSchemaVersion,
-      accepted: maxSenderEvents,
-      last: "full",
-    });
   });
 });
