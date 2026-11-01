@@ -546,14 +546,34 @@ describe("choosing which journey suites a change reaches", () => {
     });
   });
 
-  it("finds what each config imports in this repository: e2e/stack.ts for both, a journey for neither", () => {
-    const repo = path.resolve(import.meta.dirname, "..");
-    const imports = configImports(repo);
-    const stack = [path.join(repo, "e2e/stack.ts")];
-    const journey = [path.join(repo, "e2e/chat.e2e.ts")];
-    expect({
-      stack: [imports("e2e", stack), imports("admin-e2e", stack)],
-      journey: [imports("e2e", journey), imports("admin-e2e", journey)],
-    }).toStrictEqual({ stack: [true, true], journey: [false, false] });
+  it("finds what each config imports: a helper both take for both, a journey for neither", () => {
+    // Shaped as this repository is: both configs take e2e/stack.ts, the
+    // admin's for `corePort`. A small repository of its own, as walking
+    // this one's every file is too slow for a unit test under load.
+    const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "configs-")));
+    try {
+      const sources: Record<string, string> = {
+        "e2e/stack.ts": "export const corePort = 1;\n",
+        "e2e/chat.e2e.ts": 'import { corePort } from "./stack.ts";\n',
+        "playwright.config.ts":
+          'import { corePort } from "./e2e/stack.ts";\nexport default corePort;\n',
+        "playwright.admin.config.ts":
+          'import { corePort } from "./e2e/stack.ts";\nexport default corePort;\n',
+      };
+      for (const [file, content] of Object.entries(sources)) {
+        mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+        writeFileSync(path.join(repo, file), content);
+      }
+      execFileSync("git", ["init", "--quiet"], { cwd: repo });
+      const imports = configImports(repo);
+      const stack = [path.join(repo, "e2e/stack.ts")];
+      const journey = [path.join(repo, "e2e/chat.e2e.ts")];
+      expect({
+        stack: [imports("e2e", stack), imports("admin-e2e", stack)],
+        journey: [imports("e2e", journey), imports("admin-e2e", journey)],
+      }).toStrictEqual({ stack: [true, true], journey: [false, false] });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

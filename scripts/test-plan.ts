@@ -432,11 +432,19 @@ export const journeyConfigs: Readonly<Record<JourneySuite, string>> = {
  * file both configs import (e2e/stack.ts, which the admin's takes
  * `corePort` from) runs both suites, wherever it sits.
  */
-export const configImports =
-  (root: string) =>
-  (suite: JourneySuite, files: readonly string[]): boolean =>
-    files.length > 0 &&
-    filesImporting(files, root).has(path.join(root, journeyConfigs[suite]));
+export const configImports = (root: string) => {
+  // One walk of the repository for both suites' configs, per set of files.
+  const walks = new Map<string, Set<string>>();
+  return (suite: JourneySuite, files: readonly string[]): boolean => {
+    if (files.length === 0) {
+      return false;
+    }
+    const key = JSON.stringify(files);
+    const importers = walks.get(key) ?? filesImporting(files, root);
+    walks.set(key, importers);
+    return importers.has(path.join(root, journeyConfigs[suite]));
+  };
+};
 
 /**
  * The suites a changed file outside every package runs, by its path from
