@@ -931,6 +931,34 @@ describe(
       }).toStrictEqual({ handing: true, notHanding: false });
     });
 
+    it("tells the reviewer it may hand files when the App declares a plain object where its bound workflow takes a file", async () => {
+      const fixture = await reviewsApp();
+      // The same `{ id }` reaches the bound workflow, which takes it as a
+      // file: copied all the same (`handFiles`).
+      const aliased = Object.fromEntries(
+        Object.entries(files()).map(([path, text]) => [
+          path,
+          path === "operations/review.ts"
+            ? text.replace(
+                "input: v.object({ doc: v.file() })",
+                "input: v.object({ doc: v.object({ id: v.string() }) })"
+              )
+            : text,
+        ])
+      );
+      const { version } = await fixture.builder.api.apps.files.commit(
+        fixture.app,
+        aliased,
+        "Doc as an object"
+      );
+      const review = await fixture.builder.api.apps.versions.review(
+        fixture.app,
+        version
+      );
+
+      expect(review.handsFilesToWorkflows).toBeTruthy();
+    });
+
     it("refuses a commit's start once the person it acts for left the App before its dispatch, their file read as missing, never as the App", async () => {
       const fixture = await reviewsApp();
       const colleague = await signedIn("user");
