@@ -1039,7 +1039,7 @@ describe("the Workflows page", buildTime, () => {
 
     const [asUser, asStaff, hiddenSteps, missing] = await Promise.all([
       user.api.workflows.get(app, "approve"),
-      staff.workflows.get(app, "approve"),
+      outcome(staff.workflows.get(app, "approve")),
       owner.api.workflows.get(app, "hidden"),
       outcome(owner.api.workflows.get(app, "missing")),
     ]);
@@ -1048,9 +1048,8 @@ describe("the Workflows page", buildTime, () => {
       userSets: asUser.setsParams,
       userCode: codeIn(asUser.steps),
       ownerCode: codeIn(detail.steps),
-      // Staff build it, but set nothing.
-      staffSees: asStaff.params?.length,
-      staffSets: asStaff.setsParams,
+      // A staff session reaches no workflow, only the onboarding.
+      asStaff,
       hidden: hiddenSteps.steps.ok ? "listed" : hiddenSteps.steps.message,
       missing,
     }).toStrictEqual({
@@ -1065,8 +1064,7 @@ describe("the Workflows page", buildTime, () => {
         "param reviewer",
         "option timeout",
       ],
-      staffSees: 2,
-      staffSets: false,
+      asStaff: "role.forbidden",
       hidden: hiddenReason,
       missing: "workflow.not_found",
     });
