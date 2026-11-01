@@ -3570,6 +3570,28 @@ export const appVisitorEntries = sqliteTable(
 );
 
 /**
+ * The functions each version of an App grants its visitors
+ * (app-visitor-calls.ts), as its builders chose them: the App's own
+ * queries and mutations, by path. A version starts with none, so a new
+ * current version grants nothing until a builder grants it again.
+ */
+export const appVisitorGrants = sqliteTable(
+  "app_visitor_grants",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    version: integer().notNull(),
+    function: text().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version, table.function] }),
+  ]
+);
+
+/**
  * The codes sent to visitors (app-visitors.ts), each kept as its SHA-256
  * only, with how many tries it took. A row outlives its code (signed in,
  * used up or expired) for an hour, so the hour's codes per address and

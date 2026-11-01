@@ -25,6 +25,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 import {
   and,
@@ -40,6 +41,9 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { callVisitorFunction } from "./app-functions.ts";
+import type { FunctionAnswer } from "./app-functions.ts";
+import { grantHeld } from "./app-visitor-calls.ts";
 import { editableApp, toApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -53,10 +57,12 @@ import {
   appVisitorEntries,
   appVisitorSessions,
 } from "./db/core/schema.ts";
+import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { escapeHtml } from "./mail-outbox.ts";
 import { sendMail } from "./mail.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
+import { deliveryOf, leasedBuild, standingOf } from "./screen-trust.ts";
 import { visitorScreen } from "./screens-rpc.ts";
 import { requireNotStaff } from "./sharing.ts";
 
@@ -93,15 +99,16 @@ import { requireNotStaff } from "./sharing.ts";
 //   App's own code. A visitor never holds a member's session, so `/rpc`
 //   and every member's route refuse them.
 // - The screen reaching past the App. The screen runs in the frame core
-//   serves for every screen (screen-frame.ts), and no App function is
-//   called for a visitor: function calls need a member's session
-//   (app-function-route.ts), and the lease a visitor's screen gets is for
-//   `visitor:<session>`, which no member's is. Nothing runs as a member,
-//   or as anyone: what a screen shows a visitor is what its code holds.
-// - Access that outlives its reason. On every open, the session must be
-//   unexpired (8 hours at most), the App still published, and the address
-//   still listed; removing it from the list, or unpublishing, ends it at
-//   once. Signing out deletes the session.
+//   serves for every screen (screen-frame.ts). Its calls come here, never
+//   through a member's route (which needs a member's session; the lease a
+//   visitor's screen gets is for `visitor:<session>`, which no member's
+//   is), and run as the App itself, only for the functions its builders
+//   granted visitors (app-visitor-calls.ts): never as a member.
+// - Access that outlives its reason. On every open and call, the session
+//   must be unexpired (8 hours at most), the App still published, and the
+//   address still listed; removing it from the list ends it at once, and
+//   unpublishing deletes every visitor's session (app-status.ts). Signing
+//   out deletes the session.
 // - Unseen. Every code sent and every refusal (an address not listed,
 //   too many codes, a wrong or used-up code), every sign-in and sign-out
 //   is audited as the visitor; setting the list is audited as the
@@ -118,6 +125,9 @@ const requestMaxLength = 4 * 1024;
 
 /** Most rows the sweep deletes of each, a run. */
 const sweptPerRun = 500;
+
+/** The App host's bucket all of an App's visitors' calls share. */
+const visitorsBucket = "visitors";
 
 /** A visitor as the audit log names them. */
 const visitorActor = (app: AppId, sessionId?: string): AuditActor => ({
@@ -573,6 +583,109 @@ const signOut = async (env: Env, token: string): Promise<void> => {
   ]);
 };
 
+/** How long a visitor's call may take, as a member's screen call may. */
+const visitorCallMs = 30_000;
+
+/** The session `id`, unexpired, or undefined. */
+const sessionById = async (env: Env, id: string) =>
+  await drizzle(env.DB)
+    .select()
+    .from(appVisitorSessions)
+    .where(
+      and(
+        eq(appVisitorSessions.id, id),
+        gt(appVisitorSessions.expiresAt, new Date())
+      )
+    )
+    .get();
+
+/**
+ * A call of one of the App's functions by a visitor, from its screen
+ * (app-visitor-calls.ts): run as the App itself, only for a function the
+ * App's current version grants visitors, while the session is live, the
+ * App published and the address listed, each read again before every
+ * commit. Counted per visitor and per App before anything runs.
+ */
+const callAsVisitor = async (
+  env: Env,
+  token: string,
+  lease: string,
+  request: string
+): Promise<FunctionAnswer> => {
+  const session = await sessionOf(env, token);
+  if (session === undefined) {
+    throw appVisitorErrors.create("visitor.signed_out");
+  }
+  const appId = appIdSchema.parse(session.appId);
+  const found = await publishedApp(env, appId);
+  if (
+    found === undefined ||
+    found.currentVersion === null ||
+    !(await isListed(env, appId, session.address))
+  ) {
+    throw appVisitorErrors.create("visitor.signed_out");
+  }
+  const version = found.currentVersion;
+  const principal = `visitor:${session.id}`;
+  const host = appHost(env, appId);
+  // One visitor's calls, then all the App's visitors' together.
+  if (
+    !(await host.admitRequest(principal)) ||
+    !(await host.admitRequest(visitorsBucket))
+  ) {
+    throw appVisitorErrors.create("visitor.too_many");
+  }
+  // Only a build whose code gets the App's data, as for a member's call.
+  const build = await leasedBuild(env, principal, appId, lease);
+  const delivery = deliveryOf(await standingOf(env, appId, build));
+  if (delivery !== "open") {
+    throw screenErrors.create(
+      delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+    );
+  }
+  return await callVisitorFunction(
+    env,
+    {
+      app: appId,
+      version,
+      principal,
+      stillAllowed: async (path) => {
+        const live = await sessionById(env, session.id);
+        const now = await publishedApp(env, appId);
+        if (
+          live === undefined ||
+          now === undefined ||
+          now.currentVersion !== version ||
+          !(await isListed(env, appId, session.address))
+        ) {
+          throw appVisitorErrors.create("visitor.signed_out");
+        }
+        if (!(await grantHeld(env, appId, version, path))) {
+          await audited(
+            env,
+            appId,
+            "app.visitor_refused",
+            { reason: "not_granted", function: path, version },
+            session.id
+          );
+          throw appVisitorErrors.create("visitor.not_granted");
+        }
+      },
+      admitted: async (path) => {
+        await audited(
+          env,
+          appId,
+          "app.visitor_called",
+          { function: path, version },
+          session.id
+        );
+      },
+    },
+    request,
+    Date.now() + visitorCallMs
+  );
+};
+
 /** The HTTP status of each refusal a visitor meets. */
 const statusFor: Record<string, number> = {
   "visitor.invalid": 400,
@@ -632,6 +745,11 @@ export const appVisitorResponse = async (
       case "sign_out": {
         await signOut(env, body.token);
         return Response.json({ signedOut: true });
+      }
+      case "call": {
+        return Response.json(
+          await callAsVisitor(env, body.token, body.lease, body.request)
+        );
       }
       default: {
         return body satisfies never;
