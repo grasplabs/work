@@ -336,10 +336,15 @@ const deletion = (
   env: Env,
   row: HeldAction,
   entry: AuditEntry,
-  spentAs?: string
+  spentAs?: string,
+  /** What must still hold of it as it goes, read in the same transaction. */
+  guard?: SQL
 ): GuardedChange => {
   const db = drizzle(env.DB);
-  const still = eq(pendingActions.id, row.id);
+  const still =
+    guard === undefined
+      ? eq(pendingActions.id, row.id)
+      : and(eq(pendingActions.id, row.id), guard);
   const spend = db
     .insert(idempotentCalls)
     .select(
@@ -475,7 +480,10 @@ export const dropPendingActions = async (
           target: { type: "connection", id: row.connectionId },
           detail: { ...detailOf(row), reason },
         },
-        reason
+        reason,
+        // Read again as each goes: one that no longer matches (its tool
+        // allowed again meanwhile, say) stays.
+        where
       )
     );
     if (first === undefined) {

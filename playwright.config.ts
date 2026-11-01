@@ -223,6 +223,15 @@ export default defineConfig({
         // was lost) checking every 2 s at first, not every minute, so a
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
+        // Who core's mail is from (src/mail.ts), as a deployment sets it:
+        // the onboarding names its domain for the admin to let through.
+        devVar(
+          "MAIL_FROM",
+          JSON.stringify({
+            name: "Stephen at Grasp",
+            address: "onboarding@mail.localhost",
+          })
+        ),
         // The Models page shows the rules and budgets.
         devVar(
           "MODEL_GATEWAY",

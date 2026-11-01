@@ -454,7 +454,7 @@ const suitesOf = (file: string): JourneySuite[] => {
  * admin's, for e2e; the router's, for both). In 150
  * merged pull requests, 33 changed nothing either e2e stack runs, mostly
  * the admin or tests alone, each running every journey for it (October
- * 2026). The merge queue and the nightly run always run both.
+ * 2026). The nightly run always runs both; the merge queue runs neither.
  */
 export const journeysReached = ({
   changedFiles,
@@ -486,6 +486,57 @@ export const journeysReached = ({
     outside.some((file) => suitesOf(file).includes(suite)) ||
     journeyStacks[suite].some((name) => reached.has(dirOf.get(name) ?? ""));
   return { e2e: runs("e2e"), "admin-e2e": runs("admin-e2e") };
+};
+
+/**
+ * What the plan left out that it can't have: a changed file whose package
+ * pnpm didn't report as changed, or a changed test file whose project
+ * doesn't run. Either means the planner itself is wrong (pnpm's filter,
+ * its flags, the checkout's history), and a plan that silently selects
+ * too little passes `check` green, so the plan fails instead. Checked
+ * from git's own list of changed files, apart from pnpm's.
+ */
+export const missedByPlan = ({
+  changedFiles,
+  packages,
+  changedPackages,
+  tests,
+  projects,
+  root,
+}: {
+  /** Every file changed since the base, absolute. */
+  readonly changedFiles: readonly string[];
+  /** Every workspace package's directory, the root's included. */
+  readonly packages: readonly string[];
+  /** The packages pnpm reported changed. */
+  readonly changedPackages: readonly string[];
+  readonly tests: readonly PlannedFile[];
+  readonly projects: readonly string[];
+  readonly root: string;
+}): string[] => {
+  const changed = new Set(changedFiles);
+  const reported = new Set(changedPackages);
+  const selected = new Set(projects);
+  const unreported = changedFiles.filter((file) => {
+    const own = packageOf(file, packages);
+    const journey = journeyFiles.some((pattern) =>
+      path.matchesGlob(path.relative(root, file), pattern)
+    );
+    return own !== undefined && !journey && !reported.has(own);
+  });
+  const unrun = tests.filter(
+    ({ project, file }) => changed.has(file) && !selected.has(project)
+  );
+  return [
+    ...unreported.map(
+      (file) =>
+        `${path.relative(root, file)} changed, but pnpm didn't report its package as changed.`
+    ),
+    ...unrun.map(
+      ({ project, file }) =>
+        `${path.relative(root, file)} changed, but its project ${project} doesn't run.`
+    ),
+  ];
 };
 
 const writeOutput = (name: string, value: string): void => {
@@ -542,12 +593,26 @@ const plan = async (base: string | undefined): Promise<void> => {
           ...importing,
         ]),
       ].toSorted(byKey);
+      const changedFiles = filesChangedSince(base, root);
       journeys = journeysReached({
-        changedFiles: filesChangedSince(base, root),
+        changedFiles,
         testFiles: new Set(tests.map(({ file }) => file)),
         packages: workspacePackages(root),
         root,
       });
+      const missed = missedByPlan({
+        changedFiles,
+        packages,
+        changedPackages: changed,
+        tests,
+        projects,
+        root,
+      });
+      if (missed.length > 0) {
+        throw new Error(
+          `The test plan left out what its changes reach:\n${missed.join("\n")}`
+        );
+      }
       why = `Changed since ${base}: ${
         changed.map((dir) => path.relative(root, dir)).join(", ") ||
         "no package"
