@@ -12,6 +12,7 @@ import { logSearchOf } from "../activity/log-search.ts";
 import type { LogSearch } from "../activity/log-search.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { AuditArchive } from "../settings/audit-archive.tsx";
 import { AuditChainCheck } from "../settings/audit-chain.tsx";
 import {
   SettingsBody,
@@ -62,6 +63,13 @@ const AuditTrail = () => {
         )}
       </SettingsSection>
       <AuditChainCheck last={last} />
+      {log.state === "ready" ? (
+        <AuditArchive
+          directory={log.data.directory}
+          key={JSON.stringify(filters)}
+          search={filters}
+        />
+      ) : null}
     </>
   );
 };

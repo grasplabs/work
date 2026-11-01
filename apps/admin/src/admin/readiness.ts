@@ -41,7 +41,7 @@ import type { DestinationChoice } from "../hosting/placement.ts";
 export type CheckStatus = "ready" | "blocked" | "waiting" | "not_configured";
 
 /** Where a check's next step is done in the admin, when it's done there. */
-export type CheckLink = "releases" | "platform" | "organizations";
+export type CheckLink = "releases" | "organizations";
 
 /** One line of the checklist. */
 export interface ReadinessCheck {
