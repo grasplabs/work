@@ -1799,6 +1799,13 @@ export const workflowRuns = sqliteTable(
      * it (src/workflows/runs.ts). Null until the engine's first notification.
      */
     engineStatus: text("engine_status"),
+    /**
+     * Why the engine rolls the run back, as it began to (src/workflows/
+     * runs.ts): a JSON object of its cause (`failure` or `cancellation`)
+     * and, for a failure, its code. What its summary's compensation says
+     * (spec 10.7.3).
+     */
+    compensation: text(),
     /** When the engine first ran the run; null until it has. */
     startedAt: timestamp("started_at"),
     /**
@@ -4245,6 +4252,13 @@ export const workflowResourceRuns = sqliteTable(
      * own statement: the snapshot's revision is read from it.
      */
     summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * While the engine rolls the run back (its steps' compensations), why:
+     * a JSON object of its cause (`failure` or `cancellation`) and, for a
+     * failure, the code the run failed with. What a screen's snapshot shows
+     * of its compensation (spec 10.7.3); kept once it ended.
+     */
+    compensation: text(),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
