@@ -504,6 +504,7 @@ msgid "{daily} a day"
 msgstr "{daily} al día"
 
 #: src/dashboard/signals.tsx
+#: src/settings/audit-archive.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# día} other {# días}}"
 
@@ -849,6 +850,10 @@ msgstr "{match} de {matches}"
 #: src/dashboard/standard-widgets.tsx
 msgid "{measured} a month measured return"
 msgstr "{measured} al mes de rendimiento medido"
+
+#: src/workflows/share-workflow.tsx
+msgid "{memberName} (team)"
+msgstr "{memberName} (equipo)"
 
 #: src/knowledge/purge.tsx
 msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
@@ -2396,6 +2401,10 @@ msgstr "Los administradores pueden cambiar el rol de cualquiera, cerrar sus sesi
 msgid "After {most} interviews, it is better split in two"
 msgstr "Tras {most} entrevistas, mejor dividirlo en dos"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Después de que termine una ejecución. Pasado ese tiempo, se eliminan sus entradas, salidas y mensajes."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "who does a step"
 msgid "Agent"
@@ -3028,6 +3037,11 @@ msgstr "Aplicaciones por aprobar"
 msgid "Archive"
 msgstr "Archivar"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archivo"
+
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "¿Archivar {name}?"
@@ -3040,6 +3054,10 @@ msgstr "Archivar y dejar fuera de línea"
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archivado"
+
+#: src/settings/audit-archive.tsx
+msgid "Archived events"
+msgstr "Eventos archivados"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3288,6 +3306,7 @@ msgstr "Intento {n}"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/audit-archive.tsx
 msgid "Audit trail"
 msgstr "Registro de auditoría"
 
@@ -4108,6 +4127,10 @@ msgstr "Elige tu idioma"
 msgid "Choose your staff list"
 msgstr "Elige tu lista de personal"
 
+#: src/workflows/share-workflow.tsx
+msgid "Choose…"
+msgstr "Elige…"
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Se elige durante la ejecución: {options}"
@@ -4162,6 +4185,7 @@ msgstr "Borrar filtros"
 #: src/settings/stephen-settings.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Close"
 msgstr "Cerrar"
 
@@ -5590,6 +5614,10 @@ msgstr "Enrutamiento en la UE"
 msgid "European Union"
 msgstr "Unión Europea"
 
+#: src/settings/audit-archive.tsx
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Eventos más antiguos de lo que conserva el registro de auditoría, trasladados al archivo. La búsqueda y la exportación usan los filtros de arriba."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
 msgstr "Todas las llamadas se quedan en la UE: no."
@@ -5798,6 +5826,7 @@ msgstr "Exportar"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "Exportar CSV"
 
@@ -5806,6 +5835,7 @@ msgid "Export definition"
 msgstr "Exportar definición"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "Exportar JSON"
 
@@ -5816,6 +5846,10 @@ msgstr "Exportar informe"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exportar el registro de auditoría"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Exportar con el archivo"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -6233,6 +6267,10 @@ msgstr "Desde que alguien termina de hablar hasta el primer sonido de la respues
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
 msgstr "Del arranque con el patrocinador. Lo que se cambie aquí vale desde el siguiente turno de la entrevista."
+
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "Desde que se registró cada evento, archivo incluido. Pasado ese tiempo, los eventos archivados se eliminan."
 
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
@@ -6844,6 +6882,10 @@ msgstr "¿Cuánto te lleva cada una, {name}?"
 msgid "How long does that take you, {name}?"
 msgstr "¿Cuánto tiempo te lleva eso, {name}?"
 
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records."
+msgstr "Cuánto tiempo conserva Grasp lo que registra."
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
 msgstr "cuánto espera"
@@ -7325,6 +7367,11 @@ msgstr "No se ofrece a tu organización."
 msgid "It isn't shared with anyone."
 msgstr "No está compartida con nadie."
 
+#: src/workflows/share-workflow.tsx
+msgctxt "a workflow"
+msgid "It isn't shared with anyone."
+msgstr "No está compartido con nadie."
+
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "Sabe quién dirige cada equipo, así que puedo hablar primero con los responsables. La conectamos contigo."
@@ -7529,6 +7576,10 @@ msgstr "su salida es mayor de lo que puede ser un registro"
 #: src/engines/store-change-errors.ts
 msgid "its output isn't what the fixture expects"
 msgstr "su salida no es lo que espera el registro de prueba"
+
+#: src/workflows/share-workflow.tsx
+msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
+msgstr "Su propietario y los administradores siempre lo tienen. Un usuario lo sigue y lo inicia; un creador además lo cambia, lo comparte y lo elimina."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -10614,6 +10665,7 @@ msgstr "Pendiente"
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
+#: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personas"
 
@@ -11610,6 +11662,10 @@ msgstr "Resultados"
 msgid "Resume"
 msgstr "Reanudar"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Conservación"
+
 #: src/engines/package-approvals.tsx
 msgid "Retire"
 msgstr "Dar de baja"
@@ -11786,9 +11842,17 @@ msgstr "Risk-to-Compliance"
 msgid "Role"
 msgstr "Rol"
 
+#: src/workflows/share-workflow.tsx
+msgid "Role of {shown}"
+msgstr "Rol de {shown}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rol de {who}"
+
+#: src/workflows/share-workflow.tsx
+msgid "Role to share with"
+msgstr "Rol con el que compartir"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12190,6 +12254,10 @@ msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras
 msgid "Search the apps"
 msgstr "Buscar en las aplicaciones"
 
+#: src/settings/audit-archive.tsx
+msgid "Search the archive"
+msgstr "Buscar en el archivo"
+
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Buscar en la transcripción"
@@ -12197,6 +12265,10 @@ msgstr "Buscar en la transcripción"
 #: src/chat/chat-window.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Busca en tus chats y proyectos, y abre uno."
+
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Se busca arriba. Pasado ese tiempo, los eventos pasan al archivo."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -12421,6 +12493,19 @@ msgstr "Resuelto: {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Varios flujos funcionan con IA, en la mayor parte del trabajo manual."
 
+#: src/workflows/share-workflow.tsx
+msgid "Share"
+msgstr "Compartir"
+
+#: src/workflows/share-workflow.tsx
+msgctxt "share a workflow with someone"
+msgid "Share"
+msgstr "Compartir"
+
+#: src/workflows/share-workflow.tsx
+msgid "Share {name}"
+msgstr "Compartir {name}"
+
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Compartirlo"
@@ -12434,6 +12519,7 @@ msgid "Share this record"
 msgstr "Compartir este registro"
 
 #: src/brain/share-record.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Compartir con"
 
@@ -12454,6 +12540,7 @@ msgid "Shared mailboxes, registers and the company's records, after they press a
 msgstr "Buzones compartidos, registros y los datos de la empresa, después de pulsar una tarjeta."
 
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Shared with"
 msgstr "Compartida con"
 
@@ -13184,6 +13271,10 @@ msgstr "Parar y preguntar"
 msgid "Stop for now"
 msgstr "Parar aquí"
 
+#: src/workflows/share-workflow.tsx
+msgid "Stop sharing with {shown}"
+msgstr "Dejar de compartir con {shown}"
+
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
 msgid "Stopped"
@@ -13513,6 +13604,7 @@ msgstr "Equipo: {name}"
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 #: src/settings/teams.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Teams"
 msgstr "Equipos"
 
@@ -15402,6 +15494,10 @@ msgstr "Evento ilegible"
 msgid "Unsaved changes"
 msgstr "Cambios sin guardar"
 
+#: src/workflows/share-workflow.tsx
+msgid "Unshare"
+msgstr "Dejar de compartir"
+
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Hasta"
@@ -16860,6 +16956,10 @@ msgstr "Flujo de trabajo no encontrado"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Workflow packages"
 msgstr "Paquetes del flujo de trabajo"
+
+#: src/settings/audit-archive.tsx
+msgid "Workflow run details"
+msgstr "Detalles de las ejecuciones de flujos de trabajo"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
