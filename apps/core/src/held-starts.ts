@@ -10,7 +10,18 @@ import {
   coreStartKeyPrefix,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -59,6 +70,13 @@ import { startResourceRun } from "./workflows/resource-runs.ts";
 //   same start.
 // - A held start waiting for ever: it lapses after `heldStartMs`, and is
 //   neither listed nor confirmable after.
+// - A second copy of what the person put in, kept for ever: the input is
+//   kept only while the start is open. Starting, refusing or declining it
+//   empties it in the same write (a started run keeps its input under run
+//   retention, workflows/retention.ts); the clock empties a lapsed one's
+//   (`sweepHeldStartInputs`); and the rows go with their chat
+//   (`dropHeldStarts`, workspace.ts) and their person's erasure
+//   (person-erasure.ts).
 // - A decision nobody can trace: holding is audited as the agent's
 //   (`workflow.start.held`), confirming and declining as the person's
 //   (`workflow.start.confirmed`, `workflow.start.declined`), with the
@@ -141,9 +159,9 @@ const withStart = async (env: Env, row: Row): Promise<Row> => {
   }
   await drizzle(env.DB)
     .update(agentHeldStarts)
-    .set({ startId: receipt.id })
+    .set({ startId: receipt.id, input: null })
     .where(eq(agentHeldStarts.id, row.id));
-  return { ...row, startId: receipt.id };
+  return { ...row, startId: receipt.id, input: null };
 };
 
 /**
@@ -161,7 +179,9 @@ const openSql = () =>
         isNull(agentHeldStarts.refusal)
       )
     ),
-    gt(agentHeldStarts.expiresAt, new Date())
+    gt(agentHeldStarts.expiresAt, new Date()),
+    // Emptied only once it is no longer open; never confirmed without it.
+    isNotNull(agentHeldStarts.input)
   );
 
 /** Where held start `row` stands, as of `now`. */
@@ -282,6 +302,17 @@ export const holdStart = async (
   return standingOf(held, now);
 };
 
+/**
+ * The input of open held start `row`. An open start always has one; one
+ * emptied as it stopped being open is gone.
+ */
+const inputOf = (row: Row) => {
+  if (row.input === null) {
+    throw workflowResourceErrors.create("workflow.start_held_gone");
+  }
+  return z.json().parse(JSON.parse(row.input));
+};
+
 /** The starts waiting for `by`, oldest first. */
 export const heldStartsOf = async (
   env: Env,
@@ -310,7 +341,7 @@ export const heldStartsOf = async (
     workflow: row.workflowResourceId,
     workflowName,
     version: row.workflowResourceVersion,
-    input: z.json().parse(JSON.parse(row.input)),
+    input: inputOf(row),
     inputHash: row.inputHash,
     chatId: row.chatId,
     requestedAt: row.createdAt.toISOString(),
@@ -401,7 +432,7 @@ export const confirmHeldStart = async (
       row.workflowResourceId,
       {
         version: row.workflowResourceVersion,
-        input: z.json().parse(JSON.parse(row.input)),
+        input: inputOf(row),
         key: startKeyOf(row.chatId, row.key),
       },
       stillConfirmed,
@@ -419,7 +450,7 @@ export const confirmHeldStart = async (
     if (receipt !== undefined) {
       await db
         .update(agentHeldStarts)
-        .set({ startId: receipt.id })
+        .set({ startId: receipt.id, input: null })
         .where(eq(agentHeldStarts.id, row.id));
       return {
         start: receipt.id,
@@ -439,16 +470,17 @@ export const confirmHeldStart = async (
       // Refused for good: it never starts, and its agent is told why.
       await db
         .update(agentHeldStarts)
-        .set({ refusal: error.code })
+        .set({ refusal: error.code, input: null })
         .where(
           and(eq(agentHeldStarts.id, row.id), isNull(agentHeldStarts.startId))
         );
     }
     throw error;
   }
+  // Its run keeps the input from here on.
   await db
     .update(agentHeldStarts)
-    .set({ startId: started.id })
+    .set({ startId: started.id, input: null })
     .where(eq(agentHeldStarts.id, row.id));
   return { start: started.id, run: started.runId };
 };
@@ -466,7 +498,7 @@ export const declineHeldStart = async (
   const [decided] = await auditedBatch(env, db, [
     db
       .update(agentHeldStarts)
-      .set({ decision: "declined", decidedAt: new Date() })
+      .set({ decision: "declined", decidedAt: new Date(), input: null })
       .where(and(stillOpen(row.id), notAdmitted))
       .returning({ id: agentHeldStarts.id }),
     outboxedIfChanged(db, {
@@ -479,4 +511,54 @@ export const declineHeldStart = async (
   if (decided.length === 0) {
     throw workflowResourceErrors.create("workflow.start_held_gone");
   }
+};
+
+/** Most lapsed held starts emptied at once. */
+export const heldInputsPerSweep = 500;
+
+/**
+ * Empties the input of every held start lapsed by `now`, as the clock
+ * does: it can no longer be confirmed (`openSql`), so nothing needs it.
+ */
+export const sweepHeldStartInputs = async (
+  env: Env,
+  now: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await db
+    .update(agentHeldStarts)
+    .set({ input: null })
+    .where(
+      inArray(
+        agentHeldStarts.id,
+        db
+          .select({ id: agentHeldStarts.id })
+          .from(agentHeldStarts)
+          .where(
+            and(
+              isNotNull(agentHeldStarts.input),
+              lte(agentHeldStarts.expiresAt, now)
+            )
+          )
+          .limit(heldInputsPerSweep)
+      )
+    );
+};
+
+/**
+ * Deletes the held starts of chat `chatId`, as the chat is deleted, or of
+ * person `personId`, as they are erased: what they were asked to start
+ * goes with them.
+ */
+export const dropHeldStarts = async (
+  env: Env,
+  of: { chatId: string } | { personId: string }
+): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(agentHeldStarts)
+    .where(
+      "chatId" in of
+        ? eq(agentHeldStarts.chatId, of.chatId)
+        : eq(agentHeldStarts.personId, of.personId)
+    );
 };

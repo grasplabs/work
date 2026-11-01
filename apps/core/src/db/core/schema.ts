@@ -3973,7 +3973,10 @@ export const triggerSchedules = sqliteTable(
  * agent's key, scoped to the chat. One per chat and key: the agent asking
  * again is the same start. Decided once: confirmed (with the start it
  * made, or why that was refused) or declined; one not started past
- * `expires_at` lapsed.
+ * `expires_at` lapsed. The input is kept only while the start is open:
+ * emptied once it started (its run keeps it from then on, under run
+ * retention), was refused, declined or lapsed; and the row goes with its
+ * chat, or its person's erasure.
  */
 export const agentHeldStarts = sqliteTable(
   "agent_held_starts",
@@ -3987,7 +3990,8 @@ export const agentHeldStarts = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     workflowResourceVersion: integer("workflow_resource_version").notNull(),
-    input: text().notNull(),
+    /** Null once the start is no longer open (held-starts.ts). */
+    input: text(),
     inputHash: text("input_hash").notNull(),
     key: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
@@ -4009,6 +4013,10 @@ export const agentHeldStarts = sqliteTable(
     index("agent_held_starts_person")
       .on(table.personId, table.createdAt)
       .where(sql`${table.decision} IS NULL`),
+    // Inputs still kept, by when they lapse: what the clock empties.
+    index("agent_held_starts_kept")
+      .on(table.expiresAt)
+      .where(sql`${table.input} IS NOT NULL`),
   ]
 );
 

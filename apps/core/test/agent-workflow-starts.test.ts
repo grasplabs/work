@@ -1,11 +1,16 @@
-import { chatIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import {
+  collectionIdSchema,
+  chatIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { confirmHeldStart } from "../src/held-starts.ts";
+import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -153,6 +158,31 @@ const runsOf = async (id: string) => {
       agent: string;
     }>();
   return results;
+};
+
+/** How run `id` ended: its status, and why it failed if it did. */
+const endOf = async (id: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await env.DB.prepare(
+        "SELECT status, failure_code AS code, ended_at AS ended FROM workflow_resource_runs WHERE id = ?"
+      )
+        .bind(id)
+        .first<{ status: string; code: string | null; ended: number | null }>();
+      expect(run?.ended ?? null).not.toBeNull();
+      return { status: run?.status, code: run?.code ?? null };
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** What held start `id` still keeps of its input. */
+const keptInput = async (id: string) => {
+  const row = await env.DB.prepare(
+    "SELECT input FROM agent_held_starts WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ input: string | null }>();
+  return row?.input ?? null;
 };
 
 describe("a chat's agent asking to start a workflow", setUpTime, () => {
@@ -482,10 +512,12 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       kept.held,
       keptOpen?.inputHash ?? ""
     );
+    // As it stood before the write that notes its start and lets its
+    // input go.
     await env.DB.prepare(
-      "UPDATE agent_held_starts SET start_id = NULL WHERE id = ?"
+      "UPDATE agent_held_starts SET start_id = NULL, input = ? WHERE id = ?"
     )
-      .bind(kept.held)
+      .bind(JSON.stringify(keptOpen?.input), kept.held)
       .run();
     const lateDecline = await outcome(person.api.heldStarts.decline(kept.held));
     // The grant revoked meanwhile: confirming again names the start made.
@@ -549,6 +581,114 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       item: ["confirm", "decline"],
       restricted: [1],
       teams: "workflow.start_offer_only",
+    });
+  });
+
+  it("holds a confirmed start to what its chat had read: refused once the agent may no longer read it", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { chatId, inRun } = await chatOf(chats, person);
+    const { id: handbook } = await admin.api.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+      sensitive: false,
+    });
+    const readId = await requestGranted(idp, builder, {
+      subject: { type: "agent", agentId: chats.agent.agentId },
+      object: {
+        type: "collection",
+        collectionId: collectionIdSchema.parse(handbook),
+      },
+      actions: ["read"],
+      binding: `HANDBOOK_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    // What the chat had read before its agent asked.
+    await runInDurableObject(chats.stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+        chatId,
+        handbook
+      );
+    });
+    /** A start the agent asks for under `key`, as its person confirms it. */
+    const confirmedRun = async (key: string) => {
+      // In a code run of its own: a revoke closes the one under way.
+      const workflows = await inRun();
+      const held = await workflows.start(workflow.id, { who: "Ada" }, key);
+      const listed = await person.api.heldStarts.list();
+      const shown = listed.find(({ id }) => id === held.held);
+      const confirmed = await person.api.heldStarts.confirm(
+        held.held,
+        shown?.inputHash ?? ""
+      );
+      return await endOf(confirmed.run ?? confirmed.start);
+    };
+
+    const kept = await confirmedRun("kept");
+    await admin.api.permissions.revoke(readId);
+    const revoked = await confirmedRun("revoked");
+    const pinned = await env.DB.prepare(
+      "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(chats.agent.agentId)
+      .all<{ source: string; chat: string }>();
+
+    expect({ kept, revoked, pinned: pinned.results }).toStrictEqual({
+      // Its chat's reads still readable: it runs to its end.
+      kept: { status: "completed", code: null },
+      // The agent's read of what its chat read revoked: its output, which
+      // its input may have carried, never leaves it.
+      revoked: { status: "failed", code: "brain.revoked" },
+      pinned: [{ source: handbook, chat: chatId }],
+    });
+  });
+
+  it("keeps a held start's input only while it is open: gone once it starts, is declined or lapses", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { workflows } = await chatOf(chats, person);
+    const confirming = await workflows.start(workflow.id, { who: "Ada" }, "c");
+    const declining = await workflows.start(workflow.id, { who: "Bo" }, "d");
+    const lapsing = await workflows.start(workflow.id, { who: "Cy" }, "l");
+    const waiting = await workflows.start(workflow.id, { who: "Di" }, "w");
+    const listed = await person.api.heldStarts.list();
+    const whileOpen = await keptInput(confirming.held);
+
+    await person.api.heldStarts.confirm(
+      confirming.held,
+      listed.find(({ id }) => id === confirming.held)?.inputHash ?? ""
+    );
+    await person.api.heldStarts.decline(declining.held);
+    await env.DB.prepare(
+      "UPDATE agent_held_starts SET expires_at = ? WHERE id = ?"
+    )
+      .bind(Date.now() - 1000, lapsing.held)
+      .run();
+    const lapsedBeforeSweep = await keptInput(lapsing.held);
+    await sweepHeldStartInputs(env, new Date());
+    const stillListed = await person.api.heldStarts.list();
+
+    expect({
+      whileOpen,
+      confirmed: await keptInput(confirming.held),
+      declined: await keptInput(declining.held),
+      lapsedBeforeSweep,
+      lapsed: await keptInput(lapsing.held),
+      waiting: await keptInput(waiting.held),
+      stillListed: stillListed.map(({ id }) => id),
+    }).toStrictEqual({
+      whileOpen: '{"who":"Ada"}',
+      confirmed: null,
+      declined: null,
+      lapsedBeforeSweep: '{"who":"Cy"}',
+      lapsed: null,
+      waiting: '{"who":"Di"}',
+      stillListed: [waiting.held],
     });
   });
 });

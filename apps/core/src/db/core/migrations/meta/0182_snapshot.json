@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9b95a1c6-6281-4699-9994-24dbcf5076f1",
+  "id": "da8341eb-8d1c-469c-8d2a-8d5ea5939b17",
   "prevId": "6c1eb816-ffdd-46d1-99c9-27c275d43d7c",
   "tables": {
     "access_revocations": {
@@ -333,7 +333,7 @@
           "name": "input",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "input_hash": {
@@ -410,6 +410,14 @@
           ],
           "isUnique": false,
           "where": "\"agent_held_starts\".\"decision\" IS NULL"
+        },
+        "agent_held_starts_kept": {
+          "name": "agent_held_starts_kept",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false,
+          "where": "\"agent_held_starts\".\"input\" IS NOT NULL"
         }
       },
       "foreignKeys": {

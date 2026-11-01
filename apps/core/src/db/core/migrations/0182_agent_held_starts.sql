@@ -6,7 +6,7 @@ CREATE TABLE `agent_held_starts` (
 	`person_id` text NOT NULL,
 	`workflow_resource_id` text NOT NULL,
 	`workflow_resource_version` integer NOT NULL,
-	`input` text NOT NULL,
+	`input` text,
 	`input_hash` text NOT NULL,
 	`key` text NOT NULL,
 	`created_at` integer NOT NULL,
@@ -19,4 +19,5 @@ CREATE TABLE `agent_held_starts` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `agent_held_starts_key` ON `agent_held_starts` (`chat_id`,`key`);--> statement-breakpoint
-CREATE INDEX `agent_held_starts_person` ON `agent_held_starts` (`person_id`,`created_at`) WHERE "agent_held_starts"."decision" IS NULL;
+CREATE INDEX `agent_held_starts_person` ON `agent_held_starts` (`person_id`,`created_at`) WHERE "agent_held_starts"."decision" IS NULL;--> statement-breakpoint
+CREATE INDEX `agent_held_starts_kept` ON `agent_held_starts` (`expires_at`) WHERE "agent_held_starts"."input" IS NOT NULL;
