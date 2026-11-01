@@ -353,6 +353,41 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
     });
   });
 
+  it("keep what was agreed, and the links that are due go out at once, as the staff member", async () => {
+    const store = onboardingStore(env);
+    const ids = await team(["lea", "max"]);
+    await store.setAgreements(
+      { processing: false, assessment: false, council: "waiting" },
+      { type: "system" }
+    );
+    const agreements = {
+      processing: true,
+      assessment: true,
+      council: "none" as const,
+      processingOn: "2026-10-01",
+      assessmentOn: "2026-10-02",
+    };
+    const events = await auditedDuring(async () => {
+      await adminCommands().setAgreements(agreements);
+    });
+    const snapshot = await adminSnapshot();
+    expect({
+      agreements: snapshot.agreements,
+      agreed: snapshot.agreed,
+      leaOut:
+        snapshot.links.find(({ person }) => person === ids.lea)?.sentAt !==
+        null,
+      events: actionsBy(events).filter(
+        ({ action }) => action === "onboarding.agreements.set"
+      ),
+    }).toStrictEqual({
+      agreements,
+      agreed: true,
+      leaOut: true,
+      events: [{ action: "onboarding.agreements.set", actor: staffActor }],
+    });
+  });
+
   it("note the one reminder, ask a team in and give someone a new start, as the staff member", async () => {
     const commands = adminCommands();
     const store = onboardingStore(env);

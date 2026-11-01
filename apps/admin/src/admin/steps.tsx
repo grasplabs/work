@@ -1,3 +1,4 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
@@ -23,11 +24,11 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * opened underneath. It opens on the step the organization is at.
  *
  * Staff steer the onboarding from here, each change a command to the
- * company's Grasp (commands.tsx): marking the one reminder, pausing the
- * interviews, the share at which it opens, and giving Grasp's go or
- * taking it back; the first conversation is brought in from its own step
- * (kickoff.tsx). What the admin can't do yet (starting the research,
- * keeping what was agreed) says so where its buttons were. Nor is the
+ * company's Grasp (commands.tsx): keeping what was agreed (agreements.tsx),
+ * marking the one reminder, pausing the interviews, the share at which it
+ * opens, and giving Grasp's go or taking it back; the first conversation
+ * is brought in from its own step (kickoff.tsx). What the admin can't do
+ * yet (starting the research) says so where its buttons were. Nor is the
  * company's own link here, as the prototype had it under the steps: a
  * link is a credential, and core never sends one. And nothing anyone
  * said is shown: not the first conversation, not what the research
@@ -53,6 +54,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { AgreementsAction } from "./agreements.tsx";
 import { CommandButton, GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
 import { Kickoff, visionWords } from "./kickoff.tsx";
@@ -427,10 +429,27 @@ const councilWords = {
  * handling data, the company's own look at the risks to its people, and
  * the works council's yes where there is one.
  */
-const Agreed = ({ view, paused }: { view: OrgView; paused: boolean }) => {
+const Agreed = ({
+  view,
+  paused,
+  clientId,
+  agreements,
+}: {
+  view: OrgView;
+  paused: boolean;
+  clientId: string;
+  agreements: AdminSnapshot["agreements"];
+}) => {
   const { agreed } = view.state;
   return (
     <Section
+      action={
+        <AgreementsAction
+          agreements={agreements}
+          clientId={clientId}
+          told={view.told}
+        />
+      }
       description="Without all three, nobody is invited."
       title="Agreed before the first interview"
     >
@@ -472,9 +491,6 @@ const Agreed = ({ view, paused }: { view: OrgView; paused: boolean }) => {
           </span>
         ) : null}
       </div>
-      <NotHere>
-        Keeping what was agreed as it comes in isn’t in the admin yet.
-      </NotHere>
     </Section>
   );
 };
@@ -968,11 +984,14 @@ export const OrgSteps = ({
   clientId,
   paused,
   gate,
+  agreements,
 }: {
   view: OrgView;
   /** The step that is open. */
   stage: Stage;
   clientId: string;
+  /** What was agreed, as core keeps it, to change it from. */
+  agreements: AdminSnapshot["agreements"];
   /** The company has paused its interviews, which the model doesn't carry. */
   paused: boolean;
   /** The gate as core keeps it: open now or not, and Grasp's go. */
@@ -984,7 +1003,14 @@ export const OrgSteps = ({
       <Conversation clientId={clientId} view={view} />
     ) : null}
     {stage === "research" ? <Research view={view} /> : null}
-    {stage === "agreed" ? <Agreed paused={paused} view={view} /> : null}
+    {stage === "agreed" ? (
+      <Agreed
+        agreements={agreements}
+        clientId={clientId}
+        paused={paused}
+        view={view}
+      />
+    ) : null}
     {stage === "connected" ? <Company view={view} /> : null}
     {stage === "leads" ? <Leads clientId={clientId} view={view} /> : null}
     {stage === "interviews" ? (

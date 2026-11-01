@@ -17,6 +17,7 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
+import type { Agreements } from "@grasp-os/shared/onboarding";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import type { StephenSetup } from "@grasp-os/shared/onboarding-staff";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
@@ -146,6 +147,11 @@ export const command = async (
 
 /** The admin's commands, one call each, as staff used to make them in the company's Grasp. */
 export const adminCommands = (coreEnv: Env = env) => ({
+  setAgreements: async (agreements: Agreements) =>
+    await command(
+      { type: "onboarding.agreements", payload: { agreements } },
+      coreEnv
+    ),
   remind: async (people: string[]) =>
     await command({ type: "onboarding.remind", payload: { people } }, coreEnv),
   askIn: async (team: string) =>

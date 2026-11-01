@@ -81,6 +81,12 @@ const applyChange = async (
 ): Promise<void> => {
   const store = onboardingStore(env);
   switch (command.type) {
+    case "onboarding.agreements": {
+      await store.setAgreements(command.payload.agreements, by);
+      // Once all are in, the links that are due go out now, not at the next alarm.
+      await store.releaseDue();
+      return;
+    }
     case "onboarding.remind": {
       await store.remind(command.payload.people, by);
       return;

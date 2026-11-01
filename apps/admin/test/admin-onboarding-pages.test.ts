@@ -191,6 +191,10 @@ const cardOf = (html: string, name: string): string => {
     : html.slice(html.lastIndexOf("<li", at), html.indexOf("</li>", at));
 };
 
+/** The button that changes what was agreed, held while the team is told. */
+const changeAgreed =
+  /<button[^>]*disabled=""[^>]*>(?:<[^>]*>)*Change what was agreed/u;
+
 describe("an organization's onboarding in the admin", () => {
   useStoreSecrets({ deployer: token });
 
@@ -270,11 +274,8 @@ describe("an organization's onboarding in the admin", () => {
           "Interviews can start.",
           "The team is told, so this stays as it was agreed.",
         ].map((text) => agreed.html.includes(text)),
-        // Nothing here changes what was agreed.
-        switches: agreed.html.includes('role="switch"'),
-        notHere: agreed.html.includes(
-          "Keeping what was agreed as it comes in isn’t in the admin yet."
-        ),
+        // Staff keep what was agreed from here, until the team is told.
+        change: changeAgreed.test(agreed.html),
       },
       interviews: {
         shown: [
@@ -316,8 +317,7 @@ describe("an organization's onboarding in the admin", () => {
       agreed: {
         current: true,
         states: [true, true, true, true, true],
-        switches: false,
-        notHere: true,
+        change: true,
       },
       interviews: {
         shown: [true, true, true, true, true, true, true],
