@@ -195,6 +195,24 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     });
   });
 
+  it("answer a last item's null output as the loop's, not its input", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        each: {
+          for: { in: "${ [1, 2] }" },
+          input: { from: '${ {status: "input"} }' },
+          do: [{ blank: { set: "${ null }" } }],
+          output: { as: "${ {status: (. | tostring)} }" },
+        },
+      },
+    ]);
+    expect(endOf(await ranFor(by, workflow.id))).toStrictEqual({
+      status: "completed",
+      output: { status: "null" },
+    });
+  });
+
   it("stop at the first item whose while is false, before any of its tasks run", async () => {
     const by = await builder();
     const { workflow } = await published(by, [

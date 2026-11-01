@@ -408,8 +408,8 @@ export class Run extends WorkerEntrypoint {
         sleepUntil: async (name, timestamp) => {
           unwrapped(await asked(async () => await host.sleepUntil(name, timestamp)));
         },
-        listen: async (name) => unwrapped(await host.listen(name)),
-        child: async (name) => unwrapped(await host.child(name)),
+        listen: async (name) => unwrapped(await asked(async () => await host.listen(name))),
+        child: async (name) => unwrapped(await asked(async () => await host.child(name))),
       };
       return await definition.run(engine, input);
     });
@@ -4038,6 +4038,10 @@ export class ResourceRunHost
    * deadline, `workflow.event_timeout`.
    */
   async listen(name: unknown): Promise<Settled<Json>> {
+    return await this.#handling(async () => await this.#listen(name));
+  }
+
+  async #listen(name: unknown): Promise<Settled<Json>> {
     return await settle(
       async () =>
         await this.#awaited(name, async (listening) => {
@@ -4102,6 +4106,10 @@ export class ResourceRunHost
    * again before the wait, so an end told while no one waited is taken.
    */
   async child(name: unknown): Promise<Settled<Json>> {
+    return await this.#handling(async () => await this.#child(name));
+  }
+
+  async #child(name: unknown): Promise<Settled<Json>> {
     return await settle(
       async () =>
         await this.#awaited(name, async (waiting) => {

@@ -1075,4 +1075,62 @@ describe("a run's host, against a forged module's waits at once", () => {
       waited: [],
     });
   });
+
+  it("holds its run busy while a listen checks its person, until its wait reaches the engine", async () => {
+    const admin = await builder("admin");
+    const workflow = await raceWithListen(admin);
+    const { step: parking, seen } = parkingEngine();
+    // Its wait parks, as the engine parks one for an event not yet come.
+    const step: RunStep = {
+      ...parking,
+      waitForMatch: async () =>
+        await engineCall(
+          async () => await Promise.withResolvers<never>().promise
+        ),
+    };
+    const host = await hostOf(admin, workflow.id, {
+      step,
+      candidate: new Map([
+        [
+          "events",
+          {
+            kind: "event",
+            contractId: "x",
+            fingerprint: "x",
+            answer: undefined,
+          },
+        ],
+      ]),
+    });
+    await host.quiet(0, 1);
+    await host.do("enter:hear@pick.1", ada, async (attempt) => {
+      const until = await attempt.until({ input: { who: "Ada" } });
+      return until.ok
+        ? {
+            ok: true,
+            value: { output: { who: "Ada" }, until: until.value },
+          }
+        : until;
+    });
+    await host.quiet(1, 2);
+    const idle = seen.busy;
+    const held = Promise.withResolvers<null>();
+    const { DB: db } = env;
+    env.DB = holdingFirst(db, held.promise, "members", admin.userId);
+    let checking: number;
+    try {
+      void host.listen("task:hear@pick.1");
+      await scheduler.wait(50);
+      checking = seen.busy;
+      held.resolve(null);
+      await scheduler.wait(200);
+    } finally {
+      env.DB = db;
+    }
+    expect({ idle, checking, parked: seen.busy }).toStrictEqual({
+      idle: 0,
+      checking: 1,
+      parked: 0,
+    });
+  });
 });

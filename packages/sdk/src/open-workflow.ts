@@ -1195,12 +1195,16 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       const done = ran.outcomes.flatMap((outcome) =>
         outcome?.ok === true ? [outcome.done] : []
       );
-      // One after another: the last item's output, or the input for none.
-      // At once: every item's output, in item order (spec 13.5).
+      // One after another: the last item's output (null too), or the input
+      // for none. At once: every item's output, in item order (spec 13.5).
+      const last = done.at(-1);
       const state: FlowState =
         limit > 1
           ? { output: done.map((one) => one.output), context: data.context }
-          : { output: done.at(-1)?.output ?? input, context: carried };
+          : {
+              output: last === undefined ? input : last.output,
+              context: carried,
+            };
       if (!leaves(plan)) {
         return { ...state, end: false };
       }
