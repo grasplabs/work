@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ceb9eca0-59ca-4737-9d26-d31eb0d608f9",
+  "id": "8ac21ba5-933b-4e87-ab72-6a521168e2d5",
   "prevId": "cd77265f-7598-4b94-8b30-3f2319e25bd4",
   "tables": {
     "access_revocations": {
@@ -2165,6 +2165,20 @@
         },
         "removed_by": {
           "name": "removed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_workspace_id": {
+          "name": "provisional_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_chat_id": {
+          "name": "provisional_chat_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -5523,34 +5537,6 @@
         },
         "trigger_id": {
           "name": "trigger_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "event_type": {
-          "name": "event_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "event_resource": {
-          "name": "event_resource",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stop_reason": {
-          "name": "stop_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
