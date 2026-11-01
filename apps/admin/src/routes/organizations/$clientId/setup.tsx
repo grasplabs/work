@@ -11,7 +11,7 @@ import {
   fetchClientHosting,
   fetchProvisioningProgress,
 } from "../../../hosting/functions.ts";
-import { fetchNewClientOptions } from "../../../provision/functions.ts";
+import { fetchPinChoices } from "../../../provision/functions.ts";
 
 const Setup = () => {
   const { clientId } = Route.useParams();
@@ -63,7 +63,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     })();
     const [setup, { releases }, hosting, progress] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
-      fetchNewClientOptions(),
+      fetchPinChoices(),
       fetchClientHosting({ data: { clientId: params.clientId } }),
       fetchProvisioningProgress({ data: { clientId: params.clientId } }),
     ]);

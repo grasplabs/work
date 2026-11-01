@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { staffEvents } from "../src/admin/platform-data.ts";
+import { platformData, staffEvents } from "../src/admin/platform-data.ts";
 import { eventWords, needWords } from "../src/admin/platform-parts.tsx";
 import { companiesOf, platformCounts } from "../src/admin/platform.ts";
 import { clientGrid } from "../src/clients/grid.ts";
@@ -10,11 +10,14 @@ import type { GridRow, LiveStatus } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
+  channels,
   clientProvisions,
   clients,
   hostingDestinations,
 } from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
+import { promoteRelease, releaseToEdge } from "../src/rollout/channels.ts";
+import { staff } from "./hosting.ts";
 import { publishRelease } from "./releases.ts";
 
 const db = adminDatabase(env.DB);
@@ -212,6 +215,52 @@ describe("the Platform page's data", () => {
       .update(clients)
       .set({ status: "offboarded" })
       .where(ne(clients.status, "offboarded"));
+  });
+
+  it("reads each channel's release, Edge first, and every change of one, the latest first", async () => {
+    const older = await publishRelease({ notes: "feat(core): the older one" });
+    const newer = await publishRelease({ notes: "feat(core): the newer one" });
+    await importReleases(env.RELEASES, db);
+    await db.delete(channels);
+    await releaseToEdge(env, [older.id]);
+    await promoteRelease(env, staff, { channel: "beta", releaseId: older.id });
+    await releaseToEdge(env, [newer.id]);
+
+    const data = await platformData(env);
+
+    expect({
+      channels: data.channels.map(({ channel, releaseId, notes }) => ({
+        channel,
+        releaseId,
+        notes,
+      })),
+      history: data.history
+        .slice(0, 3)
+        .map(({ channel, releaseId, actor }) => ({
+          channel,
+          releaseId,
+          actor,
+        })),
+    }).toStrictEqual({
+      channels: [
+        {
+          channel: "edge",
+          releaseId: newer.id,
+          notes: "feat(core): the newer one",
+        },
+        {
+          channel: "beta",
+          releaseId: older.id,
+          notes: "feat(core): the older one",
+        },
+        { channel: "stable", releaseId: null, notes: "" },
+      ],
+      history: [
+        { channel: "edge", releaseId: newer.id, actor: "system" },
+        { channel: "beta", releaseId: older.id, actor: staff.email },
+        { channel: "edge", releaseId: older.id, actor: "system" },
+      ],
+    });
   });
 
   it("lists what staff did to the platform, the latest first, and none of the admin's own jobs or a deploy's steps", async () => {
