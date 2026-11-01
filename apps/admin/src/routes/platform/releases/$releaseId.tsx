@@ -1,145 +1,112 @@
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
 import {
+  channelsId,
   PlatformNav,
   platformCrumb,
   releasesCrumb,
 } from "../../../admin/platform-nav.tsx";
 import { Facts, listed, Quiet } from "../../../admin/release-parts.tsx";
 import { Section } from "../../../admin/section.tsx";
-import { formatBytes, formatTime } from "../../../releases/format.ts";
+import { formatTime } from "../../../releases/format.ts";
 import { fetchRelease } from "../../../releases/functions.ts";
 import type { WorkerView } from "../../../releases/queries.ts";
-import { versionWords } from "../../../releases/version.ts";
+import { releaseTitle } from "../../../releases/version.ts";
+import { channelWords } from "../../../rollout/channel-words.ts";
 
-/** One of the release's Workers: how it runs, its modules and its databases' migrations. */
-const WorkerPanel = ({ worker }: { worker: WorkerView }) => (
-  <Section description={worker.name} title={worker.app}>
-    <Facts
-      rows={[
-        { label: "Main module", value: worker.mainModule, mono: true },
-        {
-          label: "Compatibility flags",
-          value: listed(worker.compatibilityFlags),
-          mono: true,
-        },
-        { label: "Crons", value: listed(worker.crons), mono: true },
-        {
-          label: "Required secrets",
-          value: listed(worker.requiredSecrets),
-          mono: true,
-        },
-        {
-          label: "Durable Object migrations",
-          value: listed(worker.durableObjectMigrations),
-          mono: true,
-        },
-        { label: "Static assets", value: String(worker.assetCount) },
-      ]}
-    />
-    <div className="@container border-t">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">Module</TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
-              Type
-            </TableHead>
-            <TableHead className="text-right" variant="card">
-              Size
-            </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
-              SHA-256
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {worker.modules.map((module) => (
-            <TableRow key={module.name}>
-              <TableCell className="whitespace-normal" variant="card">
-                <span className="font-mono text-xs break-all">
-                  {module.name}
-                </span>
-              </TableCell>
-              <TableCell className="hidden @xl:table-cell" variant="card">
-                {module.type}
-              </TableCell>
-              <TableCell className="text-right" variant="card">
-                <span className="tabular-nums">{formatBytes(module.size)}</span>
-              </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
-                <span className="text-muted-foreground font-mono text-xs">
-                  {module.sha256.slice(0, 12)}
-                </span>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-    {worker.d1Databases.map((database) => (
-      <section
-        className="flex flex-col gap-2 border-t px-5 py-3"
-        key={database.binding}
-      >
-        <h3 className="font-medium">
-          {`D1 ${database.binding} `}
-          <span className="text-muted-foreground font-normal">
-            {`(${database.databaseName}), ${database.migrations.length} migrations`}
-          </span>
-        </h3>
-        <ul className="flex flex-col gap-0.5 font-mono text-xs">
-          {database.migrations.map((migration) => (
-            <li key={migration}>{migration}</li>
-          ))}
-        </ul>
-      </section>
-    ))}
-  </Section>
-);
+/** One of the release's Workers, in a line: what deploying it changes. */
+const workerLine = (worker: WorkerView): string =>
+  `${worker.modules} modules, ${worker.d1Migrations} D1 migrations, Durable Object migrations ${listed(worker.durableObjectMigrations)}`;
 
 /**
- * One release, as CI built it and the admin imported it: its commit,
- * each Worker with its modules and migrations, and the packages it was
- * built with. The admin's release page, under Platform.
+ * One release: what it holds, the channels it has been on and who runs
+ * it, and its record. Its name, summary and changelog join "What it
+ * holds" (GRA-1418).
  */
 const ReleasePage = () => {
   const release = Route.useLoaderData();
-  const packages = Object.entries(release.packages);
+  const title = releaseTitle(release.notes);
   return (
     <AdminPage
       action={
-        <Link className={buttonVariants()} to="/platform">
-          Start a rollout
+        <Link className={buttonVariants()} hash={channelsId} to="/platform">
+          Promote it
         </Link>
       }
-      description={release.notes}
+      description={title === "" ? undefined : title}
       parents={[platformCrumb, releasesCrumb]}
-      title={versionWords(release) ?? release.id}
+      title={release.id}
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
-        <Section title="The release">
+        <Section title="What it holds">
+          {release.notes === "" ? (
+            <Quiet>No note.</Quiet>
+          ) : (
+            <p className="border-t px-5 py-3">{release.notes}</p>
+          )}
+        </Section>
+        <Section
+          description="Every time a channel was set to it, the newest first."
+          title="Channels"
+        >
+          {release.history.length === 0 ? (
+            <Quiet>It hasn&apos;t been on a channel.</Quiet>
+          ) : (
+            <ul className="flex flex-col">
+              {release.history.map((event) => (
+                <li
+                  className="flex items-baseline justify-between gap-4 border-t px-5 py-2"
+                  key={`${event.at.getTime()}-${event.channel}`}
+                >
+                  <span>{`${channelWords[event.channel]}, by ${event.actor}`}</span>
+                  <span className="text-muted-foreground text-xs tabular-nums">
+                    {formatTime(event.at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+        <Section title="Who runs it">
+          {release.running.length === 0 ? (
+            <Quiet>No company runs it now.</Quiet>
+          ) : (
+            <ul className="flex flex-col">
+              {release.running.map((client) => (
+                <li className="border-t px-5 py-2" key={client.id}>
+                  <Link
+                    className="underline-offset-4 hover:underline"
+                    params={{ clientId: client.id }}
+                    to="/organizations/$clientId/setup"
+                  >
+                    {client.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+        <Section title="The record">
           <Facts
             rows={[
-              { label: "Release", value: release.id, mono: true },
               { label: "Commit", value: release.commitSha, mono: true },
               { label: "Built (UTC)", value: formatTime(release.builtAt) },
               {
                 label: "Imported (UTC)",
                 value: formatTime(release.importedAt),
+              },
+              {
+                label: "Bundle",
+                value:
+                  release.bundleDeletedAt === null
+                    ? "Kept"
+                    : `Deleted ${formatTime(release.bundleDeletedAt)} UTC: never promoted past Edge`,
+                attention: release.bundleDeletedAt !== null,
               },
               {
                 label: "Manifest SHA-256",
@@ -151,25 +118,12 @@ const ReleasePage = () => {
                 value: release.compatibilityDate,
                 mono: true,
               },
-              { label: "Wrangler", value: release.wranglerVersion, mono: true },
+              ...release.workers.map((worker) => ({
+                label: worker.app,
+                value: workerLine(worker),
+              })),
             ]}
           />
-        </Section>
-        {release.workers.map((worker) => (
-          <WorkerPanel key={worker.app} worker={worker} />
-        ))}
-        <Section title="Packages">
-          {packages.length === 0 ? (
-            <Quiet>None recorded.</Quiet>
-          ) : (
-            <Facts
-              rows={packages.map(([name, version]) => ({
-                label: name,
-                value: version,
-                mono: true,
-              }))}
-            />
-          )}
         </Section>
       </div>
     </AdminPage>

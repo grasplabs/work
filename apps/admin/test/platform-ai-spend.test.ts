@@ -134,7 +134,7 @@ describe("what Grasp's own AI features cost", () => {
 
     const own = await page(`/organizations/${before}/ai-use`);
     const spend = await callServerFn(fetchPlatformSpend);
-    const platform = await page("/platform/ai");
+    const platform = await page("/platform");
 
     expect({
       status: own.status,
@@ -173,7 +173,7 @@ describe("what Grasp's own AI features cost", () => {
     await liveClient("Dunmore", {});
 
     const spend = await callServerFn(fetchPlatformSpend);
-    const { html } = await page("/platform/ai");
+    const { html } = await page("/platform");
     const [thisMonth, lastMonth] = [
       monthWords(thisPeriod),
       monthWords(lastPeriod),

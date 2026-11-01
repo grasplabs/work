@@ -13,7 +13,7 @@ import {
   fetchClientHosting,
   fetchProvisioningProgress,
 } from "../../../hosting/functions.ts";
-import { fetchNewClientOptions } from "../../../provision/functions.ts";
+import { fetchPinChoices } from "../../../provision/functions.ts";
 
 /** The checklist, once its core answered; nothing while it doesn't. */
 const AnsweredChecklist = ({
@@ -93,7 +93,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     })();
     const [setup, { releases }, hosting, progress] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
-      fetchNewClientOptions(),
+      fetchPinChoices(),
       fetchClientHosting({ data: { clientId: params.clientId } }),
       fetchProvisioningProgress({ data: { clientId: params.clientId } }),
     ]);

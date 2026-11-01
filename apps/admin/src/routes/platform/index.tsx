@@ -10,24 +10,28 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { Channels, PromotionHistory } from "../../admin/channel-parts.tsx";
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
-import { PlatformNav } from "../../admin/platform-nav.tsx";
+import { channelsId, PlatformNav } from "../../admin/platform-nav.tsx";
 import {
   eventWords,
   needWords,
   StandingMark,
 } from "../../admin/platform-parts.tsx";
+import { PlatformSpendPanel } from "../../admin/platform-spend.tsx";
 import { companiesOf } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
+import { SharedSecrets } from "../../admin/secrets-parts.tsx";
 import { Section } from "../../admin/section.tsx";
 import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
+import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
 import { channelWords } from "../../rollout/channel-words.ts";
 
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
@@ -177,11 +181,13 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
 };
 
 /**
- * Every company's own Grasp at once: what blocks onboarding, every
- * company the ones that need a look first, and what staff did.
+ * Every company's own Grasp at once: what blocks onboarding, the three
+ * release channels with each company's state against them and the moves
+ * each may make, rolling out shared secrets, every company the ones that
+ * need a look first, what Grasp's own AI costs, and what staff did.
  */
 const PlatformPage = () => {
-  const { rows, platform, readiness } = Route.useLoaderData();
+  const { rows, platform, readiness, spend } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -205,22 +211,39 @@ const PlatformPage = () => {
       <PlatformNav />
       <div className="@container flex flex-col gap-6 text-sm">
         <ReadinessPanel readiness={readiness} />
+        <Channels
+          channels={platform.channels}
+          history={platform.history}
+          id={channelsId}
+        />
+        <PromotionHistory history={platform.history} />
+        <SharedSecrets />
         <EveryCompany live={live} rows={rows} />
+        <PlatformSpendPanel spend={spend} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
   );
 };
 
-/** Every company's own deployment. */
+/** Every company's own deployment, and the channels. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
+    // Not awaited: every core is read live. A read that fails shows a
+    // line, never the error page.
+    const spend = (async () => {
+      try {
+        return await fetchPlatformSpend();
+      } catch {
+        return null;
+      }
+    })();
     const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
     ]);
-    return { rows, platform, readiness };
+    return { rows, platform, readiness, spend };
   },
   component: PlatformPage,
   pendingComponent: PageLoading,

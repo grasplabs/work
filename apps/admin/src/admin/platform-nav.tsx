@@ -1,7 +1,7 @@
 /**
- * Platform's own places, as its pages link them: its overview, every
- * release the admin imported, Grasp's own AI features and the offboarded
- * clients.
+ * Platform's own places, as its pages link them: its overview (the
+ * channels, every company and what Grasp's own AI costs), every release
+ * the admin imported, and the offboarded clients.
  */
 import {
   NavigationMenu,
@@ -29,7 +29,6 @@ export const releasesCrumb: Crumb = {
 const platformPlaces = [
   { to: "/platform", label: "Overview" },
   { to: "/platform/releases", label: "Releases" },
-  { to: "/platform/ai", label: "AI" },
   { to: "/platform/offboarded", label: "Offboarded" },
 ] as const;
 
