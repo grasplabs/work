@@ -54,17 +54,19 @@ const start = daysFromToday(1 - dayOfPlan);
 
 /**
  * How many of each team talked by yesterday, its lead aside, and whether
- * its lead did. Customer service is the quiet team: under three talked, so
- * the admin sees only that its fifteen were asked, and Stephen suggests a
- * word from Lisa, their lead.
+ * its lead did. Core counts leads apart from their team's tally, as here.
+ * Customer service is the quiet team: under three talked, so the admin
+ * sees only that its fourteen besides Lisa, their lead, were asked, and
+ * Stephen suggests a word from her. Compliance's four besides its lead are
+ * under the five a team needs before the admin sees its numbers at all.
  */
 const heard: Record<string, { talked: number; lead: boolean }> = {
   "team-onboarding": { talked: 4, lead: true },
-  "team-mortgage": { talked: 10, lead: true },
+  "team-mortgage": { talked: 11, lead: true },
   "team-service": { talked: 2, lead: false },
   "team-finance": { talked: 5, lead: true },
   "team-compliance": { talked: 3, lead: true },
-  "team-operations": { talked: 4, lead: true },
+  "team-operations": { talked: 5, lead: true },
 };
 
 /**
@@ -251,12 +253,19 @@ const main = async (): Promise<void> => {
         "INSERT OR REPLACE INTO interview_states (person, kind, lead_of, started_at, completed_at, agreed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
       );
       db.prepare("DELETE FROM team_counts").run();
+      db.prepare("DELETE FROM counted").run();
       db.prepare("DELETE FROM interview_states").run();
       const count = db.prepare(
         "INSERT INTO team_counts (team, day, asked, talked) VALUES (?, ?, ?, 0) ON CONFLICT (team, day) DO UPDATE SET asked = asked + excluded.asked"
       );
       const talkedOn = db.prepare(
         "INSERT INTO team_counts (team, day, asked, talked) VALUES (?, ?, 0, 1) ON CONFLICT (team, day) DO UPDATE SET talked = talked + 1"
+      );
+      // As core's send does: everyone but a lead is counted once, in their
+      // team, with whether they talked, so an interview finished later
+      // still adds to the tally. Leads are counted apart (`leadsTalked`).
+      const counted = db.prepare(
+        "INSERT INTO counted (person, team, talked) VALUES (?, ?, ?)"
       );
       let turn = 0;
       for (const [teamId, lead] of team) {
@@ -271,10 +280,13 @@ const main = async (): Promise<void> => {
           }
           const isLead = person.id === lead;
           const sentOn = isLead ? start : othersFrom;
-          count.run(teamId, sentOn, 1);
           const talks = isLead ? leadTalked : others < talked;
-          if (!isLead && talks) {
-            others += 1;
+          if (!isLead) {
+            count.run(teamId, sentOn, 1);
+            counted.run(person.id, teamId, talks ? 1 : 0);
+            if (talks) {
+              others += 1;
+            }
           }
           const days = isLead ? leadDays : otherDays;
           const day = days[turn % days.length] ?? daysFromToday(-1);
@@ -297,7 +309,9 @@ const main = async (): Promise<void> => {
               done,
               done
             );
-            talkedOn.run(teamId, day);
+            if (!isLead) {
+              talkedOn.run(teamId, day);
+            }
           }
         }
       }
