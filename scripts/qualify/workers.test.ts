@@ -159,9 +159,9 @@ describe("the account a run starts in", () => {
   it("may hold the platform's, placed clients' and qualification runs' resources, nothing else", () => {
     expect(
       [
-        "grasp-os-clients",
-        "grasp-os-admin",
-        "g7k2m9-grasp-os-core",
+        "grasp-clients-staging",
+        "grasp-admin",
+        "grasp-7k2m9abcde-core",
         "qual-20261023-a-grasp-os-core",
         "someone-elses-worker",
         "g-grasp-os-core",

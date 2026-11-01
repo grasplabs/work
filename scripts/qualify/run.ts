@@ -18,9 +18,8 @@
  * and a write naming anything else is refused (cf.ts), so a run only ever
  * touches its own qualification resources. `preflight` refuses an account
  * holding anything it doesn't know (`knownName`): the run's and earlier
- * runs' (`qual-…`), the platform's own (`grasp-os-…`, as
- * scripts/cloudflare-account-setup.ts and deploys leave them) and placed
- * clients' (`g<deployment>-…`), so a run never starts in an account it
+ * runs' (`qual-…`), and the platform's own and placed clients' (`grasp-…`,
+ * as @grasp-os/shared/names names them), so a run never starts in an account it
  * wasn't meant for. The evidence, one JSON line per cf invocation and per
  * check, and the run's state (its generated keys and ids, mode 0600) go to
  * `--out`, by default a directory under the system's temporary directory.

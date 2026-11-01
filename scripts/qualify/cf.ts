@@ -15,6 +15,8 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
+import { namePrefix } from "@grasp-os/shared/names";
+
 /** One line of the run's evidence. */
 export type Evidence = Record<string, unknown> & { kind: string };
 
@@ -51,9 +53,6 @@ export class CfError extends Error {
   }
 }
 
-/** A placed client's resource, named after its deployment by provisioning. */
-const clientResource = /^g[a-z0-9]+-grasp-os-/u;
-
 /**
  * Whether `name` is one a run expects in Grasp's account: a qualification
  * run's, the platform's own, or a placed client's. Only ever read: the
@@ -61,8 +60,9 @@ const clientResource = /^g[a-z0-9]+-grasp-os-/u;
  */
 export const knownName = (name: string): boolean =>
   name.startsWith("qual-") ||
-  name.startsWith("grasp-os-") ||
-  clientResource.test(name);
+  // The platform's own and placed clients' (`grasp-{id}-…`) alike, as
+  // @grasp-os/shared/names names them.
+  name.startsWith(namePrefix);
 
 /**
  * Whether `name` is the run's own by its name: the prefix itself, a name
