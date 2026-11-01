@@ -1,4 +1,6 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -10,7 +12,7 @@ import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { aiStatusOf, emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
@@ -40,6 +42,9 @@ const liveClient = async (snapshot: AdminSnapshot) => {
   account.admin = snapshot;
   return { clientId, name, account, release };
 };
+
+/** A link into the company's own Grasp, to its audit trail. */
+const toItsAuditTrail = /href="https:\/\/[^"/]+\/settings\/audit"/u;
 
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
@@ -74,7 +79,6 @@ describe("an organization's Setup", () => {
     const header = textOf(sectionOf(status.html, "How it stands"));
     const checklist = textOf(sectionOf(status.html, "From contract to go"));
     const howItRuns = textOf(sectionOf(status.html, "How it runs"));
-    const quotaPolicy = textOf(sectionOf(status.html, "Quota policy"));
 
     expect({
       statuses: [status, history, resources, releases, settings].map(
@@ -88,6 +92,8 @@ describe("an organization's Setup", () => {
         "Open its Grasp",
         "Its activity",
       ].map((text) => header.includes(text)),
+      // Its activity is the audit trail in its own Grasp.
+      activity: toItsAuditTrail.test(sectionOf(status.html, "How it stands")),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
@@ -100,21 +106,15 @@ describe("an organization's Setup", () => {
       ].map((text) =>
         sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
-      // Its core asked which quota policy it applies: the platform's own,
-      // as the admin sets none.
-      quotaPolicy: [
-        "In sync",
-        "Core applies the platform's own, as the admin sets.",
-        "The admin sets no policy",
-      ].map((text) => quotaPolicy.includes(text)),
       howItRuns: [
         "Router",
         "Core",
         "Connect",
         "grasp-os-core",
         "grasp-os-files",
-        "AI Gateway",
       ].map((text) => howItRuns.includes(text)),
+      // No AI Gateway runs for it any more: its AI is its own provider's.
+      gateway: howItRuns.includes("AI Gateway"),
       // Deployed by the admin, and the contract not held by core yet.
       checklist: [
         "Its own platform is deployed",
@@ -122,7 +122,7 @@ describe("an organization's Setup", () => {
         "1 of 6 in place.",
       ].map((text) => checklist.includes(text)),
       deployed: checklist.includes(
-        "Its own platform is deployed, in its own Cloudflare account in the EU: done"
+        "Its own platform is deployed, in the EU: done"
       ),
       history: {
         kept: history.html.includes('aria-label="Its history"'),
@@ -153,11 +153,12 @@ describe("an organization's Setup", () => {
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
       header: [true, true, true, true, true, true],
+      activity: true,
       toOldPages: false,
       needs: false,
       numbers: [true, true],
-      quotaPolicy: [true, true, true],
-      howItRuns: [true, true, true, true, true, true],
+      howItRuns: [true, true, true, true, true],
+      gateway: false,
       checklist: [true, true, true],
       deployed: true,
       history: { kept: true, settingUp: false },
@@ -227,6 +228,124 @@ describe("an organization's Setup", () => {
       secretsLive: true,
       waiting: true,
     });
+  });
+
+  it("says its AI in one line from what its core reports: working, what its failing calls show since the first such failure, or not connected", async () => {
+    const now = Date.now();
+    const status = (
+      lastOkAt: number | null,
+      failure: {
+        since: number;
+        last: number;
+        kind: string;
+        shows: ProviderTrouble;
+      } | null
+    ): AiStatusReport =>
+      aiStatusOf([
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt,
+          lastFailedAt: failure?.last ?? null,
+          lastFailure: failure?.kind ?? null,
+          failingClass: failure?.shows ?? null,
+          failingSince: failure?.since ?? null,
+        },
+        // Grasp's own key's calls say nothing of the company's AI.
+        {
+          provider: "anthropic",
+          kind: "platform",
+          lastOkAt: now,
+          lastFailedAt: null,
+          lastFailure: null,
+          failingClass: null,
+          failingSince: null,
+        },
+      ]);
+    // Since its first such failure after the call that last worked, not
+    // since its latest.
+    const failingSince = now - 2 * 60 * 1000;
+    const since = `${new Date(failingSince).toISOString().slice(11, 16)} UTC`;
+    const failingAs = async (kind: string, shows: ProviderTrouble) => {
+      const client = await liveClient(emptyAdminSnapshot("Acme"));
+      client.account.ai = status(now - 60 * 60 * 1000, {
+        since: failingSince,
+        last: now - 1000,
+        kind,
+        shows,
+      });
+      return client;
+    };
+    const working = await liveClient(emptyAdminSnapshot("Acme"));
+    working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
+    const shown = [
+      working,
+      await failingAs("auth", "refused"),
+      await failingAs("provider_down", "not_answering"),
+      await failingAs("quota", "limiting"),
+      await liveClient(emptyAdminSnapshot("Acme")),
+    ];
+
+    const sectionFor = async (clientId: string): Promise<string> => {
+      const { html } = await page(`/organizations/${clientId}/setup`);
+      return sectionOf(html, "AI");
+    };
+    const sections: string[] = [];
+    for (const { clientId } of shown) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      sections.push(await sectionFor(clientId));
+    }
+    const lines = sections.map(textOf);
+    const expected = [
+      "AI: OpenAI connected · working · last used 5 min ago",
+      `AI: OpenAI connected · refusing the key since ${since}`,
+      `AI: OpenAI connected · not answering since ${since}`,
+      `AI: OpenAI connected · limiting requests since ${since}`,
+      "AI: not connected yet",
+    ];
+
+    expect({
+      lines: lines.map((line, at) => line?.includes(expected[at] ?? "")),
+      // Read only: nothing to press.
+      buttons: sections.some((html) => html.includes("<button")),
+    }).toStrictEqual({
+      lines: [true, true, true, true, true],
+      buttons: false,
+    });
+  });
+
+  it("reads the AI of a core on an earlier release, whose report says nothing of failing calls, as working", async () => {
+    const now = Date.now();
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    // As that release answers: no `failingClass` or `failingSince`.
+    client.account.ai = {
+      providers: [
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt: now - 5 * 60 * 1000 - 10 * 1000,
+          lastFailedAt: null,
+          lastFailure: null,
+        },
+      ],
+    };
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: OpenAI connected · working · last used 5 min ago"
+    );
+  });
+
+  it("reads the AI of a core that answers with a redirect elsewhere as unknown, never following it", async () => {
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    client.account.aiRedirect = true;
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: couldn’t be read just now."
+    );
   });
 
   it("opens on how it stands for a tab it doesn't have, and has no Setup for a client the admin doesn't know", async () => {

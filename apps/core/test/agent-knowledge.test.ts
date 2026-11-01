@@ -24,18 +24,17 @@ import {
   codeStatuses,
   codeStep,
   readApiStep,
-  gatewayConfig,
+  configureObject,
   model,
   pausedReply,
-  pointAtGateway,
   says,
   setObjectEnv,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import {
   callAuth,
   outcome,
@@ -156,7 +155,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: leave,
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       readApiStep("knowledge"),
       codeStep(
@@ -180,7 +179,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
     // Every request lists the APIs, a line each; the model read the full
     // declaration it needed before it wrote the code.
-    const [listed, declared] = gateway.requests.map((request) =>
+    const [listed, declared] = provider.requests.map((request) =>
       JSON.stringify(request.body)
     );
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
@@ -342,7 +341,8 @@ describe("a chat's Knowledge", setUpTime, () => {
     await ask("Read the note.");
     await ask("And now?");
     await evictDurableObject(stub);
-    await pointAtGateway(stub, fakeGateway(says("After a restart.")));
+    await fakeProvider(says("After a restart."));
+    await configureObject(stub);
     await stub.ask(chat.id, { text: "And now?", model });
 
     const events = await eventsOf(
@@ -364,20 +364,17 @@ describe("a chat's Knowledge", setUpTime, () => {
       teams: [teamId],
       sensitive: true,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
-      person.userId,
+    const { stub, chat, ask, agent } = await chatOf(person.userId);
+    const euModel = "mistral/mistral-large-latest";
+    const provider = await fakeProviderFor(
+      [model, euModel],
       codeStep(
         `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(payroll.noteId)})).title;`
       ),
       says("Never sent.")
     );
-    const euModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-    await pointAtGateway(stub, gateway, {
-      config: {
-        gateway: gatewayConfig.gateway,
-        models: [model, euModel],
-        sensitive: { models: [euModel] },
-      },
+    await configureObject(stub, {
+      rules: { sensitive: { models: [euModel] } },
     });
     await grantRead(admin, agent, payroll.collectionId);
 
@@ -389,7 +386,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     );
 
     expect(first.outcome).toBe("failed");
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
     const events = await eventsOf(
       agent.agentId,
       (all) =>
@@ -800,7 +797,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
     const answer = `Sixteen weeks [Parental leave](grasp:note/${documentId}).`;
     const { reply, release } = pausedReply(says(answer), 1);
-    const { agent, gateway, newChat } = await personalChatsOf(
+    const { agent, provider, newChat } = await personalChatsOf(
       person.userId,
       codeStep(readCode(documentId)),
       reply
@@ -811,7 +808,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const turn = ask("How long is parental leave?");
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(2);
+        expect(provider.requests).toHaveLength(2);
       },
       { timeout: 10_000 }
     );
@@ -895,7 +892,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         return { collectionId, documentId };
       })
     );
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       codeStep(readCode(handbook?.documentId ?? "")),
       says(`Leave lasts ${kept}.`),
@@ -918,11 +915,11 @@ describe("a chat's Knowledge", setUpTime, () => {
 
     await ask("How long is leave?");
     await ask("When does the route plan depart?");
-    const beforeRevoke = gateway.requests.length;
+    const beforeRevoke = provider.requests.length;
     await admin.api.permissions.revoke(plansGrant);
     await ask("And now?");
     await ask("And now?");
-    const afterRevoke = gateway.requests.slice(beforeRevoke - 1);
+    const afterRevoke = provider.requests.slice(beforeRevoke - 1);
 
     // Sent while it could be read; never once it can't. The other
     // turn's read, still readable, goes on as it was.
@@ -949,7 +946,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     // Granted again, it may be sent again.
     await grant(plans?.collectionId ?? "");
     await ask("And now?");
-    expect(JSON.stringify(gateway.requests.at(-1)?.body)).toContain(secret);
+    expect(JSON.stringify(provider.requests.at(-1)?.body)).toContain(secret);
 
     // Audited once, by the agent for its person: the run and each source
     // (its collection, and the document it read there), never what it read.
@@ -1013,7 +1010,7 @@ describe("a chat's Knowledge", setUpTime, () => {
           })
       )
     );
-    const { ask, agent, chat, gateway } = await chatOf(
+    const { ask, agent, chat, provider } = await chatOf(
       person.userId,
       codeStep(readCode(readDoc?.id ?? "")),
       says("Read it."),
@@ -1026,7 +1023,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     await grantRead(admin, agent, collectionId);
     await ask("What's the code?");
     await ask("Find the word.");
-    const before = JSON.stringify(gateway.requests.at(-1)?.body);
+    const before = JSON.stringify(provider.requests.at(-1)?.body);
     // Erased from Knowledge, as a purge erases them: the collection stays.
     for (const document of [readDoc, searchedDoc]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
@@ -1035,7 +1032,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         .run();
     }
     await ask("And now?");
-    const after = JSON.stringify(gateway.requests.at(-1)?.body);
+    const after = JSON.stringify(provider.requests.at(-1)?.body);
     const events = await eventsOf(agent.agentId, (all) =>
       all.some(({ action }) => action === "chat.history_withheld")
     );
@@ -1086,7 +1083,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     // Reads the plan, then reads it again until it can't: the person left
     // the team meanwhile. Leaving a team revokes no permission, so the run
     // ends as it ran.
-    const { stub, gateway, ask, agent } = await chatOf(
+    const { stub, provider, ask, agent } = await chatOf(
       person.userId,
       codeStep(
         `export default async (self, env) => {
@@ -1131,7 +1128,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     // The provider takes the turn's latest response whole, so nothing of
     // it can be withheld: the turn stops, and nothing more is sent.
     await expect(asked).resolves.toBe("agent.history_revoked");
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 
   it("sends only the latest of its memory and skills: a skill it can no longer read never reaches the model again", async () => {
@@ -1148,7 +1145,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `---\nname: route-check\ndescription: Check routes with ${marker}.\n---\n# Route check`,
       ifVersion: 0,
     });
-    const { gateway, ask, agent } = await chatOf(
+    const { provider, ask, agent } = await chatOf(
       person.userId,
       says("Noted."),
       says("Noted again.")
@@ -1163,7 +1160,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     await ask("Hello again.");
 
     expect(
-      gateway.requests.map(({ body }) => JSON.stringify(body).includes(marker))
+      provider.requests.map(({ body }) => JSON.stringify(body).includes(marker))
     ).toStrictEqual([true, false]);
   });
 
@@ -1289,7 +1286,7 @@ const grantBrain = async (
     binding: "BRAIN",
   });
 
-/** A message of an Anthropic request, as the gateway was sent it. */
+/** A message of an Anthropic request, as the provider was sent it. */
 const requestMessagesSchema = z.object({
   messages: z.array(
     z.object({
@@ -1342,7 +1339,7 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Depot ${word}\n\n${fact}.`,
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       says("Seven.")
     );
@@ -1351,11 +1348,11 @@ describe("a chat's recall before a question", setUpTime, () => {
 
     const reply = await ask(word);
 
-    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
+    const [request] = provider.requests.map(({ body }) => splitRequest(body));
     const [result] = await codeResults(stub, chat.id);
     expect({
       answer: reply.answer,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
       inResult: request?.results.includes(fact),
       elsewhere: request?.rest.includes(fact),
       cites: result?.text.includes(documentId),
@@ -1410,7 +1407,7 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Plan ${word}\n\n${ungrantedCanary}`,
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       says("I can't find it.")
     );
@@ -1419,7 +1416,7 @@ describe("a chat's recall before a question", setUpTime, () => {
 
     const reply = await ask(word);
 
-    const sent = JSON.stringify(gateway.requests.map(({ body }) => body));
+    const sent = JSON.stringify(provider.requests.map(({ body }) => body));
     const [result] = await codeResults(stub, chat.id);
     expect({
       team: sent.includes(teamCanary),
@@ -1449,7 +1446,7 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Code ${word}\n\n${fact}.`,
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       says("Let me look.")
     );
@@ -1459,7 +1456,7 @@ describe("a chat's recall before a question", setUpTime, () => {
 
     expect({
       steps: await codeResults(stub, chat.id),
-      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
+      sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
         fact
       ),
       provenance: reply.provenance,
@@ -1489,24 +1486,22 @@ describe("a chat's recall before a question", setUpTime, () => {
         ifVersion: 0,
       });
     }
-    // The model that takes 18,000 tokens: its window of 24,000 less a
+    // The model that takes 24,576 tokens: its window of 32,768 less a
     // quarter kept for the answer (agent.test.ts).
-    const tiny = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-    const { stub, chat, gateway, agent } = await chatOf(
-      person.userId,
+    const tiny = "mistral/voxtral-small-latest";
+    const { stub, chat, agent } = await chatOf(person.userId);
+    const provider = await fakeProviderFor(
+      [model, tiny],
       says("Near the limit."),
       says("With room.")
     );
-    await pointAtGateway(stub, gateway, {
-      config: { ...gatewayConfig, models: [model, tiny] },
-    });
     await grantRead(admin, agent, collectionId);
     await grantBrain(admin, agent);
     const question = (chars: number) =>
       `${word} ${"x".repeat(chars - word.length - 1)}`;
     // The longest question the model takes, to within a thousand
     // characters: a longer one is refused before anything runs.
-    let chars = 54_000;
+    let chars = 74_000;
     let near: Awaited<ReturnType<typeof stub.ask>> | undefined;
     const refusals = new Set<string | undefined>();
     while (near === undefined) {
@@ -1524,15 +1519,15 @@ describe("a chat's recall before a question", setUpTime, () => {
       model: tiny,
     });
     const steps = await codeResults(stub, chat.id);
-    const window = requestChars(18_000);
+    const window = requestChars(24_576);
     expect({
       refusals: [...refusals],
       near: near.outcome,
       nearSteps,
-      nearFits: JSON.stringify(gateway.requests[0]?.body).length <= window,
+      nearFits: JSON.stringify(provider.requests[0]?.body).length <= window,
       withRoom: withRoom.outcome,
       recalled: steps.at(-1)?.text.includes(`"evidence":[{`),
-      fits: JSON.stringify(gateway.requests[1]?.body).length <= window,
+      fits: JSON.stringify(provider.requests[1]?.body).length <= window,
     }).toStrictEqual({
       refusals: ["agent.question_too_long"],
       near: "answered",
@@ -1561,7 +1556,7 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Code ${word}\n\n${fact}.`,
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       says("I couldn't read Knowledge in time.")
     );
@@ -1576,12 +1571,12 @@ describe("a chat's recall before a question", setUpTime, () => {
       await restore();
     }
 
-    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
+    const [request] = provider.requests.map(({ body }) => splitRequest(body));
     expect({
       outcome: reply.outcome,
       statuses: await codeStatuses(stub, chat.id),
       told: request?.results.includes("wall_expired"),
-      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
+      sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
         fact
       ),
     }).toStrictEqual({
@@ -1620,9 +1615,9 @@ describe("a chat's recall before a question", setUpTime, () => {
       await chat.ask(word);
       /** Whether the next turn's first request still sent the fact. */
       const next = async () => {
-        const before = chat.gateway.requests.length;
+        const before = chat.provider.requests.length;
         await chat.ask("And the code?");
-        const body = JSON.stringify(chat.gateway.requests[before]?.body);
+        const body = JSON.stringify(chat.provider.requests[before]?.body);
         return {
           fact: body.includes(fact),
           withheld: body.includes(withheldResult),

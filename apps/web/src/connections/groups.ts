@@ -1,30 +1,10 @@
 import type { CatalogGroup } from "@grasp-os/shared/connect";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import {
-  ChartLineIcon,
-  ClipboardListIcon,
-  ContactRoundIcon,
-  FolderOpenIcon,
-  IdCardIcon,
-  ImageIcon,
-  LandmarkIcon,
-  ListChecksIcon,
-  MailIcon,
-  MessageCircleQuestionMarkIcon,
-  MessagesSquareIcon,
-  RocketIcon,
-  ShapesIcon,
-  SignatureIcon,
-  SparklesIcon,
-  StoreIcon,
-  WrenchIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
-// Grasp's kinds of app (`catalogGroups`), as the prototype names and draws
-// them (`lib/connections.ts`, `routes/integrations/index.tsx`). The group
-// itself stays its English id; this is what a person reads.
+// Grasp's kinds of app (`catalogGroups`), as the prototype names them
+// (`lib/connections.ts`). The group itself stays its English id; this is
+// what a person reads.
 
 /** Each kind of app on screen. */
 export const groupLabel: Record<CatalogGroup, MessageDescriptor> = {
@@ -69,25 +49,4 @@ export const groupLabel: Record<CatalogGroup, MessageDescriptor> = {
     context: "kind of app",
   }),
   Other: msg({ message: "Other", context: "kind of app" }),
-};
-
-/** Each kind of app has its icon, so the folded sidebar still says which filter is which. */
-export const groupIcon: Record<CatalogGroup, LucideIcon> = {
-  "Email and calendar": MailIcon,
-  "Files and documents": FolderOpenIcon,
-  Chat: MessagesSquareIcon,
-  CRM: ContactRoundIcon,
-  "Finance and accounting": LandmarkIcon,
-  HR: IdCardIcon,
-  Signing: SignatureIcon,
-  Marketing: RocketIcon,
-  Support: MessageCircleQuestionMarkIcon,
-  "Projects and tasks": ListChecksIcon,
-  "Forms and surveys": ClipboardListIcon,
-  "Data and analytics": ChartLineIcon,
-  AI: SparklesIcon,
-  Commerce: StoreIcon,
-  "Design and media": ImageIcon,
-  "Developer tools": WrenchIcon,
-  Other: ShapesIcon,
 };

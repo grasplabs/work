@@ -36,7 +36,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime, formatNumber } from "../format.ts";
-import { ProcessHint, ProcessTile } from "./business-process.tsx";
+import { ProcessHint } from "./business-process.tsx";
 import { handledOf, listsOf } from "./lists.ts";
 import { WorkflowOwnerPicker } from "./owner-picker.tsx";
 import { RunResult } from "./runs.tsx";
@@ -105,6 +105,7 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
         <span className="text-muted-foreground">–</span>
       ) : (
         <RunResult
+          aiProvider={workflow.lastRun.aiProvider}
           queued={workflow.lastRun.queued}
           status={workflow.lastRun.status}
         />
@@ -165,7 +166,7 @@ const Lead = ({
           />
         }
       >
-        {process === null ? <EngineIcon /> : <ProcessTile process={process} />}
+        <EngineIcon process={process} />
         {workflow.waiting === 0 ? null : (
           <span
             aria-hidden="true"
@@ -236,6 +237,11 @@ const WorkflowRow = ({
                 <Trans>Version {version}</Trans>
               </span>
             )}
+            {/* Narrow, the status's cell is hidden too, as the prototype
+                keeps the name its room: where it stands goes under it. */}
+            <div className="@sm:hidden">
+              <Status workflow={workflow} />
+            </div>
           </div>
         </div>
       </TableCell>
@@ -266,7 +272,7 @@ const WorkflowRow = ({
           <WorkflowOwnerPicker workflow={workflow} />
         </div>
       </TableCell>
-      <TableCell variant="roomy">
+      <TableCell className="hidden @sm:table-cell" variant="roomy">
         <Status workflow={workflow} />
       </TableCell>
       <TableCell>
@@ -355,7 +361,7 @@ export const WorkflowsTable = ({
             <TableHead className="hidden w-20 @md:table-cell" variant="card">
               <Trans context="column: who owns a workflow">Owner</Trans>
             </TableHead>
-            <TableHead className="w-52" variant="card">
+            <TableHead className="hidden w-52 @sm:table-cell" variant="card">
               <Trans context="column: where a workflow stands">Status</Trans>
             </TableHead>
             <TableHead className="w-9" variant="card">
@@ -414,7 +420,7 @@ const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
  * top, are dashes: core measures no return yet, and keeps no designs.
  */
 const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
-  <dl className="@container grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
+  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
     <Big
       label={<Trans>runs a week by these workflows</Trans>}
       value={formatNumber(handledOf(rows))}
@@ -426,6 +432,36 @@ const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
     />
   </dl>
 );
+
+/**
+ * `rows` in the overview's two lists, without the numbers over them: at
+ * work, those that have run, the ones waiting on a person first; on the
+ * way, those that haven't run yet. Needs you shows its workflows so, as
+ * the prototype's does.
+ */
+export const WorkflowLists = ({
+  rows,
+  processes,
+}: {
+  rows: WorkflowSummary[];
+  processes?: AppProcesses;
+}) => {
+  const { atWork, onTheWay } = listsOf(rows);
+  return (
+    <>
+      <List
+        processes={processes}
+        rows={atWork}
+        title={<Trans>At work</Trans>}
+      />
+      <List
+        processes={processes}
+        rows={onTheWay}
+        title={<Trans>On the way</Trans>}
+      />
+    </>
+  );
+};
 
 /**
  * The Workflows page's list, as the prototype tells it
@@ -443,20 +479,12 @@ export const WorkflowsOverview = ({
   if (rows.length === 0) {
     return <WorkflowsTable rows={rows} />;
   }
-  const { atWork, onTheWay } = listsOf(rows);
   return (
-    <div className="flex flex-col gap-8">
+    // The container for the numbers' columns: a container query never
+    // applies to the element that is the container.
+    <div className="@container flex flex-col gap-8">
       <Numbers rows={rows} />
-      <List
-        processes={processes}
-        rows={atWork}
-        title={<Trans>At work</Trans>}
-      />
-      <List
-        processes={processes}
-        rows={onTheWay}
-        title={<Trans>On the way</Trans>}
-      />
+      <WorkflowLists processes={processes} rows={rows} />
     </div>
   );
 };

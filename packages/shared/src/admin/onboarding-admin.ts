@@ -380,7 +380,7 @@ export interface StephenSetup {
   terms: string[];
 }
 
-/** The parts of the platform a company can have: the first six are on when it opens, the last three are parked. */
+/** The parts of the platform a company can have: the first six are on when it opens, the last is parked. */
 export const PLATFORM_PARTS = [
   "chat",
   "dashboard",
@@ -389,11 +389,9 @@ export const PLATFORM_PARTS = [
   "workflows",
   "integrations",
   "inbox",
-  "policies",
-  "landscape",
 ] as const;
 export type PlatformPart = (typeof PLATFORM_PARTS)[number];
-export const PARKED_PARTS: PlatformPart[] = ["inbox", "policies", "landscape"];
+export const PARKED_PARTS: PlatformPart[] = ["inbox"];
 
 /** Where every organization starts with what only Grasp does by hand: nothing yet. */
 /** One of Grasp's own notes on an organization: what was written, and when. */

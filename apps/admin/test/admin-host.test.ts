@@ -25,34 +25,6 @@ describe("the admin's own hostname", () => {
     expect(response.status).toBe(200);
   });
 
-  it("moves an address under /admin to the same page at the root, for good", async () => {
-    const response = await answer(
-      await asStaff(`https://${adminHost}/admin/ask?x=1`)
-    );
-    expect([response.status, response.headers.get("location")]).toStrictEqual([
-      301,
-      "/ask?x=1",
-    ]);
-  });
-
-  it("moves the old client pages to where they went, keeping what the address asked", async () => {
-    const locations = await Promise.all(
-      [
-        `https://${adminHost}/clients/new?from=grid`,
-        `https://${adminHost}/clients/acme?tab=settings`,
-        `https://${adminHost}/clients/acme/`,
-      ].map(async (url) => {
-        const response = await answer(await asStaff(url));
-        return [response.status, response.headers.get("location")];
-      })
-    );
-    expect(locations).toStrictEqual([
-      [301, "/new-organization?from=grid"],
-      [301, "/organizations/acme/setup?tab=settings"],
-      [301, "/organizations/acme/setup"],
-    ]);
-  });
-
   it("moves every page load on another hostname to the same page on the admin's", async () => {
     const locations = await Promise.all(
       [
@@ -68,24 +40,6 @@ describe("the admin's own hostname", () => {
       [302, `https://${adminHost}/ask?day=1`],
       [302, `https://${adminHost}/organizations/acme/setup`],
       [302, `https://${adminHost}/no-such-page`],
-    ]);
-  });
-
-  it("moves an old page to where it went first, then on to the admin's hostname", async () => {
-    const first = await answer(
-      await asStaff("https://ops.grasp.test/clients/acme?tab=deploys")
-    );
-    const second = await answer(
-      await asStaff(
-        `https://ops.grasp.test${first.headers.get("location") ?? ""}`
-      )
-    );
-    expect([
-      [first.status, first.headers.get("location")],
-      [second.status, second.headers.get("location")],
-    ]).toStrictEqual([
-      [301, "/organizations/acme/setup?tab=deploys"],
-      [302, `https://${adminHost}/organizations/acme/setup?tab=deploys`],
     ]);
   });
 

@@ -10,8 +10,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
-import { gatewaySettings, modelForRole, models } from "./models.ts";
-import type { ModelsEnv } from "./models.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The company's own groups of teams (GRA-1273): the brain's regions, the
 // prototype's `Workspace.teamGroups`. The kickoff's teams (GRA-528) carry
@@ -217,14 +216,17 @@ const checkedProposal = (
 
 /** The model's proposal for `unplaced`; one group per team when no model may make it. */
 const modelProposal = async (
-  env: ModelsEnv,
+  env: Env,
   actor: AuditActor,
   unplaced: readonly Team[],
   confirmed: readonly TeamGroup[]
 ): Promise<z.infer<typeof answerSchema>> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
-    sensitive: true,
-  });
+  // No AI provider connected yet (`model.no_provider`): no proposal.
+  const settings = await modelSettings(env);
+  const model =
+    settings.models.length === 0
+      ? undefined
+      : modelForRole(settings, "quick", { sensitive: true });
   if (model === undefined) {
     return { groups: [] };
   }
@@ -256,9 +258,7 @@ const modelProposal = async (
 export const proposeTeamGroups = async (
   env: Env,
   person: Identity,
-  teams: () => Promise<readonly Team[]>,
-  // The gateway the proposal is asked of: the deployment's own.
-  gateway: ModelsEnv = env
+  teams: () => Promise<readonly Team[]>
 ): Promise<TeamGroup[]> => {
   requireAdmin(person);
   const [all, held] = await Promise.all([teams(), teamGroupsOf(env)]);
@@ -270,7 +270,7 @@ export const proposeTeamGroups = async (
     unplaced.length === 0
       ? []
       : checkedProposal(
-          await modelProposal(gateway, actor, unplaced, confirmed),
+          await modelProposal(env, actor, unplaced, confirmed),
           unplaced,
           confirmed
         );

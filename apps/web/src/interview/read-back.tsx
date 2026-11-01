@@ -1,6 +1,7 @@
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -170,9 +171,11 @@ export const ReadBack = ({ room }: { room: number }) => {
         who={interviewer}
       />
       <div className="flex w-full flex-col items-center gap-5" ref={body}>
-        <h1 aria-live="polite" className="type-display min-h-8">
-          <SpokenText said={said} text={loop.line} />
-        </h1>
+        <div aria-live="polite" className="min-h-8">
+          <PageHeaderTitle>
+            <SpokenText said={said} text={loop.line} />
+          </PageHeaderTitle>
+        </div>
         {/* How much there is still to check: nobody agrees with care to pages without an end in sight. */}
         {count > 1 ? (
           <p className="text-muted-foreground text-xs">{t`Part ${n} of ${count}`}</p>

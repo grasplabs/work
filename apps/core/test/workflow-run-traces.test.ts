@@ -300,7 +300,7 @@ describe("a run's trace", () => {
     });
   });
 
-  it("shows nothing a run reached once its retention, as the deployment has it now, is over", async () => {
+  it("shows nothing a run reached once its retention is over", async () => {
     const by = await person();
     const workflow = await createWorkflowResource(
       env,
@@ -312,17 +312,12 @@ describe("a run's trace", () => {
       basedOn: null,
     });
     const run = await ranFor(by, workflow.id, 1, "Ada");
-    // Two days on, with the deployment's retention cut to one day.
+    // Past the 30 days its details are kept.
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    vi.setSystemTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
     let trace: WorkflowRunTrace;
     try {
-      trace = await resourceRunTrace(
-        { ...env, RUN_RETENTION_DAYS: "1" },
-        by,
-        workflow.id,
-        run
-      );
+      trace = await resourceRunTrace(env, by, workflow.id, run);
     } finally {
       vi.useRealTimers();
     }

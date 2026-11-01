@@ -112,36 +112,6 @@ export const listPricesOf = (
 };
 
 /**
- * What Amazon Bedrock charges for Claude on a regional endpoint (the EU's
- * inference profile among them) over its global one, which charges
- * Anthropic's list prices: 10 percent.
- *
- * Source: Anthropic's "Claude in Amazon Bedrock" page, "Regions"
- * (https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock),
- * read on 2026-10-24: "Regional endpoints carry a 10 percent pricing
- * premium over global endpoints." To be checked against AWS's own pricing
- * page before a client is charged at it.
- */
-const regionalPremium = 1.1;
-
-/** `prices` with Bedrock's regional premium, every kind and tier alike. */
-export const regionalPricesOf = <Prices extends ListPrices>(
-  prices: Prices
-): Prices => {
-  const scaled = <Each extends Rates>(rates: Each): Each => ({
-    ...rates,
-    input: rates.input * regionalPremium,
-    output: rates.output * regionalPremium,
-    cacheRead: rates.cacheRead * regionalPremium,
-    cacheWrite: rates.cacheWrite * regionalPremium,
-  });
-  return {
-    ...scaled(prices),
-    ...(prices.tiers === undefined ? {} : { tiers: prices.tiers.map(scaled) }),
-  };
-};
-
-/**
  * Dollars per million tokens as whole micros, rounded up. The catalog's
  * prices are decimals such as 0.293, which are a hair off in binary: they
  * are rounded to a thousandth of a micro first, so 0.293 is 293000.

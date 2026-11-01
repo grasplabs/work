@@ -346,6 +346,76 @@ export interface ChatCitedDocument {
 export const citedSnippetMax = 200;
 
 /**
+ * How much the chat's agent may ask at once (`askQuestions`, GRA-1001):
+ * a few short questions, each with a few short choices, plain text, one
+ * line each. The person can always answer otherwise ("Something else") or
+ * type instead.
+ */
+export const chatAskLimits = {
+  questions: 4,
+  choicesMin: 2,
+  choices: 6,
+  questionLength: 300,
+  choiceLength: 120,
+} as const;
+
+/** Text starting and ending with something other than space. */
+const unpadded = /^\S(?:.*\S)?$/su;
+
+/**
+ * What a question or a choice never holds: controls (line breaks among
+ * them), invisible formatting (bidi overrides, zero-width characters) and
+ * the line and paragraph separators, so it shows as the one line it reads
+ * as, and can't pass for something the page itself shows.
+ */
+const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * One line of plain text, as a question or a choice is: taken as written
+ * or refused, never trimmed.
+ */
+const askLine = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .regex(unpadded)
+    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
+      message:
+        "A question or choice is one line of well-formed text, with no control or invisible formatting characters",
+    });
+
+/** What the agent asks the person at once, as it calls `askQuestions`. */
+export const chatAskSchema = z.strictObject({
+  questions: z
+    .array(
+      z.strictObject({
+        question: askLine(chatAskLimits.questionLength),
+        choices: z
+          .array(askLine(chatAskLimits.choiceLength))
+          .min(chatAskLimits.choicesMin)
+          .max(chatAskLimits.choices)
+          .refine((choices) => new Set(choices).size === choices.length, {
+            message: "A question's choices are all different",
+          }),
+      })
+    )
+    .min(1)
+    .max(chatAskLimits.questions),
+});
+export type ChatAsk = z.infer<typeof chatAskSchema>;
+
+/**
+ * Questions the agent asked the person, with choices: data, never
+ * commands. A choice only says what the person may answer; their answer
+ * is their own next message, and anything the agent then changes still
+ * waits for them to confirm it in Grasp.
+ */
+export interface ChatAsked extends ChatAsk {
+  /** The call that asked them. */
+  callId: string;
+}
+
+/**
  * What the model thought before it answered, as its provider let it be
  * shown: its own words, or a summary of them (OpenAI's). A redacted part
  * (Anthropic's safety filters) shows nothing, but its time counts.
@@ -382,6 +452,12 @@ export type ChatMessage =
       code: ChatCode[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
+      /**
+       * The questions it asked the person, with choices, if it ended its
+       * response asking them (`askQuestions`): shown in place of the
+       * composer until they answer.
+       */
+      asked?: ChatAsked;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -786,6 +862,12 @@ export interface ChatsApi {
     app: string,
     version: number
   ) => Promise<ChatDraftVersion>;
+  /**
+   * Discards the chat's draft of `app`: its changes go, and the agent's
+   * next write starts over from the App's latest version; its versions
+   * stay, to restore one. For the person while they build the App.
+   */
+  discardDraft: (chatId: string, app: string) => Promise<void>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

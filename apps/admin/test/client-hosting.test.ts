@@ -1,17 +1,16 @@
-import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   auditEvents,
+  clientAdminReads,
   clientPlacements,
   clientProvisions,
   clients,
   clientRuns,
   hostingDestinations,
   releases,
-  settings,
 } from "../src/db/schema.ts";
 import { DiscardError, discardClient } from "../src/hosting/discard.ts";
 import {
@@ -52,11 +51,8 @@ const caller = "ops@grasp.test";
  * attempt in a shared destination stops at validation
  * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
-const importedRelease = async (
-  adjust: (manifest: ReleaseManifest) => ReleaseManifest = (manifest) =>
-    manifest
-): Promise<string> => {
-  const manifest = adjust(await release());
+const importedRelease = async (): Promise<string> => {
+  const manifest = await release();
   const now = new Date();
   await db.insert(releases).values({
     id: manifest.releaseId,
@@ -298,7 +294,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("tries a stopped provisioning again on the newest release that fits, a fix released since included", async () => {
+  it("tries a stopped provisioning again on the newest release, a fix released since included", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
@@ -319,25 +315,13 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: fixed, switched: [caller] });
   });
 
-  it("tries a stopped provisioning again on its own release when no newer release fits it", async () => {
+  it("tries a stopped provisioning again on its own release when no newer release is imported", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
-    // Newer, but its core calls a connect it doesn't ship: it fits no one.
-    await importedRelease((manifest) => ({
-      ...manifest,
-      compatibility: {
-        interfaces: {
-          connect: { serves: 1, calls: {} },
-          core: { calls: { connect: { min: 2, max: 2 } } },
-        },
-        workflowJournal: { min: 8, max: 9 },
-        sdkProtocols: { min: 2, max: 2 },
-      },
-    }));
 
     const retried = await retry(clientId);
     await latestStopped(attempts);
@@ -417,7 +401,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
 
     // Stopped with nothing live: a newer release takes its operation
-    // over, and resuming offers the newest that fits it; an older one,
+    // over, and resuming offers the newest; an older one,
     // or another destination, is refused.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);
@@ -475,13 +459,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
 
   it("discards nothing of a client that went live between the check and the discard, and audits no discard", async () => {
     const clientId = await client();
-    await db.insert(settings).values({
-      clientId,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db.insert(clientAdminReads).values({ clientId, askedAt: new Date() });
     // The client goes live just before the discard's batch runs.
     const racing = new Proxy(env.DB, {
       get: (target, name): unknown => {
@@ -516,15 +494,15 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .from(clients)
         .where(eq(clients.id, clientId))
         .get(),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, clientId)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, clientId)),
       audited: await actorsOf(clientId, "client.discard"),
     }).toStrictEqual({
       refusal: "not_provisioning",
       client: { status: "active" },
-      settings: [{ key: "AUDIT_RETENTION_DAYS" }],
+      reads: [{ clientId }],
       audited: [],
     });
   });
@@ -532,13 +510,9 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("discards a client never placed, audited, freeing its id, and refuses one placed, unknown or being worked on", async () => {
     const shared = await destination();
     const mistaken = await client();
-    await db.insert(settings).values({
-      clientId: mistaken,
-      key: "AUDIT_RETENTION_DAYS",
-      value: "90",
-      updatedBy: caller,
-      updatedAt: new Date(),
-    });
+    await db
+      .insert(clientAdminReads)
+      .values({ clientId: mistaken, askedAt: new Date() });
     const placed = await client();
     await placeClient(db, staff, {
       clientId: placed,
@@ -562,10 +536,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .select({ id: clients.id })
         .from(clients)
         .where(eq(clients.id, mistaken)),
-      settings: await db
-        .select({ key: settings.key })
-        .from(settings)
-        .where(eq(settings.clientId, mistaken)),
+      reads: await db
+        .select({ clientId: clientAdminReads.clientId })
+        .from(clientAdminReads)
+        .where(eq(clientAdminReads.clientId, mistaken)),
     };
 
     expect({
@@ -578,7 +552,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       kept: await placementOf(placed),
     }).toStrictEqual({
       discarded: { refused: null },
-      left: { client: [], settings: [] },
+      left: { client: [], reads: [] },
       discardedBy: [caller],
       placed: { refused: "placed" },
       unknown: { refused: "client_unknown" },

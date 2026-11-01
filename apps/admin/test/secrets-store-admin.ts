@@ -43,6 +43,13 @@ export const adminSecrets = (tokens: {
   [env.GOOGLE_CLIENT_SECRET, "google-secret"],
   [env.COMPOSIO_API_KEY, "composio-key"],
   [env.APP_OAUTH_CLIENTS, "{}"],
+  // Grasp's OpenAI and ElevenLabs keys, which the platform AI's defaults
+  // use; the other providers' empty, as a store nobody put them in reads.
+  [env.OPENAI_API_KEY, "grasp-openai-key"],
+  [env.ELEVENLABS_API_KEY, "grasp-elevenlabs-key"],
+  [env.ANTHROPIC_API_KEY, ""],
+  [env.MISTRAL_API_KEY, ""],
+  [env.OPENROUTER_API_KEY, ""],
   // Empty, as a store nobody put Stripe's key in reads: a test that
   // reads Stripe sets it (test/admin-billing.test.ts).
   [env.STRIPE_RESTRICTED_KEY, ""],

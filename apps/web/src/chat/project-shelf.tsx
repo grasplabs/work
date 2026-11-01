@@ -1,4 +1,11 @@
 import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+} from "@grasp-os/ui/components/item";
 import { Plural, Trans } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { FolderIcon, PlusIcon } from "lucide-react";
@@ -9,7 +16,8 @@ import { ProjectDialog } from "./project-dialog.tsx";
 
 // The person's projects under the box on an empty chat
 // (grasplabs/prototype `components/chat/project-shelf.tsx`), as the place
-// they start from: a quiet row each, the most recently used first, with
+// they start from: a quiet row each (the kit's quiet Item, as the starting
+// questions above them), the most recently used first, with
 // how many chats it holds, and a new project from the line above them. A
 // row opens the project's page, where its chats, instructions and files
 // are.
@@ -67,26 +75,37 @@ export const ProjectShelf = ({
           <Trans>New project</Trans>
         </button>
       </div>
-      <ul className="flex flex-col">
+      <ItemGroup render={<ul />} spacing="none">
         {shelf.map(({ project, chats: count }) => (
-          <li className="flex" key={project.id}>
-            <Link
-              className="hover:bg-muted focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-4.5 py-2 text-sm transition-colors duration-150 outline-none focus-visible:ring-3"
-              params={{ projectId: project.id }}
-              to="/projects/$projectId"
+          <li key={project.id}>
+            <Item
+              render={
+                <Link
+                  params={{ projectId: project.id }}
+                  to="/projects/$projectId"
+                />
+              }
+              size="sm"
+              variant="quiet"
             >
-              <FolderIcon
-                aria-hidden="true"
-                className="text-muted-foreground size-4 flex-none"
-              />
-              <span className="truncate">{project.name}</span>
-              <span className="text-muted-foreground ml-auto flex-none text-xs">
-                <Plural one="# chat" other="# chats" value={count} />
-              </span>
-            </Link>
+              <ItemMedia variant="icon">
+                <FolderIcon
+                  aria-hidden="true"
+                  className="text-muted-foreground"
+                />
+              </ItemMedia>
+              <ItemContent className="min-w-0">
+                <span className="truncate">{project.name}</span>
+              </ItemContent>
+              <ItemActions>
+                <span className="text-muted-foreground text-xs">
+                  <Plural one="# chat" other="# chats" value={count} />
+                </span>
+              </ItemActions>
+            </Item>
           </li>
         ))}
-      </ul>
+      </ItemGroup>
       <ProjectDialog
         onOpenChange={setCreating}
         onSaved={(projectId) => {

@@ -1,10 +1,5 @@
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { deploymentConfig } from "@grasp-os/shared/config";
-import {
-  runRetentionDefaultDays,
-  runRetentionSchema,
-} from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
   workflowIdSchema,
@@ -50,10 +45,10 @@ import { inJurisdiction } from "../durable-objects.ts";
 // created, and finds a run deleted since as deleted rather than create it
 // again. So a start is retried safely, and nothing creates a run twice.
 //
-// The engine keeps a run's record only for the deployment's run retention
-// once the run has ended: every run is created with that as its
-// retention, so the engine purges the record itself, on the same clock as
-// core removes the rest of the run's details (retention.ts).
+// The engine keeps a run's record only for the run retention
+// (`runRetentionDays`) once the run has ended: every run is created with
+// that as its retention, so the engine purges the record itself, on the
+// same clock as core removes the rest of the run's details (retention.ts).
 
 /** An event as core admits it to a run (`RunEngine.admitEvent`). */
 export interface AdmittedEngineEvent {
@@ -312,9 +307,14 @@ export interface RunEngine {
   ) => Promise<{ status: InstanceStatus; fence: number | null } | undefined>;
   /**
    * Terminates the run; one that has ended already, that is rolling back,
-   * or that the engine has no record of, stays as it is.
+   * or that the engine has no record of, stays as it is. Answers whether
+   * the engine took it: `rolling_back` for a run whose compensation it
+   * doesn't cut short.
    */
-  terminate: (id: string, generation?: number) => Promise<void>;
+  terminate: (
+    id: string,
+    generation?: number
+  ) => Promise<"taken" | "rolling_back">;
   /**
    * Pauses the run at its next safe boundary: a run asleep or waiting at
    * once, a running one once the steps it has out end. One that is queued,
@@ -371,35 +371,24 @@ export interface RunEngine {
 }
 
 /**
- * How many days an ended run keeps its details (`RUN_RETENTION_DAYS`), or
- * `undefined` if the deployment's config is invalid.
+ * How many days an ended workflow run keeps its details (its input, what
+ * its steps returned, its output, why it failed): 30. Most of those
+ * details are the engine's record of the run, and core has Cloudflare
+ * Workflows keep it for this long (each instance's `retention`), which can
+ * be no longer than the 30 days it keeps an ended instance on the Workers
+ * Paid plan.
  */
-export const runRetentionDays = (
-  env: Pick<Env, "RUN_RETENTION_DAYS">
-): number | undefined =>
-  env.RUN_RETENTION_DAYS === undefined
-    ? runRetentionDefaultDays
-    : deploymentConfig(
-        runRetentionSchema,
-        "RUN_RETENTION_DAYS",
-        env.RUN_RETENTION_DAYS
-      );
+export const runRetentionDays = 30;
 
 /**
  * How long the engine keeps a run once it has ended, after it completed
- * or was terminated and after it errored: the deployment's run retention.
- * While the deployment's config is invalid, the engine's default, 30
- * days, the longest the deployment may set.
+ * or was terminated and after it errored: the run retention.
  */
-const retentionOf = (
-  env: Pick<Env, "RUN_RETENTION_DAYS">
-): Pick<WorkflowOptions, "retention"> => {
-  const days = runRetentionDays(env);
-  if (days === undefined) {
-    return {};
-  }
-  const kept = `${days} days` as const;
-  return { retention: { successRetention: kept, errorRetention: kept } };
+const runRetention: Pick<WorkflowOptions, "retention"> = {
+  retention: {
+    successRetention: `${runRetentionDays} days`,
+    errorRetention: `${runRetentionDays} days`,
+  },
 };
 
 /**
@@ -471,7 +460,7 @@ const admit = async (
 ): Promise<void> => {
   const binding = new Workflow<{ input?: Json }>(runs(env), runDefinition, {
     version: versionOf(pin),
-    ...(pin.type === "fixture" ? fixtureRetention : retentionOf(env)),
+    ...(pin.type === "fixture" ? fixtureRetention : runRetention),
   });
   await binding.admit({
     id,
@@ -504,10 +493,11 @@ export const runEngine = (env: Env): RunEngine => ({
   terminate: async (id, generation) => {
     // Ended, rolling back or missing: nothing to terminate, and nothing
     // to fail over (a cancel racing a run's own end finds it ended).
-    await runStub(env, id).terminate({
+    const outcome = await runStub(env, id).terminate({
       rollback: false,
       ...(generation === undefined ? {} : { fence: generation }),
     });
+    return outcome === "rolling_back" ? "rolling_back" : "taken";
   },
   // Each with the run's control generation it was admitted under: the run
   // ignores one older than the newest it took, in the same write as the

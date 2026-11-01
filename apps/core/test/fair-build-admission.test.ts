@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
-  admitBuild,
   buildQueuedPerPerson,
   holding,
   maxBuildWaitMs,
@@ -11,7 +10,6 @@ import {
   renewedForMs,
 } from "../src/build-admission.ts";
 import { queueLiveMs } from "../src/workflows/admission.ts";
-import { quotaPolicy } from "../src/workflows/quotas.ts";
 import {
   admit,
   admitEach,
@@ -28,8 +26,8 @@ import {
 
 // Fair admission of the client's build jobs (build-admission.ts): how many
 // build at once, in all and of one App, each held to its share in the
-// deployment's quota policy (`QUOTA_LIMITS`, which a test sets as an
-// operator would), and in what order those waiting get one: first come,
+// quota limits (`TEST_QUOTA_LIMITS`, which a test lowers to reach them),
+// and in what order those waiting get one: first come,
 // first served, never behind an App whose own share is full. Core's
 // database is real; steps are admitted as a build job's step admits them
 // (build-jobs.ts), each test with Apps of its own. Time passes for a lease
@@ -316,7 +314,7 @@ describe("fair build admission", { timeout: 60_000 }, () => {
       .bind(job.job)
       .first<number>("ends");
     await env.DB.prepare(
-      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'person-2', ?, ?, 60000, NULL, 0)"
+      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'person-2', ?, ?, 60000, NULL)"
     )
       .bind(crypto.randomUUID(), anApp(), end ?? 0)
       .run();
@@ -330,47 +328,6 @@ describe("fair build admission", { timeout: 60_000 }, () => {
       held: await lease.lease.held(),
       renewed: (after ?? 0) > (end ?? 0),
     }).toStrictEqual({ held: false, renewed: false });
-  });
-
-  it("takes no lease under a policy lowered while it was admitted", async () => {
-    policyWith({});
-    await admit(jobOf(anApp()));
-    // The policy as this admission reads it: two builds at once. Lowered
-    // to one, and recorded, before its statement runs.
-    let lowered = false;
-    const db = env.DB;
-    const racing: Env = {
-      ...env,
-      DB: new Proxy(db, {
-        get: (target, property) => {
-          const value: unknown = Reflect.get(target, property);
-          if (property === "batch" && typeof value === "function") {
-            return async (...args: unknown[]): Promise<unknown> => {
-              if (!lowered) {
-                lowered = true;
-                policyWith({ tenantBuildJobs: 1 });
-                await quotaPolicy(env);
-              }
-              return await Reflect.apply(value, target, args);
-            };
-          }
-          return typeof value === "function"
-            ? (...args: unknown[]): unknown =>
-                Reflect.apply(value, target, args)
-            : value;
-        },
-      }),
-    };
-    const owner = jobOf(anApp());
-    const admitted = await admitBuild(racing, owner, {
-      seq: checkAt(),
-      waited: 0,
-      waitedMs: 0,
-    });
-    expect({
-      lowered,
-      admitted: "lease" in admitted ? "ok" : `wait:${admitted.wait.waitingFor}`,
-    }).toStrictEqual({ lowered: true, admitted: "wait:client" });
   });
 
   it("stops a step's build once its lease is lost, and gives the lease back", async () => {

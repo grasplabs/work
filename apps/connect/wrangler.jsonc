@@ -22,13 +22,14 @@
   // Every secret connect needs: deploys fail while one is unset, and local
   // dev loads only these from .dev.vars. CAPABILITY_SIGNING_KEY is shared
   // with core, which signs a capability for every call connect gets.
+  // TOKEN_ENCRYPTION_KEY seals what connect keeps (src/vault.ts): OAuth
+  // tokens, and the organization's AI provider keys, without which no model
+  // call can be made, locally too.
   //
   // Connecting accounts needs more, set by the admin, but connect takes
-  // calls without them, so they aren't required: TOKEN_ENCRYPTION_KEY, which
-  // seals OAuth tokens (src/vault.ts), and each provider's app credentials,
+  // calls without them, so they aren't required: each provider's app credentials,
   // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
-  // MICROSOFT_LANDSCAPE_CLIENT_ID and _SECRET for the application
-  // landscape's own Entra app, MICROSOFT_DIRECTORY_CLIENT_ID and _SECRET
+  // MICROSOFT_DIRECTORY_CLIENT_ID and _SECRET
   // and GOOGLE_DIRECTORY_CLIENT_ID and _SECRET for the directory's own apps,
   // MICROSOFT_DOCUMENTS_CLIENT_ID and _SECRET and GOOGLE_DOCUMENTS_CLIENT_ID
   // and _SECRET for the documents' own apps (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
@@ -40,8 +41,12 @@
   // Slack app's, WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN, its
   // WhatsApp number's, and TELEGRAM_BOT_TOKEN, its Telegram bot's
   // (src/channels.ts): while one is unset, every request
-  // to its platform is refused. Their types are in src/env.d.ts.
-  "secrets": { "required": ["CAPABILITY_SIGNING_KEY"] },
+  // to its platform is refused. So are OPENAI_API_KEY, ANTHROPIC_API_KEY,
+  // MISTRAL_API_KEY, OPENROUTER_API_KEY and ELEVENLABS_API_KEY, Grasp's
+  // own keys at the AI providers for platform features
+  // (src/ai-providers.ts): a provider whose key is unset isn't offered for
+  // them. Their types are in src/env.d.ts.
+  "secrets": { "required": ["CAPABILITY_SIGNING_KEY", "TOKEN_ENCRYPTION_KEY"] },
   // Vars the admin set through the API survive a deploy (keep_vars).
   "keep_vars": true,
   // Loads a native connector into an isolate of its own for each call

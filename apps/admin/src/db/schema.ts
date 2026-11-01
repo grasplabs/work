@@ -15,9 +15,6 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-/** Every client's model spend ceiling until staff set another, in euros a month (GRA-141). */
-export const defaultModelSpendCeiling = 250;
-
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
   /** `YY.MM.N` (@grasp-os/shared/release-id); the commit is `commitSha`. */
@@ -27,15 +24,6 @@ export const releases = sqliteTable("releases", {
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
-  /**
-   * Its limit evidence file, as CI's publish wrote it next to the manifest
-   * (@grasp-os/shared/release `limitEvidenceFileSchema`): JSON, checked on
-   * import against the manifest and R2's SHA-256. Null for a release that
-   * records no platform limits (built before they were).
-   */
-  limitEvidence: text("limit_evidence"),
-  /** That file's sha256, hex; null with it. */
-  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**
@@ -133,16 +121,6 @@ export const clients = sqliteTable(
      * already (src/rollout/targets.ts); null while nothing changed.
      */
     configChangedAt: timestamp("config_changed_at"),
-    /**
-     * The most its model calls may cost in a calendar month, in whole
-     * euros (GRA-141): `defaultModelSpendCeiling` unless staff set another
-     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
-     * it to its core's model gateway as its deployment budget, which the
-     * gateway enforces before each provider request.
-     */
-    modelSpendCeiling: integer("model_spend_ceiling")
-      .notNull()
-      .default(defaultModelSpendCeiling),
     /**
      * Where it runs: Grasp's cloud, or its own premises
      * (src/hosting/organization.ts). Fixed once it is provisioned.
@@ -346,25 +324,6 @@ export const rolloutTargets = sqliteTable(
     primaryKey({ columns: [table.rolloutId, table.clientId] }),
     index("rollout_targets_client_idx").on(table.clientId),
   ]
-);
-
-/**
- * A client's deployment config (sign-in, model gateway), one row
- * per setting. Never a secret: those go straight to the client's Worker.
- */
-export const settings = sqliteTable(
-  "settings",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    key: text().notNull(),
-    /** JSON. */
-    value: text().notNull(),
-    updatedBy: text("updated_by").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.key] })]
 );
 
 /**

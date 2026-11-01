@@ -1,19 +1,18 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, vi } from "vite-plus/test";
+import { beforeEach } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import type { ModelCall } from "../src/models.ts";
 import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
   appWith as serverAppWith,
@@ -23,7 +22,8 @@ import {
 // What the tests of the client's rules for model calls share
 // (model-rules.test.ts, model-rules-budgets.test.ts): the rules as a test
 // sets them, calls that meet them, and what the audit log says of each.
-// AI Gateway is the outside system: a fake behind the AI binding.
+// The model provider behind connect is the outside system
+// (test/model-provider.ts).
 
 /**
  * A new App with the sample server and `files`, declaring the model
@@ -70,13 +70,14 @@ export const currentPastActivation = async (
   return activation;
 };
 
-export const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** A model that doesn't think: the organization's default in these tests. */
+export const mistral = "mistral/mistral-large-latest";
 export const anthropic = "anthropic/claude-sonnet-4-5";
-/** Hosted in the EU, as the tests' config says: its provider's EU region. */
+/** Hosted in the EU, as the tests' config says. */
 export const euModel = "openai/gpt-5.4";
 
-export const gateway = "grasp-os-test";
-export const allowed = [workersAi, anthropic, euModel];
+/** The models the organization chose: its default, then its fallbacks. */
+export const chosen = [mistral, anthropic, euModel];
 
 /** An answer that costs next to nothing. */
 export const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
@@ -94,19 +95,22 @@ const newMonth = (): string => {
 };
 
 /**
- * Core's env with the fake gateway answering up to eight calls with
- * `answer`, and the rules `config` adds; budgets count in `month`.
+ * Core's env with the provider answering up to eight calls with `answer`,
+ * for the `chosen` models, and the rules `config`; budgets count in
+ * `month`.
  */
-export const withRules = (
+export const withRules = async (
   config: Record<string, unknown>,
-  answer: GatewayReply = cheapAnswer,
+  answer: ProviderReply = cheapAnswer,
   month = newMonth()
 ) => {
-  const fake = fakeGateway(...Array.from({ length: 8 }, () => answer));
-  const rulesEnv: ModelsEnv = {
+  const fake = await fakeProviderFor(
+    chosen,
+    ...Array.from({ length: 8 }, () => answer)
+  );
+  const rulesEnv: Env = {
     ...env,
-    AI: fake.binding,
-    MODEL_GATEWAY: { gateway, models: allowed, ...config },
+    MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: month,
   };
   const { call, agent } = models(rulesEnv);
@@ -118,19 +122,17 @@ const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
 /**
- * What `run` returns, with `config` as the deployment's gateway config for
- * the workflow runs it starts, and the fake gateway answering with
- * `replies`.
+ * What `run` returns, with `config` as the deployment's rules for the
+ * workflow runs it starts, and the provider answering with `replies`, for
+ * the `chosen` models.
  */
 export const withDeploymentRules = async <Result>(
   config: unknown,
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   run: () => Promise<Result>
 ) => {
   const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const sending = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  const fake = await fakeProviderFor(chosen, ...replies);
   try {
     env.MODEL_GATEWAY = config;
     env.MODEL_BUDGET_MONTH = newMonth();
@@ -138,7 +140,6 @@ export const withDeploymentRules = async <Result>(
   } finally {
     env.MODEL_GATEWAY = before;
     env.MODEL_BUDGET_MONTH = month;
-    sending.mockRestore();
   }
 };
 

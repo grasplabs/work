@@ -26,6 +26,7 @@ import {
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import { storedVersionTexts as versionTexts } from "./knowledge.ts";
+import { withLoweredLimit } from "./memory-limits.ts";
 import {
   auditedDuring,
   openRpc,
@@ -1177,8 +1178,8 @@ describe("purging", setUpTime, () => {
       reason: "erasure_request",
     };
     const { token } = await admin.api.knowledge.preparePurge(input);
-    // Within USER.md's 500 tokens, but not once each "Jo" is "(removed)".
-    const long = `# About me\n${"Jo ".repeat(400)}`;
+    // Within USER.md's 2,000 tokens, but not once each "Jo" is "(removed)".
+    const long = `# About me\n${"Jo ".repeat(1600)}`;
     await saveUserMemory(env, agent, work, own, { text: long, ifVersion: 1 });
     let refused = "";
     const events = await auditedDuring(async () => {
@@ -1221,14 +1222,15 @@ describe("purging", setUpTime, () => {
     const { token } = await admin.api.knowledge.preparePurge(input);
     // The limit lowered since: the current USER.md, which holds no term,
     // is over it, and a purge would save it again.
-    const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, MEMORY_LIMITS: { "USER.md": 10 } },
-    });
-    const lowered = core.authenticate();
     let refused = "";
-    const events = await auditedDuring(async () => {
-      refused = await outcome(lowered.knowledge.purge(input, token));
-    });
+    const events = await withLoweredLimit(
+      "USER.md",
+      10,
+      async () =>
+        await auditedDuring(async () => {
+          refused = await outcome(admin.api.knowledge.purge(input, token));
+        })
+    );
     expect({
       refused,
       events: events.map(({ action }) => action),

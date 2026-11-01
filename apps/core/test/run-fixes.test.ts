@@ -10,13 +10,10 @@ import { appHost, workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
   codeStep,
-  gatewayConfig,
   model,
-  pointAtGateway,
+  configureObject,
   says,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -26,6 +23,8 @@ import {
   storedGrant,
 } from "./knowledge.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -74,14 +73,11 @@ const endedRun = async (person: Person, app: string, workflow: string) => {
   return run.id;
 };
 
-/** Points `person`'s chats at a fake gateway that answers `replies`. */
-const answering = async (person: Person, ...replies: GatewayReply[]) => {
-  const gateway = fakeGateway(...replies);
-  await pointAtGateway(
-    workspace(env, personalWorkspaceId(person.userId)),
-    gateway
-  );
-  return gateway;
+/** Answers `person`'s chats with `replies`, from a fake provider. */
+const answering = async (person: Person, ...replies: ProviderReply[]) => {
+  const provider = await fakeProvider(...replies);
+  await configureObject(workspace(env, personalWorkspaceId(person.userId)));
+  return provider;
 };
 
 /** Once the agent has stopped working on the chat. */
@@ -154,7 +150,7 @@ describe("asking the agent to fix a failed run", slow, () => {
     const owner = await signedInApi(idp, "builder");
     const app = await appWith(owner, workflows(injection));
     const run = await endedRun(owner, app, "careless");
-    const gateway = await answering(
+    const provider = await answering(
       owner,
       codeStep(
         "export default async (self, env) => await env.chat.attachments();"
@@ -170,7 +166,7 @@ describe("asking the agent to fix a failed run", slow, () => {
     await owner.api.chats.send(plain.id, { text: "Hello", model });
     await answered(owner, plain.id);
 
-    const [asked, readReport, ordinary] = gateway.requests.map(({ body }) =>
+    const [asked, readReport, ordinary] = provider.requests.map(({ body }) =>
       partsOf(body)
     );
     const [result] = toolResults(readReport?.messages ?? []);
@@ -182,7 +178,7 @@ describe("asking the agent to fix a failed run", slow, () => {
     const held = await owner.api.pendingActions.list();
     expect({
       title: chat.title,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
       // The instructions are an ordinary chat's, word for word.
       instructions: asked?.system === ordinary?.system,
       inInstructions: [asked, readReport].some(
@@ -349,17 +345,10 @@ describe("asking the agent to fix a failed run", slow, () => {
     // The client's rules keep every call in the EU, and the model isn't
     // hosted there: it is allowed, so the chat is made, and the rules
     // refuse its question.
-    await pointAtGateway(
-      workspace(env, personalWorkspaceId(owner.userId)),
-      fakeGateway(),
-      {
-        config: {
-          ...gatewayConfig,
-          models: [model, euModel],
-          eu: { models: [euModel], deployment: true },
-        },
-      }
-    );
+    await fakeProviderFor([model, euModel]);
+    await configureObject(workspace(env, personalWorkspaceId(owner.userId)), {
+      rules: { eu: { models: [euModel], deployment: true } },
+    });
 
     const started = await owner.api.chats.fixRun(run, model);
     const chats = await owner.api.chats.list();

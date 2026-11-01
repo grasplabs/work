@@ -41,7 +41,7 @@ import type { Person } from "./people.ts";
 // agreed to. The map is drawn by the careful model in core's alarm, which
 // no browser route reaches and the local stack can't call. So here the
 // team waits for it (Sam's link stays shut); that the drawing opens it is
-// asserted in workerd, with AI Gateway stood in for (apps/core/test/
+// asserted in workerd, with the model provider stood in for (apps/core/test/
 // team-map.test.ts, "is drawn once the lead agrees").
 
 /** A recorded answer, as the transcription upstream writes it down. */

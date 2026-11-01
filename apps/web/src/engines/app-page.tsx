@@ -25,7 +25,7 @@ import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
-import { StatusBadge, useStatusMove } from "./app-status.tsx";
+import { useStatusMove } from "./app-status.tsx";
 
 // An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
 // with its name, its screens as tabs, its settings and the Publish menu;
@@ -265,17 +265,18 @@ export const AppPage = ({
           >
             <LayoutGridIcon className="size-4" />
           </span>
+          {/* No status beside it, as in the prototype: Publish says it for
+              its builders, and an archived App says so under the bar. */}
           <h1 className="truncate text-base font-medium">{name}</h1>
-          <StatusBadge status={app.status} />
         </span>
         <ScreenTabs app={app.id} open={open} screens={contents.screens} />
         <span className="ml-auto flex items-start gap-2">
           <Link
             aria-label={t`Settings of ${name}`}
             className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-            params={{ engine: app.id }}
+            params={{ app: app.id }}
             title={t`Settings`}
-            to="/domains/$engine"
+            to="/apps/$app/settings"
           >
             <SettingsIcon />
           </Link>

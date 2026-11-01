@@ -35,15 +35,25 @@ const bubbleVariants = cva(
         destructive:
           "*:data-[slot=bubble-content]:bg-destructive/10 *:data-[slot=bubble-content]:text-destructive dark:*:data-[slot=bubble-content]:bg-destructive/20 [&>[data-slot=bubble-content]:is(button,a):hover]:bg-destructive/20 dark:[&>[data-slot=bubble-content]:is(button,a):hover]:bg-destructive/30",
       },
+      /**
+       * `lg` is the chat's question, as the prototype draws it: roomier,
+       * and as wide as the thread allows.
+       */
+      size: {
+        default: "",
+        lg: "max-w-11/12 *:data-[slot=bubble-content]:px-4 *:data-[slot=bubble-content]:py-3",
+      },
     },
     defaultVariants: {
       variant: "default",
+      size: "default",
     },
   }
 );
 
 function Bubble({
   variant = "default",
+  size = "default",
   align = "start",
   className,
   ...props
@@ -55,8 +65,9 @@ function Bubble({
     <div
       data-slot="bubble"
       data-variant={variant}
+      data-size={size}
       data-align={align}
-      className={cn(bubbleVariants({ variant }), className)}
+      className={cn(bubbleVariants({ variant, size }), className)}
       {...props}
     />
   );
@@ -72,7 +83,7 @@ function BubbleContent({
     props: mergeProps<"div">(
       {
         className: cn(
-          "[button,a]:focus-visible:border-ring [button,a]:focus-visible:ring-ring/50 w-fit max-w-full min-w-0 overflow-hidden rounded-xl border border-transparent px-3.5 py-2 text-sm leading-relaxed wrap-break-word group-data-[align=end]/bubble:self-end [button]:text-left [button,a]:transition-colors [button,a]:outline-none [button,a]:focus-visible:ring-3",
+          "[button,a]:focus-visible:border-ring [button,a]:focus-visible:ring-ring/50 w-fit max-w-full min-w-0 overflow-hidden rounded-xl border border-transparent px-3.5 py-2.5 text-sm leading-relaxed wrap-break-word whitespace-pre-wrap group-data-[align=end]/bubble:self-end [button]:text-left [button,a]:transition-colors [button,a]:outline-none [button,a]:focus-visible:ring-3",
           className
         ),
       },

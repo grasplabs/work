@@ -1,4 +1,3 @@
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -11,6 +10,7 @@ import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
@@ -35,24 +35,16 @@ const idp = mockIdp();
 const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
-/** Each policy a test sets, under a generation higher than any before. */
-let generations = 1000;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/** What `run` returns, with the operator's quota policy `limits` in force. */
+/** What `run` returns, with the quota limits `limits` lowered. */
 const withQuotas = async <Result>(
   limits: Record<string, number>,
   run: () => Promise<Result>
 ): Promise<Result> => {
-  generations += 1;
-  env.QUOTA_LIMITS = { generation: generations, limits };
+  env.TEST_QUOTA_LIMITS = limits;
   try {
     return await run();
   } finally {
-    generations += 1;
-    env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+    env.TEST_QUOTA_LIMITS = configuredLimits;
   }
 };
 

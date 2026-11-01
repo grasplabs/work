@@ -197,6 +197,7 @@ const Releases = ({
       </Field>
       <div className="flex flex-wrap items-center gap-4">
         <Button
+          size="sm"
           disabled={busy || view.going || releaseId === ""}
           onClick={release}
         >
@@ -206,6 +207,7 @@ const Releases = ({
         </Button>
         {operation.previousReleaseId === null ? null : (
           <Button
+            size="sm"
             disabled={busy || view.going}
             onClick={rollBack}
             variant="outline"
@@ -260,6 +262,7 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
         </Field>
         <div className="flex flex-wrap items-center gap-4">
           <Button
+            size="sm"
             disabled={busy || !understood}
             onClick={() => {
               act(
@@ -352,6 +355,7 @@ const Discard = ({ view }: { view: ClientHostingView }) => {
       </Field>
       <div className="flex flex-wrap items-center gap-4">
         <Button
+          size="sm"
           disabled={busy || !understood}
           onClick={discard}
           variant="destructive"
@@ -386,7 +390,7 @@ const provisionable = (view: ClientHostingView): boolean =>
  * Its hosting for staff, read-only: where it runs, where it is placed or
  * would go, what each requirement stands at, its operation, and once it
  * stopped or hasn't started, one button that tries again now, in the
- * automatic destination with the newest release that fits, as the
+ * automatic destination with the newest release, as the
  * admin does by itself anyway.
  */
 export const ClientHosting = ({
@@ -441,7 +445,7 @@ export const ClientHosting = ({
       {stopped ? (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-4">
-            <Button disabled={busy} onClick={retry} variant="outline">
+            <Button disabled={busy} onClick={retry} size="sm" variant="outline">
               Retry now
             </Button>
             {failure === null ? null : (

@@ -1,14 +1,13 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { Reader } from "../src/knowledge/access.ts";
 import { rerankCandidates } from "../src/knowledge/rerank.ts";
-import { answeringGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
 import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // A recall reranked by the deployment's model (GRA-304; knowledge/
@@ -20,8 +19,13 @@ import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 const euModel = "openai/gpt-5.4";
+
+/** Rules under which only `model` may read sensitive data. */
+const sensitiveTo = (model: string) => ({
+  sensitive: { models: [model], connections: [] },
+});
 
 /** Letters only: digits would make it an identifier, for the exact lane. */
 const rareWord = (): string =>
@@ -50,50 +54,44 @@ describe("a reranked recall", () => {
     const query = `How many ${word} days?`;
     const plain = await knowledge.recall({ query });
     const fusedIds = plain.items.map(({ id }) => id);
-    const gateway = answeringGateway(() => ({
+    const provider = await answeringProvider(() => ({
       text: JSON.stringify({ ranking: fusedIds.toReversed() }),
       inputTokens: 200,
       outputTokens: 20,
     }));
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-    try {
-      await knowledge.recall({ query });
-      const unasked = gateway.requests.length;
-      const reranked = await knowledge.recall({
-        query,
-        budget: { rerank: true },
-      });
-      const events = await allEvents();
-      const call = events.findLast(
-        ({ action, detail }) =>
-          action === "model.call" && detail.purpose === "brain.rerank"
-      );
+    await knowledge.recall({ query });
+    const unasked = provider.requests.length;
+    const reranked = await knowledge.recall({
+      query,
+      budget: { rerank: true },
+    });
+    const events = await allEvents();
+    const call = events.findLast(
+      ({ action, detail }) =>
+        action === "model.call" && detail.purpose === "brain.rerank"
+    );
 
-      expect({
-        unasked,
-        asked: gateway.requests.length,
-        order: reranked.items.map(({ id }) => id),
-        policy: reranked.retrievalPolicyVersion,
-        call: call && {
-          actor: call.actor,
-          platform: call.detail.platform,
-          provenance: call.provenance,
-        },
-      }).toStrictEqual({
-        unasked: 0,
-        asked: 1,
-        order: fusedIds.toReversed(),
-        policy: "hybrid@1+rerank@1",
-        call: {
-          actor: { type: "person", userId: person.userId },
-          platform: "brain_recall",
-          provenance: [collectionId],
-        },
-      });
-    } finally {
-      spy.mockRestore();
-    }
+    expect({
+      unasked,
+      asked: provider.requests.length,
+      order: reranked.items.map(({ id }) => id),
+      policy: reranked.retrievalPolicyVersion,
+      call: call && {
+        actor: call.actor,
+        platform: call.detail.platform,
+        provenance: call.provenance,
+      },
+    }).toStrictEqual({
+      unasked: 0,
+      asked: 1,
+      order: fusedIds.toReversed(),
+      policy: "hybrid@1+rerank@1",
+      call: {
+        actor: { type: "person", userId: person.userId },
+        platform: "brain_recall",
+        provenance: [collectionId],
+      },
+    });
   });
 
   it("is judged as carrying sensitive data under the deployment's rules, and refused where no model may read it", async () => {
@@ -111,24 +109,21 @@ describe("a reranked recall", () => {
       provenance: [],
       deadlineMs: 5000,
     };
-    const gateway = answeringGateway(() => ({
-      text: JSON.stringify({ ranking: ["b", "a"] }),
-      inputTokens: 100,
-      outputTokens: 10,
-    }));
-    const rules = (sensitive: string[]) => ({
-      gateway: "grasp-os-test",
-      models: [workersAi, euModel],
-      sensitive: { models: sensitive, connections: [] },
-      roles: { quick: workersAi },
-    });
+    await answeringProvider(
+      () => ({
+        text: JSON.stringify({ ranking: ["b", "a"] }),
+        inputTokens: 100,
+        outputTokens: 10,
+      }),
+      { models: [mistral] }
+    );
     const ranked = await rerankCandidates(
-      { ...env, AI: gateway.binding, MODEL_GATEWAY: rules([workersAi]) },
+      { ...env, MODEL_GATEWAY: sensitiveTo(mistral) },
       reader,
       request
     );
     const refused = await rerankCandidates(
-      { ...env, AI: gateway.binding, MODEL_GATEWAY: rules([euModel]) },
+      { ...env, MODEL_GATEWAY: sensitiveTo(euModel) },
       reader,
       request
     ).then(
@@ -150,8 +145,7 @@ describe("a reranked recall", () => {
       sensitive: call?.detail.sensitive,
     }).toStrictEqual({
       ranked: ["b", "a"],
-      // The quick role's model may not read sensitive data, and the
-      // reranker never falls back to another.
+      // No model the organization chose may read sensitive data.
       refused: "brain.unavailable",
       // The company's own words: judged sensitive, as onboarding's are.
       sensitive: "restricted",

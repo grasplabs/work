@@ -1495,13 +1495,13 @@ add(
   "a person, a model and a template are opaque references",
   () =>
     [v.person(), v.model(), v.template()].map((schema) =>
-      ["team:finance", "workers-ai/@cf/meta/llama-3.3", "", "a b", "é", 5].map(
+      ["team:finance", "mistral/mistral-large-latest", "", "a b", "é", 5].map(
         (value) => check(schema, value)
       )
     ),
   Array.from({ length: 3 }, () => [
     { value: "team:finance" },
-    { value: "workers-ai/@cf/meta/llama-3.3" },
+    { value: "mistral/mistral-large-latest" },
     { issues: [["value.invalid_reference"]] },
     { issues: [["value.invalid_reference"]] },
     { issues: [["value.invalid_reference"]] },
