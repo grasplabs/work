@@ -49,10 +49,10 @@ const newMonth = (): string => {
   return `${2200 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/** The model each onboarding role gets, for calls that carry sensitive data. */
+/** The model each role gets. */
 const roleIn = (settings: ModelsNow) => ({
-  quick: modelForRole(settings, "quick", { sensitive: true }),
-  careful: modelForRole(settings, "careful", { sensitive: true }),
+  quick: modelForRole(settings, "quick"),
+  careful: modelForRole(settings, "careful"),
 });
 
 /** Core's env with `config` as the deployment's rules, counting in its own month. */
@@ -106,11 +106,6 @@ const settingsIn = async (
 describe("model settings", { timeout: 60_000 }, () => {
   it("show admins the organization's models, the rules, and the spend against each budget (this month's, a run lineage's whole life), most first, with names", async () => {
     const coreEnv = envWith({
-      eu: {
-        models: [euModel],
-        connections: ["conn-eu"],
-      },
-      sensitive: { models: [euModel], connections: ["conn-hr"] },
       budgets: {
         deployment: { limit: 100 },
         workflow: { limit: 5, alertAt: 50 },
@@ -182,13 +177,6 @@ describe("model settings", { timeout: 60_000 }, () => {
       models: chosen,
       rules: {
         state: "on",
-        eu: {
-          models: [euModel],
-          deployment: false,
-          workflows: [],
-          connections: ["conn-eu"],
-        },
-        sensitive: { models: [euModel], connections: ["conn-hr"] },
         budgets: [
           {
             scope: "deployment",
@@ -299,7 +287,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     const coreEnv = envWith();
     await expect(settingsIn(coreEnv)).resolves.toMatchObject({
       models: [euModel, anthropic],
-      rules: { state: "on", eu: null, sensitive: null, budgets: [] },
+      rules: { state: "on", budgets: [] },
     });
     const { session } = await signedInWithRole(idp, "user");
     const { core } = await openRpc(session, { coreEnv });
@@ -337,25 +325,15 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
-  it("give every role the organization's default model, or the first of its fallbacks the rules let it use, and none until it chose one", async () => {
+  it("give every role the organization's default model, and none until it chose one", async () => {
     await choose(anthropic, euModel);
     const coreEnv = envWith();
     const { session } = await signedInWithRole(idp, "user");
     const { core } = await openRpc(session, { coreEnv });
     const [chat] = await core.authenticate().chats.models();
-    const rolesWith = async (config?: unknown) =>
-      roleIn(await modelSettings(envWith(config)));
+    const rolesWith = async () => roleIn(await modelSettings(envWith()));
 
-    const roles = {
-      chat,
-      ...(await rolesWith()),
-      // Sensitive data only the fallback may take.
-      sensitive: await rolesWith({
-        sensitive: { models: [euModel], connections: [] },
-      }),
-      // Kept in the EU, where neither is hosted.
-      none: await rolesWith({ eu: { deployment: true, models: [mistral] } }),
-    };
+    const roles = { chat, ...(await rolesWith()) };
     await env.DB.prepare(
       "DELETE FROM org_settings WHERE kind = 'ai_models'"
     ).run();
@@ -365,8 +343,6 @@ describe("model settings", { timeout: 60_000 }, () => {
       chat: anthropic,
       quick: anthropic,
       careful: anthropic,
-      sensitive: { quick: euModel, careful: euModel },
-      none: { quick: undefined, careful: undefined },
       unchosen: "model.no_provider",
     });
   });

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { appIdSchema, connectionIdSchema, workflowIdSchema } from "./ids.ts";
 import { relayedClientOf } from "./oauth-relay.ts";
 import { roleSchema } from "./roles.ts";
 import { loopbackHosts } from "./router.ts";
@@ -213,45 +212,12 @@ export const budgetsSchema = z
   .optional();
 
 /**
- * The rules' part of the gateway config: `modelRef` checks one
- * `<provider>/<model>` the gateway offers.
+ * The `MODEL_GATEWAY` var: the client's rules, its budgets. A rule that
+ * doesn't parse refuses every call (core's src/models.ts).
  */
-const modelRulesShape = (modelRef: z.ZodType<string>) => ({
-  eu: z
-    .strictObject({
-      /** The models hosted in the EU. */
-      models: z.array(modelRef).min(1),
-      /** Every call of the deployment must stay in the EU. */
-      deployment: z.boolean().default(false),
-      /** Workflows whose AI steps must stay in the EU. */
-      workflows: z
-        .array(z.strictObject({ app: appIdSchema, workflow: workflowIdSchema }))
-        .default([]),
-      /** Connections whose data must stay in the EU. */
-      connections: z.array(connectionIdSchema).default([]),
-    })
-    .optional(),
-  sensitive: z
-    .strictObject({
-      /** The models that may take sensitive data. */
-      models: z.array(modelRef).min(1),
-      /** Connections whose data is sensitive. */
-      connections: z.array(connectionIdSchema).default([]),
-    })
-    .optional(),
-  budgets: budgetsSchema,
-});
+export const modelRulesConfigSchema = z.object({ budgets: budgetsSchema });
 
-export type ModelRules = z.output<
-  z.ZodObject<ReturnType<typeof modelRulesShape>>
->;
-
-/**
- * The `MODEL_GATEWAY` var: the client's rules. A rule that doesn't parse
- * refuses every call (core's src/models.ts).
- */
-export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
-  z.object(modelRulesShape(modelRef));
+export type ModelRules = z.output<typeof modelRulesConfigSchema>;
 
 // MAIL_FROM (core's src/mail.ts)
 

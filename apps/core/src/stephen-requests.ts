@@ -664,15 +664,14 @@ const proposalSchema = z.object({
 });
 
 /**
- * The model proposals are made with, which may read sensitive data; none
- * while no AI provider is connected (`model.no_provider`): then nothing is
+ * The model proposals are made with; none while no AI provider is connected (`model.no_provider`): then nothing is
  * proposed.
  */
 const quickModel = async (env: Env): Promise<string | undefined> => {
   const settings = await modelSettings(env);
   return settings.models.length === 0
     ? undefined
-    : modelForRole(settings, "quick", { sensitive: true });
+    : modelForRole(settings, "quick");
 };
 
 const proposalInstructions = `You help the owner of a company's Grasp workspace improve Stephen, the company's assistant people reach in Microsoft Teams and other chat apps. You get JSON describing one thing to fix, from counts and labels only: something five or more people asked that he cannot do yet (with the tools it would take and why each isn't there: an app off, an action off, a workflow not open to asking, no such app or action), a question whose answers people rate down, a question he didn't know the answer to (with the role best placed to answer it), or a team that hardly uses him.

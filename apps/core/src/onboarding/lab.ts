@@ -58,8 +58,8 @@ const viaOf = async (env: Env): Promise<LabVia> => {
     return { quick: null, careful: null };
   }
   return {
-    quick: modelForRole(settings, "quick", { sensitive: true }) ?? null,
-    careful: modelForRole(settings, "careful", { sensitive: true }) ?? null,
+    quick: modelForRole(settings, "quick"),
+    careful: modelForRole(settings, "careful"),
   };
 };
 
@@ -86,14 +86,7 @@ const ask = async (
       requestId
     );
   }
-  const model = modelForRole(settings, asked.role, { sensitive: true });
-  if (model === undefined) {
-    return errorResponse(
-      503,
-      modelErrors.create("model.unconfigured"),
-      requestId
-    );
-  }
+  const model = modelForRole(settings, asked.role);
   let schema: z.ZodType;
   try {
     schema = z.fromJSONSchema(asked.schema);

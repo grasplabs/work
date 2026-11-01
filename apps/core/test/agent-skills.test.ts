@@ -39,8 +39,7 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 //   returns; a pinned read outlives the agent's read of the collection;
 // - a selection goes unrecorded, or its record carries a skill's text;
 // - a skill's text stays in the chat's later requests once the agent may
-//   no longer read it, because the chat didn't keep where it came from
-//   (the same record judges a sensitive one by the client's data rule).
+//   no longer read it, because the chat didn't keep where it came from;
 // - a shipped Grasp skill is never selected for its task, or an admin's
 //   adapted copy of one leaves the task ambiguous, or doesn't take its
 //   place.

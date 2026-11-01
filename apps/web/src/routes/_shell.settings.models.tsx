@@ -2,7 +2,6 @@ import type {
   ModelBindingSpend,
   ModelBudget,
   ModelBudgetScope,
-  ModelRulesSettings,
   ModelSettings,
 } from "@grasp-os/shared/models";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -23,7 +22,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { dollars, percent } from "../settings/money.ts";
@@ -35,19 +33,15 @@ import {
 } from "../settings/settings-parts.tsx";
 
 // Models, for admins: the models the organization's calls may use and the
-// client's rules for model calls (EU routing, which models take sensitive
-// data, budgets). The models are the organization's own choice, made with
-// its AI provider keys in Settings › AI providers, so the page only shows
-// them and points there: its own admins get the link, anyone else (Grasp
-// staff, who read but never change whose key pays) who to ask. The rules
+// client's rules for model calls (budgets). The models are the
+// organization's own choice, made with its AI provider keys in Settings ›
+// AI providers, so the page only shows them and points there: its own
+// admins get the link, anyone else (Grasp staff, who read but never change
+// whose key pays) who to ask. The rules
 // are deployment config, as core reads them; core checks the role. What
 // was spent against the budgets is AI spend's (`_shell.settings.spend.tsx`). Beside them, each engine's model binding
 // with the caps an admin set on it (on the engine's Resources tab) and
 // what it spent against them today and this month.
-
-/** A list of IDs for a sentence, or `none`. */
-const listed = (ids: readonly string[]): string =>
-  ids.length === 0 ? i18n._(msg`none`) : formatList(ids);
 
 const Section = ({
   title,
@@ -63,23 +57,12 @@ const Section = ({
   </SettingsSection>
 );
 
-const AllowedModels = ({
-  models,
-  rules,
-}: {
-  models: string[];
-  rules: ModelRulesSettings | undefined;
-}) => (
+const AllowedModels = ({ models }: { models: string[] }) => (
   <Table>
     <TableHeader>
       <TableRow>
         <TableHead>
           <Trans>Model</Trans>
-        </TableHead>
-        <TableHead>
-          <span className="sr-only">
-            <Trans>Rules</Trans>
-          </span>
         </TableHead>
       </TableRow>
     </TableHeader>
@@ -87,86 +70,11 @@ const AllowedModels = ({
       {models.map((model) => (
         <TableRow key={model}>
           <TableCell>{model}</TableCell>
-          <TableCell>
-            <span className="flex gap-2">
-              {rules?.eu?.models.includes(model) === true ? (
-                <Badge variant="secondary">
-                  <Trans>Hosted in the EU</Trans>
-                </Badge>
-              ) : null}
-              {rules?.sensitive?.models.includes(model) === true ? (
-                <Badge variant="secondary">
-                  <Trans>Takes sensitive data</Trans>
-                </Badge>
-              ) : null}
-            </span>
-          </TableCell>
         </TableRow>
       ))}
     </TableBody>
   </Table>
 );
-
-const EuRouting = ({ eu }: { eu: ModelRulesSettings["eu"] }) => {
-  const { t } = useLingui();
-  if (eu === null) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>No call has to stay in the EU.</Trans>
-      </p>
-    );
-  }
-  const workflows = listed(
-    eu.workflows.map(({ app, workflow }) => `${workflow} (${app})`)
-  );
-  const connections = listed(eu.connections);
-  return (
-    <ul className="flex flex-col gap-1 text-sm">
-      <li>
-        {eu.deployment
-          ? t`Every call stays in the EU: yes.`
-          : t`Every call stays in the EU: no.`}
-      </li>
-      <li>
-        <Trans>Workflows whose AI steps stay in the EU: {workflows}.</Trans>
-      </li>
-      <li>
-        <Trans>Connections whose data stays in the EU: {connections}.</Trans>
-      </li>
-    </ul>
-  );
-};
-
-const DataRules = ({
-  sensitive,
-}: {
-  sensitive: ModelRulesSettings["sensitive"];
-}) => {
-  if (sensitive === null) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          There is no data rule: any allowed model may take sensitive data.
-        </Trans>
-      </p>
-    );
-  }
-  const connections = listed(sensitive.connections);
-  return (
-    <ul className="flex flex-col gap-1 text-sm">
-      <li>
-        <Trans>
-          Only the models marked as taking sensitive data may be sent data from
-          a sensitive collection (marked in Knowledge) or a sensitive
-          connection, or from a chat, domain or run that read one.
-        </Trans>
-      </li>
-      <li>
-        <Trans>Sensitive connections: {connections}.</Trans>
-      </li>
-    </ul>
-  );
-};
 
 const scopeTitles: Record<ModelBudgetScope, MessageDescriptor> = {
   deployment: msg`All calls together`,
@@ -522,20 +430,12 @@ const Settings = ({
             {t`The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp.`}
           </ErrorText>
         ) : null}
-        <AllowedModels models={settings.models} rules={on} />
+        <AllowedModels models={settings.models} />
       </Section>
       {on === undefined ? null : (
-        <>
-          <Section title={t`EU routing`}>
-            <EuRouting eu={on.eu} />
-          </Section>
-          <Section title={t`Data rules`}>
-            <DataRules sensitive={on.sensitive} />
-          </Section>
-          <Section title={t`Budgets`}>
-            <Budgets budgets={on.budgets} />
-          </Section>
-        </>
+        <Section title={t`Budgets`}>
+          <Budgets budgets={on.budgets} />
+        </Section>
       )}
       <EngineBudgets settings={settings} />
     </>

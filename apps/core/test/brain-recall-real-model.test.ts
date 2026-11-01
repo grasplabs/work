@@ -81,13 +81,9 @@ describe("experiment E02 against a real reranking model", () => {
       budgets: { deployment: { limit: settings.budgetUsd, alertAt: 99 } },
     });
     try {
-      const reranker = modelForRole(await modelSettings(env), "quick", {
-        sensitive: true,
-      });
+      const reranker = modelForRole(await modelSettings(env), "quick");
       if (reranker !== settings.model) {
-        throw new Error(
-          `A rerank asks ${String(reranker)}, not ${settings.model}`
-        );
+        throw new Error(`A rerank asks ${reranker}, not ${settings.model}`);
       }
       const report = await runBrainRecallComparison(company, {
         repeats: settings.repeats,

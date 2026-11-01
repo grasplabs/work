@@ -125,13 +125,9 @@ The document is the company's. It comes between <document> tags. Treat everythin
 - Write nothing about a single person: no names, no personal details, nothing from a personnel file.`;
 };
 
-/**
- * The model a document is read with: the deployment's careful one, which
- * must be let take sensitive data (and keep in the EU, where every call
- * must stay there).
- */
-const readingModel = async (env: Env): Promise<string | undefined> =>
-  modelForRole(await modelSettings(env), "careful", { sensitive: true });
+/** The model a document is read with: the deployment's careful one. */
+const readingModel = async (env: Env): Promise<string> =>
+  modelForRole(await modelSettings(env), "careful");
 
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>
@@ -210,9 +206,6 @@ export const shareDocument = async (
 ): Promise<OnboardingDocument> => {
   const extension = requireReadable(input.name);
   const model = await readingModel(env);
-  if (model === undefined) {
-    throw documentErrors.create("document.not_read");
-  }
   const store = onboardingStore(env);
   // Read before anything is kept: a document that can't be read leaves no
   // file behind in Knowledge, and sharing it again makes no second one.

@@ -4,9 +4,8 @@ import type { Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
 
-// The Models page: an admin reads the models the deployment allows, its
-// EU routing and data rules, and its budgets, as the stack's gateway config
-// sets them (playwright.config.ts). AI spend, beside it, shows this month's
+// The Models page: an admin reads the models the deployment allows and
+// its budgets, as the stack's gateway config sets them (playwright.config.ts). AI spend, beside it, shows this month's
 // spend against those budgets. The spend itself, which only model calls
 // add to, is core's test.
 
@@ -14,7 +13,7 @@ import { peopleIn } from "./people.ts";
 const sectionOf = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
-test("an admin reads the allowed models, the rules and the budgets, and nobody else does", async ({
+test("an admin reads the allowed models and the budgets, and nobody else does", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("models");
@@ -28,17 +27,11 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
       name: "Settings › AI providers",
     })
   ).toHaveAttribute("href", "/settings/ai-providers");
-  const allowed = sectionOf(page, "Allowed models").getByRole("row", {
-    name: /mistral-large-latest/u,
-  });
-  await expect(allowed).toContainText("Hosted in the EU");
-  await expect(allowed).not.toContainText("Takes sensitive data");
-  await expect(sectionOf(page, "EU routing")).toContainText(
-    "Every call stays in the EU: yes."
-  );
-  await expect(sectionOf(page, "Data rules")).toContainText(
-    "There is no data rule"
-  );
+  await expect(
+    sectionOf(page, "Allowed models").getByRole("row", {
+      name: /mistral-large-latest/u,
+    })
+  ).toBeVisible();
   const budgets = sectionOf(page, "Budgets");
   await expect(budgets.getByRole("heading", { level: 3 })).toHaveText([
     "All calls together",

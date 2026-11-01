@@ -11,15 +11,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { fakeProvider, fakeProviderFor, testModel } from "./model-provider.ts";
+import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { auditedDuring, routed } from "./sign-in.ts";
 
 // Ask Grasp on Grasp's own core (src/admin-ask.ts): only the admin's
 // signed question reaches the model gateway, every question is in the
 // audit log by the staff member the admin names before the model is
-// asked, and the admin's document only goes to a model the deployment's
-// rules let take sensitive data. The model provider behind connect is the
+// asked. The model provider behind connect is the
 // outside system (test/model-provider.ts).
 
 const staffEmail = "ada.lovelace@grasp.test";
@@ -75,22 +74,15 @@ const ask = async (
 
 /**
  * What `run` returns while the organization's provider answers with
- * `replies`, and what was sent to it: its models `models` when given.
+ * `replies`, and what was sent to it.
  */
 const answering = async <T>(
   replies: ProviderReply[],
-  run: () => Promise<T>,
-  models?: readonly string[]
+  run: () => Promise<T>
 ) => {
-  const provider =
-    models === undefined
-      ? await fakeProvider(...replies)
-      : await fakeProviderFor(models, ...replies);
+  const provider = await fakeProvider(...replies);
   return { requests: provider.requests, result: await run() };
 };
-
-/** Core's env under the deployment's rules `rules`. */
-const withRules = (rules: object): Env => ({ ...env, MODEL_GATEWAY: rules });
 
 const answer = {
   text: "Noordkade: its health needs a look, with 12 of 20 interviews done.",
@@ -223,54 +215,6 @@ describe("Ask Grasp on Grasp's own core", () => {
         },
       ],
       words: false,
-    });
-  });
-
-  it("sends the document only to a model the deployment's rules let take sensitive data, and asks none when there is none", async () => {
-    const euModel = "openai/gpt-5.4";
-    const ruled = bodyOf();
-    const none = bodyOf();
-    const [ruledSignature, noneSignature] = await Promise.all([
-      signatureOf(ruled),
-      signatureOf(none),
-    ]);
-    const { requests, result } = await answering(
-      [answer],
-      async () => {
-        const allowed = await ask(ruled, {
-          signature: ruledSignature,
-          coreEnv: withRules({
-            sensitive: { models: [euModel], connections: [] },
-          }),
-        });
-        await allowed.text();
-        const refused = await ask(none, {
-          signature: noneSignature,
-          // Only the default may take sensitive data, and only the EU model stays in the EU.
-          coreEnv: withRules({
-            sensitive: { models: [testModel], connections: [] },
-            eu: { models: [euModel], deployment: true },
-          }),
-        });
-        const refusal = z
-          .object({ code: z.string() })
-          .parse(await refused.json());
-        return {
-          allowed: allowed.status,
-          refused: refused.status,
-          code: refusal.code,
-        };
-      },
-      [testModel, euModel]
-    );
-    expect({
-      ...result,
-      sent: requests.map(({ url }) => url.includes("openai")),
-    }).toStrictEqual({
-      allowed: 200,
-      refused: 503,
-      code: "admin_ask.no_model",
-      sent: [true],
     });
   });
 });

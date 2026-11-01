@@ -4528,10 +4528,6 @@ msgstr "Conexiones"
 msgid "Connections to sign in to again"
 msgstr "Conexiones en las que volver a iniciar sesión"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Connections whose data stays in the EU: {connections}."
-msgstr "Conexiones cuyos datos se quedan en la UE: {connections}."
-
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Consentimiento"
@@ -4781,10 +4777,6 @@ msgstr "Contrato de encargo del tratamiento"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement signed"
 msgstr "Contrato de encargo del tratamiento firmado"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Data rules"
-msgstr "Reglas de datos"
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.ai-use.tsx
@@ -5570,21 +5562,9 @@ msgstr "Borró a un miembro eliminado"
 msgid "Error"
 msgstr "Error"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "EU routing"
-msgstr "Enrutamiento en la UE"
-
 #: src/routes/_shell.settings.workspace.tsx
 msgid "European Union"
 msgstr "Unión Europea"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: no."
-msgstr "Todas las llamadas se quedan en la UE: no."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: yes."
-msgstr "Todas las llamadas se quedan en la UE: sí."
 
 #: src/chat/project-dialog.tsx
 msgid "Every chat in this project reads it."
@@ -6786,10 +6766,6 @@ msgstr "Historial"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "Mantén pulsado 4 segundos"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Hosted in the EU"
-msgstr "Alojado en la UE"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
@@ -8784,10 +8760,6 @@ msgstr "No hay presupuesto definido: las llamadas a modelos no tienen límite de
 msgid "No business process"
 msgstr "Ningún proceso de negocio"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "No call has to stay in the EU."
-msgstr "Ninguna llamada tiene que quedarse en la UE."
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "No call of unknown outcome is open."
 msgstr "No hay ninguna llamada de resultado desconocido abierta."
@@ -9301,10 +9273,6 @@ msgstr "Nadie todavía"
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
 msgstr "Nadie aún."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "none"
-msgstr "ninguna"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/settings/ai-providers.tsx
@@ -10057,10 +10025,6 @@ msgstr "Solo quienes pueden aprobar paquetes ven lo aprobado en todo el espacio 
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Solo la primera manera"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Solo los modelos marcados como aptos para datos sensibles pueden recibir datos de una colección sensible (marcada en Conocimiento) o de una conexión sensible, o de un chat, dominio o ejecución que haya leído una."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -11871,7 +11835,6 @@ msgid "Rule"
 msgstr "Regla"
 
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.models.tsx
 msgid "Rules"
 msgstr "Reglas"
 
@@ -12387,10 +12350,6 @@ msgstr "Devolver la versión {version} de {who}"
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
 msgstr "Sensible"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Sensitive connections: {connections}."
-msgstr "Conexiones sensibles: {connections}."
 
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -13398,10 +13357,6 @@ msgstr "Quitado"
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Takes part in the interviews"
 msgstr "Participa en las entrevistas"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Takes sensitive data"
-msgstr "Admite datos sensibles"
 
 #: src/knowledge/purge.tsx
 msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
@@ -14632,10 +14587,6 @@ msgstr "Aquí hay una conversación. Abre el chat para verla."
 msgid "There is a team with this name already."
 msgstr "Ya hay un equipo con este nombre."
 
-#: src/routes/_shell.settings.models.tsx
-msgid "There is no data rule: any allowed model may take sensitive data."
-msgstr "No hay ninguna regla de datos: cualquier modelo permitido puede recibir datos sensibles."
-
 #: src/routes/_shell.onboarding.workflows.$work.tsx
 msgid "There is no workflow here by that name any more. A team's map may have been drawn again."
 msgstr "Ya no hay ningún flujo de trabajo con ese nombre. Puede que se haya vuelto a dibujar el mapa de un equipo."
@@ -14786,17 +14737,9 @@ msgstr "Quien te envió el enlace ha cerrado este chat."
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Este chat ha llegado a su límite. Pulsa Terminar para acabarlo."
 
-#: src/chat/failure.ts
-msgid "This chat holds sensitive data this model may not see. Pick another one."
-msgstr "Este chat contiene datos sensibles que este modelo no puede ver. Elige otro."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Este chat leyó datos restringidos: esto puede enviarlos fuera"
-
-#: src/chat/failure.ts
-msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
-msgstr "Este chat se queda en la UE, y este modelo no está alojado allí. Elige otro."
 
 #: src/knowledge/new-document.tsx
 msgid "This collection has a document at {path} already."
@@ -16983,10 +16926,6 @@ msgstr "Flujos de trabajo que más gastaron"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Flujos de trabajo este mes"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Workflows whose AI steps stay in the EU: {workflows}."
-msgstr "Flujos de trabajo cuyos pasos de IA se quedan en la UE: {workflows}."
 
 #: src/chat/thread.tsx
 #: src/workflows/requests/request-needs.tsx

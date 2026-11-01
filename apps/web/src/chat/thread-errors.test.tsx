@@ -35,8 +35,6 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.provider_key_failed": true,
   "model.provider_unavailable": true,
   "model.not_allowed": true,
-  "model.eu_only": true,
-  "model.sensitive_data": true,
   "model.over_budget": true,
   "model.run_limit": true,
   "model.budget_busy": true,

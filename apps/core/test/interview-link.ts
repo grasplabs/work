@@ -21,18 +21,13 @@ import { routed, unique } from "./sign-in.ts";
 // organization's provider with Stephen's two models, faked behind connect
 // (test/model-provider.ts).
 
-/** The organization's default: both roles resolve to it while the rules let them. */
+/** The organization's default: both roles resolve to it. */
 export const quick = "anthropic/claude-sonnet-4-5";
 /** Its fallback. */
 export const careful = "anthropic/claude-opus-4-8";
 
 /** The models the organization chose for these tests: its default first. */
 export const interviewModels = [quick, careful] as const;
-
-/** The deployment's rules: Stephen's two models, both let take sensitive data. */
-export const interviewRules = {
-  sensitive: { models: [quick, careful], connections: [] },
-};
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -165,8 +160,8 @@ export const modelOf = ({ body }: SentRequest): unknown =>
 
 /**
  * What `run` returns while the organization's provider answers each
- * request as `respond` says, from those so far, under the interview's
- * rules; once `run` is done, it answers none.
+ * request as `respond` says, from those so far; once `run` is done, it
+ * answers none.
  */
 export const answeringWith = async <T>(
   respond: (
@@ -174,18 +169,15 @@ export const answeringWith = async <T>(
   ) => ProviderReply | undefined | Promise<ProviderReply | undefined>,
   run: () => Promise<T>
 ) => {
-  const before = env.MODEL_GATEWAY;
   let done = false;
   const fake = await answeringProvider(
     async (requests) => (done ? undefined : await respond(requests)),
     { models: interviewModels }
   );
-  env.MODEL_GATEWAY = interviewRules;
   try {
     return { requests: fake.requests, result: await run() };
   } finally {
     done = true;
-    env.MODEL_GATEWAY = before;
   }
 };
 

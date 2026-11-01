@@ -15,10 +15,6 @@ export const modelErrors = defineErrorFamily({
   "model.provider_unavailable":
     "The AI provider isn't answering, so this call wasn't answered. This is usually an outage on their side; try again in a while.",
   "model.not_allowed": "This deployment doesn't allow that model.",
-  "model.eu_only":
-    "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
-  "model.sensitive_data":
-    "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
     "A model budget this call counts against is used up, so this model call can't be made. Ask your admin to have Grasp raise the budget.",
   "model.run_limit":
@@ -231,25 +227,8 @@ export interface ModelBudget {
   more: boolean;
 }
 
-/** The client's rules beyond the allowlist, while they apply. */
+/** The client's rules beyond the allowlist, while they apply: its budgets. */
 export interface ModelRulesSettings {
-  /** Which calls must stay with a model hosted in the EU; null for none. */
-  eu: {
-    /** The allowed models hosted in the EU. */
-    models: string[];
-    /** Every call of the deployment. */
-    deployment: boolean;
-    /** Workflows whose AI steps must stay in the EU. */
-    workflows: { app: string; workflow: string }[];
-    /** Connections whose data must stay in the EU. */
-    connections: string[];
-  } | null;
-  /**
-   * Which models may take sensitive data: from a sensitive collection
-   * (marked in Knowledge), from a connection listed here, or in a chat, App
-   * or run that read either. Null for no data rule.
-   */
-  sensitive: { models: string[]; connections: string[] } | null;
   budgets: ModelBudget[];
 }
 

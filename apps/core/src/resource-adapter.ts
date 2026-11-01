@@ -48,8 +48,8 @@ export const provenanceMaxResources = 1000;
 
 /**
  * What an invocation has read so far, from every source it read through
- * its resources. It feeds the model gateway's data rules on the
- * invocation's next model request, and goes back to the caller with the
+ * its resources. It is the provenance of the invocation's next model
+ * request, and goes back to the caller with the
  * answer.
  */
 export interface InvocationSources {
@@ -284,8 +284,7 @@ export type AppFunctionCall = (
     /**
      * The calling invocation's sources (`BindingCaller.sources`), which
      * the called function reads into and its model and connector requests
-     * are judged by: what the caller read, an EU-only or sensitive
-     * connection's data included, is in what it may pass on.
+     * carry: what the caller read is in what it may pass on.
      */
     readonly sources: InvocationSources;
   }

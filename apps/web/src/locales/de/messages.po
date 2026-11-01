@@ -4528,10 +4528,6 @@ msgstr "Verbindungen"
 msgid "Connections to sign in to again"
 msgstr "Erneut anzumeldende Verbindungen"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Connections whose data stays in the EU: {connections}."
-msgstr "Verbindungen, deren Daten in der EU bleiben: {connections}."
-
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Zustimmung"
@@ -4781,10 +4777,6 @@ msgstr "Auftragsverarbeitungsvertrag"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement signed"
 msgstr "Auftragsverarbeitungsvertrag unterschrieben"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Data rules"
-msgstr "Datenregeln"
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.ai-use.tsx
@@ -5570,21 +5562,9 @@ msgstr "Ein entferntes Mitglied gelöscht"
 msgid "Error"
 msgstr "Fehler"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "EU routing"
-msgstr "EU-Routing"
-
 #: src/routes/_shell.settings.workspace.tsx
 msgid "European Union"
 msgstr "Europäische Union"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: no."
-msgstr "Jeder Aufruf bleibt in der EU: nein."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: yes."
-msgstr "Jeder Aufruf bleibt in der EU: ja."
 
 #: src/chat/project-dialog.tsx
 msgid "Every chat in this project reads it."
@@ -6786,10 +6766,6 @@ msgstr "Verlauf"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "4 Sekunden gedrückt halten"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Hosted in the EU"
-msgstr "In der EU gehostet"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
@@ -8784,10 +8760,6 @@ msgstr "Kein Budget festgelegt: Modellaufrufe sind nicht nach Kosten begrenzt."
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "No call has to stay in the EU."
-msgstr "Kein Aufruf muss in der EU bleiben."
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "No call of unknown outcome is open."
 msgstr "Kein Aufruf mit unbekanntem Ergebnis ist offen."
@@ -9301,10 +9273,6 @@ msgstr "Noch niemand"
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
 msgstr "Noch niemand."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "none"
-msgstr "keine"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/settings/ai-providers.tsx
@@ -10057,10 +10025,6 @@ msgstr "Nur wer Pakete genehmigen darf, sieht, was im ganzen Workspace genehmigt
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Nur der erste Weg"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer Domäne oder einem Lauf, der eine davon gelesen hat."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -11871,7 +11835,6 @@ msgid "Rule"
 msgstr "Regel"
 
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.models.tsx
 msgid "Rules"
 msgstr "Regeln"
 
@@ -12387,10 +12350,6 @@ msgstr "Version {version} von {who} zurücksenden"
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
 msgstr "Sensibel"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Sensitive connections: {connections}."
-msgstr "Sensible Verbindungen: {connections}."
 
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -13398,10 +13357,6 @@ msgstr "Gestrichen"
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Takes part in the interviews"
 msgstr "Nimmt an den Interviews teil"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Takes sensitive data"
-msgstr "Nimmt sensible Daten an"
 
 #: src/knowledge/purge.tsx
 msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
@@ -14632,10 +14587,6 @@ msgstr "Hier gibt es ein Gespräch. Öffnen Sie den Chat, um es zu sehen."
 msgid "There is a team with this name already."
 msgstr "Es gibt schon ein Team mit diesem Namen."
 
-#: src/routes/_shell.settings.models.tsx
-msgid "There is no data rule: any allowed model may take sensitive data."
-msgstr "Es gibt keine Datenregel: Jedes erlaubte Modell darf sensible Daten erhalten."
-
 #: src/routes/_shell.onboarding.workflows.$work.tsx
 msgid "There is no workflow here by that name any more. A team's map may have been drawn again."
 msgstr "Hier gibt es keinen Workflow mit diesem Namen mehr. Die Karte eines Teams wurde vielleicht neu gezeichnet."
@@ -14786,17 +14737,9 @@ msgstr "Dieser Chat wurde von der Person geschlossen, die Ihnen den Link geschic
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Dieser Chat hat seine Länge erreicht. Klicken Sie auf Beenden, um ihn abzuschließen."
 
-#: src/chat/failure.ts
-msgid "This chat holds sensitive data this model may not see. Pick another one."
-msgstr "Dieser Chat enthält sensible Daten, die dieses Modell nicht sehen darf. Wählen Sie ein anderes."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Dieser Chat hat eingeschränkte Daten gelesen: Dies kann sie nach außen senden"
-
-#: src/chat/failure.ts
-msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
-msgstr "Dieser Chat bleibt in der EU, und dieses Modell wird dort nicht betrieben. Wählen Sie ein anderes."
 
 #: src/knowledge/new-document.tsx
 msgid "This collection has a document at {path} already."
@@ -16983,10 +16926,6 @@ msgstr "Workflows mit den höchsten Ausgaben"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows in diesem Monat"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Workflows whose AI steps stay in the EU: {workflows}."
-msgstr "Workflows, deren KI-Schritte in der EU bleiben: {workflows}."
 
 #: src/chat/thread.tsx
 #: src/workflows/requests/request-needs.tsx

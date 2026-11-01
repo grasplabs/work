@@ -4528,10 +4528,6 @@ msgstr "Connexions"
 msgid "Connections to sign in to again"
 msgstr "Connexions à reconnecter"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Connections whose data stays in the EU: {connections}."
-msgstr "Connexions dont les données restent dans l’UE : {connections}."
-
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Consentement"
@@ -4781,10 +4777,6 @@ msgstr "Accord de sous-traitance des données"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement signed"
 msgstr "Accord de sous-traitance des données signé"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Data rules"
-msgstr "Règles de données"
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.ai-use.tsx
@@ -5570,21 +5562,9 @@ msgstr "A effacé un membre retiré"
 msgid "Error"
 msgstr "Erreur"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "EU routing"
-msgstr "Routage UE"
-
 #: src/routes/_shell.settings.workspace.tsx
 msgid "European Union"
 msgstr "Union européenne"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: no."
-msgstr "Chaque appel reste dans l’UE : non."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Every call stays in the EU: yes."
-msgstr "Chaque appel reste dans l’UE : oui."
 
 #: src/chat/project-dialog.tsx
 msgid "Every chat in this project reads it."
@@ -6786,10 +6766,6 @@ msgstr "Historique"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "Maintenez 4 secondes"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Hosted in the EU"
-msgstr "Hébergé dans l’UE"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
@@ -8784,10 +8760,6 @@ msgstr "Aucun budget défini : les appels de modèles ne sont pas limités en co
 msgid "No business process"
 msgstr "Aucun processus métier"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "No call has to stay in the EU."
-msgstr "Aucun appel n’est tenu de rester dans l’UE."
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "No call of unknown outcome is open."
 msgstr "Aucun appel au résultat inconnu n'est ouvert."
@@ -9301,10 +9273,6 @@ msgstr "Personne pour l’instant"
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
 msgstr "Personne pour l’instant."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "none"
-msgstr "aucune"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/settings/ai-providers.tsx
@@ -10057,10 +10025,6 @@ msgstr "Seules les personnes autorisées à approuver des paquets voient ce qui 
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Seulement la première façon"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un domaine ou d’une exécution qui en a lu une."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -11871,7 +11835,6 @@ msgid "Rule"
 msgstr "Règle"
 
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.models.tsx
 msgid "Rules"
 msgstr "Règles"
 
@@ -12387,10 +12350,6 @@ msgstr "Renvoyer la version {version} de {who}"
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
 msgstr "Sensible"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Sensitive connections: {connections}."
-msgstr "Connexions sensibles : {connections}."
 
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -13398,10 +13357,6 @@ msgstr "Retiré"
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Takes part in the interviews"
 msgstr "Participe aux entretiens"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Takes sensitive data"
-msgstr "Accepte des données sensibles"
 
 #: src/knowledge/purge.tsx
 msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
@@ -14632,10 +14587,6 @@ msgstr "Une conversation est en cours ici. Ouvrez le chat pour la voir."
 msgid "There is a team with this name already."
 msgstr "Une équipe porte déjà ce nom."
 
-#: src/routes/_shell.settings.models.tsx
-msgid "There is no data rule: any allowed model may take sensitive data."
-msgstr "Il n’y a pas de règle de données : tout modèle autorisé peut recevoir des données sensibles."
-
 #: src/routes/_shell.onboarding.workflows.$work.tsx
 msgid "There is no workflow here by that name any more. A team's map may have been drawn again."
 msgstr "Il n’y a plus de workflow de ce nom ici. La carte d’une équipe a peut-être été redessinée."
@@ -14786,17 +14737,9 @@ msgstr "Ce chat a été fermé par la personne qui vous a envoyé le lien."
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Ce chat a atteint sa longueur maximale. Cliquez sur Terminer pour le clore."
 
-#: src/chat/failure.ts
-msgid "This chat holds sensitive data this model may not see. Pick another one."
-msgstr "Ce chat contient des données sensibles que ce modèle ne peut pas voir. Choisissez-en un autre."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Ce chat a lu des données restreintes : ceci peut les envoyer à l’extérieur"
-
-#: src/chat/failure.ts
-msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
-msgstr "Ce chat reste dans l’UE, et ce modèle n’y est pas hébergé. Choisissez-en un autre."
 
 #: src/knowledge/new-document.tsx
 msgid "This collection has a document at {path} already."
@@ -16983,10 +16926,6 @@ msgstr "Workflows qui ont le plus dépensé"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows ce mois-ci"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Workflows whose AI steps stay in the EU: {workflows}."
-msgstr "Workflows dont les étapes d’IA restent dans l’UE : {workflows}."
 
 #: src/chat/thread.tsx
 #: src/workflows/requests/request-needs.tsx

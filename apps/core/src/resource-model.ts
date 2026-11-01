@@ -21,7 +21,7 @@ import type {
 // A model resource (spec 12, 32.3): one answer per request, from the model
 // its binding names, through the model gateway, never straight to a
 // provider and with no key anywhere near App code. The gateway applies the
-// deployment's allowlist and data rules, reserves and settles the call
+// organization's models, reserves and settles the call
 // against every budget it counts against (the deployment's, the person's
 // it acts for, the binding's own caps per request, day and month in
 // model-budgets.ts, and for a workflow run's call its workflow's and its
@@ -115,8 +115,6 @@ const refusalOf = (error: unknown): unknown => {
   if (
     code === "model.not_allowed" ||
     code === "model.unconfigured" ||
-    code === "model.eu_only" ||
-    code === "model.sensitive_data" ||
     code === "model.unpriced" ||
     code === "model.answer_too_long"
   ) {

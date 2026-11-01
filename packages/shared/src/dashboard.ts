@@ -30,7 +30,6 @@ export const dashboardErrors = defineErrorFamily({
     "Grasp could not make that into a widget. Try asking another way.",
   "dashboard.widget_unchanged":
     "That is how the widget is already. Say what should be different.",
-  "dashboard.no_model": "No model may make widgets here.",
 });
 
 /**

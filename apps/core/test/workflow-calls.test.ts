@@ -1799,9 +1799,6 @@ describe("grasp.operation calls of JSON workflows", () => {
   });
 });
 
-/** A model the organization also chose, which may take sensitive data. */
-const sensitiveModel = "anthropic/claude-sonnet-4-5";
-
 /**
  * An App of `by`'s, version 1 approved, binding version 1 of workflow
  * `workflowId` as `flow`, with a `start` grant of its own from `admin`; in
@@ -2336,44 +2333,6 @@ describe("runs started by a restricted App", () => {
       calls: 1,
       retried: true,
       heldReruns: 1,
-    });
-  });
-
-  it("are judged by the model gateway's data rules as restricted", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await greetingWorkflow(ada, admin);
-    const provider = await fakeProviderFor(
-      [allowedModel, sensitiveModel],
-      answer('{"line":"Hello Ada"}'),
-      answer('{"line":"Hello Ada"}')
-    );
-    const starter = await startingApp(ada, admin, workflow.id, {
-      restricted: true,
-    });
-    const { MODEL_GATEWAY: before } = env;
-    // Only another model may take sensitive data.
-    env.MODEL_GATEWAY = {
-      sensitive: { models: [sensitiveModel], connections: [] },
-    };
-    let restricted: WorkflowResourceRun;
-    let own: WorkflowResourceRun;
-    try {
-      const restrictedRun = await starter.start();
-      restricted = await ended(ada, workflow.id, restrictedRun);
-      // The same workflow, started by Ada herself: not restricted.
-      own = await ended(ada, workflow.id, await started(ada, workflow.id));
-    } finally {
-      env.MODEL_GATEWAY = before;
-    }
-    expect({
-      restricted: endOf(restricted),
-      own: endOf(own),
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      restricted: { status: "failed", code: "model.sensitive_data" },
-      own: { status: "completed", output: { status: "Hello Ada" } },
-      requests: 1,
     });
   });
 

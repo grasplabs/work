@@ -43,12 +43,7 @@ export const wordLesson = async (
   env: Env,
   facts: LessonFacts
 ): Promise<string> => {
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw brainErrors.create("brain.unavailable");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   try {
     const { output } = await models(env).call({
       model,

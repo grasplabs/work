@@ -5,7 +5,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { modelForRole, models } from "../src/models.ts";
+import { modelForRole } from "../src/models.ts";
 import { OnboardingStaffRpc } from "../src/onboarding/staff-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { SessionCheck } from "../src/session-check.ts";
@@ -29,8 +29,7 @@ import {
 //
 // - A field kept whose quote the transcript doesn't hold: the model made
 //   it up, and Stephen would act on it.
-// - The transcript taken as instructions, or read by a model the rules
-//   don't let take sensitive data.
+// - The transcript taken as instructions.
 // - Anyone but staff reading or changing it; its words in the audit log,
 //   which the company's admin reads.
 
@@ -104,27 +103,15 @@ const answer = (body: unknown): ProviderReply => ({
 
 /**
  * What `run` returns while the provider answers with `replies`, for the
- * organization's chosen `models`, under the deployment's rules `config`
- * when given.
+ * organization's chosen `models`.
  */
 const answering = async <T>(
   replies: ProviderReply[],
   run: () => Promise<T>,
-  {
-    config,
-    models: chosen = [testModel],
-  }: { config?: unknown; models?: readonly string[] } = {}
+  { models: chosen = [testModel] }: { models?: readonly string[] } = {}
 ) => {
-  const before = env.MODEL_GATEWAY;
   const provider = await fakeProviderFor(chosen, ...replies);
-  try {
-    if (config !== undefined) {
-      env.MODEL_GATEWAY = config;
-    }
-    return { requests: provider.requests, result: await run() };
-  } finally {
-    env.MODEL_GATEWAY = before;
-  }
+  return { requests: provider.requests, result: await run() };
 };
 
 /** Grasp's staff, on a connection of their own. */
@@ -197,37 +184,12 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is read only by a model the rules let take sensitive data: the first the organization chose", async () => {
-    const staff = await asStaff();
-    const sensitive = { sensitive: { models: [euModel], connections: [] } };
-    // The default may not take sensitive data: read by the fallback that may.
-    const { requests } = await answering(
-      [answer(reading)],
-      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
-      { config: sensitive, models: [mistral, euModel] }
-    );
-    const { requests: none, result } = await answering(
-      [],
-      async () =>
-        await outcome(staff.onboardingStaff.saveKickoff(pasted(dutch))),
-      { config: sensitive, models: [mistral] }
-    );
-    expect({
-      model: requests.map(({ url }) => url.includes("api.openai.com")),
-      refused: result,
-      sent: none.length,
-    }).toStrictEqual({ model: [true], refused: "kickoff.not_read", sent: 0 });
-  });
-
-  it("is read by the organization's default model when the rules let it", async () => {
+  it("is read by the organization's default model", async () => {
     const staff = await asStaff();
     const { requests } = await answering(
       [answer(reading)],
       async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
-      {
-        config: { sensitive: { models: [mistral, euModel], connections: [] } },
-        models: [euModel, mistral],
-      }
+      { models: [euModel, mistral] }
     );
     expect(
       requests.map(({ url }) => url.includes("api.openai.com"))
@@ -236,42 +198,20 @@ describe("the kickoff", { timeout: 60_000 }, () => {
 
   it("gives both roles the organization's default, and none while it chose none", () => {
     const chosen = { models: [mistral, euModel], rules: undefined };
-    const notSensitive = { sensitive: false };
     let unchosen;
     try {
-      modelForRole({ models: [], rules: undefined }, "careful", notSensitive);
+      modelForRole({ models: [], rules: undefined }, "careful");
     } catch (error) {
       unchosen = modelErrors.codeOf(error);
     }
     expect({
-      quick: modelForRole(chosen, "quick", notSensitive),
-      careful: modelForRole(chosen, "careful", notSensitive),
+      quick: modelForRole(chosen, "quick"),
+      careful: modelForRole(chosen, "careful"),
       unchosen,
     }).toStrictEqual({
       quick: mistral,
       careful: mistral,
       unchosen: "model.no_provider",
-    });
-  });
-
-  it("goes through a gateway that judges every onboarding call as carrying sensitive data", async () => {
-    const provider = await fakeProviderFor([mistral, euModel], answer(reading));
-    const rulesEnv: Env = {
-      ...env,
-      MODEL_GATEWAY: { sensitive: { models: [euModel], connections: [] } },
-    };
-    const refused = await outcome(
-      models(rulesEnv).call({
-        model: mistral,
-        input: "Hallo.",
-        purpose: "onboarding.kickoff",
-        trigger: { type: "system" },
-        work: { onboarding: true },
-      })
-    );
-    expect({ refused, sent: provider.requests.length }).toStrictEqual({
-      refused: "model.sensitive_data",
-      sent: 0,
     });
   });
 

@@ -1,4 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import {
   evidenceMaxLength,
   extractedEntitiesSchema,
@@ -57,12 +56,7 @@ export const extractEntities = async (
   env: Env,
   text: string
 ): Promise<unknown> => {
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw brainErrors.create("brain.unavailable");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   const { output } = await models(env).call({
     model,
     system: instructions,

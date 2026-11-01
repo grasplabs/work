@@ -28,10 +28,6 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // - A question the company can't see: every one is in the audit log, by
 //   the staff member the admin names, before the model is asked; when
 //   the log can't take it, nothing is asked.
-// - The admin's document going to a model the deployment doesn't let
-//   take sensitive data: it holds every company's numbers and people's
-//   names, so the call is judged as onboarding's are, as always carrying
-//   sensitive data (model-rules.ts), and only such a model is chosen.
 // - The document or a question steering the model to do something: it has
 //   no tools; all it can do is answer in words, which the admin shows.
 
@@ -53,13 +49,12 @@ const answerTokens = 4000;
 const askTimeoutMs = 90_000;
 
 /**
- * The model Ask Grasp uses: the organization's careful one, which its
- * rules let take sensitive data (`modelForRole`). Throws
- * `model.no_provider` while it connected no AI provider; undefined when
- * the rules let none of its models answer.
+ * The model Ask Grasp uses: the organization's careful one
+ * (`modelForRole`). Throws `model.no_provider` while it connected no AI
+ * provider.
  */
-const askModel = async (env: Env): Promise<string | undefined> =>
-  modelForRole(await modelSettings(env), "careful", { sensitive: true });
+const askModel = async (env: Env): Promise<string> =>
+  modelForRole(await modelSettings(env), "careful");
 
 const forbidden = (requestId: string): Response =>
   errorResponse(403, requestErrors.create("request.forbidden"), requestId);
@@ -95,7 +90,7 @@ export const adminAskResponse = async (
       ? errorResponse(401, authErrors.create("auth.unauthenticated"), requestId)
       : forbidden(requestId);
   }
-  let model: string | undefined = undefined;
+  let model: string;
   try {
     model = await askModel(env);
   } catch (error) {
@@ -106,14 +101,6 @@ export const adminAskResponse = async (
     return errorResponse(
       503,
       modelErrors.create("model.no_provider"),
-      requestId
-    );
-  }
-  if (model === undefined) {
-    log.warn("admin.ask.no_model", {});
-    return errorResponse(
-      503,
-      adminAskErrors.create("admin_ask.no_model"),
       requestId
     );
   }

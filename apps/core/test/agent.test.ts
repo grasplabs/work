@@ -1178,39 +1178,6 @@ describe("chat agent turns", () => {
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
   });
 
-  it("keeps a chat in restricted mode to the models the client's data rule allows", async () => {
-    const euModel = "mistral/mistral-large-latest";
-    const { stub, chat, personId, provider, ask } = await newChatOn(
-      [model, euModel],
-      says("Hi.")
-    );
-    await configureObject(stub, {
-      rules: { sensitive: { models: [euModel] } },
-    });
-    // The chat has read restricted data: everything it sends is sensitive.
-    await stub.restrictChat(chat.id);
-
-    await expect(codeOf(ask("Hi."))).resolves.toBe("model.sensitive_data");
-    expect(provider.requests).toStrictEqual([]);
-    await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
-    await vi.waitFor(
-      async () => {
-        const events = await allEvents();
-        expect(
-          events.filter(
-            ({ action, actor }) =>
-              action === "model.refused" &&
-              actor.type === "agent" &&
-              actor.onBehalfOf === personId
-          )
-        ).toMatchObject([
-          { detail: { reason: "model.sensitive_data", because: "restricted" } },
-        ]);
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-  });
-
   it("stops acting for a person who has left", async () => {
     const { personId, provider, ask } = await newChat(says("Hi."));
     await env.DB.prepare("DELETE FROM members WHERE user_id = ?")

@@ -1,31 +1,18 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Reader } from "../src/knowledge/access.ts";
-import { rerankCandidates } from "../src/knowledge/rerank.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
-import { signedInApi, unique, whoami } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // A recall reranked by the deployment's model (GRA-304; knowledge/
 // rerank.ts), through a person's Knowledge RPC and the model gateway,
 // whose provider alone is stood in for. What could go wrong, tried here: a
 // recall that didn't ask spending a model call; the model's order not
-// applied; the call made for no one, off the person's budget, or judged
-// as carrying nothing sensitive.
+// applied; the call made for no one, or off the person's budget.
 
 const idp = mockIdp();
-
-const mistral = "mistral/mistral-large-latest";
-const euModel = "openai/gpt-5.4";
-
-/** Rules under which only `model` may read sensitive data. */
-const sensitiveTo = (model: string) => ({
-  sensitive: { models: [model], connections: [] },
-});
 
 /** Letters only: digits would make it an identifier, for the exact lane. */
 const rareWord = (): string =>
@@ -91,64 +78,6 @@ describe("a reranked recall", () => {
         platform: "brain_recall",
         provenance: [collectionId],
       },
-    });
-  });
-
-  it("is judged as carrying sensitive data under the deployment's rules, and refused where no model may read it", async () => {
-    const person = await signedInApi(idp, "user");
-    const reader: Reader = {
-      type: "person",
-      person: await whoami(person.session),
-    };
-    const request = {
-      question: "Who approves leave?",
-      candidates: [
-        { id: "a", text: "Managers approve leave." },
-        { id: "b", text: "HR keeps the leave rules." },
-      ],
-      provenance: [],
-      deadlineMs: 5000,
-    };
-    await answeringProvider(
-      () => ({
-        text: JSON.stringify({ ranking: ["b", "a"] }),
-        inputTokens: 100,
-        outputTokens: 10,
-      }),
-      { models: [mistral] }
-    );
-    const ranked = await rerankCandidates(
-      { ...env, MODEL_GATEWAY: sensitiveTo(mistral) },
-      reader,
-      request
-    );
-    const refused = await rerankCandidates(
-      { ...env, MODEL_GATEWAY: sensitiveTo(euModel) },
-      reader,
-      request
-    ).then(
-      () => "ok",
-      (error: unknown) => brainErrors.codeOf(error)
-    );
-    const events = await allEvents();
-    const call = events.findLast(
-      ({ action, actor, detail }) =>
-        action === "model.call" &&
-        detail.purpose === "brain.rerank" &&
-        actor.type === "person" &&
-        actor.userId === person.userId
-    );
-
-    expect({
-      ranked,
-      refused,
-      sensitive: call?.detail.sensitive,
-    }).toStrictEqual({
-      ranked: ["b", "a"],
-      // No model the organization chose may read sensitive data.
-      refused: "brain.unavailable",
-      // The company's own words: judged sensitive, as onboarding's are.
-      sensitive: "restricted",
     });
   });
 });

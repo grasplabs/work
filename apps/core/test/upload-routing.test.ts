@@ -135,11 +135,6 @@ const withoutGraspKeys = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 };
 
-/** Rules that keep every call of the deployment in the EU. */
-const euOnly = {
-  eu: { models: ["mistral/mistral-large-latest"], deployment: true },
-};
-
 /** A collection of the person's own, normal: not sensitive. */
 const ownCollection = async (api: SessionApi): Promise<string> => {
   const { id } = await api.knowledge.createCollection({
@@ -341,38 +336,13 @@ describe("upload routing", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sent: [], status: "ready", extractor: "local" });
   });
 
-  it("converts an EU-only deployment's PDF at OpenAI's EU host, where Grasp's project keeps its data", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    await plan(platformOpenAiKey, [
-      converted("openai-responses", "# Expense policy\n\nFly economy."),
-    ]);
-
-    const upload = await withDeployment(
-      euOnly,
-      async () => await uploadedTo(person.api, collectionId, name)
-    );
-
-    const sent = await carrying(name);
-    expect({
-      status: upload.status,
-      extractor: await extractorOf(upload),
-      hosts: sent.map(({ host }) => host),
-    }).toStrictEqual({
-      status: "ready",
-      extractor: "platform",
-      hosts: ["eu.api.openai.com"],
-    });
-  });
-
   it("keeps a file in the Worker while the deployment's rules don't parse", async () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
     const name = newName("pdf");
     let upload: Upload | undefined;
 
-    await withDeployment({ ...euOnly, eu: { deployment: "yes" } }, async () => {
+    await withDeployment({ budgets: { user: { limit: -1 } } }, async () => {
       upload = await uploadedTo(person.api, collectionId, name);
     });
 

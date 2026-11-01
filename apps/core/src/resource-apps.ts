@@ -62,8 +62,7 @@ import { consumerFailure, declaredFingerprint } from "./store-operations.ts";
 // - Data and restriction crossing unseen: restricted mode follows the data
 //   both ways, each flag set before the data moves (restricted.ts); the
 //   called function reads into the calling invocation's own sources, so
-//   its model and connector requests meet the rules for everything the
-//   chain read (an EU-only or sensitive connection's data included), and
+//   its model and connector requests carry everything the chain read, and
 //   a run's chain meets the run's budgets and rules (`runOrigin`).
 // - Unseen: every call this binding serves is recorded before it runs
 //   (`app.call`), as the caller's actor, with the called App, function and
@@ -323,9 +322,8 @@ const callFor = async (
       appCalls: caller.appCalls ?? { used: 1 },
       // What the caller read is in what it passes on: the called function
       // reads into the caller's own sources, so its model and connector
-      // requests are judged by everything the chain read (an EU-only or
-      // sensitive connection's data included), and the caller's by what
-      // it read in turn.
+      // requests carry everything the chain read, and the caller's what it
+      // read in turn.
       sources: caller.sources,
       // A screen's call cancelled stops the Apps it calls too.
       ...(caller.cancelled === undefined
