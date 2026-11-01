@@ -20,9 +20,9 @@ describe("where to reach Stephen", () => {
   it("names each app with what to write to, and opens it in a new tab", () => {
     const html = drawn([
       {
-        platform: "whatsapp",
-        address: "+31 20 123 4567",
-        href: "https://wa.me/31201234567",
+        platform: "teams",
+        address: null,
+        href: "https://teams.microsoft.com/l/chat/0/0?users=28:acme-bot",
       },
       {
         platform: "gmail",
@@ -31,10 +31,9 @@ describe("where to reach Stephen", () => {
       },
     ]);
 
-    expect(html).toContain("WhatsApp");
-    expect(html).toContain("+31 20 123 4567");
+    expect(html).toContain("Microsoft Teams");
     expect(html).toContain(
-      'href="https://wa.me/31201234567" rel="noopener noreferrer" target="_blank"'
+      'href="https://teams.microsoft.com/l/chat/0/0?users=28:acme-bot" rel="noopener noreferrer" target="_blank"'
     );
     expect(html).toContain("stephen@acme.test");
     expect(html).toContain('href="mailto:stephen@acme.test"');

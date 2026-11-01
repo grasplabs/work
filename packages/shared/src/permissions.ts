@@ -328,22 +328,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
-  // The client's own Telegram bot (core's src/channels/telegram.ts and
-  // where.ts, connect's src/channels.ts).
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_BOT_USERNAME",
-  "TELEGRAM_WEBHOOK_SECRET",
   // Tests' lowered quota limits (core's src/workflows/quotas.ts).
   "TEST_QUOTA_LIMITS",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
-  // The client's own WhatsApp number (core's src/channels/whatsapp.ts and
-  // where.ts, connect's src/channels.ts).
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_APP_SECRET",
-  "WHATSAPP_NUMBER",
-  "WHATSAPP_PHONE_NUMBER_ID",
-  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
   // Tests only: the run host's own I/O slowed (core's workflows/host-latency.ts).

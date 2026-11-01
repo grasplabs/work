@@ -6,8 +6,8 @@ import { MessageSquareIcon } from "lucide-react";
 
 // Settings › Security › Chat apps: where the person reaches Stephen, in
 // each chat app the deployment set up that he answers them in, as core
-// says (`channelAccounts.reach`): the number, the bot or the address to
-// write to, and a link that opens a chat with him where the app has one.
+// says (`channelAccounts.reach`): the address to write to, and a link that
+// opens a chat with him where the app has one.
 
 /** What to look for in an app that gives no address, in the page's language. */
 const useNoAddressText = (platform: string): string => {

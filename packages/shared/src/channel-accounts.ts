@@ -42,8 +42,8 @@ const printable = /^[^\p{Cc}]+$/u;
 
 /**
  * A sender's id on their platform, as its adapter verified it (Chat SDK's
- * `message.author.userId`): a Slack member id, a Telegram user id, a
- * WhatsApp number. Opaque to Grasp; never parsed for meaning.
+ * `message.author.userId`): a Slack member id, a Gmail address. Opaque to
+ * Grasp; never parsed for meaning.
  */
 export const platformUserIdSchema = z.string().min(1).max(256).regex(printable);
 
@@ -118,12 +118,11 @@ export type ChannelUnlinked = "unlinked" | "not_found";
  * anyone who looks for him there, never a secret.
  */
 export interface ChannelReach {
-  /** The platform, by its Chat SDK adapter's name (`telegram`). */
+  /** The platform, by its Chat SDK adapter's name (`slack`). */
   platform: string;
   /**
-   * What to look for there: the WhatsApp number, the Telegram bot's
-   * `@name`, the Gmail address. `null` where the app finds him by name
-   * alone (Teams, Slack) or the deployment didn't say.
+   * What to write to there: the Gmail address. `null` where the app finds
+   * him by name alone (Teams, Slack).
    */
   address: string | null;
   /** A link that opens a chat with him there, where the app has one. */

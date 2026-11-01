@@ -9,32 +9,10 @@ import type { SetUpPlatform } from "./set-up.ts";
 // the order Settings shows them, and only where he answers them
 // (Settings › Stephen), so nobody is sent to an app that turns them away.
 // Each says only what the app shows anyone who looks for him there: the
-// Teams bot's app id, the WhatsApp number, the Telegram bot's name, the
-// Gmail address. Never a secret, nor Meta's id of the number.
+// Teams bot's app id, the Gmail address. Never a secret.
 
 /** The chat apps Stephen can be set up in, in the order they are shown. */
-const platforms: readonly SetUpPlatform[] = [
-  "teams",
-  "slack",
-  "whatsapp",
-  "telegram",
-  "gmail",
-];
-
-/** A number as people dial it: a `+`, then digits, maybe spaced. */
-const dialled = /^\+[\d ()-]{6,30}$/u;
-
-/** A Telegram username: letters, digits and underscores, 5 to 32. */
-const telegramName = /^[A-Za-z][A-Za-z0-9_]{4,31}$/u;
-
-/** `value`, unless it is unset, blank or not what `pattern` takes. */
-const configured = (
-  value: string | undefined,
-  pattern: RegExp
-): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed !== undefined && pattern.test(trimmed) ? trimmed : undefined;
-};
+const platforms: readonly SetUpPlatform[] = ["teams", "slack", "gmail"];
 
 /** How to reach Stephen on `platform`, once it is set up. */
 const reachOn = (env: Env, platform: SetUpPlatform): ChannelReach => {
@@ -47,28 +25,6 @@ const reachOn = (env: Env, platform: SetUpPlatform): ChannelReach => {
         platform,
         address: null,
         href: `https://teams.microsoft.com/l/chat/0/0?users=28:${botId}`,
-      };
-    }
-    case "whatsapp": {
-      const number = configured(env.WHATSAPP_NUMBER, dialled);
-      return {
-        platform,
-        address: number ?? null,
-        href:
-          number === undefined
-            ? null
-            : `https://wa.me/${number.replaceAll(/\D/gu, "")}`,
-      };
-    }
-    case "telegram": {
-      const name = configured(
-        env.TELEGRAM_BOT_USERNAME?.replace(/^@/u, ""),
-        telegramName
-      );
-      return {
-        platform,
-        address: name === undefined ? null : `@${name}`,
-        href: name === undefined ? null : `https://t.me/${name}`,
       };
     }
     case "gmail": {
