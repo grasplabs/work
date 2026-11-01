@@ -8,7 +8,6 @@ import { z } from "zod";
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
-import { deployVersion } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
   clientPlacements,
@@ -1451,10 +1450,18 @@ describe("rolling a release out to placed clients", () => {
       .get();
     const scriptName = connect?.scriptName ?? "";
     const [first] = client.account.scripts.get(scriptName)?.versions ?? [];
-    await deployVersion(api, client.account.id, scriptName, first?.id ?? "", {
-      message: "by hand",
-      force: true,
-    });
+    await api.call(
+      {
+        method: "POST",
+        path: `/accounts/${client.account.id}/workers/scripts/${scriptName}/deployments`,
+        query: { force: "true" },
+        json: {
+          strategy: "percentage",
+          versions: [{ version_id: first?.id ?? "", percentage: 100 }],
+        },
+      },
+      z.unknown()
+    );
     const changed = await driftOf(api, db, client.clientId);
 
     expect({
