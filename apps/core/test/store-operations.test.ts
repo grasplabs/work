@@ -585,10 +585,28 @@ describe("an App calling another App's store", () => {
     await seal(crm, 2);
     await setCurrentVersion(env, crm.owner, crm.app, 2);
     await sweptAway(crm.app, 1);
+    // The store is counted by the approval Desk's row names: no write
+    // leaves the row naming the store without it, so none hides Desk.
+    const unnamed = await env.DB.prepare(
+      "UPDATE sdk_resource_bindings SET approval_id = NULL WHERE resource_id = ? AND alias = 'resources.crm'"
+    )
+      .bind(desk.app)
+      .run()
+      .then(
+        () => "written",
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes("names its store only with its approval")
+            ? "refused"
+            : error
+      );
     const refused = await outcome(deleteStore(env, crm.owner, crm.store));
     await revokeResourceBinding(env, admin, approval.id);
     await deleteStore(env, crm.owner, crm.store);
-    expect(refused).toBe("data.store_consumed");
+    expect({ unnamed, refused }).toStrictEqual({
+      unnamed: "refused",
+      refused: "data.store_consumed",
+    });
   });
 
   it("is never served an internal function or an operation the permission doesn't list", async () => {
