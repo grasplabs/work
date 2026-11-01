@@ -2818,6 +2818,21 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
 });
 
 /**
+ * Every command from Grasp's admin this core took, by its id
+ * (`@grasp-os/shared/admin-command`): a command delivered again applies
+ * once. Claimed before it applies and marked once it did; one that failed
+ * is let go, so delivering it again applies it, and one claimed by a run
+ * that died can be claimed again after a while.
+ */
+export const adminCommands = sqliteTable("admin_commands", {
+  id: text().primaryKey(),
+  type: text().notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+  /** When it applied; null while it is being applied. */
+  appliedAt: timestamp("applied_at"),
+});
+
+/**
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
  * each time who holds `dependencies.approve` changes. A decision lands

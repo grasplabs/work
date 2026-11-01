@@ -259,6 +259,7 @@ const waitingOnLead = (name: string): AdminSnapshot => {
         openedAt: null,
         remindedAt: told,
         deletedAt: null,
+        failedMail: null,
         state: "waiting",
       },
       {
@@ -267,6 +268,7 @@ const waitingOnLead = (name: string): AdminSnapshot => {
         openedAt: null,
         remindedAt: null,
         deletedAt: null,
+        failedMail: null,
         state: "waiting",
       },
     ],

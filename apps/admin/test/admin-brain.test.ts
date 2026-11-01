@@ -69,6 +69,7 @@ const link = (id: string, state: "completed" | "opened") => ({
   openedAt: started,
   remindedAt: null,
   deletedAt: null,
+  failedMail: null,
   state,
 });
 

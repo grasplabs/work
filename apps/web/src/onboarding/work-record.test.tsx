@@ -56,6 +56,7 @@ const snapshot: AdminSnapshot = {
     openedAt: isoAt("2026-10-06"),
     remindedAt: null,
     deletedAt: null,
+    failedMail: null,
   })),
   interviews: people.map((person) => ({
     person,
@@ -74,7 +75,12 @@ const snapshot: AdminSnapshot = {
     typed: true,
     interviewer: "stephen" as const,
   })),
-  works: null,
+  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
+  setup: {
+    setup: { languages: [], limits: [], terms: [] },
+    changed: false,
+    suggested: { languages: [], limits: [], terms: [] },
+  },
   kickoff: null,
   gate: {
     open: false,

@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { labMarks } from "../src/onboarding/lab-marks.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, openedFor } from "./interview-link.ts";
 import {
@@ -219,9 +220,11 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.remind([ids.oli, ids.ona, ids.lia]);
+      await adminCommands().remind([ids.oli, ids.ona, ids.lia]);
     });
-    const again = await staff.onboardingStaff.remind([ids.ona]);
+    const again = await auditedDuring(async () => {
+      await adminCommands().remind([ids.ona]);
+    });
     const { links } = await staff.onboardingStaff.interviews();
     const reminded = links
       .filter(({ remindedAt }) => remindedAt !== null)
@@ -233,7 +236,7 @@ describe("the interviews in Grasp's onboarding area", () => {
     const text = JSON.stringify(events);
     expect({
       reminded,
-      again,
+      again: again.length,
       logged: entries
         .filter(({ person }) => person?.id === ids.ona)
         .map(({ actor }) => actor),
@@ -252,12 +255,13 @@ describe("the interviews in Grasp's onboarding area", () => {
     const { ids } = await running();
     const staff = await asStaff();
 
-    const view = await staff.onboardingStaff.askIn("labs");
+    await adminCommands().askIn("labs");
+    const view = await onboardingStore(env).view();
     const { links } = await staff.onboardingStaff.interviews();
     expect({
       off: view.roster?.teams.find(({ id }) => id === "labs")?.off,
       lia: links.find(({ person }) => person === ids.lia)?.state,
-      unknown: await outcome(staff.onboardingStaff.askIn("nowhere")),
+      unknown: await outcome(adminCommands().askIn("nowhere")),
     }).toStrictEqual({
       off: false,
       lia: "invited",

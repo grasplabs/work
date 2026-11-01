@@ -18,6 +18,11 @@ import {
   adminAskRequestSchema,
 } from "@grasp-os/shared/admin-ask";
 import {
+  adminCommandEnvelopeSchema,
+  adminCommandPath,
+  adminCommandPurpose,
+} from "@grasp-os/shared/admin-command";
+import {
   adminKickoffPath,
   adminKickoffPurpose,
   adminKickoffRequestSchema,
@@ -29,6 +34,7 @@ import {
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   aiStatusReportPath,
   aiStatusReportPurpose,
@@ -479,7 +485,12 @@ export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
   mapped: [],
   links: [],
   interviews: [],
-  works: null,
+  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
+  setup: {
+    setup: { languages: [], limits: [], terms: [] },
+    changed: false,
+    suggested: { languages: [], limits: [], terms: [] },
+  },
   kickoff: null,
   gate: {
     open: false,
@@ -634,6 +645,48 @@ const answerKickoff = async (
   return Response.json(account.kickoff ?? emptyKickoff());
 };
 
+/**
+ * What a client's core answers a command from the admin with, as core does
+ * (core's src/admin-command.ts): applied once the signature checks out,
+ * with the key its live version's auth secret gives for commands, and the
+ * envelope parses, keeping it; 401 for one signed otherwise, 403 for one
+ * that doesn't parse; the account's refusal when it has one.
+ */
+const answerCommand = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminCommandPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const command = adminCommandEnvelopeSchema.safeParse(JSON.parse(body));
+  if (!command.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (account.commandRefusal !== undefined) {
+    const { status, code } = account.commandRefusal;
+    return Response.json({ code }, { status });
+  }
+  account.commands.push(command.data);
+  return Response.json({ id: command.data.id, applied: "now" });
+};
+
 /** The admin's signed requests core answers alike: by path, a `POST` each. */
 const signedPosts: ReadonlyMap<
   string,
@@ -649,6 +702,7 @@ const signedPosts: ReadonlyMap<
   [connectVersionPath, answerConnectVersion],
   [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
+  [adminCommandPath, answerCommand],
   [aiStatusReportPath, answerAiStatus],
 ]);
 
@@ -981,6 +1035,7 @@ export const fakeCloudflareApi = (token: string) => {
       adminReaders: [],
       asked: [],
       kickoffAsks: [],
+      commands: [],
     };
     accounts.set(account.id, account);
     return account;

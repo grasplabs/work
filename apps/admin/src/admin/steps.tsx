@@ -22,14 +22,16 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * Grasp opens, each with where it stands, and the step that is chosen
  * opened underneath. It opens on the step the organization is at.
  *
- * Read only, as the admin is: what the prototype does at each step
- * (bringing in the first conversation, starting the research, keeping
- * what was agreed, reminding people, giving Grasp's go) writes to the
- * company's Grasp, which the admin has no way to yet, so each step says
- * so where its buttons were. Nor is the company's own link here, as the
- * prototype had it under the steps: a link is a credential, and core
- * never sends one. And nothing anyone said is shown: not the first
- * conversation, not what the research found, only what the model counts.
+ * Staff steer the onboarding from here, each change a command to the
+ * company's Grasp (commands.tsx): marking the one reminder, pausing the
+ * interviews, the share at which it opens, and giving Grasp's go or
+ * taking it back; the first conversation is brought in from its own step
+ * (kickoff.tsx). What the admin can't do yet (starting the research,
+ * keeping what was agreed) says so where its buttons were. Nor is the
+ * company's own link here, as the prototype had it under the steps: a
+ * link is a credential, and core never sends one. And nothing anyone
+ * said is shown: not the first conversation, not what the research
+ * found, only what the model counts.
  */
 import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -51,6 +53,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { CommandButton, GateControls } from "./commands.tsx";
+import type { GateState } from "./commands.tsx";
 import { Kickoff, visionWords } from "./kickoff.tsx";
 import { Done, KnowledgeDots, Tile } from "./parts.tsx";
 import { Section, SectionRow } from "./section.tsx";
@@ -534,6 +538,34 @@ const Company = ({ view }: { view: OrgView }) => {
   );
 };
 
+/**
+ * Who can still have the one reminder, and noting that they had it once
+ * someone reminded them: then nobody is chased again.
+ */
+const Reminders = ({
+  clientId,
+  people,
+  who: [one, other],
+}: {
+  clientId: string;
+  people: string[];
+  who: [string, string];
+}) => (
+  <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+    <p className="text-muted-foreground">
+      {counted(people.length, `${one} can`, `${other} can`)} still be reminded,
+      once each.
+    </p>
+    <CommandButton
+      clientId={clientId}
+      command={{ type: "onboarding.remind", payload: { people } }}
+      variant="ghost"
+    >
+      Mark {counted(people.length, one, other)} reminded
+    </CommandButton>
+  </div>
+);
+
 /** Where one lead stands, in a line. */
 const leadLine = (view: OrgView, lead: PersonView, size: number): ReactNode => {
   if (!view.told) {
@@ -573,11 +605,13 @@ const leadLine = (view: OrgView, lead: PersonView, size: number): ReactNode => {
  * team's work and who knows each piece best, and only then does the team
  * get its links. A lead who is late holds up a whole team.
  */
-const Leads = ({ view }: { view: OrgView }) => {
+const Leads = ({ view, clientId }: { view: OrgView; clientId: string }) => {
   const leads = view.teams.flatMap((team) =>
     team.lead !== null && !team.off ? [{ team, lead: team.lead }] : []
   );
-  const waiting = leads.filter(({ lead }) => lead.mayRemind).length;
+  const waiting = leads
+    .filter(({ lead }) => lead.mayRemind)
+    .map(({ lead }) => lead.person.id);
   return (
     <Section
       description="A lead’s interview takes 30 minutes: the team’s work, how much of it there is, and who knows each piece best. The same day their team gets its links."
@@ -615,11 +649,12 @@ const Leads = ({ view }: { view: OrgView }) => {
           ))}
         </ul>
       )}
-      {waiting > 0 ? (
-        <NotHere>
-          {counted(waiting, "lead", "leads")} can still be reminded. Sending the
-          reminder isn’t in the admin yet.
-        </NotHere>
+      {waiting.length > 0 ? (
+        <Reminders
+          clientId={clientId}
+          people={waiting}
+          who={["lead", "leads"]}
+        />
       ) : null}
     </Section>
   );
@@ -677,7 +712,9 @@ const Interviews = ({
       </Section>
     );
   }
-  const reminders = view.people.filter((each) => each.mayRemind).length;
+  const reminders = view.people
+    .filter((each) => each.mayRemind)
+    .map((each) => each.person.id);
   return (
     <Section description={description} title="Interviews">
       {paused ? <Paused /> : null}
@@ -736,11 +773,12 @@ const Interviews = ({
           <ArrowRightIcon data-icon="inline-end" />
         </Button>
       </div>
-      {view.closed || reminders === 0 ? null : (
-        <NotHere>
-          {counted(reminders, "person", "people")} can still be reminded.
-          Sending the reminder isn’t in the admin yet.
-        </NotHere>
+      {view.closed || reminders.length === 0 ? null : (
+        <Reminders
+          clientId={clientId}
+          people={reminders}
+          who={["person", "people"]}
+        />
       )}
     </Section>
   );
@@ -804,7 +842,17 @@ const goLine = (view: OrgView): ReactNode => {
  * opens; where that comes from; and the work not known yet, which shows
  * to the company as still open.
  */
-const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
+const Opens = ({
+  view,
+  clientId,
+  gate,
+  paused,
+}: {
+  view: OrgView;
+  clientId: string;
+  gate: GateState;
+  paused: boolean;
+}) => {
   const { knowledge } = view;
   const known = `${knowledge.percent}% of what Grasp needs is known.`;
   const blocked = view.works.filter((work) => work.state === "blocked");
@@ -823,11 +871,12 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
             <Stat>{knowledge.percent}%</Stat>
             <KnowledgeDots count={40} knowledge={knowledge} label={known} />
           </div>
-          <span className="text-muted-foreground">
-            Opens at {knowledge.threshold}%
-          </span>
+          <GateControls clientId={clientId} gate={gate} paused={paused} />
         </div>
-        <div>{goLine(view)}</div>
+        <div aria-live="polite">{goLine(view)}</div>
+        {paused ? (
+          <span className="text-status-attention">{pausedLine}</span>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-0.5 border-t px-5 py-4">
@@ -908,10 +957,6 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
           </ul>
         </>
       ) : null}
-      <NotHere>
-        Giving Grasp’s go, taking it back and changing the share it opens at
-        aren’t in the admin yet.
-      </NotHere>
     </Section>
   );
 };
@@ -922,6 +967,7 @@ export const OrgSteps = ({
   stage,
   clientId,
   paused,
+  gate,
 }: {
   view: OrgView;
   /** The step that is open. */
@@ -929,6 +975,8 @@ export const OrgSteps = ({
   clientId: string;
   /** The company has paused its interviews, which the model doesn't carry. */
   paused: boolean;
+  /** The gate as core keeps it: open now or not, and Grasp's go. */
+  gate: GateState;
 }) => (
   <>
     <StageList clientId={clientId} stage={stage} view={view} />
@@ -938,10 +986,12 @@ export const OrgSteps = ({
     {stage === "research" ? <Research view={view} /> : null}
     {stage === "agreed" ? <Agreed paused={paused} view={view} /> : null}
     {stage === "connected" ? <Company view={view} /> : null}
-    {stage === "leads" ? <Leads view={view} /> : null}
+    {stage === "leads" ? <Leads clientId={clientId} view={view} /> : null}
     {stage === "interviews" ? (
       <Interviews clientId={clientId} paused={paused} view={view} />
     ) : null}
-    {stage === "open" ? <Opens clientId={clientId} view={view} /> : null}
+    {stage === "open" ? (
+      <Opens clientId={clientId} gate={gate} paused={paused} view={view} />
+    ) : null}
   </>
 );

@@ -424,7 +424,8 @@ describe("the admin snapshot", () => {
       usage: snapshot.usage.find(({ day }) => day === today)?.use.interviews?.[
         model
       ],
-      unknown: [snapshot.contacts, snapshot.works, snapshot.contract],
+      unknown: [snapshot.contacts, snapshot.contract],
+      works: snapshot.works.works,
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
@@ -465,7 +466,9 @@ describe("the admin snapshot", () => {
         tokensOut: 400,
         seconds: 0,
       },
-      unknown: [null, null, null],
+      unknown: [null, null],
+      // Nobody named the team's work yet.
+      works: [],
     });
     expect(text).not.toContain(sentinel);
     expect(text).not.toContain("Their own sheet");
@@ -583,7 +586,7 @@ describe("the admin snapshot", () => {
             goals: { text: "Fewer handovers", quote: sentinel },
           },
           ask: { pain: `${sentinel}?` },
-          teams: [{ name: sentinel, does: sentinel }],
+          teams: [{ name: "Boatyard", does: sentinel }],
         },
       },
       by,
@@ -604,6 +607,9 @@ describe("the admin snapshot", () => {
       kickoff: { at: saved.transcript?.at, known: 0.3 },
     });
     expect(text).not.toContain(sentinel);
+    // The teams it named are words Stephen has to know: the one thing of
+    // it the admin sees, as the setup staff steer from there.
+    expect(snapshot.setup.suggested.terms).toStrictEqual(["Boatyard"]);
   });
 });
 

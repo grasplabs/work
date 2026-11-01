@@ -7,7 +7,7 @@ import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 // The admin's own sample organizations, as the model's tests count them:
-// core sends no drawn work yet, so only they have work to list.
+// they have work drawn from every team to list.
 import { SAMPLE_ORGS } from "../../../packages/shared/test/admin/fixtures/admin-sample.ts";
 import { OrgWorkflows } from "../src/admin/workflows.tsx";
 import { adminDatabase } from "../src/db/act.ts";
@@ -43,7 +43,7 @@ const day = "2026-10-02";
 
 /** The section as it renders for `view`. */
 const sectionOf = (view: AdminView): string =>
-  renderToString(createElement(OrgWorkflows, { view }));
+  renderToString(createElement(OrgWorkflows, { view, clientId: "client" }));
 
 /** The table's row of the work named `name`. */
 const rowOf = (html: string, name: string): string => {
@@ -70,7 +70,7 @@ describe("an organization's workflows", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("says the work isn't known yet while the company's own Grasp doesn't draw it", async () => {
+  it("says none is named yet before a lead names the team's work", async () => {
     const acme = await liveClient();
     acme.account.admin = { ...emptyAdminSnapshot("Acme"), told: true };
 
@@ -82,7 +82,7 @@ describe("an organization's workflows", () => {
       status,
       title: html.includes("Workflows</h1>"),
       none: html.includes(
-        "Not known yet: the company’s own Grasp doesn’t draw the work from its interviews yet."
+        "None yet. A team’s work shows up here once its lead has named it."
       ),
       toCome: html.includes("This section isn’t in the admin yet."),
       table: html.includes("<table"),
@@ -121,8 +121,8 @@ describe("an organization's workflows", () => {
       figures: [true, true, true],
       // The head's row and one for each piece of work.
       rows: 21,
-      papers: `${papers.work.name} ${team(papers.team)} Known 6 of 13 5 of 5 1 thing missing Known`,
-      intake: `${intake.work.name} ${team(intake.team)} Being mapped 2 of 5 2 of 5 5 things missing Being mapped`,
+      papers: `${papers.work.name} ${team(papers.team)} Known 6 of 13 5 of 5 1 thing missing Known Count as known Draw again`,
+      intake: `${intake.work.name} ${team(intake.team)} Being mapped 2 of 5 2 of 5 5 things missing Being mapped Count as known Draw again`,
       teams: true,
       rules: true,
     });

@@ -105,6 +105,7 @@ const answer = {
       openedAt: "2026-10-05T07:30:00.000Z",
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "completed",
     },
     {
@@ -113,6 +114,7 @@ const answer = {
       openedAt: "2026-10-14T09:40:00.000Z",
       remindedAt: "2026-10-09T07:00:00.000Z",
       deletedAt: null,
+      failedMail: null,
       state: "progress",
     },
     {
@@ -121,6 +123,7 @@ const answer = {
       openedAt: null,
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "waiting",
     },
     {
@@ -129,6 +132,7 @@ const answer = {
       openedAt: "2026-10-06T08:00:00.000Z",
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "opened",
     },
   ],
@@ -168,7 +172,12 @@ const answer = {
       interviewer: "claire",
     },
   ],
-  works: null,
+  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
+  setup: {
+    setup: { languages: [], limits: [], terms: [] },
+    changed: false,
+    suggested: { languages: [], limits: [], terms: [] },
+  },
   kickoff: { at: "2026-09-24T10:00:00.000Z", known: 0.6 },
   gate: {
     open: false,
@@ -437,6 +446,7 @@ describe("an organization from core's admin snapshot", () => {
             ? {
                 ...link,
                 deletedAt: "2026-10-07T12:00:00.000Z",
+                failedMail: null,
                 state: "opened" as const,
               }
             : link
@@ -726,7 +736,7 @@ describe("an organization from core's admin snapshot", () => {
     ]);
   });
 
-  it("reads a contract and work core doesn't hold as unknown, not as a draft or as none", () => {
+  it("reads a contract core doesn't hold as unknown, not as a draft or as none, and its work as core sends it", () => {
     const { view } = shown();
     const { org, state } = adminOrgOf(snapshot, client);
     const real = org.real && {
@@ -740,9 +750,10 @@ describe("an organization from core's admin snapshot", () => {
       contractNeed: view.needs.some((need) => need.kind === "contract"),
       counted: portfolioOf([view]).counted,
     }).toStrictEqual({
-      unknown: { contract: true, works: true },
+      unknown: { contract: true, works: false },
       contractNeed: false,
-      counted: { fees: 0, value: 0 },
+      // Its hours are counted from the work core sends; its fees not yet.
+      counted: { fees: 0, value: 1 },
     });
     // Once core holds them, the draft contract waits for Grasp as before.
     expect({
@@ -882,7 +893,6 @@ describe("an organization from core's admin snapshot", () => {
         ...interview,
         summary: "The orders come in by phone and get lost",
       })),
-      works: [{ name: "Taking orders", steps: ["Write it down"] }],
       contract: { plan: "Grasp", fee: 4000 },
       gate: { ...answer.gate, parts: [{ source: "kickoff", known: 0.6 }] },
       usage: answer.usage.map((day) => ({
@@ -969,11 +979,10 @@ describe("an organization from core's admin snapshot", () => {
       },
     };
     const rules = { ...STARTING_ORG_RULES, people: 2 };
-    const { org, state } = adminOrgOf(both, client, {
-      works: [orders],
-      rules,
-      counted: ["orders"],
-    });
+    const { org, state } = adminOrgOf(
+      { ...both, works: { works: [orders], rules, counted: ["orders"] } },
+      client
+    );
     const view = adminViewOf(org, state, "2026-10-14");
     const record = recordOf(view, "orders");
     const missing = record

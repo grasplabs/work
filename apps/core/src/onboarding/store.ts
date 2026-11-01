@@ -67,6 +67,7 @@ import type {
   StaffOrganization,
 } from "@grasp-os/shared/onboarding-organization";
 import {
+  drawnWorkSchema,
   logPageMax,
   orgRulesSchema,
   stephenSetupSchema,
@@ -210,7 +211,7 @@ import {
   TooManyClaimChecksError,
 } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
-import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
+import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
@@ -4656,6 +4657,18 @@ export class Onboarding extends DurableObject<Env> {
       failedMail: this.#failedMail(person),
       interviewId: code.linkId,
     };
+  }
+
+  /** Everyone on the roster whose latest mail failed for good, by id: for the admin's snapshot. */
+  failedMails(): Map<string, FailedMail> {
+    const failed = new Map<string, FailedMail>();
+    for (const { id } of this.#roster()?.people ?? []) {
+      const mail = this.#failedMail(id);
+      if (mail !== null) {
+        failed.set(id, mail);
+      }
+    }
+    return failed;
   }
 
   /**

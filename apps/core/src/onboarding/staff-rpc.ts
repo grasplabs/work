@@ -35,6 +35,7 @@ import {
   logFilterSchema,
   noteMaxLength,
   orgRulesSchema,
+  staffWorksSchema,
   stephenSetupSchema,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
@@ -63,7 +64,6 @@ import { readKickoff, transcriptOf } from "./kickoff.ts";
 import { needsOf, stagesOf } from "./staff-area.ts";
 import type { StaffFacts } from "./staff-area.ts";
 import { onboardingStore } from "./store.ts";
-import { staffWorksSchema } from "./work-drawing.ts";
 
 // What only Grasp's staff do in the onboarding, over `/rpc`: pause the
 // interviews and let them run again, say where the agreements stand, give

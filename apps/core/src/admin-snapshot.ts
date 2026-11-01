@@ -14,6 +14,7 @@ import { dayOf, METER_PURPOSES } from "@grasp-os/shared/admin/org-record";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Plan } from "@grasp-os/shared/onboarding";
+import { staffWorksSchema } from "@grasp-os/shared/onboarding-staff";
 
 import { adminIntegrationsOf } from "./admin-integrations.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
@@ -195,6 +196,8 @@ const stephenOf = async (
  * Everything the admin reads of this client, from what core holds, at
  * `now`: for the admin's read below, and staff's in the onboarding area
  * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
+ * It is all the admin shows of the onboarding it steers: a command's
+ * effect (admin-command.ts) shows in the next one.
  */
 export const snapshotOf = async (
   env: Env,
@@ -213,6 +216,9 @@ export const snapshotOf = async (
     integrations,
     asked,
     stephen,
+    works,
+    setup,
+    failedMails,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -224,6 +230,9 @@ export const snapshotOf = async (
     integrationsOf(env),
     appsAsked(env),
     stephenOf(env, now),
+    store.staffWorks(),
+    store.stephen(),
+    store.failedMails(),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -237,6 +246,7 @@ export const snapshotOf = async (
       remindedAt: link?.remindedAt ?? null,
       deletedAt: link?.deletedAt ?? null,
       state: linkStateOf(link, held.get(id), view.plan, now),
+      failedMail: failedMails.get(id) ?? null,
     };
   });
   return {
@@ -261,7 +271,14 @@ export const snapshotOf = async (
     mapped: facts.mapped,
     links,
     interviews: facts.interviews.map(interviewOf),
-    works: null,
+    works: staffWorksSchema.parse(works),
+    // What the kickoff said it rests on stays out: the admin never gets
+    // the kickoff's words (`adminKickoffViewOf`).
+    setup: {
+      setup: setup.setup,
+      changed: setup.changed,
+      suggested: setup.suggested,
+    },
     kickoff,
     gate: {
       open: gate.open,

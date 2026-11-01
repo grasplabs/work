@@ -56,6 +56,7 @@ const levelWords: Record<HealthLevel, string> = {
 /** What core holds of what the signals count: the contract, the drawn work and the connections are unknown until it does. */
 interface Held {
   contract: boolean;
+  /** Any work found to count: none found yet is said so, never counted as none known or live. */
   works: boolean;
   integrations: Connections | null;
 }
@@ -238,7 +239,7 @@ export const OrgHealth = ({
 }) => {
   const held: Held = {
     contract: !view.unknown.contract,
-    works: !view.unknown.works,
+    works: !view.unknown.works && view.works.length > 0,
     integrations:
       snapshot.integrations === null
         ? null

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { METER_PURPOSES } from "./admin/org-record.ts";
 import { identifierMaxLength } from "./identifier.ts";
 import { interviewPhases, personStates } from "./interview-links.ts";
+import { staffWorksSchema } from "./onboarding-staff.ts";
 import {
   agreementsSchema,
   interviewerSchema,
@@ -24,7 +25,10 @@ import { roleSchema } from "./roles.ts";
 //
 // Interviews are here as numbers only: what anyone said, the facts Stephen
 // wrote down and the transcripts stay behind the audited staff transcript
-// read (`OnboardingStaffApi.transcript`). Nor is any interview link here:
+// read (`OnboardingStaffApi.transcript`). The work drawn from them is
+// here as the analyst drew it, for staff steer it from the admin: its
+// steps, and what each person told of it as counts and an example at
+// most. Nor is any interview link here:
 // a link is a credential. Nor any connection's: what the company connected
 // comes without tokens, server URLs or what Composio knows an account by,
 // and people's own connections, and chats' requests, only as counts by app.
@@ -74,6 +78,18 @@ export const adminLinkSchema = z.object({
   deletedAt: isoTime.nullable(),
   /** As the prototype's admin says it (`personStateOf`). */
   state: z.enum([...personStates, "waiting"]),
+  /**
+   * Their latest mail, when it failed for good: what staff can send again
+   * once what stopped it is put right. The mail service's reason, never
+   * the mail.
+   */
+  failedMail: z
+    .object({
+      kind: z.enum(["link", "reminder"]),
+      reason: z.string().nullable(),
+      at: isoTime,
+    })
+    .nullable(),
 });
 export type AdminLink = z.output<typeof adminLinkSchema>;
 
@@ -144,6 +160,13 @@ const rosterReadSchema = z.object({
 });
 const planReadSchema = z.object(planSchema.shape);
 const agreementsReadSchema = z.object(agreementsSchema.shape);
+
+/** Stephen's setup as the answer has it: core checked its lines when it kept them. */
+const setupReadSchema = z.object({
+  languages: z.array(z.string()),
+  limits: z.array(z.string()),
+  terms: z.array(z.string()),
+});
 
 /** Who carries out a connection's actions: a native connector, or Composio. */
 const sourceSchema = z.enum(["native", "composio"]);
@@ -323,10 +346,22 @@ export const adminSnapshotSchema = z.object({
   links: z.array(adminLinkSchema),
   interviews: z.array(adminInterviewSchema),
   /**
-   * The work drawn from the interviews, with what each person told: null
-   * until core draws it, with the issue that brings the drawing.
+   * Every piece of work as the team maps hold it, with its drawing from
+   * the interviews (what each person told of it, as the analyst drew it),
+   * the organization's rules for when one is known, and the pieces Grasp
+   * counts as known by hand.
    */
-  works: notYetHeld,
+  works: staffWorksSchema,
+  /**
+   * How Stephen is set up for this deployment, as staff steer it: what
+   * holds, whether staff changed it, and what the kickoff suggests. Never
+   * the kickoff's own words it rests on.
+   */
+  setup: z.object({
+    setup: setupReadSchema,
+    changed: z.boolean(),
+    suggested: setupReadSchema,
+  }),
   kickoff: z
     .object({
       at: isoTime,
