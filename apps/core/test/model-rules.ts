@@ -1,4 +1,3 @@
-import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -73,7 +72,7 @@ export const currentPastActivation = async (
 /** A model that doesn't think: the organization's default in these tests. */
 export const mistral = "mistral/mistral-large-latest";
 export const anthropic = "anthropic/claude-sonnet-4-5";
-/** Hosted in the EU, as the tests' config says. */
+/** A third model the organization chose. */
 export const euModel = "openai/gpt-5.4";
 
 /** The models the organization chose: its default, then its fallbacks. */
@@ -148,10 +147,6 @@ export const modelActions = (events: AuditEvent[]): string[] =>
   events
     .map(({ action }) => action)
     .filter((action) => action.startsWith("model."));
-
-/** A run of `workflow` in `app` no other test uses. */
-export const runOf = (app: string, workflow: string) =>
-  runActorOf({ runId: `run-${crypto.randomUUID()}`, app, workflow });
 
 /**
  * The audit events `actor` triggered, the model ledger's alerts included:

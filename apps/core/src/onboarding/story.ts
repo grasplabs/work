@@ -80,9 +80,7 @@ export const interviewStoryResponse = async (
   // The model that says his lines tells it: someone is waiting for it.
   const settings = await modelSettings(env);
   const connected = settings.models.length > 0;
-  const model = connected
-    ? modelForRole(settings, "quick", { sensitive: true })
-    : undefined;
+  const model = connected ? modelForRole(settings, "quick") : undefined;
   if (model === undefined) {
     log.error("interview.no_model", {
       requestId,

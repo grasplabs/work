@@ -9,7 +9,6 @@ import {
   chatOf,
   codeResults,
   codeStep,
-  configureObject,
   model,
   says,
   transcript,
@@ -18,7 +17,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -704,41 +703,6 @@ describe("a chat's connections", setUpTime, () => {
         resource: null,
       },
     ]);
-  });
-
-  it("keep a chat that read an EU-only connection to EU models, in every later turn", async () => {
-    const { mail, chat, grant } = await setUp();
-    const euModel = "mistral/mistral-large-latest";
-    const provider = await fakeProviderFor(
-      [model, euModel],
-      codeStep(
-        `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: "invoice" })).output;`
-      ),
-      says("Never sent.")
-    );
-    await configureObject(chat.stub, {
-      rules: { eu: { connections: [mail.id], models: [euModel] } },
-    });
-    await grant(mail.id, "MAIL");
-
-    const first = await chat.ask("Find the invoice.");
-    await expect(outcome(chat.ask("And now?"))).resolves.toBe("model.eu_only");
-
-    expect({
-      first: first.outcome,
-      requests: provider.requests.length,
-      searched: await mail.searched(),
-    }).toStrictEqual({ first: "failed", requests: 1, searched: ["invoice"] });
-    const events = await eventsOf(
-      chat.agent.agentId,
-      (all) =>
-        all.filter(({ action }) => action === "model.refused").length === 2
-    );
-    expect(
-      events
-        .filter(({ action }) => action === "model.refused")
-        .map(({ detail }) => detail.because)
-    ).toStrictEqual(["connection", "connection"]);
   });
 
   it("end a write held in a Teams chat at midnight of the company's day, and run nothing pressed after it", async () => {

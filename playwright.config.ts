@@ -9,8 +9,6 @@ import {
 } from "./e2e/people.ts";
 import {
   corePort,
-  e2eModel,
-  e2eThinkingModel,
   connectConfig,
   idpOrigin,
   idpPort,
@@ -223,11 +221,10 @@ export default defineConfig({
         // was lost) checking every 2 s at first, not every minute, so a
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
-        // The Models page shows the rules and budgets.
+        // The Models page shows the budgets.
         devVar(
           "MODEL_GATEWAY",
           JSON.stringify({
-            eu: { models: [e2eModel, e2eThinkingModel], deployment: true },
             budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
           })
         ),

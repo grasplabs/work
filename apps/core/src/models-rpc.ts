@@ -70,8 +70,6 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
         models,
         rules: {
           state: "on",
-          eu: rules.eu ?? null,
-          sensitive: rules.sensitive ?? null,
           budgets: await budgetSpend(this.#env, rules.budgets, month),
         },
         month,

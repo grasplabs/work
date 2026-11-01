@@ -446,12 +446,8 @@ export const turnStream = async ({
   // No provider connected yet: the interview isn't set up, as the person
   // with the link is told; the log says why (`model.no_provider`).
   const connected = settings.models.length > 0;
-  const quick = connected
-    ? modelForRole(settings, "quick", { sensitive: true })
-    : undefined;
-  const careful = connected
-    ? modelForRole(settings, "careful", { sensitive: true })
-    : undefined;
+  const quick = connected ? modelForRole(settings, "quick") : undefined;
+  const careful = connected ? modelForRole(settings, "careful") : undefined;
   if (quick === undefined || careful === undefined) {
     log.error("interview.no_model", {
       requestId,

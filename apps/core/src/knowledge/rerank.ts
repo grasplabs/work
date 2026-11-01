@@ -1,5 +1,4 @@
 import type { RerankRequest } from "@grasp-os/brain/brain";
-import { brainErrors } from "@grasp-os/brain/contract";
 import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
@@ -42,12 +41,7 @@ export const rerankCandidates = async (
   reader: Reader,
   { question, candidates, provenance, deadlineMs }: RerankRequest
 ): Promise<string[]> => {
-  const model = modelForRole(await modelSettings(env), "quick", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw brainErrors.create("brain.unavailable");
-  }
+  const model = modelForRole(await modelSettings(env), "quick");
   const { output } = await models(env).call({
     model,
     system: instructions,

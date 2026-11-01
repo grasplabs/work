@@ -14,8 +14,6 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.provider_key_failed": msg`Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.`,
   "model.provider_unavailable": msg`Your AI provider isn't answering. This is usually an outage on their side; try again in a while.`,
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
-  "model.eu_only": msg`This chat stays in the EU, and this model isn't hosted there. Pick another one.`,
-  "model.sensitive_data": msg`This chat holds sensitive data this model may not see. Pick another one.`,
   "model.over_budget": msg`The model budget is used up. Ask your admin to have Grasp raise it.`,
   "model.run_limit": msg`This run has made all the model calls it may make.`,
   "model.budget_busy": msg`Other questions are using what's left of the model budget. Try again in a minute.`,

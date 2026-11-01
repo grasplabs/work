@@ -10,23 +10,19 @@ import {
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import { release as nextVersion, requestGranted } from "./apps.ts";
+import { release as nextVersion } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
-import { mailConnection } from "./mail-connection.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import {
   appWith,
   llm,
   currentPastActivation,
-  mistral,
   anthropic,
   euModel,
   cheapAnswer,
   withRules,
   withDeploymentRules,
   modelActions,
-  runOf,
   eventsOf,
   callsInAnApp,
 } from "./model-rules.ts";
@@ -35,13 +31,12 @@ import { person } from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
   bindModel,
-  grantMail,
   modelRegistration,
   workflowFiles,
 } from "./workflow-apps.ts";
 
 // The client's rules for model calls, checked on every call before
-// anything is sent: which models, where, for which data, and through
+// anything is sent: which models, in which work context, and through
 // which binding. The model provider behind connect is the outside system
 // (test/model-provider.ts). Everything else is real, down to the audit
 // log and, for the
@@ -54,96 +49,10 @@ const idp = mockIdp();
 // its workflow tests to activate it, have permissions granted where they
 // need them, and wait for up to two runs to end, one after another
 // (`finished` gives each up to 20 seconds). On a loaded CI runner that
-// takes longer than Vitest's default five seconds: the sensitive-collection
-// test, with two workflows to activate and two runs, timed out there.
-// Sixty seconds fits two runs' waits with room for the setup, as
+// takes longer than Vitest's default five seconds. Sixty seconds fits two runs' waits with room for the setup, as
 // app-roles.test.ts and knowledge-access.test.ts give theirs.
 describe("model rules", { timeout: 60_000 }, () => {
   const hello = callsInAnApp(idp);
-
-  it("keep every call of an EU-only deployment with a model hosted in the EU, and audit each refusal", async () => {
-    // The rules say which models are hosted in the EU, not the provider.
-    const { fake, call } = await withRules({
-      eu: { models: [euModel], deployment: true },
-    });
-    const refused = hello(anthropic, { provenance: ["doc-1"] });
-    const answered = hello(euModel);
-
-    await expect(call(refused)).rejects.toMatchObject({
-      code: "model.eu_only",
-      message:
-        "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
-      details: { model: anthropic, because: "deployment" },
-    });
-    await expect(
-      Promise.all([outcome(call(hello(mistral))), outcome(call(answered))])
-    ).resolves.toStrictEqual(["model.eu_only", "ok"]);
-
-    // Only the EU model's call was sent, to its provider.
-    expect(fake.requests.map(({ url }) => url)).toStrictEqual([
-      "https://api.openai.com/v1/responses",
-    ]);
-    await expect(eventsOf(refused.trigger)).resolves.toMatchObject([
-      {
-        action: "model.refused",
-        provenance: ["doc-1"],
-        detail: {
-          purpose: "chat.turn",
-          reason: "model.eu_only",
-          because: "deployment",
-          model: anthropic,
-        },
-      },
-    ]);
-    await expect(eventsOf(answered.trigger)).resolves.toMatchObject([
-      { action: "model.call", detail: { euOnly: "deployment" } },
-    ]);
-  });
-
-  it("keep a listed workflow's AI steps in the EU, and no other caller's", async () => {
-    const eu = {
-      models: [euModel],
-      workflows: [{ app: "app-1", workflow: "invoices" }],
-    };
-    const { call } = await withRules({ eu });
-    const step = async (
-      model: string,
-      trigger: ModelCall<undefined>["trigger"]
-    ) =>
-      await outcome(call(hello(model, { purpose: "workflow.step", trigger })));
-
-    await expect(
-      Promise.all([
-        step(anthropic, runOf("app-1", "invoices")),
-        step(euModel, runOf("app-1", "invoices")),
-        // The same workflow name in another App, and another workflow.
-        step(anthropic, runOf("app-2", "invoices")),
-        step(anthropic, runOf("app-1", "orders")),
-      ])
-    ).resolves.toStrictEqual(["model.eu_only", "ok", "ok", "ok"]);
-  });
-
-  it("keep a call in the EU when an EU-only connection's data fed it or may have", async () => {
-    const { call } = await withRules({
-      eu: { models: [euModel], connections: ["connection-eu"] },
-    });
-
-    await expect(
-      Promise.all([
-        outcome(call(hello(anthropic, { provenance: ["connection-eu"] }))),
-        outcome(call(hello(anthropic, { connections: ["connection-eu"] }))),
-        outcome(call(hello(euModel, { connections: ["connection-eu"] }))),
-        outcome(
-          call(
-            hello(anthropic, {
-              provenance: ["doc-1"],
-              connections: ["connection-other"],
-            })
-          )
-        ),
-      ])
-    ).resolves.toStrictEqual(["model.eu_only", "model.eu_only", "ok", "ok"]);
-  });
 
   it("audit a model the organization didn't choose as refused", async () => {
     const { call } = await withRules({});
@@ -187,12 +96,10 @@ describe("model rules", { timeout: 60_000 }, () => {
     });
   });
 
-  it.each([
-    ["eu", { eu: { models: "all of them" } }],
-    ["sensitive", { sensitive: { models: [euModel], connections: 7 } }],
-    ["budgets", { budgets: { user: { limit: -5 } } }],
-  ])("refuse every call while a %s rule is malformed", async (_, malformed) => {
-    const { fake, call } = await withRules(malformed);
+  it("refuse every call while a budget is malformed", async () => {
+    const { fake, call } = await withRules({
+      budgets: { user: { limit: -5 } },
+    });
 
     await expect(outcome(call(hello(anthropic)))).resolves.toBe(
       "model.unconfigured"
@@ -200,116 +107,33 @@ describe("model rules", { timeout: 60_000 }, () => {
     expect(fake.requests).toStrictEqual([]);
   });
 
-  it("send a prompt holding a sensitive collection's content only to a model the data rule lists, such as an EU one", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const teamId = await newTeam(admin, []);
-    const [payroll, handbook] = await Promise.all([
-      collectionWithNote(admin.api, {
-        name: "Payroll",
-        access: "teams",
-        teams: [teamId],
-        sensitive: true,
-      }),
-      collectionWithNote(admin.api, { name: "Handbook", access: "everyone" }),
-    ]);
-    const { fake, call } = await withRules({
-      sensitive: { models: [euModel] },
+  it("refuse and audit a call that claims to work in another App's context", async () => {
+    const { fake, call } = await withRules({});
+    const app = appIdSchema.parse(`app-${crypto.randomUUID()}`);
+    const other = appIdSchema.parse(`app-${crypto.randomUUID()}`);
+    const claimed = hello(anthropic, {
+      work: {
+        authority: {
+          subject: { type: "app", appId: app },
+          onBehalfOf: "person-1",
+          mode: "workflow",
+          appVersion: 1,
+        },
+        context: { type: "app", appId: other },
+      },
     });
-    const refused = hello(anthropic, {
-      provenance: [handbook.noteId, payroll.collectionId],
-    });
-    const answered = hello(euModel, { provenance: [payroll.noteId] });
 
-    await expect(
-      Promise.all([
-        outcome(call(refused)),
-        // Named by one of its documents.
-        outcome(call(hello(anthropic, { provenance: [payroll.noteId] }))),
-        outcome(call(answered)),
-        // Nothing sensitive: any chosen model.
-        outcome(call(hello(anthropic, { provenance: [handbook.noteId] }))),
-      ])
-    ).resolves.toStrictEqual([
-      "model.sensitive_data",
-      "model.sensitive_data",
-      "ok",
-      "ok",
-    ]);
-    expect(fake.requests).toHaveLength(2);
-    await expect(eventsOf(refused.trigger)).resolves.toMatchObject([
+    await expect(outcome(call(claimed))).resolves.toBe(
+      "permission.context_invalid"
+    );
+    expect(fake.requests).toStrictEqual([]);
+    await expect(eventsOf(claimed.trigger)).resolves.toMatchObject([
       {
         action: "model.refused",
-        detail: { reason: "model.sensitive_data", because: "collection" },
+        detail: { reason: "permission.context_invalid", because: null },
       },
     ]);
-    await expect(eventsOf(answered.trigger)).resolves.toMatchObject([
-      { action: "model.call", detail: { sensitive: "collection" } },
-    ]);
   });
-
-  it("send a sensitive connection's data only to a model the data rule lists", async () => {
-    const { call } = await withRules({
-      sensitive: { models: [euModel], connections: ["connection-hr"] },
-    });
-
-    await expect(
-      Promise.all([
-        outcome(call(hello(anthropic, { connections: ["connection-hr"] }))),
-        outcome(call(hello(anthropic, { provenance: ["connection-hr"] }))),
-        outcome(call(hello(euModel, { connections: ["connection-hr"] }))),
-        outcome(call(hello(anthropic, { connections: ["connection-crm"] }))),
-      ])
-    ).resolves.toStrictEqual([
-      "model.sensitive_data",
-      "model.sensitive_data",
-      "ok",
-      "ok",
-    ]);
-  });
-
-  it.each([
-    ["no data rule", {}, []],
-    [
-      "a data rule its connection alone would refuse it by",
-      { sensitive: { models: [euModel], connections: ["connection-hr"] } },
-      ["connection-hr"],
-    ],
-    [
-      "a data rule its model is listed in",
-      { sensitive: { models: [anthropic] } },
-      [],
-    ],
-  ])(
-    "refuse and audit a call that claims to work in another App's context, with %s",
-    async (_, rules, connections) => {
-      const { fake, call } = await withRules(rules);
-      const app = appIdSchema.parse(`app-${crypto.randomUUID()}`);
-      const other = appIdSchema.parse(`app-${crypto.randomUUID()}`);
-      const claimed = hello(anthropic, {
-        connections,
-        work: {
-          authority: {
-            subject: { type: "app", appId: app },
-            onBehalfOf: "person-1",
-            mode: "workflow",
-            appVersion: 1,
-          },
-          context: { type: "app", appId: other },
-        },
-      });
-
-      await expect(outcome(call(claimed))).resolves.toBe(
-        "permission.context_invalid"
-      );
-      expect(fake.requests).toStrictEqual([]);
-      await expect(eventsOf(claimed.trigger)).resolves.toMatchObject([
-        {
-          action: "model.refused",
-          detail: { reason: "permission.context_invalid", because: null },
-        },
-      ]);
-    }
-  );
 
   it("refuse and audit a call that comes without a work context", async () => {
     const { fake, call } = await withRules({});
@@ -328,139 +152,6 @@ describe("model rules", { timeout: 60_000 }, () => {
         action: "model.refused",
         detail: { reason: "permission.context_invalid", because: null },
       },
-    ]);
-  });
-
-  it("fail a run's AI step with the reason when its App has an EU-only connection, once: it isn't retried", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const mail = await mailConnection();
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "reader",
-        `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "anywhere",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-  });`,
-        { extract: { total: 1234 } }
-      )
-    );
-    await grantMail(idp, builder, app, mail.id);
-
-    const { fake, result: run } = await withDeploymentRules(
-      { eu: { models: [euModel], connections: [mail.id] } },
-      [],
-      async () => {
-        await bindModel(app, "anywhere", mistral);
-        const started = await builder.api.workflows.start(app, "reader");
-        await finished(started.id);
-        return started;
-      }
-    );
-
-    await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject({
-      status: "failed",
-      error: {
-        message:
-          "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
-      },
-    });
-    expect(fake.requests).toStrictEqual([]);
-    const events = await eventsOf(
-      runActorOf({ runId: run.id, app, workflow: "reader" })
-    );
-    expect(
-      events.filter(({ action }) => action === "model.refused")
-    ).toMatchObject([
-      { detail: { reason: "model.eu_only", because: "connection" } },
-    ]);
-  });
-
-  it("fail the AI steps of an App that read a sensitive collection, unless their model is one the data rule lists", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const teamId = await newTeam(admin, []);
-    const payroll = await collectionWithNote(admin.api, {
-      name: "Payroll",
-      access: "teams",
-      teams: [teamId],
-      sensitive: true,
-    });
-    // Reads the note, then asks a model about it: the prompt holds it.
-    const summarizer = (id: string) =>
-      workflowFiles(
-        id,
-        `  const note = await step.do("read", { description: "Read the note" }, async () => (await env.HANDBOOK.getDocument("${payroll.noteId}")) as Json);
-  return await step.llm("summarize", {
-    description: "Summarize the note",
-    binding: "${id}",
-    instructions: "Summarize the note.",
-    input: (note as { version: { text: string } }).version.text,
-    schema: z.object({ summary: z.string() }),
-  });`,
-        {
-          read: { version: { text: "Note" } },
-          summarize: { summary: "A note." },
-        }
-      );
-    const app = await appWith(admin, {
-      ...summarizer("anywhere"),
-      ...summarizer("eu"),
-    });
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "app", appId: appIdSchema.parse(app) },
-        payroll.collectionId
-      )
-    );
-
-    const { fake, result: runs } = await withDeploymentRules(
-      { sensitive: { models: [euModel] } },
-      [{ text: '{ "summary": "A note." }', inputTokens: 10, outputTokens: 5 }],
-      async () => {
-        await bindModel(app, "anywhere", mistral);
-        await bindModel(app, "eu", euModel);
-        // One after another: the second starts restricted.
-        const refused = await admin.api.workflows.start(app, "anywhere");
-        await finished(refused.id);
-        const answered = await admin.api.workflows.start(app, "eu");
-        await finished(answered.id);
-        return { refused: refused.id, answered: answered.id };
-      }
-    );
-
-    await expect(
-      Promise.all([
-        admin.api.workflows.status(runs.refused),
-        admin.api.workflows.status(runs.answered),
-      ])
-    ).resolves.toMatchObject([
-      {
-        status: "failed",
-        error: {
-          message:
-            "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
-        },
-      },
-      { status: "completed", output: { summary: "A note." } },
-    ]);
-    // Only the EU model's call was sent, and it held the note.
-    expect(fake.requests.map(({ url }) => url)).toStrictEqual([
-      "https://api.openai.com/v1/responses",
-    ]);
-    expect(JSON.stringify(fake.requests[0]?.body)).toContain("See [[note.md]]");
-    // No provenance named the collection: the App's restricted mode did.
-    const refusals = await eventsOf(
-      runActorOf({ runId: runs.refused, app, workflow: "anywhere" })
-    );
-    expect(
-      refusals.filter(({ action }) => action === "model.refused")
-    ).toMatchObject([
-      { detail: { reason: "model.sensitive_data", because: "restricted" } },
     ]);
   });
 

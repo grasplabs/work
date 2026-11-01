@@ -366,50 +366,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     expect(provider.requests).toStrictEqual([]);
   });
 
-  it("refuses an onboarding line when the sensitive-data rule doesn't list it, sending nothing", async () => {
-    const { rulesEnv } = withRules({ sensitive: { models: [textModel] } });
-    const person = newPerson();
-    const line = newLine();
-
-    await expect(
-      outcome(
-        stephen(rulesEnv, person).speak({ text: line, voice, language: "de" })
-      )
-    ).resolves.toBe("model.sensitive_data");
-    await expect(carrying(line)).resolves.toStrictEqual([]);
-    const [event] = await auditedFor(person.userId, 1);
-    expect(event).toMatchObject({
-      action: "model.refused",
-      detail: { reason: "model.sensitive_data", model: speechModel },
-    });
-  });
-
-  it("says an EU-only deployment's line at ElevenLabs's EU residency host, where Grasp's account keeps its data, whatever its EU models list", async () => {
-    const { rulesEnv } = withRules({
-      sensitive: { models: [speechModel] },
-      eu: { models: [textModel], deployment: true },
-    });
-    const person = newPerson();
-    const line = newLine();
-
-    await stephen(rulesEnv, person).speak({
-      text: line,
-      voice,
-      language: "fr",
-    });
-
-    const sent = await carrying(line);
-    expect(sent.map(({ host }) => host)).toStrictEqual([
-      "api.eu.residency.elevenlabs.io",
-    ]);
-    const [event] = await auditedFor(person.userId, 1);
-    expect(event?.detail).toMatchObject({
-      euOnly: "deployment",
-      sensitive: "restricted",
-      region: "eu",
-    });
-  });
-
   it("asks once more when the provider is busy, charging only the line it said", async () => {
     const { rulesEnv, month } = withRules({
       budgets: { user: { limit: 10 } },

@@ -39,7 +39,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { jsonVar } from "@grasp-os/shared/config";
 import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
-import { modelRulesConfigSchema as rulesConfigSchema } from "@grasp-os/shared/deployment-config";
+import { modelRulesConfigSchema } from "@grasp-os/shared/deployment-config";
 import type { ModelRole, ModelRules } from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
@@ -122,7 +122,7 @@ import {
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
-import type { Judged, Refusal } from "./model-rules.ts";
+import type { Refusal } from "./model-rules.ts";
 import {
   connectRequest,
   connectSocket,
@@ -159,9 +159,9 @@ import { quotaLimits } from "./workflows/quotas.ts";
 // audit outbox, so a request that was answered (and paid for) is recorded
 // even when the audit log can't take it for a moment.
 //
-// Before anything is sent, a call is checked against the deployment's
-// rules (model-rules.ts). A refused call is audited too, with the reason,
-// and nothing is sent. The transport only says where an admitted request
+// Before anything is sent, a call is checked: its work context
+// (model-rules.ts), its model and its budgets. A refused call is audited
+// too, with the reason, and nothing is sent. The transport only says where an admitted request
 // goes: the rules, the budgets, the ledger's admission of every provider
 // request and the audit log are the gateway's, the same whatever the
 // transport.
@@ -212,27 +212,6 @@ const maxTimeoutMs = 15 * 60_000;
  */
 const maxRetries = 2;
 
-/**
- * A model the gateway offers: a text model of pi's catalog, a speech model
- * of our own (voice-models.ts), which only speech takes
- * (`models(env).speak`), or a transcription model of our own, which only
- * listening takes (`models(env).listen`), so the rules can name each.
- * Each check stays its own, so no call of one kind can name a model of
- * another.
- */
-const modelRefSchema = z
-  .string()
-  .refine(
-    (ref) =>
-      parseModelRef(ref) !== undefined ||
-      parseVoiceRef(ref) !== undefined ||
-      parseHearingRef(ref) !== undefined,
-    { message: "A <provider>/<model> the gateway offers" }
-  );
-
-/** The client's rules, in the `MODEL_GATEWAY` var (model-rules.ts). */
-const modelRulesConfigSchema = rulesConfigSchema(modelRefSchema);
-
 /** The `MODEL_GATEWAY` var as set: no rules while it isn't. */
 const rulesVar = (env: Env): unknown =>
   env.MODEL_GATEWAY === undefined ? {} : jsonVar(env.MODEL_GATEWAY);
@@ -279,31 +258,18 @@ export const modelSettings = async (env: Env): Promise<ModelsNow> => {
 };
 
 /**
- * The model for `role`, for a call that carries sensitive data when
- * `sensitive` is set: the organization's default, else the first of its
- * fallbacks, that the rules let the call use. Both roles resolve alike:
- * an organization chooses its models, not one for each role. Throws
- * `model.no_provider` while it has no model to use (no provider
- * connected, or no model chosen), as every call would; `undefined` when
- * the rules let the call use none of them. The gateway checks the rules
- * again either way.
+ * The model for `role`: the organization's default. Both roles resolve
+ * alike: an organization chooses its models, not one for each role.
+ * Throws `model.no_provider` while it has no model to use (no provider
+ * connected, or no model chosen), as every call would.
  */
 export const modelForRole = (
-  { models: chosen, rules }: ModelsNow,
-  role: ModelRole,
-  { sensitive }: { sensitive: boolean }
-): string | undefined => {
-  if (chosen.length === 0) {
-    throw modelErrors.create("model.no_provider");
-  }
-  const fits = (model: string) =>
-    (!sensitive ||
-      rules?.sensitive === undefined ||
-      rules.sensitive.models.includes(model)) &&
-    (rules?.eu?.deployment !== true || rules.eu.models.includes(model));
-  const model = chosen.find(fits);
+  { models: chosen }: ModelsNow,
+  _role: ModelRole
+): string => {
+  const [model] = chosen;
   if (model === undefined) {
-    log.error("model.role_refused", { role, sensitive: String(sensitive) });
+    throw modelErrors.create("model.no_provider");
   }
   return model;
 };
@@ -376,22 +342,20 @@ const sessionShape = {
   /** Who or what asked: a person, an agent, an App or a workflow run. */
   trigger: auditActorSchema,
   /**
-   * IDs of the resources that fed the prompt: all of them, however many,
-   * as the rules judge by every one. The audit log records as many as its
-   * event holds (`keepingProvenance`).
+   * IDs of the resources that fed the prompt. The audit log records as
+   * many as its event holds (`keepingProvenance`).
    */
   provenance: z.array(identifierSchema).default([]),
   /**
-   * Connections whose data may have fed the prompt, such as a run's: for
-   * the deployment's rules only, never recorded.
+   * Connections whose data may have fed the prompt, such as a run's:
+   * never recorded, and no check reads them now.
    */
   connections: z.array(connectionIdSchema).default([]),
   /**
-   * Where the call works, and for whom: its restricted mode decides which
-   * models it may use (model-rules.ts). Set by the host, like the
-   * trigger. Required of every caller (`ModelCall`, `AgentSession`); while
-   * the rules apply, a call without one is refused, as its restricted mode
-   * can't be known.
+   * Where the call works, and for whom (model-rules.ts). Set by the host,
+   * like the trigger. Required of every caller (`ModelCall`,
+   * `AgentSession`); a call without one, or with one its authority can't
+   * work in, is refused.
    */
   work: z
     .union([
@@ -401,32 +365,28 @@ const sessionShape = {
       }),
       /**
        * Core's own onboarding (onboarding/): reading the kickoff, Stephen's
-       * turns. It carries what the company told Grasp, so the rules always
-       * judge it as carrying sensitive data (model-rules.ts). Only core's
-       * own code makes such a call: no App or client names a `work` here.
+       * turns. Only core's own code makes such a call: no App or client
+       * names a `work` here.
        */
       z.strictObject({ onboarding: z.literal(true) }),
       /**
        * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
-       * source's text for the entities it names. Judged as onboarding's
-       * is, as carrying sensitive data, for no one in particular, but
-       * kept apart from it in spend and audit (`platform` in its events).
-       * Only core's own code makes such a call.
+       * source's text for the entities it names, for no one in particular,
+       * kept apart from onboarding in spend and audit (`platform` in its
+       * events). Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("brain_upkeep") }),
       /**
        * Core's own making of a person's dashboard widget
        * (dashboard-widgets.ts): it carries the names of their engines and
-       * workflows, judged as onboarding's is, and is made for them, on
-       * their budget, by the trigger that names them. Only core's own code
+       * workflows, and is made for them, on their budget, by the trigger that names them. Only core's own code
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
       /**
        * Core's own reranking of a person's recall (knowledge/rerank.ts),
        * only when the recall asks for it: it carries the company's own
-       * words, judged as onboarding's is, and is made for them, on their
-       * budget, by the trigger that names them. A delegate's recall reranks
+       * words, and is made for them, on their budget, by the trigger that names them. A delegate's recall reranks
        * under its own authority and context instead. Only core's own code
        * makes such a call.
        */
@@ -435,22 +395,20 @@ const sessionShape = {
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
        * answer, into the company's topics; and its proposals for what an
-       * owner could fix (stephen-requests.ts). Judged as onboarding's is,
-       * as carrying sensitive data, on the budget of the person it is
-       * for. Only core's own code makes such a call.
+       * owner could fix (stephen-requests.ts), on the budget of the person
+       * it is for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),
       /**
        * An admin's test of an AI provider the organization connected
-       * (ai-providers.ts): one fixed line of no one's data, judged as
-       * onboarding's is all the same, made for the admin, on their budget.
+       * (ai-providers.ts): one fixed line of no one's data, made for the admin, on their budget.
        * Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("provider_test") }),
       /**
        * Core's own conversion of a PDF uploaded to the Brain into its text
        * (knowledge/extract.ts), on Grasp's key: the company's own words,
-       * judged as onboarding's are, made for the person who uploaded it,
+       * made for the person who uploaded it,
        * on their budget. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("document_conversion") }),
@@ -739,11 +697,10 @@ const receivedChars = ({ content }: AssistantMessage): number => {
   return chars;
 };
 
-/** A call the gateway took: its model, and what the rules made of it. */
+/** A call the gateway took: its model, and the way it goes. */
 interface Admitted {
   call: Session;
   ref: ModelRef;
-  judged: Judged;
   /** The way it goes, as the ledger and the audit log record it. */
   way: LedgerRoute;
 }
@@ -2206,7 +2163,7 @@ const bindingOf = ({
     : { binding: binding.alias, bindingApp: binding.app };
 
 const auditEntry = (
-  { call, ref, judged, way }: Admitted,
+  { call, ref, way }: Admitted,
   recorded: Recorded
 ): AuditEntry => {
   const { logId } = recorded;
@@ -2247,10 +2204,6 @@ const auditEntry = (
           : null,
       // How hard the model was asked to think: a cost the person chose.
       effort: thinkingOf(ref.catalog, call.effort) ?? null,
-      // Which rule kept the call in the EU, if one did.
-      euOnly: judged.euOnly ?? null,
-      // Why it carried sensitive data, if a data rule asked and it did.
-      sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...bindingOf(call),
@@ -2289,12 +2242,6 @@ const largestWay: LedgerRoute = {
   provider: "x".repeat(32),
   region: "x".repeat(32),
   credential: "organization",
-};
-
-/** The most the rules can add to a call's audit event. */
-const largestJudged: Judged = {
-  euOnly: "connection",
-  sensitive: "collection",
 };
 
 /** A whole number of tokens, as a provider counted them. */
@@ -2789,10 +2736,7 @@ const admit = async (
   const { endpoint } = routing;
   try {
     createAuditEvent(
-      auditEntry(
-        { call, ref, judged: largestJudged, way: largestWay },
-        largestRecord
-      ),
+      auditEntry({ call, ref, way: largestWay }, largestRecord),
       "core"
     );
   } catch {
@@ -2809,13 +2753,7 @@ const admit = async (
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
-  // Grasp's own features go to their provider's EU host (`judgeCall`).
-  const verdict = await judgeCall(
-    env,
-    rules,
-    call,
-    routing.way.credential === "platform"
-  );
+  const verdict = await judgeCall(env, call);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -2847,7 +2785,6 @@ const admit = async (
   return {
     call,
     ref,
-    judged: verdict.judged,
     way: routing.way,
     model,
     endpoint,
@@ -3639,7 +3576,6 @@ const platformWay = (
 const speechEntry = (
   call: SpeechSession,
   ref: VoiceRef,
-  judged: Judged,
   recorded: SpeechRecord
 ): AuditEntry => {
   const { logId } = recorded;
@@ -3676,8 +3612,6 @@ const speechEntry = (
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
           : null,
-      euOnly: judged.euOnly ?? null,
-      sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...workflowRunOf(call),
@@ -3701,7 +3635,6 @@ const largestSpeech: SpeechRecord = {
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
   ref: VoiceRef;
-  judged: Judged;
   price: PinnedPrice;
   /** Sends the line once, as the ledger admitted it (`id`). */
   send: (id: string, limit: Deadline) => Promise<Response>;
@@ -3744,8 +3677,8 @@ const admitSpeech = async (
   env: Env,
   call: SpeechSession
 ): Promise<SpeechRoute> => {
-  const rules = modelRules(env);
-  if (rules === undefined) {
+  // Budgets that don't parse send nothing, as for a text model's call.
+  if (modelRules(env) === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = parseVoiceRef(call.model);
@@ -3753,17 +3686,13 @@ const admitSpeech = async (
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
-    createAuditEvent(
-      speechEntry(call, ref, largestJudged, largestSpeech),
-      "core"
-    );
+    createAuditEvent(speechEntry(call, ref, largestSpeech), "core");
   } catch {
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
   const target = await platformTarget(env, call, ref.provider);
-  // Said at ElevenLabs's EU host, as Grasp's own feature (`judgeCall`).
-  const verdict = await judgeCall(env, rules, call, true);
+  const verdict = await judgeCall(env, call);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -3791,7 +3720,6 @@ const admitSpeech = async (
     env,
     call,
     ref,
-    judged: verdict.judged,
     price,
     way: platformWay(ref.provider, target.platform, "speech"),
     send: async (id, limit) =>
@@ -4011,7 +3939,7 @@ const recordSpeech = async (
   await keepAuditEvent(
     env,
     drizzle(env.DB),
-    speechEntry(call, route.ref, route.judged, {
+    speechEntry(call, route.ref, {
       characters,
       region: route.platform.region,
       cost: costDollars(route.price, characterCounts(characters)),
@@ -4130,7 +4058,6 @@ interface HeardRecord {
 const listeningEntry = (
   call: ListeningSession,
   ref: HearingRef,
-  judged: Judged,
   recorded: HeardRecord
 ): AuditEntry =>
   keepingProvenance(call.provenance, (provenance, dropped) => ({
@@ -4158,8 +4085,6 @@ const listeningEntry = (
       transport: "connect",
       region: recorded.region,
       credential: "platform",
-      euOnly: judged.euOnly ?? null,
-      sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...workflowRunOf(call),
@@ -4202,8 +4127,8 @@ const listenThrough = async (
   signal: AbortSignal | undefined
 ): Promise<Listening> => {
   const call = parseCall(listeningSchema, fields);
-  const rules = modelRules(env);
-  if (rules === undefined) {
+  // Budgets that don't parse send nothing, as for a text model's call.
+  if (modelRules(env) === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = parseHearingRef(call.model);
@@ -4211,17 +4136,13 @@ const listenThrough = async (
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
-    createAuditEvent(
-      listeningEntry(call, ref, largestJudged, largestHeard),
-      "core"
-    );
+    createAuditEvent(listeningEntry(call, ref, largestHeard), "core");
   } catch {
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
   const target = await platformTarget(env, call, ref.provider);
-  // Heard at OpenAI's EU host, as Grasp's own feature (`judgeCall`).
-  const verdict = await judgeCall(env, rules, call, true);
+  const verdict = await judgeCall(env, call);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -4281,7 +4202,7 @@ const listenThrough = async (
         await keepAuditEvent(
           env,
           drizzle(env.DB),
-          listeningEntry(call, ref, verdict.judged, {
+          listeningEntry(call, ref, {
             seconds,
             region: target.platform.region,
             cost: costDollars(price, secondCounts(seconds)),

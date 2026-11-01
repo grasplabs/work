@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { aiModelsKind } from "../src/ai-model-choice.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
@@ -411,10 +412,6 @@ describe("model gateway", { timeout: 30_000 }, () => {
   it.each([
     ["rules that aren't JSON", "{"],
     ["a budget below nothing", { budgets: { user: { limit: -1 } } }],
-    [
-      "a model the gateway doesn't offer",
-      { sensitive: { models: ["anthropic/claude-9"], connections: [] } },
-    ],
   ])(
     "refuses every call with %s: the gateway fails closed",
     async (_, rules) => {
@@ -438,24 +435,25 @@ describe("model gateway", { timeout: 30_000 }, () => {
   );
 
   it("takes its rules as the JSON text a .dev.vars file sets", async () => {
-    const { providerEnv } = await withProvider([answer("Hi.")], {
-      rules: JSON.stringify({ eu: { deployment: true, models: [mistral] } }),
-    });
-    const call = async (model: string) =>
-      await outcome(
+    const call = async (rules: string) => {
+      const { providerEnv } = await withProvider([answer("Hi.")], { rules });
+      return await outcome(
         models(providerEnv).call({
-          model,
+          model: mistral,
           input: "Hello.",
           purpose: "chat.turn",
           trigger: newPerson(),
           work: work(),
         })
       );
+    };
 
     expect({
-      inEu: await call(mistral),
-      outside: await call(anthropic),
-    }).toStrictEqual({ inEu: "ok", outside: "model.eu_only" });
+      read: await call(JSON.stringify({ budgets: { user: { limit: 1 } } })),
+      malformed: await call(
+        JSON.stringify({ budgets: { user: { limit: -1 } } })
+      ),
+    }).toStrictEqual({ read: "ok", malformed: "model.unconfigured" });
   });
 
   it.each([
@@ -1145,7 +1143,7 @@ describe("model gateway for agents", () => {
     expect(provider.requests).toStrictEqual([]);
   });
 
-  it("admits each request by the rules as they stand then, and audits a refusal", async () => {
+  it("admits each request by the organization's models as they stand then, and audits a refusal", async () => {
     const trigger = newPerson();
     const { provider, providerEnv } = await withProvider([answer("One.")]);
     const agent = await models(providerEnv).agent({
@@ -1156,16 +1154,20 @@ describe("model gateway for agents", () => {
     });
 
     await agent.stream(agent.model, withTool("First.")).result();
-    // The deployment's rules come to keep calls in the EU while the loop
-    // runs, and the model isn't hosted there.
-    providerEnv.MODEL_GATEWAY = { eu: { deployment: true, models: [mistral] } };
+    // The organization stops choosing the model while the loop runs.
+    await env.DB.prepare("UPDATE org_settings SET value = ? WHERE kind = ?")
+      .bind(
+        JSON.stringify({ defaultModel: mistral, fallbacks: [] }),
+        aiModelsKind
+      )
+      .run();
     const second = await agent
       .stream(agent.model, withTool("Second."))
       .result();
 
     expect(second).toMatchObject({
       stopReason: "error",
-      errorMessage: "The model call was refused (model.eu_only).",
+      errorMessage: "The model call was refused (model.not_allowed).",
     });
     expect(provider.requests).toHaveLength(1);
     const events = await auditedFor(trigger.userId, 2);

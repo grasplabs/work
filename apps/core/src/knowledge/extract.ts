@@ -42,7 +42,7 @@ import type ExtractorWorker from "./extractor/worker.ts";
 // - The local extractor for everything else: a Word or Excel file, which
 //   it reads exactly, as their text is structured XML, for nothing; a
 //   WebVTT file, which only it reads as a transcript; a file in a
-//   sensitive collection (the flag the gateway's data rule reads too);
+//   sensitive collection;
 //   and every file while Grasp has no key for the conversion's provider
 //   (on-prem, a stack without Grasp's keys). So a sensitive file's content
 //   never leaves the deployment's own Workers.
@@ -409,8 +409,6 @@ const unavailableCodes: ReadonlySet<string> = new Set([
   "model.unconfigured",
   "model.no_provider",
   "model.not_allowed",
-  "model.eu_only",
-  "model.sensitive_data",
   "model.unpriced",
   "model.answer_too_long",
 ]);

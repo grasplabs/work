@@ -287,12 +287,7 @@ export const makeWidget = async (
     }
     id = known.data;
   }
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw dashboardErrors.create("dashboard.no_model");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   if (!(await store.claimWidget(person, id))) {
     throw dashboardErrors.create("dashboard.widget_busy");
   }

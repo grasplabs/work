@@ -135,8 +135,6 @@ const gatewayRefusals: Partial<
   "model.queued": "transcription.busy",
   "model.unconfigured": "transcription.unavailable",
   "model.not_allowed": "transcription.unavailable",
-  "model.eu_only": "transcription.unavailable",
-  "model.sensitive_data": "transcription.unavailable",
   "model.unpriced": "transcription.unavailable",
 };
 

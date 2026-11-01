@@ -1302,32 +1302,6 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
     });
   });
 
-  it("hand what a call read to the gateway's data rules", async () => {
-    const { sealed, documents } = await knowledgeApp();
-    await approveModel(sealed, "writer");
-    // Sensitive data may go to another model only.
-    const { provider, providerEnv: withProvider } = await providerEnv(
-      [answer("Leave needs your lead's yes.")],
-      [chosenModel, "openai/gpt-5.4"],
-      { sensitive: { models: ["openai/gpt-5.4"], connections: [] } }
-    );
-    const plain = await call(withProvider, sealed, "help.summarize", {
-      id: documents.leave,
-    });
-    const sensitive = await call(withProvider, sealed, "help.summarize", {
-      id: documents.pay,
-    });
-    expect({
-      plain: outcomeOf(plain),
-      sensitive: outcomeOf(sensitive),
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      plain: "Leave needs your lead's yes.",
-      sensitive: { failed: "resource.unavailable" },
-      sent: 1,
-    });
-  });
-
   it("stop knowledge whose collection permission was revoked", async () => {
     const { sealed, admin, permissions } = await knowledgeApp();
     await revokePermission(env, admin, permissions.salaries);

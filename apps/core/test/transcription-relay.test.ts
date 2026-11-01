@@ -62,12 +62,6 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** The transcription model sockets listen with, the platform's default. */
-const transcriptionModel = "openai/gpt-4o-transcribe";
-
-/** A model the rules may name instead: one that doesn't listen. */
-const textModel = "mistral/mistral-large-latest";
-
 /** What a session answers, as far as these tests read it: the device's key. */
 const sessionKey = z.object({ key: z.string().optional() });
 
@@ -939,60 +933,21 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuses a socket when the sensitive-data rule doesn't name it, opening nothing upstream, audited as a refused model call", async () => {
+  it("listens at OpenAI's EU host, where Grasp's project keeps its data", async () => {
     const { ada } = await openedTwo();
-    const head = await logHead();
 
-    const { upstream, result } = await relaying(
-      async () => {
-        const page = await listen();
-        page.start({
-          type: "start",
-          language: "en",
-          sampleRate: 16_000,
-          link: ada,
-        });
-        return await refusalOf(page);
-      },
-      { config: { sensitive: { models: [textModel] } } }
-    );
-
-    const events = await eventsAfter(head);
-    const refused = events.filter(({ action }) => action === "model.refused");
-    expect({
-      ...result,
-      upstream: upstream.opened.length,
-      refused: refused.map(({ detail }) => [detail?.reason, detail?.model]),
-    }).toStrictEqual({
-      errors: ["transcription.unavailable"],
-      code: 1011,
-      upstream: 0,
-      refused: [["model.sensitive_data", transcriptionModel]],
+    const { upstream, result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      const ready = await page.next();
+      page.socket.close(1000, "Done");
+      return ready?.type;
     });
-  });
-
-  it("listens for an EU-only deployment at OpenAI's EU host, where Grasp's project keeps its data, whatever its EU models list", async () => {
-    const { ada } = await openedTwo();
-
-    const { upstream, result } = await relaying(
-      async () => {
-        const page = await listen();
-        page.start({
-          type: "start",
-          language: "en",
-          sampleRate: 16_000,
-          link: ada,
-        });
-        const ready = await page.next();
-        page.socket.close(1000, "Done");
-        return ready?.type;
-      },
-      {
-        config: {
-          eu: { deployment: true, models: [textModel] },
-        },
-      }
-    );
 
     expect([
       result,

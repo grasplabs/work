@@ -68,8 +68,6 @@ const personApi = async (role: Role): Promise<Person> =>
 
 /** The model the organization chose. */
 const chosenModel = "mistral/mistral-large-latest";
-/** Hosted in the EU, as the tests' config says: its provider's EU region. */
-const euModel = "openai/gpt-5.4";
 
 /** A step of a workflow that calls one of its App's functions. */
 interface CallingStep {
@@ -2058,66 +2056,6 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
         binding: "writer",
         bindingApp: assistant,
       },
-    ]);
-  });
-
-  it("hold another App's model requests to the rules for what the calling App read, an EU-only connection's included", async () => {
-    const admin = await personApi("admin");
-    const builder = await personApi("builder");
-    const relay = await appWith(builder, relayingFiles());
-    const assistant = await appWith(builder, modelFiles());
-    await bindWriter(admin, assistant);
-    await bindAssistant(admin, relay, assistant);
-    const connectionId = await connectShared(admin);
-    const requested = await builder.api.permissions.request({
-      subject: { type: "app", appId: relay },
-      object: { type: "connection", connectionId },
-      actions: ["mail.list"],
-      binding: "MAIL",
-    });
-    await admin.api.permissions.grant(requested.id, { version: 1 });
-    await admin.api.resourceBindings.approve({
-      app: relay,
-      alias: "mail",
-      target: { kind: "connector", permissionId: requested.id },
-      reviewed: { version: 1 },
-    });
-    // The connection's data must stay with a model hosted in the EU; the
-    // Assistant's writer isn't one.
-    const { provider, env: euOnly } = await callEnv(
-      [answer("Nothing read."), answer("Never sent.")],
-      {
-        rules: {
-          eu: { models: [euModel], connections: [connectionId] },
-        },
-      }
-    );
-    const plain = await screenCall(euOnly, builder, relay, "relay.ask");
-    const afterReading = await screenCall(
-      euOnly,
-      builder,
-      relay,
-      "relay.readThenAsk"
-    );
-    expect({
-      plain,
-      afterReading,
-      asked: provider.requests.length,
-    }).toStrictEqual({
-      plain: { ok: true, value: "Nothing read." },
-      afterReading: { ok: true, value: "error:resource.unavailable" },
-      asked: 1,
-    });
-    // Refused for the connection the calling App read, as the Assistant.
-    const events = await allEvents();
-    const refused = events.filter(
-      ({ action, actor }) =>
-        action === "model.refused" &&
-        actor?.type === "app" &&
-        actor.appId === assistant
-    );
-    expect(refused).toMatchObject([
-      { detail: { reason: "model.eu_only", because: "connection" } },
     ]);
   });
 });

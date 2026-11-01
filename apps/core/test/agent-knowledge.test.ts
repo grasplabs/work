@@ -354,58 +354,6 @@ describe("a chat's Knowledge", setUpTime, () => {
     ).toStrictEqual([[], [collectionId], [collectionId], [collectionId]]);
   });
 
-  it("keeps a chat that read a sensitive collection to the models its data rule allows, in every later turn", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const teamId = await newTeam(admin, [person]);
-    const payroll = await collectionWithNote(admin, {
-      name: `Payroll ${unique()}`,
-      access: "teams",
-      teams: [teamId],
-      sensitive: true,
-    });
-    const { stub, chat, ask, agent } = await chatOf(person.userId);
-    const euModel = "mistral/mistral-large-latest";
-    const provider = await fakeProviderFor(
-      [model, euModel],
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(payroll.noteId)})).title;`
-      ),
-      says("Never sent.")
-    );
-    await configureObject(stub, {
-      rules: { sensitive: { models: [euModel] } },
-    });
-    await grantRead(admin, agent, payroll.collectionId);
-
-    // The read is sensitive: the request after it is refused, before it
-    // is sent, and so is the next turn, by what the chat read.
-    const first = await ask("Read the payroll note.");
-    await expect(outcome(ask("And now?"))).resolves.toBe(
-      "model.sensitive_data"
-    );
-
-    expect(first.outcome).toBe("failed");
-    expect(provider.requests).toHaveLength(1);
-    const events = await eventsOf(
-      agent.agentId,
-      (all) =>
-        all.filter(({ action }) => action === "model.refused").length === 2
-    );
-    expect(
-      events
-        .filter(({ action }) => action === "model.refused")
-        .map(({ detail, provenance }) => ({
-          because: detail.because,
-          provenance,
-        }))
-    ).toStrictEqual([
-      { because: "collection", provenance: [payroll.collectionId] },
-      { because: "collection", provenance: [payroll.collectionId] },
-    ]);
-    await expect(stub.isChatRestricted(chat.id)).resolves.toBeTruthy();
-  });
-
   it("reads in every chat of the workspace under one grant, each chat keeping its own sources", async () => {
     const admin = await newAdmin();
     const person = await newPerson();

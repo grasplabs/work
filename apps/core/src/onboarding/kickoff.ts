@@ -483,21 +483,16 @@ export const transcriptOf = async (
   return { text: trimmed, fileName };
 };
 
-/**
- * The model the kickoff is read with: the deployment's careful one, which
- * must be let take sensitive data (and keep in the EU, where every call
- * must stay there).
- */
-const readingModel = async (env: Env): Promise<string | undefined> =>
-  modelForRole(await modelSettings(env), "careful", { sensitive: true });
+/** The model the kickoff is read with: the deployment's careful one. */
+const readingModel = async (env: Env): Promise<string> =>
+  modelForRole(await modelSettings(env), "careful");
 
 /** How long a reading may take: a long conversation, read once. */
 const readingTimeoutMs = 120_000;
 
 /**
  * Reads `transcript` for what Stephen needs, through the model gateway:
- * a call core makes for the onboarding, which the rules judge as carrying
- * sensitive data, by the staff member who brought it in (`by`).
+ * a call core makes for the onboarding, by the staff member who brought it in (`by`).
  */
 export const readKickoff = async (
   env: Env,
@@ -506,9 +501,6 @@ export const readKickoff = async (
   by: AuditActor
 ): Promise<KickoffReading> => {
   const model = await readingModel(env);
-  if (model === undefined) {
-    throw kickoffErrors.create("kickoff.not_read");
-  }
   let answer: Answer;
   try {
     ({ output: answer } = await models(env).call({

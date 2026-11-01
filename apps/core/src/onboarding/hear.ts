@@ -67,8 +67,6 @@ const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
   "model.queued": [503, "hear.busy"],
   "model.unconfigured": [503, "hear.unavailable"],
   "model.not_allowed": [503, "hear.unavailable"],
-  "model.eu_only": [503, "hear.unavailable"],
-  "model.sensitive_data": [503, "hear.unavailable"],
   "model.unpriced": [503, "hear.unavailable"],
 };
 
