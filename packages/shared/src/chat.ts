@@ -8,7 +8,7 @@ import type {
   ScreenProblem,
 } from "./screens.ts";
 import type { ThinkingStep } from "./thinking.ts";
-import { uploadNameSchema } from "./uploads.ts";
+import { uploadNameSchema, uploadTypes } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
 // (core's chats-rpc.ts). Each chat belongs to the person who made it: only
@@ -149,6 +149,67 @@ export interface ProjectDocument {
   bytes: number;
   /** When it was added (ISO 8601). */
   createdAt: string;
+}
+
+// Files attached to a question: the person attaches each to the chat
+// (`ChatsApi.attachFile`), core reads its text then, with Knowledge's
+// extractor, and the question that names it (`ChatQuestion.files`) carries
+// it. Its agent reads the text as data (`env.chat.readFile`), never as its
+// instructions. Only the text is kept, with the chat, and goes with it.
+
+/**
+ * The file types a chat file may be, by extension: what Knowledge reads
+ * an upload of, and the text a project document is.
+ */
+export const chatFileTypes = {
+  pdf: uploadTypes.pdf,
+  docx: uploadTypes.docx,
+  xlsx: uploadTypes.xlsx,
+  md: "text/markdown",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+} as const;
+export type ChatFileType = keyof typeof chatFileTypes;
+
+/** Largest file one attachment takes, in bytes: 10 MB, as an upload. */
+export const chatFileMaxBytes = 10 * 1024 * 1024;
+
+/** Most files one question carries. */
+export const chatFilesPerQuestionMax = 5;
+
+/** Most files one chat keeps, sent or waiting for their question. */
+export const chatFilesMax = 20;
+
+const isChatFileType = (value: string): value is ChatFileType =>
+  Object.hasOwn(chatFileTypes, value);
+
+/** A chat file's type, by its name's extension; `undefined` for none it takes. */
+export const chatFileTypeOf = (name: string): ChatFileType | undefined => {
+  const extension = projectExtension
+    .exec(name)
+    ?.groups?.extension?.toLowerCase();
+  return extension !== undefined && isChatFileType(extension)
+    ? extension
+    : undefined;
+};
+
+/** A file attached to a chat, as its person sees it. */
+export interface ChatFile {
+  id: string;
+  /** The file's name, as it was attached. */
+  name: string;
+  type: ChatFileType;
+  /** The file's size, in bytes. */
+  bytes: number;
+  /** When it was attached (ISO 8601). */
+  createdAt: string;
+}
+
+/** A file to attach: its name, with one of {@link chatFileTypes}, and itself. */
+export interface ChatFileInput {
+  name: string;
+  bytes: Uint8Array;
 }
 
 /** One of the person's projects. */
@@ -436,7 +497,14 @@ export interface ChatReasoning {
  * instructions and the APIs it was shown aren't among them.
  */
 export type ChatMessage =
-  | { id: number; role: "user"; text: string; at: string }
+  | {
+      id: number;
+      role: "user";
+      text: string;
+      /** The files the question carried, in the order they were attached. */
+      files?: ChatFile[];
+      at: string;
+    }
   | {
       id: number;
       role: "assistant";
@@ -731,6 +799,12 @@ export interface ChatQuestion {
    * think ignores it.
    */
   effort?: ModelEffort;
+  /**
+   * The chat's files the question carries (`ChatsApi.attachFile`), at
+   * most {@link chatFilesPerQuestionMax}: each one attached and not yet
+   * carried by another question.
+   */
+  files?: string[];
 }
 
 /**
@@ -817,6 +891,13 @@ export interface ChatsApi {
    * holds; refused while its agent works.
    */
   remove: (chatId: string) => Promise<void>;
+  /**
+   * Attaches a file to the chat, for its next question to carry: a file
+   * of one of {@link chatFileTypes} of at most {@link chatFileMaxBytes},
+   * up to {@link chatFilesMax} a chat. Resolves once its text is read,
+   * and is refused with why when it can't be. Audited.
+   */
+  attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
   /**
    * Asks the chat's agent a question. Resolves once the agent has taken
    * it; the answer streams to `watch`, and goes on without anyone

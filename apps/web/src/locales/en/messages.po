@@ -3314,6 +3314,14 @@ msgstr "At work"
 msgid "Athens"
 msgstr "Athens"
 
+#: src/chat/chat-files.tsx
+msgid "Attach files"
+msgstr "Attach files"
+
+#: src/activity/audit-words.ts
+msgid "Attached a file to a chat"
+msgstr "Attached a file to a chat"
+
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
 msgstr "Attempt {n}"
@@ -11247,6 +11255,11 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Reading"
 
+#. Grasp reads a file the person attached; {file} is its name.
+#: src/chat/thread.tsx
+msgid "Reading {file}"
+msgstr "Reading {file}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Reading {name}"
@@ -11444,6 +11457,10 @@ msgstr "Remove {label}"
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}?"
 msgstr "Remove {label}?"
+
+#: src/chat/chat-files.tsx
+msgid "Remove {name}"
+msgstr "Remove {name}"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {name} from the fallbacks"
