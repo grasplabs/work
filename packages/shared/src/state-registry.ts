@@ -344,6 +344,10 @@ const coreDb: D1State = {
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
+    workflow_run_file_reads: transient(
+      `${core}workflows/run-file-downloads.ts`,
+      "Which run file downloads and listings were audited today: one entry a day per person and file, swept two days on."
+    ),
     build_leases: transient(`${core}build-admission.ts`),
     build_commit_fences: transient(`${core}build-admission.ts`),
     build_admission_queue: transient(`${core}build-admission.ts`),
