@@ -37,7 +37,6 @@ export type ChatPlatform = z.infer<typeof chatPlatformSchema>;
 export const chatPlatformNames: Readonly<Record<string, string>> = {
   teams: "Microsoft Teams",
   slack: "Slack",
-  gmail: "Gmail",
   discord: "Discord",
   gchat: "Google Chat",
   "google-chat": "Google Chat",

@@ -1,8 +1,7 @@
 import { signInConfig } from "../auth/config.ts";
-import { gmailSetUp } from "./gmail.ts";
 
 /** A chat platform Stephen can be set up on, by its Chat SDK adapter's name. */
-export type SetUpPlatform = "teams" | "slack" | "gmail";
+export type SetUpPlatform = "teams" | "slack";
 
 /**
  * Whether the deployment set `platform` up: Teams once it has the bot's id
@@ -13,9 +12,6 @@ export const isSetUp = (
   env: Env,
   platform: string
 ): platform is SetUpPlatform => {
-  if (platform === "gmail") {
-    return gmailSetUp(env) !== undefined;
-  }
   if (platform === "slack") {
     return (
       env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""

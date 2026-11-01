@@ -1,7 +1,6 @@
 import type { ChannelReach } from "@grasp-os/shared/channel-accounts";
 
 import { stephenFor } from "../stephen-reach.ts";
-import { gmailSetUp } from "./gmail.ts";
 import { isSetUp } from "./set-up.ts";
 import type { SetUpPlatform } from "./set-up.ts";
 
@@ -9,10 +8,10 @@ import type { SetUpPlatform } from "./set-up.ts";
 // the order Settings shows them, and only where he answers them
 // (Settings › Stephen), so nobody is sent to an app that turns them away.
 // Each says only what the app shows anyone who looks for him there: the
-// Teams bot's app id, the Gmail address. Never a secret.
+// Teams bot's app id. Never a secret.
 
 /** The chat apps Stephen can be set up in, in the order they are shown. */
-const platforms: readonly SetUpPlatform[] = ["teams", "slack", "gmail"];
+const platforms: readonly SetUpPlatform[] = ["teams", "slack"];
 
 /** How to reach Stephen on `platform`, once it is set up. */
 const reachOn = (env: Env, platform: SetUpPlatform): ChannelReach => {
@@ -23,22 +22,13 @@ const reachOn = (env: Env, platform: SetUpPlatform): ChannelReach => {
       const botId = encodeURIComponent(env.TEAMS_BOT_ID ?? "");
       return {
         platform,
-        address: null,
         href: `https://teams.microsoft.com/l/chat/0/0?users=28:${botId}`,
-      };
-    }
-    case "gmail": {
-      const mailbox = gmailSetUp(env)?.mailbox;
-      return {
-        platform,
-        address: mailbox ?? null,
-        href: mailbox === undefined ? null : `mailto:${mailbox}`,
       };
     }
     case "slack": {
       // Slack has no link to an app that works in every workspace: people
       // find him under Apps in their own.
-      return { platform, address: null, href: null };
+      return { platform, href: null };
     }
     default: {
       return platform satisfies never;

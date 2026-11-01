@@ -6,26 +6,22 @@ import { MessageSquareIcon } from "lucide-react";
 
 // Settings › Security › Chat apps: where the person reaches Stephen, in
 // each chat app the deployment set up that he answers them in, as core
-// says (`channelAccounts.reach`): the address to write to, and a link that
-// opens a chat with him where the app has one.
+// says (`channelAccounts.reach`): where to find him, and a link that opens
+// a chat with him where the app has one.
 
-/** What to look for in an app that gives no address, in the page's language. */
-const useNoAddressText = (platform: string): string => {
+/** Where to find Stephen in `platform`, in the page's language. */
+const useFindText = (platform: ChannelReach["platform"]): string => {
   const { t } = useLingui();
-  if (platform === "teams") {
-    return t`Open a chat with Stephen, or search for him in Teams’ apps.`;
-  }
-  if (platform === "slack") {
-    return t`Find Stephen under Apps in your Slack workspace.`;
-  }
-  return t`Ask your admin where to write to Stephen there.`;
+  return platform === "teams"
+    ? t`Open a chat with Stephen, or search for him in Teams’ apps.`
+    : t`Find Stephen under Apps in your Slack workspace.`;
 };
 
 /** One app, with what to write to and a link that opens it. */
 const ReachRow = ({ reach }: { reach: ChannelReach }) => {
   const { t } = useLingui();
   const app = chatPlatformName(reach.platform);
-  const noAddress = useNoAddressText(reach.platform);
+  const find = useFindText(reach.platform);
   return (
     <li className="flex items-center gap-3 border-t px-5 py-3">
       <MessageSquareIcon
@@ -34,9 +30,7 @@ const ReachRow = ({ reach }: { reach: ChannelReach }) => {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{app}</span>
-        <span className="text-muted-foreground truncate">
-          {reach.address ?? noAddress}
-        </span>
+        <span className="text-muted-foreground truncate">{find}</span>
       </div>
       {reach.href === null ? null : (
         <Button

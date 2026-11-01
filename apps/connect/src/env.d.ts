@@ -72,15 +72,6 @@ interface __BaseEnv_Env {
    */
   SLACK_BOT_TOKEN?: string;
   /**
-   * Stephen's own Gmail mailbox (people email Stephen), and the OAuth
-   * client and refresh token connect reads and sends its mail with. Until
-   * all four are set, every Gmail request is refused as `unconfigured`.
-   */
-  GMAIL_MAILBOX?: string;
-  GMAIL_CLIENT_ID?: string;
-  GMAIL_CLIENT_SECRET?: string;
-  GMAIL_REFRESH_TOKEN?: string;
-  /**
    * Grasp's own keys at the AI providers, for platform features
    * (src/ai-providers.ts): each optional, and a provider whose key is unset
    * isn't offered for them. Never the organization's own keys, which are

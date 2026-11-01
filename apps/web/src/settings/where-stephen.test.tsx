@@ -17,30 +17,25 @@ const drawn = (reach: ChannelReach[]): string =>
   );
 
 describe("where to reach Stephen", () => {
-  it("names each app with what to write to, and opens it in a new tab", () => {
+  it("names each app with where to find him, and opens it in a new tab", () => {
     const html = drawn([
       {
         platform: "teams",
-        address: null,
         href: "https://teams.microsoft.com/l/chat/0/0?users=28:acme-bot",
-      },
-      {
-        platform: "gmail",
-        address: "stephen@acme.test",
-        href: "mailto:stephen@acme.test",
       },
     ]);
 
     expect(html).toContain("Microsoft Teams");
     expect(html).toContain(
+      "Open a chat with Stephen, or search for him in Teams’ apps."
+    );
+    expect(html).toContain(
       'href="https://teams.microsoft.com/l/chat/0/0?users=28:acme-bot" rel="noopener noreferrer" target="_blank"'
     );
-    expect(html).toContain("stephen@acme.test");
-    expect(html).toContain('href="mailto:stephen@acme.test"');
   });
 
-  it("says where to look in an app with no address or link", () => {
-    const html = drawn([{ platform: "slack", address: null, href: null }]);
+  it("says where to look in an app with no link", () => {
+    const html = drawn([{ platform: "slack", href: null }]);
 
     expect(html).toContain("Find Stephen under Apps in your Slack workspace.");
     expect(html).not.toContain("<a");

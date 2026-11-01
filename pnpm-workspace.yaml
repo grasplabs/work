@@ -15,8 +15,6 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
-  # Its install script, under the Gmail adapter, only prints a banner.
-  core-js-pure: false
 
 catalog:
   # Tooling
@@ -86,10 +84,9 @@ catalog:
   better-auth: 1.7.5
   # The admin's Cloudflare Access check.
   jose: 6.2.12
-  # Vercel's Chat SDK (MIT): one bot on Teams, Slack and Gmail,
-  # its state in Durable Objects (packages/chat). Its adapters
+  # Vercel's Chat SDK (MIT): one bot on Teams and Slack, its
+  # state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
-  "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
   chat: 4.43.0

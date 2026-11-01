@@ -59,12 +59,6 @@
  * someone who hasn't linked one gets the link, once, and nothing more. A
  * press on a card's button comes the same way too, form-encoded, and is
  * handled as a press in Teams is (`slackPressResponse`).
- *
- * Gmail (gmail.ts) is Stephen's own mailbox: a push Google signed for it
- * starts the adapter reading what is new, and only mail from an address a
- * person linked to themselves goes on; someone on the client's own domains
- * who hasn't linked theirs is sent the link, once a day, and anyone else
- * nothing, so a forged sender never draws a reply.
  */
 import { durableObjectState } from "@grasp-os/chat/state";
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
@@ -97,13 +91,6 @@ import {
   signInCard,
   startAction,
 } from "./cards.tsx";
-import {
-  gmailAdapter,
-  gmailSetUp,
-  ownDomainOf,
-  verifiedGmailPush,
-} from "./gmail.ts";
-import type { GmailKeys } from "./gmail.ts";
 import { pressCard } from "./press.ts";
 import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
@@ -130,11 +117,8 @@ export const channelAdapters = async (
   slack: slackAdapter(env),
 });
 
-/**
- * A platform the door has an adapter for: Gmail's is built per push, for
- * the mailbox the deployment set up (gmail.ts).
- */
-type Platform = keyof Awaited<ReturnType<typeof channelAdapters>> | "gmail";
+/** A platform the door has an adapter for. */
+type Platform = keyof Awaited<ReturnType<typeof channelAdapters>>;
 
 /** Largest request a platform may post: a Teams activity is far smaller. */
 const maxBodyBytes = 256 * 1024;
@@ -961,170 +945,9 @@ const slackResponse = async (
   );
 };
 
-/** What the door reads of a Gmail mail's own headers: whom replies go to. */
-const gmailReplyToSchema = z.object({
-  email: z.object({
-    replyTo: z
-      .array(z.object({ address: z.string().max(320).optional() }))
-      .optional(),
-  }),
-});
-
-/** How often someone unknown on the client's own domains is sent the link. */
-const gmailLinkEveryMs = 24 * 60 * 60 * 1000;
-
-/**
- * Sends `address` the link to sign in by, in a mail of its own to that
- * address, never as a reply (a reply goes to whatever Reply-To the mail
- * named): once a day, and only on one of the client's own sign-in domains,
- * so a forged sender elsewhere draws nothing. Their mail isn't read or
- * quoted.
- */
-const offerGmailLink = async (
-  env: Env,
-  state: StateAdapter,
-  adapter: ReturnType<typeof gmailAdapter>,
-  address: string,
-  origin: string
-): Promise<void> => {
-  const domains = signInConfig(env)?.domains ?? [];
-  if (ownDomainOf(address, domains) === undefined) {
-    log.info("channel.unknown", { platform: "gmail", reason: "domain" });
-    return;
-  }
-  if (
-    !(await state.setIfNotExists(
-      `door:gmail:link:${address}`,
-      true,
-      gmailLinkEveryMs
-    ))
-  ) {
-    return;
-  }
-  try {
-    const { path } = await offerChannelLink(env, {
-      platform: "gmail",
-      platformUserId: address,
-    });
-    // As plain text: a mail shows a card's text, not its buttons.
-    await adapter.postMessage(
-      await adapter.openDM(address),
-      `${say("signIn", "en")}\n\n${new URL(path, origin).href}`
-    );
-  } catch (error) {
-    log.warn("channel.line_failed", {
-      platform: "gmail",
-      line: "link",
-      ...errorFields(error),
-    });
-  }
-};
-
-/** The addresses a mail asks replies to go to, lowercase: none if it names none. */
-const replyToOf = (raw: unknown): string[] =>
-  (gmailReplyToSchema.safeParse(raw).data?.email.replyTo ?? []).flatMap(
-    ({ address }) => (address === undefined ? [] : [address.toLowerCase()])
-  );
-
-/**
- * Answers a Gmail push whose body the door read: 401 unless Google signed
- * it for Stephen's mailbox and this deployment's subscription, and
- * otherwise what the adapter answers, each new mail handled in the
- * background. Only mail from an address a person linked goes on.
- */
-const gmailResponse = async (
-  request: Request,
-  env: Env,
-  body: string,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  handoff: ChannelHandoff | undefined,
-  gmailKeys: GmailKeys | undefined
-): Promise<Response> => {
-  const setUp = gmailSetUp(env);
-  const pushId =
-    setUp === undefined
-      ? undefined
-      : await verifiedGmailPush(env, request, body, gmailKeys);
-  if (setUp === undefined || pushId === undefined) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
-  if (!(await state.setIfNotExists(`door:gmail:${pushId}`, true, seenTtlMs))) {
-    return new Response(null, { status: 200 });
-  }
-  const adapter = gmailAdapter(env, setUp, gmailKeys);
-  const chat = new Chat({
-    userName: "Stephen",
-    adapters: { gmail: adapter },
-    state,
-    logger: "silent",
-  });
-  const { origin } = new URL(request.url);
-  chat.onNewMention(async (thread, message) => {
-    const address = message.author.userId.toLowerCase();
-    // Stephen's own mail, and what he sent, never goes on.
-    if (message.author.isMe || address === setUp.mailbox) {
-      return;
-    }
-    if (!messages.take(`gmail:${address}`, doorClock.now())) {
-      log.info("channel.limited", { platform: "gmail" });
-      return;
-    }
-    // A reply goes to the mail's Reply-To: one naming anyone but its
-    // sender would carry the answer, or the link, to someone else.
-    if (replyToOf(message.raw).some((replyTo) => replyTo !== address)) {
-      log.info("channel.refused", { platform: "gmail", reason: "reply_to" });
-      return;
-    }
-    const writer = await writerOf(env, "gmail", address);
-    if (writer.kind !== "member") {
-      await offerGmailLink(env, state, adapter, address, origin);
-      return;
-    }
-    // Settings › Stephen, as for every chat app: whether he answers them
-    // by mail at all. Someone he doesn't is sent nothing: a reply goes out
-    // only to who he answers.
-    const reach = await stephenFor(env, writer.userId, "gmail");
-    if (!reach.reaches) {
-      log.info("channel.refused", { platform: "gmail", reason: "not_on" });
-      return;
-    }
-    await keepConversation(env, "gmail", thread.id, writer.userId);
-    // A mail is sent whole: what comes after the answer goes right after.
-    const later: (() => Promise<unknown>)[] = [];
-    await handoff?.({
-      platform: "gmail",
-      userId: writer.userId,
-      thread,
-      message,
-      acts: reach.acts,
-      afterward: (send) => {
-        later.push(send);
-      },
-    });
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
-  });
-  return await chat.webhooks.gmail(
-    new Request(request.url, {
-      method: "POST",
-      headers: request.headers,
-      body,
-    }),
-    {
-      waitUntil: (promise) => {
-        ctx.waitUntil(promise);
-      },
-    }
-  );
-};
-
 /** Options the tests set: the keys to check against, and the handoff. */
 export interface DoorOptions {
   teamsKeys?: TeamsKeys;
-  gmailKeys?: GmailKeys;
   handoff?: ChannelHandoff;
 }
 
@@ -1139,7 +962,7 @@ export const channelResponse = async (
   platform: string,
   requestId: string,
   ctx: Pick<ExecutionContext, "waitUntil">,
-  { teamsKeys, gmailKeys, handoff }: DoorOptions = {}
+  { teamsKeys, handoff }: DoorOptions = {}
 ): Promise<Response> => {
   if (!isSetUp(env, platform)) {
     return errorResponse(
@@ -1165,9 +988,6 @@ export const channelResponse = async (
   }
   if (platform === "slack") {
     return await slackResponse(request, env, body, ctx, handoff);
-  }
-  if (platform === "gmail") {
-    return await gmailResponse(request, env, body, ctx, handoff, gmailKeys);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
     ctx.waitUntil(countSignal(env, platform, "refused"));

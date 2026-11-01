@@ -33,7 +33,7 @@ import type { SessionCheck } from "../session-check.ts";
 import { stephenReachFor } from "./where.ts";
 
 // A person's accounts on chat platforms whose messages carry no Entra
-// object id (Slack, Gmail), linked to their Grasp person,
+// object id (Slack), linked to their Grasp person,
 // so the agent knows who writes there. The ways it can fail, and what
 // stops each:
 //
@@ -54,9 +54,9 @@ import { stephenReachFor } from "./where.ts";
 //   (members.ts), and `personOnChannel` knows active members only.
 // - Grasp staff link an account: they aren't the company's people; every
 //   method refuses them.
-// - The audit log, append-only, keeps an email address: an event names the
-//   account by its own id and its platform, never the platform's id (on
-//   Gmail that is the address).
+// - The audit log, append-only, keeps the platform's id for an account:
+//   an event names the account by its own id and its platform, never the
+//   platform's id.
 //
 // A link someone forwards to a colleague, who signs in and confirms,
 // links the sender's account to the colleague: the confirm card shows the
@@ -293,7 +293,7 @@ export class ChannelAccountsRpc
               WHERE ${channelLinks.secretHash} = ${secretHash} AND changes() > 0`
           )
           .onConflictDoNothing(),
-        // Never the platform's id: on Gmail it is an email address.
+        // Never the platform's id.
         outboxedIfChanged(db, {
           actor: actorOf(person),
           action: "channel_account.linked",

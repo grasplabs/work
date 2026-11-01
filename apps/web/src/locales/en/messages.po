@@ -3242,10 +3242,6 @@ msgstr "Ask to go live with version {askable}"
 msgid "Ask your admin to connect an AI provider."
 msgstr "Ask your admin to connect an AI provider."
 
-#: src/settings/where-stephen.tsx
-msgid "Ask your admin where to write to Stephen there."
-msgstr "Ask your admin where to write to Stephen there."
-
 #: src/engines/app-access-requests.tsx
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx

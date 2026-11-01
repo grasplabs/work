@@ -10,9 +10,9 @@ import { defineErrorFamily } from "./errors.ts";
 
 /**
  * The platforms whose signing keys connect fetches: Microsoft's Bot
- * Framework for Teams, and Google's for Gmail's Pub/Sub pushes.
+ * Framework for Teams. Slack signs with a shared secret instead.
  */
-export const channelKeyPlatforms = ["teams", "gmail"] as const;
+export const channelKeyPlatforms = ["teams"] as const;
 
 export const channelKeyPlatformSchema = z.enum(channelKeyPlatforms);
 export type ChannelKeyPlatform = z.infer<typeof channelKeyPlatformSchema>;

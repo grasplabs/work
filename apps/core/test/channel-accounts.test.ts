@@ -11,7 +11,7 @@ import {
   sweepChannelLinks,
 } from "../src/channels/accounts.ts";
 import { stephenReachFor } from "../src/channels/where.ts";
-import { gmailAccount, slackApp, teamsBot } from "./connect-providers.ts";
+import { slackApp, teamsBot } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -28,8 +28,8 @@ import {
 // prefetch links), one that links twice, after its time, after a newer
 // one, or to a second person; someone linking an account they weren't
 // sent, or unlinking another's; staff linking anything; a removed person
-// still known on a platform; and the platform's id (an email address on
-// Gmail) or the secret kept where it shouldn't be.
+// still known on a platform; and the platform's id or the secret kept
+// where it shouldn't be.
 
 const idp = mockIdp();
 
@@ -327,7 +327,7 @@ describe("a linked chat account", { timeout: 60_000 }, () => {
       me.userId
     );
     await expect(
-      personOnChannel(env, "gmail", platformUserId)
+      personOnChannel(env, "teams", platformUserId)
     ).resolves.toBeNull();
     await expect(someoneElse.api.channelAccounts.list()).resolves.toStrictEqual(
       []
@@ -368,15 +368,9 @@ describe("where to reach Stephen", { timeout: 60_000 }, () => {
     expect(reach).toStrictEqual([
       {
         platform: "teams",
-        address: null,
         href: `https://teams.microsoft.com/l/chat/0/0?users=28:${teamsBot.id}`,
       },
-      { platform: "slack", address: null, href: null },
-      {
-        platform: "gmail",
-        address: gmailAccount.mailbox,
-        href: `mailto:${gmailAccount.mailbox}`,
-      },
+      { platform: "slack", href: null },
     ]);
     expect(JSON.stringify(reach)).not.toContain(slackApp.signingSecret);
   });
@@ -385,11 +379,7 @@ describe("where to reach Stephen", { timeout: 60_000 }, () => {
     const me = await signedInApi(idp, "user");
 
     const reach = await stephenReachFor(
-      {
-        ...env,
-        SLACK_SIGNING_SECRET: "",
-        GMAIL_MAILBOX: undefined,
-      },
+      { ...env, SLACK_SIGNING_SECRET: "" },
       me.userId
     );
 
@@ -422,7 +412,7 @@ describe("where to reach Stephen", { timeout: 60_000 }, () => {
         narrowed: narrowed.map(({ platform }) => platform),
         off,
       }).toStrictEqual({
-        narrowed: ["teams", "gmail"],
+        narrowed: ["teams"],
         off: [],
       });
     } finally {
