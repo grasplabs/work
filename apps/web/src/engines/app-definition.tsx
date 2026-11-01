@@ -6,7 +6,6 @@ import { DownloadIcon } from "lucide-react";
 
 import { ErrorText } from "../error-text.tsx";
 import { downloadText } from "../export/export-file.tsx";
-import { fileSlug } from "../landscape/download.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
 
@@ -18,9 +17,17 @@ import { buildsApp } from "./app-role.ts";
 // App's builders, Grasp staff among them; a page offers it to them alone,
 // and only once a version is current, as there is nothing to export before.
 
+const nonSlug = /[^a-z0-9]+/gu;
+const slugEnds = /^-|-$/gu;
+
 /** The file a definition package is saved as: "invoices-v3.json". */
-const fileName = (name: string, version: number): string =>
-  `${fileSlug(name) || "domain"}-v${version}.json`;
+const fileName = (name: string, version: number): string => {
+  const slug = name
+    .toLowerCase()
+    .replaceAll(nonSlug, "-")
+    .replaceAll(slugEnds, "");
+  return `${slug === "" ? "domain" : slug}-v${version}.json`;
+};
 
 /** Whether `identity` may export `app`'s definition. */
 export const exportsDefinition = (
