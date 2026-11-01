@@ -971,11 +971,16 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
       ],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    // Once the team is told what was agreed stays: the first test may
+    // already have put them in place.
+    const { agreed } = await api.onboardingStaff.agreements();
+    if (!agreed) {
+      await api.onboardingStaff.setAgreements({
+        processing: true,
+        assessment: true,
+        council: "none",
+      });
+    }
   } finally {
     core[Symbol.dispose]();
   }

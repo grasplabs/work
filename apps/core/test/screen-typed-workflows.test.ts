@@ -862,6 +862,83 @@ describe(
       });
     });
 
+    it("shows a reviewer the real decision wait that asks them, answerable, where its starter sees it unanswerable", async () => {
+      const admin = await signedIn("admin");
+      const builder = await signedIn("builder");
+      const key = `approval-${unique()}`;
+      await publishCatalogContract(env, admin.acting, {
+        key,
+        kind: "decision",
+        input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+        response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+      });
+      const workflow = await createWorkflowResource(
+        env,
+        builder.acting,
+        `ask-${unique()}`
+      );
+      await publishWorkflowVersion(env, builder.acting, workflow.id, {
+        definition: askingOf(key, "role:admin")(workflow.name),
+        basedOn: null,
+      });
+      await approveWorkflowBinding(env, admin.acting, workflow.id, {
+        alias: "approval",
+        target: { kind: "decision", deciders: ["role:admin"] },
+        reviewed: { version: 1 },
+      });
+      const { app, reference } = await requestsApp(undefined, {
+        admin,
+        builder,
+        workflow,
+      });
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      // The engine runs it to its decision, asking the admins.
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.waits).toHaveLength(
+          1
+        );
+      }, settles);
+      stopRun();
+      const watch = readWorkflowRequest(
+        JSON.stringify({
+          workflow: wireOf(reference),
+          watch: "run",
+          runId: handle.runId,
+        })
+      );
+      if (!("watch" in watch)) {
+        throw new Error("Expected a watch");
+      }
+      /** The waits `who` is shown of the run. */
+      const waitsShownTo = async (who: Person) => {
+        const shown = await readWorkflowWatch(env, who.acting, app, watch);
+        return waitsListed(shown.value).map(
+          ({ kind, key: asked, canRespond }) => ({
+            kind,
+            key: asked,
+            canRespond,
+          })
+        );
+      };
+
+      expect({
+        starter: await waitsShownTo(builder),
+        reviewer: await waitsShownTo(admin),
+      }).toStrictEqual({
+        // Its own person sees what it waits on, theirs to answer or not.
+        starter: [{ kind: "decision", key: "approval", canRespond: false }],
+        // The admin it asks watches it for that decision alone, which the
+        // reviewer's filter keeps: answerable, so not dropped.
+        reviewer: [{ kind: "decision", key: "approval", canRespond: true }],
+      });
+    });
+
     it("shows a run's next wait at a revision of its own, though it was running all along", async () => {
       const { builder, app, reference } = await requestsApp(
         undefined,
@@ -2293,7 +2370,7 @@ describe(
         other.runId
       );
       await vi.waitFor(() => {
-        expect(shown().error?.code).toBe("workflow.run_unavailable");
+        expect(shown().unavailable).toBeTruthy();
       }, settles);
       const away = shown();
       // Bound back, and read again as a new run starts: shown again.
@@ -2314,7 +2391,8 @@ describe(
         away: {
           value: away.value,
           fresh: away.fresh,
-          error: away.error?.code,
+          error: away.error,
+          unavailable: away.unavailable,
         },
         back: { revision: back.revision, control: back.value?.control },
       }).toStrictEqual({
@@ -2327,10 +2405,12 @@ describe(
             pendingControl: null,
           },
         },
+        // Shown before: losing it is a state, no error.
         away: {
           value: undefined,
           fresh: false,
-          error: "workflow.run_unavailable",
+          error: undefined,
+          unavailable: true,
         },
         back: { revision: before.revision, control: before.value?.control },
       });
