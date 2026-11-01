@@ -26,7 +26,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import { allEvents } from "./audit-events.ts";
-import { liveStatus, resumed, runObject, stopped } from "./runs.ts";
+import { liveStatus, runInstance, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -170,7 +170,9 @@ const restartReason = "Restarted by the proof";
  * Restarts run `runId` while it waits, as a deploy or a crash does: the
  * engine stops it, its object is restarted where it is, losing all it held
  * in memory, and the engine resumes it, replaying its journal in a fresh
- * activation. Answers when it was stopped.
+ * activation. Its deadlines stay where they were, as core's engine keeps
+ * them when it resumes a run (engine.ts, `keepDeadlines`): the time it was
+ * stopped counts. Answers when it was stopped.
  */
 const restarted = async (runId: string): Promise<number> => {
   await waiting(runId);
@@ -185,9 +187,40 @@ const restarted = async (runId: string): Promise<number> => {
       throw error;
     }
   });
-  await resumed(runId);
+  await runInstance(runId).resume({ keepDeadlines: true });
   return stoppedAt;
 };
+
+/**
+ * Task `task`'s sleep in run `runId`, as its object's journal records it:
+ * when it is due, and how long it sleeps (0 for one whose deadline an
+ * expression resolved). With `waiting`, once it sleeps.
+ */
+const sleepOf = async (
+  runId: string,
+  task: string,
+  { waiting: asleep = false } = {}
+): Promise<{ deadline: number; length: number }> =>
+  await vi.waitFor(
+    async () => {
+      const row = await runInDurableObject(
+        runObject(runId),
+        (_instance, state) =>
+          state.storage.sql
+            .exec(
+              `SELECT deadline, duration_ms AS length FROM steps WHERE type = 'sleep' AND (name = ? OR name LIKE ?)${asleep ? " AND state = 'waiting'" : ""}`,
+              `task:${task}`,
+              `task:${task}:%`
+            )
+            .toArray()[0]
+      );
+      if (row === undefined) {
+        throw new Error(`Task ${task} hasn't slept yet`);
+      }
+      return { deadline: Number(row.deadline), length: Number(row.length) };
+    },
+    { timeout: 90_000, interval: 100 }
+  );
 
 /**
  * The output step `name` of run `runId` recorded, as its run's object
@@ -340,20 +373,35 @@ export const profileProofs = (where: string): void => {
           do: [
             { greet: { set: { said: '${ "Hello, " + .who }' } } },
             { pause: { wait: "PT2S" } },
-            { linger: { wait: '${ "PT1S" }' } },
+            { linger: { wait: '${ "PT3S" }' } },
             { finish: { set: { status: "${ .said }" } } },
           ],
         });
-        const begun = Date.now();
         const runId = await started(by, workflow.id);
+        // Each wait restarted while it sleeps, the sealed one and the
+        // expression's, each read as its journal had it before.
+        const pause = await sleepOf(runId, "pause", { waiting: true });
+        await restarted(runId);
+        const linger = await sleepOf(runId, "linger", { waiting: true });
         await restarted(runId);
         const run = await ended(by, workflow.id, runId);
+        const lingered = await sleepOf(runId, "linger");
         expect({
           end: endOf(run),
-          // Both sleeps, whole: never cut short by the restart.
-          slept: Date.parse(run.endedAt ?? "") - begun >= 3000,
+          pause: await sleepOf(runId, "pause"),
+          linger: lingered.deadline,
+          // The expression's sleep began once the sealed one was due, and
+          // lasts its three seconds.
+          lingered: linger.deadline - pause.deadline >= 3000,
+          // Gone on only once the last sleep was due.
+          slept: Date.parse(run.endedAt ?? "") >= linger.deadline,
         }).toStrictEqual({
           end: { status: "completed", output: { status: "Hello, Ada" } },
+          // Each deadline where it was before its restart: neither cut
+          // short nor moved.
+          pause: { deadline: pause.deadline, length: 2000 },
+          linger: linger.deadline,
+          lingered: true,
           slept: true,
         });
       });
@@ -627,15 +675,23 @@ export const profileProofs = (where: string): void => {
           ],
         });
         const runId = await started(by, workflow.id);
+        await sleepOf(runId, "until", { waiting: true });
         await restarted(runId);
         const run = await ended(by, workflow.id, runId);
         const startedAt = Number(
           z.object({ status: z.string() }).parse(run.output).status
         );
+        const slept = await sleepOf(runId, "until");
         expect({
           status: run.status,
-          slept: Date.parse(run.endedAt ?? "") - startedAt >= 3000,
-        }).toStrictEqual({ status: "completed", slept: true });
+          // The deadline it recorded, unmoved by the restart.
+          deadline: slept.deadline,
+          slept: Date.parse(run.endedAt ?? "") >= startedAt + 3000,
+        }).toStrictEqual({
+          status: "completed",
+          deadline: startedAt + 3000,
+          slept: true,
+        });
       });
 
       it("grasp.decision: asks its recipient once, waits through a restart, and goes on with their confirmed answer", async () => {
