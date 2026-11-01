@@ -177,11 +177,14 @@ describe("how Stephen is set up", () => {
     });
     expect({
       actions: events.map(({ action, actor }) => [action, actor.type]),
-      detail: events[0]?.detail,
+      detail: events.find(({ action }) => action === "onboarding.stephen.set")
+        ?.detail,
       words: JSON.stringify(events).includes("Zebulon"),
     }).toStrictEqual({
       actions: [
+        ["admin.command", "staff"],
         ["onboarding.stephen.set", "staff"],
+        ["admin.command", "staff"],
         ["onboarding.stephen.reset", "staff"],
       ],
       detail: { languages: "nl", limits: 1, terms: 2 },

@@ -106,6 +106,12 @@ export const Route = createFileRoute("/_shell")({
         },
       });
     }
+    // Grasp's staff work from the admin dashboard: nothing here is theirs
+    // but the agreements, until the admin's setup takes them.
+    if (identity.staff && !location.pathname.startsWith("/onboarding")) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/staff", replace: true });
+    }
     // Just back from signing in, an admin whose organization is still
     // onboarding starts in the onboarding. Core out of reach for it: home, as ever.
     const landing = takeJustSignedIn()

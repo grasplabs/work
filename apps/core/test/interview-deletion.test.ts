@@ -297,7 +297,11 @@ const ways: {
   {
     way: "with a new start Grasp's staff give from the admin",
     remove: async (ids) => await adminCommands().newStart(ids.max),
-    audited: ["brain.records.purged", "onboarding.interview.restarted"],
+    audited: [
+      "admin.command",
+      "brain.records.purged",
+      "onboarding.interview.restarted",
+    ],
   },
   {
     way: "by taking them off the staff list (L7)",

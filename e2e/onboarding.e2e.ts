@@ -7,6 +7,7 @@ import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
 import type { Request } from "@playwright/test";
 
+import { localAdmin } from "../apps/core/test/sign-in-config.ts";
 import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
@@ -38,6 +39,22 @@ const dayMs = 24 * 60 * 60 * 1000;
 /** The day `days` from today, as core's plan reads it (UTC). */
 const daysFromToday = (days: number): string =>
   new Date(Date.now() + days * dayMs).toISOString().slice(0, 10);
+
+/**
+ * The admin the deployment names, signed in: let in while the platform
+ * waits for Grasp's go. Grasp's staff have nothing to do in the workspace
+ * (apps/web's routes/staff.tsx).
+ */
+const configuredAdmin = async (): Promise<Person> => {
+  const cookie = await signInAs(localAdmin);
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { userId, role } = await api.whoami();
+    return { userId, email: localAdmin, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
 
 test("staff put the agreements in place, and the links that waited go out", async ({
   cspViolations,
@@ -227,6 +244,23 @@ test("staff give the go, and the company's people sign in", async ({
   } finally {
     signedIn.core[Symbol.dispose]();
   }
+  expect(cspViolations).toStrictEqual([]);
+});
+
+test("Grasp's staff are sent to the admin dashboard, with nothing of the workspace", async ({
+  page,
+  cspViolations,
+}) => {
+  const staff = await signInStaff();
+  await signInTo(page.context(), staff);
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/staff$/u);
+  await expect(
+    page.getByRole("heading", {
+      name: "Grasp staff work from the admin dashboard",
+    })
+  ).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
   expect(cspViolations).toStrictEqual([]);
 });
 
@@ -649,7 +683,7 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
   page,
   cspViolations,
 }) => {
-  const staff = await signInStaff();
+  const admin = await configuredAdmin();
   // Waiting for Grasp's go.
   await adminCommand({ type: "onboarding.gate.close", payload: {} });
 
@@ -700,7 +734,7 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
       socket.send(message);
     });
   });
-  await signInTo(page.context(), staff);
+  await signInTo(page.context(), admin);
   await page.goto("/setup?step=review");
 
   // The difference, and letting Grasp's mail through, which this new
@@ -777,7 +811,7 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   cspViolations,
 }) => {
   // Last in the serial run: it replaces the roster, and moves the plan back.
-  const admin = await signInStaff();
+  const admin = await configuredAdmin();
   const run = crypto.randomUUID().slice(0, 8);
   const sales = `sales-${run}`;
   const service = `service-${run}`;

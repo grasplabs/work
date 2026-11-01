@@ -124,14 +124,17 @@ describe("Grasp's go", () => {
     });
     const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
     expect(member.session).toBeDefined();
+    // Every command is on record as given, the one that changed nothing too.
     expect(actionsOf(events)).toStrictEqual([
+      "admin.command",
       "onboarding.gate.closed",
+      "admin.command",
+      "admin.command",
       "onboarding.gate.opened",
     ]);
-    expect(events.map(({ actor }) => actor.type)).toStrictEqual([
-      "staff",
-      "staff",
-    ]);
+    expect(new Set(events.map(({ actor }) => actor.type))).toStrictEqual(
+      new Set(["staff"])
+    );
   });
 
   it("keeps when it was first given, through taking it back and giving it again", async () => {

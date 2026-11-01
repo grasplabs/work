@@ -121,9 +121,9 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   // First in the file: no test has connected a provider yet.
   it("is not read while the company connected no AI provider", async () => {
     const staff = adminKickoff();
-    await expect(
-      outcome(staff.saveKickoff(pasted(dutch)))
-    ).resolves.toBe("model.no_provider");
+    await expect(outcome(staff.saveKickoff(pasted(dutch)))).resolves.toBe(
+      "model.no_provider"
+    );
   });
 
   it("is read for what Stephen needs, keeping only what its quotes show was said, and his context holds the pain and what to leave alone", async () => {
@@ -212,8 +212,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
 12`;
     const { requests, result: view } = await answering(
       [answer(reading)],
-      async () =>
-        await staff.saveKickoff(file("kickoff.vtt", vtt))
+      async () => await staff.saveKickoff(file("kickoff.vtt", vtt))
     );
     const sent = JSON.stringify(requests[0]?.body);
     expect({
@@ -222,12 +221,8 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       speaker: sent.includes("Anna: Anna (COO)"),
       // A number said on its own line is something said, not a cue's number.
       spoken: sent.includes(String.raw`\n12\n</transcript>`),
-      pdf: await outcome(
-        staff.saveKickoff(file("kickoff.pdf", dutch))
-      ),
-      short: await outcome(
-        staff.saveKickoff(pasted("Hallo, dit is kort."))
-      ),
+      pdf: await outcome(staff.saveKickoff(file("kickoff.pdf", dutch))),
+      short: await outcome(staff.saveKickoff(pasted("Hallo, dit is kort."))),
     }).toStrictEqual({
       file: "kickoff.vtt",
       timings: false,
@@ -370,5 +365,4 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       });
     }
   );
-
 });
