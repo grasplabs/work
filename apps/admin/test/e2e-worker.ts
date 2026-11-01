@@ -31,7 +31,6 @@ import type { AccountState } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { seed, seedCreate, seedOrganizations, seedPlaced } from "./e2e-seed.ts";
 
-export { ChatState } from "@grasp-os/chat/state";
 export { AdminRuns } from "../src/run-object.ts";
 
 /** The tokens the fake lets in, which the seed puts in Secrets Store. */

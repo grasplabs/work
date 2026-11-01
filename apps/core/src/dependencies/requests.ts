@@ -903,22 +903,6 @@ export const waitingDependencies = async (
   };
 };
 
-/** How many requests wait on `by`: as many as `waitingDependencies` lists. */
-export const waitingDependencyCount = async (
-  env: Env,
-  by: Identity
-): Promise<number> => {
-  if (!(await holdsApprove(env, by))) {
-    return 0;
-  }
-  const row = await drizzle(env.DB)
-    .select({ waiting: count() })
-    .from(dependencyRequests)
-    .where(eq(dependencyRequests.status, "pending"))
-    .get();
-  return row?.waiting ?? 0;
-};
-
 const findRow = async (env: Env, input: unknown): Promise<Row> => {
   const id = identifierSchema.safeParse(input);
   const row = id.success

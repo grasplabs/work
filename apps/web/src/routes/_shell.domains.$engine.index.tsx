@@ -40,11 +40,13 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { AppAccessRequests } from "../engines/app-access-requests.tsx";
+import { ExportDefinition } from "../engines/app-definition.tsx";
 import {
   AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
@@ -579,6 +581,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
+        <ExportDefinition app={app} identity={identity} />
         {/* On its bar, as the prototype's Publish: for who builds. */}
         <AppStatusControls app={app} identity={identity} />
       </div>
@@ -676,6 +679,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   />
                 )}
               </Later>
+              <div className="pt-6">
+                <AppWorkflows app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}
