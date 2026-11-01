@@ -70,6 +70,13 @@ describe("attachments", () => {
       unknownType: accepted([{ ...ok, type: "text/html" }]),
       extraField: accepted([{ ...ok, path: "/etc" }]),
       oneAtTheTotal: accepted([{ ...ok, size: attachmentLimits.totalBytes }]),
+      oneByteOver: accepted([{ ...ok, size: attachmentLimits.totalBytes + 1 }]),
+      twoAtTheTotal: accepted(
+        [attachmentLimits.totalBytes - 1, 1].map((size) => ({ ...ok, size }))
+      ),
+      twoOverTheTotal: accepted(
+        [attachmentLimits.totalBytes, 1].map((size) => ({ ...ok, size }))
+      ),
       eleven: accepted(
         Array.from({ length: attachmentLimits.files + 1 }, () => ok)
       ),
@@ -91,6 +98,9 @@ describe("attachments", () => {
       unknownType: false,
       extraField: false,
       oneAtTheTotal: true,
+      oneByteOver: false,
+      twoAtTheTotal: true,
+      twoOverTheTotal: false,
       eleven: false,
       together: false,
     });
