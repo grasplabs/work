@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0909066f-2ee4-4daa-80f9-74512d7f348c",
+  "id": "219636a8-cf68-48b8-b90a-e4b0134a0ec4",
   "prevId": "8ac21ba5-933b-4e87-ab72-6a521168e2d5",
   "tables": {
     "access_revocations": {
@@ -1864,6 +1864,14 @@
         },
         "workflow_calls": {
           "name": "workflow_calls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "exports": {
+          "name": "exports",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -5529,6 +5537,27 @@
         },
         "trigger_id": {
           "name": "trigger_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "package_name": {
+          "name": "package_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "package_version": {
+          "name": "package_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "advisory": {
+          "name": "advisory",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
