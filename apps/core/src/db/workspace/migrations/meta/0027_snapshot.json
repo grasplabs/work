@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f45c728b-f0d8-4c4d-819d-9957da7e0673",
+  "id": "8141ef97-5470-47bf-b153-aab781504a9a",
   "prevId": "6aa67b29-3613-46c9-9ff0-bf78a5fe80a4",
   "tables": {
     "audit_outbox": {
@@ -897,108 +897,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_files": {
-      "name": "chat_files",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_files_chat": {
-          "name": "chat_files_chat",
-          "columns": [
-            "chat_id",
-            "created_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chat_files_chat_id_chats_id_fk": {
-          "name": "chat_files_chat_id_chats_id_fk",
-          "tableFrom": "chat_files",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "chat_files_message_id_chat_messages_id_fk": {
-          "name": "chat_files_message_id_chat_messages_id_fk",
-          "tableFrom": "chat_files",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chat_messages": {
       "name": "chat_messages",
       "columns": {
@@ -1694,51 +1592,6 @@
           "name": "person_id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "email_preferences": {
-      "name": "email_preferences",
-      "columns": {
-        "person_id": {
-          "name": "person_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "needs_you": {
-          "name": "needs_you",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "weekly_summary": {
-          "name": "weekly_summary",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "billing_problems": {
-          "name": "billing_problems",
-          "type": "integer",
-          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },

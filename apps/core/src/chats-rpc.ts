@@ -378,6 +378,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         running: false,
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
     });
   }
@@ -412,6 +413,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         running: false,
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
     });
   }
@@ -614,6 +616,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         lastAt: chat.lastAt.toISOString(),
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
       try {
         await chats.send(
@@ -683,6 +686,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         by.userId,
         id,
         version,
+        actorOf(by)
+      );
+    });
+  }
+
+  /**
+   * Discards the chat's draft of `app`: its changes go, its versions stay
+   * to restore one. Only while the person builds the App, as for
+   * restoring one.
+   */
+  async discardDraft(chatId: string, app: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await this.#chatsOf(by.userId).discardDraft(
+        chatIdOf(chatId),
+        by.userId,
+        id,
         actorOf(by)
       );
     });
