@@ -125,7 +125,7 @@ const citesTooDeep = "lineage:too-deep";
  * cites cite, and so on to `citesDepth`, past which it rests on
  * `citesTooDeep`, so no reader is held to have read all of it.
  */
-const citedCollectionsOf = async (
+export const citedCollectionsOf = async (
   db: DrizzleD1Database,
   refs: readonly BrainSourceRef[]
 ): Promise<string[]> => {
@@ -165,7 +165,7 @@ const citedCollectionsOf = async (
  * (`citedCollectionsOf`), in the batch that writes the record, after it:
  * only once the record is there.
  */
-const citesWrite = (
+export const citesWrite = (
   db: DrizzleD1Database,
   memoryId: string,
   cited: readonly string[]

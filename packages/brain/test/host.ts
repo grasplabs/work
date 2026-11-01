@@ -60,7 +60,9 @@ export const testHost = (
     refuse?: BrainErrorCode;
     /** Fails, as a model would, the wordings of lessons it holds of. */
     failsFor?: (facts: LessonFacts) => boolean;
-  } = {}
+  } = {},
+  /** The database it runs over: the test database unless another. */
+  database: D1Database = env.BRAIN
 ): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
@@ -203,7 +205,7 @@ export const testHost = (
     clock: () => new Date(),
   };
   return {
-    brain: createBrain(env.BRAIN, ports),
+    brain: createBrain(database, ports),
     reads,
     events,
     started,
