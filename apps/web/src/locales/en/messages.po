@@ -2093,6 +2093,10 @@ msgstr "A tool switched on starts as Read where Composio says it only reads; Gra
 msgid "A topic"
 msgstr "A topic"
 
+#: src/workflows/version-source.tsx
+msgid "A version's definition and source"
+msgstr "A version's definition and source"
+
 #: src/dashboard/widget-board.tsx
 msgid "A widget Grasp made"
 msgstr "A widget Grasp made"
@@ -2654,6 +2658,10 @@ msgstr "Already here, in case you mean one of these"
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Alright, here’s the plan."
+
+#: src/workflows/delete-workflow.tsx
+msgid "Also release its name, so a new workflow can take it."
+msgstr "Also release its name, so a new workflow can take it."
 
 #: src/workflows/diagram-doors.tsx
 msgid "Also starts it"
@@ -3711,6 +3719,7 @@ msgstr "Can’t be read"
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
+#: src/workflows/delete-workflow.tsx
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -4903,6 +4912,7 @@ msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Delete {first}'s interview for good, with all they said?"
 
 #: src/settings/teams.tsx
+#: src/workflows/delete-workflow.tsx
 msgid "Delete {name}?"
 msgstr "Delete {name}?"
 
@@ -4926,6 +4936,14 @@ msgstr "Delete project"
 #: src/chat/chat-menus.tsx
 msgid "Delete the project “{name}”?"
 msgstr "Delete the project “{name}”?"
+
+#: src/workflows/delete-workflow.tsx
+msgid "Delete the workflow"
+msgstr "Delete the workflow"
+
+#: src/workflows/delete-workflow.tsx
+msgid "Delete this workflow"
+msgstr "Delete this workflow"
 
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
@@ -5304,9 +5322,18 @@ msgstr "Doors"
 msgid "Download"
 msgstr "Download"
 
+#: src/workflows/version-source.tsx
+msgctxt "download a file"
+msgid "Download"
+msgstr "Download"
+
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "Download {name}"
+
+#: src/workflows/version-source.tsx
+msgid "Download {path}"
+msgstr "Download {path}"
 
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
@@ -7233,6 +7260,10 @@ msgstr "Issue-to-Resolution"
 msgid "it answered something that isn't its records"
 msgstr "it answered something that isn't its records"
 
+#: src/workflows/delete-workflow.tsx
+msgid "It can be deleted once nothing uses it: no other workflow calls it, no trigger or app starts it, and none of its runs is still going."
+msgstr "It can be deleted once nothing uses it: no other workflow calls it, no trigger or app starts it, and none of its runs is still going."
+
 #: src/dashboard/outcome-card.tsx
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "It can be sent once more, exactly as before. Nothing is undone."
@@ -7545,6 +7576,10 @@ msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped t
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
+
+#: src/workflows/version-source.tsx
+msgid "Its source files"
+msgstr "Its source files"
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."
@@ -9178,6 +9213,10 @@ msgstr "Nobody asked him anything yet."
 #: src/workflows/requests/request-who.tsx
 msgid "Nobody by that name"
 msgstr "Nobody by that name"
+
+#: src/workflows/delete-workflow.tsx
+msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
+msgstr "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 
 #: src/onboarding/work-record.tsx
 msgid "Nobody can say why. It waits until someone explains it."
@@ -12574,6 +12613,10 @@ msgstr "Show in the drawing"
 msgid "Show in the log"
 msgstr "Show in the log"
 
+#: src/workflows/version-source.tsx
+msgid "Show its definition"
+msgstr "Show its definition"
+
 #: src/chat/held-writes.tsx
 msgid "Show less"
 msgstr "Show less"
@@ -13973,6 +14016,10 @@ msgstr "The default model's provider was removed. Choose a new default model to 
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/workflows/version-source.tsx
+msgid "The definition of version {shownVersion}"
+msgstr "The definition of version {shownVersion}"
+
 #: src/workflows/test-run.tsx
 #: src/workflows/traces.tsx
 msgid "The details of this run were removed when its retention ended."
@@ -14413,6 +14460,10 @@ msgstr "The same pain in other teams"
 msgid "The schedule of {workflowName} stopped"
 msgstr "The schedule of {workflowName} stopped"
 
+#: src/workflows/version-source.tsx
+msgid "The source files of version {sourceVersion}"
+msgstr "The source files of version {sourceVersion}"
+
 #: src/onboarding/work-rules.tsx
 msgid "The sponsor settles one nobody can explain"
 msgstr "The sponsor settles one nobody can explain"
@@ -14517,6 +14568,10 @@ msgstr "The work they do most, as they say"
 #: src/onboarding/staff-words.ts
 msgid "The work, drawn from what people agreed to."
 msgstr "The work, drawn from what people agreed to."
+
+#: src/workflows/delete-workflow.tsx
+msgid "The workflow is deleted, but its name wasn't released: {reason}"
+msgstr "The workflow is deleted, but its name wasn't released: {reason}"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "The workflow isn't open to him"
@@ -15551,6 +15606,7 @@ msgstr "Verify the chain"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/traces.tsx
+#: src/workflows/version-source.tsx
 msgid "Version"
 msgstr "Version"
 
@@ -15589,6 +15645,7 @@ msgstr "Version {number}, current"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/version-source.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
