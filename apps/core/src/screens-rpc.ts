@@ -82,7 +82,6 @@ import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
 import { versionScreenCodes } from "./screen-references.ts";
-import { screenSubmissionReceived } from "./screen-submissions.ts";
 import {
   deliveryOf,
   deliveryAt,
@@ -1435,16 +1434,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     // of an archived App is delivered anything.
     const { id } = await usableApp(env, by, app);
     return deliveryOf(await standingOf(env, id, build));
-  }
-
-  async received(request: string): Promise<void> {
-    const { env, app } = this.#connection;
-    // From untrusted App code: counted as a request, refused for a build
-    // whose delivery is refused now, and only ever forgetting a row its
-    // receipt says settled (screen-submissions.ts).
-    await this.#delivered("received", async (by) => {
-      await screenSubmissionReceived(env, by, app, request);
-    });
   }
 
   async startRun(workflow: string, input?: unknown): Promise<WorkflowRun> {

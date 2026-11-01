@@ -37,13 +37,8 @@ import {
   callScreenFunction,
   readFunctionRequest,
   refusalOf,
-  pinnedReference,
-  publicOperationOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
-import { loadRelease } from "./app-releases.ts";
-import type { Release } from "./app-releases.ts";
-import { appFor } from "./apps.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify } from "./auth/identity.ts";
@@ -51,10 +46,6 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import {
-  noteScreenAnswer,
-  noteScreenSubmission,
-} from "./screen-submissions.ts";
 import {
   delivering,
   leasedBuild,
@@ -432,36 +423,6 @@ const withheld = (
   details: { idempotencyKey: key, refusal: refusal.code },
 });
 
-/**
- * Notes `call`, a keyed action of App `id`, as `person`'s submission
- * (screen-submissions.ts), once it resolves to one of the current
- * release's public actions; one that doesn't is refused by its invocation,
- * and noted nothing.
- */
-const noteKeyedAction = async (
-  env: Env,
-  person: Identity,
-  { id, build }: KeyedTarget,
-  call: FunctionRequest
-): Promise<void> => {
-  let release: Release;
-  let path: string;
-  try {
-    const found = await appFor(env, person, id, "user");
-    if (found.currentVersion === null) {
-      return;
-    }
-    release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(
-      release,
-      await pinnedReference(env, release, call.reference, build?.version)
-    );
-  } catch {
-    return;
-  }
-  await noteScreenSubmission(env, person, release, call, path);
-};
-
 /** What a keyed action answers: what it ran, as far as its invocation keeps. */
 interface KeyedAnswer {
   readonly result: unknown;
@@ -497,9 +458,6 @@ const keyedAnswer = async (
     operation,
     stage: "admission",
   });
-  if (caller.portableSession === undefined) {
-    await noteKeyedAction(env, person, target, call);
-  }
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
@@ -645,47 +603,21 @@ const boundedCall = async (
       id,
       build,
       operation,
-      async () => {
-        // Which attempt under its key this call is, once noted, and the
-        // fence of the receipt its mutation claimed.
-        const noted: { attempt?: number; fence?: number } = {};
-        const called = await callScreenFunction(
-          env,
-          person,
-          id,
-          text,
-          Date.now() + screenCallMs,
-          windowCharger(env, person, id),
-          // A portable host has no trusted shell to recover them in, and
-          // no lease: nothing pins its calls.
-          portableSession === undefined
-            ? {
-                ...(build === undefined
-                  ? {}
-                  : { pinnedVersion: build.version }),
-                onAdmitted: async (release, call, path) => {
-                  noted.attempt = await noteScreenSubmission(
-                    env,
-                    person,
-                    release,
-                    call,
-                    path
-                  );
-                },
-                observeClaim: (fence) => {
-                  noted.fence = fence;
-                },
-              }
-            : {}
-        );
-        if (noted.attempt !== undefined) {
-          await noteScreenAnswer(env, person, id, text, called.result, {
-            attempt: noted.attempt,
-            fence: noted.fence ?? null,
-          });
-        }
-        return withinFrame(called);
-      }
+      async () =>
+        withinFrame(
+          await callScreenFunction(
+            env,
+            person,
+            id,
+            text,
+            Date.now() + screenCallMs,
+            windowCharger(env, person, id),
+            // A portable host has no lease: nothing pins its calls.
+            portableSession === undefined && build !== undefined
+              ? { pinnedVersion: build.version }
+              : {}
+          )
+        )
     );
     return Response.json(answer);
   } catch (error) {
