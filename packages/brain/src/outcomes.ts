@@ -444,15 +444,22 @@ export const eraseOutcome = async <C>(
 export const forgetPersonOutcomes = (
   db: DrizzleD1Database,
   userId: string,
-  now: Date
+  now: Date,
+  condition: SQL = sql`1`
 ) =>
   [
     db
       .delete(brainEpisodeMembers)
-      .where(eq(brainEpisodeMembers.userId, userId)),
+      .where(and(eq(brainEpisodeMembers.userId, userId), condition)),
     // A shared session's lessons resting on their episodes alone retire.
-    ...retiringOrphans(db, eq(brainEpisodes.ownerId, userId), now),
-    db.delete(brainEpisodes).where(eq(brainEpisodes.ownerId, userId)),
+    ...retiringOrphans(
+      db,
+      and(eq(brainEpisodes.ownerId, userId), condition) ?? sql`0`,
+      now
+    ),
+    db
+      .delete(brainEpisodes)
+      .where(and(eq(brainEpisodes.ownerId, userId), condition)),
     // So a capture from before now, delivered again, stays forgotten; a
     // later purge only moves the boundary later.
     db
