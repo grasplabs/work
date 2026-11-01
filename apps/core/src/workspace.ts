@@ -51,11 +51,6 @@ import type {
   DashboardWidgetId,
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
-import { defaultEmailPreferences } from "@grasp-os/shared/email-preferences";
-import type {
-  EmailPreferenceChanges,
-  EmailPreferences,
-} from "@grasp-os/shared/email-preferences";
 import {
   internalErrors,
   isExpectedError,
@@ -184,7 +179,6 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
-  emailPreferences,
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
@@ -3400,47 +3394,6 @@ export class Workspace extends DurableObject<Env> {
       this.#deliverAudit();
     }
     return removed;
-  }
-
-  /**
-   * `personId`'s email preferences as they last saved them, or the
-   * defaults when they never did.
-   */
-  emailPreferences(personId: string): EmailPreferences {
-    const saved = this.#db
-      .select({
-        needsYou: emailPreferences.needsYou,
-        weeklySummary: emailPreferences.weeklySummary,
-        billingProblems: emailPreferences.billingProblems,
-      })
-      .from(emailPreferences)
-      .where(eq(emailPreferences.personId, personId))
-      .get();
-    return saved ?? defaultEmailPreferences;
-  }
-
-  /**
-   * Saves the email preferences `changes` names (checked by the caller,
-   * `emailPreferenceChangesSchema`) over what `personId` saved before, or
-   * the defaults: read and written with no await between, so a save
-   * running at the same time can't put back what this one changed.
-   */
-  saveEmailPreferences(
-    personId: string,
-    changes: EmailPreferenceChanges
-  ): void {
-    const before = this.emailPreferences(personId);
-    const row = {
-      needsYou: changes.needsYou ?? before.needsYou,
-      weeklySummary: changes.weeklySummary ?? before.weeklySummary,
-      billingProblems: changes.billingProblems ?? before.billingProblems,
-      updatedAt: new Date(),
-    };
-    this.#db
-      .insert(emailPreferences)
-      .values({ personId, ...row })
-      .onConflictDoUpdate({ target: emailPreferences.personId, set: row })
-      .run();
   }
 
   /** Renames `personId`'s own chat, audited as `by`'s. */

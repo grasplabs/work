@@ -12,7 +12,6 @@ import type {
 import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
-import type { EmailPreferencesApi } from "./email-preferences.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
@@ -80,8 +79,6 @@ export interface SessionApi {
   readonly chats: ChatsApi;
   /** The person's own dashboard: which widgets are on it, in what order. */
   readonly dashboard: DashboardApi;
-  /** The person's own choice of the emails Grasp sends them. */
-  readonly emailPreferences: EmailPreferencesApi;
   /** The person's own sessions: the browsers they are signed in on, and ending one. */
   readonly sessions: SessionsApi;
   /** The person's own accounts on chat platforms, linked so the agent knows them there. */
@@ -176,7 +173,7 @@ export interface SessionApi {
    */
   readonly organization: OrganizationApi;
   /**
-   * The organization's billing and Pulse settings: its admins read them,
+   * The organization's billing settings: its admins read them,
    * its own admins (never Grasp staff) change them.
    */
   readonly orgSettings: OrgSettingsApi;

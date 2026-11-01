@@ -190,6 +190,13 @@
       "when": 1793358256326,
       "tag": "0026_chat_search_text",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1793496831247,
+      "tag": "0027_drop_email_preferences",
+      "breakpoints": true
     }
   ]
 }

@@ -5,14 +5,11 @@ import {
   billingSettingsSchema,
   noBilling,
   orgSettingsErrors,
-  pulseSettingsSchema,
-  quietPulse,
 } from "@grasp-os/shared/org-settings";
 import type {
   BillingSettings,
   BillingSettingsInput,
   OrgSettingsApi,
-  PulseSettings,
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -30,22 +27,21 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // The organization's settings an admin keeps beside its name and time
-// zone (@grasp-os/shared/org-settings): billing and Pulse, one row each in
-// `org_settings`; and, read only, how people sign in, from the
+// zone (@grasp-os/shared/org-settings): billing, a row in `org_settings`; and, read only, how people sign in, from the
 // deployment's config. Its admins read them, Grasp staff included (whose every
 // view is audited, staff-audit.ts); only its own admins change them, as
-// for the organization's name: what the client is billed as and what
-// Pulse watches are the client's to say. A change writes only while the
+// for the organization's name: what the client is billed as is the
+// client's to say. A change writes only while the
 // admin still is one and the value differs, with its audit event in the
 // same batch, naming the fields that changed, never their values (an
 // address or an email is the client's business, not the log's).
 
 /** A kind of setting: its row, how it is checked, and what it is until set. */
 interface Kind<T> {
-  key: "billing" | "pulse";
+  key: "billing";
   schema: z.ZodType<T>;
   fallback: T;
-  invalid: "org_settings.billing_invalid" | "org_settings.pulse_invalid";
+  invalid: "org_settings.billing_invalid";
 }
 
 const billing: Kind<BillingSettings> = {
@@ -53,13 +49,6 @@ const billing: Kind<BillingSettings> = {
   schema: billingSettingsSchema,
   fallback: noBilling,
   invalid: "org_settings.billing_invalid",
-};
-
-const pulse: Kind<PulseSettings> = {
-  key: "pulse",
-  schema: pulseSettingsSchema,
-  fallback: quietPulse,
-  invalid: "org_settings.pulse_invalid",
 };
 
 /**
@@ -239,24 +228,10 @@ export class OrgSettingsRpc extends CoreRpcTarget implements OrgSettingsApi {
     );
   }
 
-  async pulse(): Promise<PulseSettings> {
-    return await withPerson(this.#check, async (by) => {
-      requireReader(by);
-      return await readSetting(this.#env, pulse);
-    });
-  }
-
   async signIn(): Promise<SignInSettings> {
     return await withPerson(this.#check, (by) => {
       requireReader(by);
       return signInOf(this.#env, Date.now());
     });
-  }
-
-  async updatePulse(input: PulseSettings): Promise<PulseSettings> {
-    return await withPerson(
-      this.#check,
-      async (by) => await saveSetting(this.#env, by, pulse, input)
-    );
   }
 }

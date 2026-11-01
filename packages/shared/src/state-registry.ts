@@ -663,7 +663,6 @@ const workspaces: DurableObjectState = {
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
     custom_widgets: exported(`${core}workspace.ts`),
-    email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),
     preview_stores: transient(`${core}sealed-previews.ts`),

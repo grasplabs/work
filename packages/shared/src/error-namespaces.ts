@@ -34,7 +34,6 @@ export const familyNamespaces = [
   "directory",
   "document",
   "effect",
-  "email_preferences",
   "error_report",
   "execution",
   "expression",
