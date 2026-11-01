@@ -15,8 +15,10 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Plan } from "@grasp-os/shared/onboarding";
 import { staffWorksSchema } from "@grasp-os/shared/onboarding-staff";
+import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 
 import { adminIntegrationsOf } from "./admin-integrations.ts";
+import { staffLetIn } from "./admin-kickoff.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -161,6 +163,36 @@ const usageOf = (
 };
 
 /**
+ * The drawn work as the snapshot sends it: each person's example, the one
+ * thing of it in their own words, only while the company lets Grasp's
+ * staff in, as the staff area reads it (a staff session needs the window
+ * open). Their counts stay: the admin counts how far the work is known
+ * from them.
+ */
+const worksFor = (works: StaffWorks, letIn: boolean): StaffWorks =>
+  letIn
+    ? works
+    : {
+        ...works,
+        works: works.works.map((work) =>
+          work.drawn === null
+            ? work
+            : {
+                ...work,
+                drawn: {
+                  ...work.drawn,
+                  told: Object.fromEntries(
+                    Object.entries(work.drawn.told).map(([person, told]) => [
+                      person,
+                      { ...told, example: null },
+                    ])
+                  ),
+                },
+              }
+        ),
+      };
+
+/**
  * What the company connected and what its workflows still need, or null
  * when connect doesn't answer: the rest of the snapshot is core's own and
  * still worth reading.
@@ -219,6 +251,7 @@ export const snapshotOf = async (
     works,
     setup,
     failedMails,
+    letIn,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -233,6 +266,7 @@ export const snapshotOf = async (
     store.staffWorks(),
     store.stephen(),
     store.failedMails(),
+    staffLetIn(env),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -271,7 +305,7 @@ export const snapshotOf = async (
     mapped: facts.mapped,
     links,
     interviews: facts.interviews.map(interviewOf),
-    works: staffWorksSchema.parse(works),
+    works: worksFor(staffWorksSchema.parse(works), letIn),
     // What the kickoff said it rests on stays out: the admin never gets
     // the kickoff's words (`adminKickoffViewOf`).
     setup: {

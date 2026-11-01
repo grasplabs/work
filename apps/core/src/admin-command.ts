@@ -50,8 +50,13 @@ import { onboardingStore } from "./onboarding/store.ts";
 // it brought, which a delivered command can't. It becomes a command once
 // an on-prem delivery exists, its reading shown in the snapshot.
 
-/** How long a claim holds before another delivery may take the command again. */
-const claimStaleMs = 5 * 60 * 1000;
+/**
+ * How long a claim holds before another delivery may take the command
+ * again: longer than a command stays fresh both ways
+ * (`adminCommandMaxSkewMs`), so a command whose run died after its change
+ * but before its mark can't be delivered again once its claim lapses.
+ */
+const claimStaleMs = 2 * adminCommandMaxSkewMs + 60 * 1000;
 
 /** Why a command wasn't applied, as its answer says it. */
 type Refusal =
