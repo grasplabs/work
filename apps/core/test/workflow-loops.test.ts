@@ -92,8 +92,9 @@ const longNamed = (): unknown => ({
 });
 
 /** A loop of one item with `metadata.grasp`. */
-const loop = (metadata: Record<string, unknown>) => ({
+const loop = (metadata: Record<string, unknown>, extra = {}) => ({
   each: {
+    ...extra,
     for: { in: "${ [1] }" },
     do: [{ inner: { set: '${ {status: "x"} }' } }],
     metadata: { grasp: metadata },
@@ -194,6 +195,24 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     });
   });
 
+  it("answer a last item's null output as the loop's, not its input", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        each: {
+          for: { in: "${ [1, 2] }" },
+          input: { from: '${ {status: "input"} }' },
+          do: [{ blank: { set: "${ null }" } }],
+          output: { as: "${ {status: (. | tostring)} }" },
+        },
+      },
+    ]);
+    expect(endOf(await ranFor(by, workflow.id))).toStrictEqual({
+      status: "completed",
+      output: { status: "null" },
+    });
+  });
+
   it("stop at the first item whose while is false, before any of its tasks run", async () => {
     const by = await builder();
     const { workflow } = await published(by, [
@@ -250,14 +269,19 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     ];
     const exited = await published(by, looping("exit"));
     const ended = await published(by, looping("end"));
+    const endedRun = await ranFor(by, ended.workflow.id);
+    const completed = await completedSteps(endedRun.id);
     expect({
       exited: endOf(await ranFor(by, exited.workflow.id)),
-      ended: endOf(await ranFor(by, ended.workflow.id)),
+      ended: endOf(endedRun),
+      // The item after the one that ended the workflow never started.
+      after: completed.get("task:gate@sum.3") ?? 0,
     }).toStrictEqual({
       // 1 + 2 + 4: the third item left at its exit.
       exited: { status: "completed", output: { status: "7" } },
       // The workflow's output where its end left it: nothing after ran.
       ended: { status: "completed", output: { status: "ended" } },
+      after: 0,
     });
   });
 
@@ -530,7 +554,7 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sdkLoop: true, statements: false });
   });
 
-  it("don't lower items at once, loops nested past eight levels or keys too large to list yet", async () => {
+  it("don't lower a while on items at once, loops nested past eight levels, keys too large to list, or step names past what the engine takes", async () => {
     const by = await builder();
     const unsupportedOf = async (task: unknown) => {
       const { version } = await published(by, [task]);
@@ -539,20 +563,22 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
         : version.build.unsupported.map(({ feature }) => feature);
     };
     expect({
-      concurrent: await unsupportedOf(loop({ concurrency: 2 })),
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
       // A key the profile takes, but not once listed for every item.
       keyTooLarge: await unsupportedOf(
         loop({ key: `\${ "${"k".repeat(4060)}" }` })
+      ),
+      whileAtOnce: await unsupportedOf(
+        loop({ concurrency: 2 }, { while: "${ $item < 3 }" })
       ),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
       // Step names past what the engine takes, once every loop is named.
       longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
-      concurrent: ["for:concurrency"],
       keyed: [],
       keyTooLarge: ["for:key_too_large"],
+      whileAtOnce: ["for:while_concurrency"],
       eight: [],
       nine: ["for:depth"],
       longNames: ["step:name_too_long"],

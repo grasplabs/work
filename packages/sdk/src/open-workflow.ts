@@ -167,6 +167,8 @@ export interface Chosen extends FlowState {
  */
 export interface ForPlan extends EnterPlan, LeavePlan {
   readonly while?: Stage;
+  /** How many items run at once: 1 (one after another) if unset. */
+  readonly concurrency?: number;
 }
 
 /**
@@ -193,6 +195,8 @@ export interface Looped extends FlowState {
  */
 export interface ForkPlan extends EnterPlan, LeavePlan {
   readonly compete?: true;
+  /** How many branches run at once: 1 (one after another) if unset. */
+  readonly concurrency?: number;
 }
 
 /** The tasks generated code runs, one after the other. */
@@ -355,6 +359,13 @@ export interface AttemptHost {
    * the host decides it from its own record of the run, once.
    */
   readonly catches: () => Promise<boolean>;
+  /**
+   * Settles a scope of items or branches (a race's winner, or the one an
+   * `end` came from) as `branch`, once: the host fences the others off and
+   * answers the branch that settled it, which may be one an earlier
+   * activation settled first.
+   */
+  readonly settle: (settled: { branch: number }) => Promise<number>;
 }
 
 /**
@@ -448,6 +459,92 @@ const isBodyList = (
 
 /** The most branches a fork has (the profile's maxForkBranches). */
 const maxBranches = 64;
+
+/** How one item or branch of a scope ended. */
+type Outcome =
+  | { readonly ok: true; readonly done: ScopeEnd }
+  | { readonly ok: false; readonly error: unknown };
+
+/** The most items or branches that run at once (spec 18). */
+const maxConcurrency = 8;
+
+/** `concurrency` as a scope takes it: a whole number from 1 to 8. */
+const concurrencyOf = (concurrency: number | undefined): number => {
+  if (concurrency === undefined) {
+    return 1;
+  }
+  if (!isSafeInteger(concurrency) || concurrency < 1) {
+    throw new TypeError("A scope runs 1 to 8 items or branches at once");
+  }
+  return Math.min(concurrency, maxConcurrency);
+};
+
+/** Whether to start an item or a branch, or none from it on. */
+type Admission = "run" | "skip" | "stop";
+
+/**
+ * Starts `count` items or branches, in order, at most `limit` at once,
+ * each by `run`, which answers how it ended, or null when it didn't run
+ * (its `while` was false), after which none later starts; `admit` says
+ * whether to start each, skip it, or start none from it on. Answers when
+ * every one that started has ended (`all`), and each one's end, by index,
+ * as it comes (`ends`, one a started one resolves).
+ */
+const pooled = (
+  count: number,
+  limit: number,
+  run: (index: number) => Promise<Outcome | null>,
+  admit: (index: number) => Promise<Admission>
+): {
+  all: Promise<void>;
+  ends: PromiseWithResolvers<Outcome | null>[];
+} => {
+  const ends = Array.from({ length: count }, () =>
+    Promise.withResolvers<Outcome | null>()
+  );
+  let next = 0;
+  let stopped = false;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (stopped || next >= count) {
+        return;
+      }
+      const index = next;
+      next += 1;
+      // One after another in each of the workers.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const admitted = await admit(index);
+      if (admitted === "stop") {
+        stopped = true;
+        return;
+      }
+      if (admitted === "run") {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const outcome = await run(index);
+        ends[index]?.resolve(outcome);
+        if (outcome === null) {
+          stopped = true;
+          return;
+        }
+      }
+    }
+  };
+  const all = (async (): Promise<void> => {
+    await Promise.all(
+      Array.from({ length: Math.min(limit, count) }, async () => {
+        await worker();
+      })
+    );
+  })();
+  return { all, ends };
+};
+
+/** Whether `error` is a step refused for a scope another settled over. */
+const fencedOff = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  hasOwn(error, "code") &&
+  Reflect.get(error, "code") === "workflow.branch_cancelled";
 
 /** Whether `plan` has stages after its task's own work. */
 const leaves = (plan: LeavePlan): boolean =>
@@ -644,6 +741,207 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
     kind: "task" | "enter" | "leave" | "item" | "catch",
     id: string
   ) => stepOf(kind, id, within);
+  /**
+   * Runs the `count` items or branches of task `id` (on `data`), at most
+   * `limit` at once, each by `run` on a flow of its own scope. A race
+   * (`compete`) settles on its first that succeeds; where `settles` (at
+   * once), an `end` in one, or outside a race a failure, settles the
+   * scope too. A scope settles in the task's own
+   * step (`task:<id>`), once: the host fences the others off, so none of
+   * them starts another step, and answers the one that settled it, an
+   * earlier activation's included. Once settled (one after another, once
+   * one failed outside a race), none that hasn't started does but the one
+   * it settled on. Answers how each ended,
+   * and the one that won or ended it.
+   */
+  const scoped = async ({
+    id,
+    data,
+    count,
+    limit,
+    settles,
+    compete = false,
+    run,
+  }: {
+    id: string;
+    data: TaskData;
+    count: number;
+    limit: number;
+    settles: boolean;
+    compete?: boolean;
+    /** How it ended; null when it didn't run (its `while` was false). */
+    run: (index: number, flowIn: Flow) => Promise<ScopeEnd | null>;
+  }): Promise<{
+    outcomes: (Outcome | undefined)[];
+    won?: ScopeEnd;
+    end?: ScopeEnd;
+  }> => {
+    let settling: Promise<number> | undefined;
+    // One after another, outside a race, a failure fails the scope: none
+    // starts after it. At once, it settles the scope instead.
+    let failing = false;
+    // One after another, an end stops the items after it.
+    let ending = false;
+    // A scope around this one settled over the item or branch this scope
+    // runs in: none starts after, each would be refused at its first step.
+    let fenced = false;
+    const settle = async (branch: number): Promise<number> => {
+      settling ??= (async () => {
+        const record = readRecord(
+          await engine.do(
+            named("task", id),
+            captured(data),
+            async (attempt) => ({
+              output: null,
+              branch: await attempt.settle({ branch }),
+            })
+          )
+        );
+        if (record.branch === undefined || record.branch >= count) {
+          throw new TypeError("A scope settles on one of its own");
+        }
+        return record.branch;
+      })();
+      return await settling;
+    };
+    const settled = Promise.withResolvers<number>();
+    // Settles the scope on `branch`, unless a fence around it refuses the
+    // settling: whether it settled.
+    const settledOn = async (branch: number): Promise<boolean> => {
+      try {
+        settled.resolve(await settle(branch));
+        return true;
+      } catch (error) {
+        if (!fencedOff(error)) {
+          throw error;
+        }
+        return false;
+      }
+    };
+    const pool = pooled(
+      count,
+      limit,
+      async (index) => {
+        let done: ScopeEnd | null;
+        try {
+          done = await run(index, flowOf(engine, itemScope(within, id, index)));
+        } catch (error) {
+          if (!fencedOff(error)) {
+            if (compete) {
+              return { ok: false, error };
+            }
+            // At once, a failure settles the scope on the item or branch
+            // that failed, as an end does, the first writer's: which
+            // failed first is then the run's record, never how this
+            // activation's outcomes came back, and the host fences the
+            // others off. One after another, none starts after it.
+            if (!settles) {
+              failing = true;
+            } else if (settling === undefined) {
+              fenced = !(await settledOn(index));
+            }
+            return { ok: false, error };
+          }
+          // A step refused for a fence fails nothing of the scope. The
+          // fence is this scope's own, which an earlier activation may
+          // have settled before this one reached its settling, or one
+          // around it. A scope that settles asks: the host answers the
+          // branch its own fence holds, and the one it settled on still
+          // starts; or it refuses the settling too, for a fence around
+          // it, and then none starts after. One that never settles has no
+          // fence of its own.
+          if (!settles) {
+            fenced = true;
+          } else if (settling === undefined) {
+            fenced = !(await settledOn(index));
+          }
+          return { ok: false, error };
+        }
+        if (done === null) {
+          return null;
+        }
+        if (done.end === true) {
+          ending = true;
+        }
+        if (
+          (compete || (settles && done.end === true)) &&
+          settling === undefined
+        ) {
+          settled.resolve(await settle(index));
+        }
+        return { ok: true, done };
+      },
+      async (index) => {
+        // Answered from the scope's settling, which the run records (the
+        // host's fence, the first writer's), never from the order this
+        // activation's outcomes came back in: a replay hears of them in
+        // whatever order its host's and sandbox's I/O lets it. Until the
+        // scope settles every one starts; once it has, only the one it
+        // settled on, an earlier activation's included, so a replay that
+        // starts one more than the first run did, or one fewer, has the
+        // same outcome: the host refuses the extra one's steps for the
+        // fence, and the engine wakes for a missing one's waits. One
+        // after another, a failure or an end stops the rest.
+        if (fenced) {
+          return "stop";
+        }
+        // Once settled, only the one it settled on starts (it may be an
+        // earlier activation's, not yet replayed to): none of the others.
+        if (settling !== undefined) {
+          let branch: number;
+          try {
+            branch = await settling;
+          } catch {
+            // Refused for a fence around this scope (`fenced`).
+            return "stop";
+          }
+          return index === branch ? "run" : "skip";
+        }
+        return failing || ending ? "stop" : "run";
+      }
+    );
+    // Every one that started has ended, or the scope settled and the one
+    // it settled on has: those it fenced off are left to the engine,
+    // their next steps run no attempt, and their sleeps wait for nothing.
+    const won = await Promise.race([
+      (async (): Promise<undefined> => {
+        await pool.all;
+        return undefined;
+      })(),
+      (async () => {
+        const branch = await settled.promise;
+        return { branch, outcome: await pool.ends[branch]?.promise };
+      })(),
+    ]);
+    const outcomes = await Promise.all(
+      pool.ends.map(async (end) => {
+        const outcome = await Promise.race([
+          end.promise,
+          Promise.resolve(null),
+        ]);
+        return outcome ?? undefined;
+      })
+    );
+    if (settling === undefined) {
+      // One after another, an end stops the items after it by itself.
+      const ender = outcomes.find(
+        (outcome) => outcome?.ok === true && outcome.done.end === true
+      );
+      return ender?.ok === true ? { outcomes, end: ender.done } : { outcomes };
+    }
+    const branch = won?.branch ?? (await settling);
+    const winner = won?.outcome ?? outcomes[branch];
+    // Settled on a failure (outside a race): the scope fails with it.
+    if (winner?.ok === false && !compete) {
+      throw winner.error;
+    }
+    if (winner?.ok !== true) {
+      throw new TypeError("A scope settles on one that succeeded");
+    }
+    return winner.done.end === true
+      ? { outcomes, end: winner.done }
+      : { outcomes, won: winner.done };
+  };
   const flow: Flow = {
     input: async (input, from) => {
       const record = readRecord(
@@ -818,6 +1116,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       return stateAfter(data, record);
     },
     for: async (id, data, plan, body) => {
+      const limit = concurrencyOf(plan.concurrency);
       const record = readRecord(
         await engine.do(
           named("enter", id),
@@ -847,36 +1146,65 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         throw new TypeError("A for task's enter step records its items");
       }
       const input = record.output;
-      let state: FlowState = { output: input, context: data.context };
-      for (const index of items.keys()) {
-        const scoped = itemScope(within, id, index);
-        const itemData = { input, context: state.context };
-        if (plan.while !== undefined) {
-          const { while: condition } = plan;
-          // One item after another: each item's check, then its list.
-          // oxlint-disable-next-line no-await-in-loop -- see above
-          const recorded = await engine.do(
-            stepOf("item", id, scoped),
-            captured(itemData),
-            async (attempt) => ({
-              output: holds(await condition(scopeOf(attempt, frameOf(input)))),
-            })
-          );
-          const checked = readRecord(recorded);
-          if (checked.output !== true) {
-            break;
+      // One after another, each item carries the context the one before
+      // left; at once, each starts from the context the loop found.
+      let carried = data.context;
+      const ran = await scoped({
+        id,
+        data,
+        count: items.length,
+        limit,
+        settles: limit > 1,
+        run: async (index, flowIn) => {
+          const context = limit > 1 ? data.context : carried;
+          if (plan.while !== undefined) {
+            const { while: condition } = plan;
+            const checked = readRecord(
+              await engine.do(
+                stepOf("item", id, itemScope(within, id, index)),
+                captured({ input, context }),
+                async (attempt) => ({
+                  output: holds(
+                    await condition(scopeOf(attempt, frameOf(input)))
+                  ),
+                })
+              )
+            );
+            if (checked.output !== true) {
+              return null;
+            }
           }
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one item at a time
-        const done = await body(flowOf(engine, scoped), {
-          output: input,
-          context: state.context,
-        });
-        state = { output: done.output, context: done.context };
-        if (done.end === true) {
-          return { ...state, end: true };
-        }
+          const done = await body(flowIn, { output: input, context });
+          if (limit === 1) {
+            carried = done.context;
+          }
+          return done;
+        },
+      });
+      if (ran.end !== undefined) {
+        return {
+          output: ran.end.output,
+          context: limit > 1 ? data.context : ran.end.context,
+          end: true,
+        };
       }
+      const failed = ran.outcomes.find((outcome) => outcome?.ok === false);
+      if (failed !== undefined && !failed.ok) {
+        throw failed.error;
+      }
+      const done = ran.outcomes.flatMap((outcome) =>
+        outcome?.ok === true ? [outcome.done] : []
+      );
+      // One after another: the last item's output (null too), or the input
+      // for none. At once: every item's output, in item order (spec 13.5).
+      const last = done.at(-1);
+      const state: FlowState =
+        limit > 1
+          ? { output: done.map((one) => one.output), context: data.context }
+          : {
+              output: last === undefined ? input : last.output,
+              context: carried,
+            };
       if (!leaves(plan)) {
         return { ...state, end: false };
       }
@@ -899,6 +1227,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       ) {
         throw new TypeError("A fork has its branches, in order");
       }
+      const limit = concurrencyOf(plan.concurrency);
       let { input } = data;
       // A fork with stages after its branches enters too: its enter step
       // records when it started, its leave step's `$task.startedAt`.
@@ -909,51 +1238,47 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         }
         ({ input } = entered);
       }
-      const outputs: FlowValue[] = [];
-      let failure: unknown;
-      let won: { output: FlowValue; branch: number } | undefined;
-      for (const [index, branch] of branches.entries()) {
-        const scoped = itemScope(within, id, index);
-        let done: ScopeEnd;
-        try {
-          // One branch after another (concurrency 1), each from the
-          // context the fork found: never another branch's exports.
-          // oxlint-disable-next-line no-await-in-loop -- see above
-          done = await branch(flowOf(engine, scoped), {
-            output: input,
-            context: data.context,
-          });
-        } catch (error) {
-          if (plan.compete !== true) {
-            throw error;
+      const compete = plan.compete === true;
+      const ran = await scoped({
+        id,
+        data,
+        count: branches.length,
+        limit,
+        settles: compete || limit > 1,
+        compete,
+        run: async (index, flowIn) => {
+          const branch = branches[index];
+          if (branch === undefined) {
+            throw new TypeError("A fork has its branches, in order");
           }
-          // A race goes on to its next branch: this one's completed
-          // effects stand.
-          failure = error;
-          continue;
-        }
-        if (done.end === true) {
-          return { output: done.output, context: data.context, end: true };
-        }
-        if (plan.compete === true) {
-          won = { output: done.output, branch: index };
-          break;
-        }
-        outputs.push(done.output);
+          // Each branch from the context the fork found: never another
+          // branch's exports.
+          return await branch(flowIn, { output: input, context: data.context });
+        },
+      });
+      if (ran.end !== undefined) {
+        return { output: ran.end.output, context: data.context, end: true };
       }
-      let output: FlowValue = outputs;
-      if (plan.compete === true) {
-        if (won === undefined) {
-          throw failure;
+      let output: FlowValue;
+      if (compete) {
+        if (ran.won === undefined) {
+          // Every branch failed: the fork fails as the last one did.
+          const last = ran.outcomes.findLast(
+            (outcome) => outcome !== undefined
+          );
+          throw last?.ok === false
+            ? last.error
+            : new TypeError("A race ran no branch");
         }
-        const winner: FlowValue = { output: won.output, branch: won.branch };
-        ({ output } = readRecord(
-          await engine.do(
-            named("task", id),
-            captured(data),
-            async () => await Promise.resolve(winner)
-          )
-        ));
+        ({ output } = ran.won);
+      } else {
+        const failed = ran.outcomes.find((outcome) => outcome?.ok === false);
+        if (failed !== undefined && !failed.ok) {
+          throw failed.error;
+        }
+        output = ran.outcomes.map((outcome) =>
+          outcome?.ok === true ? outcome.done.output : null
+        );
       }
       if (!leaves(plan)) {
         return { output, context: data.context, end: false };
