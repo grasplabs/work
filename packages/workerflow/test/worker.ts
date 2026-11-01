@@ -1059,6 +1059,23 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return { payload: heard.payload, done };
     },
   },
+  // A wait for a match on "go" beside a step the test holds out at its
+  // effect.
+  "listens-for-match": {
+    run: async (event, step) => {
+      const [heard, done] = await Promise.all([
+        step.waitForMatch("go", {
+          match: [{ type: "go", attributes: { subject: "now" } }],
+          until: Date.now() + 60 * 60 * 1000,
+        }),
+        step.do(
+          "slow",
+          async (context) => await effect(event.instanceId, "slow", context)
+        ),
+      ]);
+      return { payload: heard.payload, done };
+    },
+  },
   // A step that fails its first attempt and retries soon, beside a
   // longer sleep.
   "retry-nap": {

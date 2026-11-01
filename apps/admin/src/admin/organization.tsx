@@ -582,7 +582,6 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
                       originsOf(
                         admin.snapshot,
                         admin.billing.state === "read",
-                        admin.proposal.state === "read",
                         admin.crm.state === "read"
                       )[section]
                     }

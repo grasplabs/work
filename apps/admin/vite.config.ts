@@ -7,21 +7,12 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
 
-/** What the admin has in discord.js's place. */
-const discordGateway = `${import.meta.dirname}/src/admin/discord-gateway.ts`;
-
 /**
  * The admin's plugins, its Worker as cloudflare.config.ts builds it from
  * wrangler.jsonc, with `worker` on top: what the browser journeys change
  * (vite.e2e.config.ts).
  */
 export const adminPlugins = (worker: PluginConfig = {}) => [
-  // The Discord adapter's Gateway client stays out of the Worker
-  // (src/admin/discord-gateway.ts).
-  {
-    name: "grasp:discord-without-gateway",
-    config: () => ({ resolve: { alias: { "discord.js": discordGateway } } }),
-  },
   cloudflare({ viteEnvironment: { name: "ssr" }, ...worker }),
   tanstackStart(),
   react(),

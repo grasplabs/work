@@ -4,7 +4,7 @@ import type {
   TemplatesApi,
 } from "@grasp-os/shared/resource-bindings";
 
-import { listTemplates, publishTemplate } from "./resource-templates.ts";
+import { publishTemplate } from "./resource-templates.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -24,13 +24,6 @@ export class TemplatesRpc extends CoreRpcTarget implements TemplatesApi {
     return await withPerson(
       this.#check,
       async (person) => await publishTemplate(this.#env, person, publication)
-    );
-  }
-
-  async list(): Promise<PublishedTemplate[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await listTemplates(this.#env, person)
     );
   }
 }

@@ -22,8 +22,8 @@ import { LISTEN_DAYS } from "./onboarding.ts";
 
 /**
  * Grasp's admin as tools: what every chat about Grasp's companies can ask, whether it is the
- * admin's own chat, Claude or ChatGPT through the admin's MCP server, or a bot in Discord. One
- * list, answered from the same views the admin's pages show, so a chat and a page never disagree.
+ * admin's own chat, or Claude or ChatGPT through the admin's MCP server. One list, answered
+ * from the same views the admin's pages show, so a chat and a page never disagree.
  * Only reading: whatever changes something at a company stays a button a person presses in the
  * admin. The words are English and plain: they are read by a model, which says them on in the
  * language it is spoken to in. Pure.
@@ -169,7 +169,7 @@ export const ADMIN_TOOLS = [
     name: "sources",
     title: "Sources",
     description:
-      "The systems the admin reads (Grasp’s console, Rooms, Attio, Stripe, Composio, Discord): which are connected and which are still to come.",
+      "The systems the admin reads (Grasp’s console, Attio, Stripe, Composio): which are connected and which are still to come.",
     inputSchema: NOTHING,
     annotations: READS,
   },

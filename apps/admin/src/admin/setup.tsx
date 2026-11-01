@@ -643,7 +643,7 @@ const Checklist = ({
   // Until core holds the contract, neither it nor its agreements is known here.
   const steps = known.map((step): ChecklistStep =>
     !contractRead && step.to === "contract"
-      ? { ...step, state: "unknown", why: "From Rooms, once it is connected." }
+      ? { ...step, state: "unknown", why: "Not known here yet." }
       : step
   );
   const done = steps.filter(({ state }) => state === "done").length;

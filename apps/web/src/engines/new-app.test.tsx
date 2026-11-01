@@ -41,6 +41,7 @@ const fakeChats = () => {
           running: false,
           projectId: null,
           appId: null,
+          via: "web",
         };
       },
       send: async (chatId: string, question: ChatQuestion) => {
