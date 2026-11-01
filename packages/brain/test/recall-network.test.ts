@@ -1,0 +1,795 @@
+import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it } from "vite-plus/test";
+
+import { ensureCollection } from "../src/collections.ts";
+import type { MemoryPack } from "../src/contract.ts";
+import { writeVersion } from "../src/documents.ts";
+import { runLinking, settleMs, sweepLinking } from "../src/entities.ts";
+import { collectionIdSchema } from "../src/ids.ts";
+import type { IndexStep } from "../src/indexing.ts";
+import { remember } from "../src/memories.ts";
+import { recall } from "../src/recall.ts";
+import type { Caller } from "./host.ts";
+import { newCollection, testHost, writerOf } from "./host.ts";
+
+// A recall's network route (GRA-307, its threat model), through the
+// Brain's own boundaries: saves, the linking job, and the recall. The model
+// is the one outside provider, faked: it names the relations each text
+// states. The ways the route could fail, tried here:
+// 1. It adds a relation no source states, or calls a model to find one.
+// 2. It takes a hop the reader may not, or reaches a readable relation
+//    only through one they may not.
+// 3. Hidden relations change what the reader sees, a cap included.
+// 4. A recall bound to collections follows relations outside them.
+// 5. It reads without bound, or hides that a bound cut it.
+// 6. It follows a relation its source no longer states.
+
+/** A word no other test's text has. */
+const word = () => `w${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+
+/** A step that runs once, as a run without retries would. */
+const once: IndexStep = { do: async (_name, _config, fn) => await fn() };
+
+/** A relation as the fake model states it. */
+interface Stated {
+  subject: string;
+  predicate: string;
+  object: string;
+  evidence: string;
+}
+
+/** A relation stated by its passage, `subject predicate object.` */
+const stated = (
+  subject: string,
+  predicate: string,
+  object: string
+): Stated => ({
+  subject,
+  predicate,
+  object,
+  evidence: `${subject} ${predicate.replaceAll("_", " ")} ${object}.`,
+});
+
+/**
+ * A model that answers each text by the relations whose passages it holds,
+ * counting its calls.
+ */
+const modelOf = (relations: readonly Stated[]) => {
+  const calls = { count: 0 };
+  const model = async (text: string): Promise<unknown> => {
+    calls.count += 1;
+    await Promise.resolve();
+    const found = relations.filter(({ evidence }) => text.includes(evidence));
+    const names = [
+      ...new Set(found.flatMap(({ subject, object }) => [subject, object])),
+    ];
+    return {
+      entities: names.map((name) => ({ kind: "thing", name })),
+      relations: found,
+    };
+  };
+  return { model, calls };
+};
+
+type Host = ReturnType<typeof testHost>;
+type Collection = Awaited<ReturnType<typeof newCollection>>;
+
+/** Saves `text` at `path` and links it, as version `ifVersion + 1`. */
+const saved = async (
+  host: Host,
+  collection: Collection,
+  path: string,
+  text: string,
+  ifVersion = 0
+): Promise<void> => {
+  const written = await writeVersion(host.brain, writerOf("writer"), {
+    collection,
+    path,
+    text,
+    ifVersion,
+    message: null,
+    restoredFrom: null,
+  });
+  await runLinking(
+    host.brain,
+    { source: `doc:${written.id}`, version: written.currentVersion },
+    once
+  );
+};
+
+/** What a pack's network route added: each item's path, read as text. */
+const routed = (pack: MemoryPack): string[] =>
+  (pack.network?.paths ?? [])
+    .map(({ seed, steps }) =>
+      [
+        `from ${seed.name}:`,
+        ...steps.map(
+          ({ subject, predicate, object }) =>
+            `${subject.name} ${predicate} ${object.name}`
+        ),
+      ].join(" ")
+    )
+    .toSorted((a, b) => a.localeCompare(b));
+
+/** Why a pack's network route left out what it might have followed. */
+const cutsOf = (pack: MemoryPack): string[] =>
+  pack.coverage.omittedRoutes
+    .filter(({ route }) => route === "network")
+    .map(({ reason }) => reason)
+    .toSorted();
+
+/** A pack as a reader sees it, without what differs between two recalls. */
+const seen = (pack: MemoryPack) => ({
+  items: pack.items.map(({ statement, sourceRefs }) => ({
+    statement,
+    sourceRefs,
+  })),
+  paths: pack.network?.paths,
+  coverage: pack.coverage,
+  truncated: pack.truncated,
+});
+
+/**
+ * A team's notes: the one a recall finds says Anna owns onboarding; the
+ * handbook says onboarding uses a tool, and infrastructure notes that the
+ * tool runs on a cloud; a memo some can't read says onboarding uses a
+ * secret tool.
+ */
+const team = async (
+  /** More relations the model states, of onboarding's name. */
+  more: (thing: string) => Stated[] = () => []
+) => {
+  const query = word();
+  const thing = `Onboarding ${word()}`;
+  const tool = `Personio ${word()}`;
+  const cloud = `Cloud ${word()}`;
+  const secret = `Vault ${word()}`;
+  const owns = stated("Anna", "owns", thing);
+  const uses = stated(thing, "uses", tool);
+  const runs = stated(tool, "runs_on", cloud);
+  const hidden = stated(thing, "uses", secret);
+  const extra = more(thing);
+  const { model, calls } = modelOf([owns, uses, runs, hidden, ...extra]);
+  const host = testHost(model);
+  const notes = await newCollection(host.brain, "Operations");
+  await saved(host, notes, "team.md", `# Team\n${query}: ${owns.evidence}`);
+  await saved(host, notes, "handbook.md", uses.evidence);
+  await saved(host, notes, "infra.md", runs.evidence);
+  await saved(host, notes, "memo.md", hidden.evidence);
+  const everyone: Caller = { userId: "reader", reads: [notes.id] };
+  const some: Caller = {
+    userId: "other",
+    reads: [notes.id],
+    only: { [notes.id]: ["team.md", "handbook.md", "infra.md"] },
+  };
+  return {
+    host,
+    notes,
+    calls,
+    query,
+    names: { thing, tool, cloud, secret },
+    passages: { uses, runs },
+    extra,
+    everyone,
+    some,
+  };
+};
+
+describe("a recall's network route", () => {
+  it("follows what the evidence names along stored relations, each item its source's own passage and exact path, without a model", async () => {
+    const { host, calls, query, names, everyone, some } = await team();
+    const { thing, tool, cloud, secret } = names;
+    const callsBefore = calls.count;
+
+    const [plain, all, narrowed, oneHop] = await Promise.all([
+      recall(host.brain, everyone, { query }),
+      recall(host.brain, everyone, { query, network: {} }),
+      recall(host.brain, some, { query, network: {} }),
+      recall(host.brain, everyone, { query, network: { hops: 1 } }),
+    ]);
+
+    expect({
+      plain: [plain.items.length, plain.network, plain.retrievalPolicyVersion],
+      all: routed(all),
+      narrowed: routed(narrowed),
+      oneHop: routed(oneHop),
+      statements: all.items
+        .slice(1)
+        .map(({ statement }) => statement)
+        .toSorted(),
+      policy: all.retrievalPolicyVersion,
+      coverage: all.coverage,
+      truncated: all.truncated,
+      modelCalls: calls.count - callsBefore,
+    }).toStrictEqual({
+      plain: [1, undefined, "hybrid@1"],
+      all: [
+        `from ${thing}: ${thing} uses ${secret}`,
+        `from ${thing}: ${thing} uses ${tool}`,
+        `from ${thing}: ${thing} uses ${tool} ${tool} runs_on ${cloud}`,
+      ].toSorted((a, b) => a.localeCompare(b)),
+      // The memo is none of theirs: its relation neither shows nor leads.
+      narrowed: [
+        `from ${thing}: ${thing} uses ${tool}`,
+        `from ${thing}: ${thing} uses ${tool} ${tool} runs_on ${cloud}`,
+      ],
+      oneHop: [
+        `from ${thing}: ${thing} uses ${secret}`,
+        `from ${thing}: ${thing} uses ${tool}`,
+      ].toSorted((a, b) => a.localeCompare(b)),
+      statements: [
+        `${thing} uses ${secret}.`,
+        `${thing} uses ${tool}.`,
+        `${tool} runs on ${cloud}.`,
+      ].toSorted(),
+      policy: "hybrid@1+traversal@1",
+      coverage: {
+        state: "complete",
+        queriedRoutes: ["exact", "fulltext", "network"],
+        omittedRoutes: [{ route: "semantic", reason: "not_enabled" }],
+      },
+      truncated: false,
+      modelCalls: 0,
+    });
+  });
+
+  it("reports to the host every row its hops considered, not only the relations it kept", async () => {
+    const { host, query, everyone } = await team();
+
+    await recall(host.brain, everyone, { query, network: {} });
+
+    const network = host.reads
+      .map(({ record }) => record)
+      .filter(({ detail }) => detail.read === "recall.network");
+    // Anna's one relation and onboarding's three on the first hop; the
+    // tool's two and the secret's one on the second: seven rows, the
+    // three kept among them, in four documents.
+    expect(
+      network.map(({ detail, documentIds }) => ({
+        relations: detail.relations,
+        considered: detail.considered,
+        documents: documentIds?.length,
+      }))
+    ).toStrictEqual([{ relations: 3, considered: 7, documents: 4 }]);
+  });
+
+  it("never reaches a relation the reader may read through one they may not", async () => {
+    const query = word();
+    const payroll = `Payroll ${word()}`;
+    const leads = stated("Anna", "leads", `Ops ${word()}`);
+    const mentors = stated("Anna", "mentors", "Bob");
+    const owns = stated("Bob", "owns", payroll);
+    const host = testHost(modelOf([leads, mentors, owns]).model);
+    const notes = await newCollection(host.brain, "People");
+    await saved(host, notes, "team.md", `${query}: ${leads.evidence}`);
+    await saved(host, notes, "memo.md", mentors.evidence);
+    await saved(host, notes, "handbook.md", owns.evidence);
+    const everyone: Caller = { userId: "reader", reads: [notes.id] };
+    const some: Caller = {
+      userId: "other",
+      reads: [notes.id],
+      only: { [notes.id]: ["team.md", "handbook.md"] },
+    };
+
+    const [all, narrowed] = await Promise.all([
+      recall(host.brain, everyone, { query, network: {} }),
+      recall(host.brain, some, { query, network: {} }),
+    ]);
+
+    expect({ all: routed(all), narrowed: routed(narrowed) }).toStrictEqual({
+      all: [
+        "from Anna: Anna mentors Bob",
+        `from Anna: Anna mentors Bob Bob owns ${payroll}`,
+      ],
+      narrowed: [],
+    });
+  });
+
+  it("answers the same, cap and all, however many relations the reader can't read surround what they can", async () => {
+    // As many relations of onboarding as fill a read's cap and more, in
+    // notes of the same collection the reader may not read (a per-path
+    // audience): the same entity, so the same reads meet them.
+    const { host, notes, query, extra, some } = await team((thing) =>
+      Array.from({ length: 200 }, (_, index) =>
+        stated(thing, "relates_to", `Hidden ${index} ${word()}`)
+      )
+    );
+    const before = await recall(host.brain, some, { query, network: {} });
+    for (let file = 0; file < 4; file += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await saved(
+        host,
+        notes,
+        `hidden-${file}.md`,
+        extra
+          .slice(file * 50, file * 50 + 50)
+          .map(({ evidence }) => evidence)
+          .join("\n")
+      );
+    }
+
+    const after = await recall(host.brain, some, { query, network: {} });
+
+    expect(seen(after)).toStrictEqual(seen(before));
+  });
+
+  it("follows relations inside a bound recall's collections, and never across collections, whose entities are their own", async () => {
+    const query = word();
+    const thing = `Invoicing ${word()}`;
+    const owns = stated("Anna", "owns", thing);
+    const uses = stated(thing, "uses", `Exact ${word()}`);
+    const elsewhere = stated(thing, "uses", `Twinfield ${word()}`);
+    const host = testHost(modelOf([owns, uses, elsewhere]).model);
+    const finance = await newCollection(host.brain, "Finance");
+    const tools = await newCollection(host.brain, "Tools");
+    await saved(host, finance, "team.md", `${query}: ${owns.evidence}`);
+    await saved(host, finance, "stack.md", uses.evidence);
+    await saved(host, tools, "stack.md", elsewhere.evidence);
+    const reader: Caller = { userId: "reader", reads: [finance.id, tools.id] };
+
+    const [unbound, bound, filtered] = await Promise.all([
+      recall(host.brain, reader, { query, network: {} }),
+      recall(host.brain, reader, { query, network: {} }, [
+        collectionIdSchema.parse(finance.id),
+      ]),
+      recall(host.brain, reader, {
+        query,
+        network: {},
+        filters: { collectionIds: [finance.id] },
+      }),
+    ]);
+
+    // The same name in Tools is another entity there: no path reaches it.
+    const expected = [`from ${thing}: ${uses.subject} uses ${uses.object}`];
+    expect({
+      unbound: routed(unbound),
+      bound: routed(bound),
+      filtered: routed(filtered),
+    }).toStrictEqual({
+      unbound: expected,
+      bound: expected,
+      filtered: expected,
+    });
+  });
+
+  it("goes on from twenty entities at most, stays in its budget of items, and says what each cut", async () => {
+    const query = word();
+    const hub = `Hub ${word()}`;
+    const members = Array.from({ length: 21 }, (_, index) =>
+      stated(`Member ${index} ${word()}`, "belongs_to", hub)
+    );
+    const elsewhere = members.map(({ subject }) =>
+      stated(subject, "works_in", `Office ${word()}`)
+    );
+    const host = testHost(modelOf([...members, ...elsewhere]).model);
+    const notes = await newCollection(host.brain, "Directory");
+    await saved(
+      host,
+      notes,
+      "hub.md",
+      `${query}\n${members.map(({ evidence }) => evidence).join("\n")}`
+    );
+    await saved(
+      host,
+      notes,
+      "offices.md",
+      elsewhere.map(({ evidence }) => evidence).join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [notes.id] };
+
+    const [wide, small] = await Promise.all([
+      recall(host.brain, reader, {
+        query,
+        network: { hops: 1 },
+        budget: { maxItems: 50 },
+      }),
+      recall(host.brain, reader, {
+        query,
+        network: { hops: 1 },
+        budget: { maxItems: 3 },
+      }),
+    ]);
+
+    expect({
+      wide: [cutsOf(wide), routed(wide).length, wide.truncated],
+      small: [cutsOf(small), small.items.length, small.truncated],
+      states: [wide.coverage.state, small.coverage.state],
+    }).toStrictEqual({
+      // 22 seeds (21 members and the hub), 20 gone on from: the hub's
+      // relations are all the found note's own, so 19 offices are reached.
+      wide: [["fan_out"], 19, true],
+      small: [["fan_out", "items"], 3, true],
+      states: ["bounded", "bounded"],
+    });
+  });
+
+  it("starts from as many found documents as a recall holds, past what one statement may bind one by one", async () => {
+    const query = word();
+    // 49 notes, so the pack has room for one more: their pairs alone would
+    // bind 98 parameters, past what D1 takes with the rest of the query.
+    const owned = Array.from({ length: 49 }, (_, index) =>
+      stated(`Owner ${index} ${word()}`, "owns", `Process ${index} ${word()}`)
+    );
+    const used = owned.map(({ object }) =>
+      stated(object, "uses", `Tool ${word()}`)
+    );
+    const host = testHost(modelOf([...owned, ...used]).model);
+    const notes = await newCollection(host.brain, "Processes");
+    for (const [index, relation] of owned.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await saved(
+        host,
+        notes,
+        `owner-${index}.md`,
+        `${query}: ${relation.evidence}`
+      );
+    }
+    await saved(
+      host,
+      notes,
+      "tools.md",
+      used.map(({ evidence }) => evidence).join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [notes.id] };
+
+    const pack = await recall(
+      host.brain,
+      reader,
+      { query, network: { hops: 1 }, budget: { maxItems: 50 } },
+      [collectionIdSchema.parse(notes.id)]
+    );
+
+    // The route read the notes' 98 seeds, went on from twenty, and took
+    // the one item there was room for, saying so, rather than failing.
+    expect({
+      items: pack.items.length,
+      routed: routed(pack).length,
+      cuts: cutsOf(pack),
+    }).toStrictEqual({ items: 50, routed: 1, cuts: ["fan_out", "items"] });
+  });
+
+  it("stops at the recall's deadline before its hops, and says the route was cut", async () => {
+    const { host, query, everyone } = await team();
+    // A clock that has run past any deadline once the full-text route has
+    // read: the network route meets it before its first hop.
+    let late = false;
+    const brain = {
+      ...host.brain,
+      ports: {
+        ...host.brain.ports,
+        clock: () => new Date(Date.now() + (late ? 60_000 : 0)),
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          late = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+
+    const pack = await recall(brain, everyone, { query, network: {} });
+
+    expect({
+      items: pack.items.length,
+      cuts: cutsOf(pack),
+      state: pack.coverage.state,
+      truncated: pack.truncated,
+    }).toStrictEqual({
+      items: 1,
+      cuts: ["deadline"],
+      state: "bounded",
+      truncated: true,
+    });
+  });
+
+  it("neither starts from nor follows a memory record's relations", async () => {
+    const query = word();
+    const thing = `Payroll ${word()}`;
+    const owns = stated("Mia", "owns", thing);
+    const uses = stated(thing, "uses", `Loket ${word()}`);
+    const host = testHost(modelOf([owns, uses]).model);
+    const notes = await newCollection(host.brain, "HR");
+    const reader: Caller = { userId: `person-${word()}`, reads: [notes.id] };
+    for (const text of [`${query}: ${owns.evidence}`, uses.evidence]) {
+      // oxlint-disable-next-line no-await-in-loop -- one record at a time
+      await remember(
+        host.brain,
+        reader,
+        { kind: "fact", text },
+        { idempotencyKey: word() }
+      );
+    }
+    await sweepLinking(host.brain, new Date(Date.now() + settleMs + 60_000));
+    for (const { job } of host.started.filter(
+      (started) => "source" in started.job
+    )) {
+      // oxlint-disable-next-line no-await-in-loop -- one job after another
+      await runLinking(host.brain, job, once);
+    }
+
+    const pack = await recall(host.brain, reader, { query, network: {} });
+
+    // The record is found by its words, and its relations stay its own.
+    expect({
+      found: pack.items.map(({ sourceRefs }) => sourceRefs[0]?.kind),
+      routed: routed(pack),
+    }).toStrictEqual({ found: ["memory"], routed: [] });
+  });
+
+  it("follows nothing in a sensitive collection, though its notes are found", async () => {
+    const query = word();
+    const thing = `Grievance ${word()}`;
+    const handles = stated("Anna", "handles", thing);
+    const involves = stated(thing, "involves", `Bob ${word()}`);
+    const host = testHost(modelOf([handles, involves]).model);
+    const restricted = await ensureCollection(
+      host.brain,
+      {
+        id: crypto.randomUUID(),
+        name: "Cases",
+        description: "",
+        owner: "owner",
+        access: "everyone",
+        sensitive: true,
+        source: "here",
+        createdAt: new Date(),
+      },
+      { type: "person", userId: "owner" }
+    );
+    await saved(host, restricted, "case.md", `${query}: ${handles.evidence}`);
+    await saved(host, restricted, "notes.md", involves.evidence);
+    const reader: Caller = { userId: "reader", reads: [restricted.id] };
+
+    const pack = await recall(host.brain, reader, { query, network: {} });
+
+    expect({ found: pack.items.length, routed: routed(pack) }).toStrictEqual({
+      found: 1,
+      routed: [],
+    });
+  });
+
+  it("counts an entity two relations reach as one of a hop's twenty starts", async () => {
+    const query = word();
+    const hub = `Hub ${word()}`;
+    const linked = stated("Anna", "runs", hub);
+    // Eleven entities, each reached by two relations: 22 steps, 11 starts.
+    const tools = Array.from({ length: 11 }, () => `Tool ${word()}`);
+    const both = tools.flatMap((tool) => [
+      stated(hub, "owns", tool),
+      stated(hub, "uses", tool),
+    ]);
+    const hosted = tools.map((tool) =>
+      stated(tool, "runs_on", `Host ${word()}`)
+    );
+    const host = testHost(modelOf([linked, ...both, ...hosted]).model);
+    const notes = await newCollection(host.brain, "Stack");
+    await saved(host, notes, "team.md", `${query}: ${linked.evidence}`);
+    await saved(
+      host,
+      notes,
+      "tools.md",
+      both.map(({ evidence }) => evidence).join("\n")
+    );
+    await saved(
+      host,
+      notes,
+      "hosts.md",
+      hosted.map(({ evidence }) => evidence).join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [notes.id] };
+
+    const pack = await recall(host.brain, reader, {
+      query,
+      network: {},
+      budget: { maxItems: 50 },
+    });
+
+    // Every tool gone on from, so every host reached; nothing cut.
+    expect({
+      cuts: cutsOf(pack),
+      hosts: routed(pack).filter((path) => path.includes("runs_on")).length,
+    }).toStrictEqual({ cuts: [], hosts: 11 });
+  });
+
+  it("gives up on a hop's read that would outlast the recall's deadline, and says the route was cut", async () => {
+    const { host, query, everyone } = await team();
+    // Relation reads that take longer than the recall may, once its
+    // full-text route has read.
+    const slow = { on: false };
+    const slowMs = 3000;
+    /** What `pending` settles to, once `slowMs` have passed too. */
+    const later = async (pending: Promise<unknown>): Promise<unknown> => {
+      await scheduler.wait(slowMs);
+      const settled: unknown = await pending;
+      return settled;
+    };
+    const delayed = <T extends object>(target: T, sql: string): T =>
+      new Proxy(target, {
+        get: (object, property) => {
+          const value: unknown = Reflect.get(object, property, object);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return (...args: unknown[]) => {
+            const result: unknown = Reflect.apply(value, object, args);
+            if (
+              property === "bind" &&
+              typeof result === "object" &&
+              result !== null
+            ) {
+              return delayed(result, sql);
+            }
+            if (
+              result instanceof Promise &&
+              slow.on &&
+              sql.includes("brain_assertions")
+            ) {
+              return later(result);
+            }
+            return result;
+          };
+        },
+      });
+    const database = new Proxy(env.BRAIN, {
+      get: (object, property): unknown => {
+        if (property === "prepare") {
+          return (sql: string) => delayed(object.prepare(sql), sql);
+        }
+        const value: unknown = Reflect.get(object, property, object);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, object, args)
+          : value;
+      },
+    });
+    const brain = {
+      db: drizzle(database),
+      ports: {
+        ...host.brain.ports,
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          slow.on = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+    const startedAt = Date.now();
+
+    const pack = await recall(brain, everyone, {
+      query,
+      network: {},
+      budget: { deadlineMs: 1000 },
+    });
+    const tookMs = Date.now() - startedAt;
+
+    expect({
+      cuts: cutsOf(pack),
+      items: pack.items.length,
+      inTime: tookMs < slowMs,
+    }).toStrictEqual({ cuts: ["deadline"], items: 1, inTime: true });
+  });
+
+  it("starts no relation read once the recall's deadline has passed", async () => {
+    const { host, query, everyone } = await team();
+    // The clock runs past the deadline the moment the route's first
+    // relation read (its seeds) answers.
+    const state = { on: false, late: false, startedLate: 0 };
+    const watched = <T extends object>(target: T, sql: string): T =>
+      new Proxy(target, {
+        get: (object, property) => {
+          const value: unknown = Reflect.get(object, property, object);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return (...args: unknown[]) => {
+            const relationRead = state.on && sql.includes("brain_assertions");
+            if (relationRead && property !== "bind" && state.late) {
+              state.startedLate += 1;
+            }
+            const result: unknown = Reflect.apply(value, object, args);
+            if (
+              property === "bind" &&
+              typeof result === "object" &&
+              result !== null
+            ) {
+              return watched(result, sql);
+            }
+            if (result instanceof Promise && relationRead) {
+              return (async () => {
+                const settled: unknown = await result;
+                state.late = true;
+                return settled;
+              })();
+            }
+            return result;
+          };
+        },
+      });
+    const database = new Proxy(env.BRAIN, {
+      get: (object, property): unknown => {
+        if (property === "prepare") {
+          return (sql: string) => watched(object.prepare(sql), sql);
+        }
+        const value: unknown = Reflect.get(object, property, object);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, object, args)
+          : value;
+      },
+    });
+    const brain = {
+      db: drizzle(database),
+      ports: {
+        ...host.brain.ports,
+        clock: () => new Date(Date.now() + (state.late ? 60_000 : 0)),
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          state.on = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+
+    const pack = await recall(brain, everyone, { query, network: {} });
+
+    expect({
+      cuts: cutsOf(pack),
+      startedLate: state.startedLate,
+    }).toStrictEqual({ cuts: ["deadline"], startedLate: 0 });
+  });
+
+  it("no longer follows a relation once its source's new version doesn't state it", async () => {
+    const { host, notes, query, names, passages, everyone } = await team();
+    await saved(host, notes, "handbook.md", `${names.tool} is retired.`, 1);
+
+    const pack = await recall(host.brain, everyone, { query, network: {} });
+
+    expect(pack.items.map(({ statement }) => statement)).not.toContain(
+      passages.uses.evidence
+    );
+  });
+
+  it("keeps two claims of one source that differ only in their dates, each with its passage and dates", async () => {
+    /** Ben led `thing` from `from` to `to`, as the history says. */
+    const led = (thing: string, from: string, to: string) => ({
+      ...stated(thing, "led_by", "Ben"),
+      validFrom: from,
+      validTo: to,
+      evidence: `From ${from} to ${to} ${thing} was led by Ben.`,
+    });
+    const { host, notes, query, extra, everyone } = await team((thing) => [
+      led(thing, "2020-01-01", "2020-12-31"),
+      led(thing, "2023-01-01", "2023-12-31"),
+    ]);
+    await saved(
+      host,
+      notes,
+      "history.md",
+      extra.map(({ evidence }) => evidence).join("\n")
+    );
+
+    const pack = await recall(host.brain, everyone, { query, network: {} });
+    const ledBy = pack.items
+      .filter(({ statement }) => statement.includes("led by Ben"))
+      .map(({ statement, validFrom, validTo }) => ({
+        statement,
+        validFrom,
+        validTo,
+      }))
+      .toSorted((a, b) => a.statement.localeCompare(b.statement));
+
+    expect(ledBy).toStrictEqual([
+      {
+        statement: extra[0]?.evidence,
+        validFrom: "2020-01-01T00:00:00.000Z",
+        validTo: "2020-12-31T00:00:00.000Z",
+      },
+      {
+        statement: extra[1]?.evidence,
+        validFrom: "2023-01-01T00:00:00.000Z",
+        validTo: "2023-12-31T00:00:00.000Z",
+      },
+    ]);
+  });
+});

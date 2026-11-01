@@ -11,7 +11,6 @@ import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PageLoading } from "../../admin/failure.tsx";
-import { GraspOrganization } from "../../admin/grasp-organization.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
@@ -29,7 +28,6 @@ import { Section } from "../../admin/section.tsx";
 import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
-import { fetchPlatformSettings } from "../../platform-settings.ts";
 import { channelWords } from "../../rollout/channel-words.ts";
 
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
@@ -183,7 +181,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * company the ones that need a look first, and what staff did.
  */
 const PlatformPage = () => {
-  const { rows, platform, readiness, settings } = Route.useLoaderData();
+  const { rows, platform, readiness } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -208,7 +206,6 @@ const PlatformPage = () => {
       <div className="@container flex flex-col gap-6 text-sm">
         <ReadinessPanel readiness={readiness} />
         <EveryCompany live={live} rows={rows} />
-        <GraspOrganization settings={settings} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
@@ -218,13 +215,12 @@ const PlatformPage = () => {
 /** Every company's own deployment. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform, readiness, settings] = await Promise.all([
+    const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
-      fetchPlatformSettings(),
     ]);
-    return { rows, platform, readiness, settings };
+    return { rows, platform, readiness };
   },
   component: PlatformPage,
   pendingComponent: PageLoading,

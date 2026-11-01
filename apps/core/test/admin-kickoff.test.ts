@@ -1,4 +1,3 @@
-import { adminAskPurpose } from "@grasp-os/shared/admin-ask";
 import {
   adminKickoffMaxBytes,
   adminKickoffPath,
@@ -211,19 +210,12 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
         const responses = await Promise.all([
           send(fresh),
           send(fresh, { signature: "0".repeat(64) }),
-          // The admin's keys for the snapshot and the chat open nothing here.
+          // The admin's key for the snapshot opens nothing here.
           send(fresh, {
             signature: await signatureOf(
               fresh,
               env.BETTER_AUTH_SECRET,
               adminSnapshotPurpose
-            ),
-          }),
-          send(fresh, {
-            signature: await signatureOf(
-              fresh,
-              env.BETTER_AUTH_SECRET,
-              adminAskPurpose
             ),
           }),
           // Signed for another company: its own auth secret.
@@ -244,7 +236,7 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
       read: requests.length,
       kept: (await keptAt()) === before,
     }).toStrictEqual({
-      statuses: [401, 401, 401, 401, 401, 403, 403, 404],
+      statuses: [401, 401, 401, 401, 403, 403, 404],
       events: 0,
       read: 0,
       kept: true,
