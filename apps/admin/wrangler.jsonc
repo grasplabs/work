@@ -34,9 +34,8 @@
   // through the stage's OAuth relay, as every client this admin deploys is
   // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
   // each client's own origin. The Access pair is required: without it
-  // nothing is deployed. Which organization is Grasp's own is chosen
-  // on Platform (the admin's database), and secrets live in the stage's
-  // 1Password Environment.
+  // nothing is deployed. Secrets live in the stage's 1Password
+  // Environment.
   "vars": {
     "STAGE": "production",
     "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
@@ -170,10 +169,11 @@
     // Grasp's own AI provider keys, which pay for its platform features
     // (converting PDFs for the Brain, transcription, speech, fixed in
     // core's src/platform-ai.ts). Every client's connect gets them as
-    // shared secrets, never its core (src/deploy/context.ts). Optional:
-    // added to the stage's 1Password Environment, each is bound at the next
-    // Deploy platform; until then, the features on its provider aren't
-    // available in any organization.
+    // shared secrets, never its core (src/deploy/context.ts). The admin
+    // asks OpenAI with Grasp's key itself for Ask Grasp (src/admin/ask.ts).
+    // Optional: added to the stage's 1Password Environment, each is bound
+    // at the next Deploy platform; until then, the features on its provider
+    // aren't available in any organization, nor Ask Grasp without OpenAI's.
     {
       "binding": "OPENAI_API_KEY",
       "store_id": "account-secrets-store",

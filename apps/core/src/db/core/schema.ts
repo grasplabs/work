@@ -1,5 +1,5 @@
 import { candidateStates } from "@grasp-os/shared/apps";
-import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
+import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
@@ -568,7 +568,8 @@ export const auditOutboxRejected = sqliteTable(
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
  * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * another App's exports are that App's ID in `object_id`. `actions` is a
+ * an App (an agent's, to call its functions) and a store are their IDs in
+ * `object_id`. `actions` is a
  * JSON array of action names.
  */
 export const permissions = sqliteTable(
@@ -638,8 +639,8 @@ export const permissions = sqliteTable(
       table.status,
       table.revokedAt
     ),
-    // The Apps granted to call an App's exports, found from that App
-    // (app-provenance.ts): by object, not subject.
+    // The permissions on one object, found from it: by object, not
+    // subject.
     index("permissions_object_idx").on(table.objectType, table.objectId),
     // A binding name is one stub in the subject's env, so it is unique
     // among the permissions that aren't revoked: those that hold anywhere,
@@ -1007,15 +1008,6 @@ export const appVersions = sqliteTable(
      */
     workflowCalls: text("workflow_calls", { mode: "json" })
       .$type<Record<string, WorkflowCalls>>()
-      .notNull()
-      .default(sql`'{}'`),
-    /**
-     * The version's exports (JSON, `AppExports`), read from its
-     * `app/exports.json` when it is committed (app-exports.ts): so a call
-     * from another App reads no files to find what it may call.
-     */
-    exports: text({ mode: "json" })
-      .$type<AppExports>()
       .notNull()
       .default(sql`'{}'`),
     /**
@@ -3390,7 +3382,8 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that a
  * workflow failed while acting for them (`run_failed`), or that an admin
  * asked them one of the brain's open questions (`gap_asked`,
- * src/brain-gaps.ts). A `run_failed` row has its App, workflow, run and
+ * src/brain-gaps.ts), or that packages of an App or workflow they build
+ * or approved were revoked as malware (`package_revoked`). A `run_failed` row has its App, workflow, run and
  * failures, and no gap; a `gap_asked` row its gap alone, once per person
  * and gap. One unread `run_failed` row per person, App and workflow:
  * another failure while it is unread counts on it (`failures`) and names
@@ -3405,7 +3398,7 @@ export const notifications = sqliteTable(
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
     type: text({
-      enum: ["run_failed", "gap_asked", "trigger_stopped"],
+      enum: ["run_failed", "gap_asked", "trigger_stopped", "package_revoked"],
     }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
@@ -3423,6 +3416,15 @@ export const notifications = sqliteTable(
      * resource the trigger starts.
      */
     triggerId: text("trigger_id"),
+    /**
+     * The package version a `package_revoked` row says was reported as
+     * malware, and the advisory that reported it
+     * (dependencies/requests.ts); its `app_id` or `workflow_id` is the
+     * App or workflow whose packages were revoked.
+     */
+    packageName: text("package_name"),
+    packageVersion: text("package_version"),
+    advisory: text(),
   },
   (table) => [
     // A person's list, latest first.

@@ -232,12 +232,15 @@ const resourceOf = (
     return {
       // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
       call: (operation: unknown, args: unknown, options?: unknown) => {
-        // Read once, as data: only its `into`, a files use's alias.
+        // Read once, as data: only its `into` and `from`, files uses'
+        // aliases.
         const into = exportOf(options, "into");
+        const from = exportOf(options, "from");
         return callHost(alias, {
           operation,
           arguments: args,
           ...(into === undefined ? {} : { into }),
+          ...(from === undefined ? {} : { from }),
         });
       },
     };

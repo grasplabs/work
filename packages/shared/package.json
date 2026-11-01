@@ -6,7 +6,6 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    "./admin-ask": "./src/admin-ask.ts",
     "./admin-kickoff": "./src/admin-kickoff.ts",
     "./admin-snapshot": "./src/admin-snapshot.ts",
     "./admin/admin-account": "./src/admin/admin-account.ts",
@@ -66,6 +65,7 @@
     "./connect": "./src/connect.ts",
     "./connect-gateway": "./src/connect-gateway.ts",
     "./connect-names": "./src/connect-names.ts",
+    "./connector-attachments": "./src/connector-attachments.ts",
     "./dashboard": "./src/dashboard.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",
@@ -145,7 +145,6 @@
     "./shared-runs": "./src/shared-runs.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
-    "./state-registry": "./src/state-registry.ts",
     "./statistics": "./src/statistics.ts",
     "./stephen-reach": "./src/stephen-reach.ts",
     "./stephen-requests": "./src/stephen-requests.ts",
@@ -165,6 +164,7 @@
     "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
+    "./workflow-triggers": "./src/workflow-triggers.ts",
     "./work-knowledge": "./src/work-knowledge.ts",
     "./workflows": "./src/workflows.ts"
   },

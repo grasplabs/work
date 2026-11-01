@@ -40,7 +40,7 @@ export interface ConnectorCatalog {
   };
   readonly "google-workspace.mail@1": {
     readonly createDraft: {
-      readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { id: string; mailbox: string; messageId: string; threadId: string | null };
     };
     readonly get: {
@@ -64,7 +64,7 @@ export interface ConnectorCatalog {
       readonly output: { content: string | null; contentType: string | null; encoding: "text" | "base64"; id: string; mailbox: string; messageId: string; name: string; size: number };
     };
     readonly send: {
-      readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { id: string; mailbox: string; sent: true; threadId: string | null };
     };
   };
@@ -162,7 +162,7 @@ export interface ConnectorCatalog {
       readonly output: { categories: Array<string>; id: string; mailbox: string };
     };
     readonly createDraft: {
-      readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { conversationId: string | null; id: string; mailbox: string; webLink: string | null };
     };
     readonly createReplyDraft: {
@@ -190,7 +190,7 @@ export interface ConnectorCatalog {
       readonly output: { content: string | null; contentType: string | null; encoding: "text" | "base64"; id: string; mailbox: string; messageId: string; name: string | null; size: number };
     };
     readonly send: {
-      readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { mailbox: string; sent: true };
     };
     readonly thread: {

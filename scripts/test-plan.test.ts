@@ -18,9 +18,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   affectedProjects,
+  configImports,
   packageOf,
   packagesSelected,
   filesImporting,
+  journeysReached,
   missedByPlan,
   reachSince,
   reachedPackages,
@@ -418,5 +420,160 @@ describe("following a change through Grasp's workspace", () => {
     expect(
       reachedPackages(workspace, ["/repo/apps/web"], new Map())
     ).toStrictEqual(new Set(["/repo/apps/web", "/repo/apps/core"]));
+  });
+});
+
+/** The journey stacks' packages and two apart from them, as Grasp's are. */
+const stackPackages = [
+  { name: "grasp-os", dir: root, dependsOn: ["/repo/packages/shared"] },
+  { name: "@grasp-os/shared", dir: "/repo/packages/shared", dependsOn: [] },
+  {
+    name: "@grasp-os/ui",
+    dir: "/repo/packages/ui",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/web",
+    dir: "/repo/apps/web",
+    dependsOn: ["/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/connect",
+    dir: "/repo/apps/connect",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/core",
+    dir: "/repo/apps/core",
+    dependsOn: ["/repo/apps/web", "/repo/apps/connect"],
+  },
+  {
+    name: "@grasp-os/admin",
+    dir: "/repo/apps/admin",
+    dependsOn: ["/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/router",
+    dir: "/repo/apps/router",
+    dependsOn: ["/repo/packages/shared"],
+  },
+];
+
+/** What both journey configs import, as e2e/stack.ts is. */
+const sharedByConfigs = "/repo/e2e/stack.ts";
+
+const journeysFor = (...changedFiles: string[]) =>
+  journeysReached({
+    changedFiles,
+    testFiles: new Set([
+      "/repo/apps/core/test/agent.test.ts",
+      "/repo/scripts/test-plan.test.ts",
+    ]),
+    packages: stackPackages,
+    root,
+    importedByConfig: (_suite, changed) => changed.includes(sharedByConfigs),
+  });
+
+describe("choosing which journey suites a change reaches", () => {
+  it("runs e2e for a change in what its stack runs, web's build included", () => {
+    expect(journeysFor("/repo/apps/web/src/app.tsx")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+  });
+
+  it("runs both for a package both stacks depend on", () => {
+    expect(journeysFor("/repo/packages/ui/src/button.tsx")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs only admin-e2e for a change to the admin alone", () => {
+    expect(journeysFor("/repo/apps/admin/src/rollout.ts")).toStrictEqual({
+      e2e: false,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs neither for a test file, which no build bundles, or a package no stack runs", () => {
+    expect(
+      journeysFor(
+        "/repo/apps/core/test/agent.test.ts",
+        "/repo/apps/router/src/index.ts"
+      )
+    ).toStrictEqual({ e2e: false, "admin-e2e": false });
+  });
+
+  it("runs a stack for a helper of the tests, which isn't a test file", () => {
+    expect(journeysFor("/repo/apps/core/test/helpers.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+  });
+
+  it("runs a suite alone for a change to its own journeys or config", () => {
+    expect(journeysFor("/repo/e2e/chat.e2e.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+    expect(
+      journeysFor(
+        "/repo/e2e/admin/rollout.e2e.ts",
+        "/repo/playwright.admin.config.ts"
+      )
+    ).toStrictEqual({ e2e: false, "admin-e2e": true });
+  });
+
+  it("runs both for any other file outside every package", () => {
+    expect(journeysFor("/repo/scripts/dev.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs both for a file of e2e's folder that both configs import", () => {
+    expect(journeysFor(sharedByConfigs)).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs neither for a change to the root's own Vitest tests alone", () => {
+    expect(journeysFor("/repo/scripts/test-plan.test.ts")).toStrictEqual({
+      e2e: false,
+      "admin-e2e": false,
+    });
+  });
+
+  it("finds what each config imports: a helper both take for both, a journey for neither", () => {
+    // Shaped as this repository is: both configs take e2e/stack.ts, the
+    // admin's for `corePort`. A small repository of its own, as walking
+    // this one's every file is too slow for a unit test under load.
+    const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "configs-")));
+    try {
+      const sources: Record<string, string> = {
+        "e2e/stack.ts": "export const corePort = 1;\n",
+        "e2e/chat.e2e.ts": 'import { corePort } from "./stack.ts";\n',
+        "playwright.config.ts":
+          'import { corePort } from "./e2e/stack.ts";\nexport default corePort;\n',
+        "playwright.admin.config.ts":
+          'import { corePort } from "./e2e/stack.ts";\nexport default corePort;\n',
+      };
+      for (const [file, content] of Object.entries(sources)) {
+        mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+        writeFileSync(path.join(repo, file), content);
+      }
+      execFileSync("git", ["init", "--quiet"], { cwd: repo });
+      const imports = configImports(repo);
+      const stack = [path.join(repo, "e2e/stack.ts")];
+      const journey = [path.join(repo, "e2e/chat.e2e.ts")];
+      expect({
+        stack: [imports("e2e", stack), imports("admin-e2e", stack)],
+        journey: [imports("e2e", journey), imports("admin-e2e", journey)],
+      }).toStrictEqual({ stack: [true, true], journey: [false, false] });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

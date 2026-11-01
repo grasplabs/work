@@ -108,8 +108,9 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to, replyTo, headers }` each (`headers` its
- * `internetMessageHeaders`), and the drafts it made (`draft: true`).
+ * order: `{ mailbox, subject, to, replyTo, headers, attachments }` each
+ * (`headers` its `internetMessageHeaders`, `attachments` the file
+ * attachments it was given), and the drafts it made (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -143,6 +144,14 @@ export const graphDraftsUrl = "https://graph-control.test/drafts";
  * bytes as base64.
  */
 export const graphAttachmentUrl = "https://graph-control.test/attachment";
+
+/**
+ * Where tests read how often Graph handed out an attachment's content
+ * (not its fields alone): GET `?mailbox=…&message=…&id=…`, answered
+ * `{ reads }`.
+ */
+export const graphAttachmentReadsUrl =
+  "https://graph-control.test/attachment-reads";
 
 /**
  * Where tests publish a package on the fake npm registry: POST one
@@ -380,6 +389,7 @@ const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
+const graphAttachmentReads = new Map();
 /** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
 const losesAnswer = (mailbox) => {
   const losing = graphLosing.get(mailbox) ?? 0;
@@ -581,6 +591,8 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          // The files attached (\`attachments\`), as Graph was given them.
+          attachments: message.attachments ?? [],
           // The tag a native connector puts on what it sends: its effect key.
           effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
         });
@@ -603,6 +615,7 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          attachments: message.attachments ?? [],
           draft: true,
         });
         return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
@@ -619,9 +632,18 @@ export default {
         }
         const size = atob(found.contentBytes).length;
         const fields = { "@odata.type": "#microsoft.graph.fileAttachment", id: found.id, name: found.name, contentType: found.contentType, size, isInline: false };
-        return Response.json(url.searchParams.has("$select") ? fields : { ...fields, contentBytes: found.contentBytes });
+        if (url.searchParams.has("$select")) {
+          return Response.json(fields);
+        }
+        const read = [mailbox, rest[1], rest[3]].join("/");
+        graphAttachmentReads.set(read, (graphAttachmentReads.get(read) ?? 0) + 1);
+        return Response.json({ ...fields, contentBytes: found.contentBytes });
       }
       return graphEvents.answer(request, url);
+    }
+    if (request.method === "GET" && url.origin + url.pathname === ${JSON.stringify(graphAttachmentReadsUrl)}) {
+      const read = [url.searchParams.get("mailbox"), url.searchParams.get("message"), url.searchParams.get("id")].join("/");
+      return Response.json({ reads: graphAttachmentReads.get(read) ?? 0 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphAttachmentUrl)}) {
       const attachment = await request.json();

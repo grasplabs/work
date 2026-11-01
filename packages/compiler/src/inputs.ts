@@ -96,26 +96,6 @@ export const buildFiles = (
   );
 
 /**
- * The App's server code of a server class: TypeScript anywhere under
- * `app/`, in folders named as any App path's may be. Not all of `app/` is
- * code (its exports, `app/exports.json`), so nothing else there is
- * refused.
- */
-const isServerFile = (path: string): boolean =>
-  path.startsWith("app/") && isTypeScriptCode(path) && hasAppPathSegments(path);
-
-/** The module that exports the server's `App` class. */
-export const serverEntry = "app/server.ts";
-
-/** The files a server build reads: the App's `app/**.ts` (`isServerFile`). */
-export const serverFiles = (
-  files: Record<string, string>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) => isServerFile(path))
-  );
-
-/**
  * The App's workflows, their tests and the code they share: TypeScript
  * anywhere under `workflows/`. Only `workflows/<id>.ts` is a workflow
  * (`workflowIdOf`); a file in a folder, dotted or not, is shared code.
