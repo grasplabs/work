@@ -278,8 +278,13 @@ jobs:
   # parts, each the files scripts/e2e-parts.ts gives it by their times
   # (scripts/e2e-durations.json), and each serial project on a stack of its
   # own, where nothing runs before it: on one stack the three took about 7
-  # minutes (October 2026, GRA-1094). Add a parallel part by adding an
-  # entry and raising the count in every entry's `part`.
+  # minutes (October 2026, GRA-1094). Four parallel parts, not more: each
+  # part spends about 3.5 minutes on setup and starting its stack before its
+  # first test, and eight parts' tests took under 2 minutes each, so half
+  # of every part was that overhead while PRs queued for runners at the
+  # account's 60 concurrent jobs. Four still end before the test shards,
+  # which wait for the plan (October 2026, 136 PR runs). Add a parallel
+  # part by adding an entry and raising the count in every entry's `part`.
   # Part of the required `e2e` (below).
   #
   # In Playwright's image, which has the browsers and their system packages
@@ -308,30 +313,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - part: 1/8
+          - part: 1/4
             project: parallel
-            artifact: 1-of-8
-          - part: 2/8
+            artifact: 1-of-4
+          - part: 2/4
             project: parallel
-            artifact: 2-of-8
-          - part: 3/8
+            artifact: 2-of-4
+          - part: 3/4
             project: parallel
-            artifact: 3-of-8
-          - part: 4/8
+            artifact: 3-of-4
+          - part: 4/4
             project: parallel
-            artifact: 4-of-8
-          - part: 5/8
-            project: parallel
-            artifact: 5-of-8
-          - part: 6/8
-            project: parallel
-            artifact: 6-of-8
-          - part: 7/8
-            project: parallel
-            artifact: 7-of-8
-          - part: 8/8
-            project: parallel
-            artifact: 8-of-8
+            artifact: 4-of-4
           - part: onboarding
             project: onboarding
             artifact: onboarding
