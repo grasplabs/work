@@ -82,6 +82,10 @@ const applyChange = async (
   const store = onboardingStore(env);
   switch (command.type) {
     case "onboarding.agreements": {
+      // The record of what was agreed before the first interview: once a
+      // link went out, it stays as it was.
+      const { told } = await store.staffAgreements();
+      refuseUnless(!told, "onboarding.agreements_kept");
       await store.setAgreements(command.payload.agreements, by);
       // Once all are in, the links that are due go out now, not at the next alarm.
       await store.releaseDue();

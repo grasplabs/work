@@ -554,4 +554,6 @@ export const onboardingErrors = defineErrorFamily({
     "Nothing about that piece of work needs settling.",
   "onboarding.nothing_to_draw":
     "Nobody who does that work has agreed to anything yet.",
+  "onboarding.agreements_kept":
+    "The team is told: what was agreed stays as it was agreed.",
 });
