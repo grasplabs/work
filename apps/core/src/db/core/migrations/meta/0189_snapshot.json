@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a1241e20-1884-412d-88c4-e903c60d5198",
+  "id": "cd77265f-7598-4b94-8b30-3f2319e25bd4",
   "prevId": "d052d1fd-b27d-4fed-8862-a77f41c3e278",
   "tables": {
     "access_revocations": {
@@ -5527,27 +5527,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "package_name": {
-          "name": "package_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "package_version": {
-          "name": "package_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "advisory": {
-          "name": "advisory",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -6151,6 +6130,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -6171,6 +6157,13 @@
           "name": "preview_fixture_stores_created_at",
           "columns": [
             "created_at"
+          ],
+          "isUnique": false
+        },
+        "preview_fixture_stores_person": {
+          "name": "preview_fixture_stores_person",
+          "columns": [
+            "person_id"
           ],
           "isUnique": false
         }

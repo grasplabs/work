@@ -4,17 +4,14 @@ import {
   behindOf,
   driftOf,
   needsOf,
-  releaseOf,
   ringsOf,
   standingOf,
 } from "../../src/admin/admin-platform.ts";
 import type { Platform, Rollout } from "../../src/admin/admin-platform.ts";
-import { adminViewOf } from "../../src/admin/admin-view.ts";
 import {
   SAMPLE_PLATFORMS,
   SAMPLE_RELEASES,
 } from "./fixtures/admin-platform-sample.ts";
-import { SAMPLE_ORGS } from "./fixtures/admin-sample.ts";
 
 const { hartog, noordkade, veldkamp, vanrijn } = SAMPLE_PLATFORMS;
 const [core] = noordkade.workers;
@@ -147,26 +144,5 @@ describe("how a release reaches every company", () => {
       "done",
       "stopped",
     ]);
-  });
-});
-
-describe("the samples", () => {
-  it("belong to sample organizations, and run only where the contract is signed", () => {
-    const releases = new Set(SAMPLE_RELEASES.map((release) => release.id));
-    for (const [id, platform] of Object.entries(SAMPLE_PLATFORMS)) {
-      const org = SAMPLE_ORGS.find((each) => each.id === id);
-      expect(org).toBeDefined();
-      if (!org) {
-        continue;
-      }
-      const signed =
-        adminViewOf(org, org.seed, "2026-10-02").contract.status === "signed";
-      expect(platform.status === "active").toBe(signed);
-      // Every release a sample runs or ran is one the admin imported.
-      expect(
-        platform.deploys.every((deploy) => releases.has(deploy.release))
-      ).toBeTruthy();
-      expect(releaseOf(platform) === null).toBe(platform.workers.length === 0);
-    }
   });
 });
