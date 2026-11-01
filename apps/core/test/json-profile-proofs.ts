@@ -869,6 +869,9 @@ export const profileProofs = (where: string): void => {
               input: enveloped(operation.input),
               output: enveloped(operation.output),
               readOnly: true,
+              // As its connector declares it: a read whose content an
+              // action may keep as a file of its run (GRA-886).
+              ...(operation.answersFile === true ? { answersFile: true } : {}),
             },
           },
         });
