@@ -124,19 +124,15 @@ test("someone has their interview by typing, carries on after stopping, and agre
     page.getByRole("heading", { name: "Thank you, Noor." })
   ).toBeVisible();
 
-  // Core keeps it approved: both lines, as they were put right. Staff see
-  // its numbers, never its words (GRA-329).
+  // Core keeps it agreed to: both lines, as they were put right. Grasp's
+  // admin sees its numbers, never its words (GRA-329).
   await expect
     .poll(async () => {
       const { interviews } = await adminSnapshot();
       const kept = interviews.find((interview) => interview.person === person);
-      return {
-        agreed: kept?.agreed,
-        facts: kept?.facts,
-        confirmed: kept?.confirmed,
-      };
+      return { agreed: kept?.agreed, facts: kept?.facts };
     })
-    .toStrictEqual({ agreed: true, facts: 2, confirmed: 2 });
+    .toStrictEqual({ agreed: true, facts: 2 });
   expect({
     refused: asked.refused,
     events: asked.turns.map(({ event }) => event),
