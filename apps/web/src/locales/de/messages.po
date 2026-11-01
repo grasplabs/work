@@ -5625,6 +5625,10 @@ msgstr "Das Grasp-Team kann hier keine Konten verbinden und nicht ändern, was a
 msgid "Grasp staff signed in"
 msgstr "Grasp-Mitarbeitende haben sich angemeldet"
 
+#: src/routes/staff.tsx
+msgid "Grasp staff work from the admin dashboard"
+msgstr "Grasp-Mitarbeitende arbeiten im Admin-Dashboard"
+
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transkribiert Interviews mit {whereItRuns}, mit Grasps eigenem Schlüssel."
@@ -10963,6 +10967,7 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Abmelden"
 
@@ -12840,6 +12845,10 @@ msgstr "bis"
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Bis"
+
+#: src/routes/staff.tsx
+msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
+msgstr "Um in diesem Workspace zu handeln, bitten Sie seinen Admin, Sie als Benutzer hinzuzufügen, und melden Sie sich als solcher an."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "To change them, ask your admin."

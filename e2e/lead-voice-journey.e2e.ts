@@ -11,7 +11,7 @@ import { expect } from "@playwright/test";
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
-import { adminSnapshot } from "./admin-steering.ts";
+import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import {
@@ -210,10 +210,15 @@ const salesLedBy = async (staff: Person, run: string) => {
       ],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
   } finally {
     core[Symbol.dispose]();

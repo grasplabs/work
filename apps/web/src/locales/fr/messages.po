@@ -5625,6 +5625,10 @@ msgstr "L’équipe Grasp ne peut pas connecter de comptes ni modifier ce qui es
 msgid "Grasp staff signed in"
 msgstr "Le personnel de Grasp s’est connecté"
 
+#: src/routes/staff.tsx
+msgid "Grasp staff work from the admin dashboard"
+msgstr "L’équipe de Grasp travaille depuis le tableau de bord d’administration"
+
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transcrit les entretiens avec {whereItRuns}, avec la propre clé de Grasp."
@@ -10963,6 +10967,7 @@ msgstr "Connectez-vous avec le compte de votre organisation."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Déconnecter"
 
@@ -12840,6 +12845,10 @@ msgstr "à"
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Au"
+
+#: src/routes/staff.tsx
+msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
+msgstr "Pour agir dans cet espace de travail, demandez à son administrateur de vous ajouter comme utilisateur, puis connectez-vous en tant que tel."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "To change them, ask your admin."

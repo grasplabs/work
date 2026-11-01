@@ -16,6 +16,7 @@ import { Route as InterviewRouteImport } from './routes/interview'
 import { Route as KitRouteImport } from './routes/kit'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as StaffRouteImport } from './routes/staff'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
@@ -101,6 +102,11 @@ const SetupRoute = SetupRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StaffRoute = StaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShellIndexRoute = ShellIndexRouteImport.update({
@@ -383,6 +389,7 @@ export interface FileRoutesByFullPath {
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/staff': typeof StaffRoute
   '/$': typeof ShellSplatRoute
   '/brain': typeof ShellBrainRouteWithChildren
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
@@ -442,6 +449,7 @@ export interface FileRoutesByTo {
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/staff': typeof StaffRoute
   '/$': typeof ShellSplatRoute
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/dashboard': typeof ShellDashboardRoute
@@ -502,6 +510,7 @@ export interface FileRoutesById {
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
+  '/staff': typeof StaffRoute
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
@@ -565,6 +574,7 @@ export interface FileRouteTypes {
     | '/kit'
     | '/setup'
     | '/sign-in'
+    | '/staff'
     | '/$'
     | '/brain'
     | '/connect-microsoft'
@@ -624,6 +634,7 @@ export interface FileRouteTypes {
     | '/kit'
     | '/setup'
     | '/sign-in'
+    | '/staff'
     | '/$'
     | '/connect-microsoft'
     | '/dashboard'
@@ -683,6 +694,7 @@ export interface FileRouteTypes {
     | '/kit'
     | '/setup'
     | '/sign-in'
+    | '/staff'
     | '/_shell/$'
     | '/_shell/brain'
     | '/_shell/connect-microsoft'
@@ -745,6 +757,7 @@ export interface RootRouteChildren {
   KitRoute: typeof KitRoute
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
+  StaffRoute: typeof StaffRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
   KitComponentsNameRoute: typeof KitComponentsNameRoute
   KitExamplesNameRoute: typeof KitExamplesNameRoute
@@ -800,6 +813,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/staff': {
+      id: '/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof StaffRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/': {
@@ -1302,6 +1322,7 @@ const rootRouteChildren: RootRouteChildren = {
   KitRoute: KitRoute,
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
+  StaffRoute: StaffRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
   KitComponentsNameRoute: KitComponentsNameRoute,
   KitExamplesNameRoute: KitExamplesNameRoute,

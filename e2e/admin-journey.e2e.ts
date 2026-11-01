@@ -2,7 +2,7 @@ import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { expect } from "@playwright/test";
 
 import { localAdmin } from "../apps/core/test/sign-in-config.ts";
-import { adminSnapshot } from "./admin-steering.ts";
+import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
 import { apiOf, signInAs, signInStaff } from "./people.ts";
@@ -46,10 +46,15 @@ const readyForTheAdmin = async (): Promise<void> => {
     if (roster !== null) {
       await api.onboarding.savePlan({ start: daysFromToday(2) });
     }
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
   } finally {
     core[Symbol.dispose]();

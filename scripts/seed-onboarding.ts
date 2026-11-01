@@ -225,10 +225,15 @@ const main = async (): Promise<void> => {
     });
 
     // The agreements, which staff put in place: the leads' links go out.
-    await staff.api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
     // Grasp's staff close the platform to the company until their go.
     await adminCommand(

@@ -16,7 +16,7 @@ import type {
 import type { Page, Route } from "@playwright/test";
 import { z } from "zod";
 
-import { adminSnapshot } from "./admin-steering.ts";
+import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import { apiOf } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -163,10 +163,15 @@ export const invited = async (
       people: [{ id: person, name, team: `team-${person}` }],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
   } finally {
     core[Symbol.dispose]();

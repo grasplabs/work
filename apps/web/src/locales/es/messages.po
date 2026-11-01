@@ -5625,6 +5625,10 @@ msgstr "El personal de Grasp no puede conectar cuentas ni cambiar lo que se ofre
 msgid "Grasp staff signed in"
 msgstr "El personal de Grasp inició sesión"
 
+#: src/routes/staff.tsx
+msgid "Grasp staff work from the admin dashboard"
+msgstr "El equipo de Grasp trabaja desde el panel de administración"
+
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transcribe las entrevistas con {whereItRuns}, usando la clave propia de Grasp."
@@ -10963,6 +10967,7 @@ msgstr "Inicia sesión con la cuenta de tu organización."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Cerrar sesión"
 
@@ -12840,6 +12845,10 @@ msgstr "a"
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Hasta"
+
+#: src/routes/staff.tsx
+msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
+msgstr "Para actuar en este espacio de trabajo, pide a su administrador que te añada como usuario e inicia sesión como tal."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "To change them, ask your admin."
