@@ -59,7 +59,7 @@ export const added = async (): Promise<string> => {
 export const place = async (clientId: string, releaseId: string) =>
   await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId, destinationId: null },
+    { clientId, releaseId },
     { email: staff.email }
   );
 

@@ -200,7 +200,7 @@ export const ensureClientResources = async (
     throw new InventoryError("not_placed", `${clientId} isn't placed`);
   }
   const destination = await destinationOf(db, placement.destinationId);
-  if (destination.kind === "workerd" || destination.accountId === null) {
+  if (destination.accountId === null) {
     throw new InventoryError(
       "destination_unsupported",
       `${destination.id} has no Cloudflare account to create resources in`

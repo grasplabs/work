@@ -405,20 +405,17 @@ export const auditEvents = sqliteTable(
 );
 
 /**
- * Where clients run: a Cloudflare account (a Workers for Platforms
- * namespace in it, or ordinary Workers) or a host running plain workerd
- * (src/hosting/). Several clients may share one; their resources stay
- * apart (`clientResources`). Never a secret or a credential.
+ * Where clients run: a Workers for Platforms namespace in a Cloudflare
+ * account, one per stage (src/hosting/placement.ts,
+ * `ensureStageDestination`). Every client of the stage shares it; their
+ * resources stay apart (`clientResources`). Never a secret or a credential.
  */
 export const hostingDestinations = sqliteTable("hosting_destinations", {
-  /** Staff's name for it, such as `eu-production`. */
+  /** Its name, such as `workers-for-platforms-production`. */
   id: text().primaryKey(),
-  kind: text({
-    enum: ["workers_for_platforms", "dedicated", "workerd"],
-  }).notNull(),
-  /** Its Cloudflare account; null for workerd. */
+  /** Its Cloudflare account. */
   accountId: text("account_id"),
-  /** Its Workers for Platforms dispatch namespace; null otherwise. */
+  /** Its Workers for Platforms dispatch namespace. */
   namespace: text(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),

@@ -15,7 +15,7 @@ const seededSchema = z.object({
   releaseIds: z.tuple([z.string(), z.string()]),
 });
 
-/** A client live on the first of two releases, in a dedicated destination of its own. */
+/** A client live on the first of two releases, in the stage's destination. */
 const seed = async (
   request: APIRequestContext
 ): Promise<z.infer<typeof seededSchema>> => {

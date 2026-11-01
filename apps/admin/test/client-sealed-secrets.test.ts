@@ -27,6 +27,7 @@ import { targetClient } from "../src/rollout/targets.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts } from "./grasp-account.ts";
 import { callServerFn } from "./pages.ts";
 import {
   deployPlaced,
@@ -89,7 +90,7 @@ const liveSecretsOf = (
   { account, scripts }: LiveClient,
   worker: "core" | "connect"
 ) => {
-  const state = account.scripts.get(scripts[worker]);
+  const state = clientScripts(account).get(scripts[worker]);
   const [only] = state?.deployments[0]?.versions ?? [];
   const live = state?.versions.find(({ id }) => id === only?.version_id);
   return live?.secrets ?? new Map<string, string>();
@@ -422,8 +423,8 @@ describe("a client's Teams bot secret", () => {
       setBy: staff.email,
       setAt: new Date(),
     });
-    const versions = other.account.scripts.get(other.scripts.connect)?.versions
-      .length;
+    const versions = clientScripts(other.account).get(other.scripts.connect)
+      ?.versions.length;
 
     const logged = await loggedBy(async () => {
       await expect(
@@ -440,8 +441,8 @@ describe("a client's Teams bot secret", () => {
 
     expect({
       deploy,
-      versions: other.account.scripts.get(other.scripts.connect)?.versions
-        .length,
+      versions: clientScripts(other.account).get(other.scripts.connect)
+        ?.versions.length,
       connect: liveSecretsOf(other, "connect").has("TEAMS_BOT_SECRET"),
       logged: logged.includes(row?.sealed ?? "-"),
     }).toStrictEqual({

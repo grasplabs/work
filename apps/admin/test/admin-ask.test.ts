@@ -40,13 +40,13 @@ const liveClient = async () => {
   const release = await placedRelease("feat(core): ask");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name,
     signIn: null,
   });
-  account.admin = emptyAdminSnapshot("Noordkade");
-  return { clientId, account };
+  core.admin = emptyAdminSnapshot("Noordkade");
+  return { clientId, core };
 };
 
 /**
@@ -111,16 +111,16 @@ describe("Ask Grasp", () => {
   eachTest();
 
   it("says no organization is named as Grasp's own, and asks nothing", async () => {
-    const { account } = await liveClient();
+    const { core } = await liveClient();
     const answer = await asGrasp(undefined, async () => await ask(question));
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("grasp_client_unset"),
       asked: 0,
     });
   });
 
   it("says the organization chosen as Grasp's own is one the admin no longer has", async () => {
-    const { account } = await liveClient();
+    const { core } = await liveClient();
     const gone = `client-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date();
     await db
@@ -131,14 +131,14 @@ describe("Ask Grasp", () => {
       await db.delete(clients).where(eq(clients.id, gone));
       return await ask(question);
     });
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("grasp_client_unknown"),
       asked: 0,
     });
   });
 
   it("says to choose Grasp's own organization again once the one chosen is offboarded", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     const answer = await asGrasp(clientId, async () => {
       await db
         .update(clients)
@@ -146,58 +146,58 @@ describe("Ask Grasp", () => {
         .where(eq(clients.id, clientId));
       return await ask(question);
     });
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("grasp_client_unknown"),
       asked: 0,
     });
   });
 
   it("says Grasp's own organization isn't live, while it's still being set up", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     await db
       .update(clients)
       .set({ status: "provisioning" })
       .where(eq(clients.id, clientId));
     const answer = await asGrasp(clientId, async () => await ask(question));
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("grasp_client_not_active"),
       asked: 0,
     });
   });
 
   it("names the secret missing from Secrets Store that the question is signed with", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     await emptyStoreSecret(env.CLIENT_KEY, "CLIENT_KEY");
     const answer = await asGrasp(clientId, async () => await ask(question));
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("secret_missing", { secret: "CLIENT_KEY" }),
       asked: 0,
     });
   });
 
   it("says no client domain is set, so Grasp's own organization has no hostname", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     const answer = await asGrasp(clientId, async () => await ask(question), {
       clientDomain: "",
     });
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("no_client_domain"),
       asked: 0,
     });
   });
 
   it("says the router has no route to Grasp's own organization", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     await env.ROUTER_HOSTS.delete(hostKeyOf(clientId));
     const answer = await asGrasp(clientId, async () => await ask(question));
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("not_routed"),
       asked: 0,
     });
   });
 
   it("says Grasp's own core runs where the admin has no dispatcher to reach it", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     await env.ROUTER_HOSTS.put(
       hostKeyOf(clientId),
       JSON.stringify({ clientId, script: `${clientId}-core`, generation: 1 })
@@ -205,15 +205,15 @@ describe("Ask Grasp", () => {
     const answer = await asGrasp(clientId, async () => await ask(question), {
       noDispatcher: true,
     });
-    expect({ answer, asked: account.asked.length }).toStrictEqual({
+    expect({ answer, asked: core.asked.length }).toStrictEqual({
       answer: cannotAsk("core_unreachable"),
       asked: 0,
     });
   });
 
   it("asks Grasp's own core, signed, naming the staff member, with the document and the conversation as turns", async () => {
-    const { clientId, account } = await liveClient();
-    account.ask = { text: "Noordkade: 12 of 20 interviews.", truncated: false };
+    const { clientId, core } = await liveClient();
+    core.ask = { text: "Noordkade: 12 of 20 interviews.", truncated: false };
     const answer = await asGrasp(
       clientId,
       async () =>
@@ -224,7 +224,7 @@ describe("Ask Grasp", () => {
           { role: "user", text: "Which one is furthest?" },
         ])
     );
-    const [asked] = account.asked;
+    const [asked] = core.asked;
     expect({
       answer,
       staff: asked?.staff.email,
@@ -248,8 +248,8 @@ describe("Ask Grasp", () => {
   });
 
   it("says when Grasp's own core has no model it may send the document to", async () => {
-    const { clientId, account } = await liveClient();
-    account.ask = "no_model";
+    const { clientId, core } = await liveClient();
+    core.ask = "no_model";
     const answer = await asGrasp(
       clientId,
       async () => await ask([{ role: "user", text: "Which company?" }])
@@ -262,16 +262,16 @@ describe("Ask Grasp", () => {
   });
 
   it("never follows a redirect from Grasp's own core: the question goes nowhere else and gets no answer", async () => {
-    const { clientId, account } = await liveClient();
-    account.ask = { text: "Answered elsewhere.", truncated: false };
-    account.redirectsTo = "https://elsewhere.example";
+    const { clientId, core } = await liveClient();
+    core.ask = { text: "Answered elsewhere.", truncated: false };
+    core.redirectsTo = "https://elsewhere.example";
     const answer = await asGrasp(
       clientId,
       async () => await ask([{ role: "user", text: "Which company?" }])
     );
     expect({
       answer,
-      asked: account.asked.length,
+      asked: core.asked.length,
       redirected: cloudflare.redirected(),
     }).toStrictEqual({
       answer: { text: null, truncated: false, refused: "not_answered" },

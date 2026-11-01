@@ -17,7 +17,7 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // organization's AI use, this month and last by feature and by model, as
 // its core reports them; on Platform → AI, every active organization's
 // summed, with those that cost the most. Each client's core is the fake
-// account's (test/cloudflare-api.ts), answering the signed AI status
+// core's (test/cloudflare-api.ts), answering the signed AI status
 // request as core does. How it can go wrong, tried below: another month's
 // spend counted in this one, an organization ordered wrongly or one that
 // cost nothing listed, and anything there to cap or change.
@@ -38,13 +38,13 @@ const liveClient = async (
 ) => {
   const release = await placedRelease("feat(core): platform AI spend");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name,
     signIn: null,
   });
-  account.admin = emptyAdminSnapshot(name);
-  account.ai = aiStatusOf([], spend);
+  core.admin = emptyAdminSnapshot(name);
+  core.ai = aiStatusOf([], spend);
   return clientId;
 };
 

@@ -3,10 +3,12 @@
  * entry (src/server.ts) unchanged, with what the admin's tests stand in
  * for around it. Never built or deployed: production runs src/server.ts.
  *
- * - Cloudflare's API, and client Workers on workers.dev, answer from the
- *   fake the tests use (test/cloudflare-api.ts), in place of `fetch` in this
- *   isolate, where the runs' steps run too. Requests to this machine
- *   (Vite's dev server) go out as usual; anything else is refused.
+ * - Cloudflare's API answers from the fake the tests use
+ *   (test/cloudflare-api.ts), in place of `fetch` in this isolate, where
+ *   the runs' steps run too, and clients' cores from its dispatch
+ *   namespace, through the admin's `DISPATCHER` and at their hostnames
+ *   as the router routes them. Requests to this machine (Vite's dev
+ *   server) go out as usual; anything else is refused.
  * - Each Worker upload takes seconds, as a real one may: a journey sees
  *   a rollout run before it's done.
  * - Access: the dev bypass (`DEV_ACCESS_EMAIL`, src/access.ts), which holds
@@ -21,13 +23,15 @@
  *   functions fail, or answer what its page can't show, until it is
  *   cleared.
  */
+import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { loopbackHosts } from "@grasp-os/shared/router";
+import { env as adminEnv } from "cloudflare:workers";
 import { toCrossJSONAsync } from "seroval";
 import { z } from "zod";
 
 import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { seed, seedCreate, seedOrganizations, seedPlaced } from "./e2e-seed.ts";
 
@@ -62,10 +66,7 @@ if (held === undefined) {
   const outbound = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
-    if (
-      url.href.startsWith(`${base}/`) ||
-      url.hostname.endsWith(".workers.dev")
-    ) {
+    if (url.href.startsWith(`${base}/`)) {
       if (isUpload(url, init)) {
         await scheduler.wait(uploadMs);
       }
@@ -82,16 +83,32 @@ if (held === undefined) {
         Answer: [{ type: 15, data: "1 aspmx.l.google.com." }],
       });
     }
-    throw new Error(`Unexpected outbound request to ${url.href}`);
+    // A client's hostname answers as the router routes it to the core
+    // the fake's namespace holds for it (a drift check reads core's
+    // version there); the fake refuses any other host, as this did.
+    return await cloudflare.fetch(input, init);
   };
 }
+
+// Clients' cores answer from the fake's namespace in Grasp's account, as
+// the admin reaches them through its own binding of the namespace. The
+// binding's `get` is replaced, not the binding: a workflow's steps get
+// their own env, which shares the binding but not this module's object,
+// so a binding swapped in here is one they never see, and they would ask
+// the real (empty) namespace. The unit tests' mock does the same
+// (cloudflare-api-mock.ts).
+const namespace = cloudflare.dispatcher(
+  platformAccountId,
+  clientsNamespace("production")
+);
+Reflect.set(adminEnv.DISPATCHER, "get", namespace.get);
 
 /** The organizations seed's cores, by client, kept as the fake is. */
 const coresKey = Symbol.for("grasp-os.admin-e2e.cores");
 const heldCores: unknown = Reflect.get(globalThis, coresKey);
 // SAFETY: only this module sets the key, to a map it made.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const cores = (heldCores ?? new Map()) as Map<string, AccountState>;
+const cores = (heldCores ?? new Map()) as Map<string, CoreState>;
 Reflect.set(globalThis, coresKey, cores);
 
 /** What steering a seeded core takes: which, and how long it holds each answer, if that changes. */
@@ -106,19 +123,19 @@ const steerSchema = z.object({
  */
 const steerCore = async (request: Request): Promise<Response> => {
   const { clientId, holdMs } = steerSchema.parse(await request.json());
-  const account = cores.get(clientId);
-  if (account === undefined) {
+  const core = cores.get(clientId);
+  if (core === undefined) {
     return new Response("No such core", { status: 404 });
   }
   if (holdMs !== undefined) {
-    account.adminHeld =
+    core.adminHeld =
       holdMs === 0
         ? undefined
         : async () => {
             await scheduler.wait(holdMs);
           };
   }
-  return Response.json({ reads: account.adminReaders.length });
+  return Response.json({ reads: core.adminReaders.length });
 };
 
 /** What makes a server function fail: its name, and whether it fails or answers garbage. */
@@ -202,7 +219,7 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       const seeded = await seedOrganizations(cloudflare, tokens);
-      cores.set(seeded.answered.clientId, seeded.answered.account);
+      cores.set(seeded.answered.clientId, seeded.answered.core);
       return Response.json({
         answered: seeded.answered.clientId,
         unset: seeded.unset.clientId,

@@ -65,11 +65,7 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
   // Rollouts reach only placed clients.
   await placeClient(db, staff, {
     clientId: id,
-    destinationId: await destination({
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-    }),
+    destinationId: await destination({ accountId: account.id }),
   });
   return id;
 };

@@ -17,12 +17,12 @@ mockAccess();
 const liveClient = async () => {
   const release = await placedRelease("feat(core): the brain");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, name: `Acme ${clientId}`, account };
+  return { clientId, name: `Acme ${clientId}`, core };
 };
 
 /** An interview `person` agreed to, with `facts` kept and none taken out. */
@@ -136,7 +136,7 @@ describe("an organization's brain", () => {
 
   it("counts what the brain stands on, team by team, and says the brain itself isn't shared", async () => {
     const acme = await liveClient();
-    acme.account.admin = heardSnapshot("Acme");
+    acme.core.admin = heardSnapshot("Acme");
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/brain`
@@ -199,7 +199,7 @@ describe("an organization's brain", () => {
     const acme = await liveClient();
     const heard = heardSnapshot("Acme");
     // Two weeks from January: long closed, before anyone talked.
-    acme.account.admin = {
+    acme.core.admin = {
       ...heard,
       plan: { start: "2026-01-05", days: 14, at: "2026-01-05T07:00:00.000Z" },
     };
@@ -217,7 +217,7 @@ describe("an organization's brain", () => {
 
   it("says a company without teams yet has none, with nothing counted", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/brain`

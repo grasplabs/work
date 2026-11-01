@@ -107,7 +107,7 @@ export const cloudLines: readonly CloudLine[] = [
   },
   {
     id: "publish",
-    steps: ["mail", "route"],
+    steps: ["route"],
     label: ({ hostname }) => `Publishing ${hostname}`,
     details: () => ["Its address added to Grasp's router"],
   },

@@ -46,10 +46,6 @@ export const deployErrorCodes = [
   "unknown_worker",
   /** The release's Workers bind each other as services in a cycle. */
   "service_binding_cycle",
-  /** No free workers.dev subdomain was found for the account. */
-  "subdomain_unavailable",
-  /** Core's address isn't an `https://*.workers.dev` origin. */
-  "invalid_core_origin",
   /** Core didn't answer its health check as the version this deploy made live. */
   "smoke_check_failed",
   /** The router's map gives the client's hostname to another client. */

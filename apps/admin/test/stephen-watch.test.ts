@@ -22,7 +22,7 @@ import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
@@ -54,28 +54,25 @@ const quiet: AdminStephenSignals = {
 /** An active client running a fresh release, as a deploy made it live. */
 const liveClient = async (): Promise<{
   clientId: string;
-  account: AccountState;
+  core: CoreState;
 }> => {
   const release = await placedRelease("feat(core): count Stephen");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
-/** What `account`'s core answers: its company, and Stephen's counts. */
-const answering = (
-  account: AccountState,
-  stephen?: AdminStephenSignals
-): void => {
+/** What `core` answers: its company, and Stephen's counts. */
+const answering = (core: CoreState, stephen?: AdminStephenSignals): void => {
   const snapshot: AdminSnapshot = {
-    ...emptyAdminSnapshot(account.name),
+    ...emptyAdminSnapshot(core.name),
     ...(stephen === undefined ? {} : { stephen }),
   };
-  account.admin = snapshot;
+  core.admin = snapshot;
 };
 
 /** Runs the watch's cron once. */
@@ -110,13 +107,13 @@ describe("the watch of Stephen", () => {
   it("says on the client's Setup that a signal is over its bar, until it's back under", async () => {
     const acme = await liveClient();
     const calm = await liveClient();
-    answering(acme.account, { ...quiet, failed: 10 });
-    answering(calm.account, quiet);
+    answering(acme.core, { ...quiet, failed: 10 });
+    answering(calm.core, quiet);
 
     await watch();
     const whileOver = await needsOf(acme.clientId);
     const calmPage = await needsOf(calm.clientId);
-    answering(acme.account, quiet);
+    answering(acme.core, quiet);
     await watch();
     const onceUnder = await needsOf(acme.clientId);
 
@@ -130,8 +127,8 @@ describe("the watch of Stephen", () => {
   it("puts what it read on the client's page, a line a signal, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
     const acme = await liveClient();
     const older = await liveClient();
-    answering(acme.account, { ...quiet, p90Ms: 15_000 });
-    answering(older.account);
+    answering(acme.core, { ...quiet, p90Ms: 15_000 });
+    answering(older.core);
 
     await watch();
 

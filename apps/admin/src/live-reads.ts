@@ -13,14 +13,11 @@ export interface LiveReadLimits {
   concurrency: number;
   /** How long one client may take all told. */
   rowDeadlineMs: number;
-  /** The most an API call waits between its retries, all told. */
-  waitBudgetMs: number;
 }
 
 export const defaultLiveReadLimits: LiveReadLimits = {
   concurrency: 4,
   rowDeadlineMs: 15_000,
-  waitBudgetMs: 5000,
 };
 
 /**
@@ -67,3 +64,18 @@ export const eachLimited = async <T, R>(
   );
   return results;
 };
+
+/**
+ * `send`, its requests stopped by `signal` too: each keeps its own
+ * deadline, which starts as it's sent, and the row's stops it as well.
+ */
+export const stoppedBy =
+  (signal: AbortSignal, send: typeof fetch): typeof fetch =>
+  async (input, init) =>
+    await send(input, {
+      ...init,
+      signal:
+        init?.signal === undefined || init.signal === null
+          ? signal
+          : AbortSignal.any([init.signal, signal]),
+    });

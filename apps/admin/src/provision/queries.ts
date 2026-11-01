@@ -9,7 +9,7 @@ import { needsAttentionOf } from "../hosting/attention.ts";
 import type { NeedsAttention } from "../hosting/attention.ts";
 import { newestRelease, provisionOf } from "../hosting/operation.ts";
 import { clientHostingOf } from "../hosting/organization.ts";
-import { startDestination } from "../hosting/placement.ts";
+import { stageDestinationOf } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
 
@@ -66,10 +66,11 @@ export interface ProvisioningView {
 
 /**
  * Why client `clientId`'s provisioning hasn't started: it runs on its own
- * premises, no shared destination the admin picks by itself, or no
+ * premises, the admin's STAGE names no stage to place it in, or no
  * imported release; null when nothing keeps it.
  */
 export const notStartedOf = async (
+  env: Pick<Env, "STAGE">,
   db: AdminDatabase,
   clientId: string
 ): Promise<NotStarted | null> => {
@@ -77,8 +78,7 @@ export const notStartedOf = async (
   if (hosting !== "grasp_cloud") {
     return "on_prem";
   }
-  const destination = await startDestination(db);
-  if (destination.destinationId === null) {
+  if (stageDestinationOf(env) === null) {
     return "no_destination";
   }
   return (await newestRelease(db)) === null ? "no_release" : null;
@@ -124,7 +124,7 @@ export const getProvisioning = async (
     return {
       ...view,
       stopped: null,
-      notStarted: await notStartedOf(db, clientId),
+      notStarted: await notStartedOf(env, db, clientId),
       needsAttention: null,
       phase: "placing",
     };

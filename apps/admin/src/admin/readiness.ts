@@ -2,7 +2,7 @@
  * Platform's Readiness: whether this admin can onboard an organization
  * now, one check a line, each with a plain status and what to do next.
  * Every check reads what the admin reads when it acts (its vars, Secrets
- * Store, its destinations and releases, the Cloudflare API as the
+ * Store, its releases, the Cloudflare API as the
  * deployer), so a red line is the reason the action would fail, before
  * anyone tries it. Required lines that aren't ready put a banner on Home.
  *
@@ -11,15 +11,17 @@
  */
 import {
   clientDomain as stageDomain,
+  clientsNamespace,
+  platformAccountId,
   stageNamed,
 } from "@grasp-os/shared/names";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
-import { count, desc, eq } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import { hostingDestinations, releases } from "../db/schema.ts";
+import { releases } from "../db/schema.ts";
 import {
   clientDomain,
   deployerApi,
@@ -27,8 +29,6 @@ import {
   storeSecret,
 } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
-import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
-import type { DestinationChoice } from "../hosting/placement.ts";
 import { platformSettingsView } from "../platform-settings.ts";
 import type { PlatformSettingsView } from "../platform-settings.ts";
 
@@ -136,33 +136,6 @@ const domainCheck = (envOf: Env): ReadinessCheck => {
   };
 };
 
-/**
- * Where new organizations go: the shared destination the admin places
- * them in by itself (`automaticChoice`, which always picks one when there
- * is one), or that there's none yet.
- */
-const destinationCheck = (choices: DestinationChoice[]): ReadinessCheck => {
-  const automatic = automaticChoice(choices);
-  if (automatic.destinationId !== null) {
-    return {
-      id: "destination",
-      title: "Hosting destination",
-      required: true,
-      status: "ready",
-      words: `New organizations are placed in ${automatic.destinationId}, Grasp's shared destination.`,
-    };
-  }
-  return {
-    id: "destination",
-    title: "Hosting destination",
-    required: true,
-    status: "blocked",
-    words:
-      "There's no shared destination to place organizations in yet. The admin records its stage's own Workers for Platforms namespace as one once STAGE names a stage and the deployer's account is set.",
-    link: "organizations",
-  };
-};
-
 /** The newest imported release's id; null before any. */
 const newestRelease = async (envOf: Env): Promise<string | null> => {
   const [row] = await adminDatabase(envOf.DB)
@@ -227,10 +200,6 @@ const secretsCheck = (missing: string[]): ReadinessCheck =>
         words: `Secrets Store has no ${missing.join(", ")}, so provisioning stops at its first step. ${secretStep(missing)}`,
       };
 
-/**
- * Whether the deployer's token reaches the destination new organizations
- * go in: its Workers for Platforms namespace, read as the deployer.
- */
 /** The deployer check, waiting for a line above it, saying for which. */
 const deployerWaiting = (words: string): ReadinessCheck => ({
   id: "deployer",
@@ -240,25 +209,30 @@ const deployerWaiting = (words: string): ReadinessCheck => ({
   words,
 });
 
-/** Whether the deployer reaches destination `id`'s namespace: null when it does, else why not. */
-const reachOf = async (
+/**
+ * Whether the deployer's token reaches the stage's destination: Grasp's
+ * account and the stage's clients' Workers for Platforms namespace
+ * (@grasp-os/shared/names), read as the deployer.
+ */
+const deployerCheck = async (
   envOf: Env,
-  id: string
-): Promise<{
-  id: string;
-  namespace: string | null;
-  problem: string | null;
-}> => {
-  const destination = await adminDatabase(envOf.DB)
-    .select()
-    .from(hostingDestinations)
-    .where(eq(hostingDestinations.id, id))
-    .get();
-  const accountId = destination?.accountId ?? null;
-  const namespace = destination?.namespace ?? null;
-  if (accountId === null || namespace === null) {
-    return { id, namespace, problem: "no account and namespace recorded" };
+  tokenMissing: boolean
+): Promise<ReadinessCheck> => {
+  if (tokenMissing) {
+    return deployerWaiting(
+      "Checked once DEPLOYER_API_TOKEN is in Secrets Store."
+    );
   }
+  const stage = stageNamed(envOf.STAGE);
+  if (stage === undefined) {
+    return deployerWaiting("Checked once STAGE names a stage.");
+  }
+  const namespace = clientsNamespace(stage);
+  const check = {
+    id: "deployer",
+    title: "Deployer token",
+    required: true,
+  } as const;
   try {
     const api = await deployerApi(envOf, {
       waitBudgetMs: 0,
@@ -267,57 +241,22 @@ const reachOf = async (
     await api.call(
       {
         method: "GET",
-        path: `/accounts/${accountId}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}`,
+        path: `/accounts/${platformAccountId}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}`,
       },
       z.unknown()
     );
-    return { id, namespace, problem: null };
-  } catch (error) {
-    return { id, namespace, problem: errorCode(error) };
-  }
-};
-
-/**
- * Whether the deployer's token reaches a destination new organizations
- * can go in: each eligible one's Workers for Platforms namespace, read as
- * the deployer. Ready when any is reached, since staff can choose that one
- * on an organization's Setup.
- */
-const deployerCheck = async (
-  envOf: Env,
-  destinationIds: readonly string[],
-  tokenMissing: boolean
-): Promise<ReadinessCheck> => {
-  if (tokenMissing) {
-    return deployerWaiting(
-      "Checked once DEPLOYER_API_TOKEN is in Secrets Store."
-    );
-  }
-  if (destinationIds.length === 0) {
-    return deployerWaiting(
-      "Checked once a destination takes new organizations."
-    );
-  }
-  const reaches = await Promise.all(
-    destinationIds.map(async (id) => await reachOf(envOf, id))
-  );
-  const reached = reaches.find(({ problem }) => problem === null);
-  if (reached !== undefined) {
     return {
-      id: "deployer",
-      title: "Deployer token",
-      required: true,
+      ...check,
       status: "ready",
-      words: `The deployer's token reaches ${reached.namespace ?? ""} in ${reached.id}'s account.`,
+      words: `The deployer's token reaches ${namespace} in Grasp's account.`,
+    };
+  } catch (error) {
+    return {
+      ...check,
+      status: "blocked",
+      words: `The deployer's token can't reach ${namespace} in Grasp's account (${errorCode(error)}). Give the token Workers for Platforms edit on that account, or put the right one in the stage's 1Password Environment as DEPLOYER_API_TOKEN, then run Deploy platform.`,
     };
   }
-  return {
-    id: "deployer",
-    title: "Deployer token",
-    required: true,
-    status: "blocked",
-    words: `The deployer's token can't reach ${reaches.map(({ id, problem }) => `${id} (${problem ?? ""})`).join(", ")}. Give the token Workers for Platforms edit on that account, or put the right one in the stage's 1Password Environment as DEPLOYER_API_TOKEN, then run Deploy platform.`,
-  };
 };
 
 /**
@@ -369,27 +308,18 @@ const graspOrganizationCheck = ({
 /** The checklist, as this admin stands now. */
 export const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
-  const [choices, [imported], newestId, missing, settings] = await Promise.all([
-    destinationChoices(db),
+  const [[imported], newestId, missing, settings] = await Promise.all([
     db.select({ n: count() }).from(releases),
     newestRelease(envOf),
     missingSecrets(envOf, requiredSecrets),
     platformSettingsView(db),
   ]);
-  // The one new organizations go in: what the deployer must reach.
-  const automatic = automaticChoice(choices).destinationId;
-  const placeable = automatic === null ? [] : [automatic];
   const checks: ReadinessCheck[] = [
     stageCheck(envOf),
     domainCheck(envOf),
-    destinationCheck(choices),
     releaseCheck(imported?.n ?? 0, newestId),
     secretsCheck(missing),
-    await deployerCheck(
-      envOf,
-      placeable,
-      missing.includes("DEPLOYER_API_TOKEN")
-    ),
+    await deployerCheck(envOf, missing.includes("DEPLOYER_API_TOKEN")),
     graspOrganizationCheck(settings),
   ];
   return {

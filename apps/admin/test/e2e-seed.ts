@@ -1,9 +1,9 @@
 /**
  * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
  * as the admin's tests make it: its database migrated, its Secrets Store
- * filled with every secret it binds, and a client in ring 0, placed in a
- * dedicated destination of its own on the fake Cloudflare API, provisioned
- * on a release, with a newer release imported to roll out.
+ * filled with every secret it binds, and a client in ring 0, placed in the
+ * stage's destination on the fake Cloudflare API, provisioned on a release,
+ * with a newer release imported to roll out.
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
@@ -11,7 +11,7 @@ import { eq, ne } from "drizzle-orm";
 
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { namespaceRelease } from "./namespace-release.ts";
 import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
@@ -83,9 +83,9 @@ const fillStore = async (tokens: { deployer: string }): Promise<void> => {
 };
 
 /**
- * Seeds the admin: a new client in ring 0, placed in a dedicated
- * destination of its own on the fake's new account and provisioned on a
- * release, and a newer release. Every client an earlier seed made is
+ * Seeds the admin: a new client in ring 0, placed in the stage's
+ * destination on the fake and provisioned on a release, and a newer
+ * release. Every client an earlier seed made is
  * offboarded, so a journey tried again reaches only its own.
  */
 export const seed = async (
@@ -113,17 +113,16 @@ export const seed = async (
 
 /** What a placed seed made, for the placed-client journey to find on the admin's pages. */
 export interface SeededPlaced {
-  /** A client live on the first release, in a dedicated destination of its own. */
+  /** A client live on the first release, in the stage's destination. */
   clientId: string;
   /** Two releases a placed client runs, oldest first. */
   releaseIds: [string, string];
 }
 
 /**
- * Seeds the admin for the placed-client journey: a client placed in a
- * dedicated destination on the fake's new account, as the admin can
- * still place one though its pages offer only Grasp Cloud and
- * on-premises, live on a first release, and a second to release it to.
+ * Seeds the admin for the placed-client journey: a client placed in the
+ * stage's destination on the fake, live on a first release, and a second
+ * to release it to.
  */
 export const seedPlaced = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -147,7 +146,7 @@ export const seedPlaced = async (
 /** What the organizations seed made: a client whose core answers, and one not set up yet. */
 export interface SeededOrganizations {
   /** Live, its core answering the admin's snapshot. */
-  answered: { clientId: string; account: AccountState };
+  answered: { clientId: string; core: CoreState };
   /** Added, never provisioned: it has no core to answer. */
   unset: { clientId: string };
 }
@@ -177,7 +176,7 @@ export const seedOrganizations = async (
   await deployPlaced(answered.clientId, release);
   const unset = await placedClientRecord(cloudflare, 0, { name: "Unset Acme" });
   return {
-    answered: { clientId: answered.clientId, account: answered.account },
+    answered: { clientId: answered.clientId, core: answered.core },
     unset: { clientId: unset.clientId },
   };
 };
@@ -194,7 +193,9 @@ export const seedCreate = async (
   await migrate(env.DB);
   await fillStore(tokens);
   const account = cloudflare.addAccount("Grasp", undefined, platformAccountId);
-  account.namespaces.set(clientsNamespace("production"), new Map());
+  if (!account.namespaces.has(clientsNamespace("production"))) {
+    account.namespaces.set(clientsNamespace("production"), new Map());
+  }
   const manifest = await namespaceRelease();
   return { releaseId: manifest.releaseId };
 };

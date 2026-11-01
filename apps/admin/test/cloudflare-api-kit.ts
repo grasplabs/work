@@ -49,21 +49,11 @@ export interface ScriptState {
   migrationTag?: string;
 }
 
-/** A zone, as the API reports it, and its Email Sending domains. */
-export interface ZoneState {
-  id: string;
-  name: string;
-  /** `pending` until its name servers are delegated, then `active`. */
-  status: string;
-  sending: { tag: string; name: string; enabled: boolean }[];
-}
-
 export interface AccountState {
   id: string;
   name: string;
   /** Its members, by email: `accepted`, or `pending` for an invitation. */
   members: Map<string, string>;
-  subdomain?: string;
   d1: { uuid: string; name: string; jurisdiction?: string }[];
   /** Buckets by jurisdiction: a name is unique only within one. */
   buckets: { name: string; jurisdiction: string }[];
@@ -81,8 +71,6 @@ export interface AccountState {
   r2Reports?: string;
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
-  /** Its zones, each with the domains Email Sending sends from in it. */
-  zones: ZoneState[];
   scripts: Map<string, ScriptState>;
   /**
    * Its Workers for Platforms dispatch namespaces, each with its user
@@ -100,12 +88,23 @@ export interface AccountState {
    * the account's scripts was live on at that moment.
    */
   scriptUploads: { script: string; live: Record<string, string | undefined> }[];
-  /** How many more health checks its Workers fail, as a Worker still starting. */
+}
+
+/**
+ * One client's core, as the fake answers for it wherever its scripts run:
+ * what it answers the admin, and what it took. Kept by client, as the
+ * `CLIENT_ID` its live version runs with names it (`fakeCloudflareApi`,
+ * `coreOf`), so clients sharing one namespace each answer as their own.
+ */
+export interface CoreState {
+  /** The client's company name, as its admin snapshot names it. */
+  name: string;
+  /** How many more health checks its core fail, as a Worker still starting. */
   unhealthy?: number;
-  /** The version its Workers' health checks name, as an old version still answering would. */
+  /** The version its core' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
-   * What its Workers' health checks name first, one answer per check,
+   * What its core' health checks name first, one answer per check,
    * before their live version (or `answeringVersion`): as isolates of an
    * earlier version still answering just after a write would.
    */
@@ -124,7 +123,7 @@ export interface AccountState {
    */
   connectAnswersFirst?: (string | null)[];
   /**
-   * Where its Workers redirect every request (307, to the same path), as a
+   * Where its core redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
    * follows the redirect as fetch does, unless the request says
    * `redirect: "manual"`, and records what it sent there (`redirected`).
@@ -184,6 +183,12 @@ export interface AccountState {
    * connection does.
    */
   adminHeld?: () => Promise<void>;
+  /**
+   * What its core does once any request arrives, before answering it:
+   * waits, as a slow core does. A request whose caller gives up first
+   * ends then, as fetch's does.
+   */
+  held?: () => Promise<void>;
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
   /**

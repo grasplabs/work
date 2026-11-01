@@ -60,9 +60,8 @@ type SharedSecret =
  * Grasp's AI provider keys go to connect alone, which makes every
  * provider call (connect's src/ai-providers.ts): never to core, which
  * holds no key, and never into the admin's database. And only ever to
- * Grasp Cloud: a deploy runs only in a Cloudflare destination the admin's
- * own deployer reaches (hosting/operation.ts refuses a workerd one,
- * `destination_unsupported`, before it delivers anything). On-prem never
+ * Grasp Cloud: a deploy runs only in the stage's Workers for Platforms
+ * destination, which the admin's own deployer reaches. On-prem never
  * gets them: its operator leaves them unset, and its platform features run
  * locally or not at all.
  */

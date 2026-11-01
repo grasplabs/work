@@ -1,7 +1,7 @@
 /**
  * Platform's own places, as its pages link them: its overview (the
  * Platform page), every release the admin imported, every rollout, Grasp's
- * own AI features, the offboarded clients and the hosting destinations,
+ * own AI features and the offboarded clients,
  * each a page of its own under Platform, as the admin's Releases and
  * Rollouts pages were before the admin took them in.
  */

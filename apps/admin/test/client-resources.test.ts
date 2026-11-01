@@ -1,6 +1,5 @@
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
-import { clientsNamespace, platformWorkerName } from "@grasp-os/shared/names";
-import type { Stage } from "@grasp-os/shared/names";
+import { platformWorkerName } from "@grasp-os/shared/names";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { describe, expect, it } from "vite-plus/test";
@@ -13,7 +12,6 @@ import {
   placeClient,
   recordProviderId,
   renderClientWorker,
-  saveDestination,
 } from "../src/hosting/inventory.ts";
 import type {
   ClientPlacement,
@@ -27,23 +25,6 @@ import {
   release,
   staff,
 } from "./hosting.ts";
-
-/** Whether a Workers for Platforms destination in `namespace` saves, by an admin of `stage`. */
-const saving = async (stage: Stage, namespace: string | null) =>
-  await saveDestination(
-    db,
-    staff,
-    {
-      id: `eu-stage-${crypto.randomUUID().slice(0, 8)}`,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace,
-    },
-    stage
-  ).then(
-    () => "saved",
-    (error: unknown) => (error instanceof InventoryError ? error.code : error)
-  );
 
 /**
  * The manifest the release build makes of the real wrangler.jsonc of core
@@ -147,29 +128,6 @@ const codeOf = (render: () => unknown): string | null => {
 };
 
 describe("placing a client", () => {
-  it("records a Workers for Platforms destination only in its admin's own stage's namespace, in either direction", async () => {
-    expect({
-      stagingIntoProduction: await saving(
-        "staging",
-        clientsNamespace("production")
-      ),
-      productionIntoStaging: await saving(
-        "production",
-        clientsNamespace("staging")
-      ),
-      none: await saving("production", null),
-      own: [
-        await saving("production", clientsNamespace("production")),
-        await saving("staging", clientsNamespace("staging")),
-      ],
-    }).toStrictEqual({
-      stagingIntoProduction: "destination_other_stage",
-      productionIntoStaging: "destination_other_stage",
-      none: "destination_other_stage",
-      own: ["saved", "saved"],
-    });
-  });
-
   it("happens once, however often it's asked at the same time, and moving is a migration", async () => {
     const destinationId = await destination();
     const elsewhere = await destination();

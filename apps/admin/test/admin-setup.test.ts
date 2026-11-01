@@ -34,13 +34,13 @@ const liveClient = async (snapshot: AdminSnapshot) => {
   const release = await placedRelease("feat(core): the setup");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Acme ${clientId}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name,
     signIn: null,
   });
-  account.admin = snapshot;
-  return { clientId, name, account, release };
+  core.admin = snapshot;
+  return { clientId, name, core, release };
 };
 
 /** A link into the company's own Grasp, to its audit trail. */
@@ -268,7 +268,7 @@ describe("an organization's Setup", () => {
     const since = `${new Date(failingSince).toISOString().slice(11, 16)} UTC`;
     const failingAs = async (kind: string, shows: ProviderTrouble) => {
       const client = await liveClient(emptyAdminSnapshot("Acme"));
-      client.account.ai = status(now - 60 * 60 * 1000, {
+      client.core.ai = status(now - 60 * 60 * 1000, {
         since: failingSince,
         last: now - 1000,
         kind,
@@ -277,7 +277,7 @@ describe("an organization's Setup", () => {
       return client;
     };
     const working = await liveClient(emptyAdminSnapshot("Acme"));
-    working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
+    working.core.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
     const shown = [
       working,
       await failingAs("auth", "refused"),
@@ -318,7 +318,7 @@ describe("an organization's Setup", () => {
     const now = Date.now();
     const client = await liveClient(emptyAdminSnapshot("Acme"));
     // As that release answers: no `failingClass` or `failingSince`.
-    client.account.ai = {
+    client.core.ai = {
       providers: [
         {
           provider: "openai",
@@ -339,7 +339,7 @@ describe("an organization's Setup", () => {
 
   it("reads the AI of a core that answers with a redirect elsewhere as unknown, never following it", async () => {
     const client = await liveClient(emptyAdminSnapshot("Acme"));
-    client.account.aiRedirect = true;
+    client.core.aiRedirect = true;
 
     const { html } = await page(`/organizations/${client.clientId}/setup`);
 

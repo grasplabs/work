@@ -67,6 +67,8 @@ import {
   provisionProbeRequestSchema,
 } from "@grasp-os/shared/provision-probe";
 import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
+import { routerHostKey, routerHostSchema } from "@grasp-os/shared/router";
+import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import {
@@ -80,6 +82,7 @@ import {
 import type {
   AccountState,
   ApiCall,
+  CoreState,
   Json,
   Route,
   ScriptState,
@@ -92,14 +95,22 @@ import {
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
 
+/** A client's core where it runs: the account its scripts are in, and its own state. */
+interface CoreHost {
+  account: AccountState;
+  core: CoreState;
+}
+
+/** A client resource's name in a path: `grasp-<deploymentId>-…`. */
+const deploymentPath = /\/grasp-(?<deployment>[a-z0-9]{10})-/u;
+
+/** The client deployment whose resource `url` names, if it names one. */
+export const deploymentOfPath = (url: string): string | undefined =>
+  deploymentPath.exec(url)?.groups?.deployment;
+
 /** The R2 jurisdiction a call names, as the API reads its header. */
 const jurisdictionOf = (call: ApiCall): string =>
   call.headers.get("cf-r2-jurisdiction") ?? "default";
-
-const subdomainOf = (account: AccountState): Response =>
-  account.subdomain === undefined
-    ? notFound()
-    : envelope({ subdomain: account.subdomain });
 
 /**
  * What a client's core answers a platform update notice with, as core
@@ -109,12 +120,12 @@ const subdomainOf = (account: AccountState): Response =>
  * as one from before the endpoint would (`noticeStatus`).
  */
 const takeNotice = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  if (account.noticeStatus !== undefined) {
-    return new Response(null, { status: account.noticeStatus });
+  if (core.noticeStatus !== undefined) {
+    return new Response(null, { status: core.noticeStatus });
   }
   const body = await request.text();
   const key = await hkdfHmacKey(
@@ -134,7 +145,7 @@ const takeNotice = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  account.notices.push(notice.data);
+  core.notices.push(notice.data);
   return new Response(null, { status: 204 });
 };
 
@@ -203,16 +214,16 @@ const connectOf = (
  * null with no connect.
  */
 const connectAnswering = (
-  account: AccountState,
+  { account, core }: CoreHost,
   live: VersionState
 ): string | null => {
-  const [early, ...later] = account.connectAnswersFirst ?? [];
+  const [early, ...later] = core.connectAnswersFirst ?? [];
   if (early !== undefined) {
-    account.connectAnswersFirst = later;
+    core.connectAnswersFirst = later;
     return early;
   }
-  if (account.connectAnswering !== undefined) {
-    return account.connectAnswering;
+  if (core.connectAnswering !== undefined) {
+    return core.connectAnswering;
   }
   const connect = connectOf(
     account,
@@ -234,11 +245,11 @@ const connectAnswering = (
  * any request to a core from before the probe, gets its frontend's page.
  */
 const answerProbe = async (
-  account: AccountState,
+  { account, core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  const probe = account.coreProbe ?? {};
+  const probe = core.coreProbe ?? {};
   if (probe === "absent") {
     return frontendPage();
   }
@@ -275,10 +286,10 @@ const answerProbe = async (
       ? null
       : { armed: true, tasks: clockTaskNames[name] };
   return Response.json({
-    version: account.answeringVersion ?? live.id,
+    version: core.answeringVersion ?? live.id,
     ...(probe.noConnectVersion === true
       ? {}
-      : { connectVersion: connectAnswering(account, live) }),
+      : { connectVersion: connectAnswering({ account, core }, live) }),
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
@@ -306,11 +317,11 @@ const answerProbe = async (
  * page, as any path core has no route for.
  */
 const answerConnectVersion = async (
-  account: AccountState,
+  { account, core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  const probe = account.coreProbe ?? {};
+  const probe = core.coreProbe ?? {};
   if (probe === "absent" || probe.noConnectVersion === true) {
     return frontendPage();
   }
@@ -331,7 +342,7 @@ const answerConnectVersion = async (
   ) {
     return frontendPage();
   }
-  const version = connectAnswering(account, live);
+  const version = connectAnswering({ account, core }, live);
   return version === null
     ? Response.json({ ok: false }, { status: 503 })
     : Response.json({ ok: true, version });
@@ -354,11 +365,11 @@ const noOnboarding: OnboardingSummary = {
  * core from before the summary.
  */
 const answerSummary = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  if (account.onboarding === "absent") {
+  if (core.onboarding === "absent") {
     return new Response("Not found", { status: 404 });
   }
   const body = await request.text();
@@ -379,7 +390,7 @@ const answerSummary = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  return Response.json(account.onboarding ?? noOnboarding);
+  return Response.json(core.onboarding ?? noOnboarding);
 };
 
 /** The UTC month `monthsBack` before this one, such as `2026-09`. */
@@ -421,11 +432,11 @@ export const aiStatusOf = (
  * gives, and the request parses; 403 otherwise.
  */
 const answerAiStatus = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  if (account.aiRedirect === true) {
+  if (core.aiRedirect === true) {
     // As fetch does: a request that follows redirects gets what the other
     // end answers, here a report that reads as working.
     return request.redirect === "manual"
@@ -433,7 +444,7 @@ const answerAiStatus = async (
           status: 302,
           headers: { location: "https://elsewhere.test/ai" },
         })
-      : Response.json(account.ai ?? aiStatusOf());
+      : Response.json(core.ai ?? aiStatusOf());
   }
   const body = await request.text();
   const key = await hkdfHmacKey(
@@ -453,7 +464,7 @@ const answerAiStatus = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  return Response.json(account.ai ?? aiStatusOf());
+  return Response.json(core.ai ?? aiStatusOf());
 };
 
 /** Two hex characters at a time. */
@@ -506,14 +517,14 @@ export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
  * for one that doesn't parse; 404 from a core from before the snapshot.
  */
 const answerAdmin = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
-  if (account.admin === "absent") {
+  if (core.admin === "absent") {
     return new Response("Not found", { status: 404 });
   }
-  await account.adminHeld?.();
+  await core.adminHeld?.();
   const body = await request.text();
   const key = await hkdfHmacKey(
     live.secrets.get("BETTER_AUTH_SECRET") ?? "",
@@ -533,14 +544,14 @@ const answerAdmin = async (
     return new Response("Unauthorized", { status: 401 });
   }
   const asked = adminSnapshotRequestSchema.safeParse(JSON.parse(body));
-  if (!asked.success || account.admin === "ended") {
+  if (!asked.success || core.admin === "ended") {
     return new Response("Forbidden", { status: 403 });
   }
-  account.adminReaders.push(asked.data.staff.email);
-  if (account.admin === "garbled") {
-    return Response.json({ company: account.name });
+  core.adminReaders.push(asked.data.staff.email);
+  if (core.admin === "garbled") {
+    return Response.json({ company: core.name });
   }
-  return Response.json(account.admin ?? emptyAdminSnapshot(account.name));
+  return Response.json(core.admin ?? emptyAdminSnapshot(core.name));
 };
 
 /**
@@ -551,7 +562,7 @@ const answerAdmin = async (
  * signed otherwise, 403 for one that doesn't parse.
  */
 const answerAsk = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
@@ -577,11 +588,11 @@ const answerAsk = async (
   if (!asked.success) {
     return new Response("Forbidden", { status: 403 });
   }
-  account.asked.push(asked.data);
-  if (account.ask === "no_model") {
+  core.asked.push(asked.data);
+  if (core.ask === "no_model") {
     return Response.json({ code: "admin_ask.no_model" }, { status: 503 });
   }
-  return Response.json(account.ask ?? { text: "An answer.", truncated: false });
+  return Response.json(core.ask ?? { text: "An answer.", truncated: false });
 };
 
 /** A kickoff with nothing brought in yet, as core answers it. */
@@ -601,7 +612,7 @@ export const emptyKickoff = (): AdminKickoffView => ({
  * that keeps Grasp's staff out.
  */
 const answerKickoff = async (
-  account: AccountState,
+  { core }: CoreHost,
   live: VersionState,
   request: Request
 ): Promise<Response> => {
@@ -627,21 +638,17 @@ const answerKickoff = async (
   if (!asked.success) {
     return new Response("Forbidden", { status: 403 });
   }
-  account.kickoffAsks.push(asked.data);
-  if (account.kickoff === "shut_out") {
+  core.kickoffAsks.push(asked.data);
+  if (core.kickoff === "shut_out") {
     return Response.json({ code: "onboarding.staff_only" }, { status: 403 });
   }
-  return Response.json(account.kickoff ?? emptyKickoff());
+  return Response.json(core.kickoff ?? emptyKickoff());
 };
 
 /** The admin's signed requests core answers alike: by path, a `POST` each. */
 const signedPosts: ReadonlyMap<
   string,
-  (
-    account: AccountState,
-    live: VersionState,
-    request: Request
-  ) => Promise<Response>
+  (host: CoreHost, live: VersionState, request: Request) => Promise<Response>
 > = new Map([
   [platformUpdatePath, takeNotice],
   [onboardingSummaryPath, answerSummary],
@@ -652,36 +659,12 @@ const signedPosts: ReadonlyMap<
   [aiStatusReportPath, answerAiStatus],
 ]);
 
-/**
- * The workers.dev subdomains taken across Cloudflare: a subdomain is one
- * account's only.
- */
-const takenSubdomains = new Set<string>();
-
 /** What each account holds, at the paths the API serves it. */
 const accountRoutes: Route[] = [
   {
     method: "GET",
     path: /^$/u,
     answer: ({ account }) => envelope({ id: account.id, name: account.name }),
-  },
-  {
-    method: "GET",
-    path: /^\/workers\/subdomain$/u,
-    answer: ({ account }) => subdomainOf(account),
-  },
-  {
-    method: "PUT",
-    path: /^\/workers\/subdomain$/u,
-    answer: ({ account, json }) => {
-      const wanted = text(json, "subdomain");
-      if (takenSubdomains.has(wanted) && account.subdomain !== wanted) {
-        return refusal(400, 10_031, "Subdomain is unavailable");
-      }
-      takenSubdomains.add(wanted);
-      account.subdomain = wanted;
-      return subdomainOf(account);
-    },
   },
   {
     method: "GET",
@@ -908,7 +891,6 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
 };
 
 /** Email Sending's domains in a zone. */
-const sendingRoute = /^\/zones\/(?<zone>[^/]+)\/email\/sending\/subdomains$/u;
 
 const accountRoute = /^\/accounts\/(?<id>[^/]+)(?<rest>\/.*)?$/u;
 
@@ -955,13 +937,20 @@ export const fakeCloudflareApi = (token: string) => {
     meanwhile: () => Promise<void>;
   }[] = [];
 
-  /** Adds an account `member` is a member of, and returns what it holds. */
+  /**
+   * Adds an account `member` is a member of, and returns what it holds; the
+   * one there already when one has `id`.
+   */
   const addAccount = (
     name = "Client",
     member = deployerEmail,
     /** Its id, for an account the admin knows by its own, such as Grasp's. */
     id = crypto.randomUUID().replaceAll("-", "")
   ): AccountState => {
+    const known = accounts.get(id);
+    if (known !== undefined) {
+      return known;
+    }
     const account: AccountState = {
       id,
       name,
@@ -970,20 +959,54 @@ export const fakeCloudflareApi = (token: string) => {
       buckets: [],
       fullBuckets: new Set(),
       lifecycles: new Map(),
-      zones: [],
       scripts: new Map(),
       namespaces: new Map(),
       assets: new Set(),
       sessions: new Map(),
       completions: new Set(),
       scriptUploads: [],
+    };
+    accounts.set(account.id, account);
+    return account;
+  };
+
+  /** Each client's core, by client id (`coreOf`). */
+  const cores = new Map<string, CoreState>();
+  /** Every request a client's core got in this test, by client. */
+  const coreRequests: { clientId: string; url: string }[] = [];
+  /**
+   * Requests cores are answering now, by client; the most clients with one
+   * at once; and how many a caller gave up on while their core held them.
+   */
+  const coreLoad = { now: new Map<string, number>(), peak: 0, aborted: 0 };
+
+  /**
+   * Client `clientId`'s core, as the fake answers for it wherever its
+   * scripts run: a healthy one that has taken nothing yet, until a test
+   * says otherwise.
+   */
+  const coreOf = (clientId: string): CoreState => {
+    const known = cores.get(clientId);
+    if (known !== undefined) {
+      return known;
+    }
+    const core: CoreState = {
+      name: clientId,
       notices: [],
       adminReaders: [],
       asked: [],
       kickoffAsks: [],
     };
-    accounts.set(account.id, account);
-    return account;
+    cores.set(clientId, core);
+    return core;
+  };
+
+  /** The client a version runs as: the `CLIENT_ID` its bindings give. */
+  const clientOf = (live: VersionState): string => {
+    const clientId = bindingsSchema
+      .parse(live.metadata.bindings ?? [])
+      .find(({ name }) => name === "CLIENT_ID")?.json;
+    return typeof clientId === "string" ? clientId : "";
   };
 
   /**
@@ -993,6 +1016,10 @@ export const fakeCloudflareApi = (token: string) => {
   const load = { now: 0, peak: 0, peakAccounts: 0 };
   /** Calls being answered now, by account. */
   const busyAccounts = new Map<string, number>();
+  /** Calls being answered now, by the client deployment their path names. */
+  const busyClients = new Map<string, number>();
+  /** The most clients with a call being answered at once. */
+  const clientLoad = { peak: 0 };
   /** Calls whose caller aborted them before they were answered. */
   const aborted = { count: 0 };
   /** Admin snapshot requests to cores under way, and the most at once in this test. */
@@ -1035,102 +1062,13 @@ export const fakeCloudflareApi = (token: string) => {
     );
   };
 
-  /**
-   * Answers a call about zones (`/zones`, and Email Sending's domains in
-   * one), as the API does for zones in the accounts `caller` is a member
-   * of; undefined for any other call. A new zone is pending, as one whose
-   * name servers aren't delegated yet; a zone's name is Cloudflare's only.
-   */
-  const answerZones = (
-    call: ApiCall,
-    caller: string | undefined
-  ): Response | undefined => {
-    const sending = sendingRoute.exec(call.path)?.groups?.zone;
-    if (call.path !== "/zones" && sending === undefined) {
-      return undefined;
-    }
-    if (caller === undefined) {
-      return refusal(403, 10_000, "Authentication error");
-    }
-    const reachable = [...accounts.values()].filter((account) =>
-      isMember(account, caller)
-    );
-    const json: Json =
-      typeof call.body === "object" && call.body !== null
-        ? { ...call.body }
-        : {};
-    if (sending !== undefined) {
-      const zone = reachable
-        .flatMap(({ zones }) => zones)
-        .find(({ id }) => id === sending);
-      if (zone === undefined) {
-        return refusal(403, 9109, "Unauthorized to access requested resource");
-      }
-      if (call.method === "GET") {
-        return envelope(zone.sending);
-      }
-      const name = text(json, "name");
-      if (name !== zone.name && !name.endsWith(`.${zone.name}`)) {
-        return refusal(400, 1003, "Not a domain within the zone");
-      }
-      const existing = zone.sending.find((domain) => domain.name === name);
-      const domain = existing ?? {
-        tag: crypto.randomUUID().replaceAll("-", ""),
-        name,
-        enabled: true,
-      };
-      domain.enabled = true;
-      if (existing === undefined) {
-        zone.sending.push(domain);
-      }
-      return envelope(domain);
-    }
-    if (call.method === "GET") {
-      const accountId = call.query.get("account.id");
-      const name = call.query.get("name");
-      return paged(
-        reachable
-          .filter(({ id }) => accountId === null || id === accountId)
-          .flatMap(({ zones }) => zones)
-          .filter((zone) => name === null || zone.name === name)
-          .map(({ id, name: zoneName, status }) => ({
-            id,
-            name: zoneName,
-            status,
-          })),
-        call.query
-      );
-    }
-    const owner = z.object({ id: z.string() }).safeParse(json.account);
-    const account = reachable.find(({ id }) => id === owner.data?.id);
-    if (account === undefined) {
-      return refusal(403, 9109, "Unauthorized to access requested resource");
-    }
-    const name = text(json, "name");
-    if (
-      [...accounts.values()].some(({ zones }) =>
-        zones.some((zone) => zone.name === name)
-      )
-    ) {
-      return refusal(400, 1061, `${name} already exists`);
-    }
-    const zone = {
-      id: crypto.randomUUID().replaceAll("-", ""),
-      name,
-      status: "pending",
-      sending: [],
-    };
-    account.zones.push(zone);
-    return envelope({ id: zone.id, name, status: zone.status });
-  };
-
   /** Answers `call` as the API would. */
   const respond = async (
     request: Request,
     call: ApiCall
   ): Promise<Response> => {
     const caller = callers.get(request.headers.get("authorization") ?? "");
-    const unscoped = answerUnscoped(call, caller) ?? answerZones(call, caller);
+    const unscoped = answerUnscoped(call, caller);
     if (unscoped !== undefined) {
       return unscoped;
     }
@@ -1195,39 +1133,34 @@ export const fakeCloudflareApi = (token: string) => {
   };
 
   /**
-   * What a Worker on an account's workers.dev subdomain answers: its live
-   * version's `/health`, as core answers it, to a request carrying the
-   * router secret that version has, the platform update notices it
-   * takes, and the admin's signed requests it answers, its
-   * provisioning probe among them. Undefined for any other host.
+   * What a client's core answers, once it got to it (`workerAnswer`): its
+   * live version's `/health`, to a request carrying the router secret that
+   * version has, the platform update notices it takes, and the admin's
+   * signed requests it answers, its provisioning probe among them. One
+   * whose core redirects answers a request that won't follow with the
+   * redirect, and one that does as wherever it points would, as its core.
    */
-  /**
-   * The account and live version of the Worker a workers.dev `host`
-   * names, when it's on workers.dev and has a version with the first share
-   * of its traffic.
-   */
-  const workerAt = (host: { script?: string; subdomain?: string }) => {
-    const account = [...accounts.values()].find(
-      ({ subdomain }) => subdomain === host.subdomain
-    );
-    const script = account?.scripts.get(host.script ?? "");
-    const [only] = script?.deployments[0]?.versions ?? [];
-    const live = script?.versions.find(({ id }) => id === only?.version_id);
-    return account === undefined ||
-      live === undefined ||
-      script?.subdomain?.enabled !== true
-      ? undefined
-      : { account, script, live };
-  };
-
-  /** What a workers.dev Worker's live version answers, as core does. */
-  const workerAnswer = async (
+  const coreAnswer = async (
     request: Request,
     url: URL,
-    { account, live }: NonNullable<ReturnType<typeof workerAt>>
+    { account, live }: { account: AccountState; live: VersionState }
   ): Promise<Response> => {
-    if (account.unhealthy !== undefined && account.unhealthy > 0) {
-      account.unhealthy -= 1;
+    const core = coreOf(clientOf(live));
+    if (core.redirectsTo !== undefined) {
+      if (request.redirect === "manual") {
+        // Its body unread: a redirect that's followed sends it on.
+        return new Response(null, {
+          status: 307,
+          headers: { location: new URL(url.pathname, core.redirectsTo).href },
+        });
+      }
+      redirected.push({
+        url: new URL(url.pathname, core.redirectsTo).href,
+        routerSecret: request.headers.get("x-grasp-router-secret"),
+      });
+    }
+    if (core.unhealthy !== undefined && core.unhealthy > 0) {
+      core.unhealthy -= 1;
       return new Response("Starting", { status: 503 });
     }
     const secret = live.secrets.get("ROUTER_SECRET");
@@ -1240,7 +1173,7 @@ export const fakeCloudflareApi = (token: string) => {
     const signed =
       request.method === "POST" ? signedPosts.get(url.pathname) : undefined;
     if (signed !== undefined) {
-      return await signed(account, live, request);
+      return await signed({ account, core }, live, request);
     }
     if (url.pathname === adminSnapshotPath && request.method === "POST") {
       adminReads.now += 1;
@@ -1249,7 +1182,7 @@ export const fakeCloudflareApi = (token: string) => {
         // As fetch does: an aborted request ends at once, whatever its
         // core was still doing.
         return await Promise.race([
-          answerAdmin(account, live, request),
+          answerAdmin({ account, core }, live, request),
           whenAborted(request.signal),
         ]);
       } finally {
@@ -1259,45 +1192,54 @@ export const fakeCloudflareApi = (token: string) => {
     if (url.pathname !== "/health") {
       return new Response("Not found", { status: 404 });
     }
-    const [early, ...later] = account.healthAnswersFirst ?? [];
-    account.healthAnswersFirst = later;
+    const [early, ...later] = core.healthAnswersFirst ?? [];
+    core.healthAnswersFirst = later;
     return Response.json({
       ok: true,
-      version: early ?? account.answeringVersion ?? live.id,
+      version: early ?? core.answeringVersion ?? live.id,
     });
   };
 
-  const workersDev = async (
+  /**
+   * What a client's core answers a request with, wherever it comes from
+   * (the namespace, or its hostname through the router), each request on
+   * record, after whatever its core holds it for (`held`).
+   */
+  const workerAnswer = async (
     request: Request,
-    { followed = false }: { followed?: boolean } = {}
-  ): Promise<Response | undefined> => {
-    const url = new URL(request.url);
-    const host = /^(?<script>[^.]+)\.(?<subdomain>[^.]+)\.workers\.dev$/u.exec(
-      url.hostname
-    )?.groups;
-    if (host === undefined) {
-      return undefined;
+    url: URL,
+    worker: { account: AccountState; live: VersionState }
+  ): Promise<Response> => {
+    const clientId = clientOf(worker.live);
+    coreRequests.push({ clientId, url: request.url });
+    coreLoad.now.set(clientId, (coreLoad.now.get(clientId) ?? 0) + 1);
+    coreLoad.peak = Math.max(coreLoad.peak, coreLoad.now.size);
+    try {
+      const { held } = coreOf(clientId);
+      if (held !== undefined) {
+        try {
+          await Promise.race([held(), whenAborted(request.signal)]);
+        } catch (error) {
+          coreLoad.aborted += 1;
+          throw error;
+        }
+      }
+      return await coreAnswer(request, url, worker);
+    } finally {
+      const left = (coreLoad.now.get(clientId) ?? 1) - 1;
+      if (left === 0) {
+        coreLoad.now.delete(clientId);
+      } else {
+        coreLoad.now.set(clientId, left);
+      }
     }
-    const worker = workerAt(host);
-    if (worker === undefined) {
-      return new Response("There is nothing here yet", { status: 404 });
-    }
-    const { account } = worker;
-    if (account.redirectsTo !== undefined && !followed) {
-      // Its body unread: a redirect that's followed sends it on.
-      return new Response(null, {
-        status: 307,
-        headers: { location: new URL(url.pathname, account.redirectsTo).href },
-      });
-    }
-    return await workerAnswer(request, url, worker);
   };
 
   /**
    * The dispatch namespace `name` in account `accountId`, as a Worker
    * binding reaches it: only that account's namespace, as a real
    * DISPATCHER binds one namespace in its own account. Each script's live
-   * version answers as a workers.dev Worker's does (`workerAnswer`); a
+   * version answers as its client's core (`workerAnswer`); a
    * script it doesn't have, or one only another account holds, throws, as
    * Workers for Platforms does.
    */
@@ -1308,9 +1250,9 @@ export const fakeCloudflareApi = (token: string) => {
       const [only] = script?.deployments[0]?.versions ?? [];
       const live = script?.versions.find(({ id }) => id === only?.version_id);
       const worker =
-        account === undefined || script === undefined || live === undefined
+        account === undefined || live === undefined
           ? undefined
-          : { account, script, live };
+          : { account, live };
       if (worker === undefined) {
         throw new Error(`Worker not found: ${scriptName}`);
       }
@@ -1328,34 +1270,52 @@ export const fakeCloudflareApi = (token: string) => {
     },
   });
 
-  /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
+  /**
+   * The live core a client's hostname reaches, as the router routes it:
+   * the hostname's entry in the router's map (`ROUTER_HOSTS`), the script
+   * it names in a namespace, and that script's live version, which must
+   * run as the client the entry names. Undefined for a hostname the map
+   * doesn't route, an entry to an origin, a script no namespace has, or
+   * one running as another client: a deleted or wrong route never answers.
+   */
+  const routedCore = async (
+    url: URL
+  ): Promise<{ account: AccountState; live: VersionState } | undefined> => {
+    const stored: unknown = await env.ROUTER_HOSTS.get(
+      routerHostKey(url.hostname),
+      "json"
+    );
+    const entry = routerHostSchema.safeParse(stored);
+    if (!entry.success || !("script" in entry.data)) {
+      return undefined;
+    }
+    const { script: scriptName, clientId } = entry.data;
+    const routed = [...accounts.values()].flatMap((account) =>
+      [...account.namespaces.values()].flatMap((scripts) => {
+        const script = scripts.get(scriptName);
+        const [only] = script?.deployments[0]?.versions ?? [];
+        const live = script?.versions.find(({ id }) => id === only?.version_id);
+        return live === undefined || clientOf(live) !== clientId
+          ? []
+          : [{ account, live }];
+      })
+    );
+    return routed[0];
+  };
+
+  /** What the API, or a client's hostname through the router, answers `fetch(input, init)` with. */
   const answerFetch = async (
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> => {
     const request = new Request(input, init);
-    const served = await workersDev(request);
-    const location = served?.headers.get("location");
-    if (
-      served !== undefined &&
-      served.status === 307 &&
-      typeof location === "string" &&
-      request.redirect !== "manual"
-    ) {
-      // As fetch does: the same request, headers and body, to wherever
-      // the redirect points. Whatever answers there answers as the core
-      // would, as a host relaying to it would.
-      redirected.push({
-        url: location,
-        routerSecret: request.headers.get("x-grasp-router-secret"),
-      });
-      return (await workersDev(request, { followed: true })) ?? served;
-    }
-    if (served !== undefined) {
-      return served;
-    }
     if (!request.url.startsWith(`${base}/`)) {
-      throw new Error(`Unexpected outbound request to ${request.url}`);
+      const url = new URL(request.url);
+      const core = await routedCore(url);
+      if (core === undefined) {
+        throw new Error(`Unexpected outbound request to ${request.url}`);
+      }
+      return await workerAnswer(request, url, core);
     }
     load.now += 1;
     load.peak = Math.max(load.peak, load.now);
@@ -1365,6 +1325,11 @@ export const fakeCloudflareApi = (token: string) => {
     if (accountId !== undefined) {
       busyAccounts.set(accountId, (busyAccounts.get(accountId) ?? 0) + 1);
       load.peakAccounts = Math.max(load.peakAccounts, busyAccounts.size);
+    }
+    const deployment = deploymentOfPath(request.url);
+    if (deployment !== undefined) {
+      busyClients.set(deployment, (busyClients.get(deployment) ?? 0) + 1);
+      clientLoad.peak = Math.max(clientLoad.peak, busyClients.size);
     }
     try {
       // As fetch does: a request whose signal aborts before it's answered
@@ -1389,6 +1354,14 @@ export const fakeCloudflareApi = (token: string) => {
       ]);
     } finally {
       load.now -= 1;
+      if (deployment !== undefined) {
+        const left = (busyClients.get(deployment) ?? 1) - 1;
+        if (left === 0) {
+          busyClients.delete(deployment);
+        } else {
+          busyClients.set(deployment, left);
+        }
+      }
       if (accountId !== undefined) {
         const left = (busyAccounts.get(accountId) ?? 1) - 1;
         if (left === 0) {
@@ -1403,16 +1376,22 @@ export const fakeCloudflareApi = (token: string) => {
   /** Empties the fake: no accounts, calls or plans left. */
   const reset = (): void => {
     accounts.clear();
+    cores.clear();
+    coreRequests.length = 0;
+    coreLoad.now.clear();
+    coreLoad.peak = 0;
+    coreLoad.aborted = 0;
     forgetDatabases();
     calls.length = 0;
     planned.clear();
-    takenSubdomains.clear();
     matched.length = 0;
     interleaved.length = 0;
     answeredThen.length = 0;
     load.peak = 0;
     load.peakAccounts = 0;
     busyAccounts.clear();
+    clientLoad.peak = 0;
+    busyClients.clear();
     aborted.count = 0;
     adminReads.now = 0;
     adminReads.peak = 0;
@@ -1439,6 +1418,8 @@ export const fakeCloudflareApi = (token: string) => {
     peakConcurrency: () => load.peak,
     /** The most accounts it was answering calls for at once in this test. */
     peakAccounts: () => load.peakAccounts,
+    /** The most clients it was answering calls about their resources for at once in this test. */
+    peakClients: () => clientLoad.peak,
     /** The most admin snapshot requests cores were answering at once in this test. */
     peakAdminReads: () => adminReads.peak,
     /** The requests a core's redirect sent elsewhere, in this test. */
@@ -1448,13 +1429,18 @@ export const fakeCloudflareApi = (token: string) => {
     abortedCalls: () => aborted.count,
     /** Adds an account the token is a member of, and returns what it holds. */
     addAccount,
+    /** Client `clientId`'s core, as the fake answers for it: a test sets how. */
+    coreOf,
+    /** Every request a client's core got in this test, in order. */
+    coreRequests: (): readonly { clientId: string; url: string }[] =>
+      coreRequests,
+    /** The most clients whose cores were answering a request at once in this test. */
+    peakCores: () => coreLoad.peak,
+    /** How many requests a caller gave up on while their core held them, in this test. */
+    abortedCoreRequests: () => coreLoad.aborted,
     /** Fails the `n`th call from now as `failure` says, whatever it asks. */
     failCall: (n: number, failure: Failure) => {
       planned.set(calls.length + n, failure);
-    },
-    /** Takes `subdomain` for an account outside the test, as another customer's. */
-    takeSubdomain: (subdomain: string) => {
-      takenSubdomains.add(subdomain);
     },
     /** Fails the next call `matches` picks out as `failure` says, once. */
     failNext: (matches: (call: ApiCall) => boolean, failure: Failure) => {

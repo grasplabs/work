@@ -44,13 +44,10 @@ const statusWords: Readonly<
   done: "done",
 };
 
-const automaticWords = (view: ClientHostingView): string => {
-  const { automatic: choice } = view;
-  if (choice.destinationId !== null) {
-    return `Goes in ${choice.destinationId}, Grasp's shared destination.`;
-  }
-  return "No shared destination is recorded yet: the admin records its own as soon as a page reads it.";
-};
+const destinationWords = ({ destinationId }: ClientHostingView): string =>
+  destinationId === null
+    ? "No destination: this admin's STAGE names no stage."
+    : `Goes in ${destinationId}, Grasp's shared destination.`;
 
 /** Facts, as a list of terms. */
 const Facts = ({
@@ -292,17 +289,9 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
-/** Whether it is, or would be, in Grasp's shared destination. */
-const sharedHosting = (view: ClientHostingView): boolean => {
-  const id = view.placement?.destinationId ?? view.automatic.destinationId;
-  return view.destinations.some(
-    (choice) => choice.id === id && choice.kind === "workers_for_platforms"
-  );
-};
-
 /** That its core sends no mail, where its hosting gives it none yet. */
 const MailNotice = ({ view }: { view: ClientHostingView }) =>
-  sharedHosting(view) ? (
+  view.hosting.hosting === "grasp_cloud" ? (
     <p className="text-sm">
       Mail: not available on this hosting yet (GRA-965). Its core sends none, so
       its people get their interview links by hand.
@@ -427,7 +416,7 @@ export const ClientHosting = ({
       </div>
       <p className="text-sm">
         {view.placement === null
-          ? automaticWords(view)
+          ? destinationWords(view)
           : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
       </p>
       <MailNotice view={view} />

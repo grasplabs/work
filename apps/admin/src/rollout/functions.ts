@@ -9,11 +9,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import {
-  deployerApi,
-  deploySecrets,
-  MissingStoreSecretError,
-} from "../deploy/context.ts";
+import { deploySecrets, MissingStoreSecretError } from "../deploy/context.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   approveRollout,
@@ -193,7 +189,6 @@ export const fetchDrift = createServerFn({ method: "GET" })
       }
     }
     const drift = await driftOf(
-      await deployerApi(env),
       db,
       data.clientId,
       store === null ? undefined : { fetch, secrets: store }

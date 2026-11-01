@@ -18,12 +18,12 @@ mockAccess();
 const liveClient = async () => {
   const release = await placedRelease("feat(core): interviews");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 const minute = 60_000;
@@ -184,7 +184,7 @@ describe("an organization's interviews", () => {
   it("shows every team, everyone by name, every interview, and how Stephen and Claire did, in numbers only", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
-    acme.account.admin = snapshot;
+    acme.core.admin = snapshot;
     const base = `/organizations/${acme.clientId}/interviews`;
     // The last day a link works: the plan's 14th, counting its first.
     const lastDay = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
@@ -272,7 +272,7 @@ describe("an organization's interviews", () => {
 
   it("says no interview has been held before the company told its team", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
     const base = `/organizations/${acme.clientId}/interviews`;
 
     const teams = await page(base);
@@ -295,7 +295,7 @@ describe("an organization's interviews", () => {
   it("counts someone who left at the read-back, before agreeing, where people stop", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
-    acme.account.admin = {
+    acme.core.admin = {
       ...snapshot,
       interviews: snapshot.interviews.map((interview) =>
         interview.person === "p-ben"
@@ -318,7 +318,7 @@ describe("an organization's interviews", () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
     // Only Ben, who stopped halfway, and Dan, who is talking now, have started.
-    acme.account.admin = {
+    acme.core.admin = {
       ...snapshot,
       interviews: snapshot.interviews.filter((interview) => !interview.agreed),
     };
@@ -351,9 +351,9 @@ describe("an organization's interviews", () => {
 
   it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {
     const interviewing = await liveClient();
-    interviewing.account.admin = interviewingSnapshot();
+    interviewing.core.admin = interviewingSnapshot();
     const quiet = await liveClient();
-    quiet.account.admin = emptyAdminSnapshot("Acme");
+    quiet.core.admin = emptyAdminSnapshot("Acme");
 
     const { status, html } = await page("/lab");
     const name = `Acme ${interviewing.clientId}`;

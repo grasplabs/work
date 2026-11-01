@@ -18,12 +18,12 @@ mockAccess();
 const liveClient = async (snapshot: AdminSnapshot) => {
   const release = await placedRelease("feat(core): onboarding");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Bakkerij ${clientId}`,
     signIn: null,
   });
-  account.admin = snapshot;
+  core.admin = snapshot;
   return `/organizations/${clientId}`;
 };
 
