@@ -18,6 +18,7 @@ import { staffWorksSchema } from "@grasp-os/shared/onboarding-staff";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 
 import { adminIntegrationsOf } from "./admin-integrations.ts";
+import { staffLetIn } from "./admin-kickoff.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -162,30 +163,32 @@ const usageOf = (
 };
 
 /**
- * The drawn work as the snapshot sends it: what each person told of it as
- * counts and yes or no, never the example they shared or a fact of
- * theirs (`out`), which are in their own words. Nobody's example is ever drawn in (a file's name is never
- * read back, GRA-329), so the admin counts how far the work is known
- * without it, the same whether or not the company lets Grasp's staff in.
+ * The drawn work as the snapshot sends it, and only while the company
+ * lets Grasp's staff in, as the staff area shows it (a staff session
+ * needs the window open): outside it, every piece of work goes without
+ * its drawing, and the admin can't say how far it is known. Within it,
+ * what each person told of it as counts and yes or no, never the example
+ * they shared or a fact of theirs (`out`), which are in their own words.
  */
-const worksFor = (works: StaffWorks): StaffWorks => ({
+const worksFor = (works: StaffWorks, letIn: boolean): StaffWorks => ({
   ...works,
-  works: works.works.map((work) =>
-    work.drawn === null
-      ? work
-      : {
-          ...work,
-          drawn: {
-            ...work.drawn,
-            told: Object.fromEntries(
-              Object.entries(work.drawn.told).map(([person, told]) => [
-                person,
-                { ...told, example: null, out: [] },
-              ])
-            ),
-          },
-        }
-  ),
+  works: works.works.map((work) => {
+    if (work.drawn === null || !letIn) {
+      return { ...work, drawn: null };
+    }
+    return {
+      ...work,
+      drawn: {
+        ...work.drawn,
+        told: Object.fromEntries(
+          Object.entries(work.drawn.told).map(([person, told]) => [
+            person,
+            { ...told, example: null, out: [] },
+          ])
+        ),
+      },
+    };
+  }),
 });
 
 /**
@@ -247,6 +250,7 @@ export const snapshotOf = async (
     works,
     setup,
     failedMails,
+    letIn,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -261,6 +265,7 @@ export const snapshotOf = async (
     store.staffWorks(),
     store.stephen(),
     store.failedMails(),
+    staffLetIn(env),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -299,7 +304,7 @@ export const snapshotOf = async (
     mapped: facts.mapped,
     links,
     interviews: facts.interviews.map(interviewOf),
-    works: worksFor(staffWorksSchema.parse(works)),
+    works: worksFor(staffWorksSchema.parse(works), letIn),
     // What the kickoff said it rests on stays out: the admin never gets
     // the kickoff's words (`adminKickoffViewOf`).
     setup: {

@@ -93,23 +93,29 @@ export const deliver = async (
 };
 
 /** The admin snapshot as the admin reads it: signed, now, by `commandStaff`. All it shows of what commands changed. */
-export const adminSnapshot = async (): Promise<AdminSnapshot> => {
+export const adminSnapshot = async (
+  coreEnv: Env = env
+): Promise<AdminSnapshot> => {
   const body = JSON.stringify({
     sentAt: new Date().toISOString(),
     staff: { email: commandStaff },
   });
-  const response = await routed(adminSnapshotPath, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [platformUpdateSignatureHeader]: await commandSignature(
-        body,
-        env.BETTER_AUTH_SECRET,
-        adminSnapshotPurpose
-      ),
+  const response = await routed(
+    adminSnapshotPath,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [platformUpdateSignatureHeader]: await commandSignature(
+          body,
+          env.BETTER_AUTH_SECRET,
+          adminSnapshotPurpose
+        ),
+      },
+      body,
     },
-    body,
-  });
+    coreEnv
+  );
   if (!response.ok) {
     throw new Error(`The snapshot wasn't read (${response.status})`);
   }

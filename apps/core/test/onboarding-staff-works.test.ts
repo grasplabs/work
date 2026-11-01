@@ -25,6 +25,7 @@ import {
   signedInApi,
   staffPerson,
   unique,
+  withSignIn,
 } from "./sign-in.ts";
 
 // Every piece of work for Grasp's staff (GRA-377, staff-rpc.ts): as drawn
@@ -266,7 +267,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     });
   });
 
-  it("sends the admin what each person told as counts and yes or no, never the example they shared or a fact of theirs", async () => {
+  it("sends the admin what each person told as counts and yes or no, never the example they shared or a fact of theirs, and nothing of it outside the staff window", async () => {
     const { booking } = await drawn();
     const example = `example-${crypto.randomUUID()}.pdf`;
     const said = `fact-${crypto.randomUUID()}`;
@@ -295,10 +296,19 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       );
     });
     const text = JSON.stringify(await adminSnapshot());
+    // Outside the staff window, the admin gets no drawing at all.
+    const outside = await adminSnapshot(withSignIn({ staff: undefined }));
     expect({
       example: text.includes(example),
       said: text.includes(said),
-    }).toStrictEqual({ example: false, said: false });
+      drawn: text.includes('"drawn":{'),
+      drawnOutside: outside.works.works.find(({ id }) => id === booking)?.drawn,
+    }).toStrictEqual({
+      example: false,
+      said: false,
+      drawn: true,
+      drawnOutside: null,
+    });
   });
 
   it("knows a piece of work under the organization's own rules, and counts one as known by hand", async () => {
