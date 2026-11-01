@@ -93,7 +93,8 @@ export const readWaiting = async (
     const notifications = read.items.flatMap((item) =>
       item.kind === "failedRun" ||
       item.kind === "openQuestion" ||
-      item.kind === "stoppedSchedule"
+      item.kind === "stoppedSchedule" ||
+      item.kind === "revokedPackage"
         ? [item.notification]
         : []
     );
