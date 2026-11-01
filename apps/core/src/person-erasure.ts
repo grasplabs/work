@@ -27,6 +27,7 @@ import {
   personErasureAreas,
   personErasures,
   sessions,
+  stephenRequestCards,
   stephenRequests,
   stephenSummaries,
   stephenSummaryReaders,
@@ -42,6 +43,7 @@ import {
   subjectKeyVersion,
   subjectsOf,
 } from "./erased-people.ts";
+import { dropHeldStarts } from "./held-starts.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
 //
@@ -256,6 +258,18 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // The cards still to be pressed of their requests, then the requests.
+      db
+        .delete(stephenRequestCards)
+        .where(
+          inArray(
+            stephenRequestCards.requestId,
+            db
+              .select({ id: stephenRequests.id })
+              .from(stephenRequests)
+              .where(eq(stephenRequests.personId, userId))
+          )
+        ),
       db.delete(stephenRequests).where(eq(stephenRequests.personId, userId)),
       db
         .delete(stephenSummaryReaders)
@@ -294,6 +308,9 @@ const workspaceArea: ErasureStep = {
   area: "workspace",
   erase: async (env, userId) => {
     await workspace(env, personalWorkspaceId(userId)).erasePerson(userId);
+    // The workflow starts their chats' agents asked them to confirm, with
+    // what each was asked to run with, in any workspace.
+    await dropHeldStarts(env, { personId: userId });
     const db = drizzle(env.DB);
     // Who was in their chats, kept for each chat's agent (knowledge/
     // access.ts), goes with the chats. Shared chats elsewhere keep them in

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import type { ProviderReply } from "./model-provider.ts";
 
 // The drawing's model knows people by neutral labels alone (`P2`), never
 // their id (GRA-1084, src/onboarding/work-drawing.ts). The tests' fake
@@ -84,9 +84,9 @@ const peopleIn = (value: unknown, key = ""): string[] => {
  * the prompt lists put as the label it gave them; any other reply as it is.
  */
 export const relabelled = async (
-  reply: GatewayReply | undefined,
+  reply: ProviderReply | undefined,
   body: unknown
-): Promise<GatewayReply | undefined> => {
+): Promise<ProviderReply | undefined> => {
   if (reply === undefined || !("text" in reply)) {
     return reply;
   }

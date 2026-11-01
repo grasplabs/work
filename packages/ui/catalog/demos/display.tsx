@@ -23,9 +23,13 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
+  CardRow,
+  CardRowControl,
+  CardRowLabel,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
@@ -61,8 +65,10 @@ import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Kbd, KbdGroup } from "@grasp-os/ui/components/kbd";
@@ -80,6 +86,7 @@ import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { SuccessMark } from "@grasp-os/ui/components/success-mark";
 import {
   Table,
@@ -90,7 +97,22 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import { InfoIcon } from "lucide-react";
+import {
+  Tile,
+  TileContent,
+  TileDescription,
+  TileField,
+  TileMeta,
+  TileSheet,
+  TileSheetBar,
+  TileTitle,
+} from "@grasp-os/ui/components/tile";
+import {
+  ChevronRightIcon,
+  CogIcon,
+  InfoIcon,
+  LayoutGridIcon,
+} from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -143,15 +165,38 @@ const BadgeDemo = () => (
 );
 
 const CardDemo = () => (
-  <Card>
-    <CardHeader>
-      <CardTitle>Revenue</CardTitle>
-      <CardDescription>This month so far.</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <p className="text-2xl font-semibold tabular-nums">€12,400</p>
-    </CardContent>
-  </Card>
+  <div className="flex flex-col gap-6">
+    <Card>
+      <CardHeader>
+        <CardTitle>Revenue</CardTitle>
+        <CardDescription>This month so far.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-semibold tabular-nums">€12,400</p>
+      </CardContent>
+    </Card>
+    <Card variant="panel">
+      <CardHeader>
+        <CardTitle>Sign-in</CardTitle>
+        <CardDescription>How people at Acme sign in.</CardDescription>
+        <CardAction>
+          <Button size="sm" variant="outline">
+            Save
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardRow>
+        <CardRowLabel>
+          <span>Provider</span>
+          <p className="text-muted-foreground">Where accounts live.</p>
+        </CardRowLabel>
+        <CardRowControl>Microsoft 365</CardRowControl>
+      </CardRow>
+      <CardContent>
+        <p>Everyone signs in with their work account.</p>
+      </CardContent>
+    </Card>
+  </div>
 );
 
 const slides = ["First", "Second", "Third"];
@@ -247,12 +292,74 @@ const EmptyDemo = () => (
 );
 
 const ItemDemo = () => (
-  <Item variant="outline">
-    <ItemContent>
-      <ItemTitle>Weekly report</ItemTitle>
-      <ItemDescription>Every Monday at 9:00.</ItemDescription>
-    </ItemContent>
-  </Item>
+  <div className="flex flex-col gap-6">
+    <Item variant="outline">
+      <ItemContent>
+        <ItemTitle>Weekly report</ItemTitle>
+        <ItemDescription>Every Monday at 9:00.</ItemDescription>
+      </ItemContent>
+    </Item>
+    {/* Questions to start from: buttons in a named list. */}
+    <ItemGroup
+      aria-label="Questions to start with"
+      render={<ul />}
+      spacing="tight"
+    >
+      <li>
+        <Item
+          render={
+            <button
+              aria-label="Where does the most time still go?"
+              type="button"
+            />
+          }
+          size="sm"
+          variant="quiet"
+        >
+          Where does the most time still go?
+        </Item>
+      </li>
+    </ItemGroup>
+    <ItemGroup
+      aria-label="Questions to start from"
+      render={<ul />}
+      variant="card"
+    >
+      <li>
+        <Item
+          render={<button aria-label="Who needs Grasp today?" type="button" />}
+          size="sm"
+          variant="row"
+        >
+          <ItemContent>Who needs Grasp today?</ItemContent>
+          <ItemActions>
+            <ChevronRightIcon aria-hidden="true" />
+          </ItemActions>
+        </Item>
+      </li>
+    </ItemGroup>
+  </div>
+);
+
+const TileDemo = () => (
+  <Tile className="max-w-sm">
+    <TileField painting="dawn" pattern="columns">
+      <Badge variant="passed">Published</Badge>
+      <TileSheet>
+        <TileSheetBar icon={<LayoutGridIcon />}>Board</TileSheetBar>
+      </TileSheet>
+    </TileField>
+    <TileContent>
+      <TileTitle href="#board">Board</TileTitle>
+      <TileDescription>
+        Every open lead, from first call to contract.
+      </TileDescription>
+      <TileMeta>
+        <CogIcon aria-hidden="true" />
+        Sales pipeline
+      </TileMeta>
+    </TileContent>
+  </Tile>
 );
 
 const KbdDemo = () => (
@@ -355,9 +462,24 @@ const SuccessMarkDemo = () => (
   </div>
 );
 
+const StatDemo = () => (
+  <dl className="flex gap-8">
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-sm">Hours handed back</dt>
+      <Stat render={<dd />}>1,284</Stat>
+    </div>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-sm">Waiting on you</dt>
+      <Stat render={<dd />} variant="attention">
+        3
+      </Stat>
+    </div>
+  </dl>
+);
+
 const GraspMarkDemo = () => (
   <div className="flex items-center gap-2">
-    <GraspMark className="size-6" variant="logo" />
+    <GraspMark className="size-6" />
     <span className="font-medium">Grasp</span>
   </div>
 );
@@ -375,6 +497,7 @@ export const displayDemos = {
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
   "grasp-mark": GraspMarkDemo,
+  stat: StatDemo,
   item: ItemDemo,
   kbd: KbdDemo,
   progress: ProgressDemo,
@@ -385,4 +508,5 @@ export const displayDemos = {
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
+  tile: TileDemo,
 };

@@ -1,4 +1,5 @@
 import { isAdmin } from "@grasp-os/shared/roles";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
 import { BrainIcon } from "lucide-react";
@@ -100,7 +101,7 @@ const SectionPage = () => {
   const Icon = section.icon;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 pb-24 md:px-12">
+      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
         <header className="flex flex-col gap-2.5">
           <div className="flex items-center gap-2">
             <BackButton />
@@ -111,7 +112,7 @@ const SectionPage = () => {
               {shownCount(folder)}
             </span>
           </div>
-          <h1 className="type-title">{i18n._(groupLabel[section.group])}</h1>
+          <PageHeaderTitle>{i18n._(groupLabel[section.group])}</PageHeaderTitle>
           <p className="text-muted-foreground text-sm leading-relaxed">
             {i18n._(section.description)}
           </p>

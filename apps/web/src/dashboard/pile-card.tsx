@@ -8,6 +8,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import {
   Tooltip,
@@ -188,47 +189,54 @@ export const PileCard = ({
     // The one thing on the dashboard that waits on someone, so it stands on
     // a painted field.
     <PaintedField
-      className="flex min-w-0 flex-col items-center gap-5 rounded-xl px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9"
+      className="min-w-0"
       painting="dawn"
       pattern="columns"
       render={<article aria-labelledby={nameId} />}
     >
-      <div className="relative flex flex-col items-center gap-2">
-        <p className="text-muted-foreground flex items-center gap-2">
-          {/* The mark of what needs someone beats, as something that waits does; still for whoever asks for less motion. */}
-          <span aria-hidden="true" className="relative flex size-1.5 flex-none">
-            <span className="bg-status-attention absolute inset-0 rounded-full motion-safe:animate-ping" />
-            <span className="bg-status-attention relative size-1.5 rounded-full" />
-          </span>
-          <Trans>Waiting on you</Trans>
-        </p>
-        <h2 className="type-title max-w-3xl break-words" id={nameId}>
-          {name}
-        </h2>
-      </div>
-      {details === undefined ? null : (
-        <div className="relative flex w-full max-w-2xl min-w-0 flex-col gap-3 text-left">
-          {details}
-        </div>
-      )}
-      <div className="relative flex min-w-0 flex-col items-center gap-2">
-        {/* The yes and the no side by side, each as wide as the other, so they stand in the same places on every card. */}
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
-          <AnswerButton
-            answer={yes}
-            busy={busy || pile.deciding}
-            first
-            pile={pile}
-            variant="highlight"
-          />
-          <AnswerButton
-            answer={no}
-            busy={busy || pile.deciding}
-            pile={pile}
-            variant="outline"
+      <div className="flex min-w-0 flex-col items-center gap-5 px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9">
+        <div className="relative flex flex-col items-center gap-2">
+          <p className="text-muted-foreground flex items-center gap-2">
+            {/* The mark of what needs someone beats, as something that waits does; still for whoever asks for less motion. */}
+            <span
+              aria-hidden="true"
+              className="relative flex size-1.5 flex-none"
+            >
+              <span className="bg-status-attention absolute inset-0 rounded-full motion-safe:animate-ping" />
+              <span className="bg-status-attention relative size-1.5 rounded-full" />
+            </span>
+            <Trans>Waiting on you</Trans>
+          </p>
+          <PageHeaderTitle
+            className="max-w-3xl break-words"
+            id={nameId}
+            render={<h2>{name}</h2>}
           />
         </div>
-        <ErrorText>{failure}</ErrorText>
+        {details === undefined ? null : (
+          <div className="relative flex w-full max-w-2xl min-w-0 flex-col gap-3 text-left">
+            {details}
+          </div>
+        )}
+        <div className="relative flex min-w-0 flex-col items-center gap-2">
+          {/* The yes and the no side by side, each as wide as the other, so they stand in the same places on every card. */}
+          <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
+            <AnswerButton
+              answer={yes}
+              busy={busy || pile.deciding}
+              first
+              pile={pile}
+              variant="highlight"
+            />
+            <AnswerButton
+              answer={no}
+              busy={busy || pile.deciding}
+              pile={pile}
+              variant="outline"
+            />
+          </div>
+          <ErrorText>{failure}</ErrorText>
+        </div>
       </div>
     </PaintedField>
   );

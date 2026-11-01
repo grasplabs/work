@@ -1,4 +1,5 @@
 import { runActorOf } from "@grasp-os/shared/audit";
+import { runIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
@@ -9,13 +10,16 @@ import {
   cheapAnswer,
   countOf,
   dearTotal,
+  eventsNow,
   failedWith,
+  inTurn,
   llmStep,
   newMonth,
   refusalsOf,
   startChild,
+  statusOf,
   times,
-  withGateway,
+  withProvider,
 } from "./run-lineages.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -41,18 +45,19 @@ describe("run lineages", { timeout: 90_000 }, () => {
     await finished(root.id);
     const rootActor = runActorOf({ runId: root.id, app, workflow: "idle" });
 
-    const result = await withGateway(
+    const result = await withProvider(
       undefined,
       [
         ...times(97, cheapAnswer),
         // Each of the step's attempts sends one request and two retries:
-        // its first fails on server errors, and is tried again.
-        ...times(3, { status: 500 }),
+        // its first is refused for the provider's rate each time, and is
+        // tried again.
+        ...times(3, { status: 429, headers: { "retry-after": "1" } }),
         ...times(6, dearTotal),
       ],
       async (fake) => {
         // The root used 97 of its lineage's 100 requests.
-        const before = await allAtOnce(times(97, rootActor), work);
+        const before = await inTurn(times(97, rootActor), work);
         const child = await startChild(app, "reader", root.id, builder.userId);
         await finished(child);
         return {
@@ -72,51 +77,107 @@ describe("run lineages", { timeout: 90_000 }, () => {
     });
   });
 
-  it("admit 100 provider requests a lineage, its root's and its children's together, however many ask at once, and no more", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Lineages" });
-    const work = { app, person: builder.userId };
-    const root = `run-${crypto.randomUUID()}`;
-    const rootActor = runActorOf({ runId: root, app, workflow: "reader" });
-    const childActor = runActorOf({
-      runId: `run-${crypto.randomUUID()}`,
-      app,
-      workflow: "reader",
-      rootRunId: root,
-    });
-    const otherLineage = runActorOf({
-      runId: `run-${crypto.randomUUID()}`,
-      app,
-      workflow: "reader",
-    });
+  // A person's share admits four requests in flight a round, each round
+  // five seconds on, and the provider behind connect answers in its own
+  // time: 101 at once take about a minute, so this test has three.
+  it(
+    "admit 100 provider requests a lineage, its root's and its children's together, however many ask at once, and no more",
+    { timeout: 180_000 },
+    async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { id: app } = await builder.api.apps.create({ name: "Lineages" });
+      const work = { app, person: builder.userId };
+      const root = `run-${crypto.randomUUID()}`;
+      const rootActor = runActorOf({ runId: root, app, workflow: "reader" });
+      const childActor = runActorOf({
+        runId: `run-${crypto.randomUUID()}`,
+        app,
+        workflow: "reader",
+        rootRunId: root,
+      });
+      const otherLineage = runActorOf({
+        runId: `run-${crypto.randomUUID()}`,
+        app,
+        workflow: "reader",
+      });
 
-    const result = await withGateway(
+      const result = await withProvider(
+        undefined,
+        times(110, cheapAnswer),
+        async (fake) => {
+          const lineage = await allAtOnce(
+            Array.from({ length: 101 }, (_, index) =>
+              index % 2 === 0 ? rootActor : childActor
+            ),
+            work
+          );
+          return {
+            ok: countOf(lineage, "ok"),
+            refused: countOf(lineage, "model.run_limit"),
+            // In the next month too: a lineage is counted for its whole life.
+            again: await callFor(work, childActor, newMonth()),
+            other: await callFor(work, otherLineage),
+            sent: fake.requests.length,
+          };
+        }
+      );
+
+      expect(result).toStrictEqual({
+        ok: 100,
+        refused: 1,
+        again: "model.run_limit",
+        other: "ok",
+        sent: 101,
+      });
+    }
+  );
+
+  it("count a run's calls against its own lineage, whatever lineage or root its input names", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llmStep(), { extract: { total: 1234 } })
+    );
+    const work = { app, person: builder.userId };
+    const victim = runIdSchema.parse(`run-${crypto.randomUUID()}`);
+    const victimActor = runActorOf({ runId: victim, app, workflow: "reader" });
+
+    const result = await withProvider(
       undefined,
-      times(110, cheapAnswer),
-      async (fake) => {
-        const lineage = await allAtOnce(
-          Array.from({ length: 101 }, (_, index) =>
-            index % 2 === 0 ? rootActor : childActor
-          ),
-          work
-        );
+      [...times(100, cheapAnswer), dearTotal],
+      async () => {
+        // The victim's lineage used all of its requests.
+        const used = await inTurn(times(100, victimActor), work);
+        const forged = await builder.api.workflows.start(app, "reader", {
+          rootRunId: victim,
+          root: victim,
+          parent: victim,
+          lineage: victim,
+          parentRunId: victim,
+        });
+        await finished(forged.id);
+        const events = await eventsNow();
         return {
-          ok: countOf(lineage, "ok"),
-          refused: countOf(lineage, "model.run_limit"),
-          // In the next month too: a lineage is counted for its whole life.
-          again: await callFor(work, childActor, newMonth()),
-          other: await callFor(work, otherLineage),
-          sent: fake.requests.length,
+          used: countOf(used, "ok"),
+          forged: await statusOf(builder, forged.id),
+          // Its own root: no `rootRunId` at all.
+          ownActor: runActorOf({ runId: forged.id, app, workflow: "reader" }),
+          actor: events.find(
+            ({ action, actor }) =>
+              action === "model.call" &&
+              actor.type === "workflow" &&
+              actor.runId === forged.id
+          )?.actor,
+          victimAgain: await callFor(work, victimActor),
         };
       }
     );
 
-    expect(result).toStrictEqual({
-      ok: 100,
-      refused: 1,
-      again: "model.run_limit",
-      other: "ok",
-      sent: 101,
+    expect(result).toMatchObject({
+      used: 100,
+      forged: "completed",
+      victimAgain: "model.run_limit",
     });
+    expect(result.actor).toStrictEqual(result.ownActor);
   });
 });

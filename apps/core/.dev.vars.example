@@ -1,6 +1,10 @@
 # Copy to .dev.vars for local development. Never commit real values.
 # Wrangler loads only core's required secrets from it; deployment config
 # (SIGN_IN, MODEL_GATEWAY) goes in with `wrangler dev --var`.
+# No AI provider key goes here: model calls fail as "Connect an AI provider"
+# until an admin (admin@acme.test locally) adds one in Settings, with a key
+# of their own, which local connect seals with its TOKEN_ENCRYPTION_KEY
+# (apps/connect/.dev.vars).
 # Shared with the router. `vp run dev` skips the router-secret check for
 # requests to localhost, so it may stay empty locally.
 ROUTER_SECRET=

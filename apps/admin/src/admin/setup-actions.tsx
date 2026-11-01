@@ -8,11 +8,17 @@
  * reads the Setup again after, whether it worked or not.
  *
  * Also what is read live of its account once the Setup shows (reach,
- * errors, drift, shared secrets, cost), as the admin's grid read it,
+ * errors, drift, shared secrets), as the admin's grid read it,
  * and everything its audit log keeps of it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldDescription,
@@ -33,6 +39,7 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Link, useRouter } from "@tanstack/react-router";
+import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
@@ -42,7 +49,6 @@ import {
   fetchClientLive,
   fetchTeamsPackageFn,
   rotateSecretsFn,
-  setModelSpendCeilingFn,
   setRingFn,
   setSealedSecretFn,
   setSignInFn,
@@ -63,7 +69,7 @@ import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
-import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
+import { Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -169,72 +175,6 @@ export const PinRelease = ({
   );
 };
 
-/**
- * Its monthly model spend ceiling, in whole euros (GRA-141): what its
- * core's model gateway lets its model calls cost in a calendar month,
- * from its next deploy.
- */
-export const ModelSpendCeilingChange = ({
-  clientId,
-  ceiling,
-  refresh,
-}: {
-  clientId: string;
-  ceiling: number;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useSettingsAction();
-  return (
-    <form
-      className="flex flex-col gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const euros = Number(
-          textOf(new FormData(event.currentTarget), "ceiling")
-        );
-        void run(
-          async () =>
-            await thenRefresh(
-              async () =>
-                await setModelSpendCeilingFn({ data: { clientId, euros } }),
-              refresh
-            )
-        );
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor="setup-model-ceiling">
-          Model spend ceiling, euros a month
-        </FieldLabel>
-        <Input
-          className="max-w-48"
-          defaultValue={String(ceiling)}
-          id="setup-model-ceiling"
-          inputMode="numeric"
-          // Keyed by the ceiling: it starts again from the one read after each change.
-          key={ceiling}
-          max={100_000}
-          min={1}
-          name="ceiling"
-          required
-          step={1}
-          type="number"
-        />
-        <FieldDescription>
-          Past it, its model calls are refused until the next month. It reaches
-          its core with its next deploy: apply its settings for it to hold now.
-        </FieldDescription>
-      </Field>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={busy} size="sm" type="submit" variant="outline">
-          Save ceiling
-        </Button>
-        <Failure failure={failure} />
-      </div>
-    </form>
-  );
-};
-
 /** Moving it to another ring. */
 export const RingChange = ({
   clientId,
@@ -330,21 +270,21 @@ export const RollBack = ({
     );
   };
   return (
-    <Body>
+    <CardContent>
       <p className="text-muted-foreground">
         {`Rolling it back from ${rollout.releaseId ?? "the secrets rollout"} puts back what it ran before, and waits for it.`}
       </p>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Rolling it back puts the shared secrets it ran before back. If you
-            revoked them at their providers, its people can&apos;t sign in or
-            reach their connections until the next secrets rollout.
-          </p>
-          <div className="flex flex-wrap gap-2">
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Rolling it back puts the shared secrets it ran before back. If you
+              revoked them at their providers, its people can&apos;t sign in or
+              reach their connections until the next secrets rollout.
+            </p>
+          </AlertDescription>
+          <AlertAction placement="below">
             <Button
               disabled={busy}
               onClick={rollBack}
@@ -362,8 +302,8 @@ export const RollBack = ({
             >
               Keep the new secrets
             </Button>
-          </div>
-        </div>
+          </AlertAction>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -383,7 +323,7 @@ export const RollBack = ({
           <Failure failure={failure} />
         </div>
       )}
-    </Body>
+    </CardContent>
   );
 };
 
@@ -393,12 +333,10 @@ export const RollBack = ({
 export const SignInChange = ({
   clientId,
   signIn,
-  overridden,
   refresh,
 }: {
   clientId: string;
   signIn: ClientSignInRecord | null;
-  overridden: boolean;
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
@@ -420,9 +358,6 @@ export const SignInChange = ({
         );
       }}
     >
-      {overridden ? (
-        <p>A SIGN_IN setting replaces this on deploy, until it is removed.</p>
-      ) : null}
       {/* Keyed by what was read: the fields start again from it after a save. */}
       <FieldGroup key={JSON.stringify(signIn)}>
         <SignInFields current={signIn} idPrefix="setup-sign-in" />
@@ -467,7 +402,7 @@ export const ApplySettings = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <Body>
+    <CardContent>
       <p>{pendingWords(configPending, pinned)}</p>
       {active ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -493,7 +428,7 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </Body>
+    </CardContent>
   );
 };
 
@@ -778,17 +713,17 @@ export const RotateSecrets = ({
     });
   };
   return (
-    <Body>
+    <CardContent>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Its people all sign in again once the next deploy makes the new
-            secrets live.
-          </p>
-          <div className="flex flex-wrap gap-2">
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Its people all sign in again once the next deploy makes the new
+              secrets live.
+            </p>
+          </AlertDescription>
+          <AlertAction placement="below">
             <Button
               disabled={busy}
               onClick={rotate}
@@ -806,8 +741,8 @@ export const RotateSecrets = ({
             >
               Keep them
             </Button>
-          </div>
-        </div>
+          </AlertAction>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -830,7 +765,7 @@ export const RotateSecrets = ({
           ) : null}
         </div>
       )}
-    </Body>
+    </CardContent>
   );
 };
 
@@ -896,9 +831,7 @@ const readLive = async (clientId: string): Promise<LiveRead> => {
  * What its account shows now, read once the Setup shows and kept a
  * minute, as the admin's grid read it: whether the router reaches its
  * core, its errors over the last day, its drift, whether it runs the
- * shared secrets, and what it cost this month (an estimate: its Workers
- * Paid plan past what it includes, and AI Gateway spend; not storage or
- * Durable Objects). Only an active company is read.
+ * shared secrets. Only an active company is read.
  */
 export const LiveNumbers = ({
   clientId,

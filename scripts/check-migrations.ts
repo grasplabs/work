@@ -42,19 +42,6 @@ const mainJournal = (file: string): Journal | undefined => {
 
 const errors: string[] = [];
 
-/**
- * Migration folders squashed away in a hard cut: their database was reset
- * once and now applies its migrations from the folder named, so main's
- * files there may go. Knowledge's moved into the Brain package as one
- * migration (GRA-1037), before any client had it.
- */
-const squashed: Readonly<Record<string, string>> = {
-  "apps/core/src/db/knowledge/migrations/": "packages/brain/src/db/migrations/",
-};
-
-const isSquashed = (file: string): boolean =>
-  Object.keys(squashed).some((folder) => file.startsWith(folder));
-
 // A migration moved unchanged with its app (a rename at 100% similarity)
 // is still the one main shipped: only its path changed.
 const changed = git(
@@ -69,13 +56,6 @@ const changed = git(
   .split("\n")
   .filter((line) => line !== "" && !line.startsWith("R100\t"));
 for (const line of changed) {
-  // A rename's source is the second field, a deletion's the only one.
-  const [status, from] = line.split("\t");
-  const goneFrom =
-    status?.startsWith("D") === true || status?.startsWith("R") === true;
-  if (goneFrom && from !== undefined && isSquashed(from)) {
-    continue;
-  }
   errors.push(
     `${line.split("\t").at(-1)} is on main already: add a new migration instead of changing it.`
   );

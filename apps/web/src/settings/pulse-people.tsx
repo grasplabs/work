@@ -4,6 +4,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -93,7 +94,7 @@ const CoverageBar = ({
   return (
     <svg
       aria-hidden="true"
-      className="h-2.5 w-full overflow-hidden rounded-full"
+      className="bg-muted h-2.5 w-full overflow-hidden rounded-full"
       preserveAspectRatio="none"
     >
       {parts.map(({ status, x, share }) => (
@@ -124,9 +125,9 @@ export const PulseCoverage = ({
     <div className="flex flex-col gap-3 border-t px-5 py-4">
       <p className="flex items-baseline gap-2">
         <Trans>
-          <span className="type-figure">
+          <Stat>
             {reporting} of {total}
-          </span>
+          </Stat>
           <span className="text-muted-foreground">
             <Plural
               one="person has Pulse"

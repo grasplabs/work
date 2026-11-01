@@ -81,7 +81,6 @@ export interface AccountState {
   r2Reports?: string;
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
-  gateways: Json[];
   /** Its zones, each with the domains Email Sending sends from in it. */
   zones: ZoneState[];
   scripts: Map<string, ScriptState>;
@@ -90,7 +89,6 @@ export interface AccountState {
    * Workers by script name. A test adds a namespace; uploads fill it.
    */
   namespaces: Map<string, Map<string, ScriptState>>;
-  workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */
   assets: Set<string>;
   /** Assets upload sessions: each token, and the hashes still to upload. */
@@ -171,14 +169,15 @@ export interface AccountState {
    * something that isn't a snapshot.
    */
   admin?: AdminSnapshot | "absent" | "ended" | "garbled";
+  /** True for a core that answers the AI status request with a redirect elsewhere. */
+  aiRedirect?: boolean;
   /**
-   * `absent` for a core from before the quota policy report, which answers
-   * it 404. Otherwise its core answers the policy it applies, as core does:
-   * the highest generation any of its versions went live with, with the
-   * limits it first went live with. `redirect` for one that answers
-   * with a redirect elsewhere.
+   * What its core answers the admin's signed AI status request with
+   * (@grasp-os/shared/ai-status-report): no provider connected unless set.
+   * As JSON, so a core on an earlier release, which answers an older shape
+   * (`AiStatusReport` as it was then), can be played too.
    */
-  quotaPolicy?: "absent" | "redirect";
+  ai?: unknown;
   /**
    * What its core does once a snapshot request arrives, before answering
    * it: waits, as a slow or hanging one does, or throws, as a dropped

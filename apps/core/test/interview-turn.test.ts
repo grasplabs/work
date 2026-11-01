@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
   codeOf,
@@ -21,13 +20,14 @@ import {
   participate,
   quick,
 } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { routed } from "./sign-in.ts";
 
 // One turn of someone's interview (src/onboarding/interview.ts), over the
-// endpoint, as the page asks for it. AI Gateway is the outside system: a
-// fake behind the AI binding, answering for the deployment's quick model
-// (his line) and its careful one (what he writes down). The ways it can
-// fail, tried here:
+// endpoint, as the page asks for it. The model provider is the outside
+// system: a fake behind connect, answering for the organization's model:
+// his line (the quick role) and what he writes down (the careful one). The
+// ways it can fail, tried here:
 //
 // - The page saying who it is or what Stephen knows: the request takes no
 //   such field, and the brief holds what the store knows.
@@ -61,21 +61,21 @@ const turnOf = (events: TurnEvent[]): StephenTurn | undefined =>
   events.flatMap((event) => ("turn" in event ? [event.turn] : []))[0];
 
 /** What his line's model answers: six named lines. */
-const line = (say: string, more = "no", part = "you"): GatewayReply => ({
+const line = (say: string, more = "no", part = "you"): ProviderReply => ({
   text: `TONE: none\nSAY: ${say}\nPART: ${part}\nWANTS: answer\nMORE: ${more}\nAGREED: no\n`,
   inputTokens: 1500,
   outputTokens: 40,
 });
 
 /** What the notes' model answers. */
-const notes = (body: unknown): GatewayReply => ({
+const notes = (body: unknown): ProviderReply => ({
   text: JSON.stringify(body),
   inputTokens: 1600,
   outputTokens: 120,
 });
 
 describe("an interview turn", { timeout: 60_000 }, () => {
-  it("holds an interview over the endpoint: his line from the quick model, what he wrote down from the careful one, and who he talks with from the store", async () => {
+  it("holds an interview over the endpoint: his line and what he wrote down from the organization's model, and who he talks with from the store", async () => {
     const link = await opened();
     const said = "I check the invoice in Exact and then I send it on.";
     const { requests, result } = await answering(
@@ -157,11 +157,12 @@ describe("an interview turn", { timeout: 60_000 }, () => {
         more: false,
         approved: false,
       },
+      // Both roles resolve to the organization's default.
       models: [
         "claude-sonnet-4-5",
-        "claude-opus-4-8",
         "claude-sonnet-4-5",
-        "claude-opus-4-8",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-5",
       ],
       toldName: true,
       noLead: true,
@@ -211,7 +212,7 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks a line the quick model declines once more, of the careful one", async () => {
+  it("asks a line the model declines once more", async () => {
     const link = await opened();
     const { requests, result } = await answering(
       [
@@ -236,7 +237,7 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       models: requests.map(modelOf),
     }).toStrictEqual({
       say: "Which part of it takes longest?",
-      models: ["claude-sonnet-4-5", "claude-opus-4-8", "claude-opus-4-8"],
+      models: ["claude-sonnet-4-5", "claude-sonnet-4-5", "claude-sonnet-4-5"],
     });
   });
 
@@ -305,11 +306,13 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       }
     );
     const after = await countedFor(quick);
+    // What it read is counted as far as the provider's count reached core
+    // before the cut: through connect, the cut may come first.
     expect({
       cutOff: requests[0]?.signal.aborted,
-      calls: after.calls - before.calls,
-      read: after.tokensIn - before.tokensIn,
-    }).toStrictEqual({ cutOff: true, calls: 1, read: 1500 });
+      sent: requests.length,
+      counted: after.calls > before.calls,
+    }).toStrictEqual({ cutOff: true, sent: 1, counted: true });
   });
 
   it("keeps the text a turn ran on, and how long they waited for the voice, for Grasp's staff", async () => {

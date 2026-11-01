@@ -1,20 +1,3 @@
-/**
- * The organization as Grasp knows it, ported from the prototype
- * (grasplabs/prototype `components/admin/org-organization.tsx`,
- * `org-team.tsx` and `organization-parts.ts`): the company, its figures,
- * every team as a card with its lead, its people as dots, its work and
- * what needs a look there; a card opens the team, with everyone in it,
- * the work it does and where that work goes. Every figure is the shared
- * model's (`organizationOf`).
- *
- * Read only, as the admin is: the prototype puts the list right here
- * (a team or a person added, a lead named, a team asked in or left out,
- * the one reminder sent), which writes to the company's Grasp, and the
- * admin has no way to yet. A person opens nothing of their own: the
- * prototype's dialog leads to what they said, which the admin never
- * shows. Nor is where a piece of work goes said in the words of whoever
- * said it, when it isn't one of the company's own teams.
- */
 import type {
   ChartTeam,
   Organization,
@@ -35,6 +18,24 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+/**
+ * The organization as Grasp knows it, ported from the prototype
+ * (grasplabs/prototype `components/admin/org-organization.tsx`,
+ * `org-team.tsx` and `organization-parts.ts`): the company, its figures,
+ * every team as a card with its lead, its people as dots, its work and
+ * what needs a look there; a card opens the team, with everyone in it,
+ * the work it does and where that work goes. Every figure is the shared
+ * model's (`organizationOf`).
+ *
+ * Read only, as the admin is: the prototype puts the list right here
+ * (a team or a person added, a lead named, a team asked in or left out,
+ * the one reminder sent), which writes to the company's Grasp, and the
+ * admin has no way to yet. A person opens nothing of their own: the
+ * prototype's dialog leads to what they said, which the admin never
+ * shows. Nor is where a piece of work goes said in the words of whoever
+ * said it, when it isn't one of the company's own teams.
+ */
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Progress } from "@grasp-os/ui/components/progress";
 import {
   ToggleGroup,
@@ -55,6 +56,7 @@ import {
   markOf,
   PeopleDots,
 } from "./parts.tsx";
+import { EmptySection, Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, linkWords, workflowWords } from "./words.ts";
 
@@ -446,10 +448,7 @@ const NoTeams = ({ view }: { view: OrgView }) => {
   }
   return (
     <>
-      <section className="bg-card flex flex-col gap-0.5 rounded-xl border px-5 py-4">
-        <h2 className="font-medium">{view.org.name}</h2>
-        <p className="text-muted-foreground">{line}</p>
-      </section>
+      <Section description={line} title={view.org.name} />
       {named.length > 0 ? (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {named.map((each) => {
@@ -526,14 +525,10 @@ const Between = ({
   chart: Organization;
   clientId: string;
 }) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-      <h2 className="font-medium">Where the work goes between teams</h2>
-      <p className="text-muted-foreground">
-        Work one team hands to another, as the people who do it said. Work
-        stalls most where it changes hands.
-      </p>
-    </div>
+  <Section
+    description="Work one team hands to another, as the people who do it said. Work stalls most where it changes hands."
+    title="Where the work goes between teams"
+  >
     <ul className="flex flex-col">
       {chart.between.map((each) => (
         <li className="border-t" key={each.work.id}>
@@ -558,7 +553,7 @@ const Between = ({
         </li>
       ))}
     </ul>
-  </section>
+  </Section>
 );
 
 /** Whether a team is shown under `filter`. */
@@ -621,20 +616,23 @@ const AllTeams = ({
 
   return (
     <>
-      <section className="bg-card overflow-hidden rounded-xl border">
-        <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-          <h2 className="font-medium">{view.org.name}</h2>
-          {view.org.about === "" && view.org.place === "" ? null : (
-            <p className="text-muted-foreground">
-              {[view.org.about, view.org.place]
-                .filter((part) => part !== "")
-                .join(" · ")}
-            </p>
-          )}
-          <p className="text-muted-foreground text-xs">{sourceLine(view)}</p>
-        </div>
+      <Section
+        description={
+          <>
+            {view.org.about === "" && view.org.place === "" ? null : (
+              <p>
+                {[view.org.about, view.org.place]
+                  .filter((part) => part !== "")
+                  .join(" · ")}
+              </p>
+            )}
+            <p className="text-xs">{sourceLine(view)}</p>
+          </>
+        }
+        title={view.org.name}
+      >
         <Figures chart={chart} left={left} view={view} />
-      </section>
+      </Section>
 
       <div className="flex flex-wrap items-center gap-2">
         {shownFilters.length > 1 ? (
@@ -777,15 +775,14 @@ const TeamPeople = ({
 }) => {
   const each = team.view;
   return (
-    <section className="bg-card overflow-hidden rounded-xl border">
-      <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">People</h2>
-        <p className="text-muted-foreground">
-          {team.small
-            ? `Fewer than ${MIN_GROUP}: the company never sees this team’s numbers apart.`
-            : "By name, for Grasp only."}
-        </p>
-      </div>
+    <Section
+      description={
+        team.small
+          ? `Fewer than ${MIN_GROUP}: the company never sees this team’s numbers apart.`
+          : "By name, for Grasp only."
+      }
+      title="People"
+    >
       {each.people.length === 0 ? (
         <p className="text-muted-foreground border-t px-5 py-4">
           Nobody is in this team yet.
@@ -829,7 +826,7 @@ const TeamPeople = ({
           })}
         </ul>
       )}
-    </section>
+    </Section>
   );
 };
 
@@ -859,15 +856,14 @@ const TeamWork = ({
 }) => {
   const works = team.works.length;
   return (
-    <section className="bg-card overflow-hidden rounded-xl border">
-      <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">The work it does</h2>
-        <p className="text-muted-foreground">
-          {works === 0
-            ? "Its lead names the team’s work in their interview: what there is, how much of it, and who does which."
-            : "As its lead named it, with each piece’s part of the team’s work."}
-        </p>
-      </div>
+    <Section
+      description={
+        works === 0
+          ? "Its lead names the team’s work in their interview: what there is, how much of it, and who does which."
+          : "As its lead named it, with each piece’s part of the team’s work."
+      }
+      title="The work it does"
+    >
       {works > 0 ? (
         <>
           <div className="px-5 pb-4">
@@ -916,7 +912,7 @@ const TeamWork = ({
           </ul>
         </>
       ) : null}
-    </section>
+    </Section>
   );
 };
 
@@ -934,13 +930,10 @@ const TeamHandoffs = ({
   const otherLink =
     "truncate rounded-sm hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
   return (
-    <section className="bg-card overflow-hidden rounded-xl border">
-      <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">Where its work goes</h2>
-        <p className="text-muted-foreground">
-          Who gets each piece of work next, as the people who do it said.
-        </p>
-      </div>
+    <Section
+      description="Who gets each piece of work next, as the people who do it said."
+      title="Where its work goes"
+    >
       <ul className="flex flex-col">
         {team.from.map((hand) => (
           <li
@@ -998,7 +991,7 @@ const TeamHandoffs = ({
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   );
 };
 
@@ -1006,11 +999,11 @@ const TeamHandoffs = ({
 const TeamFlags = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   if (team.view.off) {
     return (
-      <p className="text-muted-foreground rounded-xl border border-dashed px-5 py-4">
+      <EmptySection>
         {view.closed
           ? "This team did not take part, and the interviews have closed."
           : "This team does not take part: nobody in it gets a link, and nothing waits for it. Asked in, its lead gets a link first, then everyone else."}
-      </p>
+      </EmptySection>
     );
   }
   if (team.flags.length === 0) {
@@ -1079,7 +1072,7 @@ const OneTeam = ({
       <section className="bg-card overflow-hidden rounded-xl border">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-            <h2 className="type-title">{each.team.name}</h2>
+            <PageHeaderTitle render={<h2>{each.team.name}</h2>} />
             {each.team.does === "" ? null : (
               <p className="text-muted-foreground">{each.team.does}</p>
             )}
@@ -1106,28 +1099,20 @@ const OneTeam = ({
         <div className="flex min-w-0 flex-col gap-6">
           <TeamWork clientId={clientId} team={team} />
           {team.tools.length > 0 ? (
-            <section className="bg-card overflow-hidden rounded-xl border">
-              <div className="flex min-w-0 flex-col gap-0.5 px-5 py-4">
-                <h2 className="font-medium">The apps it works in</h2>
-                <p className="text-muted-foreground">
-                  As the people who do the work named them, with how many pieces
-                  of work each is in.
-                </p>
-              </div>
+            <Section
+              description="As the people who do the work named them, with how many pieces of work each is in."
+              title="The apps it works in"
+            >
               <ul className="flex flex-wrap gap-2 border-t px-5 py-4">
                 {team.tools.map((tool) => (
-                  <li
-                    className="flex items-center gap-1.5 rounded-md border px-2 py-1"
-                    key={tool.name}
-                  >
-                    <span>{tool.name}</span>
-                    <span className="text-muted-foreground text-xs tabular-nums">
-                      {tool.works}
-                    </span>
+                  <li key={tool.name}>
+                    <Badge variant="outline">
+                      {`${tool.name} · ${tool.works}`}
+                    </Badge>
                   </li>
                 ))}
               </ul>
-            </section>
+            </Section>
           ) : null}
           {team.to.length + team.from.length > 0 ? (
             <TeamHandoffs clientId={clientId} team={team} view={view} />

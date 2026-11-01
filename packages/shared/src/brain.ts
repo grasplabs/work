@@ -176,7 +176,7 @@ export interface Tool {
   name: string;
   teamIds: string[];
   sourceId: string;
-  /** As the team said it; a sighting in the landscape wins. Empty is unknown. */
+  /** As the team said it. Empty is unknown. */
   ai?: AiKind;
 }
 
@@ -231,8 +231,6 @@ export interface Source {
   connection?: "directory" | "signIn" | "pulse";
   /** For an interview: a team's stakeholder, or any other employee. */
   interviewee?: "stakeholder" | "employee";
-  /** For a document: the policy it became in the policy manager. */
-  policyId?: string;
   /** The teams this source speaks for: what makes a team interviewed. */
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
@@ -375,48 +373,6 @@ export interface Connection {
   matches: string[];
 }
 
-/** How Grasp knows an application is in use. */
-export type SeenThrough = "microsoftSso" | "googleSso" | "pulse";
-
-/** One application in the client's landscape. */
-export interface LandscapeApp {
-  id: string;
-  name: string;
-  vendor: string;
-  category: string;
-  /** A file name in /logos, or none. */
-  logo?: string;
-  /** Its logo as the Landscape table shows it, as a full path. */
-  logoSrc?: string;
-  ai: AiKind;
-  /** People seen using it in the last 30 days. */
-  people: number;
-  seenThrough: SeenThrough[];
-  /** The team that owns it, or null when nobody does. */
-  owner: string | null;
-  /** Tool names that mean this application. */
-  matches: string[];
-  /** The OAuth permissions people granted it, in plain words. Empty when seen only by Pulse. */
-  permissions: string[];
-}
-
-/** A policy the company uploaded to the policy manager. */
-export interface PolicyDocument {
-  id: string;
-  title: string;
-  /** ISO minute. */
-  uploadedAt: string;
-  status: "reading" | "review" | "published" | "failed";
-  /** What the policy covers, in a sentence or two. */
-  summary?: string;
-  /** The rules proposed from it, each with the passage it comes from. */
-  proposals: { excerpt: string; decision: "open" | "accepted" | "rejected" }[];
-  /** Requirements no rule can check yet, each with its passage. */
-  unchecked: { excerpt: string }[];
-  /** ISO minute. */
-  publishedAt?: string;
-}
-
 /** Everything the brain is built from. */
 export interface Workspace {
   company: Company;
@@ -438,8 +394,6 @@ export interface Workspace {
   gaps: Gap[];
   workflows: Workflow[];
   connections: Connection[];
-  landscape: LandscapeApp[];
-  policies: PolicyDocument[];
 }
 
 /** Most statements one call takes out of the brain. */

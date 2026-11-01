@@ -2,6 +2,7 @@ import type {
   ModelMonthSpend,
   WorkflowMonthSpend,
 } from "@grasp-os/shared/models";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
@@ -13,7 +14,7 @@ import { useFull, WidgetBlock } from "./widget-block.tsx";
 // The AI spend widget of the dashboard's board, for admins: what the
 // models cost this month, budget or not, and the workflows that spent
 // most, each with what one run of it cost. Settings → AI spend has the
-// rest: budgets, each binding and the reservations held for review.
+// rest: budgets and each binding.
 
 /** A workflow that spent this month, by its name, which opens it while core still has it. */
 const WorkflowName = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
@@ -85,7 +86,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   return (
     <>
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="type-figure">{total}</span>
+        <Stat>{total}</Stat>
         <span className="text-muted-foreground text-xs">
           <Trans>for every model call this month</Trans>
         </span>

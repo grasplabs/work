@@ -3,6 +3,7 @@ import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tabs,
   TabsContent,
@@ -13,7 +14,6 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { EyeIcon, PenLineIcon } from "lucide-react";
 import { useState } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -130,9 +130,18 @@ const ToolRow = ({
   </li>
 );
 
+// The prototype's groups: what only reads, then what creates or changes.
 const toolGroups = [
-  { id: "read", readOnly: true, title: msg`Reads`, icon: EyeIcon },
-  { id: "change", readOnly: false, title: msg`Changes`, icon: PenLineIcon },
+  {
+    id: "read",
+    readOnly: true,
+    title: msg({ message: "Read", context: "permission group" }),
+  },
+  {
+    id: "change",
+    readOnly: false,
+    title: msg({ message: "Create and change", context: "permission group" }),
+  },
 ] as const;
 
 /**
@@ -175,11 +184,9 @@ const ToolList = ({
         const inGroup = tools.data.filter(
           ({ readOnly }) => readOnly === group.readOnly
         );
-        const { icon: Icon } = group;
         return inGroup.length === 0 ? null : (
           <div className="flex flex-col gap-2" key={group.id}>
-            <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
-              <Icon aria-hidden="true" className="size-3.5" />
+            <h3 className="text-muted-foreground text-xs font-medium">
               {i18n._(group.title)}
             </h3>
             <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
@@ -551,7 +558,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           <AppLogo logo={integration.logo} name={integration.name} />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="type-title">{integration.name}</h1>
+              <PageHeaderTitle>{integration.name}</PageHeaderTitle>
               {integration.listed && !integration.offered ? (
                 <Badge variant="outline">
                   <Trans>Not offered</Trans>
@@ -592,6 +599,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           }}
         />
         <Tabs
+          size="sm"
           onValueChange={(next: Tab) => {
             void navigate({
               replace: true,

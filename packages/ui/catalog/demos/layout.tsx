@@ -115,15 +115,13 @@ const StackDemo = () => (
 );
 
 const PaintedFieldDemo = () => (
-  <PaintedField
-    className="flex h-40 flex-col justify-end gap-1 rounded-xl p-5"
-    painting="dawn"
-    pattern="columns"
-  >
-    <p className="type-heading">Three invoices wait on you</p>
-    <p className="text-muted-foreground text-sm">
-      The oldest came in on Monday.
-    </p>
+  <PaintedField className="h-40" painting="dawn" pattern="columns">
+    <div className="flex h-full flex-col justify-end gap-1 p-5">
+      <p className="type-display">Three invoices wait on you</p>
+      <p className="text-muted-foreground text-sm">
+        The oldest came in on Monday.
+      </p>
+    </div>
   </PaintedField>
 );
 

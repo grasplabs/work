@@ -31,16 +31,14 @@ function InputGroup({
       data-slot="input-group"
       data-size={size}
       role="group"
-      // Fields stay filled (`bg-card`). A box is typed into all the time, so
-      // its focus is its edge in the keyboard's ink and a hair of ring, not
-      // the wide ring of a single field.
+      // Fields stay filled (`bg-card`); focus is Input's own ring.
       className={cn(
-        "group/input-group border-input bg-card has-[[data-slot=input-group-control]:focus-visible]:border-ring has-[[data-slot=input-group-control]:focus-visible]:ring-ring/25 has-[[data-slot][aria-invalid=true]]:border-destructive has-[[data-slot][aria-invalid=true]]:ring-destructive/20 dark:bg-input/30 dark:has-[[data-slot][aria-invalid=true]]:ring-destructive/40 relative flex w-full min-w-0 items-center border shadow-xs transition-[color,box-shadow] outline-none in-data-[slot=combobox-content]:focus-within:border-inherit in-data-[slot=combobox-content]:focus-within:ring-0 has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot][aria-invalid=true]]:ring-3 has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>textarea]:h-auto has-[>[data-align=block-end]]:[&>input]:pt-3 has-[>[data-align=block-start]]:[&>input]:pb-3 has-[>[data-align=inline-end]]:[&>input]:pr-1.5 has-[>[data-align=inline-start]]:[&>input]:pl-1.5",
+        "group/input-group border-input bg-card has-[[data-slot=input-group-control]:focus-visible]:border-ring has-[[data-slot=input-group-control]:focus-visible]:ring-ring/50 has-[[data-slot][aria-invalid=true]]:border-destructive has-[[data-slot][aria-invalid=true]]:ring-destructive/20 dark:bg-input/30 dark:has-[[data-slot][aria-invalid=true]]:ring-destructive/40 relative flex w-full min-w-0 items-center border shadow-xs transition-[color,box-shadow] outline-none in-data-[slot=combobox-content]:focus-within:border-inherit in-data-[slot=combobox-content]:focus-within:ring-0 has-[[data-slot=input-group-control]:focus-visible]:ring-3 has-[[data-slot][aria-invalid=true]]:ring-3 has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>textarea]:h-auto has-[>[data-align=block-end]]:[&>input]:pt-3 has-[>[data-align=block-start]]:[&>input]:pb-3 has-[>[data-align=inline-end]]:[&>input]:pe-1.5 has-[>[data-align=inline-start]]:[&>input]:ps-1.5",
         size === "default" && "h-9 rounded-md",
         size === "prompt" &&
           "h-9 rounded-xl [&>textarea]:px-4.5 [&>textarea]:pt-3.5",
         size === "chat" &&
-          "h-9 rounded-xl [&>[data-align=block-end]]:px-1.5 [&>[data-align=block-end]]:pt-0 [&>[data-align=block-end]]:pb-1.5 [&>[data-align=inline-end]]:pr-2.5 [&>[data-slot=input-group-addon]_button]:rounded-lg [&>textarea]:px-3",
+          "has-[[data-slot=input-group-control]:focus-visible]:ring-ring/25 h-9 rounded-xl has-[[data-slot=input-group-control]:focus-visible]:ring-1 [&>[data-align=block-end]]:px-1.5 [&>[data-align=block-end]]:pt-0 [&>[data-align=block-end]]:pb-1.5 [&>[data-align=inline-end]]:pe-2.5 [&>[data-slot=input-group-addon]_button]:rounded-md [&>textarea]:px-3",
         size === "lg" &&
           "text-foreground min-h-14 rounded-[1.75rem] px-1.5 text-sm font-medium shadow-sm [&>[data-slot=input-group-addon]]:py-2 [&>textarea]:px-3.5 [&>textarea]:py-4.5 [&>textarea]:font-medium",
         className
@@ -56,9 +54,9 @@ const inputGroupAddonVariants = cva(
     variants: {
       align: {
         "inline-start":
-          "order-first pl-2 has-[>button]:-ml-1 has-[>kbd]:ml-[-0.15rem]",
+          "order-first ps-2 has-[>button]:-ms-1 has-[>kbd]:ms-[-0.15rem]",
         "inline-end":
-          "order-last pr-2 has-[>button]:-mr-1 has-[>kbd]:mr-[-0.15rem]",
+          "order-last pe-2 has-[>button]:-me-1 has-[>kbd]:me-[-0.15rem]",
         "block-start":
           "order-first w-full justify-start px-2.5 pt-2 group-has-[>input]/input-group:pt-2 [.border-b]:pb-2",
         "block-end":

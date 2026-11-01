@@ -1,7 +1,3 @@
-// Local check that the UI kit renders with the theme, in light and dark mode
-// (e2e/kit.e2e.ts). Not product UI: builds in production mode answer not
-// found. Gated on the mode rather than `DEV`, because the local stack serves
-// a `--mode development` build, which Vite still builds with `DEV` false.
 import {
   Avatar,
   AvatarFallback,
@@ -77,6 +73,19 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Kbd } from "@grasp-os/ui/components/kbd";
 import { Label } from "@grasp-os/ui/components/label";
+// Local check that the UI kit renders with the theme, in light and dark mode
+// (e2e/kit.e2e.ts). Not product UI: builds in production mode answer not
+// found. Gated on the mode rather than `DEV`, because the local stack serves
+// a `--mode development` build, which Vite still builds with `DEV` false.
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import {
   Popover,
   PopoverContent,
@@ -113,6 +122,7 @@ import {
 } from "@grasp-os/ui/components/sidebar";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Switch } from "@grasp-os/ui/components/switch";
 import {
   Table,
@@ -151,15 +161,7 @@ import { DotBrain } from "../brain/dot-brain.tsx";
 import type { ShapeKey } from "../brain/dot-shapes.ts";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
 import type { Integration } from "../connections/integrations.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import {
   ErrorState,
   LoadingLines,
@@ -198,12 +200,8 @@ const swatches = [
   { name: "tile", className: "bg-tile" },
   { name: "status-agreed", className: "bg-status-agreed" },
   { name: "status-attention", className: "bg-status-attention" },
-  { name: "status-attention-soft", className: "bg-status-attention-soft" },
   { name: "highlight", className: "bg-highlight" },
-  { name: "signal", className: "bg-signal" },
-  { name: "hairline", className: "bg-hairline" },
-  { name: "icon-tile", className: "bg-icon-tile" },
-  { name: "veil", className: "bg-veil" },
+  { name: "scrim", className: "bg-scrim" },
 ];
 
 const buttonVariants = [
@@ -251,9 +249,8 @@ const Theme = () => (
         </ul>
         <div className="flex flex-col gap-1">
           <p className="type-display">What Grasp says, in Newsreader.</p>
-          <p className="type-title">A page&apos;s title</p>
-          <p className="type-heading">A heading inside a page</p>
-          <p className="type-figure">1,284</p>
+          <PageHeaderTitle render={<p />}>A page&apos;s title</PageHeaderTitle>
+          <Stat render={<p />}>1,284</Stat>
           <p className="text-sm">
             The body text, in Geist, with a{" "}
             <span className="line-under">line under</span> what was heard.
@@ -684,18 +681,18 @@ const PageColumn = () => {
         <div className="flex h-64 overflow-hidden rounded-lg border">
           {folded ? (
             <PageSidebar folded label="Documents">
-              <RailExpand
+              <PageSidebarRailExpand
                 label="Expand the documents"
                 onExpand={() => {
                   setFolded(false);
                 }}
               />
-              <RailButton label="New document">
+              <PageSidebarRailButton label="New document">
                 <PlusIcon />
-              </RailButton>
-              <RailDivider />
+              </PageSidebarRailButton>
+              <PageSidebarRailDivider />
               {kitDocuments.map((name) => (
-                <RailButton
+                <PageSidebarRailButton
                   active={name === open}
                   key={name}
                   label={name}
@@ -704,7 +701,7 @@ const PageColumn = () => {
                   }}
                 >
                   <FileTextIcon />
-                </RailButton>
+                </PageSidebarRailButton>
               ))}
             </PageSidebar>
           ) : (
@@ -752,10 +749,10 @@ const Kit = () => (
     <TooltipProvider>
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
         <div className="flex items-center gap-3">
-          <div className="bg-icon-tile text-icon-tile-foreground flex size-8 items-center justify-center rounded-lg">
+          <div className="bg-highlight text-highlight-foreground flex size-8 items-center justify-center rounded-lg">
             <GraspMark className="size-4" />
           </div>
-          <h1 className="type-title">UI kit</h1>
+          <PageHeaderTitle>UI kit</PageHeaderTitle>
         </div>
 
         <Theme />

@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Input } from "@grasp-os/ui/components/input";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -62,6 +63,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
+import { ListedCount } from "../workflows/listed-count.tsx";
 import { readActivity } from "../workflows/reads.ts";
 import { workflowFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
@@ -623,11 +625,6 @@ const WorkflowView = ({
   const { t } = useLingui();
   const { version } = summary;
   const owner = summary.owner.name ?? summary.owner.userId;
-  // As many as core sent, "+" where it had more.
-  const runCount =
-    runs.state === "ready" && runs.data.runs.length > 0
-      ? `${runs.data.runs.length}${runs.data.more ? "+" : ""}`
-      : undefined;
   return (
     <Tabs defaultValue="steps" spacing="none">
       {/* As the prototype's workflow page: the title with where it is and
@@ -636,7 +633,7 @@ const WorkflowView = ({
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="flex min-w-0 grow basis-96 flex-col gap-2">
-            <h1 className="type-title">{summary.workflow}</h1>
+            <PageHeaderTitle>{summary.workflow}</PageHeaderTitle>
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
                 render={
@@ -684,12 +681,14 @@ const WorkflowView = ({
           )}
           <TabsTrigger value="runs">
             <Trans context="tab listing the runs of workflows">Runs</Trans>
-            {runCount === undefined ? null : (
-              <span className="text-muted-foreground tabular-nums">
-                {" "}
-                {runCount}
-              </span>
-            )}
+            {/* As many as core sent, "+" where it had more. */}
+            {runs.state === "ready" ? (
+              <ListedCount
+                count={runs.data.runs.length}
+                more={runs.data.more}
+                of="runs"
+              />
+            ) : null}
           </TabsTrigger>
           {versions === undefined ? null : (
             <TabsTrigger value="versions">
@@ -699,19 +698,19 @@ const WorkflowView = ({
         </TabsList>
       </div>
       <TabsContent value="steps">
-        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+        <div className="pb-chat mx-auto w-full max-w-7xl px-6 pt-6">
           <Steps steps={steps} />
         </div>
       </TabsContent>
       <TabsContent value="triggers">
-        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+        <div className="pb-chat mx-auto w-full max-w-7xl px-6 pt-6">
           <WorkflowTriggers triggers={triggers} />
         </div>
       </TabsContent>
       {/* Kept while another tab shows: what was saved or typed stays. */}
       {params === null ? null : (
         <TabsContent keepMounted value="parameters">
-          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+          <div className="pb-chat mx-auto w-full max-w-7xl px-6 pt-6">
             <Parameters
               app={summary.app}
               editable={setsParams}
@@ -722,7 +721,7 @@ const WorkflowView = ({
         </TabsContent>
       )}
       <TabsContent value="runs">
-        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6">
+        <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-6">
           <Figures activity={activity} summary={summary} />
           {runs.state === "ready" ? (
             <RunsLog
@@ -739,7 +738,7 @@ const WorkflowView = ({
       </TabsContent>
       {versions === undefined ? null : (
         <TabsContent value="versions">
-          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+          <div className="pb-chat mx-auto w-full max-w-7xl px-6 pt-6">
             <Versions versions={versions} />
           </div>
         </TabsContent>

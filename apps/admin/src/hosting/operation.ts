@@ -3,8 +3,7 @@
  * operation per client, run by the runner that holds it (src/runners.ts),
  * through its steps in order:
  *
- * 1. `validated`: the release is imported and declares what it works with
- *    (`incompatibility`, as deploys check it), the destination can run
+ * 1. `validated`: the release is imported, the destination can run
  *    every binding it uses, the client's secrets and core config can be
  *    made, and its resources are allocated in its inventory.
  * 2. `resources`: its databases and buckets exist, each id recorded
@@ -54,14 +53,6 @@
  * fencing: a call already in flight can still land, and the runner that
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
- * Model spend (GRA-141): core reaches models through an AI Gateway in the
- * destination's account (`modelGatewayOf`): the client's own in a
- * dedicated account, the destination's shared one in a Workers for
- * Platforms namespace (spec 37.5), ensured with the client's resources.
- * Its core's model gateway holds every client to its monthly ceiling, the
- * deployment budget its vars carry (src/deploy/core-vars.ts
- * `withSpendCeiling`), so no client has unbounded spend on the account.
- *
  * Not here, on purpose:
  * - A probe of an owned workflow's run: core's probe asks its identity,
  *   every private binding of core and connect (databases, buckets,
@@ -86,35 +77,17 @@
  * fingerprints.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
-  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { releaseManifestSchema } from "@grasp-os/shared/release";
-import type {
-  LimitRaise,
-  ReleaseManifest,
-  WorkerEntry,
-} from "@grasp-os/shared/release";
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
-import {
-  and,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
@@ -122,7 +95,7 @@ import { z } from "zod";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
-import { ensureAiGateway, findD1Database } from "../cloudflare/accounts.ts";
+import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -145,20 +118,10 @@ import {
   clientWorkers,
   releases,
 } from "../db/schema.ts";
-import {
-  appliedSchema,
-  currentReleases,
-  incompatibility,
-} from "../deploy/compatibility.ts";
-import {
-  clientGatewayId,
-  clientMailDomain,
-  clientRuntimeProfile,
-  derivedCoreConfig,
-} from "../deploy/core-config.ts";
+import { clientMailDomain, derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
-import { DeployError, errorCode } from "../deploy/errors.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { sendsMail } from "../deploy/resources.ts";
@@ -187,7 +150,6 @@ import {
 } from "../deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../deploy/versions.ts";
 import type { ReleaseStore } from "../releases/import.ts";
-import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, releaseRun, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
@@ -216,22 +178,6 @@ export const provisionOperationErrorCodes = [
   "client_unknown",
   /** The operation's release isn't imported. */
   "release_not_imported",
-  /** The release declares nothing of what its code works with. */
-  "release_undeclared",
-  /** The release doesn't work with what the client runs, or with itself, Worker by Worker. */
-  "release_incompatible",
-  /** The release's code doesn't run on a database's schema as the client's migrations left it. */
-  "schema_incompatible",
-  /**
-   * The release raises a platform limit, over the oldest release the admin
-   * holds that records limits, without evidence for the client's profile
-   * (src/releases/limits.ts).
-   */
-  "limit_evidence_missing",
-  /** The release was built before platform limits were recorded, and isn't made live. */
-  "release_without_limits",
-  /** A release on the way to it isn't imported, so its evidence can't be read. */
-  "release_history_incomplete",
   /** The operation provisions another release: it's fixed for the operation. */
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
@@ -431,13 +377,6 @@ const progressSchema = z.object({
    */
   configuredAt: z.string().optional(),
   /**
-   * The newest-built release whose database migrations may have run,
-   * recorded before they run (src/deploy/compatibility.ts `appliedSchema`):
-   * kept across releases, so a release that migrated and then failed, and
-   * the one started after it, don't forget the schema it left.
-   */
-  schema: z.string().optional(),
-  /**
    * Each Worker's last Durable Object migration as its script was observed
    * at (null for none): what a later release or rollback may not go back
    * past, rather than what a release that never uploaded declared.
@@ -457,8 +396,7 @@ const appSchema = z.enum(apps);
 
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
- * Workers: D1, R2, Durable Objects and Workers AI
- * (configuration/bindings), and static assets
+ * Workers: D1, R2 and Durable Objects (configuration/bindings), and static assets
  * (configuration/static-assets), and what the GRA-430 run
  * on a real namespace (28 Oct) qualified: the Worker Loader, version
  * metadata and a service binding, which renders to the connect gateway (a
@@ -468,7 +406,6 @@ const appSchema = z.enum(apps);
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
-  "ai",
   "d1",
   "r2_bucket",
   "durable_object_namespace",
@@ -882,9 +819,7 @@ export const startedAs = (started: {
  * it runs isn't imported (`release_not_imported`), past a migration a
  * script ran (`rollback_past_migration`, `release_behind_migration`), and
  * when the claim or the operation changed as it started
- * (`operation_running`). Whether the code of either release works with
- * the other and with the client's databases is the operation's first
- * step's (`incompatibility`). `cause` goes in the audit event, as when a
+ * (`operation_running`). `cause` goes in the audit event, as when a
  * release is rolled back on its own.
  */
 export const startClientRelease = async (
@@ -1518,39 +1453,14 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 };
 
 /**
- * The AI Gateway `loaded`'s core reaches models through, in its
- * destination's account: the destination's shared one in a Workers for
- * Platforms namespace (spec 37.5), the client's own in a dedicated one.
+ * Core's vars: its derived sign-in and runtime profile, the platform's AI
+ * settings, checked against the AI provider keys connect gets, and the
+ * change core records.
  */
-const modelGatewayOf = (loaded: Loaded): string => {
-  if (loaded.destination.kind !== "workers_for_platforms") {
-    return clientGatewayId;
-  }
-  const stage = stageOfNamespace(loaded.ownNamespace);
-  if (stage === undefined) {
-    throw new ProvisionOperationError(
-      "stage_unset",
-      "This admin's STAGE is neither staging nor production: it runs no operation"
-    );
-  }
-  return placedModelGateway(stage);
-};
-
-/** Whether any of the release's Workers binds Workers AI. */
-const bindsModels = (manifest: ReleaseManifest): boolean =>
-  Object.values(manifest.workers).some((worker) =>
-    worker.bindings.some(({ type }) => type === "ai")
-  );
-
-/**
- * Core's vars: its derived sign-in, runtime profile and model gateway
- * (`modelGatewayOf`), the client's settings, its monthly model spend
- * ceiling as the gateway's budget, and the change core records.
- */
-const coreVarsOf = async (
+const coreVarsOf = (
   context: ProvisionContext,
   loaded: Loaded
-): Promise<Record<string, unknown>> => {
+): Record<string, unknown> => {
   const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
@@ -1560,27 +1470,15 @@ const coreVarsOf = async (
       ? {}
       : { oauthRelay: context.router.oauthRelay }),
   });
-  return await configuredCoreVars(
-    context.db,
-    loaded.held.clientId,
-    {
-      ...derived,
-      MODEL_GATEWAY: {
-        gateway: modelGatewayOf(loaded),
-        models: defaultGatewayModels,
-      },
-    },
-    {
-      by: loaded.operation.startedBy,
-      // What started it: a release, or new settings or secrets on the
-      // release it runs, as its core records it in its Activity.
-      what: loaded.operation.what ?? "release",
-      release: loaded.operation.releaseId,
-      // When the operation started: the same however often it's resumed.
-      at: loaded.operation.createdAt.toISOString(),
-    },
-    mailSenderOf(context, loaded.held.clientId)
-  );
+  return configuredCoreVars(loaded.held.clientId, derived, {
+    by: loaded.operation.startedBy,
+    // What started it: a release, or new settings or secrets on the
+    // release it runs, as its core records it in its Activity.
+    what: loaded.operation.what ?? "release",
+    release: loaded.operation.releaseId,
+    // When the operation started: the same however often it's resumed.
+    at: loaded.operation.createdAt.toISOString(),
+  });
 };
 
 /**
@@ -1695,70 +1593,6 @@ const load = async (
   };
 };
 
-/**
- * Throws unless client `clientId` may run `manifest` as far as the
- * admin's records tell, before anything of its destination is read:
- * the release works with what the client runs and with itself
- * (`incompatibility`), on the schema its databases have, and any
- * platform limit it raises has evidence for the client's profile. What
- * the first step checks first (`validate`), and what picks the release a
- * provisioning offers (`newestFittingRelease`).
- */
-const assertReleaseFits = async (
-  db: AdminDatabase,
-  clientId: string,
-  manifest: ReleaseManifest
-): Promise<void> => {
-  const refused = incompatibility(
-    await currentReleases(db, clientId),
-    manifest,
-    appsOf(manifest),
-    await appliedSchema(db, clientId)
-  );
-  if (refused !== null) {
-    throw new ProvisionOperationError(refused.code, refused.message);
-  }
-  // A new client runs nothing yet: a raise from before it needs evidence
-  // for its profile too.
-  let raise: LimitRaise | undefined;
-  try {
-    raise = await uncoveredLimitRaise(
-      db,
-      clientId,
-      manifest.releaseId,
-      clientRuntimeProfile
-    );
-  } catch (error) {
-    // A release that records no limits isn't made live.
-    if (error instanceof DeployError) {
-      throw new ProvisionOperationError(
-        error.code === "release_without_limits" ||
-          error.code === "release_history_incomplete"
-          ? error.code
-          : "release_not_imported",
-        error.message
-      );
-    }
-    throw error;
-  }
-  if (raise !== undefined) {
-    throw new ProvisionOperationError(
-      "limit_evidence_missing",
-      `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
-    );
-  }
-};
-
-/** How many imported releases are read at a time while looking for one that fits. */
-const fittingReleasesPage = 20;
-
-/** Releases listed after `row`, newest first: built before it, or at once with a lower id. */
-const olderThan = (row: { id: string; builtAt: Date }): SQL | undefined =>
-  or(
-    lt(releases.builtAt, row.builtAt),
-    and(eq(releases.builtAt, row.builtAt), lt(releases.id, row.id))
-  );
-
 /** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
 const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
   or(
@@ -1767,61 +1601,22 @@ const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
   );
 
 /**
- * The newest imported release client `clientId` may be provisioned with
- * (`assertReleaseFits`), looking through every imported release, newest
- * first, a page at a time, never only a window of the newest; with
- * `newerThan`, only releases built after that one (by when built, then
- * id). Null when none fits. What a client is provisioned with when staff
- * don't pick one, and what a retry moves a stopped one forward to.
+ * The newest imported release (by when built, then id); with `newerThan`,
+ * only one built after that one. Null when there is none. What a client
+ * is provisioned with when staff don't pick one, and what a retry moves a
+ * stopped one forward to.
  */
-export const newestFittingRelease = async (
+export const newestRelease = async (
   db: AdminDatabase,
-  clientId: string,
   newerThan?: { id: string; builtAt: Date }
 ): Promise<string | null> => {
-  let after: { id: string; builtAt: Date } | undefined;
-  for (;;) {
-    const page: { id: string; builtAt: Date; manifest: string }[] =
-      // oxlint-disable-next-line no-await-in-loop -- a page at a time, newest first
-      await db
-        .select({
-          id: releases.id,
-          builtAt: releases.builtAt,
-          manifest: releases.manifest,
-        })
-        .from(releases)
-        .where(
-          and(
-            after === undefined ? undefined : olderThan(after),
-            newerThan === undefined ? undefined : newerThanRow(newerThan)
-          )
-        )
-        .orderBy(desc(releases.builtAt), desc(releases.id))
-        .limit(fittingReleasesPage);
-    for (const row of page) {
-      const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
-      if (!parsed.success) {
-        continue;
-      }
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
-        await assertReleaseFits(db, clientId, parsed.data);
-        return row.id;
-      } catch (error) {
-        if (
-          !(error instanceof ProvisionOperationError) &&
-          !(error instanceof DeployError)
-        ) {
-          throw error;
-        }
-      }
-    }
-    const last = page.at(-1);
-    if (last === undefined || page.length < fittingReleasesPage) {
-      return null;
-    }
-    after = last;
-  }
+  const [row] = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(newerThan === undefined ? undefined : newerThanRow(newerThan))
+    .orderBy(desc(releases.builtAt), desc(releases.id))
+    .limit(1);
+  return row?.id ?? null;
 };
 
 /**
@@ -1835,8 +1630,7 @@ const validate = async (
   const { db } = context;
   const { manifest, held } = loaded;
   const order = appsOf(manifest);
-  await assertReleaseFits(db, held.clientId, manifest);
-  const vars = await coreVarsOf(context, loaded);
+  const vars = coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);
     assertRunnable(loaded, worker);
@@ -1884,24 +1678,6 @@ const observedDatabases = async (
     databases.set(row.role.slice("d1:".length), row.providerId);
   }
   return databases;
-};
-
-/** The newer-built of releases `a` (if any) and `b`. */
-const newerOf = async (
-  db: AdminDatabase,
-  a: string | undefined,
-  b: string
-): Promise<string> => {
-  if (a === undefined || a === b) {
-    return b;
-  }
-  const [newest] = await db
-    .select({ id: releases.id })
-    .from(releases)
-    .where(inArray(releases.id, [a, b]))
-    .orderBy(desc(releases.builtAt))
-    .limit(1);
-  return newest?.id ?? b;
 };
 
 /**
@@ -2005,16 +1781,6 @@ const migrate = async (
 ): Promise<void> => {
   const databases = await observedDatabases(context, loaded, inventory);
   await assertHolds(context.db, loaded.held);
-  // Recorded before any runs: one that stops part way still left them.
-  const progress = await progressNow(context.db, loaded.operation.id);
-  const schema = await newerOf(
-    context.db,
-    progress.schema,
-    loaded.manifest.releaseId
-  );
-  if (schema !== progress.schema) {
-    await recordProgress(context.db, loaded, { ...progress, schema });
-  }
   // Checked before each migration too: an attempt that timed out, and goes
   // on beside its retry (src/runners.ts, `takeAttempt`), applies nothing.
   const applied = await migrateDatabases(
@@ -2066,7 +1832,7 @@ const upload = async (
   const vars = varsOf(
     loaded,
     app,
-    app === "core" ? await coreVarsOf(context, loaded) : {}
+    app === "core" ? coreVarsOf(context, loaded) : {}
   );
   const fingerprint = await keyedHash(
     await hkdfHmacKey(context.secrets.clientKey, uploadFingerprintPurpose, [
@@ -2932,11 +2698,6 @@ const runOperation = async (
 
     step = "resources";
     const inventory = await ensureClientResources(api, db, "system", held);
-    // Before core goes live naming it: the gateway its model calls take.
-    if (bindsModels(loaded.manifest)) {
-      await assertHolds(db, held);
-      await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
-    }
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";

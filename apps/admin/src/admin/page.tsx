@@ -1,22 +1,21 @@
 /**
- * An admin page in its frame, as the prototype lays one out
- * (`components/site-header.tsx` and `components/page.tsx`): the bar above
- * it, with the sidebar's trigger and where the page is, then its title.
- * The pages after the overview have only their title until they are ported.
+ * An admin page in its frame, as the workspace lays one out
+ * (apps/web/src/frame/page.tsx, from the prototype's
+ * `components/site-header.tsx` and `components/page.tsx`): the kit's
+ * site header above it, with the sidebar's trigger and where the page
+ * is, then its heading from the kit's page header.
  */
 import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Separator } from "@grasp-os/ui/components/separator";
-import { SidebarTrigger } from "@grasp-os/ui/components/sidebar";
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderContent,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
+import { SiteHeader } from "@grasp-os/ui/components/site-header";
+import type { SiteCrumb } from "@grasp-os/ui/components/site-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
-import { Fragment } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 /** A page above this one in the bar: its name, and a link to it to render as. */
@@ -27,60 +26,40 @@ export interface Crumb {
 
 const noParents: readonly Crumb[] = [];
 
+/** The admin's own overview, first in every page's bar. */
+const adminCrumb: SiteCrumb = { label: "Admin", link: <Link to="/" /> };
+
 /**
  * The bar above an admin page: the sidebar's trigger, then the admin and,
- * below its overview, the pages above it (`parents`) and the page. It
- * stays in view while the page scrolls.
+ * below its overview, the pages above it (`parents`) and the page. With
+ * `page` undefined, the page is still loading. It stays in view while the
+ * page scrolls.
  */
 export const AdminHeader = ({
   page,
   parents = noParents,
+  actions,
 }: {
-  page: string | null;
+  page: string | null | undefined;
   parents?: readonly Crumb[];
-}) => (
-  <header className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b">
-    {/* A square of its own, so the line beside it continues a column's edge. */}
-    <div className="flex h-full w-12 flex-none items-center justify-center">
-      <SidebarTrigger label="Show or hide the sidebar" />
-    </div>
-    <Separator
-      className="-ml-px h-4 data-vertical:self-auto"
-      orientation="vertical"
+  /** The page's actions, on the right of the bar. */
+  actions?: ReactNode;
+}) => {
+  let crumbs: readonly SiteCrumb[] = [];
+  if (page === null) {
+    crumbs = [{ label: "Admin" }];
+  } else if (page !== undefined) {
+    crumbs = [adminCrumb, ...parents, { label: page }];
+  }
+  return (
+    <SiteHeader
+      actions={actions}
+      breadcrumbLabel="Breadcrumb"
+      crumbs={crumbs}
+      triggerLabel="Show or hide the sidebar"
     />
-    <div className="flex min-w-0 flex-1 items-center gap-1 px-4 lg:gap-2 lg:pr-6">
-      <Breadcrumb className="min-w-0">
-        <BreadcrumbList className="flex-nowrap">
-          {page === null ? (
-            <BreadcrumbItem className="min-w-8">
-              <BreadcrumbPage>Admin</BreadcrumbPage>
-            </BreadcrumbItem>
-          ) : (
-            <>
-              <BreadcrumbItem className="flex-none">
-                <BreadcrumbLink render={<Link to="/" />}>Admin</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              {parents.map((parent) => (
-                <Fragment key={parent.label}>
-                  <BreadcrumbItem className="hidden flex-none sm:inline-flex">
-                    <BreadcrumbLink render={parent.link}>
-                      {parent.label}
-                    </BreadcrumbLink>
-                  </BreadcrumbItem>
-                  <BreadcrumbSeparator className="hidden sm:block" />
-                </Fragment>
-              ))}
-              <BreadcrumbItem className="min-w-8">
-                <BreadcrumbPage>{page}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </>
-          )}
-        </BreadcrumbList>
-      </Breadcrumb>
-    </div>
-  </header>
-);
+  );
+};
 
 /** A page's title, with what it is for under it when there is a `description`, and `children` under that. */
 export const PageHeading = ({
@@ -92,11 +71,32 @@ export const PageHeading = ({
   description?: string;
   children?: ReactNode;
 }) => (
-  <div className="flex flex-col gap-1">
-    <h1 className="type-title">{title}</h1>
+  <PageHeaderContent>
+    <PageHeaderTitle>{title}</PageHeaderTitle>
     {description === undefined || description === "" ? null : (
-      <p className="text-muted-foreground text-sm">{description}</p>
+      <PageHeaderDescription>{description}</PageHeaderDescription>
     )}
+    {children}
+  </PageHeaderContent>
+);
+
+/**
+ * The page body: centred, with the workspace's room around it, as wide as
+ * the prototype's overview when `wide`, for its table.
+ */
+export const PageBody = ({
+  wide = false,
+  children,
+}: {
+  wide?: boolean;
+  children: ReactNode;
+}) => (
+  <div
+    className={cn(
+      "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6",
+      wide ? "max-w-7xl" : "max-w-5xl"
+    )}
+  >
     {children}
   </div>
 );
@@ -104,9 +104,8 @@ export const PageHeading = ({
 /**
  * An admin page titled `title`, with what it is for under it when there is
  * a `description` and its `action` on the right when it has one: the
- * overview when `overview` (as wide as the prototype's, for its table),
- * otherwise a page under it, below the pages in `parents`, with `children`
- * below its title.
+ * overview when `overview`, otherwise a page under it, below the pages in
+ * `parents`, with `children` below its title.
  */
 export const AdminPage = ({
   title,
@@ -125,22 +124,14 @@ export const AdminPage = ({
 }) => (
   <>
     <AdminHeader page={overview ? null : title} parents={parents} />
-    <div
-      className={cn(
-        "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6",
-        overview ? "max-w-7xl" : "max-w-5xl"
-      )}
-    >
-      <div className="flex flex-wrap items-end gap-3">
-        {/* A width of its own, so an action beside it goes to the next line rather than squeezing it. */}
-        <div className="min-w-0 flex-1 basis-64">
-          <PageHeading description={description} title={title} />
-        </div>
+    <PageBody wide={overview}>
+      <PageHeader>
+        <PageHeading description={description} title={title} />
         {action === undefined ? null : (
-          <div className="ml-auto flex items-center gap-2">{action}</div>
+          <PageHeaderActions>{action}</PageHeaderActions>
         )}
-      </div>
+      </PageHeader>
       {children}
-    </div>
+    </PageBody>
   </>
 );

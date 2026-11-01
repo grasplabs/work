@@ -178,8 +178,6 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          data-pattern="rings"
-          data-from="bottom"
           className="patterned bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
           side={side}
         >
@@ -219,8 +217,6 @@ function Sidebar({
       <div
         data-slot="sidebar-container"
         data-side={side}
-        data-pattern="rings"
-        data-from="bottom"
         className={cn(
           "patterned ease-sidebar fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] motion-reduce:transition-none md:flex",
           // Adjust the padding for floating and inset variants.
@@ -582,18 +578,39 @@ function SidebarMenuAction({
   });
 }
 
+const sidebarMenuBadgeVariants = cva(
+  "text-sidebar-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden",
+  {
+    variants: {
+      /**
+       * `beside`: after its menu button, as shadcn's, set by the button's
+       * size. `inside`: in the button, so the count is part of its name;
+       * placed for a button of the default size.
+       */
+      placement: {
+        beside:
+          "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
+        inside: "top-1.5",
+      },
+    },
+    defaultVariants: {
+      placement: "beside",
+    },
+  }
+);
+
 function SidebarMenuBadge({
   className,
+  placement = "beside",
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof sidebarMenuBadgeVariants>) {
   return (
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      className={cn(
-        "text-sidebar-foreground peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
-        className
-      )}
+      data-placement={placement}
+      className={cn(sidebarMenuBadgeVariants({ placement }), className)}
       {...props}
     />
   );

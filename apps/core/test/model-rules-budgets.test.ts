@@ -8,9 +8,7 @@ import { mockIdp } from "./idp.ts";
 import {
   appWith,
   llm,
-  workersAi,
   anthropic,
-  gateway,
   cheapAnswer,
   withDeploymentRules,
   modelActions,
@@ -22,9 +20,9 @@ import { outcome, signedInApi } from "./sign-in.ts";
 import { bindModel, workflowFiles } from "./workflow-apps.ts";
 
 // The model budgets a workflow's AI steps meet, and how a step the budget
-// turned away waits on the model ledger. AI Gateway is the outside
-// system: a fake behind the AI binding. Everything else is real, down to
-// the audit log and the run. The other rules' tests are in
+// turned away waits on the model ledger. The model provider behind
+// connect is the outside system (test/model-provider.ts). Everything else
+// is real, down to the audit log and the run. The other rules' tests are in
 // model-rules.test.ts.
 
 const idp = mockIdp();
@@ -65,11 +63,7 @@ describe("model rules", { timeout: 60_000 }, () => {
     // Sonnet 4.5 reserves some $0.56: another of the workflow's runs holds
     // its $1 budget while it answers, until released.
     const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
+      { budgets: { workflow: { limit: 1 } } },
       [
         { ...cheapAnswer, pause: { at: 1, until: release.promise } },
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
@@ -165,11 +159,7 @@ describe("model rules", { timeout: 60_000 }, () => {
     // Another run of each workflow holds its $1 budget while it answers,
     // until released.
     const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
+      { budgets: { workflow: { limit: 1 } } },
       [
         { ...cheapAnswer, pause: { at: 1, until: release.promise } },
         { ...cheapAnswer, pause: { at: 1, until: release.promise } },
@@ -267,9 +257,9 @@ describe("model rules", { timeout: 60_000 }, () => {
     );
     const release = Promise.withResolvers<boolean>();
 
-    // The gateway answers the first attempt only after its second.
+    // The provider answers the first attempt only after its second.
     const { result } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [
         {
           text: '{ "total": 1234 }',
@@ -328,11 +318,7 @@ describe("model rules", { timeout: 60_000 }, () => {
       runActorOf({ runId, app, workflow: "reader" });
 
     const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
+      { budgets: { workflow: { limit: 1 } } },
       [
         { ...cheapAnswer, pause: { at: 1, until: release.promise } },
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
@@ -405,11 +391,7 @@ describe("model rules", { timeout: 60_000 }, () => {
 
     // One answer of a million tokens in costs $3: well past the budget.
     const { result: runs } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
+      { budgets: { workflow: { limit: 1 } } },
       [{ text: '{ "total": 1234 }', inputTokens: 1_000_000, outputTokens: 10 }],
       async () => {
         await bindModel(app, "reader", anthropic);

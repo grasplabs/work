@@ -1,7 +1,7 @@
 import { jsonBytes } from "@grasp-os/shared/screens";
 import { RpcStub } from "capnweb";
 
-import { holdsBigInt, isPlainData } from "./app.ts";
+import { holdsBigInt, isPlainData } from "./plain-data.ts";
 
 // Callbacks a page passes over `/rpc` for an object to keep and call later:
 // a screen's for its App (screens-rpc.ts), a chat page's for the chat's

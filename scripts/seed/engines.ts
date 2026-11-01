@@ -10,6 +10,7 @@
  * on purpose, so some runs fail as real ones do.
  */
 import { v } from "@grasp-os/sdk";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 
 import type { PersonKey, TeamName } from "./company.ts";
 import {
@@ -109,6 +110,8 @@ export interface WorkflowSeed {
 
 export interface EngineSeed {
   name: string;
+  /** The business process it serves, which gives it its icon. */
+  process: BusinessProcess;
   description: string;
   owner: PersonKey;
   /** The teams it is shared with, and their role in it. */
@@ -388,6 +391,7 @@ ${failsInItsCalculation}`,
 
 const opportunityToCash: EngineSeed = {
   name: "Opportunity-to-Cash",
+  process: "o2c",
   description:
     "Everything from a first client conversation until the money is in the bank.",
   owner: "nina",
@@ -670,6 +674,7 @@ t.equal(await t.runs.untilTerminal(run), {
 
 const issueToResolution: EngineSeed = {
   name: "Issue-to-Resolution",
+  process: "i2r",
   description:
     "Every client question or complaint, from the first message until it is solved.",
   owner: "lisa",
@@ -872,6 +877,7 @@ ${failsInItsCalculation}`,
 
 const purchaseToPay: EngineSeed = {
   name: "Purchase-to-Pay",
+  process: "p2p",
   description:
     "Everything from ordering from a supplier until their invoice is paid.",
   owner: "eva",
@@ -963,6 +969,7 @@ t.equal(await t.runs.untilTerminal(run), {
 
 const recordToReport: EngineSeed = {
   name: "Record-to-Report",
+  process: "r2r",
   description:
     "Closing the books and producing the numbers leadership looks at.",
   owner: "eva",
@@ -1125,6 +1132,7 @@ ${failsInItsCalculation}`,
 
 const riskToCompliance: EngineSeed = {
   name: "Risk-to-Compliance",
+  process: "r2c",
   description:
     "The checks, reviews and records the regulator expects from you.",
   owner: "pieter",
@@ -1147,6 +1155,7 @@ Know-your-customer checks for every new client.
  */
 const hireToRetire: EngineSeed = {
   name: "Hire-to-Retire",
+  process: "h2r",
   description: "Everything around employees, from hiring to leaving.",
   owner: "sanne",
   teams: [],

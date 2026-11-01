@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { anyQueued, queueFronts, sharesOf } from "./admission.ts";
 import { runEngine } from "./engine.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission } from "./quotas.ts";
 
 // Waking a step that waits for a share when one is given back: an attempt
@@ -60,7 +60,7 @@ export const wakeQueueFronts = async (env: Env): Promise<void> => {
     if (!(await anyQueued(db, now))) {
       return;
     }
-    const fronts = await queueFronts(db, now, sharesOf(await quotaPolicy(env)));
+    const fronts = await queueFronts(db, now, sharesOf(quotaLimits(env)));
     const engine = runEngine(env);
     // Every send is waited for, each failure logged alone: one that
     // fails leaves none of the others out.

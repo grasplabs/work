@@ -281,64 +281,6 @@
   );
 }
 
-/*
- * From the prototype (packages/grasp/src/index.css): the chat dock's edge
- * (chat/chat-dock.tsx). A light in the attention colour runs round it, with
- * a faint glow coming off it, so it is noticed where it sits without
- * asking for attention. With less motion the edge stands still.
- */
-@property --chat-turn {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@utility chat-glow {
-  position: relative;
-  box-shadow:
-    0 0 22px -6px color-mix(in oklch, var(--status-attention) 28%, transparent),
-    0 8px 24px -14px color-mix(in oklch, var(--foreground) 35%, transparent);
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    padding: 1.5px;
-    border-radius: inherit;
-    pointer-events: none;
-    background: conic-gradient(
-      from var(--chat-turn),
-      color-mix(in oklch, var(--status-attention) 18%, transparent) 0deg,
-      var(--status-attention) 60deg,
-      color-mix(in oklch, var(--status-attention) 18%, transparent) 130deg,
-      color-mix(in oklch, var(--status-attention) 18%, transparent) 180deg,
-      color-mix(in oklch, var(--status-attention) 75%, transparent) 240deg,
-      color-mix(in oklch, var(--status-attention) 18%, transparent) 310deg,
-      color-mix(in oklch, var(--status-attention) 18%, transparent) 360deg
-    );
-    /* Only the ring between the padding and the edge shows. */
-    -webkit-mask:
-      linear-gradient(#000 0 0) content-box,
-      linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-      linear-gradient(#000 0 0) content-box exclude,
-      linear-gradient(#000 0 0);
-    animation: chat-turn 5s linear infinite;
-
-    @media (prefers-reduced-motion: reduce) {
-      animation: none;
-    }
-  }
-}
-
-@keyframes chat-turn {
-  to {
-    --chat-turn: 360deg;
-  }
-}
-
 /**
  * The page an export prints as a PDF (export/export-file.tsx): A4 with the
  * prototype's margins, its colours printed as they are.
@@ -350,21 +292,16 @@
 
 /*
  * In every Markdown export, its first two levels of heading are in
- * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts):
- * the brand's title and heading, so a printed page reads as Grasp's. Only
- * here: on screen, a document's headings stay in the product's sans
- * (knowledge/markdown.tsx), which these outrank on the printed page.
+ * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts),
+ * so a printed page reads as Grasp's. A Markdown h1 is in the serif
+ * already (knowledge/markdown.tsx); on paper its h2 is too.
  */
 @utility page-export {
   page: export;
   print-color-adjust: exact;
 
-  & h1 {
-    @apply type-title;
-  }
-
   & h2 {
-    @apply type-heading;
+    @apply font-serif font-normal tracking-tight;
   }
 }
 
@@ -961,42 +898,24 @@
   }
 }
 
-/* The line down between two blocks on a narrow canvas, where the chain stands top to bottom
-   (`thread-dots`), and the same dots for a line of any length: down (`dots-down`, the rail a
-   question's answers hang on) and across (`dots-across`, from that rail to an answer). */
-@utility thread-dots {
-  width: 2px;
-  height: 1rem;
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 2px 6.5px;
-  background-repeat: repeat-y;
-}
-
+/* A line of dots, down a page in the colour of the text it is set in (`text-*`). One rule draws
+   every size of it: `dots-down` is the fine line, `dots-down-wide` beside it the larger, softer
+   dots of the spine the brain's log hangs its days on (brain/brain-log.tsx), as the prototype
+   draws it. */
 @utility dots-down {
-  color: var(--wire);
   background-image: radial-gradient(
     circle,
-    currentColor 0.8px,
-    transparent 1px
+    currentColor var(--dots-dot, 0.8px),
+    transparent var(--dots-fade, 1px)
   );
-  background-size: 2px 6.5px;
+  background-size: var(--dots-tile, 2px 6.5px);
   background-repeat: repeat-y;
 }
 
-@utility dots-across {
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 6.5px 2px;
-  background-repeat: repeat-x;
+@utility dots-down-wide {
+  --dots-dot: 0.8px;
+  --dots-fade: 1.3px;
+  --dots-tile: 4px 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1281,14 +1200,6 @@
 }
 @utility stage-columns {
   grid-template-columns: 11rem minmax(0, 1fr);
-}
-
-/*
- * From the prototype's Landscape (components/landscape/insight.tsx): what
- * Grasp read about a value, as labels and values side by side.
- */
-@utility grid-label-value {
-  grid-template-columns: auto 1fr;
 }
 
 /*

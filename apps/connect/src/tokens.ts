@@ -392,7 +392,7 @@ const refreshUnderLease = async (
       throw connectErrors.create("connect.connection_inactive");
     }
     // A connection that must hold exactly what it asked for (the
-    // landscape's) is kept only while each renewal says so: granted more
+    // directory's, the documents') is kept only while each renewal says so: granted more
     // or less since, it needs an admin to connect it again.
     if (!grantedAsAsked(provider, minted)) {
       // What it minted is never kept: revoked where the provider can

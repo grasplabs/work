@@ -122,6 +122,7 @@ describe("an organization's AI use and hours", () => {
       prices: [
         has("€5 a million tokens read, €25 written"),
         has("€0.15 a minute"),
+        has("€0.006 a minute"),
         has("Other models (not priced)"),
         has("No price: its tokens count, its cost doesn’t"),
       ],
@@ -138,7 +139,7 @@ describe("an organization's AI use and hours", () => {
       voice: [true, true],
       byUse: [true, true, true, true],
       shares: [true, true, true],
-      prices: [true, true, true, true],
+      prices: [true, true, true, true, true],
       toCome: false,
     });
   });

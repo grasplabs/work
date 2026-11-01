@@ -150,10 +150,6 @@ describe("Grasp staff's views, audited", () => {
       ["audit.search", async () => await api.audit.search()],
       ["workflows.runs", async () => await api.workflows.runs()],
       [
-        "screenSubmissions.list",
-        async () => await api.screenSubmissions.list(),
-      ],
-      [
         "audit.export",
         async () =>
           await routed(`${auditExportPath}?format=csv`, {

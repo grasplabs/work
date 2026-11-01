@@ -22,8 +22,6 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
     "That isn't a secret: paste the client secret's value as Entra shows it, without spaces.",
   teams_bot_invalid:
     "That isn't a Teams bot: give its app id and tenant as the GUIDs Entra shows, and the day its secret expires.",
-  changed_meanwhile:
-    "Someone else changed it at the same moment: the page shows it as it is now, so look and save again.",
 };
 
 /** A staff change to a client's settings (`useAction`), its refusals worded. */

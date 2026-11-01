@@ -21,6 +21,7 @@ import { BookOpenIcon, FileTextIcon, FolderIcon } from "lucide-react";
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
+import { PageHeading } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
@@ -306,25 +307,25 @@ const CollectionView = () => {
           <CollectionNotLoaded collection={collection} open={open} />
           {collection.state === "ready" ? (
             <>
-              <header className="flex flex-col gap-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <h1 className="type-title">
-                    {collection.data.collection.name}
-                  </h1>
-                  {isMemberAdmin(identity) ? (
+              <PageHeading
+                action={
+                  isMemberAdmin(identity) ? (
                     <CollectionAdminMenu
                       collection={collection.data.collection.name}
                       documents={collection.data.documents}
                     />
-                  ) : null}
-                </div>
-                {collection.data.collection.description === "" ? null : (
-                  <p className="text-muted-foreground text-sm leading-relaxed">
-                    {collection.data.collection.description}
-                  </p>
-                )}
-                <CollectionMarkers collection={collection.data.collection} />
-              </header>
+                  ) : undefined
+                }
+                description={
+                  collection.data.collection.description === ""
+                    ? undefined
+                    : collection.data.collection.description
+                }
+                meta={
+                  <CollectionMarkers collection={collection.data.collection} />
+                }
+                title={collection.data.collection.name}
+              />
               {writable ? (
                 <Uploads
                   // Another collection starts with no uploads to follow.

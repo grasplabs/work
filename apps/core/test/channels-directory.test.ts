@@ -3,14 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { configureObject, says } from "./agent-chat.ts";
 import {
   connectedDirectory,
   directoryHolds,
   directoryUser,
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -49,9 +49,8 @@ const setUpTime = { timeout: 60_000 };
 const signInLink = `${clientOrigin}/sign-in`;
 
 /**
- * The directory connected by an admin, holding `users`, and a gateway
- * answering `replies`: Workspace objects share their env, so pointing the
- * admin's points the ones made for people from the directory too.
+ * The directory connected by an admin, holding `users`, and the
+ * organization's provider answering `replies`, for everyone's chats.
  */
 const directoryWith = async (
   users: Record<string, unknown>[],
@@ -59,12 +58,9 @@ const directoryWith = async (
 ) => {
   await directoryHolds(users);
   const { admin } = await connectedDirectory(idp);
-  const gateway = fakeGateway(...replies.map((text) => says(text)));
-  await pointAtGateway(
-    workspace(env, personalWorkspaceId(admin.userId)),
-    gateway
-  );
-  return { admin, gateway };
+  const provider = await fakeProvider(...replies.map((text) => says(text)));
+  await configureObject(workspace(env, personalWorkspaceId(admin.userId)));
+  return { admin, provider };
 };
 
 /** The cards and lines sent in `conversation`, each as JSON. */
@@ -90,7 +86,7 @@ const usersWith = async (oid: string) => {
 describe("someone the directory holds", setUpTime, () => {
   it("is answered on their first message, with no sign-in, as one member however often they write", async () => {
     const oid = crypto.randomUUID();
-    const { gateway } = await directoryWith(
+    const { provider } = await directoryWith(
       [directoryUser({ id: oid, displayName: "Daan Bakker" })],
       "Sixteen weeks.",
       "You're welcome."
@@ -108,7 +104,7 @@ describe("someone the directory holds", setUpTime, () => {
     expect({
       made: users.length,
       kept: await kept(person.conversation),
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
       link: sent.some((each) => each.includes(signInLink)),
       recorded: events
         .filter(({ action }) => action === "member.joined_from_directory")
@@ -129,7 +125,7 @@ describe("someone the directory holds", setUpTime, () => {
 
   it("is that same member from their first Microsoft sign-in on, with their own address", async () => {
     const oid = crypto.randomUUID();
-    const { gateway } = await directoryWith(
+    const { provider } = await directoryWith(
       [directoryUser({ id: oid, displayName: "Lisa Jansen" })],
       "Hello Lisa.",
       "Hello again."
@@ -147,7 +143,7 @@ describe("someone the directory holds", setUpTime, () => {
       signedInAs: signedInAs.userId,
       users: await usersWith(oid),
       kept: await kept(person.conversation),
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
     }).toStrictEqual({
       signedInAs: made?.userId,
       users: [{ userId: made?.userId, email: claims.email }],
@@ -160,7 +156,7 @@ describe("someone the directory holds", setUpTime, () => {
 describe("someone the directory doesn't vouch for", setUpTime, () => {
   it("is refused once the directory no longer holds them", async () => {
     const oid = crypto.randomUUID();
-    const { gateway } = await directoryWith(
+    const { provider } = await directoryWith(
       [directoryUser({ id: oid })],
       "Answered.",
       "Not for you."
@@ -174,14 +170,14 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
 
     const sent = await sentIn(person.conversation);
     expect({
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
       last: sent.at(-1)?.includes(signInLink),
     }).toStrictEqual({ answers: 1, last: true });
   });
 
   it("isn't answered as a guest or with their account turned off, nor ever made a member", async () => {
     const [guest, disabled] = [crypto.randomUUID(), crypto.randomUUID()];
-    const { gateway } = await directoryWith(
+    const { provider } = await directoryWith(
       [
         directoryUser({ id: guest, userType: "Guest" }),
         directoryUser({ id: disabled, accountEnabled: false }),
@@ -195,7 +191,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
     }
 
     expect({
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
       made: [...(await usersWith(guest)), ...(await usersWith(disabled))],
     }).toStrictEqual({ answers: 0, made: [] });
   });
@@ -203,7 +199,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
   it("is never taken for a member who has their email address", async () => {
     const member = await signedInApi(idp, "user");
     const oid = crypto.randomUUID();
-    const { gateway } = await directoryWith(
+    const { provider } = await directoryWith(
       [directoryUser({ id: oid, mail: member.person.email })],
       "Answered."
     );
@@ -213,7 +209,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
 
     const [made] = await usersWith(oid);
     expect({
-      answered: gateway.requests.length,
+      answered: provider.requests.length,
       asMember: made?.userId === member.userId,
       email: made?.email === member.person.email,
     }).toStrictEqual({ answered: 1, asMember: false, email: false });
@@ -221,7 +217,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
 
   it("isn't made a member again once an admin removed them", async () => {
     const oid = crypto.randomUUID();
-    const { admin, gateway } = await directoryWith(
+    const { admin, provider } = await directoryWith(
       [directoryUser({ id: oid })],
       "Answered.",
       "Not for you."
@@ -236,7 +232,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
     const sent = await sentIn(person.conversation);
     const users = await usersWith(oid);
     expect({
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
       users: users.length,
       last: sent.at(-1)?.includes("You no longer have access to Grasp"),
     }).toStrictEqual({ answers: 1, users: 1, last: true });
@@ -244,7 +240,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
 
   it("isn't made a member again once an admin removed and erased them, on Teams or by signing in", async () => {
     const oid = crypto.randomUUID();
-    const { admin, gateway } = await directoryWith(
+    const { admin, provider } = await directoryWith(
       [directoryUser({ id: oid, displayName: "Sanne de Vries" })],
       "Answered.",
       "Not for you."
@@ -266,7 +262,7 @@ describe("someone the directory doesn't vouch for", setUpTime, () => {
     const sent = await sentIn(person.conversation);
     const members = await admin.api.members.list();
     expect({
-      answers: gateway.requests.length,
+      answers: provider.requests.length,
       last: sent.at(-1)?.includes("You no longer have access to Grasp"),
       session: again.session,
       members: members.filter(({ email }) => email === claims.email),

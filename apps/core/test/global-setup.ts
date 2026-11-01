@@ -10,13 +10,7 @@ import {
 import buildExtractor from "../build-extractor.ts";
 import { bundleConnect, connectBundle } from "./build-connect.ts";
 import { testVersionModule } from "./compiler-version.ts";
-
-/**
- * The static assets core's tests serve: a stand-in frontend, so tests don't
- * wait for a build of apps/web, and the App compiler and the extractor,
- * as core's deploy puts them next to the frontend.
- */
-const testAssets = path.join(import.meta.dirname, "../dist/test-assets");
+import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
 
 /**
  * Builds the App compiler as core's build does, in a process of its
@@ -46,6 +40,7 @@ const writeTestAssets = async (): Promise<void> => {
 };
 
 const prepare = async (): Promise<void> => {
+  removeEndedRuns();
   // The release's built-ins, and one of the tests' own, so the install
   // has a blueprint to write while the release ships none: into the
   // tests' module, never the one core's build ships.
@@ -67,10 +62,18 @@ declare global {
 /**
  * Before any test of a project: embeds the built-in blueprints, writes
  * the test assets and bundles the connect Worker, which the project's config reads when its pool starts.
+ * After the run, removes what it wrote for itself; Vitest tears down only
+ * once every project's tests are done. A watch run whose config changed
+ * tears down and sets up again in this process: forgetting the setup then
+ * makes it build again, rather than find its directory gone.
  */
-const setup = async (): Promise<void> => {
+const setup = async (): Promise<() => void> => {
   globalThis.coreTestSetup ??= prepare();
   await globalThis.coreTestSetup;
+  return () => {
+    globalThis.coreTestSetup = undefined;
+    removeTestRun();
+  };
 };
 
 export default setup;

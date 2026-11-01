@@ -1,3 +1,5 @@
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -12,12 +14,7 @@ import {
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
-import {
-  InterviewFrame,
-  InterviewPage,
-  Said,
-  useQuietRoom,
-} from "../interview/page.tsx";
+import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
 
 // Where someone's own interview link leads (`/interview#<secret>`): their
@@ -69,29 +66,40 @@ const opened = async (secret: string): Promise<Page> => {
   return { state: "open", secret, session: answer };
 };
 
-/** Why the link opens no interview here. */
-const Notice = ({ title, children }: { title: string; children: string }) => {
-  const { t } = useLingui();
-  const { top, bottom, room } = useQuietRoom();
-  return (
-    <InterviewFrame bottom={bottom} top={top}>
-      <Said label={t`Stephen, drawn in dots.`} room={room}>
-        <div className="flex flex-col items-center gap-2">
-          <h1 className="type-title">{title}</h1>
-          <ErrorText>{children}</ErrorText>
-        </div>
-      </Said>
-    </InterviewFrame>
-  );
-};
+/**
+ * Why the link opens no interview here, laid out as calm as the prototype's
+ * (`routes/i/$code.tsx`): the mark, and what there is to say.
+ */
+const Notice = ({
+  title,
+  children,
+  failed = false,
+}: {
+  title: string;
+  children: string;
+  /** Core's refusal, with its reference for the person to quote. */
+  failed?: boolean;
+}) => (
+  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
+    <GraspMark className="size-6" />
+    <div className="flex max-w-sm flex-col items-center gap-3">
+      <PageHeaderTitle>{title}</PageHeaderTitle>
+      {failed ? (
+        <ErrorText>{children}</ErrorText>
+      ) : (
+        <p className="text-muted-foreground text-balance">{children}</p>
+      )}
+    </div>
+  </main>
+);
 
 const Loading = () => {
   const { t } = useLingui();
-  const { top, bottom } = useQuietRoom();
   return (
-    <InterviewFrame bottom={bottom} top={top}>
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
+      <GraspMark className="size-6" />
       <output className="text-muted-foreground">{t`Opening your interview…`}</output>
-    </InterviewFrame>
+    </main>
   );
 };
 
@@ -134,7 +142,7 @@ const Interview = () => {
     }
     case "refused": {
       return (
-        <Notice title={t`This interview can't be opened`}>
+        <Notice failed title={t`This interview can't be opened`}>
           {shown.message === ""
             ? t`This link doesn't work. Ask whoever sent it for a new one.`
             : shown.message}

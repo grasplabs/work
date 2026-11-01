@@ -243,15 +243,16 @@ const coreDb: D1State = {
     ),
     organizations: exported(auth),
     org_settings: exported(`${core}org-settings.ts`),
-    policy_documents: exported(`${core}policies.ts`),
-    policy_rules: exported(`${core}policies.ts`),
-    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
     channel_links: transient(
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
+    ),
+    agent_held_starts: transient(
+      `${core}held-starts.ts`,
+      "Starts a chat's agent asked for, held until its person confirms them, good for a while: one still waiting after a move is asked for again."
     ),
     channel_conversations: exported(`${core}channels/door.ts`),
     chat_workflow_offers: transient(
@@ -265,6 +266,10 @@ const coreDb: D1State = {
     stephen_requests: exported(
       `${core}channels/stephen-requests.ts`,
       "One record per request Stephen took on outside Grasp, labels only: what he is billed by."
+    ),
+    stephen_request_cards: transient(
+      `${core}channels/stephen-requests.ts`,
+      "Which request a card still to be pressed was posted for (a Start, a held change), good for a day: a press after a move counts for no request."
     ),
     stephen_request_topics: exported(`${core}channels/request-sorting.ts`),
     stephen_request_questions: exported(`${core}channels/request-sorting.ts`),
@@ -315,7 +320,6 @@ const coreDb: D1State = {
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
     app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),
-    screen_submissions: exported(`${core}screen-submissions.ts`),
     action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
     resource_templates: exported(`${core}resource-bindings.ts`),
@@ -344,6 +348,10 @@ const coreDb: D1State = {
     build_commit_fences: transient(`${core}build-admission.ts`),
     build_admission_queue: transient(`${core}build-admission.ts`),
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
+    workflow_ai_waits: cache(
+      `${core}workflows/ai-waits.ts`,
+      "Which steps of running workflow runs wait for their AI provider (refusing the key, not answering, limiting requests), for their summaries and to wake them: lost, a held run still tries again on its own timer."
+    ),
     run_mail_stamps: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_calls: exported(`${core}workflows/mail-stamps.ts`),
     resource_run_mail_calls: exported(
@@ -355,7 +363,6 @@ const coreDb: D1State = {
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
     run_lineage_children: exported(`${core}workflows/quotas.ts`),
     mail_domains: exported(`${core}workflows/inbound-email.ts`),
-    quota_policies: exported(`${core}workflows/quotas.ts`),
     workflow_run_controls: exported(`${core}workflows/controls.ts`),
     workflow_run_wakes: exported(`${core}workflows/wakes.ts`),
     workflow_triggers: exported(
@@ -395,8 +402,6 @@ const coreDb: D1State = {
     notifications: exported(`${core}notifications.ts`),
     guest_chats: exported(`${core}guests.ts`),
     guest_messages: exported(`${core}guests.ts`),
-    migration_samples: exported(`${core}migration-samples.ts`),
-    migration_sample_leases: transient(`${core}migration-samples.ts`),
     business_stores: exported(`${core}data-stores.ts`),
     business_store_members: exported(`${core}data-stores.ts`),
     workflow_resources: exported(`${core}workflow-resources.ts`),
@@ -436,14 +441,6 @@ const coreDb: D1State = {
     app_workflow_bindings: exported(`${core}app-workflow-bindings.ts`),
     workflow_candidate_runs: exported(`${core}workflows/candidate-runs.ts`),
     workflow_item_tests: exported(`${core}workflows/item-tests.ts`),
-    landscape_syncs: transient(`${core}landscape.ts`),
-    landscape_apps: cache(
-      `${core}landscape.ts`,
-      "As last read from the tenant; the next sync reads it again."
-    ),
-    landscape_app_people: cache(`${core}landscape.ts`),
-    landscape_staged_apps: transient(`${core}landscape.ts`),
-    landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
     brain_team_groups: exported(`${core}brain-team-groups.ts`),
@@ -603,6 +600,10 @@ const connectDb: D1State = {
     connection_tokens: secret(
       `${connect}vault.ts`,
       "OAuth tokens sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
+    ),
+    ai_provider_keys: secret(
+      `${connect}ai-providers.ts`,
+      "Organizations' AI provider keys sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
     ),
     audit_outbox: exported(`${connect}audit.ts`),
     audit_outbox_rejected: exported(`${connect}audit.ts`),
@@ -850,6 +851,10 @@ const modelLedger: DurableObjectState = {
     spend: exported(`${core}model-ledger.ts`),
     alerts: exported(`${core}model-ledger.ts`),
     person_limits: exported(`${core}model-ledger.ts`),
+    provider_health: cache(
+      `${core}model-ledger.ts`,
+      "Each provider's last success and failure, and what its failing calls show since when, by whose key: the next calls write it again."
+    ),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },
 };
@@ -934,7 +939,6 @@ const workflowRuns: DurableObjectState = {
     grasp_tried_once: exported(`${core}workflows/run-object.ts`),
     grasp_action_model_calls: exported(`${core}workflows/run-object.ts`),
     grasp_run_cancelled: exported(`${core}workflows/run-object.ts`),
-    grasp_run_apps: exported(`${core}workflows/run-object.ts`),
     grasp_run_shares: exported(`${core}workflows/run-object.ts`),
   },
 };

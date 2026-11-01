@@ -23,8 +23,9 @@
  * as its updates are saved, and again until each arm finds them: how long
  * that takes is the arm's update lag.
  *
- * Only the model provider behind AI Gateway is swapped in CI, by the
- * caller: whatever stands behind `env.AI` ranks for the rerank arm.
+ * Only the model provider behind connect is swapped in CI, by the caller:
+ * whatever answers the provider the organization connected
+ * (model-provider.ts) ranks for the rerank arm.
  */
 import type { MemoryPack } from "@grasp-os/brain/contract";
 import { recallDefaults } from "@grasp-os/brain/contract";
@@ -304,9 +305,13 @@ const lagsOf = async (
     if (marker !== undefined) {
       for (const arm of arms) {
         const first = performance.now();
+        // Lag runs from the first ask's start, not from `first`: the clock
+        // may tick between the two, and an arm the first ask finds lags 0.
+        let firstAsk: number | undefined;
         let lagMs: number | null = null;
         while (lagMs === null && performance.now() - first < lagLimitMs) {
           const asking = performance.now();
+          firstAsk ??= asking;
           // oxlint-disable-next-line no-await-in-loop -- asked until found
           const { texts } = await askedOf(
             arm,
@@ -314,7 +319,7 @@ const lagsOf = async (
             recallCase
           );
           if (texts.some((text) => text.includes(marker))) {
-            lagMs = asking - first;
+            lagMs = asking - firstAsk;
           } else {
             // oxlint-disable-next-line no-await-in-loop -- a pause before asking again
             await scheduler.wait(lagPollMs);
@@ -336,7 +341,7 @@ export interface BrainRecallOptions {
   repeats: number;
   arms?: readonly BrainRecallArm[];
   cases?: readonly BrainRecallCase[];
-  /** Whether the reranker behind the gateway is a real model, not a stub. */
+  /** Whether the reranker behind connect is a real model, not a stub. */
   measured: boolean;
   seed?: number;
   /** What the run's numbers depend on, beyond the code: its model and profile. */

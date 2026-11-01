@@ -1,7 +1,3 @@
-/**
- * Small marks the admin's pages draw what the model counts with, ported
- * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
- */
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   LinkState,
@@ -12,6 +8,11 @@ import type {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Progress } from "@grasp-os/ui/components/progress";
+/**
+ * Small marks the admin's pages draw what the model counts with, ported
+ * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
+ */
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
@@ -20,7 +21,7 @@ import type { ReactNode } from "react";
 /** One number and what it counts. */
 export const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="type-figure">{value}</span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
@@ -107,58 +108,6 @@ export const Done = ({ children }: { children: ReactNode }) => (
 );
 
 /**
- * A titled panel of a section: its title, what it shows under it, and
- * beside them what can be done there (`action`); where there is no room
- * beside them, that goes under the title, so the line under it keeps its
- * width. Ported from the prototype's `SettingsSection`.
- */
-export const Panel = ({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children?: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border text-sm">
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
-      <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        {description === undefined ? null : (
-          <p className="text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
-/** One row of a panel: what it is and why on the left, where it stands on the right. */
-export const PanelRow = ({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: ReactNode;
-}) => (
-  <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <span>{label}</span>
-      {description === undefined ? null : (
-        <p className="text-muted-foreground">{description}</p>
-      )}
-    </div>
-    <div className="flex flex-none sm:w-64 sm:justify-end">{children}</div>
-  </div>
-);
-
-/**
  * So much of a whole as a small ring, dark on grey: for a number that is
  * a share of something. The circle is 100 around, so the dark part is the
  * percentage itself.
@@ -240,8 +189,8 @@ export const Figure = ({
         value={ring.value}
       />
     ) : null}
-    <span className="type-figure col-span-2 row-start-2 wrap-break-word hyphens-auto">
-      {value}
+    <span className="col-span-2 row-start-2 wrap-break-word hyphens-auto">
+      <Stat>{value}</Stat>
     </span>
     {sub === undefined ? null : (
       <span
