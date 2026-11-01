@@ -14,6 +14,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { forgetComposioCatalog } from "../src/catalog.ts";
 import {
   changeToolkitTools,
   reconcileUnsyncedTools,
@@ -972,12 +973,46 @@ describe("a Composio connection", () => {
   });
 });
 
-/** Changes the tools of `connectionId` for `person`, as core does. */
+/** A tool as connect stores it: by name, or with its rule. */
+const shownToolsSchema = z.array(
+  z.union([
+    z.string(),
+    z.object({
+      name: z.string(),
+      read: z.boolean().optional(),
+      resource: z.string().optional(),
+    }),
+  ])
+);
+type ShownTool = z.infer<typeof shownToolsSchema>[number];
+
+/** What connect holds `connectionId` allows, as a page shows it. */
+const shownTools = async (connectionId: string): Promise<ShownTool[]> => {
+  const row = await env.DB.prepare("SELECT tools FROM connections WHERE id = ?")
+    .bind(connectionId)
+    .first<{ tools: string | null }>();
+  // A connection that isn't there shows a list all the same.
+  return shownToolsSchema.parse(
+    JSON.parse(row?.tools ?? '["HUBSPOT_LIST_CONTACTS"]')
+  );
+};
+
+/**
+ * Changes the tools of `connectionId` for `person`, as core does, from a
+ * page showing what connect holds now unless `expected`.
+ */
 const change = async (
   person: ConnectionPerson,
   connectionId: string,
-  tools: (string | { name: string; read?: boolean; resource?: string })[]
-) => await exports.default.changeToolkitTools({ person, connectionId, tools });
+  tools: (string | { name: string; read?: boolean; resource?: string })[],
+  expected?: ShownTool[]
+) =>
+  await exports.default.changeToolkitTools({
+    person,
+    connectionId,
+    tools,
+    expected: expected ?? (await shownTools(connectionId)),
+  });
 
 /** The allowlist of the one server connect made at Composio. */
 const serverTools = () =>
@@ -1109,6 +1144,61 @@ describe("changing what a connected Composio toolkit may do", () => {
       updates: [],
       unchanged: true,
       refused: ["connection.staff_not_allowed", "role.forbidden"],
+    });
+  });
+
+  it("refuses a change made from a page another change made stale, recorded, putting nothing back", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const shown = await shownTools(connectionId);
+    // Another admin narrows it to one tool first.
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+    const narrowed = await toolsNow(connectionId);
+    const sentBefore = updates().length;
+    // The stale page sends its whole list, with one more tool.
+    const stale = await outcome(
+      change(admin, connectionId, [...shown, "HUBSPOT_UPDATE_CONTACT"], shown)
+    );
+    const recorded = await events();
+    const refused = recorded.filter(
+      ({ action, detail }) =>
+        action === "connection.tools" && detail.outcome === "refused"
+    );
+
+    expect({
+      stale,
+      unchanged: (await toolsNow(connectionId)) === narrowed,
+      sent: updates().length - sentBefore,
+      reasons: refused.map(({ detail }) => detail.reason),
+    }).toStrictEqual({
+      stale: "connection.tools_changed",
+      unchanged: true,
+      sent: 0,
+      reasons: ["connection.tools_changed"],
+    });
+  });
+
+  it("records a change it couldn't check because Composio's catalog was away", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // Its tools as connecting read them, forgotten: read again, and away.
+    forgetComposioCatalog();
+    composio.state.failing = "GET /tools";
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const recorded = await events();
+    const failed = recorded.filter(
+      ({ action, detail }) =>
+        action === "connection.tools" && detail.outcome === "failed"
+    );
+
+    expect({
+      end,
+      reasons: failed.map(({ detail }) => detail.reason),
+    }).toStrictEqual({
+      end: "connect.catalog_unavailable",
+      reasons: ["connect.catalog_unavailable"],
     });
   });
 
@@ -1587,6 +1677,7 @@ describe("changing what a connected Composio toolkit may do", () => {
         person: admin,
         connectionId,
         tools: ["HUBSPOT_UPDATE_CONTACT"],
+        expected: await shownTools(connectionId),
       }
     );
     const recorded = await events();
@@ -1972,6 +2063,7 @@ const changeTo =
       person: admin,
       connectionId,
       tools,
+      expected: await shownTools(connectionId),
     });
 
 const setUp = async () => {

@@ -119,6 +119,9 @@ export const ToolPermissions = ({
       await session.connections.changeTools({
         connectionId: connection.id,
         tools: toolRules(next),
+        // What this page shows: a change since makes it refused, and the
+        // page is read again (`useChange`).
+        expected: toolRules(allowed),
       });
     });
   };

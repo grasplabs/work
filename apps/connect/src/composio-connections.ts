@@ -452,6 +452,18 @@ const readToolsOf = (tools: readonly (string | ComposioToolRule)[]): string[] =>
     typeof tool !== "string" && tool.read === true ? [tool.name] : []
   );
 
+/** `tools` as one choice, however each was written and in whatever order. */
+const choiceOf = (tools: readonly (string | ComposioToolRule)[]): string =>
+  JSON.stringify(
+    tools
+      .map((tool) =>
+        typeof tool === "string"
+          ? [tool, false, null]
+          : [tool.name, tool.read === true, tool.resource ?? null]
+      )
+      .toSorted(([a], [b]) => String(a).localeCompare(String(b)))
+  );
+
 /**
  * Whether every one of `tools` is one of `toolkit`'s, each held to a
  * resource only by one of its own input properties: a name that matches
@@ -1169,7 +1181,7 @@ const reconciled = async (
   key: string,
   serverId: string,
   connectionId: string
-): Promise<Send | undefined> => {
+): Promise<(Send & { tools: string }) | undefined> => {
   const listNow = async (): Promise<string | undefined> => {
     const now = await db
       .select({ tools: connections.tools })
@@ -1194,8 +1206,8 @@ const reconciled = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- read after each send
     const after = await listNow();
-    if (after === sent) {
-      return send;
+    if (after === sent && sent !== undefined) {
+      return { ...send, tools: sent };
     }
     sent = after;
   }
@@ -1210,13 +1222,15 @@ const unsyncedRetryDoublings = 6;
 /**
  * Settles connection `connectionId` at `send`, which told Composio
  * connect's latest list: only if no send came after it (that one's
- * reconcile, or the clock, settles), and none before it could land after
- * it (`Send.last`; the clock settles once none can). Whether it settled.
+ * reconcile, or the clock, settles), none before it could land after it
+ * (`Send.last`; the clock settles once none can), and connect still holds
+ * the list it sent (a change saved since saves without a send of its
+ * own). Whether it settled.
  */
 const settle = async (
   db: ReturnType<typeof drizzle>,
   connectionId: string,
-  { seq, last }: Send
+  { seq, last, tools }: Send & { tools: string }
 ): Promise<boolean> => {
   const settled = last
     ? await db
@@ -1229,7 +1243,8 @@ const settle = async (
         .where(
           and(
             eq(connections.id, connectionId),
-            eq(connections.toolsSentSeq, seq)
+            eq(connections.toolsSentSeq, seq),
+            eq(connections.tools, tools)
           )
         )
         .returning({ id: connections.id })
@@ -1333,6 +1348,43 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
 };
 
 /**
+ * Refuses a change made from a page another change made stale
+ * (`connection.tools_changed`), so it never puts back what that change
+ * took away, then checks its tools against the toolkit (`checkedTools`).
+ * Each failure is recorded with `failed`, the catalog away too.
+ */
+const checkedChange = async (
+  {
+    key,
+    toolkit,
+    tools,
+    expected,
+    previous,
+  }: {
+    key: string;
+    toolkit: string;
+    tools: readonly (string | ComposioToolRule)[];
+    expected: readonly (string | ComposioToolRule)[];
+    previous: readonly (string | ComposioToolRule)[];
+  },
+  failed: (reason: string, outcome: "refused" | "failed") => Promise<void>
+): Promise<Awaited<ReturnType<typeof checkedTools>>> => {
+  if (choiceOf(expected) !== choiceOf(previous)) {
+    await failed("connection.tools_changed", "refused");
+    throw connectionErrors.create("connection.tools_changed");
+  }
+  try {
+    return await checkedTools(key, toolkit, tools, previous);
+  } catch (error) {
+    await failed(
+      connectErrors.codeOf(error) ?? "connection.change_failed",
+      "failed"
+    );
+    throw error;
+  }
+};
+
+/**
  * Changes which tools a shared Composio connection allows, and which of
  * them only read, for an admin (GRA-993; the threat model is on the
  * issue). Only tools its toolkit has, as connecting checks them.
@@ -1349,7 +1401,7 @@ export const changeToolkitTools = async (
   env: Env,
   request: unknown
 ): Promise<{ tools: string[] }> => {
-  const { person, connectionId, tools } = connectionErrors.parse(
+  const { person, connectionId, tools, expected } = connectionErrors.parse(
     "connection.invalid",
     changeToolkitToolsSchema,
     request
@@ -1390,7 +1442,10 @@ export const changeToolkitTools = async (
     throw connectionErrors.create("connection.provider_unavailable");
   }
   const previous = composioToolsSchema.parse(JSON.parse(before));
-  const { fits, hinted } = await checkedTools(key, toolkit, tools, previous);
+  const { fits, hinted } = await checkedChange(
+    { key, toolkit, tools, expected, previous },
+    failed
+  );
   if (!fits) {
     await failed("connection.invalid", "refused");
     throw connectionErrors.create("connection.invalid");

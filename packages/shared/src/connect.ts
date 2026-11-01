@@ -563,6 +563,8 @@ export interface ConnectionsApi extends StephenReachApi {
     connectionId: string;
     /** The tools to allow, each by name or with its rule. */
     tools: (string | ComposioToolRule)[];
+    /** The tools the page showed allowed, which the change was made from. */
+    expected: (string | ComposioToolRule)[];
   }) => Promise<{ tools: string[] }>;
   /**
    * Asks for an app the catalog doesn't have, audited. An app asked for
@@ -1087,6 +1089,11 @@ export const changeToolkitToolsSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: identifierSchema,
   tools: composioToolsSchema,
+  /**
+   * The tools the admin's page showed allowed: a change made from a page
+   * another change made stale is refused (`connection.tools_changed`).
+   */
+  expected: composioToolsSchema,
 });
 export type ChangeToolkitTools = z.input<typeof changeToolkitToolsSchema>;
 

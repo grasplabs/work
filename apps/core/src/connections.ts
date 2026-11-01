@@ -452,12 +452,14 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async changeTools(request: {
     connectionId: string;
     tools: (string | ComposioToolRule)[];
+    expected: (string | ComposioToolRule)[];
   }): Promise<{ tools: string[] }> {
     const person = await this.#person();
     return await this.#env.CONNECT.changeToolkitTools({
       person,
       connectionId: request.connectionId,
       tools: request.tools,
+      expected: request.expected,
     });
   }
 

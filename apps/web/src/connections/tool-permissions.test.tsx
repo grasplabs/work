@@ -77,20 +77,21 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** A change of tools as the page sends it to core. */
+interface Sent {
+  connectionId: string;
+  tools: (string | ComposioToolRule)[];
+  expected: (string | ComposioToolRule)[];
+}
+
 /** The switches for `shown`, recording each change of tools sent to core. */
 const shown = async (
   listed: ListedConnection,
   staff = false
-): Promise<
-  { connectionId: string; tools: (string | ComposioToolRule)[] }[]
-> => {
-  const sent: { connectionId: string; tools: (string | ComposioToolRule)[] }[] =
-    [];
+): Promise<Sent[]> => {
+  const sent: Sent[] = [];
   const connections = {
-    changeTools: async (request: {
-      connectionId: string;
-      tools: (string | ComposioToolRule)[];
-    }): Promise<{ tools: string[] }> => {
+    changeTools: async (request: Sent): Promise<{ tools: string[] }> => {
       sent.push(request);
       return await Promise.resolve({ tools: [] });
     },
@@ -181,10 +182,19 @@ describe("changing what Grasp may do in a connected app", () => {
             "HUBSPOT_CREATE_NOTE",
             "HUBSPOT_DELETE_NOTE",
           ],
+          // What the page showed, which connect checks is still so.
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+          ],
         },
         {
           connectionId: "connection-1",
           tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"],
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+          ],
         },
       ],
     });
@@ -235,10 +245,18 @@ describe("changing what Grasp may do in a connected app", () => {
             "HUBSPOT_ARCHIVED_TOOL",
             "HUBSPOT_DELETE_NOTE",
           ],
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_ARCHIVED_TOOL",
+          ],
         },
         {
           connectionId: "connection-1",
           tools: [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_ARCHIVED_TOOL",
+          ],
         },
       ],
     });
