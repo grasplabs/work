@@ -196,8 +196,9 @@ export const clients = sqliteTable(
 /**
  * The runner that's a client's current one (src/runners.ts): the
  * only one that may change what its account runs. A provisioning run (a
- * run per attempt), a rollout while it deploys the client
- * (its run), or a rollback of the client (its run).
+ * run per attempt), a deploy by the reconciler (its run,
+ * src/rollout/deploy.ts), a rollout while it deploys the client (its run),
+ * or a rollback of the client (its run).
  * Each claims it with one conditional write naming the runner it
  * replaces, so however many act at once, one wins: the single runner a
  * client's deploy relies on. No foreign key: a provisioning run is
@@ -208,7 +209,8 @@ export const clientRuns = sqliteTable("client_runs", {
   clientId: text("client_id").primaryKey(),
   /**
    * The runner's id: a provisioning attempt's run
-   * (`<clientId>-<random>`), a rollout's (the rollout's id), a
+   * (`<clientId>-<random>`), a deploy's (`deploy-<random>`), a rollout's
+   * (the rollout's id), a
    * rollback's (`rollback-<random>`), or applying the client's settings
    * (`apply-<random>`, src/clients/apply.ts).
    */
@@ -221,7 +223,7 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/hosting/workflow.ts).
    */
   kind: text({
-    enum: ["rollout", "rollback", "apply", "provision_placed"],
+    enum: ["deploy", "rollout", "rollback", "apply", "provision_placed"],
   }).notNull(),
   /**
    * The runner's attempt that holds the client, for a runner on Workerflow

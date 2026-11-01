@@ -15,6 +15,7 @@ import {
   clientWorkers,
   releases,
 } from "../src/db/schema.ts";
+import type { Channel } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import { placeClient } from "../src/hosting/inventory.ts";
 import {
@@ -85,6 +86,8 @@ export interface PlacedClientOptions {
   name?: string;
   /** How its people sign in, as staff give it; Acme's when not given, none for null. */
   signIn?: Record<string, unknown> | null;
+  /** The release channel it follows; Stable when not given. */
+  channel?: Channel;
 }
 
 /** A live placed client, and the account its dedicated destination is on. */
@@ -110,6 +113,7 @@ export const placedClientRecord = async (
       admins: ["ada@acme.test"],
       googleHostedDomain: "acme.test",
     },
+    channel = "stable",
   }: PlacedClientOptions = {}
 ): Promise<PlacedClient> => {
   const account = cloudflare.addAccount(name);
@@ -128,6 +132,7 @@ export const placedClientRecord = async (
         id: clientId,
         name,
         ring,
+        channel,
         signIn: signIn === null ? null : JSON.stringify(signIn),
         createdAt: now,
         updatedAt: now,

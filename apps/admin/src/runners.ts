@@ -93,6 +93,7 @@ const isMissingInstance = (error: unknown): boolean =>
 
 /** The workflow a runner of `kind` is a run of. */
 const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
+  deploy: (env) => adminWorkflow(env, adminWorkflows.deploy),
   rollout: (env) => adminWorkflow(env, adminWorkflows.rollout),
   rollback: (env) => adminWorkflow(env, adminWorkflows.rollbackClient),
   apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
