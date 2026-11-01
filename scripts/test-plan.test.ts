@@ -21,6 +21,7 @@ import {
   packageOf,
   packagesSelected,
   filesImporting,
+  missedByPlan,
   reachSince,
   reachedPackages,
 } from "./test-plan.ts";
@@ -73,6 +74,53 @@ describe("planning which test projects run", () => {
 
   it("runs no project when no package is affected", () => {
     expect(affectedProjects(files, packages, new Set())).toStrictEqual([]);
+  });
+
+  it("finds nothing missed in a plan that covers its changes", () => {
+    expect(
+      missedByPlan({
+        changedFiles: [
+          "/repo/apps/core/src/agent.ts",
+          "/repo/apps/core/test/agent.test.ts",
+          "/repo/e2e/chat.e2e.ts",
+        ],
+        packages,
+        changedPackages: ["/repo/apps/core"],
+        tests: files,
+        projects: ["@grasp-os/core", "@grasp-os/core:screens", "scripts"],
+        root,
+      })
+    ).toStrictEqual([]);
+  });
+
+  it("fails a plan when pnpm reports no change in a package git says changed", () => {
+    expect(
+      missedByPlan({
+        changedFiles: ["/repo/apps/core/src/agent.ts"],
+        packages,
+        changedPackages: [],
+        tests: files,
+        projects: [],
+        root,
+      })
+    ).toStrictEqual([
+      "apps/core/src/agent.ts changed, but pnpm didn't report its package as changed.",
+    ]);
+  });
+
+  it("fails a plan that leaves out the project of a changed test file", () => {
+    expect(
+      missedByPlan({
+        changedFiles: ["/repo/apps/admin/test/rollout.test.ts"],
+        packages,
+        changedPackages: ["/repo/apps/admin"],
+        tests: files,
+        projects: [],
+        root,
+      })
+    ).toStrictEqual([
+      "apps/admin/test/rollout.test.ts changed, but its project admin doesn't run.",
+    ]);
   });
 
   it("asks pnpm for the packages a change in one reaches: itself and those that depend on it", () => {

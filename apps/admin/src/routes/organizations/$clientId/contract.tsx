@@ -10,7 +10,7 @@ import {
 } from "@grasp-os/ui/components/collapsible";
 /**
  * An organization's Contract, ported from the prototype (grasplabs/prototype
- * `components/admin/org-contract.tsx`): the seats taken, the proposal, the
+ * `components/admin/org-contract.tsx`): the seats taken, the
  * agreements that have to be in place before anyone is interviewed, and
  * billing. Read-only: the admin keeps nothing of its own on a company.
  * The agreements are core's own. Core holds no contract's terms, so the
@@ -20,10 +20,6 @@ import {
  * is open or overdue, what it paid last and when the next invoice comes,
  * and its invoices as Stripe has them, once someone at Grasp linked it to
  * its customer there; until then, or without Stripe's key, it says so.
- *
- * The proposal is Rooms' (src/proposal/proposal.ts): the room Grasp wrote
- * it in and who signed it, once someone at Grasp linked the company to
- * its room there; until then, or without Rooms' token, it says so.
  */
 import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -32,7 +28,6 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
-import { RoomsLink } from "../../../admin/rooms-link.tsx";
 import { Section } from "../../../admin/section.tsx";
 import { StripeLink } from "../../../admin/stripe-link.tsx";
 import {
@@ -48,12 +43,6 @@ import type {
   Money,
 } from "../../../billing/billing.ts";
 import type { StripeReadError } from "../../../billing/stripe.ts";
-import type {
-  Proposal,
-  ProposalRoom,
-  ProposalSignature,
-} from "../../../proposal/proposal.ts";
-import type { RoomsReadError } from "../../../proposal/rooms.ts";
 
 /** One for one, many for the rest. */
 const plural = (count: number, one: string, other: string): string =>
@@ -131,48 +120,6 @@ const Summary = ({ view }: { view: AdminView }) => (
     <Figure label="Seats" sub="are taken" value={String(view.seats.used)} />
   </section>
 );
-
-/** Why Rooms wasn't read now, as the rest of a sentence. */
-const roomsUnreadWords: Record<RoomsReadError, string> = {
-  refused: "Rooms turned the admin’s token away",
-  not_found: "Rooms has no such room",
-  invalid_answer: "what Rooms answered can’t be read",
-  timeout: "Rooms didn’t answer in time",
-  no_answer: "the request to Rooms failed",
-};
-
-/** The signature the proposal was signed with last, if any. */
-const lastSigned = (room: ProposalRoom): ProposalSignature | undefined =>
-  room.signatures.find((signature) => signature.status === "signed");
-
-/** The proposal in a line: where it stands, or why it isn't known. */
-const proposalLine = (proposal: Proposal): string => {
-  switch (proposal.state) {
-    case "not_connected": {
-      return notConnected("Rooms", "ROOMS_READ_TOKEN");
-    }
-    case "not_linked": {
-      return "Not linked to its room in Rooms yet. Link it by the room’s id, and this fills in by itself.";
-    }
-    case "unread": {
-      return `Rooms can’t be read for it now: ${roomsUnreadWords[proposal.error]}.`;
-    }
-    case "read": {
-      const signed = lastSigned(proposal.room);
-      if (signed?.signed !== null && signed !== undefined) {
-        return `Signed by ${signed.signer} on ${formatDate(signed.signed)}.`;
-      }
-      return proposal.room.signatures.some(
-        (signature) => signature.status === "pending"
-      )
-        ? "Sent to sign, not signed yet."
-        : "Not sent to sign yet.";
-    }
-    default: {
-      return proposal satisfies never;
-    }
-  }
-};
 
 /** How one agreement stands, as the prototype says it. */
 const Stands = ({ agreement }: { agreement: AgreementView }) => {
@@ -401,87 +348,6 @@ const BillingLines = ({
   </dl>
 );
 
-/** Each status of a signature request, in a word. */
-const signatureWords: Record<ProposalSignature["status"], string> = {
-  signed: "Signed",
-  pending: "Waiting",
-  revoked: "Withdrawn",
-  expired: "Expired",
-};
-
-/**
- * The proposal: the room in Rooms the company was sent, who was asked to
- * sign it and who did, and the room it is linked to, which staff link or
- * change here.
- */
-const ProposalPart = ({
-  proposal,
-  clientId,
-}: {
-  proposal: Proposal;
-  clientId: string;
-}) => {
-  const projectId = proposal.state === "not_linked" ? null : proposal.projectId;
-  return (
-    <Section
-      description={proposalLine(proposal)}
-      id="contract-proposal"
-      title="The proposal"
-    >
-      {proposal.state === "read" ? (
-        <dl>
-          <Line label="Room in Rooms">
-            <a
-              className="hover:text-foreground underline underline-offset-4"
-              href={proposal.room.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {proposal.room.name}
-            </a>
-          </Line>
-          <Line label="For">{proposal.room.clientName || "Nobody named"}</Line>
-          <Line label="Last changed">
-            {proposal.room.archived
-              ? `${formatDate(proposal.room.updated)}, archived since`
-              : formatDate(proposal.room.updated)}
-          </Line>
-        </dl>
-      ) : null}
-      {proposal.state === "read" && proposal.room.signatures.length > 0 ? (
-        <ul className="flex flex-col">
-          {proposal.room.signatures.map((signature) => (
-            <li
-              className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
-              key={`${signature.email}-${signature.sent}-${signature.status}`}
-            >
-              <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-                <span className="truncate">{signature.signer}</span>
-                <span className="text-muted-foreground text-xs">
-                  {signature.signed === null
-                    ? `Sent ${formatDate(signature.sent)}`
-                    : `Signed ${formatDate(signature.signed)}`}
-                </span>
-              </span>
-              <span
-                className={cn(
-                  "w-20 text-right text-xs",
-                  signature.status === "pending"
-                    ? "text-status-attention"
-                    : "text-muted-foreground"
-                )}
-              >
-                {signatureWords[signature.status]}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <RoomsLink clientId={clientId} projectId={projectId} />
-    </Section>
-  );
-};
-
 /**
  * Billing: what Stripe says the company pays and whether it is paid, and
  * the customer it is linked to there, which staff link or change here.
@@ -573,11 +439,10 @@ const Contract = () => {
   const { admin, view } = useOrganization();
   // Until staff say where the agreements stand, core holds none, and the model's "no works council" is only its default.
   const recorded = admin.snapshot.agreements !== null;
-  const { billing, proposal } = admin;
+  const { billing } = admin;
   return (
     <>
       <Summary view={view} />
-      <ProposalPart clientId={admin.client.id} proposal={proposal} />
       <Agreements recorded={recorded} view={view} />
       <BillingPart billing={billing} clientId={admin.client.id} />
       {billing.state === "read" ? (
@@ -587,7 +452,7 @@ const Contract = () => {
   );
 };
 
-/** An organization's Contract: the seats, the proposal, the agreements and billing. */
+/** An organization's Contract: the seats, the agreements and billing. */
 export const Route = createFileRoute("/organizations/$clientId/contract")({
   component: Contract,
 });
