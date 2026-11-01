@@ -24,6 +24,7 @@ import type {
 
 import {
   bindWorkflowToApp,
+  listAppWorkflowBindings,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
@@ -410,6 +411,13 @@ export class WorkflowResourcesRpc
     await withPerson(this.#check, async (person) => {
       await unbindWorkflowFromApp(this.#env, person, binding);
     });
+  }
+
+  async appBindings(app: string): Promise<AppWorkflowBinding[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listAppWorkflowBindings(this.#env, person, app)
+    );
   }
 
   async catalog(): Promise<CatalogContractEntry[]> {

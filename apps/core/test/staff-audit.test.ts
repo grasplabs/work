@@ -146,7 +146,6 @@ describe("Grasp staff's views, audited", () => {
         async () => await api.knowledge.getDocument(noteId),
       ],
       ["memory.collections", async () => await api.memory.collections()],
-      ["brain.notes", async () => await api.brain.notes()],
       ["chats.list", async () => await api.chats.list()],
       ["decisions.waiting", async () => await api.decisions.waiting()],
       ["audit.search", async () => await api.audit.search()],

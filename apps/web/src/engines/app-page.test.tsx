@@ -54,6 +54,7 @@ const appChat: ChatSummary = {
   running: false,
   projectId: null,
   appId: app.id,
+  via: "web",
 };
 
 /** How the dock sits, as the page shows it. */

@@ -14,10 +14,8 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
-    "@chat-adapter/discord": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/newsreader": "catalog:",
-    "@grasp-os/chat": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
@@ -25,7 +23,6 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
-    "chat": "catalog:",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
     "jose": "catalog:",

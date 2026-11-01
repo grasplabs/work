@@ -27,6 +27,7 @@ const chat = (
   running: false,
   projectId,
   appId: null,
+  via: "web",
 });
 
 const project = (id: string, createdAt: string): ChatProject => ({
