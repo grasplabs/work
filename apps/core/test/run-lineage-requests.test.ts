@@ -46,7 +46,6 @@ describe("run lineages", { timeout: 90_000 }, () => {
     const rootActor = runActorOf({ runId: root.id, app, workflow: "idle" });
 
     const result = await withProvider(
-      undefined,
       [
         ...times(97, cheapAnswer),
         // Each of the step's attempts sends one request and two retries:
@@ -102,7 +101,6 @@ describe("run lineages", { timeout: 90_000 }, () => {
       });
 
       const result = await withProvider(
-        undefined,
         times(110, cheapAnswer),
         async (fake) => {
           const lineage = await allAtOnce(
@@ -143,7 +141,6 @@ describe("run lineages", { timeout: 90_000 }, () => {
     const victimActor = runActorOf({ runId: victim, app, workflow: "reader" });
 
     const result = await withProvider(
-      undefined,
       [...times(100, cheapAnswer), dearTotal],
       async () => {
         // The victim's lineage used all of its requests.

@@ -36,11 +36,9 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { jsonVar } from "@grasp-os/shared/config";
 import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
-import { modelRulesConfigSchema } from "@grasp-os/shared/deployment-config";
-import type { ModelRole, ModelRules } from "@grasp-os/shared/deployment-config";
+import type { ModelRole } from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
   connectionIdSchema,
@@ -50,9 +48,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   defaultModelEffort,
   modelEfforts,
-  busyBudgetMessage,
   modelErrors,
-  overBudgetMessage,
 } from "@grasp-os/shared/models";
 import type {
   ModelEffort,
@@ -65,7 +61,6 @@ import {
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
-import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { maxSpeechChars } from "@grasp-os/shared/voice";
 import type { Speech } from "@grasp-os/shared/voice";
 import { drizzle } from "drizzle-orm/d1";
@@ -83,17 +78,6 @@ import {
   shareIdentity,
 } from "./model-admission.ts";
 import type { Fairness, ModelShare, ShareIdentity } from "./model-admission.ts";
-import {
-  bindingRequestMicros,
-  bindingScopes,
-  budgetPeriods,
-  budgetPersonOf,
-  hasBudget,
-  limitedPersonOf,
-  lineageModelRequests,
-  platformScopes,
-  scopesFor,
-} from "./model-budgets.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import {
@@ -107,8 +91,6 @@ import type {
   Admitted as LedgerAdmitted,
   LedgerRoute,
   LedgerScope,
-  LedgerScopeName,
-  LimitedPerson,
   Settled,
   Settlement,
 } from "./model-ledger.ts";
@@ -123,6 +105,12 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Refusal } from "./model-rules.ts";
+import {
+  bindingScopes,
+  platformScopes,
+  scopesFor,
+  spendMonth,
+} from "./model-spend.ts";
 import {
   connectRequest,
   connectSocket,
@@ -160,9 +148,9 @@ import { quotaLimits } from "./workflows/quotas.ts";
 // even when the audit log can't take it for a moment.
 //
 // Before anything is sent, a call is checked: its work context
-// (model-rules.ts), its model and its budgets. A refused call is audited
-// too, with the reason, and nothing is sent. The transport only says where an admitted request
-// goes: the rules, the budgets, the ledger's admission of every provider
+// (model-rules.ts) and its model. A refused call is audited too, with the
+// reason, and nothing is sent. The transport only says where an admitted
+// request goes: the rules, the ledger's admission of every provider
 // request and the audit log are the gateway's, the same whatever the
 // transport.
 
@@ -212,49 +200,22 @@ const maxTimeoutMs = 15 * 60_000;
  */
 const maxRetries = 2;
 
-/** The `MODEL_GATEWAY` var as set: no rules while it isn't. */
-const rulesVar = (env: Env): unknown =>
-  env.MODEL_GATEWAY === undefined ? {} : jsonVar(env.MODEL_GATEWAY);
-
-/**
- * The deployment's rules: deployment config, set by the admin as the
- * `MODEL_GATEWAY` var, never an in-product setting, so an admin session
- * can't loosen what the client agreed to; none while it isn't set.
- * `undefined` for rules that don't parse: every call then fails closed.
- */
-export const modelRules = (env: Env): ModelRules | undefined => {
-  const parsed = modelRulesConfigSchema.safeParse(rulesVar(env));
-  if (!parsed.success) {
-    log.error("model.rules_invalid", {
-      paths: parsed.error.issues.map(({ path }) => path.join(".")).join(" "),
-    });
-    return undefined;
-  }
-  return parsed.data;
-};
-
-/** The models the organization's calls may use now, and the rules. */
+/** The models the organization's calls may use now. */
 export interface ModelsNow {
   /**
    * The models its admins chose, its default first, each of a provider it
    * still has connected: none until it connected one and chose.
    */
   models: string[];
-  /** The deployment's rules; `undefined` when they don't parse. */
-  rules: ModelRules | undefined;
 }
 
 /**
  * The models the organization's calls may use now, for whatever picks one
- * (a role's model, a chat's choices, a binding's approval), and the
- * deployment's rules.
+ * (a role's model, a chat's choices, a binding's approval).
  */
 export const modelSettings = async (env: Env): Promise<ModelsNow> => {
   const routes = await aiRoutesOf(env);
-  return {
-    models: chosenModels(routes, await readModelChoice(env)),
-    rules: modelRules(env),
-  };
+  return { models: chosenModels(routes, await readModelChoice(env)) };
 };
 
 /**
@@ -379,14 +340,14 @@ const sessionShape = {
       /**
        * Core's own making of a person's dashboard widget
        * (dashboard-widgets.ts): it carries the names of their engines and
-       * workflows, and is made for them, on their budget, by the trigger that names them. Only core's own code
+       * workflows, and is made for them, counted as theirs, by the trigger that names them. Only core's own code
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
       /**
        * Core's own reranking of a person's recall (knowledge/rerank.ts),
        * only when the recall asks for it: it carries the company's own
-       * words, and is made for them, on their budget, by the trigger that names them. A delegate's recall reranks
+       * words, and is made for them, counted as theirs, by the trigger that names them. A delegate's recall reranks
        * under its own authority and context instead. Only core's own code
        * makes such a call.
        */
@@ -395,13 +356,13 @@ const sessionShape = {
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
        * answer, into the company's topics; and its proposals for what an
-       * owner could fix (stephen-requests.ts), on the budget of the person
-       * it is for. Only core's own code makes such a call.
+       * owner could fix (stephen-requests.ts), counted for the person it is
+       * for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),
       /**
        * An admin's test of an AI provider the organization connected
-       * (ai-providers.ts): one fixed line of no one's data, made for the admin, on their budget.
+       * (ai-providers.ts): one fixed line of no one's data, made for the admin, counted as theirs.
        * Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("provider_test") }),
@@ -409,7 +370,7 @@ const sessionShape = {
        * Core's own conversion of a PDF uploaded to the Brain into its text
        * (knowledge/extract.ts), on Grasp's key: the company's own words,
        * made for the person who uploaded it,
-       * on their budget. Only core's own code makes such a call.
+       * counted as theirs. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("document_conversion") }),
     ])
@@ -418,9 +379,9 @@ const sessionShape = {
   /**
    * For a call of an independent workflow's run, whose trigger names no
    * App's run (`system`): the run lineage its requests count against, by
-   * its root, with every other run of the lineage's (model-budgets.ts,
+   * its root, with every other run of the lineage's (model-spend.ts,
    * `scopesFor`), so children never start the lineage's requests afresh;
-   * and the workflow the run is of, whose budget it counts against too.
+   * and the workflow the run is of, whose spend it counts in too.
    * From the run's row; set by core's host only, never by App code.
    */
   lineage: z
@@ -437,15 +398,13 @@ const sessionShape = {
    */
   shareSubject: z.string().min(1).max(512).optional(),
   /**
-   * The App's model binding the call is made through, with its own caps
-   * (model-budgets.ts): set by core's model resource only, from the
-   * binding's row, never by App code.
+   * The App's model binding the call is made through: set by core's model
+   * resource only, from the binding's row, never by App code.
    */
   binding: z
     .strictObject({
       app: appIdSchema,
       alias: z.string().min(1).max(64),
-      budget: modelBindingBudgetSchema.nullable(),
     })
     .optional(),
 };
@@ -731,28 +690,15 @@ interface Route extends Admitted {
   price: PinnedPrice | undefined;
   /**
    * The scopes a provider request sent now counts against, in this month,
-   * its run lineage's limited by the quota limits. Throws when the teams
-   * of the person it is made for can't be read: nothing is admitted
-   * without the limits they give.
+   * its run lineage's limited by the quota limits. Throws when the quota
+   * limits can't be read: nothing is admitted without them.
    */
   scopesNow: () => Promise<{
     period: string;
     scopes: LedgerScope[];
     /** Whose shares of the requests in flight it takes, under the quota limits. */
     fair: Fairness;
-    /**
-     * The person it is made for, and their teams, whose limit the ledger
-     * reserves it against; none for a call made for nobody.
-     */
-    person: LimitedPerson | undefined;
   }>;
-  /**
-   * What the call's provider requests may reserve together, under its
-   * binding's cap per request, and what they hold of it now: each one's
-   * reservation, less what settled below it. Its requests go one at a
-   * time, so nothing races it. None without a cap.
-   */
-  perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
   env: Env;
   /** The call's ID: its place in the queue while it waits for a share. */
@@ -800,7 +746,6 @@ type Admitting = Partial<Pick<Route, "way">> &
     | "env"
     | "call"
     | "price"
-    | "perRequest"
     | "scopesNow"
     | "disclose"
     | "beforeSend"
@@ -829,13 +774,13 @@ interface GatewayResponse {
   /** What the log keeps of a response that refused the request. */
   refusal: ProviderRefusal | undefined;
   /**
-   * Why the model ledger held a provider request back, unsent: no room in
-   * a budget, or no ledger to account for it.
+   * Why the model ledger held a provider request back, unsent: a full
+   * share, a lineage out of requests, or no ledger to account for it.
    */
   held: Refusal | undefined;
   /**
    * The provider request whose answer streams, admitted by the ledger and
-   * waiting to be settled with what it used, and what it reserved.
+   * waiting to be settled with what it used.
    */
   pending: Admission | undefined;
   /** The provider requests already settled, in order: refused, failed or superseded. */
@@ -850,11 +795,11 @@ interface GatewayResponse {
   failure: TransportFailure | undefined;
 }
 
-/** A provider request the ledger admitted: its ID, and what it reserved. */
+/** A provider request the ledger admitted: its ID, and the most it can cost. */
 interface Admission {
   id: string;
   reservedMicros: number;
-  /** The most tokens its prompt can be, as reserved: its body's bytes and more. */
+  /** The most tokens its prompt can be: its body's bytes and more. */
   promptTokens: number;
   /** The most tokens its answer can be: the cap its body sets. */
   answerCap: number;
@@ -977,55 +922,9 @@ const promptAllowanceTokens = 1024;
 
 /**
  * How long after a call's deadline a provider request still unsettled is
- * charged its whole reservation (model-ledger.ts).
+ * charged the most it can cost (model-ledger.ts).
  */
 const reconcileGraceMs = 5 * 60_000;
-
-/**
- * The wait a refusal for a budget held by calls under way suggests. An
- * advisory hint: asking again sooner is only refused again.
- *
- * Where the caller is the person themselves (their own request, or their
- * chat's agent) and every full scope is their user scope, the calls
- * holding it are made for them: the wait runs until the soonest call
- * under way reaches its deadline (the ledger's `heldUntil`), rounded up
- * to a whole step, and no longer than the most. Optimistic, as that call
- * may not free enough on its own; bounded, so a caller asks again and is
- * told afresh rather than wait out a long call.
- *
- * Any other scope, or any other caller, is shared: the deployment and a
- * workflow hold other people's calls; a run lineage holds its runs' calls,
- * which may be other Apps' (a run's own mail starts other Apps' runs under
- * it, connector-events.ts); and to an App's code, a run's or a server's,
- * the person's user scope holds their chats' calls and other Apps'. A
- * derived wait would give away when those were sent: polling would show
- * the second it drops a step. Such a refusal suggests a fixed wait. That
- * removes only the timing of when they were sent: being told the budget
- * is busy at all still says other calls are under way, and its turning
- * into an admission (or out of budget) says when they finished.
- */
-const busyRetry = { stepSeconds: 15, mostSeconds: 300, sharedSeconds: 60 };
-
-/** Whether `trigger` is the person themselves, whose user scope is theirs to watch. */
-const isThePerson = (trigger: Session["trigger"]): boolean =>
-  trigger.type === "person" || trigger.type === "agent";
-
-/** The seconds `trigger` waits before asking again, for a budget held until `heldUntil`. */
-const retryAfterSeconds = (
-  trigger: Session["trigger"],
-  heldBy: readonly LedgerScopeName[],
-  heldUntil: number
-): number => {
-  // The limit admins set for the person counts their own calls, as their
-  // user scope does.
-  const own = heldBy.every((scope) => scope === "user" || scope === "person");
-  if (!(isThePerson(trigger) && own)) {
-    return busyRetry.sharedSeconds;
-  }
-  const waitMs = heldUntil - Date.now();
-  const steps = Math.max(1, Math.ceil(waitMs / 1000 / busyRetry.stepSeconds));
-  return Math.min(steps * busyRetry.stepSeconds, busyRetry.mostSeconds);
-};
 
 /**
  * The longest a call waits in the gateway for a share of the requests in
@@ -1075,29 +974,6 @@ const rateLimitedSeconds = (headers: Headers, now = Date.now()): number => {
     return defaultSeconds;
   }
   return Math.min(mostSeconds, Math.max(leastSeconds, Math.ceil(seconds)));
-};
-
-/** The longest a used-up budget's refusal says to wait: a month. */
-const mostResetSeconds = 31 * 24 * 60 * 60;
-
-/**
- * The seconds until a budget of `scope` used up at `now` resets: the next
- * UTC day for a binding's day, the next UTC month for any other, as the
- * ledger counts them (model-budgets.ts); none for a run lineage, which
- * never resets, nor a binding's cap per request, which no wait helps.
- */
-const resetSeconds = (scope: string, now = new Date()): number | undefined => {
-  if (scope === "run" || scope === "binding_request") {
-    return undefined;
-  }
-  const resetsAt =
-    scope === "binding_day"
-      ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
-      : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
-  return Math.min(
-    mostResetSeconds,
-    Math.max(1, Math.ceil((resetsAt - now.getTime()) / 1000))
-  );
 };
 
 /** Waits `ms`, or until `signal` aborts, whichever comes first. */
@@ -1167,7 +1043,7 @@ const leaveQueue = async (route: Admitting): Promise<void> => {
   }
 };
 
-/** The prices of a model that has none, which no budget admits. */
+/** The prices of a model that has none: it is counted, at no cost. */
 const unpriced: PinnedPrice = {
   version: "unpriced",
   input: 0,
@@ -1186,8 +1062,8 @@ const heldResponse = (): Response =>
 
 /**
  * Settles provider request `id` in the model ledger. Never throws: a
- * request the ledger doesn't hear about stays reserved, and is charged
- * its whole reservation when it comes due.
+ * request the ledger doesn't hear about is charged the most it can cost
+ * when it comes due.
  */
 const settleRequest = async (
   env: Env,
@@ -1207,9 +1083,7 @@ const settleRequest = async (
 
 /**
  * Settles provider request `admission` of `route`'s call, as
- * `settleRequest` does, and gives back to its cap per request what it
- * settled below its reservation: everything, for one the ledger has no
- * record of. One whose outcome is unknown keeps holding all of it.
+ * `settleRequest` does.
  */
 const settleAdmitted = async (
   route: Admitting,
@@ -1218,8 +1092,8 @@ const settleAdmitted = async (
 ): Promise<RequestSettled> => {
   const settled = await settleRequest(route.env, admission.id, settlement);
   // Charged what it used, never clamped: that is what the provider bills.
-  // Above its reservation it means the bound was wrong, which budgets
-  // rely on.
+  // Above its bound it means the bound was wrong, which a request whose
+  // usage is lost is charged by.
   if (
     settled?.state === "settled" &&
     settled.chargedMicros > admission.reservedMicros
@@ -1229,12 +1103,6 @@ const settleAdmitted = async (
       reservedMicros: admission.reservedMicros,
       chargedMicros: settled.chargedMicros,
     });
-  }
-  const { perRequest } = route;
-  if (perRequest !== undefined && settled?.state === "settled") {
-    perRequest.heldMicros -= admission.reservedMicros - settled.chargedMicros;
-  } else if (perRequest !== undefined && settled?.state === "missing") {
-    perRequest.heldMicros -= admission.reservedMicros;
   }
   return { reservedMicros: admission.reservedMicros, settled };
 };
@@ -1279,50 +1147,13 @@ const heldBecause = (
       placed: queued.placed,
     };
   }
-  if ("unpriced" in admitted) {
-    return { code: "model.unpriced" };
-  }
-  // The run lineage's own limits: no wait helps a lineage out of
-  // requests, nor one whose spend leaves no room.
-  if ("requests" in admitted) {
-    return { code: "model.run_limit", because: "requests" };
-  }
   if ("reused" in admitted) {
     // Never expected: every ID is a new UUID.
     log.error("model.request_id_reused", { model: call.model });
     return { code: "model.ledger_unavailable" };
   }
-  // A guest spends the budgets of the member who invited them: whether
-  // that member has calls under way is theirs to know. Held or used up,
-  // in any scope, a guest hears the same: used up, with no wait.
-  if (fixed) {
-    return {
-      code: "model.over_budget",
-      because: admitted.scope,
-      capUntold: true,
-    };
-  }
-  if ("heldUntil" in admitted) {
-    return {
-      code: "model.budget_busy",
-      because: admitted.scope,
-      retryAfterSeconds: retryAfterSeconds(
-        call.trigger,
-        admitted.heldBy,
-        admitted.heldUntil
-      ),
-    };
-  }
-  if (admitted.scope === "run") {
-    return { code: "model.run_limit", because: "spend" };
-  }
-  // Used up until it resets: when, which says nothing of anyone's calls.
-  const resets = resetSeconds(admitted.scope);
-  return {
-    code: "model.over_budget",
-    because: admitted.scope,
-    ...(resets === undefined ? {} : { retryAfterSeconds: resets }),
-  };
+  // The run lineage's own limit: no wait helps a lineage out of requests.
+  return { code: "model.run_limit", because: "requests" };
 };
 
 /**
@@ -1381,24 +1212,20 @@ const documentBound = (
 
 /**
  * Asks the model ledger to admit one provider request, with the body it
- * will send: reserves the most it can cost (`Route.bound`), at the
- * model's pinned prices. Its ID, or why it is held back.
+ * will send, and the most it can cost (`Route.bound`) at the model's
+ * pinned prices. Its ID, or why it is held back.
  */
 const admitRequest = async (
   route: Admitting,
   body: unknown,
   endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
-  const { env, call, price, perRequest } = route;
+  const { env, call, price } = route;
   const now = await scopesRead(route);
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, fair, person } = now;
-  const budgeted = hasBudget(scopes) || perRequest !== undefined;
-  if (price === undefined && budgeted) {
-    return { held: { code: "model.unpriced" } };
-  }
+  const { period, scopes, fair } = now;
   const bound = route.bound(body);
   if ("held" in bound) {
     return bound;
@@ -1409,15 +1236,6 @@ const admitRequest = async (
   // whole timeout from now.
   const callDeadline = endsAt;
   const reservedMicros = boundMicros(pinned, bound);
-  // The binding's cap per request holds the App's request as a whole: a
-  // second attempt or a retry needs room beside what the earlier ones
-  // still hold, an unknown outcome all of its reservation.
-  if (
-    perRequest !== undefined &&
-    perRequest.heldMicros + reservedMicros > perRequest.limitMicros
-  ) {
-    return { held: { code: "model.over_budget", because: "binding_request" } };
-  }
   try {
     const admitted = await modelLedger(env).admit({
       id,
@@ -1431,7 +1249,6 @@ const admitRequest = async (
       reconcileAt: callDeadline + reconcileGraceMs,
       ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
       fair,
-      ...(person === undefined ? {} : { person }),
       ...(route.way === undefined ? {} : { route: route.way }),
     });
     if ("policyBehind" in admitted) {
@@ -1445,9 +1262,6 @@ const admitRequest = async (
       return { held: { code: "model.quota_policy_behind" } };
     }
     if (admitted.ok) {
-      if (perRequest !== undefined) {
-        perRequest.heldMicros += reservedMicros;
-      }
       return {
         id,
         reservedMicros,
@@ -1459,7 +1273,8 @@ const admitRequest = async (
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
-    // sent, so it is released, or charged in full if even that fails.
+    // sent, so it is settled as unsent, or charged its bound if even that
+    // fails.
     await settleRequest(env, id, { by: "unsent" });
     return { held: { code: "model.ledger_unavailable" } };
   }
@@ -1617,9 +1432,9 @@ const hostOf = (input: Parameters<FetchFunction>[0]): string | undefined => {
 const notedFailure = (
   failure: TransportFailure
 ):
-  | { kind: Exclude<TransportFailure["kind"], "budget">; status?: number }
+  | { kind: Exclude<TransportFailure["kind"], "held">; status?: number }
   | undefined => {
-  if (failure.kind === "budget") {
+  if (failure.kind === "held") {
     return undefined;
   }
   return failure.status === undefined
@@ -1652,7 +1467,7 @@ const open = async (
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
   // One the provider refused is settled at nothing; one whose fate can't
-  // be known keeps its reservation; the one whose answer streams is
+  // be known is charged the most it can cost; the one whose answer streams is
   // settled once the answer ends (`record`). Besides, the request's size
   // as sent, should what it used have to be estimated (`usedBy`); and
   // what a refusal's body says went wrong, which the provider SDKs drop
@@ -1675,12 +1490,12 @@ const open = async (
     }
     // The caller's last word, after the ledger's admission, with nothing
     // awaited before the request is sent: refused, it is never sent, and
-    // its reservation goes back.
+    // is settled as such.
     try {
       await route.reauthorize?.();
       route.beforeSend?.();
       // Cancelled while it was admitted, or while its wait was cleared: it
-      // is never sent, and its reservation goes back whole.
+      // is never sent, and is settled as such.
       signal.throwIfAborted();
     } catch (error) {
       response.settled.push(
@@ -1915,7 +1730,7 @@ const failureMessage = ({ status, errorType }: Failure): string => {
     : `The model call failed (${cause.join(" ")}).`;
 };
 
-/** The model error code a failed answer's message names, as "(model.over_budget)". */
+/** The model error code a failed answer's message names, as "(model.run_limit)". */
 const namedFailure = /\((?<code>model\.[a-z_]+)\)/u;
 
 /**
@@ -1953,8 +1768,8 @@ interface Used {
  * an estimate. A request the provider began to answer and that then
  * failed, timed out or was cancelled comes without a full count: chat
  * completions and OpenAI's responses count in their last event only, and
- * Anthropic counts the answer at its end. Counted as nothing, someone at
- * their budget could start answers and cancel them for free. So the
+ * Anthropic counts the answer at its end. Counted as nothing, the spend
+ * overview would miss answers started and cancelled. So the
  * prompt, if it wasn't counted, is taken from the request's size as sent,
  * and the answer from what came of it, if that is more than was counted,
  * at {@link estimatedCharsPerToken} characters a token and the model's
@@ -2014,11 +1829,11 @@ interface Recorded extends Used {
 /**
  * How the model ledger settled a request's provider request, as its audit
  * event records it, so the event and the ledger agree: `settled` at what
- * it charged; `unknown`, holding its whole reservation until it is charged
- * that in full; `quarantined`, held for a person; `missing` or `failed`
- * when the ledger had none or couldn't be reached (the reservation, if
- * any, is charged in full when it comes due); `none` when nothing was
- * sent.
+ * it charged; `unknown`, to be charged the most it can cost when it comes
+ * due; `quarantined`, set aside, charged nothing; `missing` or `failed`
+ * when the ledger had none or couldn't be reached (one it admitted is
+ * charged the most it can cost when it comes due); `none` when nothing
+ * was sent.
  */
 interface Ledgered {
   /** How the last of them settled. */
@@ -2028,29 +1843,31 @@ interface Ledgered {
   /** What they were charged, in US dollars; null when none were sent. */
   charged: number | null;
   /**
-   * What their reservations still hold, in US dollars, to be charged in
-   * full or settled by a person; null when none were sent.
+   * What is still to be charged for them, in US dollars, when they come
+   * due: the most each of unknown fate can cost; null when none were sent.
    */
   held: number | null;
 }
 
-/** One provider request's settlement, with what it reserved. */
+/** One provider request's settlement, with the most it can cost. */
 interface RequestSettled {
   reservedMicros: number;
   /** `undefined` when the ledger couldn't be reached to settle it. */
   settled: Settled | undefined;
 }
 
-/** What a settlement holds still: all its reservation, unless settled or missing. */
+/** What a settlement still has to be charged: its bound, unless settled, set aside or missing. */
 const heldBy = ({ reservedMicros, settled }: RequestSettled): number =>
-  settled?.state === "settled" || settled?.state === "missing"
+  settled?.state === "settled" ||
+  settled?.state === "missing" ||
+  settled?.state === "quarantined"
     ? 0
     : reservedMicros;
 
 /**
  * What the audit event records of how the ledger settled every provider
  * request a call's attempt sent: a retry the SDK made after a server error
- * too, whose reservation stays held, so the event accounts for all of it.
+ * too, still to be charged, so the event accounts for all of it.
  */
 const ledgerOf = (settlements: readonly RequestSettled[]): Ledgered => {
   const last = settlements.at(-1);
@@ -2273,7 +2090,7 @@ const countedTokens = ({
  * known to have used by then. The prompt as the provider counted it at
  * the start (Anthropic's `message_start`); where it sent no count yet
  * (chat completions count in their last chunk), the prompt's bound, as
- * its admission reserved it: never an estimate below what it may bill.
+ * its admission bounded it: never an estimate below what it may bill.
  * The answer as far as it was relayed, at {@link estimatedCharsPerToken}
  * characters a token where that is more than was counted, but never an
  * estimate past the answer's cap, which the provider stops at. None where
@@ -2304,10 +2121,9 @@ const cutTokens = (
  * How the ledger settles the provider request whose answer streamed: at
  * the provider's count once it ended whole; at what it is known to have
  * used once it was cut off here (`cutTokens`), so a caller who talks on
- * pays for what it used, and its reservation goes back at once; and
- * otherwise (it failed, or answered with no usage at all) not at all:
- * it keeps its whole reservation, never an estimate below what the
- * provider may bill.
+ * is charged what it used; and otherwise (it failed, or answered with no
+ * usage at all) not at all: it is charged the most it can cost, never an
+ * estimate below what the provider may bill.
  */
 const settlementOf = (
   pending: Admission,
@@ -2339,7 +2155,7 @@ const failureTroubles: Readonly<
   rate_limited: "limiting",
   provider_down: "not_answering",
   refused: undefined,
-  budget: undefined,
+  held: undefined,
 };
 
 /**
@@ -2475,25 +2291,14 @@ const refuse = async (
   if (code === "permission.context_invalid") {
     throw permissionErrors.create(code);
   }
-  const { retryAfterSeconds: retryAfter, waitingFor, capUntold } = refusal;
+  const { retryAfterSeconds: retryAfter, waitingFor } = refusal;
   const error = modelErrors.create(code, {
     model: call.model,
     ...(because === undefined ? {} : { because }),
     ...(waitingFor === undefined ? {} : { waitingFor }),
-    // Worth asking again, after this: a budget held by calls under way, a
-    // full share, or one used up until it resets.
+    // Worth asking again, after this: a full share, or a provider's rate.
     ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
   });
-  // Worded after the cap that refused it, so nobody waits for the month
-  // when a day's or one request's cap said no; never to a guest, who is
-  // told only that a budget is used up.
-  if (code === "model.over_budget" && capUntold !== true) {
-    error.message = overBudgetMessage(because);
-  }
-  // Which budget calls under way hold, and nothing of those calls.
-  if (code === "model.budget_busy" && capUntold !== true) {
-    error.message = busyBudgetMessage(because);
-  }
   throw error;
 };
 
@@ -2529,43 +2334,34 @@ const parseCall = <Schema extends z.ZodType>(
 
 /**
  * The scopes a provider request of `call` counts against once it is sent
- * (`Route.scopesNow`), by `scopesOn` for its day and its lineage's limit
- * of requests, and whose shares of the requests in flight it takes: from
- * its trigger and work context, which core's host sets, never from App
- * code.
+ * (`Route.scopesNow`), the organization's or Grasp's (`whose`), with its
+ * lineage's limit of requests, and whose shares of the requests in flight
+ * it takes: from its trigger and work context, which core's host sets,
+ * never from App code.
  */
 const scopesNowOf = (
   env: Env,
   call: Session,
   place: string,
-  scopesOn:
-    | ((day: string, lineageRequests: number) => LedgerScope[])
-    | "platform"
+  whose: "organization" | "platform"
 ): Route["scopesNow"] => {
   const { subject, resource } = shareIdentity(call);
   return async () => {
+    await Promise.resolve();
     const limits = quotaLimits(env);
     const lineageRequests = limits.lineageModelRequests;
-    // One clock for both, so a request at a month's last instant never
-    // counts its day in one month and its month in the next.
-    const { month, day } = budgetPeriods(env);
-    // The person's teams as core's records have them now, so a person
-    // moved between teams is held to the right limit from their next
-    // request.
-    // A call on Grasp's own key counts against none of the organization's
-    // budgets, a person's limit included (`platformScopes`).
-    const person =
-      scopesOn === "platform"
-        ? undefined
-        : await limitedPersonOf(env, budgetPersonOf(call));
     return {
-      period: month,
+      period: spendMonth(env),
       scopes:
-        scopesOn === "platform"
+        whose === "platform"
           ? platformScopes(call, lineageRequests)
-          : scopesOn(day, lineageRequests),
+          : [
+              ...scopesFor(call, lineageRequests),
+              ...(call.binding === undefined
+                ? []
+                : bindingScopes(call.binding)),
+            ],
       fair: { place, subject, resource, shares: modelSharesOf(limits) },
-      person,
     };
   };
 };
@@ -2728,10 +2524,6 @@ const admit = async (
   call: Session,
   via: Via = chosenVia
 ): Promise<Route> => {
-  const rules = modelRules(env);
-  if (rules === undefined) {
-    throw modelErrors.create("model.unconfigured");
-  }
   const { ref, routing } = await routingOf(env, call, via);
   const { endpoint } = routing;
   try {
@@ -2757,26 +2549,10 @@ const admit = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  // A model with no safe price can't be bounded, so no budget admits it.
+  // A model with no safe price is counted at no cost.
   const price = await pinnedPrice(
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
-  const { binding } = call;
-  const scopesOn = (day: string, lineageRequests: number): LedgerScope[] => {
-    const scopes = scopesFor(rules.budgets, call, lineageRequests);
-    return binding === undefined
-      ? scopes
-      : [...scopes, ...bindingScopes(binding, day)];
-  };
-  const requestMicros = bindingRequestMicros(binding);
-  // Whether a budget applies: the lineage's request limit limits no spend.
-  if (
-    price === undefined &&
-    (hasBudget(scopesOn(budgetPeriods(env).day, lineageModelRequests)) ||
-      requestMicros !== undefined)
-  ) {
-    return await refuse(env, call, { code: "model.unpriced" });
-  }
   // Whose shares of the requests in flight the call takes, from its
   // trigger and work context, which core's host sets: never from App code.
   const { disclose } = shareIdentity(call);
@@ -2795,17 +2571,13 @@ const admit = async (
     place,
     disclose,
     notes: Promise.resolve(),
-    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    // Grasp's own key: none of the organization's spend (`platformScopes`).
     scopesNow: scopesNowOf(
       env,
       call,
       place,
-      routing.way.credential === "platform" ? "platform" : scopesOn
+      routing.way.credential === "platform" ? "platform" : "organization"
     ),
-    perRequest:
-      requestMicros === undefined
-        ? undefined
-        : { limitMicros: requestMicros, heldMicros: 0 },
     env,
   };
 };
@@ -2875,9 +2647,7 @@ const fallbackOf = async (
     }
     return undefined;
   }
-  // The same call, on another model: it keeps what its requests already
-  // hold under its binding's cap per request, never a fresh count.
-  return { ...route, ...admitted, perRequest: route.perRequest };
+  return { ...route, ...admitted };
 };
 
 /** The code a call fails with for what its provider showed. */
@@ -2896,8 +2666,8 @@ const troubleCodes = {
  * request that got no answer at all (connect couldn't reach the provider,
  * or the deadline passed with it out: it may have been taken on), not an
  * answer begun, and not a call cut off here or with a request of it
- * already billed. The ledger still holds a 5xx's reservation charged
- * (`settleAdmitted`, "unknown"), as a bound on spend; whether running the
+ * already billed. The ledger still charges a 5xx's request its bound
+ * (`settleAdmitted`, "unknown"); whether running the
  * call again is safe is this rule's, which an exactly-once caller keeps to
  * (workflows/resource-host.ts).
  */
@@ -3465,8 +3235,8 @@ const relayOrFail = async (
 // transcription model writes down what someone says (voice-models.ts),
 // each fixed in code at its provider's EU host. They go through the gateway
 // like any model call, as what is said and heard is interview content:
-// the rules judge it, the ledger admits each provider request against the
-// budgets, at its price per character or per second, and the audit log
+// the rules judge it, the ledger admits and meters each provider request,
+// at its price per character or per second, and the audit log
 // records it, never anything said or heard. They go to the provider's own
 // API through connect, with Grasp's own key for it, which connect holds
 // (`platformSecret` in @grasp-os/shared/ai-providers): core holds no key,
@@ -3677,10 +3447,6 @@ const admitSpeech = async (
   env: Env,
   call: SpeechSession
 ): Promise<SpeechRoute> => {
-  // Budgets that don't parse send nothing, as for a text model's call.
-  if (modelRules(env) === undefined) {
-    throw modelErrors.create("model.unconfigured");
-  }
   const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
@@ -3739,10 +3505,9 @@ const admitSpeech = async (
     characters,
     platform: target.platform,
     // The line's characters are all it is billed for, known before it is
-    // sent: what the ledger reserves is what it charges.
+    // sent: the most it can cost is what the ledger charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
-    perRequest: undefined,
-    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    // Grasp's own key: none of the organization's spend (`platformScopes`).
     scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
@@ -3776,7 +3541,7 @@ const sendSpeechOnce = async (
     sent.held = admitted.held;
     return "done";
   }
-  // Cancelled while it was admitted: never sent, its reservation back.
+  // Cancelled while it was admitted: never sent, and settled as such.
   if (limit.signal.aborted) {
     sent.settled.push(await settleAdmitted(route, admitted, { by: "unsent" }));
     return "done";
@@ -3955,17 +3720,16 @@ const recordSpeech = async (
 // Listening: a transcription model writes down what someone says
 // (voice-models.ts), live over the provider's realtime socket
 // (transcription.ts), or from a recording (onboarding/hear.ts). The rules
-// judge it before anything is sent, failing closed; the ledger admits it
-// against the budgets at its price per second, for the most it may hear,
-// before anything is opened; and the audit log records it once it ended,
+// judge it before anything is sent; the ledger admits it at its price
+// per second, for the most it may hear, before anything is opened; and the audit log records it once it ended,
 // with the seconds heard and what they cost, never anything heard. The
 // caller reaches the provider only through what its admission hands it
 // (`Listening.send`, `Listening.socket`), each through connect with
 // Grasp's key, and is held to the seconds admitted.
 //
-// One provider request a listening, whatever its length: its reservation
-// is all it may hear, charged what it heard once it ended (`heard`), or
-// in full should it never say so (the ledger's reconciliation). Unlike a
+// One provider request a listening, whatever its length: its bound is
+// all it may hear, charged what it heard once it ended (`heard`), or in
+// full should it never say so (the ledger's reconciliation). Unlike a
 // text model's request it holds no share of the requests in flight while
 // it is open (`listeningLeaseMs`): a socket open for minutes would
 // otherwise keep Stephen's own turns, and every chat, from the client's
@@ -3994,7 +3758,7 @@ const listeningSchema = z.strictObject({
   work: sessionShape.work,
   requestId: sessionShape.requestId,
   /**
-   * The most seconds of audio it may hear: what the ledger reserves, and
+   * The most seconds of audio it may hear: the ledger's bound on it, and
    * what the caller holds the upstream to.
    */
   seconds: z.int().positive().max(maxListeningSeconds),
@@ -4036,8 +3800,7 @@ export interface Listening {
   seconds: number;
   /**
    * Charges the seconds it heard (whole seconds, rounded up, and never
-   * more than admitted), gives the rest of its reservation back, and
-   * audits it as a model call. Once: a second call does nothing. Never
+   * more than admitted), and audits it as a model call. Once: a second call does nothing. Never
    * throws.
    */
   heard: (seconds: number, outcome: ListeningOutcome) => Promise<void>;
@@ -4117,9 +3880,8 @@ const chargedSeconds = (heard: number, most: number): number =>
  * does a line, and has the ledger admit it for the most it may hear,
  * before anything is sent. A model that isn't a transcription model of
  * the gateway's (a speech model, or a text model), one the rules don't
- * let it use, one whose provider Grasp has no key for, or a budget with
- * no room refuses it, audited as a refused model call. Fails closed:
- * rules that don't parse send nothing.
+ * let it use, or one whose provider Grasp has no key for refuses it,
+ * audited as a refused model call.
  */
 const listenThrough = async (
   env: Env,
@@ -4127,10 +3889,6 @@ const listenThrough = async (
   signal: AbortSignal | undefined
 ): Promise<Listening> => {
   const call = parseCall(listeningSchema, fields);
-  // Budgets that don't parse send nothing, as for a text model's call.
-  if (modelRules(env) === undefined) {
-    throw modelErrors.create("model.unconfigured");
-  }
   const ref = parseHearingRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
@@ -4157,10 +3915,9 @@ const listenThrough = async (
     call,
     price,
     way: platformWay(ref.provider, target.platform, "transcription"),
-    perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
-    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    // Grasp's own key: none of the organization's spend (`platformScopes`).
     scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
@@ -4219,7 +3976,7 @@ const listenThrough = async (
 
 /**
  * Says a line through the gateway: refused, audited, before anything is
- * sent when the rules, Grasp's keys or a budget don't let it through;
+ * sent when the rules or Grasp's keys don't let it through;
  * otherwise sent, charged its characters and audited, however it ended.
  */
 const speakLine = async (
@@ -4330,19 +4087,19 @@ const agentModel = async (
  * The session is refused up front, before the loop keeps or sends
  * anything, and each request is admitted again by the rules as they stand
  * then (the context's restricted mode, what `provenance` says it has read
- * by then, the budgets), sent and audited like a call's.
+ * by then), sent and audited like a call's.
  *
  * `await models(env).speak({ model, text, voice, language, purpose,
  * trigger, work }, signal)` has a speech model say a line, with Grasp's
- * key for its provider: judged by the same rules, charged per character
- * against the same budgets, and audited like a call. It returns the audio
+ * key for its provider: judged by the same rules, charged per character,
+ * and audited like a call. It returns the audio
  * and when each word is said.
  *
  * `await models(env).listen({ model, seconds, openMs, purpose, trigger,
  * work }, signal)` admits a transcription model to hear at most `seconds`
  * of audio, with Grasp's key for its provider: judged by the same rules,
- * reserved per second against the same budgets, refused and audited like
- * a call when they don't let it through. It returns the way to the
+ * metered per second, refused and audited like a call when they don't
+ * let it through. It returns the way to the
  * provider, and `heard`, which charges what was heard and audits it once
  * it ended.
  */
@@ -4354,7 +4111,7 @@ export const models = (env: Env) => ({
    * A call of one of core's own platform features (its `work` names the
    * feature), to `<provider>/<model>` with Grasp's own key for the
    * provider, which connect holds (`OPENAI_API_KEY` and the like): judged
-   * by the rules, admitted against the budgets and audited like any call,
+   * by the rules, metered and audited like any call,
    * never falling back. Refused as `model.not_allowed` when Grasp has no
    * key for the provider. Only a platform call may carry a `document`.
    */

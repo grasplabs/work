@@ -183,7 +183,7 @@ const gatewayRefusal = /^The model call was refused \((?<code>[a-z_.]+)\)/u;
 
 /** What a gateway refusal tells the page: busy is worth a retry, the rest isn't. */
 const refusalOf = (code: string | undefined): TurnFailedError =>
-  code === "model.budget_busy" || code === "model.rate_limited"
+  code === "model.queued" || code === "model.rate_limited"
     ? new TurnFailedError("Stephen is busy. Try again in a minute.", 429)
     : new TurnFailedError("Stephen could not be reached. Try again.", 502);
 

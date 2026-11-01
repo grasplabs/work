@@ -4,11 +4,6 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { personLimitSubjectSchema } from "@grasp-os/shared/models";
-import type {
-  PersonLimitFrom,
-  PersonLimitSubject,
-} from "@grasp-os/shared/models";
 import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { DurableObject } from "cloudflare:workers";
@@ -32,13 +27,10 @@ import { inList } from "./db/d1.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
-  alerts,
   auditOutbox,
-  personLimits,
   policy,
   providerHealth,
   queue,
-  requestScopes,
   requests,
   spend,
 } from "./db/model-ledger/schema.ts";
@@ -56,121 +48,57 @@ import type { PinnedPrice } from "./model-prices.ts";
 import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 import { queueLiveMs } from "./workflows/admission.ts";
 
-// The model ledger: the one authority for what the deployment's model
-// requests may spend and have spent, a Durable Object per deployment,
-// whose storage orders every admission strictly. The gateway (models.ts)
-// asks it to admit each provider request, every HTTP request, a retry
-// too, before it is sent, and settles it once the request ends. Money is
-// whole micros (model-prices.ts) at prices pinned to the request when it
-// is admitted. Threat model, and how each is closed:
+// The model ledger: what the deployment's model requests have spent, a
+// Durable Object per deployment, whose storage orders every admission
+// strictly. The gateway (models.ts) asks it to admit each provider
+// request, every HTTP request, a retry too, before it is sent, and settles
+// it once the request ends. Money is whole micros (model-prices.ts) at
+// prices pinned to the request when it is admitted. Nothing here limits
+// spend: clients pay their providers on their own keys, and admins read
+// what was spent (model-spend.ts). Threat model, and how each is closed:
 //
-// - Concurrent requests overspend a budget: an admission reserves the
-//   request's most possible cost (its bound) against every one of its
-//   scopes (the deployment, the workflow, the person, the run lineage, a
-//   model binding's month and day) in one synchronous transaction that
-//   first checks each scope's spend plus what is reserved plus the bound
-//   against its limit, and its requests against its request limit.
-//   Nothing else runs in between, so
-//   reservations never oversubscribe a limit, and a scope without room
-//   refuses the whole request: no partial reservation.
-// - A run lineage escapes its limits: its scope is keyed by the lineage's
-//   root run, so a child run, a run beside it, a retry or a restart counts
-//   against the same spend and requests as the rest of the lineage, and
-//   its spend and alerts are kept under one period (`lineagePeriod`), so
-//   a new month doesn't start it afresh either. Each request records, per
-//   scope, the period it reserved against (`request_scopes.period`), and
-//   settles, is rebuilt and is summed against exactly that, never one
-//   worked out again later: so a request settles against what it
-//   reserved, whatever later releases change. A
-//   lineage whose spend row was lost lost its request count too: rebuilt,
-//   it is used up, under any quota policy.
+// - A run lineage escapes its limit of requests: its scope is keyed by the
+//   lineage's root run, so a child run, a run beside it, a retry or a
+//   restart counts against the same requests as the rest of the lineage,
+//   and its count is kept under one period (`lineagePeriod`), so a new
+//   month doesn't start it afresh either.
 // - A lineage's request limit kept past a policy change: each admission
-//   carries the limit of the policy in force (model-budgets.ts) and is
+//   carries the limit of the policy in force (model-spend.ts) and is
 //   checked against it; the lineage's row keeps only its count. An
 //   admission under an older generation than one this ledger already saw
 //   is refused (`policyBehind`), so nothing is admitted under an older
 //   policy once an admission came under a newer one.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
-//   may have committed: the gateway releases it only if it knows the
-//   request was never sent (`unsent`), and otherwise it is charged in
-//   full when it comes due, never lost.
+//   may have committed: the gateway settles it as `unsent` only if it
+//   knows the request was never sent, and otherwise it is charged the
+//   most it can cost when it comes due, never lost.
 // - Usage is lost: the provider may bill what it already took. Such a
-//   request is never charged nothing: its whole reservation stays held
-//   (`unknown`), and reconciliation charges it in full when it comes due
-//   (`reconcileAt`), on the object's alarm, which outlives the request,
-//   the isolate and a restart. A request whose gateway died before
-//   settling it is charged the same way.
-// - An accepted stream is cut off, its caller talking on: it is never
-//   charged nothing either, but what it is known to have used (`cut`):
-//   the prompt as counted, or its bound, and the answer as relayed,
-//   estimated within its cap. The rest goes back at once, so one cut-off
-//   answer doesn't fill a budget until it comes due. The provider may
-//   bill the few tokens it made after the last one relayed.
-// - A retry releases an unknown earlier cost: every provider request has
-//   its own ID and reservation; a retry is admitted, reserved and settled
-//   on its own, and nothing settles one request by another's outcome.
-// - A lineage's rows pruned while it can still spend, or told early that
-//   it ended: the alarm prunes a lineage's spend and alerts only once
+//   request is never counted as nothing: it is charged the most it can
+//   cost (`unknown`) when it comes due (`reconcileAt`), on the object's
+//   alarm, which outlives the request, the isolate and a restart. A
+//   request whose gateway died before settling it is charged the same way.
+// - An accepted stream is cut off, its caller talking on: it is charged
+//   what it is known to have used (`cut`): the prompt as counted, or its
+//   bound, and the answer as relayed, estimated within its cap.
+// - A lineage's rows pruned while it can still make requests, or told
+//   early that it ended: the alarm prunes a lineage's spend only once
 //   core's own records of its runs (`workflow_runs`, which only core
-//   writes) say every run of it ended a retention ago, and no open
-//   request reserves against it; nothing an App or a run passes says so
-//   (run-lineage-ends.ts).
+//   writes) say every run of it ended a retention ago; nothing an App or
+//   a run passes says so (run-lineage-ends.ts).
 // - A request is settled twice, or an ID reused: a request settles once
 //   (`state`), later settlements answer the first; an admission repeated
 //   with the same input under its ID answers the first, and other input
-//   under it is refused. A release that would leave a scope's
-//   reservations below nothing is refused by the database (`CHECK`).
-// - A request can't be read to settle, or its spend is damaged (that
-//   `CHECK` failed, or a scope's spend is gone): it is set aside
-//   (`quarantined`), logged and audited, and keeps holding its
-//   reservation, as what it holds can't be told, until its period ends.
-// - A model with no safe price or output bound: the gateway admits no
-//   such request against a budget (model-prices.ts); its price and bound
-//   are pinned here when admitted, so a later catalog never reprices it.
-// - Duplicate alerts or audit entries: an alert's row is keyed by scope,
-//   month, kind and threshold value, and its event is stored in this
-//   object's outbox only when that insert added the row, in the same
-//   transaction as the spend that reached it.
+//   under it is refused.
+// - A request can't be read to settle: it is set aside (`quarantined`),
+//   logged and audited, and charged nothing.
 // - Spend crosses clients: each deployment's core has its own namespace
 //   of this object, so no other client's requests reach this ledger.
-// - A refusal tells a caller about other people's requests: a scope held
-//   only by requests under way answers which scopes are full and when the
-//   soonest request under way in each reaches its deadline, and nothing
-//   else of them (whose, which model, how much, how many). The gateway
-//   passes on a wait derived from that time only when every full scope
-//   is the caller's own (their user scope, their run); for a shared scope
-//   it passes on a fixed wait, and to a guest, whose user scope is the
-//   member who invited them, it says only that the budget is used up
-//   (models.ts).
-//
-// It also keeps the limits the company's admins set per person (D8): a
-// default monthly limit and messages an hour, and exceptions for a person
-// or a team (`person_limits`). They limit within Grasp's budgets, never
-// beside them:
-//
-// - A limit lifting spend above Grasp's budgets: the person's limit is one
-//   more scope (`person`), reserved against beside the console's, which
-//   still refuse on their own; and a monthly limit above Grasp's budget
-//   for one person or for the deployment is refused when it is set
-//   (`setPersonLimit`). Should the console lower a budget below a limit
-//   set before, the budget still refuses first.
-// - A call choosing its own limit: the gateway passes only whose call it
-//   is and their teams (core's own records, never App code), and an
-//   admission naming the `person` scope itself is refused. The ledger
-//   reads the limit in the same transaction it reserves in, so a limit
-//   lowered applies to the very next request, and none races it.
-// - A limit set mid-month missing what was already spent: the `person`
-//   scope is counted for every request with a person, limit or not, as a
-//   model binding's are, so a limit set later counts the month's spend.
-// - A change nobody can account for: each is audited in the admin's name,
-//   with what it was before, in the same transaction as the change.
 //
 // It also admits each request fairly among the client's requests in
-// flight, for one person and of one App, in the same transaction as its
-// budgets: a request's receipt is its lease on its shares, and the calls
-// waiting for one keep places in its queue. That threat model is
-// model-admission.ts's.
+// flight, for one person and of one App, in the same transaction: a
+// request's receipt is its lease on its shares, and the calls waiting for
+// one keep places in its queue. That threat model is model-admission.ts's.
 
 /** The object's name: one ledger for the deployment. */
 const ledgerName = "deployment";
@@ -198,17 +126,15 @@ const scopeNames = [
   "workflow",
   "user",
   "run",
+  // An App's model binding, by its App and alias (model-spend.ts).
   "binding",
-  "binding_day",
-  "person",
   // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
-  // counted, never limited, and apart from every scope of the
-  // organization's own.
+  // counted apart from every scope of the organization's own.
   "platform",
 ] as const;
 
 /**
- * The period a run lineage's spend, requests and alerts are kept under,
+ * The period a run lineage's spend and requests are kept under,
  * whatever month its requests count in for the other scopes: a lineage
  * is counted for its whole life.
  */
@@ -226,17 +152,11 @@ const microsSchema = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 const scopeSchema = z.strictObject({
   scope: z.enum(scopeNames),
   key: z.string().min(1).max(512),
-  /** The most it may spend this month; `null` without a budget: counted only. */
-  limitMicros: microsSchema.nullable(),
-  /** Where admins are alerted; `null` without a budget. */
-  alertMicros: microsSchema.nullable(),
   /** The most requests it may admit; `null` for no limit. */
   limitRequests: z.int().positive().nullable().default(null),
-  /** What its alerts name, as audit detail: the workflow or the person. */
-  names: z.record(z.string(), z.string()),
 });
 
-/** One scope a request counts against, with its budget when admitted. */
+/** One scope a request counts against. */
 export type LedgerScope = z.input<typeof scopeSchema>;
 
 const ratesShape = {
@@ -257,118 +177,6 @@ const priceSchema = z.strictObject({
 });
 
 const periodPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
-
-/** The most teams of a person an admission names, to find their limit by. */
-export const personTeamsMost = 100;
-
-/**
- * Whose limit a request counts against: the person, by the key of their
- * user scope, and the teams they are in.
- */
-const limitedPersonSchema = z.strictObject({
-  key: z.string().min(1).max(512),
-  teams: z.array(z.string().min(1).max(512)).max(personTeamsMost),
-});
-
-/** The person a request counts for, and their teams. */
-export type LimitedPerson = z.input<typeof limitedPersonSchema>;
-
-/** A limit an admin set, as the ledger keeps it: micros a month, messages an hour. */
-export interface StoredPersonLimit {
-  subject: PersonLimitSubject;
-  monthlyMicros: number | null;
-  messagesAnHour: number | null;
-}
-
-/** A person's limit, and where it comes from. */
-export interface AppliedPersonLimit {
-  from: PersonLimitFrom;
-  monthlyMicros: number | null;
-  messagesAnHour: number | null;
-}
-
-/** A stored limit's values alone. */
-const limitValues = ({ monthlyMicros, messagesAnHour }: StoredPersonLimit) => ({
-  monthlyMicros,
-  messagesAnHour,
-});
-
-/** The more generous of two limits, none being the most. */
-const moreGenerous = (one: number | null, other: number | null) =>
-  one === null || other === null ? null : Math.max(one, other);
-
-/**
- * The limit that applies to `person` in `teams`, of those `stored`: their
- * own exception; else their teams' exceptions, the most generous of each
- * (a team's exception grants, so being in one more team never takes
- * away); else the default; else none.
- */
-export const appliedLimit = (
-  stored: readonly StoredPersonLimit[],
-  person: string,
-  teams: readonly string[]
-): AppliedPersonLimit => {
-  const own = stored.find(
-    ({ subject }) => subject.type === "person" && subject.userId === person
-  );
-  if (own !== undefined) {
-    return { from: "person", ...limitValues(own) };
-  }
-  const ofTeams = stored.filter(
-    ({ subject }) => subject.type === "team" && teams.includes(subject.teamId)
-  );
-  const [first, ...rest] = ofTeams;
-  if (first !== undefined) {
-    let { monthlyMicros, messagesAnHour } = first;
-    for (const one of rest) {
-      monthlyMicros = moreGenerous(monthlyMicros, one.monthlyMicros);
-      messagesAnHour = moreGenerous(messagesAnHour, one.messagesAnHour);
-    }
-    return { from: "team", monthlyMicros, messagesAnHour };
-  }
-  const fallback = stored.find(({ subject }) => subject.type === "default");
-  return fallback === undefined
-    ? { from: "none", monthlyMicros: null, messagesAnHour: null }
-    : { from: "default", ...limitValues(fallback) };
-};
-
-/** A subject as `person_limits` keys it: its type, and its ID (none for the default). */
-const subjectKey = (
-  subject: PersonLimitSubject
-): { subjectType: PersonLimitSubject["type"]; subjectId: string } => {
-  if (subject.type === "person") {
-    return { subjectType: "person", subjectId: subject.userId };
-  }
-  if (subject.type === "team") {
-    return { subjectType: "team", subjectId: subject.teamId };
-  }
-  return { subjectType: "default", subjectId: "" };
-};
-
-/** A `person_limits` row's subject; none for one that can't be read. */
-const subjectOf = (row: {
-  subjectType: string;
-  subjectId: string;
-}): PersonLimitSubject | undefined => {
-  if (row.subjectType === "person") {
-    return personLimitSubjectSchema.safeParse({
-      type: "person",
-      userId: row.subjectId,
-    }).data;
-  }
-  if (row.subjectType === "team") {
-    return personLimitSubjectSchema.safeParse({
-      type: "team",
-      teamId: row.subjectId,
-    }).data;
-  }
-  return row.subjectType === "default" ? { type: "default" } : undefined;
-};
-
-const storedLimitSchema = z.strictObject({
-  monthlyMicros: microsSchema.nullable(),
-  messagesAnHour: z.int().positive().nullable(),
-});
 
 /**
  * The way a request goes, as recorded with it (models.ts): its transport,
@@ -424,11 +232,6 @@ export interface PlatformSpendByPeriod {
   micros: number;
 }
 
-/** What an admin's limit came to: set, or refused as above Grasp's budget. */
-export type PersonLimitSetting =
-  | { state: "set" }
-  | { state: "above_budget"; ceilingMicros: number };
-
 const admissionSchema = z
   .strictObject({
     /** The provider request's ID: one per HTTP request. */
@@ -437,16 +240,14 @@ const admissionSchema = z
     period: z.string().regex(periodPattern),
     /**
      * Each scope once, at most one of each kind the gateway counts (the
-     * deployment, the workflow, the person, the run, a model binding's
-     * month and day): a bound that also keeps a decision's audit event
-     * within its detail limit. The person's limit is one more, which the
-     * ledger adds itself (`person`). Grasp's own (`platform`) goes only
-     * with a run's, never beside the organization's.
+     * deployment, the workflow, the person, the run, a model binding).
+     * Grasp's own
+     * (`platform`) goes only with a run's, never beside the organization's.
      */
     scopes: z
       .array(scopeSchema)
       .min(1)
-      .max(scopeNames.length - 2)
+      .max(scopeNames.length - 1)
       .refine(
         (all) =>
           new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
@@ -455,15 +256,18 @@ const admissionSchema = z
       ),
     model: z.string().min(1).max(256),
     price: priceSchema,
-    /** The most the request can cost at its price. */
+    /**
+     * The most the request can cost at its price: what it is charged
+     * when its usage can't be known.
+     */
     reservedMicros: microsSchema,
     actor: auditActorSchema,
-    /**
-     * When the call is cut off at the latest, in ms since the epoch: until
-     * then it may settle for less than it reserved.
-     */
+    /** When the call is cut off at the latest, in ms since the epoch. */
     deadline: z.int().positive(),
-    /** When it is charged in full unless settled before, in ms since the epoch. */
+    /**
+     * When it is charged the most it can cost unless settled before, in
+     * ms since the epoch.
+     */
     reconcileAt: z.int().positive(),
     /**
      * How long after it is admitted it holds its shares of the requests in
@@ -479,59 +283,34 @@ const admissionSchema = z
     policyGeneration: z.int().min(0).optional(),
     /** Whose shares of the requests in flight it takes, and how many there are. */
     fair: fairnessSchema,
-    /**
-     * The person it counts for, whose limit the ledger reserves against
-     * as the `person` scope; none for a call made for nobody.
-     */
-    person: limitedPersonSchema.optional(),
     /** The way it goes (`routeSchema`); none for a voice model's. */
     route: routeSchema.optional(),
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
-  })
-  // Only the ledger sets a person's limit, from what admins set.
-  .refine(({ scopes }) => scopes.every(({ scope }) => scope !== "person"), {
-    message: "The ledger makes the person's scope",
   });
 
 /** A provider request to admit. */
 export type Admission = z.input<typeof admissionSchema>;
 
-/**
- * Whether it was admitted, or which scope has no room. A refusal with
- * `heldUntil` is one whose room is held only by requests still under way,
- * which may settle for less than they reserved: `heldBy` names every
- * scope without room, and `heldUntil` is when room is hoped back, in ms
- * since the epoch (`#refusal`). Without it, spend leaves no room.
- */
+/** Whether it was admitted, or why not. */
 export type Admitted =
   | { ok: true }
-  | { ok: false; scope: LedgerScopeName }
-  | {
-      ok: false;
-      scope: LedgerScopeName;
-      heldBy: LedgerScopeName[];
-      heldUntil: number;
-    }
-  /** It admitted as many requests as it may: refused, for good. */
+  /** Its scope admitted as many requests as it may: refused, for good. */
   | { ok: false; scope: LedgerScopeName; requests: true }
   /**
    * Its quota policy generation is lower than one an admission already
-   * carried: refused, reserving nothing, to be asked again under the
-   * policy in force.
+   * carried: refused, to be asked again under the policy in force.
    */
   | { ok: false; policyBehind: true; highest: number }
   /**
    * Its ID was admitted before, for another request or one no longer
-   * open: refused, reserving nothing.
+   * open: refused.
    */
   | { ok: false; reused: true }
-  /** No price for its input or output, against a budget: refused. */
-  | { ok: false; unpriced: true }
   /**
    * A share of the requests in flight it is held to is full: refused,
-   * reserving nothing, its call's place in the queue kept (`joined` when
+   * its call's place in the queue kept (`joined` when
    * this admission gave it one; `placed` while it holds one), to ask
    * again after `retryAfterSeconds` at the latest (model-admission.ts).
    */
@@ -606,42 +385,33 @@ export type Settlement = z.input<typeof settlementSchema>;
 export type Settled =
   | { state: "settled"; chargedMicros: number }
   | { state: "unknown" }
-  /** It couldn't be read to settle, and holds its reservation. */
+  /** It couldn't be read to settle, and was charged nothing. */
   | { state: "quarantined" }
   | { state: "missing" };
 
-const namesSchema = z.record(z.string(), z.string());
-
-/** What a scope spent and holds in a month, for admins to read. */
+/** What a scope spent in a month, for admins to read. */
 export interface ScopeSpend {
   key: string;
   spentMicros: number;
-  reservedMicros: number;
 }
 
 /** A request as its row stores it. */
 type RequestRow = typeof requests.$inferSelect;
 
 /**
- * Whether a request on `credential` holds and spends its money on `scope`:
- * every scope it counts in, but for a call on Grasp's own key (one of
- * Grasp's features), whose money is Grasp's alone. Such a call still
- * counts as a request in the organization's run scope (a lineage's limit
- * of requests, which bounds every call), but never as money there, so a
- * platform call leaves an organization-funded budget as it was.
+ * Whether a request on `credential` spends its money on `scope`: every
+ * scope it counts in, but for a call on Grasp's own key (one of Grasp's
+ * features), whose money is Grasp's alone. Such a call still counts as a
+ * request in the organization's run scope (a lineage's limit of requests,
+ * which bounds every call), but never as money there, so the
+ * organization's spend shows only what its own keys cost.
  */
-const holdsMoney = (
+const spendsMoney = (
   scope: LedgerScopeName,
   credential: string | null
 ): boolean => credential !== "platform" || scope === "platform";
 
 const storedScopesSchema = z.array(scopeSchema);
-
-/** The two thresholds a budget alerts at. */
-const thresholds = [
-  { kind: "alert", of: (scope: LedgerScope) => scope.alertMicros },
-  { kind: "exhausted", of: (scope: LedgerScope) => scope.limitMicros },
-] as const;
 
 /** `text` as JSON; `undefined` when it isn't. */
 const jsonOf = (text: string): unknown => {
@@ -656,30 +426,16 @@ const jsonOf = (text: string): unknown => {
 const pricesOf = (row: RequestRow): PinnedPrice | undefined =>
   priceSchema.safeParse(jsonOf(row.prices)).data;
 
-/** The scopes `row` reserved against; `undefined` when they can't be read. */
+/** The scopes `row` counts against; `undefined` when they can't be read. */
 const scopesOf = (row: RequestRow): LedgerScope[] | undefined =>
   storedScopesSchema.safeParse(jsonOf(row.scopes)).data;
 
 /**
  * Who `row` was made for, for the events it causes: the system when that
- * can't be read, so a request is still settled and alerted on.
+ * can't be read, so a request is still settled.
  */
 const actorOf = (row: RequestRow): AuditActor =>
   auditActorSchema.safeParse(jsonOf(row.actor)).data ?? { type: "system" };
-
-/** Micros as US dollars, none as none. */
-const dollarsOf = (micros: number | null): number | null =>
-  micros === null ? null : micros / microsPerDollar;
-
-/** A limit's subject as audit detail: its type, and its person or team. */
-const limitDetail = ({
-  subjectType,
-  subjectId,
-}: ReturnType<typeof subjectKey>) => ({
-  subject: subjectType,
-  ...(subjectType === "person" ? { userId: subjectId } : {}),
-  ...(subjectType === "team" ? { teamId: subjectId } : {}),
-});
 
 /** The deployment's model ledger, in the EU unless turned off. */
 export const modelLedger = (
@@ -713,20 +469,18 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * Admits one provider request before it is sent: reserves its most
-   * possible cost against every one of its scopes in one transaction, or
-   * refuses it, reserving nothing, when any scope with a limit lacks room
-   * for it. Alerts admins first to every threshold a scope's spend has
-   * reached without an alert (a limit lowered below this month's spend).
-   * Admitting the same request again answers yes without reserving twice.
+   * Admits one provider request before it is sent: counts it against
+   * every one of its scopes in one transaction, or refuses it, counting
+   * nothing, when a scope with a limit of requests has made them all, or
+   * a share of the requests in flight it is held to is full. Admitting the
+   * same request again answers yes without counting it twice.
    */
   async admit(input: Admission): Promise<Admitted> {
     const admission = admissionSchema.parse(input);
     const fingerprint = await fingerprintOf(admission);
     const actor = JSON.stringify(admission.actor);
     const now = Date.now();
-    const credential = admission.route?.credential ?? null;
-    const { admitted } = this.ctx.storage.transactionSync(() => {
+    const admitted = this.ctx.storage.transactionSync((): Admitted => {
       const existing = this.#db
         .select({ fingerprint: requests.fingerprint, state: requests.state })
         .from(requests)
@@ -736,94 +490,33 @@ export class ModelLedger extends DurableObject<Env> {
         // A repeat of the same admission, while its request is still open
         // and unsettled; never one that settled or whose usage was lost.
         // It holds the one lease it took: no second.
-        return {
-          admitted:
-            existing.fingerprint === fingerprint &&
-            existing.state === "dispatched"
-              ? ({ ok: true } as const)
-              : ({ ok: false, reused: true } as const),
-          alerted: 0,
-        };
+        return existing.fingerprint === fingerprint &&
+          existing.state === "dispatched"
+          ? { ok: true }
+          : { ok: false, reused: true };
       }
       const highest =
         admission.policyGeneration === undefined
           ? undefined
           : this.#policyAhead(admission.policyGeneration);
       if (highest !== undefined) {
-        return {
-          admitted: { ok: false, policyBehind: true, highest } as const,
-          alerted: 0,
-        };
+        return { ok: false, policyBehind: true, highest };
       }
-      const scopes =
-        admission.person === undefined
-          ? admission.scopes
-          : [...admission.scopes, this.#personScope(admission.person)];
-      const { price } = admission;
-      const unpriced = [price, ...price.tiers].some(
-        (rates) => rates.input === 0 || rates.output === 0
-      );
-      if (unpriced && scopes.some(({ limitMicros }) => limitMicros !== null)) {
-        this.#leaveQueue(admission.fair.place);
-        return { admitted: { ok: false, unpriced: true } as const, alerted: 0 };
-      }
-      const rows = scopes.map((scope) => ({
-        scope,
-        row: this.#spendOf(scope, admission.period),
-      }));
+      const { scopes } = admission;
       // No request comes back but one never sent: a scope out of requests
-      // is refused whatever its spend.
-      const counted = rows.find(
-        ({ scope, row }) =>
-          scope.limitRequests !== null && row.requests >= scope.limitRequests
+      // is refused for good.
+      const counted = scopes.find(
+        (scope) =>
+          scope.limitRequests !== null &&
+          this.#requestsOf(scope, admission.period) >= scope.limitRequests
       );
       if (counted !== undefined) {
         this.#leaveQueue(admission.fair.place);
-        return {
-          admitted: {
-            ok: false,
-            scope: counted.scope.scope,
-            requests: true,
-          } as const,
-          alerted: 0,
-        };
-      }
-      let alertedNow = 0;
-      for (const { scope, row } of rows) {
-        alertedNow += this.#alert(
-          scope,
-          admission.period,
-          row.spentMicros,
-          admission.actor
-        );
-      }
-      const full = rows.filter(
-        ({ scope, row }) =>
-          scope.limitMicros !== null &&
-          row.spentMicros + row.reservedMicros + admission.reservedMicros >
-            scope.limitMicros
-      );
-      const refused =
-        full.length === 0
-          ? undefined
-          : this.#refusal(
-              full,
-              admission.period,
-              admission.reservedMicros,
-              now
-            );
-      // A budget without room, used up or held by requests under way, is
-      // told so before any share is looked at, and holds no place: no
-      // wait for a share helps it. Both budget refusals come first, so
-      // whether a share is full never tells one from the other (a guest,
-      // who spends the member's budgets, hears the same either way).
-      if (refused !== undefined) {
-        this.#leaveQueue(admission.fair.place);
-        return { admitted: refused, alerted: alertedNow };
+        return { ok: false, scope: counted.scope, requests: true };
       }
       const queued = this.#queuedFor(admission.fair, now);
       if (queued !== undefined) {
-        return { admitted: queued, alerted: alertedNow };
+        return queued;
       }
       this.#leaveQueue(admission.fair.place);
       this.#db
@@ -852,229 +545,27 @@ export class ModelLedger extends DurableObject<Env> {
           ...routeColumns(admission.route),
         })
         .run();
-      for (const {
-        scope,
-        key,
-        limitMicros,
-        alertMicros,
-        limitRequests,
-        names,
-      } of scopes) {
-        const held = holdsMoney(scope, credential)
-          ? admission.reservedMicros
-          : 0;
-        this.#db
-          .insert(requestScopes)
-          .values({
-            requestId: admission.id,
-            scope,
-            key,
-            limitMicros,
-            alertMicros,
-            names: JSON.stringify(names),
-            period: periodOf(scope, admission.period),
-            limitRequests: limitRequests ?? null,
-            reservedMicros: held,
-          })
-          .run();
+      for (const { scope, key } of scopes) {
         this.#db
           .insert(spend)
           .values({
             scope,
             key,
             period: periodOf(scope, admission.period),
-            reservedMicros: held,
             requests: 1,
           })
           .onConflictDoUpdate({
             target: [spend.scope, spend.key, spend.period],
-            set: {
-              reservedMicros: sql`${spend.reservedMicros} + excluded.reserved_micros`,
-              requests: sql`${spend.requests} + 1`,
-            },
+            set: { requests: sql`${spend.requests} + 1` },
           })
           .run();
       }
-      return { admitted: { ok: true } as const, alerted: alertedNow };
+      return { ok: true };
     });
     if (admitted.ok) {
       await this.#alarmBy(admission.reconcileAt);
     }
-    this.#deliverIfStored();
     return admitted;
-  }
-
-  /**
-   * The `person` scope of a request made for `person`: keyed as their user
-   * scope, limited to what admins set for them, counted without a limit
-   * when they set none. Inside the transaction that admits it.
-   */
-  #personScope({ key, teams }: z.output<typeof limitedPersonSchema>) {
-    const { monthlyMicros } = appliedLimit(
-      this.#storedLimits(key, teams),
-      key,
-      teams
-    );
-    return scopeSchema.parse({
-      scope: "person",
-      key,
-      limitMicros: monthlyMicros,
-      // Admins are told when it is used up, not before: it is theirs to
-      // set, and they read each person's spend in Settings.
-      alertMicros: null,
-      names: { user: key },
-    });
-  }
-
-  /**
-   * The limits stored for `person`, `teams` and the default (all of them
-   * with neither), each that can be read: one that can't is left out,
-   * logged, so a damaged row never stops the calls it would limit.
-   */
-  #storedLimits(person?: string, teams: readonly string[] = []) {
-    const rows = this.#db
-      .select()
-      .from(personLimits)
-      .where(
-        person === undefined
-          ? undefined
-          : sql`${personLimits.subjectType} = 'default' OR (${personLimits.subjectType} = 'person' AND ${personLimits.subjectId} = ${person}) OR (${personLimits.subjectType} = 'team' AND ${inList(personLimits.subjectId, teams)})`
-      )
-      .all();
-    return rows.flatMap((row): StoredPersonLimit[] => {
-      const subject = subjectOf(row);
-      const values = storedLimitSchema.safeParse({
-        monthlyMicros: row.monthlyMicros,
-        messagesAnHour: row.messagesAnHour,
-      }).data;
-      if (subject === undefined || values === undefined) {
-        log.error("model.person_limit_unreadable", {
-          subject: row.subjectType,
-        });
-        return [];
-      }
-      return [{ subject, ...values }];
-    });
-  }
-
-  /** Every limit admins set: the default and each exception. */
-  async personLimits(): Promise<StoredPersonLimit[]> {
-    await Promise.resolve();
-    return this.#storedLimits();
-  }
-
-  /** The limit that applies to `person`, in `teams`. */
-  async personLimitOf(input: LimitedPerson): Promise<AppliedPersonLimit> {
-    const { key, teams } = limitedPersonSchema.parse(input);
-    await Promise.resolve();
-    return appliedLimit(this.#storedLimits(key, teams), key, teams);
-  }
-
-  /**
-   * Sets the limit for `subject`, audited in the name of `by` with what
-   * it replaced, in one transaction; refused, changing nothing, when its
-   * monthly limit is above `ceilingMicros` (Grasp's budget, none for no
-   * budget).
-   */
-  async setPersonLimit(
-    subjectInput: PersonLimitSubject,
-    limitInput: Pick<StoredPersonLimit, "monthlyMicros" | "messagesAnHour">,
-    ceilingMicros: number | null,
-    by: AuditActor
-  ): Promise<PersonLimitSetting> {
-    const subject = personLimitSubjectSchema.parse(subjectInput);
-    const limit = storedLimitSchema.parse(limitInput);
-    const ceiling = microsSchema.nullable().parse(ceilingMicros);
-    const actor = auditActorSchema.parse(by);
-    if (
-      ceiling !== null &&
-      limit.monthlyMicros !== null &&
-      limit.monthlyMicros > ceiling
-    ) {
-      await Promise.resolve();
-      return { state: "above_budget", ceilingMicros: ceiling };
-    }
-    const key = subjectKey(subject);
-    this.ctx.storage.transactionSync(() => {
-      const before = this.#limitRow(key);
-      this.#db
-        .insert(personLimits)
-        .values({ ...key, ...limit, updatedAt: Date.now() })
-        .onConflictDoUpdate({
-          target: [personLimits.subjectType, personLimits.subjectId],
-          set: { ...limit, updatedAt: Date.now() },
-        })
-        .run();
-      this.#outbox({
-        actor,
-        action: "model.limit.set",
-        detail: {
-          ...limitDetail(key),
-          monthly: dollarsOf(limit.monthlyMicros),
-          messagesAnHour: limit.messagesAnHour,
-          "before.monthly": dollarsOf(before?.monthlyMicros ?? null),
-          "before.messagesAnHour": before?.messagesAnHour ?? null,
-          "before.set": before !== undefined,
-        },
-      });
-    });
-    this.#deliverIfStored();
-    return { state: "set" };
-  }
-
-  /**
-   * Removes `subject`'s limit, audited in the name of `by` with what it
-   * was; nothing for a subject with none.
-   */
-  async removePersonLimit(
-    subjectInput: PersonLimitSubject,
-    by: AuditActor
-  ): Promise<void> {
-    const key = subjectKey(personLimitSubjectSchema.parse(subjectInput));
-    const actor = auditActorSchema.parse(by);
-    this.ctx.storage.transactionSync(() => {
-      const before = this.#limitRow(key);
-      if (before === undefined) {
-        return;
-      }
-      this.#db
-        .delete(personLimits)
-        .where(
-          and(
-            eq(personLimits.subjectType, key.subjectType),
-            eq(personLimits.subjectId, key.subjectId)
-          )
-        )
-        .run();
-      this.#outbox({
-        actor,
-        action: "model.limit.removed",
-        detail: {
-          ...limitDetail(key),
-          "before.monthly": dollarsOf(before.monthlyMicros),
-          "before.messagesAnHour": before.messagesAnHour,
-        },
-      });
-    });
-    this.#deliverIfStored();
-    await Promise.resolve();
-  }
-
-  /** The stored row of subject `key`, if any. Inside a transaction. */
-  #limitRow(key: ReturnType<typeof subjectKey>) {
-    return this.#db
-      .select({
-        monthlyMicros: personLimits.monthlyMicros,
-        messagesAnHour: personLimits.messagesAnHour,
-      })
-      .from(personLimits)
-      .where(
-        and(
-          eq(personLimits.subjectType, key.subjectType),
-          eq(personLimits.subjectId, key.subjectId)
-        )
-      )
-      .get();
   }
 
   /**
@@ -1242,38 +733,32 @@ export class ModelLedger extends DurableObject<Env> {
   /**
    * Settles one provider request: charges what its usage cost at its
    * pinned prices (one cut off mid-answer what it is known to have used),
-   * or nothing when the provider refused it or it was never sent, and
-   * releases its reservation. A request whose usage can't be known keeps
-   * its whole reservation until reconciliation charges it in full. A request settles once; settling it again
+   * or nothing when the provider refused it or it was never sent. A
+   * request whose usage can't be known waits for reconciliation to charge
+   * it the most it can cost. A request settles once; settling it again
    * answers how it settled.
    */
   async settle(id: string, input: Settlement): Promise<Settled> {
     const settlement = settlementSchema.parse(input);
-    const { settled } = this.ctx.storage.transactionSync(() => {
+    const settled = this.ctx.storage.transactionSync((): Settled => {
       const row = this.#db
         .select()
         .from(requests)
         .where(eq(requests.id, id))
         .get();
       if (row === undefined) {
-        return { settled: { state: "missing" } as const, alerted: 0 };
+        return { state: "missing" };
       }
       if (row.state === "settled") {
-        return {
-          settled: {
-            state: "settled",
-            chargedMicros: row.chargedMicros ?? 0,
-          } as const,
-          alerted: 0,
-        };
+        return { state: "settled", chargedMicros: row.chargedMicros ?? 0 };
       }
       if (row.state === "quarantined") {
-        return { settled: { state: "quarantined" } as const, alerted: 0 };
+        return { state: "quarantined" };
       }
       // Once its usage was lost, only reconciliation closes it: no later
-      // report, of any kind, releases what it holds.
+      // report, of any kind, settles it for less.
       if (row.state === "unknown") {
-        return { settled: { state: "unknown" } as const, alerted: 0 };
+        return { state: "unknown" };
       }
       this.#noteProvider(row, settlement);
       if (settlement.by === "unknown") {
@@ -1282,10 +767,10 @@ export class ModelLedger extends DurableObject<Env> {
           .set({ state: "unknown" })
           .where(eq(requests.id, id))
           .run();
-        return { settled: { state: "unknown" } as const, alerted: 0 };
+        return { state: "unknown" };
       }
       // A refusal or an unsent request costs nothing, prices or not. A
-      // count whose prices can't be read is charged the whole reservation,
+      // count whose prices can't be read is charged the most it can cost,
       // as reconciliation charges a count that was lost.
       const counted =
         settlement.by === "usage" || settlement.by === "cut"
@@ -1299,12 +784,12 @@ export class ModelLedger extends DurableObject<Env> {
       } else if (counted !== undefined && prices !== undefined) {
         charged = costMicros(prices, counted);
       }
-      const alertedNow = this.#charge(
-        row,
-        charged,
-        unpriced ? "reconciled" : settlement.by
-      );
-      if (unpriced && alertedNow !== "quarantined") {
+      if (
+        !this.#charge(row, charged, unpriced ? "reconciled" : settlement.by)
+      ) {
+        return { state: "quarantined" };
+      }
+      if (unpriced) {
         this.#outbox({
           actor: actorOf(row),
           action: "model.spend.reconciled",
@@ -1317,19 +802,13 @@ export class ModelLedger extends DurableObject<Env> {
           },
         });
       }
-      return alertedNow === "quarantined"
-        ? { settled: { state: "quarantined" } as const, alerted: 0 }
-        : {
-            settled: { state: "settled", chargedMicros: charged } as const,
-            alerted: alertedNow,
-          };
+      return { state: "settled", chargedMicros: charged };
     });
     this.#deliverIfStored();
     await Promise.resolve();
     return settled;
   }
 
-  /** The requests set aside because they couldn't be read, oldest first, at most `limit`. */
   /**
    * Notes how a request of a provider ended, as it settles, by whose key:
    * worked once it ended with a count, failed once it was refused or
@@ -1491,8 +970,8 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * What each of `scopes` spent and holds in `period` (a run lineage: in
-   * its whole life), most spent first, at most `limit` each; ties by key,
+   * What each of `scopes` spent in `period` (a run lineage: in its whole
+   * life), most spent first, at most `limit` each; ties by key,
    * descending.
    */
   async spendOf(
@@ -1503,11 +982,7 @@ export class ModelLedger extends DurableObject<Env> {
     const read: Record<string, ScopeSpend[]> = {};
     for (const scope of scopes) {
       read[scope] = this.#db
-        .select({
-          key: spend.key,
-          spentMicros: spend.spentMicros,
-          reservedMicros: spend.reservedMicros,
-        })
+        .select({ key: spend.key, spentMicros: spend.spentMicros })
         .from(spend)
         .where(
           and(eq(spend.scope, scope), eq(spend.period, periodOf(scope, period)))
@@ -1521,9 +996,9 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * What `scope` spent and holds in `period` under each of `keys`, for the
-   * keys that spent or hold anything: the named ones only, however many
-   * the scope has. The keys go to SQLite as one parameter (`inList`).
+   * What `scope` spent in `period` under each of `keys`, for the keys that
+   * spent anything: the named ones only, however many the scope has. The
+   * keys go to SQLite as one parameter (`inList`).
    */
   async spendOfKeys(
     period: string,
@@ -1535,11 +1010,7 @@ export class ModelLedger extends DurableObject<Env> {
       return [];
     }
     return this.#db
-      .select({
-        key: spend.key,
-        spentMicros: spend.spentMicros,
-        reservedMicros: spend.reservedMicros,
-      })
+      .select({ key: spend.key, spentMicros: spend.spentMicros })
       .from(spend)
       .where(
         and(
@@ -1552,8 +1023,8 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * Reconciles every reservation that came due without a settlement,
-   * charging each in full; sweeps receipts past their retention; delivers
+   * Reconciles every request that came due without a settlement, charging
+   * each the most it can cost; sweeps receipts past their retention; delivers
    * the audit events waiting; and sets itself again for what is next.
    */
   override async alarm(): Promise<void> {
@@ -1579,10 +1050,7 @@ export class ModelLedger extends DurableObject<Env> {
         // One row that fails is set aside, never left to stop the rest.
         try {
           const charged = this.ctx.storage.transactionSync(() => {
-            if (
-              this.#charge(row, row.reservedMicros, "reconciled") ===
-              "quarantined"
-            ) {
+            if (!this.#charge(row, row.reservedMicros, "reconciled")) {
               return false;
             }
             this.#outbox({
@@ -1627,16 +1095,14 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * Deletes the spend and alerts of run lineages that have ended, every
-   * run of each, at least {@link settledRetentionMs} ago, and that are
-   * past the oldest any lineage may grow (the platform's
-   * `workflowAgeMs`), as core's own records of the runs say
-   * (`endedLineages`): nothing an App or a run passes, so no lineage is
-   * ended early, and none is pruned while a late delivery could still
-   * start a run in it, whose spend would then start again from nothing. A lineage any open request
-   * (under way, lost or set aside) still reserves against keeps
-   * its rows, checked again as they are deleted. A page of lineages at a
-   * time, in key order, so a page of live ones holds up none after it.
+   * Deletes the spend of run lineages that have ended, every run of each,
+   * at least {@link settledRetentionMs} ago, and that are past the oldest
+   * any lineage may grow (the platform's `workflowAgeMs`), as core's own
+   * records of the runs say (`endedLineages`): nothing an App or a run
+   * passes, so no lineage is ended early, and none is pruned while a late
+   * delivery could still start a run in it, whose requests would then
+   * count again from nothing. A page of lineages at a time, in key order,
+   * so a page of live ones holds up none after it.
    */
   async #pruneLineages(now: number): Promise<void> {
     let after = "";
@@ -1656,30 +1122,16 @@ export class ModelLedger extends DurableObject<Env> {
         startedBy: now - platformLimits.workflowAgeMs,
       });
       if (ended.size > 0) {
-        this.ctx.storage.transactionSync(() => {
-          for (const key of this.#prunable("", [...ended])) {
-            this.#db
-              .delete(spend)
-              .where(
-                and(
-                  eq(spend.scope, "run"),
-                  eq(spend.key, key),
-                  eq(spend.period, lineagePeriod)
-                )
-              )
-              .run();
-            this.#db
-              .delete(alerts)
-              .where(
-                and(
-                  eq(alerts.scope, "run"),
-                  eq(alerts.key, key),
-                  eq(alerts.period, lineagePeriod)
-                )
-              )
-              .run();
-          }
-        });
+        this.#db
+          .delete(spend)
+          .where(
+            and(
+              eq(spend.scope, "run"),
+              eq(spend.period, lineagePeriod),
+              inArray(spend.key, [...ended])
+            )
+          )
+          .run();
         log.info("model.lineages_pruned", { lineages: ended.size });
       }
       if (page.length < lineagesAsked) {
@@ -1689,11 +1141,10 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * Run lineages past `after` in key order, at most {@link lineagesAsked}
-   * (or those of `only`), whose spend holds nothing and that no open
-   * request reserves against: the ones that may be pruned once ended.
+   * Run lineages past `after` in key order, at most {@link lineagesAsked}:
+   * the ones that may be pruned once ended.
    */
-  #prunable(after: string, only?: readonly string[]): string[] {
+  #prunable(after: string): string[] {
     return this.#db
       .select({ key: spend.key })
       .from(spend)
@@ -1701,17 +1152,7 @@ export class ModelLedger extends DurableObject<Env> {
         and(
           eq(spend.scope, "run"),
           eq(spend.period, lineagePeriod),
-          gt(spend.key, after),
-          only === undefined ? undefined : inArray(spend.key, [...only]),
-          eq(spend.reservedMicros, 0),
-          sql`not exists (
-            select 1 from ${requestScopes}
-            join ${requests} on ${requests.id} = ${requestScopes.requestId}
-            where ${requestScopes.scope} = 'run'
-              and ${requestScopes.key} = ${spend.key}
-              and ${requestScopes.period} = ${lineagePeriod}
-              and ${requests.state} in ('dispatched', 'unknown', 'quarantined')
-          )`
+          gt(spend.key, after)
         )
       )
       .orderBy(asc(spend.key))
@@ -1739,20 +1180,14 @@ export class ModelLedger extends DurableObject<Env> {
         return;
       }
       const ids = expired.map(({ id }) => id);
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .delete(requestScopes)
-          .where(inArray(requestScopes.requestId, ids))
-          .run();
-        this.#db.delete(requests).where(inArray(requests.id, ids)).run();
-      });
+      this.#db.delete(requests).where(inArray(requests.id, ids)).run();
       if (expired.length < alarmPage) {
         return;
       }
     }
   }
 
-  /** Sets the alarm for the next reservation due, or the next sweep. */
+  /** Sets the alarm for the next request due, or the next sweep. */
   async #alarmForNext(): Promise<void> {
     const next = this.#db
       .select({ at: requests.reconcileAt })
@@ -1785,87 +1220,11 @@ export class ModelLedger extends DurableObject<Env> {
     }
   }
 
-  /**
-   * Why a request of `bound` is refused by the scopes in `full`, each
-   * without room for it. Room comes back only from requests still under
-   * way (`dispatched`, before their deadline): they settle at what they
-   * used, often far less than they hold. Every other reservation is as
-   * good as spent: a request whose usage was lost, or past its deadline
-   * (in the grace before it comes due, or due), is charged in full, and a
-   * quarantined one holds until its period ends. A scope that has no room even
-   * once all those under way release theirs is out of budget, whatever
-   * the other scopes say. When every full scope would have room, the
-   * refusal says when: the soonest deadline of the requests under way in
-   * each scope, the latest of those across scopes. Optimistic, as the
-   * soonest may not free enough on its own; the gateway bounds the wait
-   * it passes on. Only scope names and a time: nothing of whose requests
-   * they are, or what they hold. Inside a transaction.
-   */
-  #refusal(
-    full: readonly {
-      scope: LedgerScope;
-      row: { spentMicros: number; reservedMicros: number };
-    }[],
-    period: string,
-    bound: number,
-    now: number
-  ): Admitted & { ok: false } {
-    let heldUntil = 0;
-    for (const { scope, row } of full) {
-      const underWay = this.#db
-        .select({
-          releasable: sql<number>`coalesce(sum(${requestScopes.reservedMicros}), 0)`,
-          soonest: sql<number | null>`min(${requests.deadline})`,
-        })
-        .from(requests)
-        .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
-        .where(
-          and(
-            eq(requests.state, "dispatched"),
-            // Those that reserved against this very spend: a lineage's in
-            // whatever month they count in.
-            sql`${requestScopes.period} = ${periodOf(scope.scope, period)}`,
-            gt(requests.deadline, now),
-            eq(requestScopes.scope, scope.scope),
-            eq(requestScopes.key, scope.key)
-          )
-        )
-        .get();
-      const releasable = underWay?.releasable ?? 0;
-      const held = row.reservedMicros - releasable;
-      if (
-        underWay?.soonest === null ||
-        underWay?.soonest === undefined ||
-        row.spentMicros + held + bound > (scope.limitMicros ?? 0)
-      ) {
-        return { ok: false, scope: scope.scope };
-      }
-      heldUntil = Math.max(heldUntil, underWay.soonest);
-    }
-    const [first] = full;
-    if (first === undefined) {
-      throw new Error("A refusal needs a scope without room");
-    }
-    return {
-      ok: false,
-      scope: first.scope.scope,
-      heldBy: full.map(({ scope }) => scope.scope),
-      heldUntil,
-    };
-  }
-
-  /** The spend row of `scope` for a request of `period`, or none spent yet. */
-  #spendOf(
-    { scope, key }: LedgerScope,
-    period: string
-  ): { spentMicros: number; reservedMicros: number; requests: number } {
+  /** The requests `scope` admitted for a request of `period`. */
+  #requestsOf({ scope, key }: LedgerScope, period: string): number {
     return (
       this.#db
-        .select({
-          spentMicros: spend.spentMicros,
-          reservedMicros: spend.reservedMicros,
-          requests: spend.requests,
-        })
+        .select({ requests: spend.requests })
         .from(spend)
         .where(
           and(
@@ -1874,32 +1233,24 @@ export class ModelLedger extends DurableObject<Env> {
             eq(spend.period, periodOf(scope, period))
           )
         )
-        .get() ?? { spentMicros: 0, reservedMicros: 0, requests: 0 }
+        .get()?.requests ?? 0
     );
   }
 
   /**
-   * Settles `row` at `charged`: releases its reservation from each of its
-   * scopes and adds the charge to their spend, then alerts admins to each
-   * threshold that reached. Inside a transaction. Returns how many alerts
-   * it stored.
+   * Settles `row` at `charged`, adding it to the spend of each of its
+   * scopes. Inside a transaction. False when its scopes can't be read: it
+   * is set aside instead.
    */
   #charge(
     row: RequestRow,
     charged: number,
     by: "usage" | "cut" | "refused" | "unsent" | "reconciled"
-  ): number | "quarantined" {
-    // What it reserved against, as its admission recorded it apart from
-    // its JSON. Stored data that can't be read, its JSON or no scope at
-    // all, is set aside.
-    const kept = this.#db
-      .select()
-      .from(requestScopes)
-      .where(eq(requestScopes.requestId, row.id))
-      .all();
-    if (scopesOf(row) === undefined || kept.length === 0) {
+  ): boolean {
+    const scopes = scopesOf(row);
+    if (scopes === undefined) {
       this.#quarantine(row);
-      return "quarantined";
+      return false;
     }
     const changed = this.#db
       .update(requests)
@@ -1918,16 +1269,13 @@ export class ModelLedger extends DurableObject<Env> {
       .returning({ id: requests.id })
       .all();
     if (changed.length === 0) {
-      return 0;
+      return true;
     }
-    const actor = actorOf(row);
-    let alerted = 0;
-    for (const scope of kept) {
-      const money = holdsMoney(scope.scope, row.credential);
-      const after = this.#db
+    for (const { scope, key } of scopes) {
+      const money = spendsMoney(scope, row.credential);
+      this.#db
         .update(spend)
         .set({
-          reservedMicros: sql`${spend.reservedMicros} - ${scope.reservedMicros}`,
           spentMicros: sql`${spend.spentMicros} + ${money ? charged : 0}`,
           // A request never sent wasn't made: its count comes back.
           ...(by === "unsent"
@@ -1936,89 +1284,18 @@ export class ModelLedger extends DurableObject<Env> {
         })
         .where(
           and(
-            eq(spend.scope, scope.scope),
-            eq(spend.key, scope.key),
-            eq(spend.period, scope.period)
+            eq(spend.scope, scope),
+            eq(spend.key, key),
+            eq(spend.period, periodOf(scope, row.period))
           )
         )
-        .returning({ spentMicros: spend.spentMicros })
-        .get();
-      if (after === undefined) {
-        throw new Error("A request's scope has no spend to settle against");
-      }
-      alerted += this.#alert(
-        {
-          scope: scope.scope,
-          key: scope.key,
-          limitMicros: scope.limitMicros,
-          alertMicros: scope.alertMicros,
-          names: namesSchema.safeParse(jsonOf(scope.names)).data ?? {},
-        },
-        row.period,
-        after.spentMicros,
-        actor
-      );
+        .run();
     }
-    return alerted;
+    return true;
   }
 
   /**
-   * Alerts admins to each threshold of `scope` that `spentMicros` reached
-   * without an alert at that value this month: stores the alert's row,
-   * and its event only if that added the row. Inside a transaction.
-   * Returns how many it stored.
-   */
-  #alert(
-    scope: LedgerScope,
-    period: string,
-    spentMicros: number,
-    actor: AuditActor
-  ): number {
-    let stored = 0;
-    const counted = periodOf(scope.scope, period);
-    for (const threshold of thresholds) {
-      const value = threshold.of(scope);
-      if (value === null || spentMicros < value) {
-        continue;
-      }
-      const added = this.#db
-        .insert(alerts)
-        .values({
-          scope: scope.scope,
-          key: scope.key,
-          period: counted,
-          kind: threshold.kind,
-          thresholdMicros: value,
-        })
-        .onConflictDoNothing()
-        .returning({ kind: alerts.kind })
-        .all();
-      if (added.length === 0) {
-        continue;
-      }
-      this.#outbox({
-        actor,
-        action: `model.budget.${threshold.kind}`,
-        detail: {
-          scope: scope.scope,
-          period: counted,
-          limit: (scope.limitMicros ?? 0) / microsPerDollar,
-          threshold: value / microsPerDollar,
-          ...scope.names,
-        },
-      });
-      log.warn(`model.budget_${threshold.kind}`, {
-        scope: scope.scope,
-        period: counted,
-      });
-      stored += 1;
-    }
-    return stored;
-  }
-
-  /**
-   * Sets aside a request that can't be read to settle: it keeps holding its
-   * reservation until its period ends, as what it holds can't be told,
+   * Sets aside a request that can't be read to settle: charged nothing,
    * logged and audited. Never throws: it is the fallback.
    */
   #quarantine(row: RequestRow): void {
@@ -2038,12 +1315,7 @@ export class ModelLedger extends DurableObject<Env> {
       this.#outbox({
         actor: actorOf(row),
         action: "model.spend.quarantined",
-        detail: {
-          request: row.id,
-          model: row.model,
-          period: row.period,
-          held: row.reservedMicros / microsPerDollar,
-        },
+        detail: { request: row.id, model: row.model, period: row.period },
       });
     }
   }
@@ -2051,7 +1323,7 @@ export class ModelLedger extends DurableObject<Env> {
   /**
    * Counts a failed try at reconciling `row`: it is tried again a while
    * from `now`, and after {@link maxReconcileFailures} tries it is set
-   * aside, audited, with what it holds. Whether that could
+   * aside, audited. Whether that could
    * be written; never throws.
    */
   #failedToReconcile(row: RequestRow, now: number): boolean {

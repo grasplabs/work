@@ -18,7 +18,7 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 
 // Ask Grasp (GRA-657) on Grasp's own core: the admin's chat over every
 // organization, whose model calls go through this core's model gateway
-// (GRA-637, answer 3), with its rules, budgets and audit. What it can't
+// (GRA-637, answer 3), with its rules, metering and audit. What it can't
 // let happen, and what stops it here:
 //
 // - Anyone but Grasp's staff asking, or spending this core's model budget:

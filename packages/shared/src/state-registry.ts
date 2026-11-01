@@ -838,10 +838,7 @@ const modelLedger: DurableObjectState = {
     requests: exported(`${core}model-ledger.ts`),
     queue: transient(`${core}model-admission.ts`),
     policy: exported(`${core}model-ledger.ts`),
-    request_scopes: exported(`${core}model-ledger.ts`),
     spend: exported(`${core}model-ledger.ts`),
-    alerts: exported(`${core}model-ledger.ts`),
-    person_limits: exported(`${core}model-ledger.ts`),
     provider_health: cache(
       `${core}model-ledger.ts`,
       "Each provider's last success and failure, and what its failing calls show since when, by whose key: the next calls write it again."
@@ -926,7 +923,6 @@ const workflowRuns: DurableObjectState = {
     history: exported(`${workerflow}history.ts`),
     notifications: exported(`${workerflow}notifications.ts`),
     stream_chunks: exported(`${workerflow}streams.ts`),
-    grasp_busy_refusals: exported(`${core}workflows/run-object.ts`),
     grasp_tried_once: exported(`${core}workflows/run-object.ts`),
     grasp_action_model_calls: exported(`${core}workflows/run-object.ts`),
     grasp_run_cancelled: exported(`${core}workflows/run-object.ts`),

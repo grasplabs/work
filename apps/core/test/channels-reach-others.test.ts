@@ -3,9 +3,8 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { confirmAction } from "../src/channels/cards.tsx";
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { codeStep, configureObject, says } from "./agent-chat.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
+import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
@@ -113,7 +112,6 @@ const sendingTurn = async (
     ),
     says("Done.")
   );
-  await configureObject(workspace(env, personalWorkspaceId(person.userId)));
   const teams = teamsPerson(String(person.person.oid));
   // The invoice's number is the person's, as a real one would be.
   await post(messageFrom(teams, { text: `${asked} It's ${subject}.` }));

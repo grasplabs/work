@@ -122,7 +122,7 @@ export const interviewStoryResponse = async (
       log.error("interview.story_failed", { requestId });
     }
     return asTheyStand(
-      code === "model.budget_busy" || code === "model.rate_limited" ? 429 : 502
+      code === "model.queued" || code === "model.rate_limited" ? 429 : 502
     );
   }
 };

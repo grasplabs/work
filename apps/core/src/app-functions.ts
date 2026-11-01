@@ -426,8 +426,8 @@ const keyedUnderRun =
  * The invocation of `release` (the run's own App, at the version the run
  * is pinned to) for a step of `caller`'s run: as the person the run acts
  * for, in workflow mode, with the run as its work context, and with the
- * run as whoever the audit log names and whose budgets a model request
- * counts against besides its binding's (`BindingCaller.actor`), for the
+ * run as whoever the audit log names and whose spend a model request
+ * counts in besides its binding's (`BindingCaller.actor`), for the
  * call of `operation`, its public function's path. Nothing of it comes
  * from the run's isolate.
  */

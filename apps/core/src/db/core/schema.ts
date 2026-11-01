@@ -1588,11 +1588,6 @@ export const appResourceBindings = sqliteTable(
     approvedAt: timestamp("approved_at").notNull(),
     revokedBy: text("revoked_by"),
     revokedAt: timestamp("revoked_at"),
-    /**
-     * A model binding's own caps, as JSON (`modelBindingBudgetSchema`):
-     * set at approval, null for none (model-budgets.ts).
-     */
-    budget: text(),
   },
   (table) => [
     uniqueIndex("app_resource_bindings_active_idx")
@@ -1671,7 +1666,7 @@ export const workflowRuns = sqliteTable(
      * is its own root. Written once, with the row, and never from what the
      * run is given: the model gateway counts the lineage's model calls and
      * spend by it, unless the run is charged to an account
-     * (`accountRunId`, src/model-budgets.ts).
+     * (`accountRunId`, src/model-spend.ts).
      */
     rootRunId: text("root_run_id"),
     /**

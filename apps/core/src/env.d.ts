@@ -48,8 +48,6 @@ interface __BaseEnv_Env {
   GMAIL_PUBSUB_SUBSCRIPTION?: string;
   GMAIL_PUBSUB_TOPIC?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
-  MODEL_GATEWAY?: unknown;
   /**
    * Lower limits on an App's npm packages than the defaults
    * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
@@ -142,15 +140,10 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_RETRY_DELAY_MS?: string;
   /**
-   * Tests only: the UTC month model budgets count in, such as `2031-01`
-   * (src/model-budgets.ts).
+   * Tests only: the UTC month model spend counts in, such as `2031-01`
+   * (src/model-spend.ts).
    */
   MODEL_BUDGET_MONTH?: string;
-  /**
-   * Tests only: the UTC day a model binding's daily cap counts in, such as
-   * `2031-01-02` (src/model-budgets.ts).
-   */
-  MODEL_BUDGET_DAY?: string;
   /**
    * Tests only: fewer connector events one clock run delivers
    * (src/workflows/connector-events.ts).

@@ -1,9 +1,6 @@
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { configureObject, says } from "./agent-chat.ts";
+import { says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant, clientOrigin, otherTenant } from "./sign-in-config.ts";
@@ -65,7 +62,6 @@ const signsIn = async (
   );
   const { userId } = await whoami(session);
   const provider = await fakeProvider(...replies.map((text) => says(text)));
-  await configureObject(workspace(env, personalWorkspaceId(userId)));
   return { userId, provider };
 };
 

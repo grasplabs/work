@@ -47,18 +47,14 @@ const answer = (text: string): ProviderReply => ({
 
 /**
  * Core's env with the provider answering with `replies` for `models`, the
- * organization's choice, and `rules` as the deployment's, none by
- * default: model-rules.test.ts tests them.
+ * organization's choice.
  */
 const withProvider = async (
   replies: ProviderReply[],
-  {
-    rules,
-    models: choice = chosen,
-  }: { rules?: unknown; models?: string[] } = {}
+  { models: choice = chosen }: { models?: string[] } = {}
 ) => {
   const provider = await fakeProviderFor(choice, ...replies);
-  const providerEnv: Env = { ...env, MODEL_GATEWAY: rules };
+  const providerEnv: Env = { ...env };
   return { provider, providerEnv };
 };
 
@@ -385,75 +381,6 @@ describe("model gateway", { timeout: 30_000 }, () => {
       details: { model: anthropic },
     });
     expect(provider.requests).toStrictEqual([]);
-  });
-
-  it("answers the organization's chosen models with no rules while MODEL_GATEWAY isn't set", async () => {
-    const { provider, providerEnv } = await withProvider([
-      answer("Hello."),
-      answer("Hello again."),
-    ]);
-    providerEnv.MODEL_GATEWAY = undefined;
-    const call = async (to: string) =>
-      await models(providerEnv).call({
-        model: to,
-        input: "Say hello.",
-        purpose: "chat.turn",
-        trigger: newPerson(),
-        work: work(),
-      });
-
-    await expect(call(mistral)).resolves.toMatchObject({ text: "Hello." });
-    await expect(call(openai)).resolves.toMatchObject({
-      text: "Hello again.",
-    });
-    expect(provider.requests).toHaveLength(2);
-  });
-
-  it.each([
-    ["rules that aren't JSON", "{"],
-    ["a budget below nothing", { budgets: { user: { limit: -1 } } }],
-  ])(
-    "refuses every call with %s: the gateway fails closed",
-    async (_, rules) => {
-      const { provider, providerEnv } = await withProvider([answer("Hi.")], {
-        rules,
-      });
-
-      await expect(
-        outcome(
-          models(providerEnv).call({
-            model: mistral,
-            input: "Hello.",
-            purpose: "chat.turn",
-            trigger: newPerson(),
-            work: work(),
-          })
-        )
-      ).resolves.toBe("model.unconfigured");
-      expect(provider.requests).toStrictEqual([]);
-    }
-  );
-
-  it("takes its rules as the JSON text a .dev.vars file sets", async () => {
-    const call = async (rules: string) => {
-      const { providerEnv } = await withProvider([answer("Hi.")], { rules });
-      return await outcome(
-        models(providerEnv).call({
-          model: mistral,
-          input: "Hello.",
-          purpose: "chat.turn",
-          trigger: newPerson(),
-          work: work(),
-        })
-      );
-    };
-
-    expect({
-      read: await call(JSON.stringify({ budgets: { user: { limit: 1 } } })),
-      malformed: await call(
-        JSON.stringify({ budgets: { user: { limit: -1 } } })
-      ),
-    }).toStrictEqual({ read: "ok", malformed: "model.unconfigured" });
   });
 
   it.each([
@@ -836,7 +763,6 @@ describe("model gateway", { timeout: 30_000 }, () => {
         binding: {
           app: appIdSchema.parse(appId),
           alias: "writer",
-          budget: null,
         },
       });
 

@@ -19,7 +19,7 @@ import {
 } from "./workflow-apps.ts";
 
 // What the tests of the client's rules for model calls share
-// (model-rules.test.ts, model-rules-budgets.test.ts): the rules as a test
+// (model-rules.test.ts, ai-step-answers.test.ts): the rules as a test
 // sets them, calls that meet them, and what the audit log says of each.
 // The model provider behind connect is the outside system
 // (test/model-provider.ts).
@@ -84,7 +84,7 @@ export const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
 let monthsUsed = 0;
 
 /**
- * A month no other test counts budgets in, so none depends on the real
+ * A month no other test counts spend in, so none depends on the real
  * month or another test's spend.
  */
 const newMonth = (): string => {
@@ -95,11 +95,9 @@ const newMonth = (): string => {
 
 /**
  * Core's env with the provider answering up to eight calls with `answer`,
- * for the `chosen` models, and the rules `config`; budgets count in
- * `month`.
+ * for the `chosen` models; spend counts in `month`.
  */
 export const withRules = async (
-  config: Record<string, unknown>,
   answer: ProviderReply = cheapAnswer,
   month = newMonth()
 ) => {
@@ -109,7 +107,6 @@ export const withRules = async (
   );
   const rulesEnv: Env = {
     ...env,
-    MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: month,
   };
   const { call, agent } = models(rulesEnv);
@@ -121,23 +118,20 @@ const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
 /**
- * What `run` returns, with `config` as the deployment's rules for the
- * workflow runs it starts, and the provider answering with `replies`, for
- * the `chosen` models.
+ * What `run` returns, for the workflow runs it starts, with the provider
+ * answering with `replies`, for the `chosen` models, and spend counted in
+ * a month of its own.
  */
 export const withDeploymentRules = async <Result>(
-  config: unknown,
   replies: ProviderReply[],
   run: () => Promise<Result>
 ) => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
+  const { MODEL_BUDGET_MONTH: month } = env;
   const fake = await fakeProviderFor(chosen, ...replies);
   try {
-    env.MODEL_GATEWAY = config;
     env.MODEL_BUDGET_MONTH = newMonth();
     return { fake, result: await run() };
   } finally {
-    env.MODEL_GATEWAY = before;
     env.MODEL_BUDGET_MONTH = month;
   }
 };

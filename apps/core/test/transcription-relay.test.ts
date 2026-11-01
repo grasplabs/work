@@ -53,8 +53,8 @@ import {
 //   (GRA-329, T5), the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
 // - Listening with a model the gateway or the rules don't let it use
-//   (GRA-1064). The deployment's own budgets don't limit it: it is
-//   charged to Grasp's own key.
+//   (GRA-1064). It is charged to Grasp's own key, never the
+//   deployment's.
 
 const idp = mockIdp();
 
@@ -72,27 +72,22 @@ interface Upstream {
 
 let monthsUsed = 0;
 
-/** A month no other test counts budgets in: from 2800, clear of other files. */
+/** A month no other test counts spend in: from 2800, clear of other files. */
 const newMonth = (): string => {
   monthsUsed += 1;
   return `${2800 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
 /**
- * What `run` returns under the deployment's rules `config`, budgets
- * counted in `month`, and the realtime sockets OpenAI's fake took
- * meanwhile.
+ * What `run` returns with model spend counted in `month`, and the
+ * realtime sockets OpenAI's fake took meanwhile.
  */
 const relaying = async <T>(
   run: () => Promise<T>,
-  { config = {}, month }: { config?: object; month?: string } = {}
+  { month }: { month?: string } = {}
 ): Promise<{ upstream: Upstream; result: T }> => {
-  const before = {
-    gateway: env.MODEL_GATEWAY,
-    month: env.MODEL_BUDGET_MONTH,
-  };
+  const before = env.MODEL_BUDGET_MONTH;
   const { length: known } = await realtimeSockets();
-  env.MODEL_GATEWAY = config;
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
@@ -101,8 +96,7 @@ const relaying = async <T>(
     const sockets = await realtimeSockets();
     return { upstream: { opened: sockets.slice(known) }, result };
   } finally {
-    env.MODEL_GATEWAY = before.gateway;
-    env.MODEL_BUDGET_MONTH = before.month;
+    env.MODEL_BUDGET_MONTH = before;
   }
 };
 
@@ -273,18 +267,16 @@ const microsPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
 const heardMicros = (seconds: number): number =>
   Math.ceil((seconds * microsPerMillionSeconds) / 1e6);
 
-/** What the deployment spent and holds in `month`, as the ledger counts it. */
+/** What the deployment spent in `month`, as the ledger counts it. */
 const deploymentSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
-  const [row] = spent.deployment ?? [];
-  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+  return spent.deployment?.[0]?.spentMicros ?? 0;
 };
 
-/** What Grasp's own key spent and holds in `month`: transcription counts there. */
+/** What Grasp's own key spent in `month`: transcription counts there. */
 const graspSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
-  const [row] = spent.platform ?? [];
-  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+  return spent.platform?.[0]?.spentMicros ?? 0;
 };
 
 /**
@@ -841,7 +833,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     }).toStrictEqual({ noted: [true, true], kept: [] });
   });
 
-  it("charges transcription to Grasp's own key, never to the deployment's budget, which stops no socket, and shows staff what it heard by purpose", async () => {
+  it("charges transcription to Grasp's own key, never to the deployment's spend, and shows staff what it heard by purpose", async () => {
     const { ada, bo, roster } = await openedTwo();
     const [adaPerson, boPerson] = roster.people.map(({ id }) => id);
     // A minute left on each link today: each socket holds a minute.
@@ -858,7 +850,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         const first = await listen();
         first.start(slowStart(ada));
         const ready = await first.next();
-        // Bo's minute opens beside Ada's: the budget has room for neither.
+        // Bo's minute opens beside Ada's.
         const second = await listen();
         second.start(slowStart(bo));
         const alsoReady = await second.next();
@@ -873,7 +865,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         const charged = await vi.waitFor(
           async () => {
             const grasp = await graspSpend(month);
-            expect(grasp).toStrictEqual({ spent: minute, held: 0 });
+            expect(grasp).toBe(minute);
             return grasp;
           },
           { timeout: 10_000 }
@@ -885,11 +877,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           deployment: await deploymentSpend(month),
         };
       },
-      {
-        // A cent: a minute of GPT-4o Transcribe (1¢) fits, two held don't.
-        config: { budgets: { deployment: { limit: 0.01 } } },
-        month,
-      }
+      { month }
     );
 
     const events = await eventsAfter(head);
@@ -925,8 +913,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       ready: "ready",
       alsoReady: "ready",
-      charged: { spent: minute, held: 0 },
-      deployment: { spent: 0, held: 0 },
+      charged: minute,
+      deployment: 0,
       upstreams: 2,
       refused: 0,
       heard: 60,

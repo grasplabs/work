@@ -4,7 +4,6 @@
  * workers.
  */
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
@@ -410,22 +409,16 @@ export const bindMail = async (
 
 /**
  * An admin's binding of App `app`'s model resource `alias` to `model`,
- * with `budget`, for the version current now: the model must be one the
- * deployment allows as it is approved.
+ * for the version current now: the model must be one the deployment
+ * allows as it is approved.
  */
-export const bindModel = async (
-  app: string,
-  alias: string,
-  model: string,
-  budget?: ModelBindingBudgetInput
-) => {
+export const bindModel = async (app: string, alias: string, model: string) => {
   const { currentVersion } = await findApp(env, appIdSchema.parse(app));
   return await approveResourceBinding(env, await person("admin"), {
     app,
     alias,
     target: { kind: "model", model },
     reviewed: { version: currentVersion ?? 0 },
-    ...(budget === undefined ? {} : { budget }),
   });
 };
 

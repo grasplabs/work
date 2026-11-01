@@ -502,7 +502,6 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "model.failed",
   // A provider that didn't answer: what `model.failed` said of it before.
   "model.provider_unavailable",
-  "model.budget_busy",
   // Nothing was sent; a share of the model requests in flight comes back
   // as they end, and a provider's rate as its window passes.
   "model.queued",

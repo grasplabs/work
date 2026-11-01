@@ -59,16 +59,12 @@ import { postOffers } from "./workflow-offers.ts";
 const typingEveryMs = 3000;
 
 /** Why a turn couldn't answer, as one of Stephen's lines. */
-type RefusedLine = "budget" | "busy" | "removed" | "failed";
+type RefusedLine = "busy" | "removed" | "failed";
 
 /** The line for an error a turn was refused or failed with. */
 const lineFor = (error: unknown): RefusedLine => {
   const model = modelErrors.codeOf(error);
-  if (model === "model.over_budget") {
-    return "budget";
-  }
   if (
-    model === "model.budget_busy" ||
     model === "model.queued" ||
     model === "model.rate_limited" ||
     agentErrors.codeOf(error) === "agent.busy"
@@ -94,7 +90,6 @@ export const appLocale = (raw: unknown): ChannelLocale => {
 
 /** How a request whose turn was refused or failed ended (stephen-requests.ts). */
 const endOfLine: Readonly<Record<RefusedLine, "stopped" | "failed">> = {
-  budget: "stopped",
   busy: "stopped",
   removed: "stopped",
   failed: "failed",
@@ -158,7 +153,6 @@ const endOfTurn = (outcome: string): "stopped" | "failed" =>
 
 /** The count a refused or failed turn's line stands for (signals.ts). */
 const signalOfLine: Readonly<Record<RefusedLine, ChannelSignal | null>> = {
-  budget: "over_budget",
   busy: "busy",
   failed: "failed",
   // Someone removed since the door let them in: nothing about Stephen.

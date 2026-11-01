@@ -13,7 +13,6 @@ export const watchedSignalsSchema = z.object({
   answered: z.int(),
   failed: z.int(),
   refused: z.int(),
-  overBudget: z.int(),
   busy: z.int(),
   /** Sends the platform didn't take, the uninstalled ones apart. */
   sendFailed: z.int(),
@@ -37,7 +36,6 @@ export type SignalKind =
   | "stephen_refused"
   | "stephen_failing"
   | "stephen_slow"
-  | "stephen_over_budget"
   | "stephen_busy"
   | "stephen_sends_failing"
   | "stephen_uninstalled"
@@ -69,10 +67,6 @@ const bars: readonly {
     kind: "stephen_slow",
     over: ({ answered, p90Ms }) =>
       answered >= fewestAnswers && p90Ms !== null && p90Ms > 12_000,
-  },
-  {
-    kind: "stephen_over_budget",
-    over: ({ overBudget }) => overBudget > 0,
   },
   {
     kind: "stephen_busy",
@@ -112,7 +106,6 @@ export const signalsOf = (snapshot: AdminSnapshot): WatchedSignals | null => {
     answered: stephen.answered,
     failed: stephen.failed,
     refused: stephen.refused,
-    overBudget: stephen.overBudget,
     busy: stephen.busy,
     sendFailed: Math.max(0, stephen.sendFailed - stephen.uninstalled),
     uninstalled: stephen.uninstalled,

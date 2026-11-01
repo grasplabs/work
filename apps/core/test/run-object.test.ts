@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { cancelRun } from "../src/workflows/controls.ts";
 import { markRunCancelled } from "../src/workflows/engine.ts";
-import { busyRefusalsIn, triedOnceIn } from "../src/workflows/run-object.ts";
+import { triedOnceIn } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
 import { asking, confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
@@ -160,35 +160,6 @@ const rowEnded = async (run: string, ms: number) => {
 
 describe("a run's object", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
-
-  it("keeps a step's busy-budget refusal with the run, and drops it with the run's purge", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, napper);
-    const { id: run } = await builder.api.workflows.start(app, "napper");
-    await sleeping(run, "go");
-
-    const kept = await runInDurableObject(runObject(run), (_object, state) => {
-      const refusals = busyRefusalsIn(state.storage.sql);
-      refusals.set("first", {
-        at: 1,
-        details: { reason: "model.budget_busy" },
-      });
-      return refusals.get("first");
-    });
-    await builder.api.workflows.cancel(run);
-    await finished(run);
-    // Its retention over: the purge's alarm comes due.
-    await runInDurableObject(runObject(run), (_object, state) => {
-      state.storage.sql.exec("UPDATE run SET purge_at = ?", Date.now() - 1);
-    });
-    await runDurableObjectAlarm(runObject(run));
-
-    expect({ kept, left: await leftIn(run) }).toStrictEqual({
-      kept: { at: 1, details: { reason: "model.budget_busy" } },
-      // Only the start's tombstone, which the engine keeps for 30 days.
-      left: { tables: ["tombstones"], kv: 0 },
-    });
-  });
 
   it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
     const builder = await signedInApi(idp, "builder");

@@ -221,13 +221,6 @@ export default defineConfig({
         // was lost) checking every 2 s at first, not every minute, so a
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
-        // The Models page shows the budgets.
-        devVar(
-          "MODEL_GATEWAY",
-          JSON.stringify({
-            budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
-          })
-        ),
       ].join(" "),
       env: {
         DEV_PERSIST_TO: stateDir,

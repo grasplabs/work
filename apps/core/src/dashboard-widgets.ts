@@ -49,10 +49,10 @@ import { workflowOverview } from "./workflows/overview.ts";
 // - The model's answer doing something: it is untrusted text, read only as
 //   a spec (`widgetAnswer`): never code or markup, one too long is never
 //   parsed, and a part or a setting the dashboard doesn't have refuses it.
-// - Spending without bound: every call goes through the model gateway,
-//   with its rules, budgets and audit, on the budget of the person asked
-//   for (`trigger`), at most {@link widgetAttempts} calls a request, and
-//   one request on a widget at a time (`claimWidget`).
+// - Calling without bound: every call goes through the model gateway,
+//   with its rules and audit, counted for the person asked for
+//   (`trigger`), at most {@link widgetAttempts} calls a request, and one
+//   request on a widget at a time (`claimWidget`).
 // - Another person's widgets: kept in the person's own Workspace object,
 //   keyed by them, reached only for the person the session or the chat
 //   names.
@@ -103,7 +103,7 @@ You are given what was asked; the person's engines and workflows, by ID and name
 
 /** Who asks for a widget, and how its model calls are made and recorded. */
 export interface WidgetAsker {
-  /** The person the widget is for, whose rows it shows and whose budget pays. */
+  /** The person the widget is for, whose rows it shows and whose spend it counts in. */
   member: Member;
   /** Who asked, for the gateway and the audit log: the person, or a chat's agent for them. */
   trigger: AuditActor;
@@ -117,7 +117,7 @@ type ModelCall = Parameters<ReturnType<typeof models>["call"]>[0];
 /** The `work` a widget's model call is made in. */
 export type WidgetWork = NonNullable<ModelCall["work"]>;
 
-/** The dashboard's own work: made by core for the person, on their budget. */
+/** The dashboard's own work: made by core for the person, counted as theirs. */
 export const dashboardWork: WidgetWork = { platform: "dashboard_widgets" };
 
 /** A workflow's state, from its latest run's status, if it ran. */
@@ -253,7 +253,7 @@ const sameDraft = (one: WidgetDraft, other: WidgetDraft): boolean =>
  * writes it, it is checked against their rows, sent back to be put right
  * at most twice, and kept, a new one last on their dashboard. Refused as
  * `dashboard.widget_unreadable` when no answer would do, and with the
- * gateway's own refusals (a budget used up, say).
+ * gateway's own refusals (a full share of the requests in flight, say).
  */
 export const makeWidget = async (
   env: Env,

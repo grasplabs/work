@@ -272,8 +272,6 @@ export const adminStephenSignalsSchema = z.object({
   answered: z.int().nonnegative(),
   /** Turns that ended in Stephen's line for a failure. */
   failed: z.int().nonnegative(),
-  /** Turns refused for the company's AI budget. */
-  overBudget: z.int().nonnegative(),
   /** Turns refused as the model or the agent was busy. */
   busy: z.int().nonnegative(),
   /** Answers or lines the platform didn't take. */

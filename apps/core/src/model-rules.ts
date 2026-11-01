@@ -12,11 +12,10 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 // or with another's, is refused, so no call is made in a context that
 // isn't its own, or none.
 //
-// And budgets: each request a call sends is admitted by the model ledger,
-// which refuses it when one of its budgets has no room left for what it
-// may cost (model-budgets.ts, model-ledger.ts). They are the `MODEL_GATEWAY`
-// var's, deployment config: a config that doesn't parse refuses every
-// call (models.ts).
+// Each request a call sends is then admitted by the model ledger, which
+// counts what it costs and holds a run lineage to its limit of requests
+// (model-spend.ts, model-ledger.ts). Nothing limits spend: clients pay
+// their providers on their own keys.
 
 /** What the gateway checks a call by. */
 export interface RulesInput {
@@ -54,9 +53,7 @@ export interface Refusal {
   code:
     | "model.no_provider"
     | "model.not_allowed"
-    | "model.over_budget"
     | "model.run_limit"
-    | "model.budget_busy"
     | "model.queued"
     | "model.rate_limited"
     | "model.unpriced"
@@ -68,18 +65,10 @@ export interface Refusal {
   because?: string;
   /**
    * When asking again may be admitted, in seconds, as core computes it:
-   * for `model.budget_busy`, about until the calls under way that hold the
-   * budget finish; for `model.queued`, until its call asks for a share
-   * again; for `model.rate_limited`, until the provider's rate may let it
-   * through; for `model.over_budget`, until the budget resets.
+   * for `model.queued`, until its call asks for a share again; for
+   * `model.rate_limited`, until the provider's rate may let it through.
    */
   retryAfterSeconds?: number;
-  /**
-   * For `model.over_budget`: the cap that refused it (`because`) isn't
-   * told, only that a budget is used up, as to a guest, whose budgets are
-   * the member's who invited them (models.ts).
-   */
-  capUntold?: true;
   /** For `model.queued`: the share of the requests in flight it waits for. */
   waitingFor?: ModelShare;
   /**

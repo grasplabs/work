@@ -3,10 +3,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 
 // What model requests cost, in whole millionths of a US dollar (micros):
 // the prices a request is pinned to when it is admitted, the most it can
-// cost, which the model ledger reserves (model-ledger.ts), and what its
-// usage cost, which the ledger charges. Integers only, rounded up, so no
-// sum of many small requests rounds away to nothing, and a reservation is
-// never below what its request can cost at those prices.
+// cost, which the model ledger charges when its usage is lost
+// (model-ledger.ts), and what its usage cost, which the ledger charges.
+// Integers only, rounded up, so no sum of many small requests rounds away
+// to nothing, and the most a request can cost is never below what it can
+// cost at those prices.
 //
 // Some models are priced in tiers: past a number of prompt tokens, all of
 // the request is charged at the tier's prices (OpenAI's GPT-5.4 and later
@@ -139,8 +140,8 @@ const ratesOf = ({ input, output, cacheRead, cacheWrite }: Rates): Rates => ({
  * The prices a model's requests are pinned to, or `undefined` for a model
  * with no safe price: a price that isn't a number, below nothing, or none
  * at all for its input or its output, which a catalog gives a model it
- * doesn't know the price of, in its base prices or any tier. Such a model
- * can't be admitted against a budget: what it costs can't be bounded.
+ * doesn't know the price of, in its base prices or any tier. What such a
+ * model costs can't be told: its requests are counted at no cost.
  */
 export const pinnedPrice = async (
   prices: ListPrices

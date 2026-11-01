@@ -23,7 +23,6 @@ export type ChannelSignal =
   | "refused"
   | "answered"
   | "failed"
-  | "over_budget"
   | "busy"
   | "send_failed"
   | "uninstalled";
@@ -165,7 +164,6 @@ export const stephenSignalsOf = async (
     refused: of("refused"),
     answered: of("answered"),
     failed: of("failed"),
-    overBudget: of("over_budget"),
     busy: of("busy"),
     sendFailed: of("send_failed"),
     uninstalled: of("uninstalled"),

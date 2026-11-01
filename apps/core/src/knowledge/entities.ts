@@ -9,7 +9,7 @@ import { modelSettings, modelForRole, models } from "../models.ts";
 
 // Core's side of the Brain's `extractEntities` port (packages/brain's
 // entities.ts): reading a text for the entities it names, through the
-// model gateway like every model call, with its rules, budgets and audit.
+// model gateway like every model call, with its rules, metering and audit.
 // The Brain checks the answer against the text itself; what kinds of
 // thing to name is core's to say, not the Brain's.
 

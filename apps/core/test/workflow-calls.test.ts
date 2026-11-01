@@ -179,10 +179,11 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 });
 
 /**
- * The read of a person's teams, as a model request's scopes are read just
- * before the ledger admits it (model-budgets.ts, `limitedPersonOf`).
+ * The read of the organization's chosen models, as the gateway routes a
+ * call, after the call was authorized and before the ledger admits its
+ * request (ai-model-choice.ts, `readModelChoice`).
  */
-const scopesRead = /from "team_members"/iu;
+const modelChoiceRead = /from "org_settings"/iu;
 
 /** A call's read of its run's authority (resource-authority.ts). */
 const authorityRead = /approval\.alias/iu;
@@ -1471,7 +1472,7 @@ describe("grasp.model calls of JSON workflows", () => {
     });
     const provider = await providerAnswering(answer('{"line":"Never sent"}'));
     const run = await started(ada, workflow.id);
-    // The approval is revoked as the ledger admits the request, after the
+    // The approval is revoked as the gateway routes the call, after the
     // call was authorized.
     const db = env.DB;
     const prepare = db.prepare.bind(db);
@@ -1482,7 +1483,7 @@ describe("grasp.model calls of JSON workflows", () => {
       if (
         authorized.once &&
         revoking.length === 0 &&
-        scopesRead.test(statement)
+        modelChoiceRead.test(statement)
       ) {
         revoking.push(
           prepare(
@@ -1588,42 +1589,18 @@ describe("grasp.model calls of JSON workflows", () => {
   });
 });
 
-let budgetMonths = 0;
+/** This month, as admins read spend in it, such as `2026-11`. */
+const thisMonth = (): string =>
+  new Date().toISOString().slice(0, "yyyy-mm".length);
 
-/** A month no other file counts budgets in: from 3300, clear of the others. */
-const newBudgetMonth = (): string => {
-  budgetMonths += 1;
-  return `${3300 + Math.floor(budgetMonths / 12)}-${String((budgetMonths % 12) + 1).padStart(2, "0")}`;
-};
-
-/**
- * What `run` returns, with `budgets` in the deployment's model rules,
- * counting in `month`: by default, one no other file counts in.
- */
-const withBudgets = async <Result>(
-  budgets: Record<string, unknown>,
-  run: () => Promise<Result>,
-  month = newBudgetMonth()
-): Promise<Result> => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: was } = env;
-  try {
-    env.MODEL_GATEWAY = { budgets };
-    env.MODEL_BUDGET_MONTH = month;
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = before;
-    env.MODEL_BUDGET_MONTH = was;
-  }
-};
-
-/**
- * An answer of some $1: a $0.50 budget holds the most one request may
- * use, and nothing after this answer.
- */
-const dearGreeting = {
-  text: '{"line":"Hello Ada"}',
-  inputTokens: 2_000_000,
-  outputTokens: 20,
+/** What the models settings say an independent workflow spent this month. */
+const workflowSpend = async (workflowId: string) => {
+  const { session } = await signedInWithRole(idp, "admin");
+  const { core } = await openRpc(session, {
+    coreEnv: { ...env, MODEL_BUDGET_MONTH: thisMonth() },
+  });
+  const spend = await core.authenticate().models.spend();
+  return spend.workflows.filter((each) => each.workflowId === workflowId);
 };
 
 describe("an independent workflow's model spend", () => {
@@ -1633,7 +1610,7 @@ describe("an independent workflow's model spend", () => {
     vi.restoreAllMocks();
   });
 
-  it("counts against its workflow's budget, every run of it, as admins read it with its name and runs", async () => {
+  it("counts every run of it, as admins read it with its name and runs", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
@@ -1641,50 +1618,23 @@ describe("an independent workflow's model spend", () => {
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hello again"}')
     );
-    // This month: what admins read counts the runs started in it.
-    const read = await withBudgets(
-      { workflow: { limit: 5 } },
-      async () => {
-        for (const _ of [1, 2]) {
-          // oxlint-disable-next-line no-await-in-loop -- one after another
-          await ended(ada, workflow.id, await started(ada, workflow.id));
-        }
-        const { session } = await signedInWithRole(idp, "admin");
-        const { core } = await openRpc(session, { coreEnv: env });
-        const { models } = core.authenticate();
-        const [settings, spend] = await Promise.all([
-          models.settings(),
-          models.spend(),
-        ]);
-        const budgets =
-          settings.rules.state === "on" ? settings.rules.budgets : [];
-        return {
-          budget: budgets
-            .filter(({ scope }) => scope === "workflow")
-            .flatMap(({ spent }) => spent)
-            .filter(
-              ({ of }) =>
-                of.type === "workflow" && of.workflowId === workflow.id
-            ),
-          spend: spend.workflows.filter(
-            ({ workflowId }) => workflowId === workflow.id
-          ),
-        };
-      },
-      new Date().toISOString().slice(0, "yyyy-mm".length)
-    );
-    const named = {
-      appId: null,
-      appName: null,
-      workflowId: workflow.id,
-      name: workflow.name,
-    };
-    const amount = read.budget[0]?.amount ?? 0;
+    for (const _ of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ended(ada, workflow.id, await started(ada, workflow.id));
+    }
+    const read = await workflowSpend(workflow.id);
+    const amount = read[0]?.amount ?? 0;
     expect(amount).toBeGreaterThan(0);
-    expect(read).toStrictEqual({
-      budget: [{ of: { type: "workflow", ...named }, amount }],
-      spend: [{ ...named, amount, runs: 2 }],
-    });
+    expect(read).toStrictEqual([
+      {
+        appId: null,
+        appName: null,
+        workflowId: workflow.id,
+        name: workflow.name,
+        amount,
+        runs: 2,
+      },
+    ]);
   });
 
   it("keeps a deleted workflow's spend for admins, by its ID, with no name to link it by", async () => {
@@ -1692,27 +1642,14 @@ describe("an independent workflow's model spend", () => {
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
     await providerAnswering(answer('{"line":"Hello Ada"}'));
-    const read = await withBudgets(
-      { workflow: { limit: 5 } },
-      async () => {
-        await ended(ada, workflow.id, await started(ada, workflow.id));
-        // Deleted since: its row stays, marked.
-        await env.DB.prepare(
-          "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
-        )
-          .bind(Date.now(), workflow.id)
-          .run();
-        const { session } = await signedInWithRole(idp, "admin");
-        const { core } = await openRpc(session, { coreEnv: env });
-        const { models } = core.authenticate();
-        const spend = await models.spend();
-        return spend.workflows.filter(
-          ({ workflowId }) => workflowId === workflow.id
-        );
-      },
-      new Date().toISOString().slice(0, "yyyy-mm".length)
-    );
-
+    await ended(ada, workflow.id, await started(ada, workflow.id));
+    // Deleted since: its row stays, marked.
+    await env.DB.prepare(
+      "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), workflow.id)
+      .run();
+    const read = await workflowSpend(workflow.id);
     expect(
       read.map(({ name, amount, runs }) => ({
         name,
@@ -1720,31 +1657,6 @@ describe("an independent workflow's model spend", () => {
         runs,
       }))
     ).toStrictEqual([{ name: null, spent: true, runs: 1 }]);
-  });
-
-  it("is refused once its workflow's budget is spent, sending nothing, while another workflow's runs go on", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const spent = await greetingWorkflow(ada, admin);
-    const other = await greetingWorkflow(ada, admin);
-    const provider = await providerAnswering(
-      dearGreeting,
-      dearGreeting,
-      dearGreeting
-    );
-    const ends = await withBudgets({ workflow: { limit: 0.5 } }, async () => {
-      const runOf = async (id: string) =>
-        endOf(await ended(ada, id, await started(ada, id)));
-      const first = await runOf(spent.workflow.id);
-      const second = await runOf(spent.workflow.id);
-      return { first, second, other: await runOf(other.workflow.id) };
-    });
-    expect({ ...ends, sent: provider.requests.length }).toStrictEqual({
-      first: { status: "completed", output: { status: "Hello Ada" } },
-      second: { status: "failed", code: "model.over_budget" },
-      other: { status: "completed", output: { status: "Hello Ada" } },
-      sent: 2,
-    });
   });
 });
 

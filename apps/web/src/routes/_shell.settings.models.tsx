@@ -1,11 +1,5 @@
-import type {
-  ModelBindingSpend,
-  ModelBudget,
-  ModelBudgetScope,
-  ModelSettings,
-} from "@grasp-os/shared/models";
+import type { ModelSettings } from "@grasp-os/shared/models";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
   TableBody,
@@ -14,17 +8,13 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { dollars, percent } from "../settings/money.ts";
+import { dollars } from "../settings/money.ts";
 import {
   SettingsBody,
   SettingsError,
@@ -32,16 +22,15 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
-// Models, for admins: the models the organization's calls may use and the
-// client's rules for model calls (budgets). The models are the
-// organization's own choice, made with its AI provider keys in Settings ›
-// AI providers, so the page only shows them and points there: its own
-// admins get the link, anyone else (Grasp staff, who read but never change
-// whose key pays) who to ask. The rules
-// are deployment config, as core reads them; core checks the role. What
-// was spent against the budgets is AI spend's (`_shell.settings.spend.tsx`). Beside them, each engine's model binding
-// with the caps an admin set on it (on the engine's Resources tab) and
-// what it spent against them today and this month.
+// Models, for admins: the models the organization's calls may use. They
+// are the organization's own choice, made with its AI provider keys in
+// Settings › AI providers, so the page only shows them and points there:
+// its own admins get the link, anyone else (Grasp staff, who read but
+// never change whose key pays) who to ask; core checks the role. Beside
+// them, the one limit every run has, and what each engine's model binding
+// spent this month. What all calls spent is AI spend's
+// (`_shell.settings.spend.tsx`). Nothing here limits spend: the
+// organization pays its providers on its own keys.
 
 const Section = ({
   title,
@@ -76,39 +65,7 @@ const AllowedModels = ({ models }: { models: string[] }) => (
   </Table>
 );
 
-const scopeTitles: Record<ModelBudgetScope, MessageDescriptor> = {
-  deployment: msg`All calls together`,
-  workflow: msg`Each workflow`,
-  user: msg`Each person`,
-  run: msg`Each workflow run, with the runs it starts`,
-};
-
-/** One budget's rule: its limit, and when admins are alerted. */
-const BudgetRule = ({ budget }: { budget: ModelBudget }) => {
-  const limit = dollars(budget.limit);
-  const alertAt = percent(budget.alertAt);
-  return (
-    <div className="flex flex-col gap-1">
-      <h3 className="font-medium">{i18n._(scopeTitles[budget.scope])}</h3>
-      <p className="text-muted-foreground text-sm">
-        {budget.scope === "run" ? (
-          <Trans>
-            {limit} for the run&apos;s whole life, admins alerted at {alertAt}.
-            Its calls stop once it&apos;s used up or held by calls whose cost
-            isn&apos;t settled yet.
-          </Trans>
-        ) : (
-          <Trans>
-            {limit} a month, admins alerted at {alertAt}. Calls stop once
-            it&apos;s used up.
-          </Trans>
-        )}
-      </p>
-    </div>
-  );
-};
-
-/** The limit on requests every run has, whatever the budgets. */
+/** The limit on requests every run has. */
 const RunRequests = () => (
   <p className="text-muted-foreground text-sm">
     <Trans>
@@ -118,134 +75,11 @@ const RunRequests = () => (
   </p>
 );
 
-const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
-  if (budgets.length === 0) {
-    return (
-      <div className="flex flex-col gap-4">
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            No budget is set: model calls aren&apos;t limited by cost.
-          </Trans>
-        </p>
-        <RunRequests />
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-4">
-      {budgets.map((budget) => (
-        <BudgetRule budget={budget} key={budget.scope} />
-      ))}
-      <RunRequests />
-      <p className="text-sm">
-        <Trans>
-          What was spent this month is under{" "}
-          <Link className="underline underline-offset-4" to="/settings/spend">
-            AI spend
-          </Link>
-          .
-        </Trans>
-      </p>
-    </div>
-  );
-};
-
-/** A binding's caps, each on a line of its own; or why it has none. */
-const BindingCaps = ({ binding }: { binding: ModelBindingSpend }) => {
-  if (binding.budgetDamaged) {
-    return (
-      <span className="text-status-attention">
-        <Trans>Its budget can&apos;t be read, so it serves nothing.</Trans>
-      </span>
-    );
-  }
-  const { budget } = binding;
-  if (budget === null) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>No caps of its own</Trans>
-      </span>
-    );
-  }
-  const { perRequest, perDay, perMonth } = budget;
-  const request = perRequest === undefined ? null : dollars(perRequest);
-  const daily = perDay === undefined ? null : dollars(perDay);
-  const monthly = perMonth === undefined ? null : dollars(perMonth);
-  const alertAt = percent(budget.alertAt);
-  return (
-    <ul className="flex flex-col gap-0.5">
-      {request === null ? null : (
-        <li>
-          <Trans>{request} a request</Trans>
-        </li>
-      )}
-      {daily === null ? null : (
-        <li>
-          <Trans>{daily} a day</Trans>
-        </li>
-      )}
-      {monthly === null ? null : (
-        <li>
-          <Trans>{monthly} a month</Trans>
-        </li>
-      )}
-      {daily === null && monthly === null ? null : (
-        <li className="text-muted-foreground">
-          <Trans>Admins alerted at {alertAt}</Trans>
-        </li>
-      )}
-    </ul>
-  );
-};
-
-/** What a binding spent in a period, and of what cap when it has one. */
-const SpentOf = ({
-  amount,
-  cap,
-}: {
-  amount: number;
-  cap: number | undefined;
-}) => {
-  const spent = dollars(amount);
-  if (cap === undefined) {
-    return <span className="tabular-nums">{spent}</span>;
-  }
-  const limit = dollars(cap);
-  return (
-    <span className="tabular-nums">
-      <Trans>
-        {spent} of {limit}
-      </Trans>
-    </span>
-  );
-};
-
-/** How far a binding's spend is into its caps, when it is anywhere near them. */
-const BindingAlert = ({ binding }: { binding: ModelBindingSpend }) => {
-  if (binding.alert === "reached") {
-    return (
-      <Badge variant="attention">
-        <Trans>Cap reached</Trans>
-      </Badge>
-    );
-  }
-  if (binding.alert === "alerted") {
-    return (
-      <Badge variant="secondary">
-        <Trans>Past the alert</Trans>
-      </Badge>
-    );
-  }
-  return null;
-};
-
-/** Each engine's model binding, its caps, and what it spent against them. */
-const BindingBudgets = ({
+/** Each engine's model binding, and what it spent this month. */
+const BindingSpend = ({
   bindings,
-  day,
 }: {
   bindings: ModelSettings["bindings"];
-  day: string;
 }) => {
   const { listed: bound, more } = bindings;
   if (bound.length === 0) {
@@ -264,19 +98,8 @@ const BindingBudgets = ({
             <TableHead>
               <Trans>Domain</Trans>
             </TableHead>
-            <TableHead>
-              <Trans>Caps</Trans>
-            </TableHead>
-            <TableHead className="text-right">
-              <Trans>Today ({day}, UTC)</Trans>
-            </TableHead>
             <TableHead className="text-right">
               <Trans>This month</Trans>
-            </TableHead>
-            <TableHead>
-              <span className="sr-only">
-                <Trans>Alert</Trans>
-              </span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -313,20 +136,10 @@ const BindingBudgets = ({
                   )}
                 </span>
               </TableCell>
-              <TableCell>
-                <BindingCaps binding={binding} />
-              </TableCell>
               <TableCell className="text-right">
-                <SpentOf amount={binding.today} cap={binding.budget?.perDay} />
-              </TableCell>
-              <TableCell className="text-right">
-                <SpentOf
-                  amount={binding.thisMonth}
-                  cap={binding.budget?.perMonth}
-                />
-              </TableCell>
-              <TableCell>
-                <BindingAlert binding={binding} />
+                <span className="tabular-nums">
+                  {dollars(binding.thisMonth)}
+                </span>
               </TableCell>
             </TableRow>
           ))}
@@ -343,25 +156,20 @@ const BindingBudgets = ({
   );
 };
 
-/**
- * The engine budgets section: shown whatever the gateway's configuration
- * says, as what was spent stays worth seeing while calls are refused.
- */
-const EngineBudgets = ({ settings }: { settings: ModelSettings }) => {
+/** What each domain's model spent: shown whether or not models are chosen. */
+const EngineSpend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   return (
     <Section
       description={
         <Trans>
-          Caps an admin set on a domain&apos;s model, on the domain&apos;s
-          Resources tab, on top of the deployment&apos;s budgets, and what the
-          domain&apos;s actions spent through it. A workflow&apos;s own AI steps
-          don&apos;t count here.
+          What each domain&apos;s actions spent through its model this month. A
+          workflow&apos;s own AI steps don&apos;t count here.
         </Trans>
       }
-      title={t`Domain budgets`}
+      title={t`Domain spend`}
     >
-      <BindingBudgets bindings={settings.bindings} day={settings.day} />
+      <BindingSpend bindings={settings.bindings} />
     </Section>
   );
 };
@@ -406,12 +214,10 @@ const Settings = ({
             <WhereToChange canChange={canChange} />
           </p>
         </Section>
-        <EngineBudgets settings={settings} />
+        <EngineSpend settings={settings} />
       </>
     );
   }
-  const { rules } = settings;
-  const on = rules.state === "on" ? rules : undefined;
   return (
     <>
       <Section
@@ -425,19 +231,12 @@ const Settings = ({
         }
         title={t`Allowed models`}
       >
-        {rules.state === "invalid" ? (
-          <ErrorText>
-            {t`The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp.`}
-          </ErrorText>
-        ) : null}
         <AllowedModels models={settings.models} />
       </Section>
-      {on === undefined ? null : (
-        <Section title={t`Budgets`}>
-          <Budgets budgets={on.budgets} />
-        </Section>
-      )}
-      <EngineBudgets settings={settings} />
+      <Section title={t`Limits`}>
+        <RunRequests />
+      </Section>
+      <EngineSpend settings={settings} />
     </>
   );
 };

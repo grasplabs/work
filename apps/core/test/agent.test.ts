@@ -40,7 +40,6 @@ import {
   codeStatuses,
   codeStep,
   readApiStep,
-  configureObject,
   model,
   pausedReply,
   says,
@@ -364,7 +363,6 @@ describe("chat agent", () => {
     });
     await evictDurableObject(stub);
     const later = await fakeProvider(says("What six times seven is."));
-    await configureObject(stub);
     await stub.ask(chat.id, { text: "What did I ask?", model });
 
     // What each request sent, in Anthropic's wire format.
@@ -467,7 +465,6 @@ describe("chat agent", () => {
       "teams"
     );
     await fakeProvider(says("Hello."));
-    await configureObject(stub);
 
     await stub.ask(chat.id, { text: "Hi.", model });
 
@@ -1600,7 +1597,6 @@ describe("chat agent after a restart", () => {
 
     await evictDurableObject(stub);
     const provider = await fakeProvider(says("You asked which chat this is."));
-    await configureObject(stub);
     const reply = await ask("What did I ask before?");
 
     expect(reply.answer).toBe("You asked which chat this is.");
@@ -1638,7 +1634,6 @@ describe("chat agent after a restart", () => {
 
     await evictDurableObject(stub);
     const after = await fakeProvider(says("It was 42."));
-    await configureObject(stub);
     const reply = await ask("So?");
 
     const sent = JSON.stringify(after.requests[0]?.body);
@@ -2466,7 +2461,6 @@ describe("chat agent code output", () => {
       ),
       says("Done.")
     );
-    await configureObject(stub);
 
     await withRevocationReads(
       stub,

@@ -37,7 +37,6 @@ import {
 } from "./host.ts";
 import type {
   AiCalls,
-  BusyRefusals,
   FailedStep,
   HostHooks,
   HostedRun,
@@ -240,12 +239,11 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
 };
 
 /**
- * What a run has of its own object beside the engine's journal: where it
- * keeps each step's busy-budget refusal, and the engine's lease of each
- * step's attempt, read from the journal as it is now (run-object.ts).
+ * What a run has of its own object beside the engine's journal: the
+ * engine's lease of each step's attempt, read from the journal as it is
+ * now (run-object.ts).
  */
 export interface RunMemory {
-  busyRefusals: BusyRefusals;
   /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
   triedOnce?: TriedOnceMarks;
   /** The model calls its JSON workflow's actions made (resource-host.ts). */
@@ -366,7 +364,6 @@ const runWorkflow = async (
     const host = new RunHost(env, step, run, {
       stepFailed,
       attemptCall: trackAttemptCalls(calls),
-      busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
       tampered: (error) => {

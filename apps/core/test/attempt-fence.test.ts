@@ -159,7 +159,6 @@ const runOf = async (
       },
       {
         stepFailed: () => {},
-        busyRefusals: new Map(),
         leaseOf,
         tampered: () => {},
         waiting: async () => {

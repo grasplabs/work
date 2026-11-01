@@ -128,12 +128,6 @@ const typeRules: readonly {
   // Its calls that can change something (a connector call, an App's
   // export) record themselves under their own actions.
   { action: "agent.call", type: "read" },
-  // A spending budget crossing its alert threshold or running out: filed
-  // with the budgets it belongs to, not as a model call.
-  { action: "model.budget", type: "config" },
-  // A company admin setting or removing a limit per person (core's
-  // src/model-ledger.ts): configuration, not a model call.
-  { action: "model.limit", type: "config" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
   // A chat or run whose context read restricted sources, and so is held to

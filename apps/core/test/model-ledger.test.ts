@@ -9,14 +9,11 @@ import { allEvents } from "./audit-events.ts";
 // the gateway (models.ts) relies on when a request is admitted, settled,
 // lost or repeated. Each test has a ledger of its own.
 
-/** A run lineage's scope, by its root run, counted with no budget. */
-const lineageOf = (root: string): LedgerScope => ({
+/** A run lineage's scope, by its root run. */
+const lineageOf = (root: string, limitRequests = 100): LedgerScope => ({
   scope: "run",
   key: root,
-  limitMicros: null,
-  alertMicros: null,
-  limitRequests: 100,
-  names: { run: root },
+  limitRequests,
 });
 
 /** Values in order, as their JSON sorts. */
@@ -37,14 +34,8 @@ const price = {
 
 const actor = { type: "person", userId: "ada" } as const;
 
-/** A person's budget of `limit` micros, alerting at half of it. */
-const budget = (limit: number, key = "ada"): LedgerScope => ({
-  scope: "user",
-  key,
-  limitMicros: limit,
-  alertMicros: limit / 2,
-  names: { user: key },
-});
+/** A person's scope. */
+const person = (key = "ada"): LedgerScope => ({ scope: "user", key });
 
 /**
  * Ada's shares of the requests in flight, room enough that none fills in
@@ -68,12 +59,12 @@ const roomyFair = (): Admission["fair"] => ({
 const graceMs = 5 * 60_000;
 
 /**
- * A request of `reservedMicros`, due in an hour unless `more` says when,
- * its deadline the gateway's grace before that.
+ * A request that can cost at most `reservedMicros`, due in an hour unless
+ * `more` says when, its deadline the gateway's grace before that.
  */
 const admission = (
   reservedMicros: number,
-  scopes: LedgerScope[] = [budget(100)],
+  scopes: LedgerScope[] = [person()],
   more: Partial<Admission> = {}
 ): Admission => {
   const reconcileAt = more.reconcileAt ?? Date.now() + 60 * 60_000;
@@ -110,24 +101,18 @@ const corrupt = async (
   });
 };
 
-/**
- * Points request `id`'s recorded scopes at a person with no spend, as a
- * release that stored them otherwise might have: every charge of it
- * throws.
- */
-const strayed = async (
-  ledger: ReturnType<typeof newLedger>,
-  id: string
+/** Makes every change to the ledger's spend fail, as a broken store would. */
+const breakSpend = async (
+  ledger: ReturnType<typeof newLedger>
 ): Promise<void> => {
   await runInDurableObject(ledger, (_instance, state) => {
     state.storage.sql.exec(
-      "UPDATE request_scopes SET key = 'nobody' WHERE request_id = ?",
-      id
+      "CREATE TRIGGER broken_spend BEFORE UPDATE ON spend BEGIN SELECT RAISE(ABORT, 'broken'); END"
     );
   });
 };
 
-/** The ledger's requests, most reserved first. */
+/** The ledger's requests, most costly first. */
 const rowsOf = async (ledger: ReturnType<typeof newLedger>) =>
   await runInDurableObject(ledger, (_instance, state) =>
     state.storage.sql
@@ -137,22 +122,15 @@ const rowsOf = async (ledger: ReturnType<typeof newLedger>) =>
       .toArray()
   );
 
-/** What `key`'s user scope spent and holds in 2400-01. */
+/** What `key`'s user scope spent in 2400-01. */
 const spendOf = async (ledger: ReturnType<typeof newLedger>, key = "ada") => {
   const read = await ledger.spendOf("2400-01", ["user"], 10);
   return read.user?.find((row) => row.key === key);
 };
 
 describe("the model ledger", () => {
-  it("releases exactly what a request reserved on each scope, as recorded when admitted, whatever rule it settles under", async () => {
+  it("counts a request on Grasp's key as Grasp's money, and only as a request of the run it is made in", async () => {
     const ledger = newLedger();
-    const platform: LedgerScope = {
-      scope: "platform",
-      key: "platform",
-      limitMicros: null,
-      alertMicros: null,
-      names: {},
-    };
     const route = {
       transport: "connect",
       provider: "openai",
@@ -160,27 +138,20 @@ describe("the model ledger", () => {
       credential: "platform",
       feature: "conversion",
     } as const;
-    const now = admission(50, [platform, lineageOf("root")], { route });
+    const now = admission(
+      50,
+      [{ scope: "platform", key: "platform" }, lineageOf("root")],
+      { route }
+    );
     await ledger.admit(now);
     const used = { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 };
 
     await ledger.settle(now.id, { by: "usage", tokens: used });
 
-    const run = await ledger.spendOf("2400-01", ["run"], 10);
-    const grasp = await ledger.spendOf("2400-01", ["platform"], 10);
-    expect({
-      // Nothing left held on the run, and none of Grasp's money spent there.
-      run: run.run?.map(({ spentMicros, reservedMicros }) => ({
-        spentMicros,
-        reservedMicros,
-      })),
-      grasp: grasp.platform?.map(({ spentMicros, reservedMicros }) => ({
-        spentMicros,
-        reservedMicros,
-      })),
-    }).toStrictEqual({
-      run: [{ spentMicros: 0, reservedMicros: 0 }],
-      grasp: [{ spentMicros: 30, reservedMicros: 0 }],
+    const read = await ledger.spendOf("2400-01", ["run", "platform"], 10);
+    expect(read).toStrictEqual({
+      run: [{ key: "root", spentMicros: 0 }],
+      platform: [{ key: "platform", spentMicros: 30 }],
     });
   });
 
@@ -207,58 +178,24 @@ describe("the model ledger", () => {
     }).toStrictEqual({ scansRequests: false, byIndex: true });
   });
 
-  it("admits concurrent requests only while their reservations fit every scope together, and refuses the rest whole", async () => {
+  it("admits concurrent requests however much they could cost, counting each in every scope", async () => {
     const ledger = newLedger();
-    const team = {
-      scope: "deployment",
-      key: "deployment",
-      limitMicros: 1000,
-      alertMicros: null,
-      names: {},
-    } as const;
-
-    const reconcileAt = Date.now() + 60 * 60_000;
+    const deployment = { scope: "deployment", key: "deployment" } as const;
 
     const admitted = await Promise.all(
       Array.from(
         { length: 10 },
         async () =>
-          await ledger.admit(
-            admission(30, [team, budget(100)], { reconcileAt })
-          )
+          await ledger.admit(admission(1_000_000, [deployment, person()]))
       )
     );
 
-    // The person's $100 micros fit three; the deployment had room for all.
-    // The three hold it while under way: room is hoped back by their
-    // deadline.
-    expect(admitted.filter(({ ok }) => ok)).toHaveLength(3);
-    expect(admitted.filter(({ ok }) => !ok)).toStrictEqual(
-      Array.from({ length: 7 }, () => ({
-        ok: false,
-        scope: "user",
-        heldBy: ["user"],
-        heldUntil: reconcileAt - graceMs,
-      }))
-    );
-    // Refused whole: the deployment holds only what the admitted reserved.
-    const read = await ledger.spendOf("2400-01", ["deployment", "user"], 10);
-    expect(read).toStrictEqual({
-      deployment: [{ key: "deployment", spentMicros: 0, reservedMicros: 90 }],
-      user: [{ key: "ada", spentMicros: 0, reservedMicros: 90 }],
-    });
+    expect(admitted.filter(({ ok }) => ok)).toHaveLength(10);
   });
 
-  it("counts a run lineage's requests and spend across months, and gives back the count of a request never sent", async () => {
+  it("counts a run lineage's requests across months, and gives back the count of a request never sent", async () => {
     const ledger = newLedger();
-    const lineage = {
-      scope: "run",
-      key: "root",
-      limitMicros: 100,
-      alertMicros: null,
-      limitRequests: 2,
-      names: { run: "root" },
-    } as const;
+    const lineage = lineageOf("root", 2);
     const first = admission(10, [lineage]);
     const unsent = admission(10, [lineage], { period: "2400-02" });
 
@@ -276,27 +213,23 @@ describe("the model ledger", () => {
       by: "usage",
       tokens: { input: 60, output: 0, cacheRead: 0, cacheWrite: 0 },
     });
-    // Months on, its spend holds: 60 of 100 micros spent, 10 held.
-    const roomless = await ledger.admit(
-      admission(50, [{ ...lineage, key: "root", limitRequests: 5 }], {
-        period: "2400-05",
-      })
-    );
+    // Months on, its spend is the lineage's whole life's.
+    const read = await ledger.spendOf("2400-05", ["run"], 10);
 
-    expect({ counted, afterUnsent, roomless }).toStrictEqual({
+    expect({ counted, afterUnsent, run: read.run }).toStrictEqual({
       counted: [
         { ok: true },
         { ok: true },
         { ok: false, scope: "run", requests: true },
       ],
       afterUnsent: { ok: true },
-      roomless: { ok: false, scope: "run" },
+      run: [{ key: "root", spentMicros: 60 }],
     });
   });
 
   it("charges what a request used at its pinned prices, once, however often it is settled", async () => {
     const ledger = newLedger();
-    const request = admission(80, [budget(1000)], {
+    const request = admission(80, [person()], {
       price: { ...price, output: 2_000_000, version: "pinned" },
     });
     await expect(ledger.admit(request)).resolves.toStrictEqual({ ok: true });
@@ -318,25 +251,32 @@ describe("the model ledger", () => {
     await expect(spendOf(ledger)).resolves.toStrictEqual({
       key: "ada",
       spentMicros: 20,
-      reservedMicros: 0,
     });
   });
 
-  it("answers an admission repeated after its answer was lost without reserving twice, and refuses its ID for another request", async () => {
+  it("answers an admission repeated after its answer was lost without counting it twice, and refuses its ID for another request", async () => {
     const ledger = newLedger();
-    const request = admission(40);
+    const lineage = lineageOf("root", 2);
+    const request = admission(40, [lineage]);
 
-    await expect(ledger.admit(request)).resolves.toStrictEqual({ ok: true });
-    await expect(ledger.admit(request)).resolves.toStrictEqual({ ok: true });
-    await expect(
-      ledger.admit({ ...request, reservedMicros: 1 })
-    ).resolves.toStrictEqual({ ok: false, reused: true });
-    await expect(spendOf(ledger)).resolves.toMatchObject({
-      reservedMicros: 40,
-    });
+    const answers = [
+      await ledger.admit(request),
+      await ledger.admit(request),
+      await ledger.admit({ ...request, reservedMicros: 1 }),
+      // Counted once: the lineage has one request left.
+      await ledger.admit(admission(40, [lineage])),
+      await ledger.admit(admission(40, [lineage])),
+    ];
+    expect(answers).toStrictEqual([
+      { ok: true },
+      { ok: true },
+      { ok: false, reused: true },
+      { ok: true },
+      { ok: false, scope: "run", requests: true },
+    ]);
   });
 
-  it("releases a request the provider refused or that was never sent, and nothing else", async () => {
+  it("charges nothing for a request the provider refused or that was never sent, and leaves one whose usage was lost to reconciliation", async () => {
     const ledger = newLedger();
     const [refused, unsent, unknown] = [
       admission(30),
@@ -361,27 +301,19 @@ describe("the model ledger", () => {
       { state: "unknown" },
       { state: "missing" },
     ]);
-    // The unknown one stays held in full: no room for a fourth of 80.
-    await expect(spendOf(ledger)).resolves.toMatchObject({
-      spentMicros: 0,
-      reservedMicros: 30,
-    });
-    await expect(ledger.admit(admission(80))).resolves.toStrictEqual({
-      ok: false,
-      scope: "user",
-    });
+    await expect(spendOf(ledger)).resolves.toMatchObject({ spentMicros: 0 });
   });
 
-  it("charges in full each reservation that came due unsettled or with its usage lost, on its alarm, and audits each", async () => {
+  it("charges the most it can cost each request that came due unsettled or with its usage lost, on its alarm, and audits each", async () => {
     const ledger = newLedger();
     // Due in a moment: once both were admitted and one settled as lost.
     const soon = Date.now() + 1000;
     // One whose gateway died before settling it, one whose usage was lost,
     // and one not yet due.
     const [abandoned, lost, later] = [
-      admission(30, [budget(1000, "ben")], { reconcileAt: soon }),
-      admission(20, [budget(1000, "ben")], { reconcileAt: soon }),
-      admission(10, [budget(1000, "ben")]),
+      admission(30, [person("ben")], { reconcileAt: soon }),
+      admission(20, [person("ben")], { reconcileAt: soon }),
+      admission(10, [person("ben")]),
     ];
     for (const request of [abandoned, lost, later]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
@@ -395,7 +327,6 @@ describe("the model ledger", () => {
     await expect(spendOf(ledger, "ben")).resolves.toStrictEqual({
       key: "ben",
       spentMicros: 50,
-      reservedMicros: 10,
     });
     // A late usage report can't lower what reconciliation charged.
     await expect(
@@ -449,57 +380,42 @@ describe("the model ledger", () => {
       { ok: false, reused: true },
       { ok: false, reused: true },
     ]);
-    await expect(spendOf(ledger)).resolves.toMatchObject({
-      spentMicros: 0,
-      reservedMicros: 30,
+    await expect(spendOf(ledger)).resolves.toMatchObject({ spentMicros: 0 });
+  });
+
+  it("admits a request with no price, and charges it nothing", async () => {
+    const ledger = newLedger();
+    const free = { ...price, input: 0, output: 0, version: "free" };
+    const request = admission(0, [person("fay")], { price: free });
+
+    const admitted = await ledger.admit(request);
+    const settled = await ledger.settle(request.id, {
+      by: "usage",
+      tokens: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0 },
+    });
+
+    expect({ admitted, settled }).toStrictEqual({
+      admitted: { ok: true },
+      settled: { state: "settled", chargedMicros: 0 },
     });
   });
 
-  it("refuses a request with no price against a budget, and counts it where nothing limits it", async () => {
-    const ledger = newLedger();
-    const free = { ...price, input: 0, output: 0, version: "free" };
-    const counted = {
-      scope: "deployment",
-      key: "deployment",
-      limitMicros: null,
-      alertMicros: null,
-      names: {},
-    } as const;
-
-    await expect(
-      Promise.all([
-        ledger.admit(admission(0, [budget(100)], { price: free })),
-        ledger.admit(
-          admission(0, [budget(100)], { price: { ...price, output: 0 } })
-        ),
-        ledger.admit(admission(0, [counted], { price: free })),
-      ])
-    ).resolves.toStrictEqual([
-      { ok: false, unpriced: true },
-      { ok: false, unpriced: true },
-      { ok: true },
-    ]);
-  });
-
-  it("quarantines a request whose scopes can't be read, audited and still held, and reconciles the rest", async () => {
+  it("quarantines a request whose scopes can't be read, audited and charged nothing, and reconciles the rest", async () => {
     const ledger = newLedger();
     const soon = Date.now() + 1000;
-    const [broken, stray, nameless, fine, settling] = [
-      admission(30, [budget(1000, "dan")], { reconcileAt: soon }),
-      admission(25, [budget(1000, "dan")], { reconcileAt: soon }),
-      admission(15, [budget(1000, "dan")], { reconcileAt: soon }),
-      admission(20, [budget(1000, "dan")], { reconcileAt: soon }),
-      admission(5, [budget(1000, "dan")]),
+    const [broken, nameless, fine, settling] = [
+      admission(30, [person("dan")], { reconcileAt: soon }),
+      admission(15, [person("dan")], { reconcileAt: soon }),
+      admission(20, [person("dan")], { reconcileAt: soon }),
+      admission(5, [person("dan")]),
     ];
-    for (const request of [broken, stray, nameless, fine, settling]) {
+    for (const request of [broken, nameless, fine, settling]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await ledger.admit(request);
     }
     // Rows written by a release that stored them otherwise: scopes that
-    // aren't JSON, a scope with no spend to settle against, and an actor
-    // that isn't one.
+    // aren't JSON, and an actor that isn't one.
     await corrupt(ledger, "scopes", "not JSON", broken.id, settling.id);
-    await strayed(ledger, stray.id);
     await corrupt(ledger, "actor", "not JSON", nameless.id);
     await expect(
       ledger.settle(settling.id, { by: "refused" })
@@ -511,14 +427,14 @@ describe("the model ledger", () => {
     const events = await allEvents();
     expect({
       states: rows.map(({ id, state }) => [id, state]),
-      // Set aside for now, not quarantined: its scopes can be read.
-      strayLater:
-        (rows.find(({ id }) => id === stray.id)?.reconcileAt ?? 0) > soon,
       dan: await spendOf(ledger, "dan"),
       quarantined: events
         .filter(({ action }) => action === "model.spend.quarantined")
-        .map(({ detail }) => detail.request)
-        .filter((id) => id === broken.id || id === settling.id)
+        .filter(
+          ({ detail }) =>
+            detail.request === broken.id || detail.request === settling.id
+        )
+        .map(({ detail }) => detail)
         .toSorted(byJson),
       // Reconciled all the same, in the system's name.
       nameless: events.find(
@@ -528,24 +444,27 @@ describe("the model ledger", () => {
     }).toStrictEqual({
       states: [
         [broken.id, "quarantined"],
-        [stray.id, "dispatched"],
         [fine.id, "settled"],
         [nameless.id, "settled"],
         [settling.id, "quarantined"],
       ],
-      strayLater: true,
-      // Their reservations stay held: what they hold can't be told.
-      dan: { key: "dan", spentMicros: 35, reservedMicros: 30 + 25 + 5 },
-      quarantined: [broken.id, settling.id].toSorted(byJson),
+      dan: { key: "dan", spentMicros: 35 },
+      quarantined: [broken.id, settling.id]
+        .map((request) => ({
+          request,
+          model: "mistral/test",
+          period: "2400-01",
+        }))
+        .toSorted(byJson),
       nameless: { type: "system" },
     });
   });
 
-  it("charges in full a request whose prices can't be read, and needs none to release one", async () => {
+  it("charges the most it can cost a request whose prices can't be read, and needs none to settle a refused one", async () => {
     const ledger = newLedger();
     const [used, refused] = [
-      admission(30, [budget(1000, "eve")]),
-      admission(20, [budget(1000, "eve")]),
+      admission(30, [person("eve")]),
+      admission(20, [person("eve")]),
     ];
     await ledger.admit(used);
     await ledger.admit(refused);
@@ -566,13 +485,12 @@ describe("the model ledger", () => {
     await expect(spendOf(ledger, "eve")).resolves.toStrictEqual({
       key: "eve",
       spentMicros: 30,
-      reservedMicros: 0,
     });
   });
 
-  it("delivers a quarantine's audit event at once, not only when an alert comes with it", async () => {
+  it("delivers a quarantine's audit event at once, from the settlement itself", async () => {
     const ledger = newLedger();
-    const broken = admission(10, [budget(1000, "jo")]);
+    const broken = admission(10, [person("jo")]);
     await ledger.admit(broken);
     await corrupt(ledger, "scopes", "not JSON", broken.id);
 
@@ -594,7 +512,7 @@ describe("the model ledger", () => {
     expect(delivered).toBeTruthy();
   });
 
-  it("refuses an admission under an older quota policy than one it already admitted under, reserving and counting nothing", async () => {
+  it("refuses an admission under an older quota policy than one it already admitted under, counting nothing", async () => {
     const ledger = newLedger();
     const run = lineageOf(`root-${crypto.randomUUID()}`);
     const newer = admission(10, [{ ...run, limitRequests: 2 }], {
@@ -607,9 +525,7 @@ describe("the model ledger", () => {
       await ledger.admit(newer),
       await ledger.admit(older),
       // A request with no lineage carries no generation: never refused for it.
-      await ledger.admit(
-        admission(10, [budget(1000, `ivo-${crypto.randomUUID()}`)])
-      ),
+      await ledger.admit(admission(10, [person(`ivo-${crypto.randomUUID()}`)])),
       await ledger.admit(
         admission(10, [{ ...run, limitRequests: 2 }], { policyGeneration: 7 })
       ),
@@ -626,12 +542,7 @@ describe("the model ledger", () => {
         )
         .toArray()
     );
-    const spent = await ledger.spendOf("2400-01", ["run"], 10);
-    expect({
-      admitted,
-      lineage: spent.run,
-      generations,
-    }).toStrictEqual({
+    expect({ admitted, generations }).toStrictEqual({
       admitted: [
         { ok: true },
         { ok: false, policyBehind: true, highest: 7 },
@@ -640,23 +551,21 @@ describe("the model ledger", () => {
         // Two of its two requests made, under the newest policy too.
         { ok: false, scope: "run", requests: true },
       ],
-      lineage: [{ key: run.key, spentMicros: 0, reservedMicros: 20 }],
       generations: [{ id: newer.id, generation: 7 }],
     });
   });
 
-  it("refuses an admission with more scopes than the gateway counts, reserving nothing", async () => {
+  it("refuses an admission with more scopes than the gateway counts, counting nothing", async () => {
     const ledger = newLedger();
     const scopes: LedgerScope[] = [
-      { ...budget(1000, "max"), scope: "deployment", key: "deployment" },
-      { ...budget(1000, "max"), scope: "workflow", key: "flow" },
-      budget(1000, "max"),
-      { ...budget(1000, "max"), scope: "run", key: "run" },
-      { ...budget(1000, "max"), scope: "binding", key: "binding" },
-      { ...budget(1000, "max"), scope: "binding_day", key: "binding-day" },
+      { scope: "deployment", key: "deployment" },
+      { scope: "workflow", key: "flow" },
+      person("max"),
+      lineageOf("run"),
+      { scope: "binding", key: "binding" },
     ];
     const fits = admission(10, scopes);
-    const tooMany = admission(10, [...scopes, budget(1000, "nia")]);
+    const tooMany = admission(10, [...scopes, person("nia")]);
 
     const refused = await ledger.admit(tooMany).then(
       () => "admitted",
@@ -670,95 +579,15 @@ describe("the model ledger", () => {
     }).toStrictEqual({ refused: "refused", admitted: true, nia: undefined });
   });
 
-  it("refuses an admission naming a person's limit itself, which only the ledger sets from what admins set", async () => {
+  it("quarantines a request that keeps failing to reconcile, after three tries, audited", async () => {
     const ledger = newLedger();
-    await ledger.setPersonLimit(
-      { type: "person", userId: "ada" },
-      { monthlyMicros: 10, messagesAnHour: null },
-      null,
-      actor
-    );
-    const ownLimit = admission(50, [
-      budget(1000),
-      {
-        scope: "person",
-        key: "ada",
-        limitMicros: 1000,
-        alertMicros: null,
-        names: {},
-      },
-    ]);
-
-    const refused = await ledger.admit(ownLimit).then(
-      () => "admitted",
-      () => "refused"
-    );
-    const held = await ledger.admit(
-      admission(50, [budget(1000)], { person: { key: "ada", teams: [] } })
-    );
-    expect({ refused, held }).toStrictEqual({
-      refused: "refused",
-      held: { ok: false, scope: "person" },
-    });
-  });
-
-  it("settles every scope a request reserved against, as its admission recorded them, even one its JSON leaves out, and holds one with no record", async () => {
-    const ledger = newLedger();
-    const key = `una-${crypto.randomUUID()}`;
-    const workflow = {
-      scope: "workflow",
-      key: `flow-${crypto.randomUUID()}`,
-      limitMicros: null,
-      alertMicros: null,
-      names: {},
-    } as const;
-    const left = admission(30, [budget(1000, key), workflow]);
-    const unrecorded = admission(10, [budget(1000, key)]);
-    await ledger.admit(left);
-    await ledger.admit(unrecorded);
-    // Its JSON lost the workflow, the record of the other is gone.
-    await corrupt(
-      ledger,
-      "scopes",
-      JSON.stringify([budget(1000, key)]),
-      left.id
-    );
-    await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec(
-        "DELETE FROM request_scopes WHERE request_id = ?",
-        unrecorded.id
-      );
-    });
-    const used = { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 };
-
-    const settled = [
-      await ledger.settle(left.id, { by: "usage", tokens: used }),
-      await ledger.settle(unrecorded.id, { by: "usage", tokens: used }),
-    ];
-    const read = await ledger.spendOf("2400-01", ["user", "workflow"], 10);
-
-    expect({ settled, user: read.user, workflow: read.workflow }).toStrictEqual(
-      {
-        settled: [
-          { state: "settled", chargedMicros: 4 },
-          { state: "quarantined" },
-        ],
-        // The unrecorded request still holds its 10.
-        user: [{ key, spentMicros: 4, reservedMicros: 10 }],
-        workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
-      }
-    );
-  });
-
-  it("quarantines a request that keeps failing to reconcile, after three tries, audited and held", async () => {
-    const ledger = newLedger();
-    const failing = admission(25, [budget(1000, "hal")], {
+    const failing = admission(25, [person("hal")], {
       reconcileAt: Date.now() + 1000,
     });
     await ledger.admit(failing);
-    // Its scopes can be read, but name a scope with no spend to settle
-    // against: every charge throws.
-    await strayed(ledger, failing.id);
+    // Its scopes can be read, but its spend can't be written: every
+    // charge throws.
+    await breakSpend(ledger);
     const states: string[] = [];
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       // As if its next try came due.
@@ -795,7 +624,7 @@ describe("the model ledger", () => {
     const ledger = newLedger();
     const soon = Date.now() + 1000;
     const stuck = Array.from({ length: 100 }, () =>
-      admission(1, [budget(1000, "ivy")], { reconcileAt: soon })
+      admission(1, [person("ivy")], { reconcileAt: soon })
     );
     for (const request of stuck) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
@@ -803,11 +632,8 @@ describe("the model ledger", () => {
     }
     // Every charge throws, and nothing about a request can be written:
     // no try can be counted or put off.
+    await breakSpend(ledger);
     await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE requests SET scopes = ?",
-        JSON.stringify([budget(1000, "nobody")])
-      );
       state.storage.sql.exec(
         "CREATE TRIGGER stuck BEFORE UPDATE ON requests BEGIN SELECT RAISE(ABORT, 'stuck'); END"
       );
@@ -828,163 +654,5 @@ describe("the model ledger", () => {
       state.storage.sql.exec("DROP TRIGGER stuck");
     });
     expect(ran).toBe("ended");
-  });
-
-  it("refuses a request whose tiers have no price against a budget", async () => {
-    const ledger = newLedger();
-    const { version: _version, ...rates } = price;
-    const tier = { ...rates, inputTokensAbove: 100 };
-    await expect(
-      Promise.all([
-        ledger.admit(
-          admission(1, [budget(100)], {
-            price: { ...price, tiers: [{ ...tier, output: 0 }] },
-          })
-        ),
-        ledger.admit(
-          admission(1, [budget(100)], {
-            price: { ...price, tiers: [{ ...tier, input: 0 }] },
-          })
-        ),
-        ledger.admit(
-          admission(1, [budget(100)], { price: { ...price, tiers: [tier] } })
-        ),
-      ])
-    ).resolves.toStrictEqual([
-      { ok: false, unpriced: true },
-      { ok: false, unpriced: true },
-      { ok: true },
-    ]);
-  });
-
-  it("alerts admins once per scope, month and threshold, however many requests reach it", async () => {
-    const ledger = newLedger();
-    const key = `cara-${crypto.randomUUID()}`;
-    const requests = Array.from({ length: 4 }, () =>
-      admission(10, [budget(40, key)])
-    );
-    for (const request of requests) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await ledger.admit(request);
-    }
-    await Promise.all(
-      requests.map(
-        async ({ id }) =>
-          await ledger.settle(id, {
-            by: "usage",
-            tokens: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0 },
-          })
-      )
-    );
-    // A limit lowered below the spend alerts once more, at its own value.
-    const lowered = { ...budget(30, key), alertMicros: 15 };
-    await ledger.admit(admission(1, [lowered]));
-    await ledger.admit(admission(1, [lowered]));
-    // Its alarm delivers what its outbox holds.
-    await runDurableObjectAlarm(ledger);
-
-    const events = await allEvents();
-    const alerts = events.filter(
-      ({ action, detail }) =>
-        action.startsWith("model.budget.") && detail.user === key
-    );
-    expect(
-      alerts.map(({ action, detail }) => [action, detail.threshold])
-    ).toStrictEqual([
-      ["model.budget.alert", 0.00002],
-      ["model.budget.exhausted", 0.00004],
-      ["model.budget.alert", 0.000015],
-      ["model.budget.exhausted", 0.00003],
-    ]);
-  });
-
-  it("refuses as out of budget when any full scope has no room even once the requests under way finish, in whichever order the scopes come", async () => {
-    const ledger = newLedger();
-    const team: LedgerScope = {
-      scope: "deployment",
-      key: "deployment",
-      limitMicros: 100,
-      alertMicros: null,
-      names: {},
-    };
-    // Ben's request is under way, holding 60 of the deployment's 100; Ada
-    // spent 80 of her own 100.
-    await ledger.admit(admission(60, [team, budget(1000, "ben")]));
-    const spent = admission(80, [budget(100)]);
-    await ledger.admit(spent);
-    await ledger.settle(spent.id, {
-      by: "usage",
-      tokens: { input: 80, output: 0, cacheRead: 0, cacheWrite: 0 },
-    });
-
-    // 50 more: the deployment would have room once Ben's is in; Ada never.
-    await expect(
-      Promise.all([
-        ledger.admit(admission(50, [team, budget(100)])),
-        ledger.admit(admission(50, [budget(100), team])),
-      ])
-    ).resolves.toStrictEqual([
-      { ok: false, scope: "user" },
-      { ok: false, scope: "user" },
-    ]);
-  });
-
-  it("counts as spent what a request holds past its deadline, in the grace before it comes due, and what a quarantined one holds", async () => {
-    const ledger = newLedger();
-    // Past its deadline, not yet due: cut off, so charged in full when due.
-    const late = admission(60, [budget(100, "cy")], {
-      deadline: Date.now() - 1000,
-      reconcileAt: Date.now() + graceMs,
-    });
-    // Its scopes can't be read once it settles: held for a person.
-    const held = admission(60, [budget(100, "di")]);
-    await ledger.admit(late);
-    await ledger.admit(held);
-    await corrupt(ledger, "scopes", "not json", held.id);
-    await expect(
-      ledger.settle(held.id, {
-        by: "usage",
-        tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
-      })
-    ).resolves.toStrictEqual({ state: "quarantined" });
-
-    await expect(
-      Promise.all([
-        ledger.admit(admission(50, [budget(100, "cy")])),
-        ledger.admit(admission(50, [budget(100, "di")])),
-      ])
-    ).resolves.toStrictEqual([
-      { ok: false, scope: "user" },
-      { ok: false, scope: "user" },
-    ]);
-  });
-
-  it("hopes room back across several full scopes by the latest of each scope's soonest deadline", async () => {
-    const ledger = newLedger();
-    const team: LedgerScope = {
-      scope: "deployment",
-      key: "deployment",
-      limitMicros: 100,
-      alertMicros: null,
-      names: {},
-    };
-    const now = Date.now();
-    const at = (minutes: number) => ({
-      reconcileAt: now + minutes * 60_000 + graceMs,
-    });
-    // The deployment's room is held by two of Ben's, the soonest in 10
-    // minutes; Ada's by one of hers in 20.
-    await ledger.admit(admission(40, [team, budget(1000, "ben")], at(10)));
-    await ledger.admit(admission(40, [team, budget(1000, "ben")], at(30)));
-    await ledger.admit(admission(60, [budget(100)], at(20)));
-
-    await expect(
-      ledger.admit(admission(50, [team, budget(100)]))
-    ).resolves.toStrictEqual({
-      ok: false,
-      scope: "deployment",
-      heldBy: ["deployment", "user"],
-      heldUntil: now + 20 * 60_000,
-    });
   });
 });

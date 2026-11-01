@@ -24,7 +24,6 @@ import {
   codeStatuses,
   codeStep,
   readApiStep,
-  configureObject,
   model,
   pausedReply,
   says,
@@ -342,7 +341,6 @@ describe("a chat's Knowledge", setUpTime, () => {
     await ask("And now?");
     await evictDurableObject(stub);
     await fakeProvider(says("After a restart."));
-    await configureObject(stub);
     await stub.ask(chat.id, { text: "And now?", model });
 
     const events = await eventsOf(

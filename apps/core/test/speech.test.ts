@@ -16,7 +16,7 @@ import { outcome } from "./sign-in.ts";
 // Speech through the model gateway: Grasp's own speech feature
 // (@grasp-os/shared/platform-ai), ElevenLabs's, says a line, judged by
 // the deployment's rules, charged per character to Grasp's own key (never
-// the organization's budgets, which limit its own keys only) and audited
+// the organization's spend) and audited
 // like any model call, through connect with Grasp's own key.
 // ElevenLabs is the outside system: a fake behind connect's fetch
 // (test/ai-providers-fake.ts), which says each character in 25 ms.
@@ -54,20 +54,16 @@ const thrown = async (promise: Promise<unknown>): Promise<unknown> => {
 
 let monthsUsed = 0;
 
-/** A month no other test counts budgets in: from 2700, clear of other files. */
+/** A month no other test counts spend in: from 2700, clear of other files. */
 const newMonth = (): string => {
   monthsUsed += 1;
   return `${2700 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/** Core's env under the deployment's rules `config`, budgets counted in a month of its own. */
-const withRules = (config: Record<string, unknown> = {}) => {
+/** Core's env with model spend counted in a month of its own. */
+const withRules = () => {
   const month = newMonth();
-  const rulesEnv: Env = {
-    ...env,
-    MODEL_GATEWAY: config,
-    MODEL_BUDGET_MONTH: month,
-  };
+  const rulesEnv: Env = { ...env, MODEL_BUDGET_MONTH: month };
   return { rulesEnv, month };
 };
 
@@ -106,22 +102,17 @@ const auditedFor = async (
 /** What `userId` spent and holds in `month`, as the ledger counts it. */
 const spentBy = async (month: string, userId: string) => {
   const spent = await modelLedger(env).spendOf(month, ["user"], 1000);
-  return (
-    spent.user?.find(({ key }) => key === userId) ?? {
-      spentMicros: 0,
-      reservedMicros: 0,
-    }
-  );
+  return spent.user?.find(({ key }) => key === userId) ?? { spentMicros: 0 };
 };
 
 /**
- * What Grasp's own key spent and holds in `month`: a line is charged
- * there, never against the organization's budgets.
+ * What Grasp's own key spent in `month`: a line is charged there, never
+ * to the organization's spend.
  */
 const graspSpent = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
   const [row] = spent.platform ?? [];
-  return row ?? { spentMicros: 0, reservedMicros: 0 };
+  return row ?? { spentMicros: 0 };
 };
 
 /** A request's body, read as JSON. */
@@ -176,9 +167,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("says a quick line in Eleven v4 Turbo, at half the price", async () => {
-    const { rulesEnv, month } = withRules({
-      budgets: { user: { limit: 10 } },
-    });
+    const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
 
@@ -198,9 +187,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("refuses a voice the speech model doesn't have, charging nothing", async () => {
-    const { rulesEnv, month } = withRules({
-      budgets: { user: { limit: 10 } },
-    });
+    const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
 
@@ -215,7 +202,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     ).resolves.toBe("model.failed");
     await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: 0,
-      reservedMicros: 0,
     });
   });
 
@@ -262,10 +248,8 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the line's characters to Grasp's own key, never to the organization's budgets, and audits it as a platform call", async () => {
-    const { rulesEnv, month } = withRules({
-      budgets: { user: { limit: 10 } },
-    });
+  it("charges the line's characters to Grasp's own key, never to the organization's spend, and audits it as a platform call", async () => {
+    const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
     const lineMicros = lineMicrosOf(line.length);
@@ -279,11 +263,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
     await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: lineMicros,
-      reservedMicros: 0,
     });
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
       spentMicros: 0,
-      reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
@@ -304,31 +286,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
     // Never the line itself.
     expect(JSON.stringify(event)).not.toContain(line);
-  });
-
-  it("says a line however little room the organization's budgets have: they limit its own keys, not Grasp's", async () => {
-    // A cent: less than a line of 600 characters costs at Eleven v4 (4.8¢).
-    const { rulesEnv, month } = withRules({
-      budgets: { deployment: { limit: 0.01 }, user: { limit: 0.01 } },
-    });
-    const person = newPerson();
-    const line = `${newLine()} ${"a".repeat(maxSpeechChars - 19)}`;
-
-    await stephen(rulesEnv, person).speak({
-      text: line,
-      voice,
-      language: "en",
-    });
-
-    await expect(carrying(line)).resolves.toHaveLength(1);
-    await expect(graspSpent(month)).resolves.toMatchObject({
-      spentMicros: lineMicrosOf(line.length),
-    });
-    const [event] = await auditedFor(person.userId, 1);
-    expect(event).toMatchObject({
-      action: "model.call",
-      detail: { outcome: "answered", purpose: "onboarding.speech" },
-    });
   });
 
   it("refuses a model that isn't a speech model of the gateway's, and a speech model for a text call, sending nothing", async () => {
@@ -367,9 +324,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("asks once more when the provider is busy, charging only the line it said", async () => {
-    const { rulesEnv, month } = withRules({
-      budgets: { user: { limit: 10 } },
-    });
+    const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
     await plan(platformElevenLabsKey, [
@@ -386,7 +341,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(carrying(line)).resolves.toHaveLength(2);
     await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: lineMicrosOf(line.length),
-      reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
     expect(event?.detail).toMatchObject({

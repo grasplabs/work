@@ -17,7 +17,6 @@ import {
   codeStep,
   model,
   pausedReply,
-  configureObject,
   says,
   transcript,
 } from "./agent-chat.ts";
@@ -158,7 +157,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const lastRequest = JSON.stringify(chat.provider.requests.at(-1)?.body);
     // A later turn of the chat.
     const later = await fakeProvider(says("Anything else?"));
-    await configureObject(chat.stub);
     await chat.ask("Thanks.");
     expect({
       answer,
@@ -542,7 +540,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
         };`),
       says("You no longer build that App.")
     );
-    await configureObject(chat.stub);
 
     await chat.ask("How did that check go?");
 
@@ -756,7 +753,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
         };`),
       says("There's no such job here.")
     );
-    await configureObject(chat.stub);
 
     await chat.stub.ask(another.id, { text: "How's that build?", model });
 

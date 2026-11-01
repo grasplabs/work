@@ -25,8 +25,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
+import { bindingKey, spendMonth } from "../src/model-spend.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
@@ -537,17 +537,12 @@ const appWith = async (
 };
 
 /** `admin`'s approval of the App's `writer` to the chosen model. */
-const bindWriter = async (
-  admin: Person,
-  app: string,
-  budget?: { perDay: number }
-) =>
+const bindWriter = async (admin: Person, app: string) =>
   await admin.api.resourceBindings.approve({
     app,
     alias: "writer",
     target: { kind: "model", model: chosenModel },
     reviewed: { version: 1 },
-    ...(budget === undefined ? {} : { budget }),
   });
 
 /**
@@ -794,15 +789,15 @@ const startedBefore = (
 };
 
 /**
- * Core's env with the model gateway's `rules` and `db` as its database,
- * and the chosen model's provider answering `replies` in turn.
+ * Core's env with `db` as its database, and the chosen model's provider
+ * answering `replies` in turn.
  */
 const callEnv = async (
   replies: ProviderReply[],
-  { rules = {}, db = env.DB }: { rules?: object; db?: D1Database } = {}
+  { db = env.DB }: { db?: D1Database } = {}
 ) => {
   const provider = await fakeProviderFor([chosenModel], ...replies);
-  const changed: Env = { ...env, DB: db, MODEL_GATEWAY: rules };
+  const changed: Env = { ...env, DB: db };
   return { provider, env: changed };
 };
 
@@ -914,7 +909,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     }).toStrictEqual({ answered: [true, true, true], hits: 3 });
   });
 
-  it("reach a model through the App's binding as the run, counted against the binding's caps and the run's budgets", async () => {
+  it("reach a model through the App's binding as the run, counted in the binding's and the run's spend", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const app = await appWith(builder, {
@@ -923,14 +918,18 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         { name: "draft", reference: draft, input: { prompt: "Hi" } },
       ]),
     });
-    await bindWriter(admin, app, { perDay: 1 });
+    await bindWriter(admin, app);
     const provider = await providerAnswering(answer("Hello."));
     const run = await builder.api.workflows.start(app, "assist");
     const ended = await endedRun(builder, run.id);
-    const [runSpend] = await modelLedger(env).spendOfKeys(
-      budgetMonth(env),
-      "run",
-      [run.id]
+    const ledger = modelLedger(env);
+    const [runSpend] = await ledger.spendOfKeys(spendMonth(env), "run", [
+      run.id,
+    ]);
+    const [bindingSpend] = await ledger.spendOfKeys(
+      spendMonth(env),
+      "binding",
+      [bindingKey({ app, alias: "writer" })]
     );
     const events = await allEvents();
     const calls = events.filter(
@@ -948,16 +947,17 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         actor,
         purpose: detail.purpose,
       })),
-      bindingSpent:
-        (bindings.listed.find((binding) => binding.appId === app)?.today ?? 0) >
-        0,
+      bindingSpent: (bindingSpend?.spentMicros ?? 0) > 0,
+      listed:
+        (bindings.listed.find((binding) => binding.appId === app)?.thisMonth ??
+          0) > 0,
     }).toMatchObject({
       ended: { status: "completed", output: [{ ok: true, value: "Hello." }] },
       asked: 1,
-      // The run lineage's spend counts it, so the run's budgets limit it,
-      // and so do the binding's own caps.
+      // The run lineage's spend counts it, and so does the binding's.
       runSpent: true,
       bindingSpent: true,
+      listed: true,
       // Audited as the run, not as the App.
       calls: [
         {
@@ -1579,59 +1579,6 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
-  it("count a run's requests through a binding against its run lineage's budget, which a screen's don't", async () => {
-    const asleep = await sleepingRun(modelFiles());
-    await bindWriter(asleep.admin, asleep.app);
-    // The first answer costs far more than the run lineage may spend.
-    const { provider, env: budgeted } = await callEnv(
-      [
-        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
-        // The run's second request never reaches it: the screen's does.
-        answer("For the screen."),
-      ],
-      { rules: { budgets: { run: { limit: 0.01 } } } }
-    );
-    const step = stepOf(asleep, { holds: true });
-    const call = async () =>
-      await callRunFunction(
-        budgeted,
-        { ...step, requestId: crypto.randomUUID() },
-        draft,
-        { prompt: "Hi" },
-        `step:${crypto.randomUUID()}`
-      );
-    const first = await call();
-    const second = await call();
-    const app = appIdSchema.parse(asleep.app);
-    const released = await loadRelease(env, app, 1);
-    const screen = await callAppFunction(
-      budgeted,
-      await asleep.builder.api.whoami(),
-      app,
-      JSON.stringify({
-        reference: {
-          resourceId: app,
-          resourceVersion: 1,
-          contractId: "assist.draft",
-          fingerprint: released.fingerprints["assist.draft"] ?? "",
-          kind: "action",
-        },
-        input: { prompt: "Hi" },
-      })
-    );
-    expect({
-      first,
-      second: second.ok ? null : second.error.code,
-      screen: screen.result,
-      asked: provider.requests.length,
-    }).toMatchObject({
-      first: { ok: true, value: "Costly." },
-      second: "resource.budget_exhausted",
-      screen: { ok: true, value: "For the screen." },
-      asked: 2,
-    });
-  });
-
   it("send nothing through connect for an attempt let go of while the request was signed", async () => {
     const subject = `Invoice ${crypto.randomUUID()}`;
     const mailer = await mailerApp(sleeper);
@@ -1976,33 +1923,37 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     await endLiveRuns();
   });
 
-  it("count a run's model requests through another App against the run lineage's budget, which a screen's don't", async () => {
+  it("count a run's model requests through another App in the run lineage's spend, which a screen's don't", async () => {
     const asleep = await sleepingRun(relayingFiles());
     const assistant = await appWith(asleep.builder, modelFiles());
     await bindWriter(asleep.admin, assistant);
     await bindAssistant(asleep.admin, asleep.app, assistant);
-    // The first answer costs far more than the run lineage may spend.
-    const { provider, env: budgeted } = await callEnv(
-      [
-        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
-        // The run's second request never reaches it: the screen's does.
-        answer("For the screen."),
-      ],
-      { rules: { budgets: { run: { limit: 0.01 } } } }
-    );
+    const { provider, env: counted } = await callEnv([
+      answer("First."),
+      answer("Second."),
+      answer("For the screen."),
+    ]);
+    const runSpent = async (): Promise<number> => {
+      const [row] = await modelLedger(env).spendOfKeys(spendMonth(env), "run", [
+        asleep.runId,
+      ]);
+      return row?.spentMicros ?? 0;
+    };
     const step = stepOf(asleep, { holds: true });
     const ask = async () =>
       await callRunFunction(
-        budgeted,
+        counted,
         { ...step, requestId: crypto.randomUUID() },
         { contractId: "relay.ask", kind: "action" },
         {},
         `step:${crypto.randomUUID()}`
       );
     const first = await ask();
+    const afterFirst = await runSpent();
     const second = await ask();
+    const afterSecond = await runSpent();
     const screen = await screenCall(
-      budgeted,
+      counted,
       asleep.builder,
       asleep.app,
       "relay.ask"
@@ -2012,14 +1963,18 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
       second,
       screen,
       asked: provider.requests.length,
+      // Each of the run's requests adds to its lineage; the screen's none.
+      runSpend: [
+        afterFirst > 0,
+        afterSecond > afterFirst,
+        (await runSpent()) === afterSecond,
+      ],
     }).toStrictEqual({
-      first: { ok: true, value: "Costly." },
-      second: {
-        ok: true,
-        value: "error:resource.operation_failed:resource.budget_exhausted",
-      },
+      first: { ok: true, value: "First." },
+      second: { ok: true, value: "Second." },
       screen: { ok: true, value: "For the screen." },
-      asked: 2,
+      asked: 3,
+      runSpend: [true, true, true],
     });
     // Each request named as the run's, with the Assistant's binding it
     // went through, so the log tells it from the Relay's own.
@@ -2027,7 +1982,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     const models = events
       .filter(
         ({ action, actor }) =>
-          (action === "model.call" || action === "model.refused") &&
+          action === "model.call" &&
           actor?.type === "workflow" &&
           actor.runId === asleep.runId
       )
@@ -2051,7 +2006,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
         bindingApp: assistant,
       },
       {
-        action: "model.refused",
+        action: "model.call",
         actor: run,
         binding: "writer",
         bindingApp: assistant,

@@ -67,7 +67,7 @@ const viaOf = async (env: Env): Promise<LabVia> => {
 const refusalResponse = (error: unknown, requestId: string): Response => {
   const code = modelErrors.codeOf(error) ?? "model.failed";
   const status =
-    code === "model.budget_busy" || code === "model.rate_limited" ? 429 : 502;
+    code === "model.queued" || code === "model.rate_limited" ? 429 : 502;
   return errorResponse(status, modelErrors.create(code), requestId);
 };
 

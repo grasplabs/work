@@ -228,7 +228,7 @@ const modelProposal = async (
   if (model === undefined) {
     return { groups: [] };
   }
-  // The gateway's refusal (its rules, a spent budget) reaches the admin as it is.
+  // The gateway's refusal (its rules, say) reaches the admin as it is.
   const { output } = await models(env).call({
     model,
     system: instructions,

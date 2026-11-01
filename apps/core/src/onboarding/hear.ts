@@ -44,12 +44,10 @@ import { heardBudgets, transcriptionModel } from "./transcription.ts";
 // - Keep the audio: the recording is read, sent on and dropped. Nothing
 //   heard is logged, counted or audited; only its seconds are counted.
 // - Run up the bill: a recording is at most `hearMaxBytes` and
-//   `hearSecondsMax` long; the model gateway admits it against the
-//   deployment's budgets for its seconds, refused as any model call when
-//   they have no room (`hear.over_budget`), and charges and audits what
-//   was heard once it is written down, never anything heard. The minutes a
-//   day the live line has (`heardBudgets`) stay a second bound, below the
-//   budgets; the router limits the endpoint per address, as every link
+//   `hearSecondsMax` long; the model gateway admits it for its seconds,
+//   and charges and audits what was heard once it is written down, never
+//   anything heard. The minutes a day the live line has (`heardBudgets`)
+//   bound it; the router limits the endpoint per address, as every link
 //   endpoint.
 
 /** What the gateway is told every recording is for. */
@@ -62,8 +60,6 @@ type HearCode = Parameters<typeof hearErrors.create>[0];
 
 /** The gateway's refusals, as the page is told them; any other is a failure. */
 const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
-  "model.over_budget": [429, "hear.over_budget"],
-  "model.budget_busy": [503, "hear.busy"],
   "model.queued": [503, "hear.busy"],
   "model.unconfigured": [503, "hear.unavailable"],
   "model.not_allowed": [503, "hear.unavailable"],

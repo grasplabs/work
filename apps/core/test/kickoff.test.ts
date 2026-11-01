@@ -197,10 +197,10 @@ describe("the kickoff", { timeout: 60_000 }, () => {
   });
 
   it("gives both roles the organization's default, and none while it chose none", () => {
-    const chosen = { models: [mistral, euModel], rules: undefined };
+    const chosen = { models: [mistral, euModel] };
     let unchosen;
     try {
-      modelForRole({ models: [], rules: undefined }, "careful");
+      modelForRole({ models: [] }, "careful");
     } catch (error) {
       unchosen = modelErrors.codeOf(error);
     }

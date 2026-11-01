@@ -17,8 +17,7 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
-import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
-import type { ErrorPayload } from "@grasp-os/shared/errors";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import type {
   AppId,
@@ -1215,14 +1214,14 @@ export const keyRound = async (
 };
 
 /**
- * The least an AI step waits after the model budget turned it away while
- * other calls under way hold it (`model.budget_busy`), before its attempt
- * fails and the engine retries it at the step's own delay: so a step with
- * a tight retry config can't loop on the ledger. The refusal's
- * `retryAfterSeconds` is advisory, and steps don't wait it out: their
+ * The most an AI step waits after a full share of the model requests in
+ * flight or a provider's rate turned it away, before its attempt fails and
+ * the engine retries it at the step's own delay: so a step with a tight
+ * retry config can't loop on the gateway. The refusal's
+ * `retryAfterSeconds` is advisory, and steps don't wait longer: their
  * retries are theirs to set.
  */
-const budgetBusyWaitMs = 15_000;
+const throttledWaitMs = 15_000;
 
 /** What core reads of the context the engine gives a step's attempt. */
 const attemptContextSchema = z.object({
@@ -1282,39 +1281,6 @@ const waitWithin = async (attempt: StepAttempt, ms: number): Promise<void> => {
   const timeLeft = attempt.deadline - Date.now();
   await scheduler.wait(Math.max(0, Math.min(ms, timeLeft)));
 };
-
-/**
- * The refusal `known` again, for an attempt answered without asking the
- * gateway: its suggested wait less the time gone by since, at least a
- * second.
- */
-const busyAgain = (known: BusyBudget) => {
-  const wait = known.details?.retryAfterSeconds;
-  const gone = Math.floor((Date.now() - known.at) / 1000);
-  return modelErrors.create(
-    "model.budget_busy",
-    typeof wait === "number"
-      ? { ...known.details, retryAfterSeconds: Math.max(1, wait - gone) }
-      : known.details
-  );
-};
-
-/** The last refusal of a step's AI call for a budget held by calls under way. */
-export interface BusyBudget {
-  at: number;
-  details: ErrorPayload["details"];
-}
-
-/**
- * Where a run keeps each step's last busy-budget refusal, by step name:
- * durably, with the run (run-object.ts), as each retry of a step may run
- * in an activation of its own. A `Map` will do where nothing outlives one
- * host.
- */
-export interface BusyRefusals {
-  get: (step: string) => BusyBudget | undefined;
-  set: (step: string, refusal: BusyBudget) => unknown;
-}
 
 /**
  * A run's AI calls, by step name, kept in memory by the run's object
@@ -1660,8 +1626,6 @@ export interface HostHooks {
    * cut off, and whether its step is to be retried (dispatcher.ts).
    */
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
-  /** Each step's last refusal for a busy budget (`#untilAsking`). */
-  busyRefusals: BusyRefusals;
   /**
    * The run's AI calls in flight, and answers no attempt took, kept by
    * its object across its activations (`AiCalls`); a host of its own
@@ -2457,12 +2421,12 @@ export class RunHost extends RpcTarget {
 
   /**
    * `call`'s answer, asked of the gateway once {@link #untilAsking} lets
-   * `attempt` ask. When the budget turns it away while other calls under
-   * way hold it, the refusal is kept, and the attempt waits out
-   * {@link budgetBusyWaitMs} (as long as its timeout lets it) before it
+   * `attempt` ask. When a full share or a provider's rate turns it away,
+   * the attempt waits the wait core computed, at most
+   * {@link throttledWaitMs} (as long as its timeout lets it), before it
    * fails, unless it is the last: nothing comes after it.
    */
-  async #waitingOutBusyBudget(
+  async #askingOnce(
     attempt: StepAttempt,
     request: string,
     call: () => Promise<unknown>,
@@ -2499,21 +2463,11 @@ export class RunHost extends RpcTarget {
       // Settled: stop holding later attempts on it before this one waits,
       // or they would await the same settled promise again and again.
       this.#stopAsking(attempt.step, asking);
-      if (modelErrors.codeOf(error) === "model.budget_busy") {
-        const details =
-          typeof error === "object" && error !== null && "details" in error
-            ? errorPayloadSchema.shape.details.safeParse(error.details).data
-            : undefined;
-        this.#hooks.busyRefusals.set(attempt.step, { at: Date.now(), details });
-        if (!attempt.last) {
-          await waitWithin(attempt, budgetBusyWaitMs);
-        }
-      }
       // A full share of the model requests in flight (the gateway already
       // waited its turn for as long as a call may), or the provider's
       // rate: the attempt waits the wait core computed, as long as its
-      // timeout lets it and no longer than a busy budget's, before it
-      // fails, unless it is the last.
+      // timeout lets it and no longer than {@link throttledWaitMs}, before
+      // it fails, unless it is the last.
       // One its provider limits on the organization's key holds the run
       // instead (`keyMarkerOf`): no wait here.
       const throttled = modelErrors.codeOf(error);
@@ -2528,8 +2482,8 @@ export class RunHost extends RpcTarget {
         await waitWithin(
           attempt,
           Math.min(
-            budgetBusyWaitMs,
-            typeof wait === "number" ? wait * 1000 : budgetBusyWaitMs
+            throttledWaitMs,
+            typeof wait === "number" ? wait * 1000 : throttledWaitMs
           )
         );
       }
@@ -2555,45 +2509,24 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Returns once `attempt` may ask the gateway for its step's AI call, so
-   * a step asks the ledger, and audits a refusal, at most once every
-   * {@link budgetBusyWaitMs}, however tightly its attempts are retried or
-   * time out. It waits for a call of the step still in flight, and while
-   * the step's last refusal for a busy budget is that recent, for that
-   * while to end. An attempt whose timeout ends first, or that a newer
-   * attempt took over meanwhile, is answered with that refusal instead,
-   * its wait shortened by the time gone by.
+   * Returns once `attempt` may ask the gateway for its step's AI call: once
+   * no call of the step is still in flight, so a later attempt waits for
+   * an earlier one's answer rather than ask, and pay, beside it. An
+   * attempt the engine gave up on meanwhile fails.
    */
   async #untilAsking(attempt: StepAttempt): Promise<void> {
     for (;;) {
       const asking = this.#asking.get(attempt.step);
-      const known = this.#hooks.busyRefusals.get(attempt.step);
-      const left =
-        known === undefined ? 0 : known.at + budgetBusyWaitMs - Date.now();
-      if (asking === undefined && left <= 0) {
+      if (asking === undefined) {
         return;
       }
-      if (asking !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- then look again
-        await asking.then(
-          () => null,
-          () => null
-        );
-      } else if (known !== undefined) {
-        const timeLeft = attempt.deadline - Date.now();
-        if (timeLeft < left) {
-          // oxlint-disable-next-line no-await-in-loop -- once, then answered
-          await scheduler.wait(Math.max(0, timeLeft));
-          throw busyAgain(known);
-        }
-        // oxlint-disable-next-line no-await-in-loop -- then look again
-        await scheduler.wait(left);
-      }
+      // oxlint-disable-next-line no-await-in-loop -- then look again
+      await asking.then(
+        () => null,
+        () => null
+      );
       if (!this.#holds(attempt)) {
-        const latest = this.#hooks.busyRefusals.get(attempt.step);
-        throw latest === undefined
-          ? modelErrors.create("model.failed")
-          : busyAgain(latest);
+        throw modelErrors.create("model.failed");
       }
     }
   }
@@ -2627,7 +2560,7 @@ export class RunHost extends RpcTarget {
         throw modelErrors.create("model.invalid_call");
       }
       const { output } = modelAnswerSchema.parse(
-        await this.#waitingOutBusyBudget(
+        await this.#askingOnce(
           attempt,
           JSON.stringify([binding, instructions, input, outputSchema]),
           async () => {

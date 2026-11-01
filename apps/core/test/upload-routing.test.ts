@@ -107,20 +107,6 @@ const timesSent = async (upload: Upload): Promise<number> => {
   ).length;
 };
 
-/** Runs `run` with `config` as the deployment's rules for model calls. */
-const withDeployment = async <T>(
-  config: unknown,
-  run: () => Promise<T>
-): Promise<T> => {
-  const { MODEL_GATEWAY: gateway } = env;
-  env.MODEL_GATEWAY = config;
-  try {
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = gateway;
-  }
-};
-
 /**
  * Runs `run` as a deployment where connect holds no key of Grasp's (on
  * premises, a stack without them).
@@ -334,29 +320,6 @@ describe("upload routing", { timeout: 60_000 }, () => {
       status: upload.status,
       extractor: await extractorOf(upload),
     }).toStrictEqual({ sent: [], status: "ready", extractor: "local" });
-  });
-
-  it("keeps a file in the Worker while the deployment's rules don't parse", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    let upload: Upload | undefined;
-
-    await withDeployment({ budgets: { user: { limit: -1 } } }, async () => {
-      upload = await uploadedTo(person.api, collectionId, name);
-    });
-
-    expect({
-      sent: await carrying(name),
-      status: upload?.status,
-      extractor: upload && (await extractorOf(upload)),
-      recorded: upload && (await timesSent(upload)),
-    }).toStrictEqual({
-      sent: [],
-      status: "ready",
-      extractor: "local",
-      recorded: 0,
-    });
   });
 
   it("reads a PDF in the Worker while Grasp has no key for the conversion's provider, as on-prem", async () => {
