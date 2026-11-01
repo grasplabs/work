@@ -15752,6 +15752,10 @@ msgctxt "highest end of a rating of the interview"
 msgid "Very good"
 msgstr "Heel goed"
 
+#: src/chat/chat-window.tsx
+msgid "via {app}"
+msgstr "via {app}"
+
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
