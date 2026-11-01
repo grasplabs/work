@@ -16,7 +16,9 @@ import type {
   WorkflowResourcesApi,
   WorkflowResourceRun,
   WorkflowResourceVersion,
+  WorkflowShareCandidates,
   WorkflowStart,
+  WorkflowStartForm,
   WorkflowVersionSource,
   WorkflowActivity,
   WorkflowFile,
@@ -72,6 +74,8 @@ import {
   workflowSource,
   workflowVersions,
 } from "./workflow-resources.ts";
+import { workflowShareCandidates } from "./workflow-share-candidates.ts";
+import { workflowStartForm } from "./workflow-start-form.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import {
   candidateRunFor,
@@ -349,6 +353,20 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await terminateResourceRun(this.#env, person, id, runId)
+    );
+  }
+
+  async startForm(id: string): Promise<WorkflowStartForm> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowStartForm(this.#env, person, id)
+    );
+  }
+
+  async shareCandidates(id: string): Promise<WorkflowShareCandidates> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowShareCandidates(this.#env, person, id)
     );
   }
 

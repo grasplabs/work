@@ -30,16 +30,14 @@ import { sourceNames } from "../../../admin/sections.ts";
 const Connected = () => {
   const { view, admin } = useOrganization();
   const { integrations } = admin.snapshot;
-  if (view.org.made || view.state.client === "none") {
+  if (view.state.client === "none") {
     return (
       <Section
         description="The company starts with its sign-in, in its own onboarding. Everything else follows once it has named its team leads."
         title="Nothing connected yet"
       >
         <p className="text-muted-foreground border-t px-5 py-4">
-          {view.org.made
-            ? "An organization made here has nothing to connect."
-            : "Grasp waits on the company’s own admin."}
+          Grasp waits on the company’s own admin.
         </p>
       </Section>
     );

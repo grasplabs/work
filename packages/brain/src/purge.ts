@@ -21,6 +21,7 @@ import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
 import { forgetCollectionEntities } from "./entities.ts";
+import { erasedDocumentsDone, erasedDocumentsWrite } from "./erasures.ts";
 import type { BrainEvent } from "./events.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
@@ -1723,6 +1724,14 @@ const purgeContent = async <C>(
       )
     ),
     rebuildOwed(db, purgeId),
+    // The documents it names, before the host's copies of them are
+    // forgotten: one made after that is found by them (erasures.ts).
+    ...(await erasedDocumentsWrite(
+      db,
+      purgeId,
+      named.map(({ document }) => document),
+      brain.ports.clock()
+    )),
   ]);
   const done: Counts[] = [];
   try {
@@ -1762,8 +1771,10 @@ const purgeContent = async <C>(
     }
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
-    // them failed: it writes no more.
+    // them failed: it writes no more. Its erasure records stop counting
+    // as running for the same reason (erasures.ts).
     await owedWritesDone(db, purgeId);
+    await erasedDocumentsDone(db, purgeId, brain.ports.clock());
   }
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).

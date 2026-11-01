@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "73f69eb0-6742-4a69-9801-240ba04fff79",
+  "id": "529d6e4a-d9c4-45d7-b88f-3e3511e3977c",
   "prevId": "46d18b0e-de42-4c51-96f5-982b91d81a3c",
   "tables": {
     "audit_outbox": {
@@ -479,123 +479,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "brain_entity_matches": {
-      "name": "brain_entity_matches",
-      "columns": {
-        "entity_a": {
-          "name": "entity_a",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "entity_b": {
-          "name": "entity_b",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence_document_id": {
-          "name": "evidence_document_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "evidence_version": {
-          "name": "evidence_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        }
-      },
-      "indexes": {
-        "brain_entity_matches_b_idx": {
-          "name": "brain_entity_matches_b_idx",
-          "columns": [
-            "entity_b"
-          ],
-          "isUnique": false
-        },
-        "brain_entity_matches_evidence_idx": {
-          "name": "brain_entity_matches_evidence_idx",
-          "columns": [
-            "evidence_document_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "brain_entity_matches_entity_a_brain_entities_id_fk": {
-          "name": "brain_entity_matches_entity_a_brain_entities_id_fk",
-          "tableFrom": "brain_entity_matches",
-          "tableTo": "brain_entities",
-          "columnsFrom": [
-            "entity_a"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "brain_entity_matches_entity_b_brain_entities_id_fk": {
-          "name": "brain_entity_matches_entity_b_brain_entities_id_fk",
-          "tableFrom": "brain_entity_matches",
-          "tableTo": "brain_entities",
-          "columnsFrom": [
-            "entity_b"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "brain_entity_matches_entity_a_entity_b_pk": {
-          "columns": [
-            "entity_a",
-            "entity_b"
-          ],
-          "name": "brain_entity_matches_entity_a_entity_b_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "brain_episode_members": {
       "name": "brain_episode_members",
       "columns": {
@@ -803,6 +686,67 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "brain_erased_documents": {
+      "name": "brain_erased_documents",
+      "columns": {
+        "purge_id": {
+          "name": "purge_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "place": {
+          "name": "place",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "erased_at": {
+          "name": "erased_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "done_at": {
+          "name": "done_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "brain_erased_documents_place_idx": {
+          "name": "brain_erased_documents_place_idx",
+          "columns": [
+            "place"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brain_erased_documents_purge_id_document_id_pk": {
+          "columns": [
+            "purge_id",
+            "document_id"
+          ],
+          "name": "brain_erased_documents_purge_id_document_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
