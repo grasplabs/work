@@ -40,10 +40,9 @@ import { connectDb, testBinding } from "./test-env.ts";
 // 15 s (channels-stream.test.ts).
 //
 // Imports cut off mid-load: a module whose first import starts inside a
-// Durable Object can never load at all. The clock's alarm imports the
-// Gmail channel for its quarter-hour tasks as soon as a test arms it, a
-// workflow step imports postal-mime or jq, a workspace imports the agent
-// loop at a chat's first turn. The module runner keeps that import's
+// Durable Object can never load at all. A workflow step imports
+// postal-mime or jq, a workspace imports the agent loop at a chat's first
+// turn. The module runner keeps that import's
 // promise for every later import of the module in this runtime, but the
 // next file's reset (reset-storage.ts) aborts the object mid-import, so
 // the promise never settles: each later import, such as a test running
@@ -62,7 +61,6 @@ await Promise.all([
   // entry.ts, clock.ts, agent-workflows.ts
   import("../src/channels/door.ts"),
   import("../src/channels/answer.ts"),
-  import("../src/channels/gmail.ts"),
   import("../src/channels/workflow-offers.ts"),
   // workflows/kept-email.ts
   import("postal-mime"),

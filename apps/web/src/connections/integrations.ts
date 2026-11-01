@@ -191,7 +191,6 @@ const knownFirst = [
   "youtube",
   "instagram",
   "facebook",
-  "telegram",
   "twitter",
   "zoho",
   "box",
