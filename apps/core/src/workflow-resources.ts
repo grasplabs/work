@@ -2109,8 +2109,9 @@ const writeVersion = async (
           definitionHash,
           contractHash,
           manifestHash,
-          // Its stores, by ID, as its manifest binds them.
-          stores: stores.map(({ storeId }) => storeId).join(","),
+          // How many stores it binds: their IDs are in its manifest, which
+          // `manifestHash` names; joined they'd pass a detail's limit.
+          stores: stores.length,
         })
       ),
     ]);

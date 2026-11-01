@@ -196,6 +196,38 @@ describe("stores a workflow declares", () => {
     });
   });
 
+  it("publish a version declaring as many stores as a workflow may, recorded by count", async () => {
+    const ada = await person("builder");
+    const { id, name } = await newWorkflow(ada);
+    const eight = Object.fromEntries(
+      Array.from({ length: 8 }, (_, at) => [
+        `store${at}`,
+        {
+          tables: { orders: orders() },
+          operations: { getOrder: { kind: "get", table: "orders" } },
+        },
+      ])
+    );
+    const published = await publishWorkflowVersion(env, ada, id, {
+      definition: definitionOf(name, "1.0.0", eight),
+      basedOn: null,
+    });
+    const events = await allEvents();
+    const event = events.find(
+      ({ action, target }) =>
+        action === "workflow.version.published" && target?.id === id
+    );
+
+    const stores = await storesOf(id);
+    const binds = await bindingsOf(id, published.version);
+
+    expect({
+      stores: stores.length,
+      binds: binds.length,
+      recorded: event?.detail?.stores,
+    }).toStrictEqual({ stores: 8, binds: 8, recorded: 8 });
+  });
+
   it("mint one store for a name however often or concurrently the publication runs, and none for a test run", async () => {
     const ada = await person("builder");
     const { id, name } = await newWorkflow(ada);
