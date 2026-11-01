@@ -1,8 +1,8 @@
 /**
  * A client's AI as its core reports it (core's src/ai-status-report.ts):
  * the providers its organization connected and how their real calls last
- * fared, read live at `aiStatusReportPath`, signed as the quota policy is
- * (src/clients/quota-policy.ts), and said in one line
+ * fared, read live at `aiStatusReportPath`, signed for
+ * (src/clients/core-report.ts), and said in one line
  * (src/admin/ai-status-words.ts); with what Grasp's own AI features cost
  * on its keys (src/clients/platform-spend.ts).
  * Read only: staff see it, the organization's admins change it in their
@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
-import { askClientCore, signedCoreReport } from "./quota-policy.ts";
+import { askClientCore, signedCoreReport } from "./core-report.ts";
 
 /** Client `clientId`'s AI, as its core reports it now; null when it doesn't answer. */
 export const readAiStatus = async (

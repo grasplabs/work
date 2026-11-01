@@ -333,7 +333,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     });
   });
 
-  it("keep a lineage a request held for a person still reserves against, however long ago its runs ended", async () => {
+  it("keep a lineage a request set aside still reserves against, however long ago its runs ended", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await lineageApp(builder);
     const root = await builder.api.workflows.start(app, "idle");
@@ -341,8 +341,8 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     await spendFor(app, builder.userId, [
       runActorOf({ runId: root.id, app, workflow: "idle" }),
     ]);
-    // A request of it held for a person, its reservation released by
-    // hand so only the hold says the lineage still owes something.
+    // A request of it set aside, its reservation released by hand so
+    // only the hold says the lineage still owes something.
     const held = crypto.randomUUID();
     await runInDurableObject(modelLedger(env), (_instance, state) => {
       state.storage.sql.exec(
@@ -351,7 +351,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
         held
       );
       state.storage.sql.exec(
-        "INSERT INTO request_scopes (request_id, scope, key, period) VALUES (?, 'run', ?, 'lineage')",
+        "INSERT INTO request_scopes (request_id, scope, key, period, reserved_micros) VALUES (?, 'run', ?, 'lineage', 0)",
         held,
         root.id
       );
@@ -363,7 +363,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     const whileHeld = await keptOf(root.id);
     await runInDurableObject(modelLedger(env), (_instance, state) => {
       state.storage.sql.exec(
-        "UPDATE requests SET state = 'settled', charged_micros = 0, settled_by = 'released', settled_at = ? WHERE id = ?",
+        "UPDATE requests SET state = 'settled', charged_micros = 0, settled_by = 'reconciled', settled_at = ? WHERE id = ?",
         Date.now(),
         held
       );

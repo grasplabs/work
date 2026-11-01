@@ -1,12 +1,11 @@
 import { z } from "zod";
 
-import { domainSchema } from "./deployment-config.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // The organization's settings an admin keeps in Grasp (core's
 // org-settings.ts), beside its name and time zone (organization.ts): how
-// it is billed, and when and for whom Pulse may report; and, read only,
-// how its people sign in, which Grasp sets up for the deployment. Only the organization's admins read them, and
+// it is billed; and, read only, how its people sign in, which Grasp sets
+// up for the deployment. Only the organization's admins read them, and
 // only its own admins (never Grasp staff) change them; every change is
 // audited, naming what changed, never the values.
 
@@ -65,40 +64,6 @@ export const noBilling: BillingSettings = {
   emailReceipts: false,
 };
 
-/** Per weekday, Monday first, the 24 hours Pulse may report in, in the organization's time zone. */
-export const weekScheduleSchema = z
-  .array(z.array(z.boolean()).length(24))
-  .length(7);
-export type WeekSchedule = z.output<typeof weekScheduleSchema>;
-
-/** Most employee email domains Pulse counts. */
-export const employeeDomainsMax = 20;
-
-/**
- * Pulse, the device app that sees which apps and AI tools are used, never
- * what is in them: when it may report, and whose devices count as
- * employees'. No device reports to core yet, so who has it isn't here.
- */
-export const pulseSettingsSchema = z.strictObject({
-  schedule: weekScheduleSchema,
-  /** People with an email address at these domains count as employees. */
-  employeeDomains: z
-    .array(domainSchema)
-    .max(employeeDomainsMax)
-    .refine((domains) => new Set(domains).size === domains.length, {
-      message: "Each domain once",
-    }),
-});
-export type PulseSettings = z.output<typeof pulseSettingsSchema>;
-
-/** Pulse until an admin sets it: it never reports, and counts nobody. */
-export const quietPulse: PulseSettings = {
-  schedule: Array.from({ length: 7 }, () =>
-    Array.from({ length: 24 }, () => false)
-  ),
-  employeeDomains: [],
-};
-
 /** One identity provider people sign in with, as the deployment sets it up. */
 export interface SignInProvider {
   provider: "microsoft" | "google";
@@ -132,8 +97,6 @@ export interface SignInSettings {
 export const orgSettingsErrors = defineErrorFamily({
   "org_settings.billing_invalid":
     "Those aren't billing details: a valid email, one-line company, an address of up to 500 characters and an EU VAT number.",
-  "org_settings.pulse_invalid":
-    "That isn't a Pulse setting: 24 hours for each of the seven days, and up to 20 email domains, each once.",
 });
 
 /** The organization's settings, over `/rpc`, for its admins. */
@@ -145,13 +108,6 @@ export interface OrgSettingsApi {
    * admins only, never Grasp staff; audited when something changed.
    */
   updateBilling: (billing: BillingSettingsInput) => Promise<BillingSettings>;
-  /** Pulse's schedule and employee domains. Admins, Grasp staff included. */
-  pulse: () => Promise<PulseSettings>;
-  /**
-   * Replaces Pulse's schedule and employee domains. The organization's
-   * own admins only, never Grasp staff; audited when something changed.
-   */
-  updatePulse: (pulse: PulseSettings) => Promise<PulseSettings>;
   /**
    * How people sign in, as the deployment sets it up, never a secret.
    * Admins, Grasp staff included; not a setting anyone changes here.

@@ -65,14 +65,13 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
  */
 export const screenTests = [
   "test/screen*.test.ts",
-  "test/app-sandbox.test.ts",
   "test/app-releases.test.ts",
   "test/migration-transform.test.ts",
   "test/custom-migration-runs.test.ts",
-  "test/migration-samples.test.ts",
   "test/app-functions.test.ts",
   "test/app-invocation-isolation.test.ts",
   "test/release-retention.test.ts",
+  "test/release-controls.test.ts",
   "test/app-activation.test.ts",
   "test/app-candidates.test.ts",
   "test/app-tests.test.ts",
@@ -226,9 +225,6 @@ export const coreProject = (
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
             CAPABILITY_SIGNING_KEY: capabilitySigningKey,
-            // The audit log works out when to purge archives from its own
-            // env: the shortest archive retention the admin may set.
-            AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
             // The client's Teams bot, so its door is open
             // (src/channels/door.ts).
@@ -250,8 +246,6 @@ export const coreProject = (
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
-            // One memory limit set, the others at their defaults.
-            MEMORY_LIMITS: { "USER.md": 500 },
             // Package limits a test can reach with packages it publishes
             // on the fake npm registry (test/packages.test.ts).
             PACKAGE_LIMITS: {
@@ -288,12 +282,9 @@ export const coreProject = (
             SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
-            // The quota policy, its step limit lowered so a test reaches it
+            // The quota limits, the step limit lowered so a test reaches it
             // (src/workflows/quotas.ts); tests of the others set their own.
-            QUOTA_LIMITS: {
-              generation: 1,
-              limits: { workflowSteps: testStepLimit },
-            },
+            TEST_QUOTA_LIMITS: { workflowSteps: testStepLimit },
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
@@ -430,6 +421,8 @@ export default coreProject({
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",
+    // With the host made slower at random: vite.latency.config.ts.
+    "test/workflow-latency.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

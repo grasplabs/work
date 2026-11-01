@@ -23,16 +23,17 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
+import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
+import { checkReadings } from "./onboarding/documents.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
@@ -83,6 +84,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Shared documents' readings their writer never checked against the
+  // purges since (src/onboarding/documents.ts `checkReading`).
+  {
+    name: "onboarding.readings",
+    period: "minute",
+    run: checkReadings,
+  },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
   {
     name: "knowledge.payloads",
@@ -251,6 +259,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepRunDetails,
   },
+  // What a lapsed held start was asked to run with (held-starts.ts).
+  {
+    name: "workflows.held_start_inputs",
+    period: "quarterHour",
+    run: sweepHeldStartInputs,
+  },
   {
     name: "workflows.candidate_runs",
     period: "quarterHour",
@@ -297,11 +311,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "apps.test_fixtures",
     period: "quarterHour",
     run: sweepTestFixtures,
-  },
-  {
-    name: "screens.submissions",
-    period: "quarterHour",
-    run: sweepScreenSubmissions,
   },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
   // The audit log's retention alarm armed, if it isn't yet: retention

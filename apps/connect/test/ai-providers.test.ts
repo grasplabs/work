@@ -145,6 +145,8 @@ const refusalOf = (response: Response): string =>
   response.headers.get(aiRefusedHeader) ?? "sent";
 
 const openAiUrl = "https://api.openai.com/v1/responses";
+/** Where Grasp's own key goes at OpenAI: its EU data residency host. */
+const openAiEuUrl = "https://eu.api.openai.com/v1/responses";
 
 describe("AI providers in connect", () => {
   beforeEach(async () => {
@@ -391,10 +393,10 @@ describe("AI providers in connect", () => {
           const body = JSON.stringify(asked);
           return refusalOf(
             await connect().modelFetch(
-              modelRequest(openAiUrl, { body }),
+              modelRequest(openAiEuUrl, { body }),
               await grantFor({
                 provider: "openai",
-                host: "api.openai.com",
+                host: "eu.api.openai.com",
                 credential: "platform",
                 body: await sha256Hex(body),
               })
@@ -477,53 +479,42 @@ describe("AI providers in connect", () => {
       }
     );
 
-    it("sends Grasp's own key for a platform feature", async () => {
-      const response = await connect().modelFetch(
-        modelRequest(openAiUrl),
-        await grantFor({
-          provider: "openai",
-          host: "api.openai.com",
-          credential: "platform",
-        })
-      );
-
-      expect(response.status).toBe(200);
-      expect(sent[0]?.headers.authorization).toBe(`Bearer ${platformKey}`);
-      await expect(connect().aiProviderRoutes()).resolves.toStrictEqual({
-        organization: [],
-        platform: ["openai"],
-      });
-    });
-
-    it("sends Grasp's own key to OpenAI's EU host, its project's, and to no host but OpenAI's own", async () => {
-      const euUrl = "https://eu.api.openai.com/v1/responses";
+    it("sends Grasp's own key only to OpenAI's EU host", async () => {
       const toEu = await connect().modelFetch(
-        modelRequest(euUrl),
+        modelRequest(openAiEuUrl),
         await grantFor({
           provider: "openai",
           host: "eu.api.openai.com",
           credential: "platform",
         })
       );
-      const elsewhere = await connect().modelFetch(
-        modelRequest("https://api.anthropic.com/v1/responses"),
-        await grantFor({
-          provider: "openai",
-          host: "api.anthropic.com",
-          credential: "platform",
-        })
+      const elsewhere = await Promise.all(
+        ["api.openai.com", "api.anthropic.com"].map(async (host) =>
+          refusalOf(
+            await connect().modelFetch(
+              modelRequest(`https://${host}/v1/responses`),
+              await grantFor({
+                provider: "openai",
+                host,
+                credential: "platform",
+              })
+            )
+          )
+        )
       );
 
       expect({
         toEu: refusalOf(toEu),
         sentTo: sent.map(({ host }) => host),
         key: sent[0]?.headers.authorization,
-        elsewhere: refusalOf(elsewhere),
+        elsewhere,
+        routes: await connect().aiProviderRoutes(),
       }).toStrictEqual({
         toEu: "sent",
         sentTo: ["eu.api.openai.com"],
         key: `Bearer ${platformKey}`,
-        elsewhere: "endpoint",
+        elsewhere: ["endpoint", "endpoint"],
+        routes: { organization: [], platform: ["openai"] },
       });
     });
 
@@ -535,18 +526,18 @@ describe("AI providers in connect", () => {
       );
 
       await Promise.all(
-        (["platform", "organization"] as const).map(
-          async (credential) =>
-            await connect().modelFetch(
-              modelRequest(openAiUrl, { body }),
-              await grantFor({
-                provider: "openai",
-                host: "api.openai.com",
-                credential,
-                body: await sha256Hex(body),
-              })
-            )
-        )
+        (["platform", "organization"] as const).map(async (credential) => {
+          const url = credential === "platform" ? openAiEuUrl : openAiUrl;
+          return await connect().modelFetch(
+            modelRequest(url, { body }),
+            await grantFor({
+              provider: "openai",
+              host: new URL(url).hostname,
+              credential,
+              body: await sha256Hex(body),
+            })
+          );
+        })
       );
 
       const stores = Object.fromEntries(
@@ -659,7 +650,7 @@ describe("AI providers in connect", () => {
     const elevenLabsGrant = async (host = euHost) =>
       await grantFor({ provider: "elevenlabs", host, credential: "platform" });
 
-    it("sends a line to ElevenLabs with Grasp's key in its one header, at its EU residency host or its US one", async () => {
+    it("sends a line to ElevenLabs with Grasp's key in its one header, at its EU residency host only", async () => {
       const path = `/v1/text-to-speech/s3TPKV1kjDlVtZbl4Ksh/with-timestamps${speechQuery}`;
       const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
 
@@ -685,13 +676,10 @@ describe("AI providers in connect", () => {
         })),
         routes: await withKey.aiProviderRoutes(),
       }).toStrictEqual({
-        outcomes: ["sent", "sent"],
-        sent: [euHost, "api.elevenlabs.io"].map((host) => ({
-          host,
-          path,
-          key: elevenLabsKey,
-          authorization: undefined,
-        })),
+        outcomes: ["sent", "endpoint"],
+        sent: [
+          { host: euHost, path, key: elevenLabsKey, authorization: undefined },
+        ],
         routes: { organization: [], platform: ["openai", "elevenlabs"] },
       });
     });
@@ -803,31 +791,31 @@ describe("AI providers in connect", () => {
       const grant = async () =>
         await grantFor({
           provider: "openai",
-          host: "api.openai.com",
+          host: "eu.api.openai.com",
           credential: "platform",
         });
       const outcomes = {
         speech: refusalOf(
           await connect().modelFetch(
-            modelRequest("https://api.openai.com/v1/audio/speech"),
+            modelRequest("https://eu.api.openai.com/v1/audio/speech"),
             await grant()
           )
         ),
         transcription: refusalOf(
           await connect().modelFetch(
-            modelRequest("https://api.openai.com/v1/audio/transcriptions"),
+            modelRequest("https://eu.api.openai.com/v1/audio/transcriptions"),
             await grant()
           )
         ),
         translation: refusalOf(
           await connect().modelFetch(
-            modelRequest("https://api.openai.com/v1/audio/translations"),
+            modelRequest("https://eu.api.openai.com/v1/audio/translations"),
             await grant()
           )
         ),
         voices: refusalOf(
           await connect().modelFetch(
-            modelRequest("https://api.openai.com/v1/audio/voice_consents"),
+            modelRequest("https://eu.api.openai.com/v1/audio/voice_consents"),
             await grant()
           )
         ),
@@ -850,7 +838,7 @@ describe("AI providers in connect", () => {
 
   describe("a realtime socket, for Grasp's live listening", () => {
     const realtimeUrl =
-      "https://api.openai.com/v1/realtime?intent=transcription";
+      "https://eu.api.openai.com/v1/realtime?intent=transcription";
 
     /** OpenAI's end of each socket connect opens: what it got, and how it closed. */
     const upstreams: {
@@ -905,7 +893,7 @@ describe("AI providers in connect", () => {
     it("refuses a socket without a platform grant, to any other path or host, without the placeholder, or without Grasp's key", async () => {
       const organizationGrant = await grantFor({
         provider: "openai",
-        host: "api.openai.com",
+        host: "eu.api.openai.com",
       });
       const elsewhereGrant = await grantFor({
         provider: "openai",
@@ -923,13 +911,13 @@ describe("AI providers in connect", () => {
         ),
         responses: refusalOf(
           await connect().fetch(
-            await upgrade("https://api.openai.com/v1/responses")
+            await upgrade("https://eu.api.openai.com/v1/responses")
           )
         ),
         conversation: refusalOf(
           await connect().fetch(
             await upgrade(
-              "https://api.openai.com/v1/realtime?model=gpt-realtime"
+              "https://eu.api.openai.com/v1/realtime?model=gpt-realtime"
             )
           )
         ),
@@ -956,7 +944,7 @@ describe("AI providers in connect", () => {
               headers: {
                 [aiGrantHeader]: await grantFor({
                   provider: "openai",
-                  host: "api.openai.com",
+                  host: "eu.api.openai.com",
                   credential: "platform",
                 }),
                 authorization: `Bearer ${aiCredentialPlaceholder}`,

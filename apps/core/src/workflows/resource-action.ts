@@ -1,5 +1,6 @@
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { isRetryableCode } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
@@ -181,6 +182,14 @@ interface ActionHostState {
     | { readonly reason: AdmissionReason; readonly call: string | null }
     | undefined;
   readonly made: Promise<unknown>[];
+  /** How many of its calls reached their effect, so may have taken it. */
+  reached: number;
+  /**
+   * Whether a call before the first refusal reached its effect: a paid
+   * model call, a write. Then a refusal that says its own call sent
+   * nothing (a busy store) no longer says the action sent nothing.
+   */
+  refusedAfterEffect: boolean;
 }
 
 /** How deep and big one call's arguments may be: a step's payload. */
@@ -249,9 +258,15 @@ class ActionHost extends RpcTarget {
     const previous = this.#last;
     const made = (async (): Promise<Json> => {
       await Promise.allSettled([previous]);
+      // One at a time: every call before this one reached its effect or
+      // didn't by now.
+      const reachedBefore = this.#state.reached;
       try {
         return await this.#call(alias, request);
       } catch (error) {
+        if (this.#state.refusal === undefined) {
+          this.#state.refusedAfterEffect = reachedBefore > 0;
+        }
         this.#state.refusal ??=
           error instanceof Error
             ? error
@@ -264,6 +279,15 @@ class ActionHost extends RpcTarget {
     this.#last = made;
     this.#state.made.push(made);
     return await made;
+  }
+
+  /** Makes `call` through the attempt's effects, counting it as reached. */
+  async #make(
+    call: Parameters<ActionEffects["make"]>[0],
+    ordinal: number
+  ): Promise<Json> {
+    this.#state.reached += 1;
+    return await this.#effects.make(call, ordinal);
   }
 
   /**
@@ -326,7 +350,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_denied")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       {
         name: "grasp.connector",
         binding: alias,
@@ -366,7 +390,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_denied")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       {
         name: "grasp.files",
         binding: alias,
@@ -390,7 +414,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_invalid")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       { name: "grasp.template", binding: alias },
       ordinal
     );
@@ -447,7 +471,7 @@ class ActionHost extends RpcTarget {
           workflowResourceErrors.create("workflow.call_denied")
         );
       }
-      return await this.#effects.make(
+      return await this.#make(
         {
           name: "grasp.knowledge",
           binding: alias,
@@ -472,7 +496,7 @@ class ActionHost extends RpcTarget {
           workflowResourceErrors.create("workflow.call_invalid")
         );
       }
-      return await this.#effects.make(
+      return await this.#make(
         {
           name: "grasp.model",
           binding: alias,
@@ -493,7 +517,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_invalid")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       {
         name: "grasp.operation",
         binding: alias,
@@ -534,6 +558,8 @@ export const callAction = async (
     refusal: undefined,
     admission: undefined,
     made: [],
+    reached: 0,
+    refusedAfterEffect: false,
   };
   const host = new ActionHost(contract.uses ?? [], effects, state);
   const modules = {
@@ -644,6 +670,18 @@ export const callAction = async (
       } finally {
         clearTimeout(giveUp);
       }
+    }
+    // A refusal that says only its own call sent nothing (a busy store, a
+    // rate limit), after an earlier call of the action reached its effect:
+    // trying the action again would make that call again, a paid model
+    // call or a write. Never a retry's to take (resource-errors.ts).
+    const code: unknown = Reflect.get(state.refusal, "code");
+    if (
+      state.refusedAfterEffect &&
+      typeof code === "string" &&
+      isRetryableCode(code)
+    ) {
+      throw workflowResourceErrors.create("workflow.failed_after_effect");
     }
     throw state.refusal;
   }

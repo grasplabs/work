@@ -1,16 +1,13 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import {
-  ensureD1Database,
-  ensureR2Bucket,
-  getAccount,
-} from "../src/cloudflare/accounts.ts";
+import { createD1Database } from "../src/cloudflare/accounts.ts";
 import {
   CloudflareApiError,
   cloudflareApi,
   listAll,
 } from "../src/cloudflare/api.ts";
+import type { CloudflareApi } from "../src/cloudflare/api.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 
 const token = "test-deployer-token-0123456789";
@@ -18,6 +15,13 @@ const cloudflare = mockCloudflareApi(token);
 /** No waiting between retries: the fake answers at once. */
 const api = cloudflareApi({ token, retryDelayMs: 0 });
 const accountSchema = z.object({ id: z.string(), name: z.string() });
+
+/** The account `accountId`, as the token sees it: a plain read. */
+const getAccount = async (client: CloudflareApi, accountId: string) =>
+  await client.call(
+    { method: "GET", path: `/accounts/${accountId}` },
+    accountSchema
+  );
 
 /** What `promise` fails with, or undefined if it doesn't. */
 const errorOf = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -67,92 +71,6 @@ describe("accounts", () => {
       status: 403,
       codes: [9109],
     });
-  });
-});
-
-describe("EU resources", () => {
-  it("creates each resource once, in the EU, however often it runs", async () => {
-    const account = cloudflare.addAccount();
-    const provision = async () =>
-      await Promise.all([
-        ensureD1Database(api, account.id, "grasp-os-core"),
-        ensureR2Bucket(api, account.id, "grasp-os-files"),
-      ]);
-
-    const first = await provision();
-    const again = await provision();
-
-    expect(again).toStrictEqual(first);
-    expect(account).toMatchObject({
-      d1: [{ name: "grasp-os-core", jurisdiction: "eu" }],
-      buckets: [{ name: "grasp-os-files", jurisdiction: "eu" }],
-    });
-  });
-
-  it("finds a D1 database by its exact name", async () => {
-    const account = cloudflare.addAccount();
-    account.d1.push({
-      uuid: "other",
-      name: "grasp-os-core-old",
-      jurisdiction: "eu",
-    });
-    const database = await ensureD1Database(api, account.id, "grasp-os-core");
-    expect(database.uuid).not.toBe("other");
-    expect(account.d1).toHaveLength(2);
-  });
-
-  it("stops at a D1 database outside the EU, creating nothing", async () => {
-    const account = cloudflare.addAccount();
-    account.d1.push({ uuid: "us", name: "grasp-os-core" });
-    await expect(
-      ensureD1Database(api, account.id, "grasp-os-core")
-    ).rejects.toThrow(
-      "D1 database grasp-os-core exists outside the EU jurisdiction (none)"
-    );
-    expect(account.d1).toHaveLength(1);
-  });
-
-  it("refuses a D1 database created outside the EU", async () => {
-    const account = cloudflare.addAccount();
-    account.d1Reports = "fedramp";
-
-    await expect(
-      ensureD1Database(api, account.id, "grasp-os-core")
-    ).rejects.toThrow(
-      "D1 database grasp-os-core exists outside the EU jurisdiction (fedramp)"
-    );
-  });
-
-  it("never uses a bucket of the same name outside the EU", async () => {
-    const account = cloudflare.addAccount();
-    account.buckets.push({ name: "grasp-os-files", jurisdiction: "default" });
-    await ensureR2Bucket(api, account.id, "grasp-os-files");
-    expect(account.buckets).toStrictEqual([
-      { name: "grasp-os-files", jurisdiction: "default" },
-      { name: "grasp-os-files", jurisdiction: "eu" },
-    ]);
-  });
-
-  it("refuses a bucket R2 reports outside the EU, found or created", async () => {
-    const account = cloudflare.addAccount();
-    account.r2Reports = "default";
-    // Created: the create answers with the wrong jurisdiction.
-    await expect(
-      ensureR2Bucket(api, account.id, "grasp-os-files")
-    ).rejects.toThrow(
-      "R2 bucket grasp-os-files exists outside the EU jurisdiction (default)"
-    );
-    // Found: the lookup does too.
-    await expect(
-      ensureR2Bucket(api, account.id, "grasp-os-files")
-    ).rejects.toThrow(
-      "R2 bucket grasp-os-files exists outside the EU jurisdiction (default)"
-    );
-    expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
-      "GET",
-      "POST",
-      "GET",
-    ]);
   });
 });
 
@@ -208,13 +126,12 @@ describe("answers as Cloudflare sends them", () => {
 describe("retries", () => {
   it("retries a rate-limited call, creating once", async () => {
     const account = cloudflare.addAccount();
-    // The list finds nothing; the create is refused twice, then goes through.
+    // The create is refused twice, then goes through.
+    cloudflare.failCall(1, 429);
     cloudflare.failCall(2, 429);
-    cloudflare.failCall(3, 429);
-    await ensureD1Database(api, account.id, "grasp-os-core");
+    await createD1Database(api, account.id, "grasp-os-core", "eu");
     expect(account.d1).toHaveLength(1);
     expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
-      "GET",
       "POST",
       "POST",
       "POST",
@@ -234,41 +151,12 @@ describe("retries", () => {
 
   it("doesn't retry a create that may have gone through", async () => {
     const account = cloudflare.addAccount();
-    cloudflare.failCall(2, 500);
+    cloudflare.failCall(1, 500);
     await expect(
-      ensureD1Database(api, account.id, "grasp-os-core")
+      createD1Database(api, account.id, "grasp-os-core", "eu")
     ).rejects.toMatchObject({ status: 500, codes: [10_000] });
-    cloudflare.failCall(1, "network");
-    await expect(
-      ensureR2Bucket(api, account.id, "grasp-os-files")
-    ).resolves.toMatchObject({ name: "grasp-os-files" });
     expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
-      "GET",
       "POST",
-      "GET",
-      "GET",
-      "POST",
-    ]);
-  });
-
-  it("adopts what a create made when its answer was lost", async () => {
-    const account = cloudflare.addAccount();
-    // The lookup, then the create, which runs but never answers.
-    cloudflare.failCall(2, "lost");
-    await expect(
-      ensureD1Database(api, account.id, "grasp-os-core")
-    ).rejects.toMatchObject({ status: 0 });
-    cloudflare.failCall(2, "lost");
-    await expect(
-      ensureR2Bucket(api, account.id, "grasp-os-files")
-    ).rejects.toMatchObject({ status: 0 });
-
-    // The step runs again and finds both, creating nothing more.
-    const database = await ensureD1Database(api, account.id, "grasp-os-core");
-    await ensureR2Bucket(api, account.id, "grasp-os-files");
-    expect(account.d1).toStrictEqual([database]);
-    expect(account.buckets).toStrictEqual([
-      { name: "grasp-os-files", jurisdiction: "eu" },
     ]);
   });
 
@@ -313,7 +201,7 @@ describe("retries", () => {
 describe("the token", () => {
   it("goes only into the Authorization header", async () => {
     const account = cloudflare.addAccount();
-    await ensureD1Database(api, account.id, "grasp-os-core");
+    await createD1Database(api, account.id, "grasp-os-core", "eu");
     for (const { headers, path, query } of cloudflare.calls) {
       expect(headers.get("authorization")).toBe(`Bearer ${token}`);
       expect(`${path}?${query.toString()}`).not.toContain(token);

@@ -249,10 +249,6 @@ export const StephenLab = ({
       {notCounted === "" ? null : (
         <Section description={notCounted} title="Not counted" />
       )}
-      <Section
-        description="The benches on practice companies (vp run lab) run on a developer’s machine against the local stack, and keep their runs there. Nothing publishes them where the admin can read them yet, so they aren’t shown here."
-        title="Measured on practice companies"
-      />
     </div>
   );
 };

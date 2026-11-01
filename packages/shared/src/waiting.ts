@@ -12,6 +12,7 @@ import type { DecisionView } from "./decisions.ts";
 import { dependencyDecisionSchema } from "./dependencies.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
@@ -22,6 +23,7 @@ import type {
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
 import type { ScreensWaiting } from "./screen-trust.ts";
+import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
 // that stops until they decide or do something, each item of a kind,
@@ -62,6 +64,13 @@ export interface HeldWriteItem extends ItemBase {
   kind: "heldWrite";
   verdicts: ("approve" | "decline")[];
   action: PendingAction;
+}
+
+/** A start of a workflow a chat's agent asked for, held until the person confirms it. */
+export interface HeldStartItem extends ItemBase {
+  kind: "heldStart";
+  verdicts: ("confirm" | "decline")[];
+  start: HeldStart;
 }
 
 /** A change sent for the person whose answer was lost: they say whether it happened. */
@@ -147,6 +156,17 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/**
+ * A workflow version, live or asked to go live, whose bindings no admin
+ * approved, so its starts are refused: for the organization's own admins,
+ * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
+ */
+export interface BindingApprovalItem extends ItemBase {
+  kind: "bindingApproval";
+  verdicts: never[];
+  pending: PendingWorkflowBindings;
+}
+
 /** A connection whose access ran out, which the person can sign in to again on its page. */
 export interface SignInAgainItem extends ItemBase {
   kind: "signInAgain";
@@ -174,8 +194,10 @@ export type WaitingItem =
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | BindingApprovalItem
   | SignInAgainItem
-  | DecisionItem;
+  | DecisionItem
+  | HeldStartItem;
 
 export type WaitingKind = WaitingItem["kind"];
 
@@ -194,6 +216,8 @@ export const waitingParts = [
   "notifications",
   "connections",
   "decisions",
+  "heldStarts",
+  "bindings",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 
@@ -224,6 +248,18 @@ export const waitingVerdictSchema = z.union([
   }),
   z.strictObject({
     kind: z.literal("heldWrite"),
+    id: identifierSchema,
+    verdict: z.literal("decline"),
+  }),
+  z.strictObject({
+    kind: z.literal("heldStart"),
+    id: identifierSchema,
+    verdict: z.literal("confirm"),
+    /** The hash of exactly the input the person was shown. */
+    inputHash: identifierSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("heldStart"),
     id: identifierSchema,
     verdict: z.literal("decline"),
   }),

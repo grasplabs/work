@@ -65,6 +65,7 @@ import {
   ThinkingLine,
   useAnswerThinking,
 } from "./answer-thinking.tsx";
+import { AskedLine } from "./asked-questions.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -943,32 +944,36 @@ export const ChatThread = ({
                   key={item.replies[0]?.id}
                 >
                   {item.replies.map((message) => (
-                    <Reply
-                      key={message.id}
-                      compact={compact}
-                      onRetry={
-                        !running && message === lastAnswer && answersLast
-                          ? onRetry
-                          : undefined
-                      }
-                      output={output}
-                      reply={message}
-                      results={results}
-                      running={running}
-                      sign={
-                        shown === null && message === replies.at(-1)
-                          ? doing
-                          : undefined
-                      }
-                      cited={
-                        message.citations.length === 0
-                          ? undefined
-                          : { chatId, messageId: message.id }
-                      }
-                      card={cardOf(message.id)}
-                      top={topOf(message.id)}
-                      writing={false}
-                    />
+                    <Fragment key={message.id}>
+                      <Reply
+                        compact={compact}
+                        onRetry={
+                          !running && message === lastAnswer && answersLast
+                            ? onRetry
+                            : undefined
+                        }
+                        output={output}
+                        reply={message}
+                        results={results}
+                        running={running}
+                        sign={
+                          shown === null && message === replies.at(-1)
+                            ? doing
+                            : undefined
+                        }
+                        cited={
+                          message.citations.length === 0
+                            ? undefined
+                            : { chatId, messageId: message.id }
+                        }
+                        card={cardOf(message.id)}
+                        top={topOf(message.id)}
+                        writing={false}
+                      />
+                      {message.asked === undefined ? null : (
+                        <AskedLine asked={message.asked} />
+                      )}
+                    </Fragment>
                   ))}
                   {goesOn ? written : null}
                 </li>

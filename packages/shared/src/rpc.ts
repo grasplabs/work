@@ -12,7 +12,7 @@ import type {
 import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
-import type { EmailPreferencesApi } from "./email-preferences.ts";
+import type { HeldStartsApi } from "./held-starts.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
@@ -32,7 +32,6 @@ import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
 import type { StoresApi } from "./stores.ts";
-import type { ScreenSubmissionsApi } from "./submissions.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
@@ -80,8 +79,6 @@ export interface SessionApi {
   readonly chats: ChatsApi;
   /** The person's own dashboard: which widgets are on it, in what order. */
   readonly dashboard: DashboardApi;
-  /** The person's own choice of the emails Grasp sends them. */
-  readonly emailPreferences: EmailPreferencesApi;
   /** The person's own sessions: the browsers they are signed in on, and ending one. */
   readonly sessions: SessionsApi;
   /** The person's own accounts on chat platforms, linked so the agent knows them there. */
@@ -152,6 +149,11 @@ export interface SessionApi {
    */
   readonly decisions: DecisionsApi;
   /**
+   * Starts of independent workflows the person's chats' agents asked for,
+   * held until they confirm them.
+   */
+  readonly heldStarts: HeldStartsApi;
+  /**
    * npm packages proposed for Apps, and the people who approve them: a
    * permission of its own, which no role gives.
    */
@@ -171,7 +173,7 @@ export interface SessionApi {
    */
   readonly organization: OrganizationApi;
   /**
-   * The organization's billing and Pulse settings: its admins read them,
+   * The organization's billing settings: its admins read them,
    * its own admins (never Grasp staff) change them.
    */
   readonly orgSettings: OrgSettingsApi;
@@ -208,11 +210,6 @@ export interface SessionApi {
    * that connect couldn't recover: the person says what became of each.
    */
   readonly unknownOutcomes: UnknownOutcomesApi;
-  /**
-   * The person's screen submissions whose answer may never have reached
-   * their page, by status only (spec 10.7.8).
-   */
-  readonly screenSubmissions: ScreenSubmissionsApi;
   /**
    * Improvement signals from runs and the audit log, computed daily: every
    * one for admins, an App's for its builders.

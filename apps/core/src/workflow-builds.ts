@@ -372,6 +372,21 @@ const sealedCatchSchema = z.strictObject({
     .optional(),
   when: z.int().min(0).optional(),
   exceptWhen: z.int().min(0).optional(),
+  /** Its retry policy (generate.ts, `GeneratedRetry`), in milliseconds. */
+  retry: z
+    .strictObject({
+      attempts: z.int().min(1).max(5),
+      delayMs: z.int().min(0),
+      backoff: z.enum(["constant", "linear", "exponential"]),
+      jitter: z
+        .strictObject({ fromMs: z.int().min(0), toMs: z.int().min(0) })
+        .optional(),
+      limitMs: z.int().min(0).optional(),
+      attemptMs: z.int().positive().optional(),
+      when: z.int().min(0).optional(),
+      exceptWhen: z.int().min(0).optional(),
+    })
+    .optional(),
 });
 
 /** One task the generated module runs, as the host checks its steps. */
@@ -399,6 +414,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     fork: z.strictObject({
       branches: z.int().min(1).max(64),
       compete: z.boolean(),
+      /** How many branches run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
     }),
     // Its input.from, of the slots its module evaluates (generate.ts).
     inputFrom: templateSchema.optional(),
@@ -418,6 +435,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
       each: z.string().min(1).max(64),
       at: z.string().min(1).max(64),
       while: z.int().min(0).optional(),
+      /** How many items run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
     }),
     // Its input.from, of the slots its module evaluates (generate.ts).
     inputFrom: templateSchema.optional(),

@@ -769,16 +769,11 @@ const testModelOf = (
 /** One of Grasp's own features, and who handles it, in a sentence. */
 const useUsageLine = () => {
   const { t } = useLingui();
-  return ({ feature, provider, off }: AiPlatformUse): string => {
+  return ({ feature, provider }: AiPlatformUse): string => {
     if (provider === null) {
       return t`Grasp converts uploaded documents on this deployment: nothing is sent out.`;
     }
     const { whereItRuns } = provider;
-    if (off) {
-      return feature === "transcription"
-        ? t`Interviews aren't transcribed: this deployment keeps everything in the EU, and ${whereItRuns} isn't.`
-        : t`The interview's questions aren't read aloud: this deployment keeps everything in the EU, and ${whereItRuns} isn't.`;
-    }
     if (feature === "conversion") {
       return t`Grasp converts uploaded PDFs with ${whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out.`;
     }

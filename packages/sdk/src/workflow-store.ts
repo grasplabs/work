@@ -10,6 +10,7 @@ import type {
 } from "./client-workflow.ts";
 import type {
   AppErrorPayload,
+  DecisionValueOf,
   EventDataOf,
   RunHandle,
   WorkflowWait,
@@ -84,6 +85,24 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
     event: Sent,
     data: NoInfer<EventDataOf<Sent>>
   ) => Promise<void>;
+  /**
+   * Answers a decision the selected run is held at (spec 10.4.5, 10.7.2):
+   * `wait` exactly as a wait of this run's (`waits`) or the decision inbox
+   * (`queries.decisions`) gave it, and `value` as that decision's value
+   * schema declares it. The page asks the person to confirm the answer in
+   * its own dialog first; it resolves once the answer is the recorded
+   * decision, and rejects with `decision.cancelled` when they cancel it,
+   * the draft kept. Never sent on render, mount or a lost connection; an
+   * answer whose outcome is lost rejects with `decision.outcome_unknown`,
+   * and giving the same answer again records nothing twice.
+   */
+  readonly respond: <Answered extends Extract<Wait, { kind: "decision" }>>(
+    wait: Answered,
+    response: {
+      readonly approved: boolean;
+      readonly value: NoInfer<DecisionValueOf<Answered>>;
+    }
+  ) => Promise<void>;
   /** Whether a new run may be started now (not a promise it will be). */
   readonly canRun: boolean;
   readonly canPause: boolean;
@@ -108,6 +127,12 @@ export type ObservedRun = Readonly<RunHandle> & {
 export type WorkflowRunView<Output> =
   | { readonly status: "idle" }
   | { readonly status: "loading"; readonly runId: string }
+  /**
+   * The run was shown, and the person may see it no more (a decision that
+   * asked them was answered, its alias bound elsewhere): nothing of it is
+   * shown, and it is no error. Shown again should access come back.
+   */
+  | { readonly status: "unavailable"; readonly runId: string }
   | (ObservedRun & {
       readonly status: "queued" | "running" | "waiting" | "paused";
       readonly finishedAt: null;
@@ -420,6 +445,14 @@ export class WorkflowStore {
     await this.#control("cancel");
   };
 
+  readonly respond = async (
+    wait: unknown,
+    response: unknown
+  ): Promise<void> => {
+    const runId = this.#attachedRunId();
+    await this.#channel.respond(this.#read, runId, wait, response);
+  };
+
   readonly send = async (event: unknown, data: unknown): Promise<void> => {
     const runId = this.#attachedRunId();
     await this.#channel.send(this.#read, runId, event, data);
@@ -599,6 +632,7 @@ export class WorkflowStore {
       resume: this.resume,
       cancel: this.cancel,
       send: this.send,
+      respond: this.respond,
       canRun:
         binding.fresh &&
         binding.error === undefined &&
@@ -612,7 +646,11 @@ export class WorkflowStore {
       return Object.freeze({ ...commands, status: "idle" });
     }
     if (snapshot === undefined) {
-      return Object.freeze({ ...commands, status: "loading", runId });
+      return Object.freeze({
+        ...commands,
+        status: run?.unavailable === true ? "unavailable" : "loading",
+        runId,
+      });
     }
     return Object.freeze({ ...commands, ...runView(snapshot) });
   }

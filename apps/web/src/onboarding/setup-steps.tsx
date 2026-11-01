@@ -83,6 +83,7 @@ import type { DocumentRow } from "./document-drop.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { NoSenderItem } from "./no-sender.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
 import { useWayIn } from "./platform-reveal.tsx";
@@ -173,8 +174,8 @@ export interface SetupData {
   hr: OnboardingHr | null;
   /** Where the documents live, connected for the onboarding; null before it is. */
   places: OnboardingPlaces | null;
-  /** Grasp's sending domain, which the admin lets through their mail filter. */
-  sendingDomain: string;
+  /** Grasp's sending domain (core's `MAIL_FROM`), which the admin lets through their mail filter; null while unset. */
+  sendingDomain: string | null;
   /** The steps people told two ways and nobody could explain, and how much of the work is mapped. */
   review: OnboardingReview;
   /** What the admin chose about what Grasp may connect. */
@@ -185,6 +186,10 @@ export interface SetupData {
   ai: AiReadiness | null;
   identity: Identity;
 }
+
+/** Whether the admin has Grasp's mail to let through: it sends, from a sender core names. */
+const mailToLetThrough = (data: SetupData): boolean =>
+  data.view.mailSends && data.sendingDomain !== null;
 
 export interface StepProps {
   data: SetupData;
@@ -298,7 +303,7 @@ const useHeadlines = ({
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
   const { differences, mapped } = data.review;
   const openCount =
-    openItems(settled, data.view.mailSends, data.ai).length +
+    openItems(settled, mailToLetThrough(data), data.ai).length +
     differences.filter(({ holds }) => holds === null).length;
   // A sign-in to connect where the deployment signs in with one; else a staff list.
   const [onlySuite, ...otherSuites] = data.suites;
@@ -1821,10 +1826,14 @@ const Team = (props: StepProps) => {
 
 /**
  * Letting Grasp's mail through, as one of what needs the admin; where
- * Grasp sends no mail, that it doesn't, and nothing to settle.
+ * Grasp sends no mail, or has no sender set, that it doesn't, and
+ * nothing to settle.
  */
-const Mail = ({ data, settled, onSettle }: StepProps) =>
-  data.view.mailSends ? (
+const Mail = ({ data, settled, onSettle }: StepProps) => {
+  if (data.view.mailSends && data.sendingDomain === null) {
+    return <NoSenderItem />;
+  }
+  return mailToLetThrough(data) && data.sendingDomain !== null ? (
     <MailItem
       domain={data.sendingDomain}
       onSettle={(done) => {
@@ -1835,6 +1844,7 @@ const Mail = ({ data, settled, onSettle }: StepProps) =>
   ) : (
     <NoMailItem />
   );
+};
 
 /**
  * The weeks Stephen talks to the team: where the interviews stand
@@ -1962,7 +1972,8 @@ const Review = (props: StepProps) => {
   const [changing, setChanging] = useState<string[]>([]);
   const { differences } = props.data.review;
   const open =
-    openItems(props.settled, props.data.view.mailSends, props.data.ai).length +
+    openItems(props.settled, mailToLetThrough(props.data), props.data.ai)
+      .length +
     differences.filter(
       ({ work, holds }) => holds === null || changing.includes(work)
     ).length;

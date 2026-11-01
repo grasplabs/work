@@ -4,7 +4,6 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import {
   connectVersionPath,
   provisionProbePath,
@@ -1880,7 +1879,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI settings on its core and Grasp's AI key on its connect alone, and without mail", async () => {
+  it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
       "workers_for_platforms",
@@ -1908,7 +1907,6 @@ describe("provisioning a placed client", () => {
     const coreBindings = z
       .array(z.object({ type: z.string(), name: z.string() }).loose())
       .parse(scripts?.get(core)?.versions.at(-1)?.metadata.bindings ?? []);
-    const platformAi = coreBindings.find(({ name }) => name === "PLATFORM_AI");
     const aiKeys = (script: string) =>
       [...(scripts?.get(script)?.versions.at(-1)?.secrets.keys() ?? [])]
         .filter(
@@ -1926,9 +1924,6 @@ describe("provisioning a placed client", () => {
         path.includes("/gateways")
       ).length,
       modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
-      // Grasp's AI features as the platform chose them: the defaults, none chosen.
-      platformAi: z.object({ json: z.unknown() }).loose().parse(platformAi)
-        .json,
       // Grasp's key goes to connect, which makes every provider call, never core.
       keys: { core: aiKeys(core), connect: aiKeys(connect) },
       // Its core goes live without `EMAIL`, so it sends nothing and says
@@ -1943,7 +1938,6 @@ describe("provisioning a placed client", () => {
       ai: [],
       gatewayCalls: 0,
       modelGateway: false,
-      platformAi: platformAiSchema.parse({}),
       keys: { core: [], connect: ["OPENAI_API_KEY"] },
       mail: [],
       zones: 0,

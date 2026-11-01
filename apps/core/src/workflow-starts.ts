@@ -1059,11 +1059,35 @@ const restrictedStart = async (
 };
 
 /**
+ * The chat whose agent is behind a start by `invoker`: the agent's own
+ * start from its chat (held-starts.ts), or an App's start an agent's call
+ * made. None for any other start.
+ */
+const startingChatOf = (invoker: StartInvoker): StartingAgent | undefined => {
+  if (invoker.type === "app") {
+    return invoker.agent ?? undefined;
+  }
+  if (
+    invoker.type !== "agent" ||
+    invoker.context?.type !== "chat" ||
+    invoker.authority.subject.type !== "agent"
+  ) {
+    return undefined;
+  }
+  return {
+    agentId: invoker.authority.subject.agentId,
+    workspaceId: invoker.context.workspaceId,
+    chatId: invoker.context.chatId,
+  };
+};
+
+/**
  * What the chat behind a start by `invoker` has read, withheld or not
- * (GRA-1093): an App's start an agent's call made, the
- * agent's chat's. Its run is held to them (workflows/resource-reads.ts),
- * as its input may carry any. None for any other start. More than a run
- * keeps is refused (`brain.budget_exceeded`), never cut short.
+ * (GRA-1093): the chat of the agent that started it, itself or through
+ * an App's call (`startingChatOf`). Its run is held to them
+ * (workflows/resource-reads.ts), as its input may carry any. None for any
+ * other start. More than a run keeps is refused (`brain.budget_exceeded`),
+ * never cut short.
  *
  * Refused (`workflow.start_denied`, recorded by `refuse`) once that chat
  * is deleted, or being deleted. A start its
@@ -1079,14 +1103,10 @@ const chatPinsOf = async (
   invoker: StartInvoker,
   refuse: () => Promise<void>
 ): Promise<ChatPins | undefined> => {
-  if (
-    invoker.type !== "app" ||
-    invoker.agent === undefined ||
-    invoker.agent === null
-  ) {
+  const agent = startingChatOf(invoker);
+  if (agent === undefined || !("authority" in invoker)) {
     return undefined;
   }
-  const { agent } = invoker;
   const sources = await workspace(env, agent.workspaceId).heldSourcesOf(
     agent.chatId
   );

@@ -7,7 +7,7 @@ import { defineErrorFamily } from "./errors.ts";
 // `files` binding and read back, by reference, in later steps of the same
 // run. Core keeps the bytes in the deployment's private R2 (EU), in
 // chunks, and their record in its own database; a file is its run's
-// alone, and goes with the run's details (RUN_RETENTION_DAYS). Nothing of
+// alone, and goes with the run's details (30 days after it ends). Nothing of
 // it leaves the run but through the bindings the run already has.
 
 const kib = 1024;

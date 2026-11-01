@@ -10,8 +10,8 @@ const configuredKey = Symbol.for("grasp.configured-env");
  * runtime's global: were the module registry reset (`vi.resetModules()`),
  * a later file's setup would evaluate this module again and take what a
  * test left in the env for configured, and every later file would start
- * from it. A quota policy left so, under a generation of its own, put
- * each later file's own policies behind it (quotas.ts, `quotaPolicy`).
+ * from it: a quota limit a test lowered, say, would hold every later
+ * file to it.
  */
 const taken: unknown = Reflect.get(globalThis, configuredKey);
 export const configuredEnv: ReadonlyMap<string, unknown> =

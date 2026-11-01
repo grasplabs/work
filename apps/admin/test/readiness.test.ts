@@ -29,7 +29,7 @@ mockAccess();
 
 /** Runs `run` with the admin's vars as `vars` set them, as a deploy would. */
 const withVars = async <T>(
-  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN" | "DISCORD_PUBLIC_KEY">>,
+  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN">>,
   run: () => Promise<T>
 ): Promise<T> => {
   const before = { ...env };
@@ -39,7 +39,6 @@ const withVars = async <T>(
   } finally {
     env.STAGE = before.STAGE;
     env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
-    env.DISCORD_PUBLIC_KEY = before.DISCORD_PUBLIC_KEY;
   }
 };
 
@@ -96,9 +95,6 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        platform_ai: "ready",
-        rooms: "not_configured",
-        discord_bot: "ready",
         grasp_organization: "not_configured",
       },
       blocking: 3,
@@ -160,7 +156,6 @@ describe("Platform's Readiness", () => {
         release: "ready",
         secrets: "ready",
         deployer: "ready",
-        platform_ai: "ready",
       },
       blocking: 0,
       destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
@@ -184,33 +179,6 @@ describe("Platform's Readiness", () => {
         "The deployer's token can't reach"
       ),
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
-  });
-
-  it("says Grasp's AI isn't configured while Secrets Store lacks the chosen provider's key, naming it, without blocking onboarding", async () => {
-    const keyed = await withVars(production, readiness);
-    await emptyStoreSecret(env.ELEVENLABS_API_KEY, "ELEVENLABS_API_KEY");
-    const unspoken = await withVars(production, readiness);
-    await emptyStoreSecret(env.OPENAI_API_KEY, "OPENAI_API_KEY");
-    const unkeyed = await withVars(production, readiness);
-
-    expect({
-      keyed: statuses(keyed).platform_ai,
-      unkeyed: statuses(unkeyed).platform_ai,
-      words: [
-        wordsOf(unspoken, "platform_ai"),
-        wordsOf(unkeyed, "platform_ai"),
-      ],
-      // Provisioning and deploys go on without it.
-      blocking: unkeyed.blocking - keyed.blocking,
-    }).toStrictEqual({
-      keyed: "ready",
-      unkeyed: "not_configured",
-      words: [
-        "Secrets Store has no ELEVENLABS_API_KEY, so speech isn't configured yet in any organization; everything else works. Add ELEVENLABS_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
-        "Secrets Store has no OPENAI_API_KEY and ELEVENLABS_API_KEY, so document conversion, transcription and speech aren't configured yet in any organization; everything else works. Add OPENAI_API_KEY and ELEVENLABS_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
-      ],
-      blocking: 0,
-    });
   });
 
   it("checks the deployer against the one shared destination new organizations go in, of several", async () => {
@@ -247,35 +215,10 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("says the Discord bot is ready with a spaced public key, as the bot reads it", async () => {
-    const read = await withVars(
-      {
-        ...production,
-        DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""} `,
-      },
-      readiness
-    );
-
-    expect(statuses(read).discord_bot).toBe("ready");
-  });
-
-  it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
-    const read = await withVars(
-      { ...production, DISCORD_PUBLIC_KEY: "" },
-      readiness
-    );
-
+  it("reads only for staff", async () => {
     await expect(
       callServerFn(fetchReadiness, undefined, { email: null })
     ).rejects.toThrow("The server function answered 403");
-    expect({
-      status: statuses(read).discord_bot,
-      words: wordsOf(read, "discord_bot"),
-    }).toStrictEqual({
-      status: "not_configured",
-      words:
-        "Not configured: the Discord bot refuses everything. Set DISCORD_PUBLIC_KEY in apps/admin/wrangler.jsonc for this stage, then run Deploy platform.",
-    });
   });
 
   it("says whether Grasp's own organization is chosen, live, or gone, and not that onboarding waits on it", async () => {

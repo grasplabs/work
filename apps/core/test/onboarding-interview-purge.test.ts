@@ -7,7 +7,6 @@ import {
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Roster } from "@grasp-os/shared/onboarding";
-import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -18,6 +17,7 @@ import {
 } from "../src/onboarding/interview-erasure.ts";
 import { staffTextErasure } from "../src/onboarding/staff-text-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
@@ -32,7 +32,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 // audit log naming them.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "elevenlabs/eleven_v4";
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 /** An interview in which `term` was said, marked and read back. */
@@ -109,7 +109,7 @@ const talking = async (term: string, does = "") => {
 const spokenKey = (text: string): SpokenKey => ({
   text,
   spoken: `[warm] ${text}`,
-  voice: defaultPlatformAi.speech.voices.stephen,
+  voice: platformAi.speech.voices.stephen,
   model: speechModel,
   language: "en",
 });
