@@ -8,7 +8,11 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
-import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
+import {
+  clientDomain as stageDomain,
+  clientsNamespace,
+  stageNamed,
+} from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
 import type { ClientDispatcher } from "../clients/core-address.ts";
@@ -338,16 +342,20 @@ export interface DeployContext {
 /**
  * Relay mode for every client this admin deploys: the stage whose OAuth
  * relay (@grasp-os/shared/oauth-relay) their sign-in and connections come
- * back through, while `OAUTH_RELAY` is `on`, as wrangler.jsonc sets it
- * for both stages: every client the admin deploys is Grasp-hosted, under
- * its stage's hosted domain, on Grasp's shared OAuth apps. `off` leaves
- * each client's IdPs returning to its own origin, as on-prem has it.
+ * back through. Every client the admin deploys is Grasp-hosted, under its
+ * stage's hosted domain, on Grasp's shared OAuth apps, so the relay is
+ * always on there. A local run or a test serves clients under a domain of
+ * its own, which no relay serves: their IdPs return to their own origin.
  */
 export const oauthRelayOf = (env: {
   STAGE?: string;
-  OAUTH_RELAY?: string;
-}): Stage | undefined =>
-  env.OAUTH_RELAY === "on" ? stageNamed(env.STAGE) : undefined;
+  CLIENT_DOMAIN?: string;
+}): Stage | undefined => {
+  const stage = stageNamed(env.STAGE);
+  return stage !== undefined && env.CLIENT_DOMAIN?.trim() === stageDomain(stage)
+    ? stage
+    : undefined;
+};
 
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);

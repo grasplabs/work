@@ -66,11 +66,8 @@ describe("a placed client's core vars", () => {
 
 describe("a hosted client's sign-in, in relay mode", () => {
   /** Client acme's derived `SIGN_IN` under `servedUnder`, as an admin with `vars` deploys it. */
-  const signInWith = (
-    vars: { STAGE: string; OAUTH_RELAY: string },
-    servedUnder: string
-  ): unknown => {
-    const relay = oauthRelayOf(vars);
+  const signInWith = (stage: string, servedUnder: string): unknown => {
+    const relay = oauthRelayOf({ STAGE: stage, CLIENT_DOMAIN: servedUnder });
     return derivedCoreConfig({
       clientId: "acme",
       signIn: JSON.stringify(signIn),
@@ -80,11 +77,9 @@ describe("a hosted client's sign-in, in relay mode", () => {
     }).SIGN_IN;
   };
 
-  it("sends each stage's hosted clients back through that stage's relay while OAUTH_RELAY is on", () => {
+  it("sends each stage's hosted clients back through that stage's relay", () => {
     expect(
-      stages.map((stage) =>
-        signInWith({ STAGE: stage, OAUTH_RELAY: "on" }, clientDomain(stage))
-      )
+      stages.map((stage) => signInWith(stage, clientDomain(stage)))
     ).toMatchObject([
       {
         origin: "https://acme.ongrasp.app",
@@ -97,23 +92,25 @@ describe("a hosted client's sign-in, in relay mode", () => {
     ]);
   });
 
-  it("leaves a client's IdPs returning to its own origin while OAUTH_RELAY is off", () => {
-    const config = signInWith(
-      { STAGE: "production", OAUTH_RELAY: "off" },
-      clientDomain("production")
-    );
+  it("leaves a client's IdPs returning to its own origin under a domain no stage's relay serves, or another stage's", () => {
+    const config = signInWith("production", domain);
+    const other = signInWith("production", clientDomain("staging"));
 
-    expect(config).toMatchObject({ origin: "https://acme.ongrasp.app" });
+    expect(other).not.toHaveProperty("callbackOrigin");
+    expect(config).toMatchObject({ origin: `https://acme.${domain}` });
     expect(config).not.toHaveProperty("callbackOrigin");
   });
 
-  it("refuses relay mode for a client under a domain its stage's relay doesn't serve, and another stage's", () => {
-    const refusal = (
-      vars: { STAGE: string; OAUTH_RELAY: string },
-      servedUnder: string
-    ): unknown => {
+  it("refuses relay mode for a client under a domain its stage's relay doesn't serve", () => {
+    const refusal = (): unknown => {
       try {
-        signInWith(vars, servedUnder);
+        derivedCoreConfig({
+          clientId: "acme",
+          signIn: JSON.stringify(signIn),
+          domain: clientDomain("staging"),
+          apps: signInApps(env),
+          oauthRelay: "production",
+        });
       } catch (error) {
         return error instanceof Error && "code" in error
           ? error.code
@@ -122,12 +119,6 @@ describe("a hosted client's sign-in, in relay mode", () => {
       return "taken";
     };
 
-    expect([
-      refusal({ STAGE: "production", OAUTH_RELAY: "on" }, domain),
-      refusal(
-        { STAGE: "production", OAUTH_RELAY: "on" },
-        clientDomain("staging")
-      ),
-    ]).toStrictEqual(["sign_in_incomplete", "sign_in_incomplete"]);
+    expect(refusal()).toBe("sign_in_incomplete");
   });
 });

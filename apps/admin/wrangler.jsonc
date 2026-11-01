@@ -30,10 +30,7 @@
   // in with; CLIENT_DOMAIN is where
   // clients are served, and ADMIN_HOST the admin's own hostname, both as the
   // names module gives them (check:wrangler-configs holds them to it);
-  // OAUTH_RELAY "on" sends every client's sign-in and connections back
-  // through the stage's OAuth relay, as every client this admin deploys is
-  // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
-  // each client's own origin. ROOMS_ORIGIN is Grasp's Rooms' team origin
+  // ROOMS_ORIGIN is Grasp's Rooms' team origin
   // (e.g. https://rooms.grasp.example), which the proposal under Contract
   // is read from (src/proposal/rooms.ts); DISCORD_PUBLIC_KEY is Grasp's
   // Discord application's public key, hex (General Information), which
@@ -53,7 +50,6 @@
     "GOOGLE_CLIENT_ID": "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
     "CLIENT_DOMAIN": "ongrasp.app",
     "ADMIN_HOST": "admin.ongrasp.app",
-    "OAUTH_RELAY": "on",
     "ROOMS_ORIGIN": "",
     "DISCORD_PUBLIC_KEY": "",
     "DISCORD_STAFF_IDS": "",
@@ -290,7 +286,6 @@
         "GOOGLE_CLIENT_ID": "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
         "CLIENT_DOMAIN": "staging.ongrasp.app",
         "ADMIN_HOST": "admin.staging.ongrasp.app",
-        "OAUTH_RELAY": "on",
         "ROOMS_ORIGIN": "",
         "DISCORD_PUBLIC_KEY": "",
         "DISCORD_STAFF_IDS": "",

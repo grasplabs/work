@@ -297,7 +297,7 @@ export interface CoreConfigInputs {
   domain: string;
   apps: SignInApps;
   /**
-   * Relay mode (`OAUTH_RELAY`, src/deploy/context.ts): the stage whose
+   * Relay mode (`oauthRelayOf`, src/deploy/context.ts): the stage whose
    * OAuth relay the client's sign-in and connections come back through,
    * as Grasp-hosted clients' do. Absent, they come back to the client's
    * own origin, which needs its own OAuth apps.
