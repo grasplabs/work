@@ -407,7 +407,7 @@ const assemble = async (
     if (text === undefined) {
       continue;
     }
-    const limit = memoryLimit(env, wanted.name);
+    const limit = memoryLimit(wanted.name);
     const cut = memoryTokens(text) > limit;
     files.push({
       source: wanted.source,
@@ -464,7 +464,7 @@ export const forContext = async (
         source,
         documentId ?? ("appId" in at ? at.appId : ""),
         version,
-        memoryLimit(env, name),
+        memoryLimit(name),
       ])
     )
   );

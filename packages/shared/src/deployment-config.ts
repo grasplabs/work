@@ -9,11 +9,8 @@ import { loopbackHosts } from "./router.ts";
 // (with `deploymentConfig`, @grasp-os/shared/config) and the admin
 // validates them before it deploys: one schema for both, so the admin
 // never sets a value core would refuse. Each var is deployment config,
-// never an in-product setting, so no admin session can change it. The
-// `MEMORY_LIMITS` var's schema is `memoryLimitsSchema` in
-// @grasp-os/shared/memory, `QUOTA_LIMITS`'s is `quotaLimitsSchema` in
-// @grasp-os/shared/quota-policy, and `PLATFORM_CHANGE`'s is in
-// @grasp-os/shared/platform-change.
+// never an in-product setting, so no admin session can change it.
+// `PLATFORM_CHANGE`'s schema is in @grasp-os/shared/platform-change.
 
 // SIGN_IN (core's src/auth/config.ts)
 
@@ -256,73 +253,6 @@ export type ModelRules = z.output<
 export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
   z.object(modelRulesShape(modelRef));
 
-// AUDIT_RETENTION_DAYS and AUDIT_ARCHIVE_RETENTION_DAYS (core's
-// src/audit-log.ts)
-
-/** Days the audit log keeps an event where admins search it, unless set. */
-export const auditRetentionDefaultDays = 180;
-
-/**
- * `AUDIT_RETENTION_DAYS`: at least 30 days (so an admin always has the
- * last month to search), at most ten years.
- */
-export const auditRetentionSchema = z.int().min(30).max(3650);
-
-/**
- * `AUDIT_ARCHIVE_RETENTION_DAYS`: how long archived stretches are kept, in
- * days from when the log received their last event: at least a year, at
- * most ten. Core also refuses one shorter than the retention.
- */
-export const auditArchiveRetentionSchema = z.int().min(365).max(3650);
-
-/**
- * Days an event is kept in all, archive included, unless set: seven years
- * (Nick's decision on GRA-903), or the log's own retention if that is
- * longer, so an unset archive retention is never shorter than it.
- */
-export const auditArchiveRetentionDefaultDays = 7 * 365;
-
-// RUN_RETENTION_DAYS (core's src/workflows/retention.ts)
-
-/** Days an ended workflow run keeps its details, unless set. */
-export const runRetentionDefaultDays = 30;
-
-/**
- * `RUN_RETENTION_DAYS`: how long a workflow run keeps its details (its
- * input, what its steps returned, its output, why it failed) once it has
- * ended, in days: at least one, at most 30. Most of those details are the
- * engine's record of the run, and core has Cloudflare Workflows keep it
- * for this long (each instance's `retention`), which can be no longer
- * than the 30 days it keeps an ended instance on the Workers Paid plan.
- */
-export const runRetentionSchema = z.int().min(1).max(30);
-
-// INBOUND_MAIL_DOMAIN (core's src/workflows/overview.ts)
-
-/**
- * `INBOUND_MAIL_DOMAIN`: the domain the deployment receives mail at, as
- * its Email Routing catch-all rule sends it to core (set up outside core),
- * so an email trigger's address shows whole: `<local part>@<domain>`. A
- * lowercase hostname of at most 253 characters, its labels at most 63,
- * none starting or ending with a hyphen.
- * Unset, triggers show their local part alone.
- */
-export const inboundMailDomainSchema = domainSchema
-  .max(253)
-  .refine(
-    (domain) =>
-      domain
-        .split(".")
-        .every(
-          (label) =>
-            label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")
-        ),
-    {
-      message:
-        "Each part of the domain is at most 63 characters, and starts and ends with a letter or digit",
-    }
-  );
-
 // MAIL_FROM (core's src/mail.ts)
 
 /**
@@ -343,21 +273,3 @@ export const mailFromSchema = z.strictObject({
   address: z.email().max(254),
 });
 export type MailFrom = z.infer<typeof mailFromSchema>;
-
-/**
- * The names of the deployment config vars above, and `PLATFORM_AI`
- * (./platform-ai.ts), the only settings the admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
- * on every version it deploys, never a setting.
- */
-export const deploymentConfigVars = [
-  "SIGN_IN",
-  "MODEL_GATEWAY",
-  "MEMORY_LIMITS",
-  "AUDIT_RETENTION_DAYS",
-  "AUDIT_ARCHIVE_RETENTION_DAYS",
-  "RUN_RETENTION_DAYS",
-  "QUOTA_LIMITS",
-  "INBOUND_MAIL_DOMAIN",
-  "MAIL_FROM",
-  "PLATFORM_AI",
-] as const;

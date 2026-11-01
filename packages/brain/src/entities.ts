@@ -2256,6 +2256,7 @@ const replaceable = async <C>(
       decidedBy: string;
       decision: string;
       revision: number;
+      decidedAt: Date;
       previousDecider: string | null;
     }
   | undefined
@@ -2265,6 +2266,7 @@ const replaceable = async <C>(
       decidedBy: brainEntityMatches.decidedBy,
       decision: brainEntityMatches.decision,
       revision: brainEntityMatches.revision,
+      decidedAt: brainEntityMatches.decidedAt,
     })
     .from(brainEntityMatches)
     .where(pair)
@@ -2344,12 +2346,18 @@ export const decideEntityMatch = async <C>(
         target: [brainEntityMatches.entityA, brainEntityMatches.entityB],
         set: { ...values, revision: sql`${brainEntityMatches.revision} + 1` },
         // Exactly the decision the replacement was allowed against, at the
-        // revision read: one made or replaced meanwhile, by anyone, the
-        // same person too, is left as it is (and refused below).
+        // revision read, by whom and when it was made: one made or
+        // replaced meanwhile, by anyone, the same person too, is left as
+        // it is (and refused below), one a purge deleted and someone made
+        // again at the first revision too.
         setWhere:
           existing === undefined
             ? sql`0`
-            : eq(brainEntityMatches.revision, existing.revision),
+            : and(
+                eq(brainEntityMatches.revision, existing.revision),
+                eq(brainEntityMatches.decidedBy, existing.decidedBy),
+                eq(brainEntityMatches.decidedAt, existing.decidedAt)
+              ),
       }),
     outboxedIfChanged(brain, {
       actor: brain.ports.actorOf(reader),
@@ -2389,9 +2397,14 @@ export const sameAsFor = async <C>(
   reader: C,
   entityId: string
 ): Promise<string[]> => {
+  // The Brain's own read first, as every entity read: before anything of
+  // a match is read.
+  await requireBrainRead(brain, reader);
   // Every direct decision, a page at a time, so none is dropped before
   // the visibility check.
   const readable: string[] = [];
+  // What the read showed, for the host's record of it (`noteRead`).
+  const shown: ReadableMention[] = [];
   const allowed = await allowedFor(brain.ports, reader);
   let after: { a: string; b: string } | undefined;
   for (;;) {
@@ -2416,16 +2429,27 @@ export const sameAsFor = async <C>(
     }
     const others = page.map(({ a, b }) => (a === entityId ? b : a));
     // oxlint-disable-next-line no-await-in-loop -- each page's visibility before the next
-    const { sides } = await readableSides(brain, reader, [entityId, ...others]);
+    const { sides, rows } = await readableSides(brain, reader, [
+      entityId,
+      ...others,
+    ]);
     if (!sides.has(entityId)) {
       return [];
     }
-    readable.push(...others.filter((id) => sides.has(id)));
+    const counterparts = others.filter((id) => sides.has(id));
+    readable.push(...counterparts);
+    const read = new Set([entityId, ...counterparts]);
+    shown.push(
+      ...rows.filter((row) => row.entityId !== null && read.has(row.entityId))
+    );
     after = page.at(-1);
     if (page.length < decisionBatch) {
       break;
     }
   }
+  // Recorded as the other entity reads are: who read which identification,
+  // from which collections.
+  await noteRead(brain, reader, "entity_matches", shown);
   return readable.toSorted();
 };
 

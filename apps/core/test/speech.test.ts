@@ -366,46 +366,23 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     expect(provider.requests).toStrictEqual([]);
   });
 
-  it.each([
-    [
-      "the sensitive-data rule doesn't list it",
-      { sensitive: { models: [textModel] } },
-      "model.sensitive_data",
-    ],
-    [
-      "the deployment must stay in the EU and Grasp's project is in the US, whatever its EU models list",
-      { eu: { models: [textModel, speechModel], deployment: true } },
-      "model.eu_only",
-      { region: "us" },
-    ],
-  ])(
-    "refuses an onboarding line when %s, sending nothing",
-    async (_, rules, code, platform?: unknown) => {
-      const { rulesEnv: configured } = withRules(rules);
-      const rulesEnv: Env =
-        platform === undefined
-          ? configured
-          : { ...configured, PLATFORM_AI: platform };
-      const person = newPerson();
-      const line = newLine();
+  it("refuses an onboarding line when the sensitive-data rule doesn't list it, sending nothing", async () => {
+    const { rulesEnv } = withRules({ sensitive: { models: [textModel] } });
+    const person = newPerson();
+    const line = newLine();
 
-      await expect(
-        outcome(
-          stephen(rulesEnv, person).speak({
-            text: line,
-            voice,
-            language: "de",
-          })
-        )
-      ).resolves.toBe(code);
-      await expect(carrying(line)).resolves.toStrictEqual([]);
-      const [event] = await auditedFor(person.userId, 1);
-      expect(event).toMatchObject({
-        action: "model.refused",
-        detail: { reason: code, model: speechModel },
-      });
-    }
-  );
+    await expect(
+      outcome(
+        stephen(rulesEnv, person).speak({ text: line, voice, language: "de" })
+      )
+    ).resolves.toBe("model.sensitive_data");
+    await expect(carrying(line)).resolves.toStrictEqual([]);
+    const [event] = await auditedFor(person.userId, 1);
+    expect(event).toMatchObject({
+      action: "model.refused",
+      detail: { reason: "model.sensitive_data", model: speechModel },
+    });
+  });
 
   it("says an EU-only deployment's line at ElevenLabs's EU residency host, where Grasp's account keeps its data, whatever its EU models list", async () => {
     const { rulesEnv } = withRules({
@@ -478,24 +455,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       details: { retryAfterSeconds: 7 },
     });
     await expect(carrying(line)).resolves.toHaveLength(2);
-  });
-
-  it("fails closed while the platform's AI settings don't parse, sending nothing", async () => {
-    const { rulesEnv } = withRules();
-    const line = newLine();
-
-    await expect(
-      outcome(
-        stephen(
-          {
-            ...rulesEnv,
-            PLATFORM_AI: { speech: { provider: "openai" } },
-          },
-          newPerson()
-        ).speak({ text: line, voice, language: "en" })
-      )
-    ).resolves.toBe("model.unconfigured");
-    await expect(carrying(line)).resolves.toStrictEqual([]);
   });
 
   it("refuses a line longer than one request may have said", async () => {

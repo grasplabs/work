@@ -151,12 +151,22 @@ export const readWaiting = async (
           ofKind(read, "appApproval").map(({ waiting }) => waiting)
         )
       : undefined,
+    heldStarts: partOf(feed, "heldStarts", (read) =>
+      ofKind(read, "heldStart").map(({ start }) => start)
+    ),
     decisions: partOf(feed, "decisions", (read) =>
       ofKind(read, "decision").map(({ decision }) => decision)
     ),
     workflowGoLives: partOf(feed, "workflowGoLives", (read) =>
       ofKind(read, "workflowGoLive")
     ),
+    ...(decidesRequests(identity)
+      ? {
+          bindings: partOf(feed, "bindings", (read) =>
+            ofKind(read, "bindingApproval")
+          ),
+        }
+      : {}),
   };
 };
 

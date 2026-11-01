@@ -23,7 +23,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -34,6 +34,7 @@ import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import {
+  workflowDecisions,
   workflowResourceRunControlKeys,
   workflowResourceRunControls,
   workflowResources,
@@ -41,6 +42,10 @@ import {
   workflowStartReceipts,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import {
+  answerableByNow,
+  resourceDecisionPending,
+} from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { screenStartFiles } from "./screen-start-files.ts";
@@ -61,7 +66,7 @@ import type { ResourceControlRow, RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { AdmittedEvent } from "./workflows/run-events.ts";
-import { runWaits } from "./workflows/run-waits.ts";
+import { runWaits, withRespond } from "./workflows/run-waits.ts";
 
 // What an App's screen asks of the workflows its App binds, through the
 // typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
@@ -300,7 +305,8 @@ const aliasPattern = /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
 
 /** Who asks, and through which App's current release. */
 interface Asking {
-  readonly by: Pick<Identity, "userId" | "role" | "teams">;
+  readonly by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>;
   readonly app: AppId;
   readonly version: number;
   readonly release: Release;
@@ -454,17 +460,56 @@ interface SeenRun {
 }
 
 /**
+ * That a decision of the run in the statement asks `asking`'s person now,
+ * as SQL: one still pending they may answer (`answerableByNow`), never for
+ * staff, and only where the run's restricted mode is the App's
+ * (`appRestricted`), as answering it requires (screen-runs.ts,
+ * `appDecision`). What lets a reviewer watch the run they decide on.
+ */
+const askedNowSql = (env: Env, asking: Asking, appRestricted: boolean): SQL => {
+  if (asking.by.staff === true) {
+    return sql`0`;
+  }
+  const db = drizzle(env.DB);
+  return (
+    and(
+      eq(workflowResourceRuns.restricted, appRestricted),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(workflowDecisions)
+          .where(
+            and(
+              eq(workflowDecisions.resourceRunId, workflowResourceRuns.id),
+              resourceDecisionPending(new Date()),
+              answerableByNow(db, asking.by.userId)
+            )
+          )
+      )
+    ) ?? sql`0`
+  );
+};
+
+/**
  * Run `runId`, if the asking App started it for the asking person and it
  * acts for them, of exactly `pin`, while the App's binding names `pin`:
  * `workflow.run_unavailable` for any other, one that doesn't exist alike.
+ * With `watching`, for a snapshot alone, also a run of the App's that one
+ * of its decisions asks the person to answer now (`askedNowSql`): never
+ * to control it or send it events, which stay its own person's.
  */
 const seenRun = async (
   env: Env,
   asking: Asking,
   alias: string,
   pin: WorkflowPin,
-  runId: string
+  runId: string,
+  watching?: { readonly appRestricted: boolean }
 ): Promise<SeenRun> => {
+  const own = and(
+    eq(workflowStartReceipts.principalId, asking.by.userId),
+    eq(workflowResourceRuns.principalId, asking.by.userId)
+  );
   const found = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
@@ -480,8 +525,9 @@ const seenRun = async (
         eq(workflowResourceRuns.id, runId),
         eq(workflowStartReceipts.invokerType, "app"),
         eq(workflowStartReceipts.invokerId, asking.app),
-        eq(workflowStartReceipts.principalId, asking.by.userId),
-        eq(workflowResourceRuns.principalId, asking.by.userId),
+        watching === undefined
+          ? own
+          : or(own, askedNowSql(env, asking, watching.appRestricted)),
         eq(workflowResourceRuns.workflowResourceId, pin.workflowId),
         eq(workflowResourceRuns.version, pin.version),
         bindingPinnedSql(asking.app, alias, pin)
@@ -548,10 +594,32 @@ const runAndPending = async (
  * run (an App grant revoked or given again) is a revision of its own,
  * never a change under the same one. Everything else a snapshot holds is
  * the gate's to keep current (the person's role, the build's trust). One
- * more, so the first is 1.
+ * more, so the first is 1; and one more again once the App is in
+ * restricted mode (`appRestricted`), which is for good: what it may send
+ * the run changes with it, so a screen following the run is pushed it.
  */
-const revisionOf = (generation: number, row: RunRow): number =>
-  generation + row.summaryRevision + 1;
+const revisionOf = (
+  generation: number,
+  row: RunRow,
+  appRestricted = false
+): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
+
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+  code: z.string().nullable(),
+});
+
+/**
+ * Run `row`'s compensation while the engine rolls it back (spec 10.7.3):
+ * why, from its row; none once it ended, or while it doesn't.
+ */
+const compensationOf = (
+  row: RunRow
+): z.infer<typeof compensationSchema> | undefined =>
+  row.status === "running" && row.compensation !== null
+    ? compensationSchema.safeParse(JSON.parse(row.compensation)).data
+    : undefined;
 
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
@@ -701,6 +769,26 @@ export const failureOf = (
 };
 
 /**
+ * A compensating run's snapshot's compensation (spec 10.7.3): its cause,
+ * its cleanup's activity (the engine reports it running), and, after a
+ * failure, what it failed with, as a failed run says it; none otherwise.
+ */
+const compensationShown = (
+  compensation: z.infer<typeof compensationSchema> | undefined
+): { compensation?: Json } =>
+  compensation === undefined
+    ? {}
+    : {
+        compensation: {
+          cause: compensation.cause,
+          activity: "running",
+          ...(compensation.cause === "failure"
+            ? { originalError: failureOf({ code: compensation.code }) }
+            : {}),
+        },
+      };
+
+/**
  * What a completed run returned, projected by the output the App declared:
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
@@ -749,6 +837,16 @@ const waitsOf = async (
       )
     : [];
 
+/** A decision wait the viewer may answer, as `withRespond` marks one. */
+const answerableDecision = z.looseObject({
+  kind: z.literal("decision"),
+  canRespond: z.literal(true),
+});
+
+/** Whether `wait` is a decision the viewer may answer (`withRespond`). */
+const isAnswerableDecision = (wait: Json): boolean =>
+  answerableDecision.safeParse(wait).success;
+
 /**
  * A run's status as its snapshot shows it: a running run held for its AI
  * provider (ai-waits.ts) shows queued, as its summary does, since it goes
@@ -767,6 +865,118 @@ const shownStatus = async (
   return held.has(row.id) ? "queued" : "running";
 };
 
+/**
+ * What run `row` waits on, as `asking` is shown it in its snapshot: its
+ * events sendable while they may send it one, and never from a restricted
+ * App into a run that isn't restricted itself, as a send refuses it
+ * (`permission.restricted`); its decisions answerable as they may answer
+ * them there (`withRespond`).
+ */
+const snapshotWaits = async (
+  env: Env,
+  asking: Asking,
+  resolved: Resolved,
+  row: RunRow,
+  appRestricted: boolean
+): Promise<Json[]> => {
+  const own = row.principalId === asking.by.userId;
+  const canSend =
+    own &&
+    !isEnded(row.status) &&
+    !(appRestricted && !row.restricted) &&
+    (await holds(env, maySendSql(asking, resolved.alias, pinOf(resolved))));
+  const waits = await withRespond(
+    env,
+    row.id,
+    await waitsOf(env, row, resolved, canSend),
+    {
+      userId: asking.by.userId,
+      ...(asking.by.staff === true ? { staff: true } : {}),
+      sameRestriction: row.restricted === appRestricted,
+    }
+  );
+  // A reviewer watching a run they decide on (`seenRun`'s `watching`)
+  // sees only the decisions asking them: nothing else it waits on.
+  return own ? waits : waits.filter(isAnswerableDecision);
+};
+
+/**
+ * What a screen may ask of run `row` now: nothing that pauses, resumes or
+ * cuts its compensation short (spec 10.7.3), nor what the person may no
+ * longer start (`mayStart`), nor anything past a control applying.
+ */
+const controlOf = (
+  row: RunRow,
+  {
+    pending,
+    mayStart,
+    compensating,
+  }: {
+    pending: ResourceControlRow["kind"] | undefined;
+    mayStart: boolean;
+    compensating: boolean;
+  }
+): Json => {
+  const free = mayStart && !compensating;
+  return {
+    canPause:
+      free &&
+      pending === undefined &&
+      (row.status === "starting" || row.status === "running"),
+    canResume: free && pending === undefined && row.status === "paused",
+    canCancel: free && !isEnded(row.status) && pending !== "cancel",
+    pendingControl:
+      pending === undefined ? null : { kind: pending, stage: "applying" },
+  };
+};
+
+/**
+ * Refuses (`workflow.run_unavailable`) run `row` to a reviewer once it has
+ * ended: they watch it only while a decision of it asks them, which a run
+ * that goes on has, so one that ended since `seenRun` admitted them never
+ * hands them its output or its error.
+ */
+const requireWatchable = (row: RunRow, asking: Asking): void => {
+  if (isEnded(row.status) && row.principalId !== asking.by.userId) {
+    throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+};
+
+/**
+ * What a reviewer watching run `row` sees (`seenRun`'s widened access,
+ * while a decision of it asks them): who the run is, its status as its row
+ * says, when it started, the waits they may see and no control. Named
+ * field by field, so nothing a snapshot says of the run's outcome (what
+ * it returned, why it failed, what it rolls back after and why) reaches
+ * them, now or as the snapshot grows: that is its own person's alone.
+ */
+const watchedSnapshot = (
+  row: RunRow,
+  fingerprint: string,
+  waits: Json[],
+  pending: ResourceControlRow["kind"] | undefined
+): Json => {
+  const status = statusOf[row.status];
+  return {
+    runId: row.id,
+    workflowId: row.workflowResourceId,
+    workflowVersion: row.version,
+    manifestHash: row.manifestHash,
+    fingerprint,
+    status,
+    startedAt: status === "queued" ? null : row.createdAt.getTime(),
+    finishedAt: null,
+    waits,
+    control: {
+      canPause: false,
+      canResume: false,
+      canCancel: false,
+      pendingControl:
+        pending === undefined ? null : { kind: pending, stage: "applying" },
+    },
+  };
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -780,34 +990,41 @@ const runSnapshot = async (
   // under the one before it is never numbered as one of the newer's, and
   // the read again it causes is a revision of its own.
   const generation = await generationOf(env, pin.workflowId);
-  const seen = await seenRun(env, asking, resolved.alias, pin, runId);
+  const appRestricted = await appHost(env, asking.app).isRestricted();
+  const seen = await seenRun(env, asking, resolved.alias, pin, runId, {
+    appRestricted,
+  });
   const { originAppVersion } = seen;
   // The run and the control it has applying, read together: one moment of
   // it, under the revision its row says (`summary_revision`, which every
   // write that changes either moves on in that write).
   const [row, pending] = await runAndPending(env, seen.row);
-  const ended = isEnded(row.status);
-  const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
+  requireWatchable(row, asking);
+  const compensation = compensationOf(row);
   // Read after the row: a wait opened or closed since moves its revision on.
-  const waits = await waitsOf(
-    env,
-    row,
-    resolved,
-    !ended && (await holds(env, maySendSql(asking, resolved.alias, pin)))
-  );
-  const status = await shownStatus(env, row, waits.length);
+  const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
+  const status =
+    compensation === undefined
+      ? await shownStatus(env, row, waits.length)
+      : "compensating";
   const contract = await startedContract(
     env,
     asking,
     resolved,
     originAppVersion
   );
-  const returned = row.status === "completed" || row.status === "failed";
-  if (
-    returned &&
-    row.restricted &&
-    !(await appHost(env, asking.app).isRestricted())
-  ) {
+  if (row.principalId !== asking.by.userId) {
+    return {
+      value: watchedSnapshot(row, contract.fingerprint, waits, pending),
+      revision: revisionOf(generation, row, appRestricted),
+    };
+  }
+  const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
+  const returned =
+    row.status === "completed" ||
+    row.status === "failed" ||
+    compensation?.cause === "failure";
+  if (returned && row.restricted && !appRestricted) {
     // What a restricted run returned, or why it failed, only to an App in
     // restricted mode itself: never out through one that isn't.
     throw permissionErrors.create("permission.restricted");
@@ -827,20 +1044,18 @@ const runSnapshot = async (
     startedAt: row.status === "starting" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
     waits,
-    control: {
-      canPause:
-        mayStart &&
-        pending === undefined &&
-        (row.status === "starting" || row.status === "running"),
-      canResume: mayStart && pending === undefined && row.status === "paused",
-      canCancel: !ended && pending !== "cancel" && mayStart,
-      pendingControl:
-        pending === undefined ? null : { kind: pending, stage: "applying" },
-    },
+    control: controlOf(row, {
+      pending,
+      mayStart,
+      compensating: compensation !== undefined,
+    }),
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
+    // Compensating after a failure: what it failed with, as a failed run
+    // says it; its cleanup's activity, which the engine reports as running.
+    ...compensationShown(compensation),
   };
-  return { value, revision: revisionOf(generation, row) };
+  return { value, revision: revisionOf(generation, row, appRestricted) };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */

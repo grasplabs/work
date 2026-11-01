@@ -51,7 +51,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     // Another App's job holds the client's one build.
     const other = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL, 0)"
+      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL)"
     )
       .bind(other, Date.now())
       .run();
@@ -141,7 +141,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
           "UPDATE build_leases SET admitted_at = admitted_at - 700000 WHERE job_id = ?"
         ).bind(job.id),
         env.DB.prepare(
-          "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', ?, ?, 600000, NULL, 0)"
+          "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', ?, ?, 600000, NULL)"
         ).bind(other, record?.appId ?? "", Date.now()),
       ]);
       storing.restore();
@@ -241,7 +241,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     // Another App's job holds the client's one build.
     const other = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at, policy_generation) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL, 0)"
+      "INSERT INTO build_leases (job_id, seq, subject, resource, admitted_at, reserved_ms, settled_at) VALUES (?, 1, 'someone-else', 'another-app', ?, 600000, NULL)"
     )
       .bind(other, Date.now())
       .run();

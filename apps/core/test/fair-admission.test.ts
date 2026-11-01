@@ -35,8 +35,8 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Fair admission of the client's workflow attempts (admission.ts): how
 // many run at once, in all, for one person and of one App, each held to
-// its share in the deployment's quota policy (`QUOTA_LIMITS`, which a
-// test sets as an operator would), and in what order those waiting get
+// its share in the quota limits (`TEST_QUOTA_LIMITS`, which a test
+// lowers to reach them), and in what order those waiting get
 // a share: first come, first served, never behind an App or a person
 // whose own share is full. Runs, the engine, the dispatcher and core's
 // database are real; attempts are admitted as a run's host admits them

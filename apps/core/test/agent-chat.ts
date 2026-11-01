@@ -68,24 +68,20 @@ export const pausedReply = (answer: Answer, at: number) => {
 export type WorkspaceStub = ReturnType<typeof workspace>;
 
 /**
- * Sets the object's model rules (`MODEL_GATEWAY`), none unless given, and
- * the memory files' limits when given. Objects may share their env, so
- * every test sets it; a restarted object may get a new one, so it is set
- * again.
+ * Sets the object's model rules (`MODEL_GATEWAY`), none unless given.
+ * Objects may share their env, so every test sets it; a restarted object
+ * may get a new one, so it is set again.
  */
 export const configureObject = async (
   stub: WorkspaceStub,
-  { rules = {}, memoryLimits }: { rules?: object; memoryLimits?: object } = {}
+  { rules = {} }: { rules?: object } = {}
 ) => {
   await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
     if (typeof objectEnv !== "object" || objectEnv === null) {
       throw new TypeError("The Workspace object has no env");
     }
-    Object.assign(objectEnv, {
-      MODEL_GATEWAY: rules,
-      ...(memoryLimits === undefined ? {} : { MEMORY_LIMITS: memoryLimits }),
-    });
+    Object.assign(objectEnv, { MODEL_GATEWAY: rules });
   });
 };
 

@@ -3,7 +3,6 @@ import type {
   BrainApi,
   BrainChangePage,
   BrainForgetPreview,
-  BrainNotePage,
   Company,
   Connection,
   Gap,
@@ -47,7 +46,6 @@ import {
   gapsWith,
   redactGapAnswer,
 } from "./brain-gaps.ts";
-import { brainNotes } from "./brain-notes.ts";
 import {
   addBrainRecords,
   datedInOrder,
@@ -123,7 +121,6 @@ import { visibleApps } from "./workflows/overview.ts";
 // | goals              | the brain's records, for everyone signed in; each goal's |
 // |                    | linked workflows only as far as the person may see their |
 // |                    | App, while it still has them                             |
-// | landscape          | nothing core can read holds it yet: empty                |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
 // the documents shared) is the admin's: its own RPC shows the roster, the
@@ -1069,7 +1066,6 @@ export const readBrain = async (
     gaps: await brainGaps(env, person, records),
     workflows: records.workflows,
     connections,
-    landscape: [],
   };
 };
 
@@ -1180,13 +1176,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await brainTranscript(this.#env, person, sourceId)
-    );
-  }
-
-  async notes(options?: unknown): Promise<BrainNotePage> {
-    return await withPerson(
-      this.#check,
-      async (person) => await brainNotes(brainOf(this.#env), person, options)
     );
   }
 

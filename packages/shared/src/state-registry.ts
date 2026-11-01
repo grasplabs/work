@@ -250,6 +250,10 @@ const coreDb: D1State = {
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
+    agent_held_starts: transient(
+      `${core}held-starts.ts`,
+      "Starts a chat's agent asked for, held until its person confirms them, good for a while: one still waiting after a move is asked for again."
+    ),
     channel_conversations: exported(`${core}channels/door.ts`),
     chat_workflow_offers: transient(
       `${core}channels/workflow-offers.ts`,
@@ -316,7 +320,6 @@ const coreDb: D1State = {
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
     app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),
-    screen_submissions: exported(`${core}screen-submissions.ts`),
     action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
     resource_templates: exported(`${core}resource-bindings.ts`),
@@ -360,7 +363,6 @@ const coreDb: D1State = {
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
     run_lineage_children: exported(`${core}workflows/quotas.ts`),
     mail_domains: exported(`${core}workflows/inbound-email.ts`),
-    quota_policies: exported(`${core}workflows/quotas.ts`),
     workflow_run_controls: exported(`${core}workflows/controls.ts`),
     workflow_run_wakes: exported(`${core}workflows/wakes.ts`),
     workflow_triggers: exported(
@@ -400,8 +402,6 @@ const coreDb: D1State = {
     notifications: exported(`${core}notifications.ts`),
     guest_chats: exported(`${core}guests.ts`),
     guest_messages: exported(`${core}guests.ts`),
-    migration_samples: exported(`${core}migration-samples.ts`),
-    migration_sample_leases: transient(`${core}migration-samples.ts`),
     business_stores: exported(`${core}data-stores.ts`),
     business_store_members: exported(`${core}data-stores.ts`),
     workflow_resources: exported(`${core}workflow-resources.ts`),
@@ -534,17 +534,13 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
     ),
-    brain_eval_suite_versions: exported(
-      `${brain}eval-suites.ts`,
-      "Each learning suite version, frozen by its digests, and who accepted it."
-    ),
-    brain_eval_cases: exported(
-      `${brain}eval-suites.ts`,
-      "The cases of each learning suite version, by split, with their answer keys."
-    ),
     brain_erased_evidence: exported(
       `${brain}outcomes.ts`,
       "Execution records whose events were erased, and single events taken back: late captures stay erased."
+    ),
+    brain_erased_documents: exported(
+      `${brain}erasures.ts`,
+      "Which documents each content purge erased, and when: copies made late go too."
     ),
     brain_lessons: exported(
       `${brain}lessons.ts`,
@@ -600,6 +596,10 @@ const connectDb: D1State = {
     composio_cleanups: exported(
       `${connect}composio-connections.ts`,
       "Deletions at Composio still owed."
+    ),
+    composio_tool_sends: transient(
+      `${connect}composio-connections.ts`,
+      "Tool-list sends to Composio not yet answered, kept a few minutes at most."
     ),
     connection_tokens: secret(
       `${connect}vault.ts`,
@@ -667,7 +667,6 @@ const workspaces: DurableObjectState = {
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
     custom_widgets: exported(`${core}workspace.ts`),
-    email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),
     preview_stores: transient(`${core}sealed-previews.ts`),
@@ -943,8 +942,8 @@ const workflowRuns: DurableObjectState = {
     grasp_tried_once: exported(`${core}workflows/run-object.ts`),
     grasp_action_model_calls: exported(`${core}workflows/run-object.ts`),
     grasp_run_cancelled: exported(`${core}workflows/run-object.ts`),
-    grasp_run_apps: exported(`${core}workflows/run-object.ts`),
     grasp_run_shares: exported(`${core}workflows/run-object.ts`),
+    grasp_scope_fences: exported(`${core}workflows/run-object.ts`),
   },
 };
 

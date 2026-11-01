@@ -286,11 +286,16 @@ export const endSession = async (
  */
 const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
-  appPage: { builder: "builder", user: "user" },
+  appPage: { builder: "builder", user: "user", colleague: "builder" },
   screens: { one: "builder", two: "builder" },
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
   screenBoundWorkflow: { builder: "builder", admin: "admin" },
+  screenDecisionForm: {
+    builder: "builder",
+    admin: "admin",
+    colleague: "user",
+  },
   screenApproval: { builder: "builder", admin: "admin" },
   notesApp: { builder: "builder" },
   screenNavigation: { builder: "builder" },
@@ -330,6 +335,7 @@ const cast = {
   knowledgeReader: { admin: "admin", reader: "user" },
   knowledgeCreate: { admin: "admin", member: "user" },
   knowledgePurge: { admin: "admin", member: "user" },
+  knowledgeSkills: { admin: "admin", member: "user" },
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
@@ -370,6 +376,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChanges: { member: "user" },
   brainTranscript: { member: "user" },
   brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   boardGoals: { admin: "admin", member: "user" },

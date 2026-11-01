@@ -45,9 +45,12 @@ import type {
 } from "../workflow-builds.ts";
 import { aiWaitEnded, aiWaitStarted } from "./ai-waits.ts";
 import type { AiWait } from "./ai-waits.ts";
+import { betweenStepsBudgetOf } from "./between-steps.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
+import { engineAsks } from "./engine-asks.ts";
+import type { EngineAsk } from "./engine-asks.ts";
 import {
   childEndSchema,
   childEndType,
@@ -66,6 +69,7 @@ import {
   openFixtureDecision,
   takeFixtureDecision,
 } from "./fixture-decisions.ts";
+import { hostLatency } from "./host-latency.ts";
 import {
   busyMarker,
   keyMarkerOf,
@@ -93,7 +97,7 @@ import {
   waitStep,
 } from "./host.ts";
 import type { Busy, CoreMarker, KeyWait, LoadWait, RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -115,6 +119,7 @@ import {
   matchesFilter,
   notCaught,
   raisedCode,
+  retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
@@ -152,6 +157,42 @@ import { heldWakeType } from "./wakes.ts";
 //   loops' recorded items, at most the platform's 1,000 a collection (and
 //   the run's own step ceiling). Each item's effects are keyed by its own
 //   step name, so a retry or replay of one is never another's.
+// - Items and branches at once running past what a run may (GRA-956).
+//   However many steps the module asks for at once, at most eight of the
+//   run's attempts run (`#inSlot`, spec 18); one past it waits, admitted
+//   to nothing, its module not yet told. Only a running attempt holds a
+//   slot: a step parked on its retry or a wait holds none, so the steps
+//   behind it run. Every attempt is admitted as ever, so a run's lineage
+//   only grows.
+// - A run that does otherwise as its host is slower. Between the module
+//   asking for a step and the engine hearing of it, the host does I/O of
+//   its own (the person's check), and an answer travels back to
+//   the isolate before its next ask: the engine, seeing only parked waits
+//   out, would suspend the run meanwhile, the ask running in a later
+//   activation after the run slept, so a race's slower branch could win.
+//   The host holds the run busy with the engine (`#account`) from an
+//   ask's arrival until its engine call is made, and from each answer
+//   until the isolate says it went quiet with every ask it made since
+//   arrived (`quiet`), for at most an activation's time between steps in
+//   all, so a module that never says it went quiet, or counts asks it
+//   never makes, can't keep its run from suspending on parked steps
+//   (`#account`); a replay hands back only outcomes of calls already
+//   made, in journaled order (workerflow's activation.ts), and a scope's
+//   admissions follow its settling, recorded with the run, never the order
+//   outcomes came back in (the SDK's `scoped`). Tests slow the host down
+//   at random (host-latency.ts).
+// - A branch acting after its scope settled. A race's winner, or the item
+//   or branch an `end` came from, settles its scope once, in the scope's
+//   own step (`settle`), in a fence kept with the run (`ScopeFences`,
+//   run-object.ts), first writer's: a branch that finishes first in a
+//   later replay settles nothing new. A step of an item or branch another
+//   settled its scope over runs no attempt (`workflow.branch_cancelled`,
+//   for good), every activation; what it recorded before replays as
+//   recorded, so a replay reaches every step it journaled, and a step
+//   already out as the scope settled ends as it would, its effect
+//   standing. Its sleeps sleep as recorded: nothing waits for them. The branch a scope
+//   settled on is data the run carries, never authority: only one its
+//   scope has.
 // - An expression that isn't the build's, or another step's. An attempt
 //   evaluates only the sealed table's entries of its own task, of the
 //   stages its step runs (an enter step's if and input.from, say), by
@@ -240,7 +281,7 @@ import { heldWakeType } from "./wakes.ts";
 //   what they decided, never a second send (`#waitWhileHeld`).
 // - A catch taking a failure it mustn't, or one that never happened. A
 //   try's catch step asks the host (`#catches`), which decides from its
-//   own record of the run (`#failure`): the failure of the last step it
+//   own record of the run (`#failures`): the failure of the last step it
 //   reached, fresh or replayed, while nothing after it succeeded, mapped
 //   by resource-errors.ts, which never lets a catch take an unknown
 //   outcome or a refusal; only one of a task in the try's own list, with
@@ -267,6 +308,11 @@ import { heldWakeType } from "./wakes.ts";
 //   App's test started waits the same way for a decision of its test's
 //   own, which only its fixture's principal answers (fixture-decisions.ts).
 
+/** What a step that can't say the run busy ends (`RunStep.busy`). */
+const noBusy = (): void => {
+  // Nothing was counted.
+};
+
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
 
@@ -278,6 +324,7 @@ export const resourceAttemptMethods = [
   "until",
   "items",
   "catches",
+  "settle",
 ] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
@@ -308,13 +355,41 @@ const unwrapped = (result) => {
 
 export class Run extends WorkerEntrypoint {
   async run(host, { input }) {
+    // Each time this isolate gets control back (its start, each answer to
+    // an ask), it tells the host once its code has gone quiet, a macrotask
+    // later, with how many asks it has made in all: the host holds the run
+    // busy until each has arrived, so the engine never suspends the run
+    // while one is on its way (resource-host.ts, \`quiet\`). Each is
+    // numbered by the time it got control back, so one that doesn't reach
+    // the host can be sent again, a few times, under its number, and the
+    // host counts it once however often it arrives.
+    let made = 0;
+    let times = 0;
+    const quiet = (time = (times += 1), tries = 3) => {
+      setTimeout(() => {
+        host.quiet(made, time).catch(() => {
+          if (tries > 1) {
+            quiet(time, tries - 1);
+          }
+        });
+      }, 0);
+    };
+    const asked = async (ask) => {
+      made += 1;
+      try {
+        return await ask();
+      } finally {
+        quiet();
+      }
+    };
+    quiet();
     return await settled(async () => {
       if (definition?.metadata?.profile !== "grasp-open-workflow/1" || typeof definition.run !== "function") {
         throw new Error("The generated module doesn't export its workflow.");
       }
       const engine = {
         do: async (name, data, fn) =>
-          unwrapped(await host.do(name, { input: data }, async (attempt) =>
+          unwrapped(await asked(async () => await host.do(name, { input: data }, async (attempt) =>
             await settled(async () =>
               await fn({
                 evaluate: async (slot, frame) => unwrapped(await attempt.evaluate(slot, frame)),
@@ -325,15 +400,16 @@ export class Run extends WorkerEntrypoint {
                 until: async (frame) => unwrapped(await attempt.until(frame)),
                 items: async (frame) => unwrapped(await attempt.items(frame)),
                 catches: async () => unwrapped(await attempt.catches()),
-              })))),
+                settle: async (settled) => unwrapped(await attempt.settle(settled)),
+              }))))),
         sleep: async (name, milliseconds) => {
-          unwrapped(await host.sleep(name, milliseconds));
+          unwrapped(await asked(async () => await host.sleep(name, milliseconds)));
         },
         sleepUntil: async (name, timestamp) => {
-          unwrapped(await host.sleepUntil(name, timestamp));
+          unwrapped(await asked(async () => await host.sleepUntil(name, timestamp)));
         },
-        listen: async (name) => unwrapped(await host.listen(name)),
-        child: async (name) => unwrapped(await host.child(name)),
+        listen: async (name) => unwrapped(await asked(async () => await host.listen(name))),
+        child: async (name) => unwrapped(await asked(async () => await host.child(name))),
       };
       return await definition.run(engine, input);
     });
@@ -459,6 +535,13 @@ export interface ResourceHostHooks {
    */
   triedOnce?: TriedOnceMarks;
   /**
+   * The settled scopes of the run's items and branches (a race's winner,
+   * the one an `end` came from), kept with the run across its activations
+   * (run-object.ts, `fencesIn`). Unset, a store of this activation's
+   * alone.
+   */
+  fences?: ScopeFences;
+  /**
    * The model calls the run's actions made, across its activations
    * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
    * alone.
@@ -510,6 +593,11 @@ const activationModelCalls = (): ActionModelCalls => {
 export interface TriedOnceMarks {
   /** Marks an attempt as one whose module never ran: its call never went out. */
   markUnstarted: (key: string, attempt: number) => void;
+  /**
+   * Takes that mark back: the attempt may run its module from now on (it
+   * was marked only while it waited for a slot, `#onceAtMost`).
+   */
+  markStarted: (key: string, attempt: number) => void;
   /** Whether that attempt was so marked. */
   unstarted: (key: string, attempt: number) => boolean;
   /** Keeps what an attempt that ran its module failed with. */
@@ -521,6 +609,49 @@ export interface TriedOnceMarks {
 /** An attempt's ID among marks: its number, and its step's key. */
 const markId = (key: string, attempt: number): string => `${attempt}:${key}`;
 
+/**
+ * The scopes of a run's items and branches that settled, by the place of
+ * their `for` or `fork` task (`StepOf.place`): the one item or branch that
+ * settled it. Its others start no step after (`workflow.branch_cancelled`).
+ */
+export interface ScopeFences {
+  /**
+   * Settles scope `place` on `branch` unless it settled already: the
+   * branch it settled on, first writer's, in one write.
+   */
+  settle: (place: string, branch: number) => number;
+  /** The branch scope `place` settled on, if it did. */
+  settled: (place: string) => number | undefined;
+}
+
+/** Fences of one activation's alone (`ResourceHostHooks.fences` unset). */
+const activationFences = (): ScopeFences => {
+  const settled = new Map<string, number>();
+  return {
+    settle: (place, branch) => {
+      const first = settled.get(place);
+      if (first !== undefined) {
+        return first;
+      }
+      settled.set(place, branch);
+      return branch;
+    },
+    settled: (place) => settled.get(place),
+  };
+};
+
+/**
+ * The most attempts of a run that run at once (spec 18: eight simultaneous
+ * branches a run), whatever its module asks: one past it waits for one to
+ * end before the engine hears of it.
+ */
+const maxAttemptsAtOnce = platformLimits.workflowBranches;
+/**
+ * The most asks a run's isolate can have on their way to its host: no more
+ * than a run takes steps (`quiet`).
+ */
+const maxAsksOnTheirWay = platformLimits.workflowSteps;
+
 /** Marks of one activation's alone (`ResourceHostHooks.triedOnce` unset). */
 const activationMarks = (): TriedOnceMarks => {
   const unstarted = new Set<string>();
@@ -529,6 +660,9 @@ const activationMarks = (): TriedOnceMarks => {
   return {
     markUnstarted: (key, attempt) => {
       unstarted.add(id(key, attempt));
+    },
+    markStarted: (key, attempt) => {
+      unstarted.delete(id(key, attempt));
     },
     unstarted: (key, attempt) => unstarted.has(id(key, attempt)),
     keepFailure: (key, attempt, error) => {
@@ -631,7 +765,30 @@ interface StepOf {
    * recorded: never anything the isolate passes.
    */
   loop: Readonly<Record<string, Json>>;
+  /**
+   * The `try` tasks whose list holds its task, innermost first: whose
+   * catches, and their retry policies, a failure of it meets on its way out.
+   */
+  tries: readonly Extract<SealedTask, { kind: "try" }>[];
+  /**
+   * Whether it runs in an item or a branch another settled its scope over
+   * (`#fencedOff`): no attempt of it runs.
+   */
+  fenced?: boolean;
 }
+
+/** The `try` tasks of `build` whose list holds `task`, innermost first. */
+const triesAround = (
+  build: LoadedBuild,
+  task: SealedTask
+): Extract<SealedTask, { kind: "try" }>[] =>
+  build.tasks
+    .filter(
+      (around): around is Extract<SealedTask, { kind: "try" }> =>
+        around.kind === "try" &&
+        task.pointer.startsWith(`${around.pointer}/try/`)
+    )
+    .toSorted((a, b) => b.pointer.length - a.pointer.length);
 
 /**
  * Whether `task`'s own step is a durable wait the host makes, not a `do`:
@@ -705,6 +862,49 @@ const placeOf = (
     ? id
     : `${id}@${scope.map((segment) => `${segment.id}.${segment.index}`).join("/")}`;
 
+/** A failure no catch took yet, and the scope of the step that failed. */
+interface PendingFailure {
+  readonly failure: Failure;
+  readonly scope: readonly { id: string; index: number }[];
+}
+
+/** Scope `scope`, as a key: `<for>.<index>/…`, empty for the workflow's own. */
+const scopeKey = (scope: readonly { id: string; index: number }[]): string =>
+  scope.map(({ id, index }) => `${id}.${index}`).join("/");
+
+/** Whether scope `inner` is scope `outer` or nested in it. */
+const isWithin = (
+  inner: readonly { id: string; index: number }[],
+  outer: readonly { id: string; index: number }[]
+): boolean =>
+  outer.length <= inner.length &&
+  outer.every(
+    ({ id, index }, depth) =>
+      inner[depth]?.id === id && inner[depth]?.index === index
+  );
+
+/**
+ * Whether `step` is the own step of a `for` or `fork` task (its `task:`
+ * step, which settles its scope), and `pending` a failure in one of its
+ * items or branches, which that step isn't held back by: a race settles
+ * past its branches' failures a catch may take, on a branch that didn't
+ * fail (`#raceMaySettle`); any other scope settles on the item or branch
+ * that failed, only to start none of the others after, the failure still
+ * pending past it. One no catch may take still holds a race back.
+ */
+const settlesPast = (step: StepOf, pending: PendingFailure): boolean => {
+  const { task } = step;
+  if (
+    step.kind !== "task" ||
+    (task?.kind !== "fork" && task?.kind !== "for") ||
+    !isWithin(pending.scope, step.scope) ||
+    pending.scope[step.scope.length]?.id !== task.id
+  ) {
+    return false;
+  }
+  return task.kind === "for" || !task.fork.compete || pending.failure.catchable;
+};
+
 /** The workflow's own `flow` step of `build`, if it has one. */
 const workflowStep = (
   build: LoadedBuild,
@@ -718,6 +918,7 @@ const workflowStep = (
         place: "",
         scope: [],
         loop: {},
+        tries: [],
       }
     : undefined;
 
@@ -773,6 +974,7 @@ const sealedStep = (
     place: placeOf(task.id, outer),
     scope,
     loop: {},
+    tries: triesAround(build, task),
   };
 };
 
@@ -925,6 +1127,19 @@ const outcomeSchema = z.discriminatedUnion("answered", [
   }),
   z.strictObject({ answered: z.literal(false) }),
 ]);
+
+/**
+ * What a retry's decision step records (`#decideRetry`): whether the step
+ * runs again, after how long, and when its first round failed.
+ */
+const retryDecisionSchema = z.strictObject({
+  retry: z.boolean(),
+  delayMs: z.int().min(0),
+  firstFailedAt: z.number(),
+});
+
+/** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
+const maxRetryDelayMs = 365 * 86_400_000;
 
 /**
  * What a catch step journals: its record, and the error its catch took,
@@ -1114,11 +1329,17 @@ const triedOnce = new Set<SealedCall["name"]>([
 const configOf = (step: StepOf) => {
   const { task } = step;
   // A listen's timeout is how long it waits for its events, never how
-  // long an attempt of its steps may take.
+  // long an attempt of its steps may take. A retry policy's attempt
+  // duration bounds each attempt of the steps of its try's list, as the
+  // task's own timeout does.
   const ownTimeout = task?.kind === "listen" ? undefined : task?.timeoutMs;
+  const attemptMs = step.tries.map(
+    (around) => around.catch.retry?.attemptMs ?? stepConfig.timeout
+  );
   const timeout = Math.min(
     stepConfig.timeout,
-    ownTimeout ?? stepConfig.timeout
+    ownTimeout ?? stepConfig.timeout,
+    ...attemptMs
   );
   const once =
     step.kind === "task" &&
@@ -1246,6 +1467,8 @@ interface StepAttempt {
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
   proceeds: boolean | undefined;
+  /** The branch it settled its task's scope on, once (`settle`). */
+  settled: number | undefined;
   /**
    * The filters it resolved for its listen task, with its deadline: what
    * the task's waits match, journaled beside its enter step's record.
@@ -1308,7 +1531,7 @@ interface StepRun {
   decided: DecisionOutcome | undefined;
   /**
    * For a catch step, the failure that left its try's list, as the run
-   * stood when the step began (`ResourceRunHost.#failure`).
+   * stood when the step began (`ResourceRunHost.#failures`).
    */
   failure: Failure | undefined;
 }
@@ -1467,8 +1690,14 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
         }
       }
     } else if (task.kind === "try") {
-      // A catch's conditions: its catch step's, which the host evaluates.
-      for (const slot of [task.catch.when, task.catch.exceptWhen]) {
+      // A catch's conditions and its retry's, which the host evaluates.
+      const { retry } = task.catch;
+      for (const slot of [
+        task.catch.when,
+        task.catch.exceptWhen,
+        retry?.when,
+        retry?.exceptWhen,
+      ]) {
         if (slot !== undefined) {
           slots.add(slot);
         }
@@ -1620,30 +1849,75 @@ export class ResourceRunHost
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
   /**
-   * The failure of the step the run reached last, fresh or replayed, while
-   * no step after it succeeded and no catch took it: what a `try` task's
-   * catch step decides on. A step's success, or a catch taking it, clears
-   * it; a catch that doesn't take it leaves it for the next catch out.
-   * Generated code runs its tasks one at a time, so between a step's
-   * failure and the catch steps it reaches nothing else runs.
+   * The failures no catch took yet, fresh or replayed, each pending in the
+   * scope of the step that failed, by that scope (`scopeKey`): what a `try`
+   * task's catch step decides on. A failure holds back the steps of its
+   * own scope, those nested in it and those around it (`#pendingAt`),
+   * never a sibling item's or branch's, which may run at once; one in an
+   * item or branch another settled its scope over is that scope's no more
+   * (`#fencedOff`). A step's success clears its scope's; a catch taking
+   * one clears those in its try; a catch that doesn't leaves them for the
+   * next catch out.
    */
-  #failure: Failure | undefined;
+  readonly #failures = new Map<string, PendingFailure>();
   /**
    * The error each `try` task's catch took, by the task's place, as its catch step
    * journaled it, fresh or replayed: what its catch's variable is to the
    * expressions of its `do`.
    */
   readonly #caughtErrors = new Map<string, CaughtError>();
-  /** The scope of the step whose failure is pending (`#failure`). */
-  #failureScope: readonly { id: string; index: number }[] = [];
   /**
    * The branches of each race (a competing fork, by its place) that
    * failed, as this activation reached them, fresh or replayed: a failure
    * of theirs no catch took, which the race went past (`#passRace`).
    */
   readonly #raceFailures = new Map<string, Set<number>>();
-  /** The branch each race recorded as its winner, by its place. */
-  readonly #raceWinners = new Map<string, number>();
+  /**
+   * The input each `try` task's enter step recorded, by its place, fresh or
+   * replayed: its own input, which its catch's conditions read when the
+   * host decides whether a failure in its list is tried again.
+   */
+  readonly #tryInputs = new Map<string, Json>();
+  readonly #fences: ScopeFences;
+  /** Tests only: the host's own I/O made slower (host-latency.ts). */
+  readonly #latency: () => Promise<void>;
+  /**
+   * Asks of the run's code (`do`, `sleep`, `sleepUntil`) this host is
+   * handling outside the engine: arrived, and not yet at a call of the
+   * engine's step API, or back from one and not yet answered.
+   */
+  #asksInHost = 0;
+  /** The asks of the run's code that arrived. */
+  #arrived = 0;
+  /**
+   * The times the run's code got control back: its start, and each answer
+   * to an ask. Its isolate says when it has gone quiet after each
+   * (`quiet`), with how many asks it had made by then.
+   */
+  #handedBack = 1;
+  /** Of those, the times its isolate said it went quiet after, each once. */
+  readonly #quieted = new Set<number>();
+  /** The most asks its isolate said it had made, as it went quiet. */
+  #madeByIsolate = 0;
+  /**
+   * Whether the run's isolate is done: its run returned, or it was
+   * stopped (a CPU kill). Nothing more comes from it.
+   */
+  #isolateDone = false;
+  /** Ends the engine's count of the run busy (`#account`), while held. */
+  #endBusy: (() => void) | undefined;
+  /**
+   * How much longer this activation may hold its run busy waiting on its
+   * isolate (`#account`), in all: its time between steps.
+   */
+  #isolateHoldLeftMs: number;
+  /** When the run began being held busy waiting on its isolate, if it is. */
+  #isolateHoldSince: number | undefined;
+  /** Ends that hold once its time is spent. */
+  #isolateHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Attempts of this activation running, and those waiting for a slot. */
+  #running = 0;
+  readonly #waitingSlot: (() => void)[] = [];
 
   constructor(
     env: Env,
@@ -1658,6 +1932,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#fences = hooks.fences ?? activationFences();
     this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
@@ -1670,6 +1945,8 @@ export class ResourceRunHost
       JSON.stringify(run.input).length +
       JSON.stringify(this.#readableParams).length;
     this.#hostSlots = hostSlotsOf(run.build);
+    this.#latency = hostLatency(env);
+    this.#isolateHoldLeftMs = betweenStepsBudgetOf(env);
   }
 
   /**
@@ -1707,7 +1984,107 @@ export class ResourceRunHost
       return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
     }
     this.#asked.add(name);
-    return { ...step, loop };
+    // Not a refusal of the module: a branch another settled its scope over
+    // (a race's winner, an `end`) runs no attempt more (`do`), every
+    // activation, while what it recorded replays as recorded.
+    return { ...step, loop, fenced: this.#fencedOff(step.scope) };
+  }
+
+  /**
+   * Whether scope `scope` runs in an item or a branch whose `for` or
+   * `fork` settled on another (`#fences`): its steps start no more.
+   *
+   * For GRA-278 (#889, its run's pending failure): with items and branches
+   * at once, a failure no catch took is pending in the scope of the step
+   * that failed, and refuses only that scope's steps and those nested in
+   * it, never a sibling branch's; a catch reads its own scope's; and only
+   * a failure pending in the workflow's own scope fails the run, a
+   * branch's surfacing as its branch's failure, for its fork.
+   */
+  #fencedOff(scope: readonly { id: string; index: number }[]): boolean {
+    return scope.some(({ id, index }, depth) => {
+      const settled = this.#fences.settled(placeOf(id, scope.slice(0, depth)));
+      return settled !== undefined && settled !== index;
+    });
+  }
+
+  /**
+   * `ResourceAttemptHost.settle`, for `attempt`: settles its `for` or
+   * `fork` task's scope on `settled.branch`, once, in the task's own step,
+   * a branch it has (its items as its enter step recorded them, its
+   * branches as sealed): the branch it settled on, an earlier
+   * activation's first (`#fences`). The others start no step after.
+   */
+  #settleOf(attempt: StepAttempt, settled: unknown): Settled<number> {
+    try {
+      this.#requireCurrent(attempt);
+      const { step } = attempt;
+      const { task } = step;
+      const branch = z
+        .strictObject({ branch: z.int().min(0) })
+        .safeParse(settled).data?.branch;
+      let count: number | undefined;
+      if (task?.kind === "fork") {
+        count = task.fork.branches;
+      } else if (task?.kind === "for") {
+        count = this.#items.get(step.place)?.length;
+      }
+      if (
+        step.kind !== "task" ||
+        count === undefined ||
+        branch === undefined ||
+        branch >= count ||
+        attempt.settled !== undefined
+      ) {
+        return this.#refuse(
+          `Step of "${task?.id ?? "the workflow"}" settles no such scope, or settles it twice.`
+        );
+      }
+      // A race settles only on a branch that got there (`#raceMaySettle`).
+      if (task?.kind === "fork" && !this.#raceMaySettle(step, task, branch)) {
+        return this.#refuse(
+          `Task "${task.id}"'s race settles only on a branch that got there.`
+        );
+      }
+      attempt.settled = this.#fences.settle(step.place, branch);
+      return { ok: true, value: attempt.settled };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * `work`, an attempt, once fewer than the run's most attempts at once
+   * (`maxAttemptsAtOnce`) of this activation run: one past it waits for
+   * one to end, before it is admitted or its module told, so it holds
+   * nothing of its lineage. It waits inside the engine's attempt, so its
+   * wait counts against the attempt's timeout: running attempts end, by
+   * their timeouts at the latest, so the wait does too.
+   */
+  async #inSlot<T>(work: () => Promise<T>): Promise<T> {
+    await this.#latency();
+    if (this.#running >= maxAttemptsAtOnce) {
+      const free = Promise.withResolvers<null>();
+      this.#waitingSlot.push(() => {
+        free.resolve(null);
+      });
+      // Handed over by the attempt that ends, still counted: nothing
+      // that comes meanwhile takes it.
+      await free.promise;
+    } else {
+      this.#running += 1;
+    }
+    try {
+      await this.#latency();
+      return await work();
+    } finally {
+      const waiter = this.#waitingSlot.shift();
+      if (waiter === undefined) {
+        this.#running -= 1;
+      } else {
+        waiter();
+      }
+    }
   }
 
   /**
@@ -1728,6 +2105,7 @@ export class ResourceRunHost
         if (
           index >= task.fork.branches ||
           (task.fork.compete &&
+            task.fork.concurrency === 1 &&
             !this.#raceAdmits(placeOf(id, scope.slice(0, depth)), index))
         ) {
           return undefined;
@@ -1750,18 +2128,21 @@ export class ResourceRunHost
   }
 
   /**
-   * Whether the race at `place` lets a step of its branch `branch` run:
-   * only once every branch before it failed, while it hasn't failed
-   * itself, and, once the race recorded its winner, only the winner's.
-   * Its branches run one after another, the next only past a failure
-   * (open-workflow.ts, `fork`): the host holds a module to that order, so
-   * a branch after one that succeeded, or a failed one, never runs on,
-   * and a race is never a way past a failure.
+   * Whether the race at `place`, one branch at a time, lets a step of its
+   * branch `branch` run: only once every branch before it failed, and
+   * while it hasn't (`#raceGoesTo`); once it settled, as its fence says
+   * (`#fencedOff`). Its branches run one after another, the next only
+   * past a failure (open-workflow.ts, `fork`), each done before the next
+   * starts, items at once inside it too: the host holds a module to that
+   * order, so a branch after one that succeeded never runs, and a race is
+   * never a way past a failure. A race of branches at once has no order:
+   * its fence settles it.
    */
   #raceAdmits(place: string, branch: number): boolean {
-    const winner = this.#raceWinners.get(place);
-    if (winner !== undefined) {
-      return winner === branch;
+    // Settled: its fence decides from then on, every activation, a branch
+    // it settled over replaying only what it recorded (`#fencedOff`).
+    if (this.#fences.settled(place) !== undefined) {
+      return true;
     }
     return this.#raceGoesTo(place, branch);
   }
@@ -1772,6 +2153,36 @@ export class ResourceRunHost
       this.#raceFailures.get(place)?.has(branch) !== true &&
       this.#failedBefore(place, branch)
     );
+  }
+
+  /**
+   * Whether fork `task`, whose own step `step` is, may settle on `branch`:
+   * any fork that doesn't compete; a race only on a branch with no failure
+   * pending, and, one branch at a time, only past the failure of every
+   * branch before it (`#raceGoesTo`).
+   */
+  #raceMaySettle(
+    step: StepOf,
+    task: Extract<SealedTask, { kind: "fork" }>,
+    branch: number
+  ): boolean {
+    // Settled already, by an earlier activation's first writer, checked as
+    // it settled: the fence answers that branch, whatever this one asks.
+    if (!task.fork.compete || this.#fences.settled(step.place) !== undefined) {
+      return true;
+    }
+    const branchScope = [...step.scope, { id: task.id, index: branch }];
+    return (
+      this.#pendingAt(branchScope, true).length === 0 &&
+      (task.fork.concurrency > 1 || this.#raceGoesTo(step.place, branch))
+    );
+  }
+
+  /** The failure a catch step `step` decides on: the first pending in its scope. */
+  #catchFailure(step: StepOf): Failure | undefined {
+    return step.kind === "catch"
+      ? this.#pendingAt(step.scope, true)[0]?.failure
+      : undefined;
   }
 
   /**
@@ -1794,30 +2205,107 @@ export class ResourceRunHost
     this.#raceFailures.set(place, failed);
   }
 
+  /** Notes `failure` as pending in `scope`, the scope of the step that failed. */
+  #failed(
+    scope: readonly { id: string; index: number }[],
+    failure: Failure
+  ): void {
+    this.#failures.set(scopeKey(scope), { failure, scope });
+  }
+
   /**
-   * Lets the race the pending failure (`#failure`) came from go past it,
-   * for a step in `scope`, by the host's own rule and no other: a failure
-   * a catch may take, that none in its branch took, is that branch's, and
-   * the race goes on to its next branch (open-workflow.ts, `fork`), so a
-   * step of exactly that branch takes it; past the race's last branch,
-   * the race fails as that branch did, a failure of the scope around it,
-   * for the races and catches out there. Nothing else gets past a
-   * failure: a step anywhere else still meets it (`#requireNoFailure`),
-   * and one the race may not take (an unknown outcome, a refusal) goes on
-   * to fail the run, whatever a module calls a race.
+   * The failures pending that hold back a step in `scope`: those not
+   * fenced off, in its own scope, nested in it, or around it; with
+   * `within`, only those in it or nested in it, what a catch there reads.
+   * In the order they failed.
+   */
+  #pendingAt(
+    scope: readonly { id: string; index: number }[],
+    within = false
+  ): PendingFailure[] {
+    return [...this.#failures.values()].filter(
+      (pending) =>
+        !this.#fencedOff(pending.scope) &&
+        (within
+          ? isWithin(pending.scope, scope)
+          : this.#holdsBack(pending.scope, scope))
+    );
+  }
+
+  /**
+   * Whether a failure pending in scope `failed` holds back a step in
+   * `scope`: one in the same scope, nested in it or around it; and any
+   * other but a sibling item or branch of a task that runs them at once
+   * (`concurrency` above 1), which runs beside it, or of a race one branch
+   * at a time, which goes on only by its own rule (`#passRace`,
+   * `#raceAdmits`). One at a time, a later item or branch never starts
+   * past a failure no catch took, as nothing does.
+   */
+  #holdsBack(
+    failed: readonly { id: string; index: number }[],
+    scope: readonly { id: string; index: number }[]
+  ): boolean {
+    if (isWithin(failed, scope) || isWithin(scope, failed)) {
+      return true;
+    }
+    const depth = failed.findIndex(
+      ({ id, index }, at) => scope[at]?.id !== id || scope[at]?.index !== index
+    );
+    const sibling = scope[depth];
+    if (sibling === undefined || sibling.id !== failed[depth]?.id) {
+      return true;
+    }
+    const task = this.#run.build.tasks.find((one) => one.id === sibling.id);
+    if (task?.kind === "for") {
+      return task.loop.concurrency === 1;
+    }
+    if (task?.kind === "fork") {
+      return task.fork.concurrency === 1 && !task.fork.compete;
+    }
+    return true;
+  }
+
+  /**
+   * Lets a race one branch at a time go past a failure pending in one of
+   * its branches, for a step in `scope`, by the host's own rule and no
+   * other: a failure a catch may take, that none in its branch took, is
+   * that branch's, and the race goes on to its next branch
+   * (open-workflow.ts, `fork`), so a step of exactly that branch takes it;
+   * past the race's last branch, the race fails as that branch did, a
+   * failure of the scope around it, for the races and catches out there.
+   * Nothing else gets past a failure: a step anywhere else still meets it
+   * (`#requireNoFailure`), and one the race may not take (an unknown
+   * outcome, a refusal) goes on to fail the run, whatever a module calls
+   * a race. A race of branches at once runs them beside a failure, as
+   * siblings, and settles past it (`#requireNoFailure`, `#settleOf`).
    */
   #passRace(scope: readonly { id: string; index: number }[]): void {
-    if (this.#failure?.catchable !== true) {
-      return;
+    // Every failure pending, its branch's sibling's next included.
+    for (const pending of this.#failures.values()) {
+      if (
+        pending.failure.catchable &&
+        !this.#fencedOff(pending.scope) &&
+        this.#raceTakes(pending, scope)
+      ) {
+        this.#failures.delete(scopeKey(pending.scope));
+      }
     }
-    const failed = this.#failureScope;
+  }
+
+  /** Whether a race one branch at a time takes `pending` for a step in `scope`. */
+  #raceTakes(
+    pending: PendingFailure,
+    scope: readonly { id: string; index: number }[]
+  ): boolean {
+    const failed = pending.scope;
     for (let depth = failed.length - 1; depth >= 0; depth -= 1) {
       const segment = failed[depth];
       const task = this.#run.build.tasks.find((one) => one.id === segment?.id);
       if (
         segment === undefined ||
         task?.kind !== "fork" ||
-        !task.fork.compete
+        !task.fork.compete ||
+        task.fork.concurrency !== 1
       ) {
         continue;
       }
@@ -1835,18 +2323,19 @@ export class ResourceRunHost
         // branch leaves it to its catches, and any other to its refusal.
         if (next.index === segment.index + 1) {
           this.#raceFailed(place, segment.index);
-          this.#failure = undefined;
+          return true;
         }
-        return;
+        return false;
       }
       if (
         segment.index !== task.fork.branches - 1 ||
         !this.#failedBefore(place, segment.index)
       ) {
-        return;
+        return false;
       }
       this.#raceFailed(place, segment.index);
     }
+    return false;
   }
 
   /**
@@ -1875,7 +2364,10 @@ export class ResourceRunHost
    * one to fail with too; one that fails never having called it (cut off
    * in an isolate already stopped, refused its admission) is marked as
    * never run, so a later attempt may run it. Only that branch, where the
-   * module was never called, ever writes the mark.
+   * module was never called, ever writes the mark, and the wait for a slot
+   * (`#inSlot`) the attempt runs in: marked as never run while it waits,
+   * and unmarked once it holds one, so an activation that dies meanwhile
+   * leaves a later attempt free to run it.
    */
   async #onceAtMost<T>(
     once: boolean,
@@ -1883,9 +2375,12 @@ export class ResourceRunHost
     attempt: (ran: () => void) => Promise<T>
   ): Promise<T> {
     if (!once) {
-      return await attempt(() => {
-        // Only a step tried once keeps what it did.
-      });
+      return await this.#inSlot(
+        async () =>
+          await attempt(() => {
+            // Only a step tried once keeps what it did.
+          })
+      );
     }
     const { idempotencyKey: key, attempt: number } = told;
     const earlier = this.#ranBefore(key, number);
@@ -1897,10 +2392,14 @@ export class ResourceRunHost
         Number.POSITIVE_INFINITY
       );
     }
+    this.#triedOnce.markUnstarted(key, number);
     let ranModule = false;
     try {
-      return await attempt(() => {
-        ranModule = true;
+      return await this.#inSlot(async () => {
+        this.#triedOnce.markStarted(key, number);
+        return await attempt(() => {
+          ranModule = true;
+        });
       });
     } catch (error) {
       if (ranModule) {
@@ -1919,8 +2418,49 @@ export class ResourceRunHost
    * module that goes on past it otherwise is refused, and the run fails.
    */
   #requireNoFailure(step: StepOf | undefined): void {
-    if (this.#failure !== undefined && step?.kind !== "catch") {
+    if (step?.kind === "catch") {
+      return;
+    }
+    const holding = this.#pendingAt(step?.scope ?? []).filter(
+      (pending) => !(step !== undefined && settlesPast(step, pending))
+    );
+    if (holding.length > 0) {
       this.#refuse("A run goes on past a failure only once a catch took it.");
+    }
+  }
+
+  /**
+   * Holds the run busy with the engine (`RunStep.busy`) for as long as a
+   * call of its step API may be on its way that the engine hasn't seen:
+   * an ask of the run's code the host handles outside the engine (its
+   * person checked); an answer the isolate got whose
+   * code hasn't gone quiet yet, which may make its next ask; an ask the
+   * isolate made that hasn't arrived. Otherwise the engine could suspend
+   * the run as its parked waits are all it sees out, and the call would
+   * run in a later activation, after the run slept: host latency would
+   * decide which of a race's branches wins, and replays would differ.
+   *
+   * Waiting on the isolate is held for at most the activation's time
+   * between steps, in all (between-steps.ts): its clock stops while a step
+   * call is out, parked ones too, so it can't bound a module that never
+   * says it went quiet, or counts asks it never makes, while another of
+   * its steps is parked. An honest module goes quiet a macrotask after
+   * each answer, far within it; past it, the engine may suspend the run
+   * on its parked steps, as for a module that is done.
+   */
+  #account(): void {
+    const waitingOnIsolate =
+      !this.#isolateDone &&
+      this.#isolateHoldLeftMs > 0 &&
+      (this.#quieted.size < this.#handedBack ||
+        this.#arrived < this.#madeByIsolate);
+    this.#holdForIsolate(waitingOnIsolate);
+    const busy = this.#asksInHost > 0 || waitingOnIsolate;
+    if (busy && this.#endBusy === undefined) {
+      this.#endBusy = this.#step.busy?.() ?? noBusy;
+    } else if (!busy && this.#endBusy !== undefined) {
+      this.#endBusy();
+      this.#endBusy = undefined;
     }
   }
 
@@ -1930,7 +2470,115 @@ export class ResourceRunHost
    * (resource-runs.ts).
    */
   get failureUntaken(): boolean {
-    return this.#failure !== undefined;
+    return this.#pendingAt([]).length > 0;
+  }
+
+  /**
+   * Runs the clock of the time the run is held busy waiting on its
+   * isolate (`#account`) while `waiting`, and stops it otherwise; once it
+   * is spent, the run is no longer held for the isolate.
+   */
+  #holdForIsolate(waiting: boolean): void {
+    if (waiting && this.#isolateHoldSince === undefined) {
+      this.#isolateHoldSince = Date.now();
+      this.#isolateHoldTimer = setTimeout(() => {
+        this.#holdForIsolate(false);
+        this.#isolateHoldLeftMs = 0;
+        this.#account();
+      }, this.#isolateHoldLeftMs);
+    } else if (!waiting && this.#isolateHoldSince !== undefined) {
+      this.#isolateHoldLeftMs -= Date.now() - this.#isolateHoldSince;
+      this.#isolateHoldSince = undefined;
+      clearTimeout(this.#isolateHoldTimer);
+      this.#isolateHoldTimer = undefined;
+    }
+  }
+
+  /**
+   * Handles an ask of the run's code by `work`, counted in the host
+   * (`#account`) from its arrival to its answer, but while a call of the
+   * engine's step API made for it is out (engine-asks.ts): the engine
+   * counts that one. An ask whose engine call never comes back (it
+   * parked) is never answered in this activation.
+   */
+  async #handling<T>(work: () => Promise<T>): Promise<T> {
+    this.#arrived += 1;
+    this.#asksInHost += 1;
+    this.#account();
+    let inEngine = 0;
+    const ask: EngineAsk = {
+      made: () => {
+        inEngine += 1;
+        if (inEngine === 1) {
+          this.#asksInHost -= 1;
+          this.#account();
+        }
+      },
+      back: () => {
+        inEngine -= 1;
+        if (inEngine === 0) {
+          this.#asksInHost += 1;
+          this.#account();
+        }
+      },
+    };
+    try {
+      return await engineAsks.run(ask, work);
+    } finally {
+      if (inEngine === 0) {
+        this.#asksInHost -= 1;
+      }
+      this.#handedBack += 1;
+      this.#account();
+    }
+  }
+
+  /**
+   * The run's isolate went quiet after it last got control back, having
+   * made `made` asks in all, the `time`th time it got control back
+   * (`openRunMain`; its start the first): every ask its code made since
+   * then is on its way, and the host holds the run busy until each has
+   * arrived. Refused, failing the run, for anything but counts. A count
+   * past what a run could have on its way (more than its steps beyond
+   * those that arrived) is taken as that. Each time counts once, however
+   * often it is said (a quiet sent again), and only one the host handed
+   * back control for.
+   */
+  // oxlint-disable-next-line require-await -- an RPC method, answered at once
+  async quiet(made: unknown, time: unknown): Promise<Settled<null>> {
+    try {
+      if (
+        typeof made !== "number" ||
+        !Number.isSafeInteger(made) ||
+        made < 0 ||
+        typeof time !== "number" ||
+        !Number.isSafeInteger(time) ||
+        time < 1
+      ) {
+        return this.#refuse("A run's isolate counts the asks it made.");
+      }
+      if (time <= this.#handedBack) {
+        this.#quieted.add(time);
+      }
+      this.#madeByIsolate = Math.max(
+        this.#madeByIsolate,
+        Math.min(made, this.#arrived + maxAsksOnTheirWay)
+      );
+      this.#account();
+      return { ok: true, value: null };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * The run's isolate is done (its run settled, or it was stopped): the
+   * host no longer holds the run busy for what it may still ask
+   * (`#account`), so the engine can suspend the run on its parked steps.
+   */
+  isolateDone(): void {
+    this.#isolateDone = true;
+    this.#account();
   }
 
   /**
@@ -1941,7 +2589,9 @@ export class ResourceRunHost
     if (this.#hooks.fixture === true) {
       return;
     }
-    if (!(await memberRole(this.#env.DB, this.#run.principal))) {
+    const active = await memberRole(this.#env.DB, this.#run.principal);
+    await this.#latency();
+    if (!active) {
       throw permissionErrors.create("permission.person_inactive");
     }
   }
@@ -1953,6 +2603,14 @@ export class ResourceRunHost
    * recorded result without calling it.
    */
   async do(
+    name: unknown,
+    options: unknown,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    return await this.#handling(async () => await this.#do(name, options, fn));
+  }
+
+  async #do(
     name: unknown,
     options: unknown,
     fn: (attempt: ResourceAttemptHost) => Promise<unknown>
@@ -1976,16 +2634,16 @@ export class ResourceRunHost
           // A catch step's own failure is no catch's to take: a catch
           // around it would otherwise take it in place of a failure no
           // catch may take, an unknown outcome's, that it decided on.
-          this.#failure =
+          this.#failed(
+            reached?.scope ?? [],
             reached?.kind === "catch"
               ? notCaught()
               : failureOf(
                   failedWith(error),
                   reached?.task,
                   this.#tampered !== undefined
-                );
-          // Where it failed: what a race goes past it by (`#passRace`).
-          this.#failureScope = reached?.scope ?? [];
+                )
+          );
           throw error;
         }
       });
@@ -2035,31 +2693,296 @@ export class ResourceRunHost
       collecting: false,
       decided: undefined,
       // As the run stands as it begins, for every attempt and round.
-      failure: step.kind === "catch" ? this.#failure : undefined,
+      failure: this.#catchFailure(step),
     };
     // A decision task's call step runs once its decision has an
     // outcome, waited for durably before it, fresh or replayed.
     if (isDecisionTask(step.task) && takesDecision(step)) {
       run.decided = await this.#awaitDecision(step, step.task, data);
     }
+    // A step of a branch another settled its scope over runs nothing:
+    // the engine still replays what it recorded, and fails anything
+    // else for good, so a replay reaches every step it journaled.
+    // Only a running attempt holds one of the run's slots (`#inSlot`),
+    // taken as the engine hands it over (`#onceAtMost`): a step whose
+    // retry is parked never returns from the engine in this activation,
+    // so a slot taken around the engine's call would be held for good,
+    // and the steps waiting for one would hold the run busy until its
+    // load ended.
     const attemptStep = async (context: unknown): Promise<unknown> =>
       await this.#attempt(run, context, fn, stepDone);
-    let recorded = await this.#step.do(
-      stepName,
-      engineConfigOf(step),
-      attemptStep
-    );
-    recorded = await this.#rounds(run, recorded, attemptStep);
+    // A failure a catch's retry policy may try again: the step runs again
+    // in its place, under steps of its own, after a durable backoff, its
+    // call under the same key (`#retried`).
+    let recorded: unknown;
+    let firstFailedAt: number | undefined;
+    for (let round = 1; ; round += 1) {
+      const base = round === 1 ? stepName : `${stepName}:retry:${round}`;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        recorded = await this.#roundsFrom(run, base, attemptStep);
+        break;
+      } catch (error) {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        const retry = await this.#retried(run, error, round, firstFailedAt);
+        if (retry === undefined) {
+          throw error;
+        }
+        firstFailedAt = retry;
+      }
+    }
+    return this.#reached(step, entering, recorded);
+  }
+
+  /**
+   * What step `step` answers its code, from what it recorded at last
+   * (`recorded`), fresh or replayed: an enter step's record, a catch
+   * step's, or what it recorded; noted as what the run has reached.
+   */
+  #reached(step: StepOf, entering: boolean, recorded: unknown): unknown {
     let outcome = entering ? this.#entered(step, recorded) : recorded;
+    // A try's input, as its enter step recorded it: what a retry's
+    // decision reads its catch's conditions on (`#decideRetry`).
+    const record = entering ? recordSchema.safeParse(outcome).data : undefined;
+    if (
+      step.task?.kind === "try" &&
+      record !== undefined &&
+      !("skipped" in record)
+    ) {
+      this.#tryInputs.set(step.place, record.output);
+    }
     if (step.kind === "catch") {
       outcome = this.#noteCatch(step, recorded);
     } else {
-      // A step that succeeded: no failure is left for a catch.
-      this.#failure = undefined;
+      // A step that succeeded: no failure is left in its scope for a catch.
+      this.#failures.delete(scopeKey(step.scope));
     }
     // Fresh or replayed alike: what the run has reached, in order.
     this.#noteRecorded(step, outcome);
     return outcome;
+  }
+
+  /**
+   * Runs step `run` under the name `base` (its own, or a retry's): its
+   * attempt, then its rounds again under names of `base`'s, refused for
+   * load, waiting for its AI provider or held for its person (`#rounds`).
+   * What it recorded at last.
+   */
+  async #roundsFrom(
+    run: StepRun,
+    base: string,
+    attemptStep: (context: unknown) => Promise<unknown>
+  ): Promise<unknown> {
+    run.wait = loadWaitStart;
+    // A retry's round is a run of its own: it collects no held outcome,
+    // and its attempts take their lineage's host calls.
+    run.collecting = false;
+    const first = await this.#step.do(
+      base,
+      engineConfigOf(run.step),
+      attemptStep
+    );
+    return await this.#rounds(run, first, attemptStep, base);
+  }
+
+  /**
+   * Whether step `run`, whose round `round` failed with `error`, is tried
+   * again (spec 13.7): only a failure that may be tried again
+   * (resource-errors.ts, `retryable`) of a task in the list of a try whose
+   * catch has a retry policy. Then the host decides, in a step of its own
+   * that records it (`#decideRetry`), whether the innermost catch that
+   * takes the failure retries it, and after how long; sleeps that long,
+   * durably, as a timer of its own (`:retry:<n>:wait`); and answers when
+   * the first round failed, which every later decision reads. `undefined`
+   * when it isn't tried again: the original failure goes on unchanged,
+   * whatever a decision itself failed with. Fresh or replayed alike.
+   */
+  async #retried(
+    run: StepRun,
+    error: unknown,
+    round: number,
+    firstFailedAt: number | undefined
+  ): Promise<number | undefined> {
+    const { step, name } = run;
+    const { task } = step;
+    // Only while a try around it may still try it again.
+    const triesLeft = step.tries.some(
+      (around) => round < (around.catch.retry?.attempts ?? 0)
+    );
+    if (task === undefined || step.kind === "catch" || !triesLeft) {
+      return undefined;
+    }
+    const failure = failureOf(
+      failedWith(error),
+      task,
+      this.#tampered !== undefined
+    );
+    if (!retryable(failure, task)) {
+      return undefined;
+    }
+    // Named after the round it leads to, as that round's run is.
+    const prefix = `${name}:retry:${round + 1}`;
+    let decided: z.infer<typeof retryDecisionSchema>;
+    try {
+      decided = retryDecisionSchema.parse(
+        await this.#step.do(
+          `${prefix}:decide`,
+          { retries: stepConfig.retries, timeout: stepConfig.timeout },
+          async (context) =>
+            await this.#decideRetry(run, context, failure, round, firstFailedAt)
+        )
+      );
+    } catch {
+      return undefined;
+    }
+    if (!decided.retry) {
+      return undefined;
+    }
+    if (decided.delayMs > 0) {
+      this.#requireShortSleep(decided.delayMs);
+      await this.#step.sleep(`${prefix}:wait`, decided.delayMs);
+    }
+    await this.#requirePerson();
+    return decided.firstFailedAt;
+  }
+
+  /**
+   * The decision step of round `round` of step `run`, which failed with
+   * `failure`, as the engine claimed its attempt (`context`): admitted as
+   * any attempt is, then, for each try around the step's task, innermost
+   * first, whether its catch takes the failure, decided as its catch step
+   * would (`#takes`), on the try's own input as its enter step recorded
+   * it. The first that does decides: a retry while its policy has attempts
+   * left, its `when` holds and its `exceptWhen` doesn't (each evaluated
+   * here with the error bound to the catch's variable), and its backoff,
+   * jitter included, stays within its duration limit. What it decides is
+   * the step's record, so a replay waits as long, and decides the same.
+   */
+  async #decideRetry(
+    run: StepRun,
+    context: unknown,
+    failure: Failure,
+    round: number,
+    firstFailedAt: number | undefined
+  ): Promise<z.infer<typeof retryDecisionSchema>> {
+    const firstAt = firstFailedAt ?? Date.now();
+    const told = attemptContextSchema.parse(context);
+    const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
+    if (lease === undefined) {
+      throw new Error(`Step "${run.name}"'s retry decision holds no lease`);
+    }
+    // Its conditions spend the activation's fuel as any attempt's do
+    // (`#attemptOf`): one the activation can't fund any more is cut off
+    // as the Loader cuts off an isolate past its CPU time, and the engine
+    // tries the decision again in the next activation.
+    if (this.#isolateStopped || this.#activationFuel < attemptFuel) {
+      throw toStepError(forIsolate(cpuLimitKill()));
+    }
+    const admitted = await this.#admitFunded(
+      { ...run, wait: loadWaitStart, collecting: false },
+      told,
+      lease,
+      true
+    );
+    if (!("settle" in admitted)) {
+      // Refused for load: tried again by the engine, as a timeout is.
+      throw toStepError({
+        name: "TimeoutError",
+        message: "The retry's decision waited for load.",
+      });
+    }
+    const attempt = ResourceRunHost.#newAttempt(run, told, lease, admitted);
+    try {
+      for (const around of run.step.tries) {
+        const scope = run.step.scope.slice(0, around.scope.length);
+        const input = this.#tryInputs.get(placeOf(around.id, scope));
+        if (input === undefined) {
+          // A try around a retrying one always enters (generate.ts): none
+          // recorded is a module that skipped it, which takes no retry.
+          break;
+        }
+        const asCatch: StepAttempt = {
+          ...attempt,
+          step: {
+            kind: "catch",
+            task: around,
+            name: `catch:${placeOf(around.id, scope)}`,
+            place: placeOf(around.id, scope),
+            scope,
+            loop: run.step.loop,
+            tries: [],
+          },
+          data: { input, context: run.data.context },
+          failure,
+          evaluated: new Set(),
+        };
+        // oxlint-disable-next-line no-await-in-loop -- innermost first
+        if (await this.#takes(asCatch, around)) {
+          // oxlint-disable-next-line no-await-in-loop -- the one that takes it
+          return await this.#retryOf(asCatch, around, round, firstAt);
+        }
+      }
+      return { retry: false, delayMs: 0, firstFailedAt: firstAt };
+    } finally {
+      attempt.over = true;
+      // What it didn't spend of its share goes back once every evaluation
+      // it started has settled, as an attempt's does.
+      await Promise.allSettled(attempt.pending);
+      this.#activationFuel += Math.max(0, attempt.budget.fuel);
+      await admitted.settle();
+    }
+  }
+
+  /**
+   * Whether try task `around`, whose catch takes the failure `attempt`
+   * decides on, tries round `round` again, and after how long: see
+   * `#decideRetry`.
+   */
+  async #retryOf(
+    attempt: StepAttempt,
+    around: Extract<SealedTask, { kind: "try" }>,
+    round: number,
+    firstFailedAt: number
+  ): Promise<z.infer<typeof retryDecisionSchema>> {
+    const stop = { retry: false, delayMs: 0, firstFailedAt };
+    const { retry } = around.catch;
+    if (retry === undefined || round >= retry.attempts) {
+      return stop;
+    }
+    const frame = { input: attempt.data.input, output: null };
+    const holds = async (slot: number): Promise<boolean> =>
+      (await this.#evaluated(
+        attempt,
+        this.#expressionOf(attempt, slot, true),
+        frame,
+        JSON.stringify(frame).length
+      )) === true;
+    if (retry.when !== undefined && !(await holds(retry.when))) {
+      return stop;
+    }
+    if (retry.exceptWhen !== undefined && (await holds(retry.exceptWhen))) {
+      return stop;
+    }
+    let factor = 1;
+    if (retry.backoff === "linear") {
+      factor = round;
+    } else if (retry.backoff === "exponential") {
+      factor = 2 ** (round - 1);
+    }
+    const { jitter } = retry;
+    const delayMs =
+      retry.delayMs * factor +
+      (jitter === undefined
+        ? 0
+        : Math.round(
+            jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
+          ));
+    const limited =
+      retry.limitMs !== undefined &&
+      Date.now() + delayMs - firstFailedAt > retry.limitMs;
+    return limited || delayMs > maxRetryDelayMs
+      ? stop
+      : { retry: true, delayMs, firstFailedAt };
   }
 
   /**
@@ -2076,9 +2999,11 @@ export class ResourceRunHost
   async #rounds(
     run: StepRun,
     first: unknown,
-    attemptStep: (context: unknown) => Promise<unknown>
+    attemptStep: (context: unknown) => Promise<unknown>,
+    /** What its rounds are named after: its own name, or a retry's. */
+    stepName: string = run.name
   ): Promise<unknown> {
-    const { name: stepName, step } = run;
+    const { step } = run;
     let recorded = first;
     const waitKey = await waitKeyOf(stepName);
     // Its wait for its AI provider, over its rounds in a row.
@@ -2102,7 +3027,7 @@ export class ResourceRunHost
             step.task?.kind === "call" &&
             step.task.call.name === "grasp.connector";
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          await this.#waitWhileHeld(stepName, round);
+          await this.#waitWhileHeld(stepName, step.name, round);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           await this.#requirePerson();
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
@@ -2122,7 +3047,7 @@ export class ResourceRunHost
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- once per wait
-        keyWait = await this.#providerWaitOver(stepName, keyWait);
+        keyWait = await this.#providerWaitOver(run.name, keyWait);
         const busy = busyOnly(stepName, marker);
         run.wait = loadWaitAfter(run.wait, busy);
         if (run.wait.sleepMs <= 0) {
@@ -2139,10 +3064,10 @@ export class ResourceRunHost
         );
       }
     } catch (error) {
-      await this.#providerWaitOverQuietly(stepName, keyWait);
+      await this.#providerWaitOverQuietly(run.name, keyWait);
       throw error;
     }
-    await this.#providerWaitOver(stepName, keyWait);
+    await this.#providerWaitOver(run.name, keyWait);
     return recorded;
   }
 
@@ -2240,7 +3165,9 @@ export class ResourceRunHost
     }
     if (journal.error !== undefined) {
       this.#caughtErrors.set(step.place, journal.error);
-      this.#failure = undefined;
+      for (const pending of this.#pendingAt(step.scope, true)) {
+        this.#failures.delete(scopeKey(pending.scope));
+      }
     }
     return journal.record;
   }
@@ -2336,11 +3263,16 @@ export class ResourceRunHost
     stepDone: Promise<unknown>
   ): Promise<unknown> {
     const told = attemptContextSchema.parse(context);
-    return await this.#onceAtMost(
-      configOf(run.step).once,
-      told,
-      async (ran) => await this.#attemptOf(run, told, fn, stepDone, ran)
-    );
+    const { step } = run;
+    return await this.#onceAtMost(configOf(step).once, told, async (ran) => {
+      // Settled meanwhile too: checked again as the attempt starts.
+      if (step.fenced === true || this.#fencedOff(step.scope)) {
+        throw toStepError(
+          forIsolate(workflowResourceErrors.create("workflow.branch_cancelled"))
+        );
+      }
+      return await this.#attemptOf(run, told, fn, stepDone, ran);
+    });
   }
 
   /** One attempt of step `run` (`#attempt`), `ran` told just before its module is. */
@@ -2370,7 +3302,11 @@ export class ResourceRunHost
     // for the next activation, its call not spent (`#onceAtMost`).
     const runs = funded || (configOf(step).once && !this.#isolateStopped);
     // Only an attempt that runs is admitted: one cut off holds nothing of
-    // its lineage.
+    // its lineage, and records no receipt, so a lineage's receipts can skip
+    // its number (attempt 3 after 1, GRA-1096). It is still one of the
+    // engine's attempts at the step (`stepConfig.retries`), as an isolate
+    // the Loader stopped is on Cloudflare: the engine, not core, counts
+    // them, and its count is the attempts' fence.
     let admission: AttemptAdmission | undefined;
     if (runs) {
       const admitted = await this.#admitFunded(run, told, lease, funded);
@@ -2403,6 +3339,15 @@ export class ResourceRunHost
         // told to have run, so a check that can't answer for a moment
         // leaves it to a later attempt, never a failure kept for good.
         await this.#actionPackagesAdmitted(run, attempt, funded);
+        // Its scope settled while it waited to be admitted: refused as it
+        // would have been at its start (`do`), its module never told.
+        if (this.#fencedOff(step.scope)) {
+          throw toStepError(
+            forIsolate(
+              workflowResourceErrors.create("workflow.branch_cancelled")
+            )
+          );
+        }
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -2518,6 +3463,7 @@ export class ResourceRunHost
       decision: undefined,
       decided: run.decided,
       child: undefined,
+      settled: undefined,
       held: false,
       collecting: run.collecting,
       failure: run.failure,
@@ -2594,6 +3540,8 @@ export class ResourceRunHost
           besideCall() ??
             (await ResourceRunHost.#tracked(attempt, this.#catches(attempt)))
         ),
+      settle: async (settled) =>
+        await Promise.resolve(this.#settleOf(attempt, settled)),
     });
   }
 
@@ -2765,13 +3713,6 @@ export class ResourceRunHost
     }
     if (
       step.kind === "task" &&
-      task.kind === "fork" &&
-      record.data.branch !== undefined
-    ) {
-      this.#raceWinners.set(step.place, record.data.branch);
-    }
-    if (
-      step.kind === "task" &&
       task.kind === "call" &&
       task.call.name === "grasp.model" &&
       // Made in this activation: counted as it was asked for.
@@ -2782,9 +3723,9 @@ export class ResourceRunHost
   }
 
   /**
-   * Waits, in round `round`, while the call of step `stepName` (a call
-   * task's, whose key its call carries) is held for the run's person:
-   * each check a step of its own (retried, and replayed without asking
+   * Waits, in round `round` of the step run under the name `base`, while
+   * the call of step `callStep` (a call task's, whose key its call
+   * carries) is held for the run's person: each check a step of its own (retried, and replayed without asking
    * connect again), then a durable wait that the person's decision ends
    * (`heldWakeType`, wakes.ts), or else the next check: a first wait
    * (`waitMsOf`) doubling up to `maxWaits` of them, in steps named after
@@ -2798,12 +3739,19 @@ export class ResourceRunHost
    * a run suspended in one: Grasp has no release yet, so no such run
    * outlives a deploy.
    */
-  async #waitWhileHeld(stepName: string, round: number): Promise<void> {
+  async #waitWhileHeld(
+    base: string,
+    callStep: string,
+    round: number
+  ): Promise<void> {
     const first = waitMsOf(this.#env);
-    const prefix = `${stepName}:held:${round}`;
-    const wakeType = await heldWakeType(stepName);
+    const prefix = `${base}:held:${round}`;
+    // The call's own identity, never the round's: a retry's round
+    // (`base`, `…:retry:<n>`) calls under its step's key, which connect
+    // holds and the person's decision wakes.
+    const wakeType = await heldWakeType(callStep);
     // The key `#made` gives the task's call, in every attempt and round.
-    const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
+    const idempotencyKey = stepIdempotencyKey(this.#run.runId, callStep);
     for (let checks = 0; ; checks += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one check at a time
       const held = await this.#step.do(
@@ -2957,14 +3905,15 @@ export class ResourceRunHost
    * left for a catch; one that failed (a test run's wait past its limit, a
    * refusal) is no failure of a step's work, which no catch takes.
    */
-  async #sleeping(work: () => Promise<null>): Promise<null> {
+  async #sleeping(name: unknown, work: () => Promise<null>): Promise<null> {
+    const scope = sealedStep(this.#run.build, name, true)?.scope ?? [];
     try {
       await work();
     } catch (error) {
-      this.#failure = notCaught();
+      this.#failed(scope, notCaught());
       throw error;
     }
-    this.#failure = undefined;
+    this.#failures.delete(scopeKey(scope));
     return null;
   }
 
@@ -2982,26 +3931,39 @@ export class ResourceRunHost
     let reached: StepOf | undefined;
     try {
       reached = this.#stepOf(name, true);
+      // Not a refusal of the module: a wait of a branch another settled
+      // its scope over waits for nothing, every activation, so it never
+      // takes an event or a child's end meant for a step after the scope
+      // (`#awaitsUnfenced` checks again as it waits).
+      if (reached.fenced === true) {
+        throw workflowResourceErrors.create("workflow.branch_cancelled");
+      }
       this.#requireNoFailure(reached);
       const answered = await work(reached);
-      this.#failure = undefined;
+      this.#failures.delete(scopeKey(reached.scope));
       return answered;
     } catch (error) {
-      this.#failure = failureOf(
-        failedWith(error),
-        reached?.task,
-        this.#tampered !== undefined
+      this.#failed(
+        reached?.scope ?? [],
+        failureOf(
+          failedWith(error),
+          reached?.task,
+          this.#tampered !== undefined
+        )
       );
-      this.#failureScope = reached?.scope ?? [];
       throw error;
     }
   }
 
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
+    return await this.#handling(async () => await this.#sleep(name, duration));
+  }
+
+  async #sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(
       async () =>
-        await this.#sleeping(async () => {
+        await this.#sleeping(name, async () => {
           const sleeping = this.#stepOf(name, true);
           this.#requireNoFailure(sleeping);
           const { task } = sleeping;
@@ -3015,9 +3977,10 @@ export class ResourceRunHost
             );
           }
           // Its length alone, as sealed: the same on every replay.
-          this.#requireShortSleep(task.milliseconds);
+          const { milliseconds } = task;
+          this.#requireShortSleep(milliseconds);
           await this.#requirePerson();
-          await this.#step.sleep(sleeping.name, task.milliseconds);
+          await this.#step.sleep(sleeping.name, milliseconds);
           return null;
         })
     );
@@ -3029,9 +3992,15 @@ export class ResourceRunHost
    * exactly the deadline it recorded, at once when that has passed.
    */
   async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
+    return await this.#handling(
+      async () => await this.#sleepUntil(name, timestamp)
+    );
+  }
+
+  async #sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
     return await settle(
       async () =>
-        await this.#sleeping(async () => {
+        await this.#sleeping(name, async () => {
           const sleeping = this.#stepOf(name, true);
           this.#requireNoFailure(sleeping);
           const { task } = sleeping;
@@ -3069,6 +4038,10 @@ export class ResourceRunHost
    * deadline, `workflow.event_timeout`.
    */
   async listen(name: unknown): Promise<Settled<Json>> {
+    return await this.#handling(async () => await this.#listen(name));
+  }
+
+  async #listen(name: unknown): Promise<Settled<Json>> {
     return await settle(
       async () =>
         await this.#awaited(name, async (listening) => {
@@ -3100,6 +4073,9 @@ export class ResourceRunHost
           for (const [index, match] of groups.entries()) {
             const wait =
               index === 0 ? listening.name : `${listening.name}:${index + 1}`;
+            // Settled over meanwhile (its person or authority checked):
+            // it takes nothing, as its scope's steps after start nothing.
+            this.#awaitsUnfenced(listening);
             // One at a time, in the filters' order: waits come one at a time.
             // oxlint-disable-next-line no-await-in-loop -- see above
             const taken = await this.#taken(wait, match, deadline);
@@ -3130,6 +4106,10 @@ export class ResourceRunHost
    * again before the wait, so an end told while no one waited is taken.
    */
   async child(name: unknown): Promise<Settled<Json>> {
+    return await this.#handling(async () => await this.#child(name));
+  }
+
+  async #child(name: unknown): Promise<Settled<Json>> {
     return await settle(
       async () =>
         await this.#awaited(name, async (waiting) => {
@@ -3163,6 +4143,8 @@ export class ResourceRunHost
             });
           }
           let ended: { payload: unknown };
+          // Settled over meanwhile: it takes no end.
+          this.#awaitsUnfenced(waiting);
           try {
             ended = await this.#step.waitForMatch(waiting.name, {
               match: [{ type: childEndType(child) }],
@@ -3188,6 +4170,21 @@ export class ResourceRunHost
           return end.output;
         })
     );
+  }
+
+  /**
+   * Refuses, with `workflow.branch_cancelled` and no refusal of the module,
+   * a wait of step `step` whose item or branch another settled its scope
+   * over, checked again just before the engine is asked: a wait the engine
+   * hasn't been asked for takes no event (Workerflow takes one only as a
+   * wait is asked, in the activation that asks it), so a branch that lost
+   * never takes an event or a child's end meant for a step after its
+   * scope, nor does any replay of it.
+   */
+  #awaitsUnfenced(step: StepOf): void {
+    if (this.#fencedOff(step.scope)) {
+      throw workflowResourceErrors.create("workflow.branch_cancelled");
+    }
   }
 
   /**
@@ -4536,7 +5533,7 @@ export class ResourceRunHost
     passed: { input: Json; output: Json; size: number }
   ): Promise<number> {
     attempt.child = await this.#startedChild(attempt, running, passed);
-    const { limits } = await quotaPolicy(this.#env);
+    const limits = quotaLimits(this.#env);
     const lineageEnds =
       (this.#run.lineageStartedAt ?? this.#run.createdAt) +
       limits.workflowAgeMs;
@@ -4942,7 +5939,9 @@ export class ResourceRunHost
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
     // A race's record (a fork's `task` step) follows its enter step's `if`.
-    const race = step.kind === "task" && step.task?.kind === "fork";
+    const race =
+      step.kind === "task" &&
+      (step.task?.kind === "fork" || step.task?.kind === "for");
     return (
       !race &&
       stagesFor(step).includes("taskIf") &&
@@ -4992,24 +5991,25 @@ export class ResourceRunHost
   }
 
   /**
-   * Refuses `record` of race `task`'s own step `step` unless it names its
-   * winning branch alone: one it has, which the race reached past the
-   * failures before it and which didn't fail itself (`#raceGoesTo`). What
-   * each branch did its own steps recorded.
+   * Refuses `record` of the own step of `for` or `fork` task `task` (its
+   * settling) unless it records the branch the host settled its scope on
+   * in this attempt (`settle`), and nothing of its own: what each item or
+   * branch did its own steps recorded.
    */
-  #requireRaceRecord(
-    step: StepOf,
-    task: Extract<SealedTask, { kind: "fork" }>,
-    record: { branch?: number | undefined }
+  #requireSettledRecord(
+    attempt: StepAttempt,
+    task: SealedTask,
+    record: { output: Json; branch?: number | undefined }
   ): void {
-    const { branch } = record;
     if (
-      branch === undefined ||
-      branch >= task.fork.branches ||
-      !this.#raceGoesTo(step.place, branch) ||
+      attempt.settled === undefined ||
+      record.branch !== attempt.settled ||
+      record.output !== null ||
       Object.keys(record).length !== 2
     ) {
-      this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
+      this.#refuse(
+        `Task "${task.id}" records the branch its scope settled on.`
+      );
     }
   }
 
@@ -5035,8 +6035,8 @@ export class ResourceRunHost
     if (task === undefined) {
       return false;
     }
-    if (task.kind === "fork" && step.kind === "task") {
-      this.#requireRaceRecord(step, task, record);
+    if ((task.kind === "fork" || task.kind === "for") && step.kind === "task") {
+      this.#requireSettledRecord(attempt, task, record);
       return true;
     }
     if (step.kind === "item") {

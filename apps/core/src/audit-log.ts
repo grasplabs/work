@@ -13,13 +13,7 @@ import type {
   FullVerification,
   ParsedAuditFilter,
 } from "@grasp-os/shared/audit-log";
-import { deploymentConfig, jsonVar } from "@grasp-os/shared/config";
-import {
-  auditArchiveRetentionDefaultDays,
-  auditArchiveRetentionSchema,
-  auditRetentionDefaultDays,
-  auditRetentionSchema,
-} from "@grasp-os/shared/deployment-config";
+import { jsonVar } from "@grasp-os/shared/config";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
@@ -33,6 +27,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -84,77 +79,32 @@ const dayMs = 24 * 60 * 60 * 1000;
 const deleteBatchMax = 1000;
 
 /**
- * The deployment's retention in days (`AUDIT_RETENTION_DAYS`, see
- * {@link retainAuditLog}), or `undefined` if its config is invalid.
+ * Days the audit log keeps an event where admins search it (see
+ * {@link retainAuditLog}).
  */
-export const auditRetentionDays = (
-  env: Pick<Env, "AUDIT_RETENTION_DAYS">
-): number | undefined =>
-  env.AUDIT_RETENTION_DAYS === undefined
-    ? auditRetentionDefaultDays
-    : deploymentConfig(
-        auditRetentionSchema,
-        "AUDIT_RETENTION_DAYS",
-        env.AUDIT_RETENTION_DAYS
-      );
+export const auditRetentionDays = 180;
 
 /**
  * Days an event is kept in all, archive included, counted from when the
- * log received it: the `AUDIT_ARCHIVE_RETENTION_DAYS` var the admin sets
- * per deployment, as the DPA states it (AU7), at least a year and at least
- * the retention, at most ten years. Unset, seven years
- * (`auditArchiveRetentionDefaultDays`), or the retention if that is longer.
- * `undefined` while it's invalid (logged as `config.invalid`), or while
- * retention is invalid: then nothing is purged. It's deployment config, so
- * no session can shorten it.
+ * log received it, as the DPA states it (AU7): seven years (Nick's
+ * decision on GRA-903), longer than {@link auditRetentionDays}, so no
+ * event is purged before it was archived.
  */
-export const archiveRetentionDays = (
-  env: Pick<Env, "AUDIT_ARCHIVE_RETENTION_DAYS" | "AUDIT_RETENTION_DAYS">
-): number | undefined => {
-  const retention = auditRetentionDays(env);
-  if (env.AUDIT_ARCHIVE_RETENTION_DAYS === undefined) {
-    return retention === undefined
-      ? undefined
-      : Math.max(auditArchiveRetentionDefaultDays, retention);
-  }
-  const days = deploymentConfig(
-    auditArchiveRetentionSchema,
-    "AUDIT_ARCHIVE_RETENTION_DAYS",
-    env.AUDIT_ARCHIVE_RETENTION_DAYS
-  );
-  if (retention === undefined || days === undefined) {
-    return undefined;
-  }
-  // Shorter than retention, an event would be purged before it was even
-  // archived.
-  if (days < retention) {
-    log.error("config.invalid", {
-      var: "AUDIT_ARCHIVE_RETENTION_DAYS",
-      paths: "<root>",
-    });
-    return undefined;
-  }
-  return days;
-};
+export const archiveRetentionDays = 7 * 365;
 
 // Retention of the audit log: how long the log keeps an event where admins
 // search it. After that the event moves to the archive in R2 (in the EU),
 // as it was stored, and the chain carries on (see `AuditLog`), so an
 // archived event still counts when the chain is verified. The archive keeps
-// it until the log purges it, once the deployment's archive retention has
-// passed (`AUDIT_ARCHIVE_RETENTION_DAYS`, the event's total age, worked out
-// by the log itself; see `AuditLog.purge`), and never while that is unset.
-// Verification reports a purged stretch as purged. Deleting archived
-// objects any other way (outside the product) makes verification report
-// them missing.
+// it until the log purges it, once the archive retention has passed
+// (`archiveRetentionDays`, the event's total age, worked out by the log
+// itself; see `AuditLog.purge`). Verification reports a purged stretch as
+// purged. Deleting archived objects any other way (outside the product)
+// makes verification report them missing.
 //
-// The admin sets it per deployment with the `AUDIT_RETENTION_DAYS` var:
-// 180 days unless set, at least 30 (so an admin always has the last month
-// to search), at most ten years. A value outside that, or one that isn't a
-// whole number of days, is logged as `config.invalid` and archives nothing:
-// events stay searchable until the config is fixed. It's deployment config,
-// not an in-product setting, so a compromised admin session can't shorten
-// it.
+// The retention is fixed in code (`auditRetentionDays`), at least a month
+// so an admin always has the last month to search, and no session can
+// shorten it.
 //
 // The log runs retention itself, daily, on its alarm (`AuditLog.alarm`),
 // which it arms when it appends an event while none is set (and core's
@@ -170,16 +120,14 @@ const stretchesPerPass = 10;
 type Retained = Pick<AuditLog, "archive" | "purge">;
 
 /** Archives what is past retention, up to {@link stretchesPerPass} stretches. */
-const archiveExpired = async (store: Retained, env: Env): Promise<boolean> => {
-  const days = auditRetentionDays(env);
-  if (days === undefined) {
-    return false;
-  }
-  const cutoff = new Date(Date.now() - days * dayMs).toISOString();
+const archiveExpired = async (store: Retained): Promise<boolean> => {
+  const cutoff = new Date(
+    Date.now() - auditRetentionDays * dayMs
+  ).toISOString();
   for (let pass = 0; pass < stretchesPerPass; pass += 1) {
     // One stretch after another: each starts where the last one ended.
     // oxlint-disable-next-line no-await-in-loop
-    const stretch = await store.archive(cutoff, days);
+    const stretch = await store.archive(cutoff, auditRetentionDays);
     if (stretch === null) {
       return pass > 0;
     }
@@ -193,10 +141,10 @@ const archiveExpired = async (store: Retained, env: Env): Promise<boolean> => {
 };
 
 /**
- * One retention pass over the log `store`, with the deployment's `env`:
- * archives the events it received longer ago than the deployment's
- * retention, oldest first, a stretch at a time; the log records each
- * stretch as `audit.archived`, in the same transaction. Then purges the
+ * One retention pass over the log `store`: archives the events it
+ * received longer ago than the retention, oldest first, a stretch at a
+ * time; the log records each stretch as `audit.archived`, in the same
+ * transaction. Then purges the
  * archived stretches past archive retention, likewise recorded as
  * `audit.purged`. At most {@link stretchesPerPass} of each, so a backlog
  * is worked off over several passes. Returns whether it archived or
@@ -207,11 +155,8 @@ const archiveExpired = async (store: Retained, env: Env): Promise<boolean> => {
  * stretch once. So the log's alarm, which may run more than once, can
  * always run it.
  */
-export const retainAuditLog = async (
-  store: Retained,
-  env: Env
-): Promise<boolean> => {
-  const archived = await archiveExpired(store, env);
+export const retainAuditLog = async (store: Retained): Promise<boolean> => {
+  const archived = await archiveExpired(store);
   for (let pass = 0; pass < stretchesPerPass; pass += 1) {
     // One stretch after another, oldest first.
     // oxlint-disable-next-line no-await-in-loop
@@ -261,6 +206,22 @@ export interface SearchRange {
   low: number;
   high: number;
 }
+
+/** A search of the archive: as {@link SearchQuery}, newest first, before `before`. */
+export interface ArchiveQuery {
+  filter: ParsedAuditFilter;
+  /** The position to read before, not included; the newest archived by default. */
+  before?: number;
+  limit: number;
+}
+
+/**
+ * A page of the archive, or the stretch whose object can't be read (gone,
+ * or holding something that isn't an entry), where the search stopped.
+ */
+export type ArchivePage =
+  | AuditPage
+  | { unreadable: { from: number; through: number } };
 
 /** What the daily signals want tallied of a stretch (`tallyStretch`). */
 export interface TallyWanted {
@@ -514,7 +475,7 @@ export class AuditLog extends DurableObject<Env> {
     await this.#rearm(Date.now() + dayMs);
     let moved = false;
     try {
-      moved = await retainAuditLog(this, this.env);
+      moved = await retainAuditLog(this);
     } catch (error) {
       log.error("audit.retention_failed", errorFields(error));
     }
@@ -719,6 +680,183 @@ export class AuditLog extends DurableObject<Env> {
   }
 
   /**
+   * The archived events that match the filter, newest first, before
+   * position `before`. Reads one archived stretch's object at most (up to
+   * {@link archiveStretch} entries), each record checked against the chain
+   * as a search checks it, so the archive is searched a stretch per call:
+   * `next` says where to carry on, or is `null` once no older stretch is
+   * left. Purged stretches have nothing left to read and are passed over,
+   * and so are stretches the filter's times rule out, by their receipt
+   * times, without reading their objects.
+   */
+  async searchArchive({
+    filter,
+    before,
+    limit,
+  }: ArchiveQuery): Promise<ArchivePage> {
+    // Newest first, each with the one before it: a stretch's events were
+    // received no earlier than the last of the stretch before it.
+    const stretches = this.#db
+      .select()
+      .from(archives)
+      .where(before === undefined ? undefined : lt(archives.firstSeq, before))
+      .orderBy(desc(archives.lastSeq))
+      .all();
+    const readable = (index: number): number =>
+      stretches.findIndex(
+        (stretch, at) => at >= index && stretch.purgedAt === null
+      );
+    for (const [index, stretch] of stretches.entries()) {
+      const older = stretches[index + 1];
+      if (filter.from !== undefined && stretch.lastReceivedAt < filter.from) {
+        break;
+      }
+      const afterTo =
+        filter.to !== undefined &&
+        older !== undefined &&
+        older.lastReceivedAt >= filter.to;
+      if (stretch.purgedAt === null && !afterTo) {
+        // oxlint-disable-next-line no-await-in-loop -- one stretch is read, then the loop ends
+        const read = await this.#searchStretch(
+          stretch,
+          filter,
+          { low: 1, high: before === undefined ? stretch.lastSeq : before - 1 },
+          "newest",
+          limit
+        );
+        if ("unreadable" in read) {
+          return read;
+        }
+        const rest = readable(index + 1);
+        const next = read.cut ?? (rest === -1 ? null : stretch.firstSeq);
+        return { records: read.records, next };
+      }
+    }
+    return { records: [], next: null };
+  }
+
+  /**
+   * How many archived stretches archive retention purged: what an export
+   * that takes the archive in passes over, as it begins.
+   */
+  purgedStretches(): number {
+    return this.#db
+      .select({ firstSeq: archives.firstSeq })
+      .from(archives)
+      .where(isNotNull(archives.purgedAt))
+      .all().length;
+  }
+
+  /**
+   * The archived events that match the filter, oldest first, after
+   * position `after` and up to `through`: an export's reading of the
+   * archive, as `searchArchive` reads it newest first. Reads one archived
+   * stretch's object at most; `next` is the last position it covered, so
+   * the next call carries on after it, or `null` past `through`. A purged
+   * stretch has nothing to read: it is passed as `purged`, read past, and
+   * the chain carries on after it.
+   */
+  async readArchive({
+    filter,
+    after,
+    through,
+    limit,
+  }: {
+    filter: ParsedAuditFilter;
+    after: number;
+    through: number;
+    limit: number;
+  }): Promise<
+    | (AuditPage & { purged?: { from: number; through: number } })
+    | { unreadable: { from: number; through: number } }
+  > {
+    const stretch = this.#db
+      .select()
+      .from(archives)
+      .where(gt(archives.lastSeq, after))
+      .orderBy(asc(archives.firstSeq))
+      .limit(1)
+      .get();
+    if (stretch === undefined || stretch.firstSeq > through) {
+      return { records: [], next: null };
+    }
+    const end = Math.min(stretch.lastSeq, through);
+    const covered = end >= through ? null : end;
+    if (stretch.purgedAt !== null) {
+      return {
+        records: [],
+        next: covered,
+        purged: { from: Math.max(stretch.firstSeq, after + 1), through: end },
+      };
+    }
+    const read = await this.#searchStretch(
+      stretch,
+      filter,
+      { low: after + 1, high: end },
+      "oldest",
+      limit
+    );
+    if ("unreadable" in read) {
+      return read;
+    }
+    return { records: read.records, next: read.cut ?? covered };
+  }
+
+  /**
+   * The entries of one archived stretch that match, in `order`, between
+   * positions `low` and `high`, up to `limit`; `cut` is where it stopped
+   * when more may match.
+   */
+  async #searchStretch(
+    stretch: typeof archives.$inferSelect,
+    filter: ParsedAuditFilter,
+    { low, high }: SearchRange,
+    order: SearchQuery["order"],
+    limit: number
+  ): Promise<
+    | { records: AuditRecord[]; cut?: number }
+    | { unreadable: { from: number; through: number } }
+  > {
+    const unreadable = {
+      unreadable: { from: stretch.firstSeq, through: stretch.lastSeq },
+    };
+    const object = await this.env.AUDIT_ARCHIVE.get(stretch.key);
+    if (object === null) {
+      return unreadable;
+    }
+    const entries: EntryRow[] = [];
+    for await (const line of linesOf(object)) {
+      const parsed = archivedEntrySchema.safeParse(jsonVar(line));
+      if (!parsed.success) {
+        return unreadable;
+      }
+      entries.push(parsed.data);
+    }
+    const hashes = new Map(entries.map(({ seq, hash }) => [seq, hash]));
+    const matched: { entry: EntryRow; event: AuditEvent | null }[] = [];
+    let cut: number | undefined;
+    const ordered = order === "newest" ? entries.toReversed() : entries;
+    for (const entry of ordered) {
+      if (entry.seq >= low && entry.seq <= high) {
+        const event = parseStored(entry.event);
+        if (matches(filter, entry.receivedAt, event)) {
+          if (matched.length === limit) {
+            cut = matched.at(-1)?.entry.seq;
+            break;
+          }
+          matched.push({ entry, event });
+        }
+      }
+    }
+    const records = await Promise.all(
+      matched.map(
+        async ({ entry, event }) => await this.#record(entry, event, hashes)
+      )
+    );
+    return cut === undefined ? { records } : { records, cut };
+  }
+
+  /**
    * Checks the chain from after position `after`, from the hash the log
    * holds there: one archived stretch, or up to {@link verifyStretch} of
    * the entries it holds. Reports how far it got, and whether that's the
@@ -836,10 +974,10 @@ export class AuditLog extends DurableObject<Env> {
   }
 
   /**
-   * Purges the oldest archived stretch kept longer than the deployment's
-   * archive retention ({@link archiveRetentionDays}; nothing while it's
-   * unset): records the purge (the stretch's `purgedAt`, and `audit.purged`
-   * in the chain, in one transaction), then deletes its object.
+   * Purges the oldest archived stretch kept longer than the archive
+   * retention ({@link archiveRetentionDays}): records the purge (the
+   * stretch's `purgedAt`, and `audit.purged` in the chain, in one
+   * transaction), then deletes its object.
    * Verification then reports the stretch as purged, not missing, and the
    * chain carries on across it from its recorded hashes. Only a stretch
    * that verifies is purged, so a break is never erased with it, and
@@ -850,14 +988,10 @@ export class AuditLog extends DurableObject<Env> {
    * purge, staff included.
    */
   async purge(): Promise<ArchivedStretch | null> {
-    const days = archiveRetentionDays(this.env);
-    if (days === undefined) {
-      return null;
-    }
     let purged: ArchivedStretch | null;
     try {
       purged = await this.#purgeOldest(
-        new Date(Date.now() - days * dayMs).toISOString()
+        new Date(Date.now() - archiveRetentionDays * dayMs).toISOString()
       );
     } catch (error) {
       // Also when this purge fails, say a read of the stretch's object

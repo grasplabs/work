@@ -145,13 +145,6 @@ export const clients = sqliteTable(
      */
     stripeCustomerId: text("stripe_customer_id"),
     /**
-     * The client's proposal in Grasp's Rooms: its room's id, as someone at
-     * Grasp linked it by hand (src/proposal/link.ts), never matched by
-     * name. Only the id is kept; the room and what was signed in it are
-     * read each time (src/proposal/rooms.ts). Null until it is linked.
-     */
-    roomsProjectId: text("rooms_project_id"),
-    /**
      * The client's company in Grasp's Attio: its record's id, as someone at
      * Grasp linked it by hand (src/crm/link.ts), never matched by name or
      * domain. Only the id is kept; the company, its people and its deals
@@ -324,25 +317,6 @@ export const rolloutTargets = sqliteTable(
     primaryKey({ columns: [table.rolloutId, table.clientId] }),
     index("rollout_targets_client_idx").on(table.clientId),
   ]
-);
-
-/**
- * A client's deployment config (sign-in, model gateway), one row
- * per setting. Never a secret: those go straight to the client's Worker.
- */
-export const settings = sqliteTable(
-  "settings",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    key: text().notNull(),
-    /** JSON. */
-    value: text().notNull(),
-    updatedBy: text("updated_by").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.key] })]
 );
 
 /**
@@ -640,20 +614,4 @@ export const clientWatch = sqliteTable("client_watch", {
   readAt: timestamp("read_at").notNull(),
   /** `WatchedSignals` (src/clients/watch.ts), as JSON. */
   signals: text().notNull(),
-});
-
-/**
- * Which provider and model each of Grasp's own AI features uses, as staff
- * choose them on Platform → AI (src/platform-ai.ts): one row, `id` 1,
- * none until staff first choose, when the defaults stand. Every deploy
- * gives it to the client's core as its `PLATFORM_AI` var. Never a key:
- * Grasp's provider keys live in Secrets Store and go to connect alone.
- */
-export const platformAi = sqliteTable("platform_ai", {
-  /** Always 1: there is one platform. */
-  id: integer().primaryKey(),
-  /** `platformAiSchema`'s output (@grasp-os/shared/platform-ai), as JSON. */
-  settings: text().notNull(),
-  updatedBy: text("updated_by").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
 });

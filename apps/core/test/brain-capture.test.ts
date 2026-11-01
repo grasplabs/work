@@ -503,10 +503,7 @@ describe("a workflow run's outcome", () => {
       { timeout: 10_000, interval: 100 }
     );
 
-    await sweepRunDetails(
-      { ...env, RUN_RETENTION_DAYS: "1" },
-      new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-    );
+    await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 60 * 60 * 1000));
 
     expect({
       captured,

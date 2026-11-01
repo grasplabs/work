@@ -11,7 +11,7 @@ import { platformAiFeatures } from "./platform-ai.ts";
 // on Grasp's keys this month and last, from the ledger's charges. Never a
 // key, a mask or a base URL: provider ids, models, times and amounts only. Only the admin reads it: the request
 // is signed with a key both derive from the client's auth secret for this
-// purpose alone, as the quota policy report is (`quota-policy-report.ts`).
+// purpose alone.
 
 /** Where the admin asks core for its AI's status. Behind the router-secret check. */
 export const aiStatusReportPath = "/platform/ai-status";

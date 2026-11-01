@@ -1,19 +1,12 @@
 /**
- * Deploying a release's Workers to a client account: uploading a version
- * (with its static assets), pointing a deployment at it, and what goes
- * with it (secrets, cron schedules, workflows, D1 migrations).
- *
- * A deploy uploads a version, then sends all traffic to it in one
- * deployment, or, in a rollout, in stages that split it with the previous
- * version first (`deployVersions`); rolling back is a deployment back to
- * the previous version, its secrets included. A Worker's first upload, and a release that adds a
- * Durable Object migration, go as a script upload instead, which deploys at
- * once.
+ * The Cloudflare calls a placed client's deploy makes: uploading its
+ * scripts (with their static assets), their secrets, cron schedules and
+ * workers.dev route, reading what is live, and applying D1 migrations.
  */
 import { encodeAsset } from "@grasp-os/shared/release";
 import { z } from "zod";
 
-import { CloudflareApiError, isNotFound } from "./api.ts";
+import { isNotFound } from "./api.ts";
 import type { CloudflareApi } from "./api.ts";
 
 /** One module of a Worker, as its bundle holds it. */
@@ -57,18 +50,6 @@ export interface WorkerUpload {
 const scriptPath = (accountId: string, scriptName: string) =>
   `/accounts/${accountId}/workers/scripts/${scriptName}`;
 
-/** The names of every Worker script in the account. */
-export const listScripts = async (
-  api: CloudflareApi,
-  accountId: string
-): Promise<string[]> => {
-  const scripts = await api.call(
-    { method: "GET", path: `/accounts/${accountId}/workers/scripts` },
-    z.array(z.object({ id: z.string() }))
-  );
-  return scripts.map(({ id }) => id);
-};
-
 const uploadSessionSchema = z.object({
   jwt: z.string(),
   /** The hashes it lacks, in groups to upload together. */
@@ -93,9 +74,11 @@ const inBatches = async <T, R>(
 };
 
 /**
- * `uploadAssets` for the script at `scriptAt`: an account's own, or one in a
- * Workers for Platforms dispatch namespace, whose upload session is
- * opened under its own path and whose files go to the account's upload.
+ * Uploads the files the script at `scriptAt` serves that the account
+ * doesn't hold yet, and returns the token its upload's metadata names them
+ * by (`assets.jwt`). The script is an account's own, or one in a Workers
+ * for Platforms dispatch namespace, whose upload session is opened under
+ * its own path and whose files go to the account's upload.
  */
 const uploadAssetsAt = async (
   api: CloudflareApi,
@@ -172,24 +155,6 @@ const uploadAssetsAt = async (
   return completion.jwt;
 };
 
-/**
- * Uploads the files `scriptName`'s next version serves that the account
- * doesn't hold yet, and returns the token that version's metadata names
- * them by (`assets.jwt`).
- */
-export const uploadAssets = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  files: readonly AssetFile[]
-): Promise<string> =>
-  await uploadAssetsAt(
-    api,
-    accountId,
-    scriptPath(accountId, scriptName),
-    files
-  );
-
 const deploymentSchema = z.object({
   id: z.string(),
   created_on: z.string(),
@@ -231,74 +196,27 @@ export const liveVersion = async (
     : undefined;
 };
 
-/** A secret a version is uploaded with. */
+/** A Worker secret. */
 export interface Secret {
   name: string;
   value: string;
 }
 
 /**
- * Bindings a new version keeps from the Worker's latest version, as
- * Wrangler asks: the secrets. The API keeps them from the latest version
- * uploaded, not the deployed one, which differ after a rollback
- * (`latestIsDeployed`).
+ * Bindings an upload keeps from the script's latest version, as Wrangler
+ * asks: the secrets, which are delivered after it by name.
  */
 const keptBindings = ["secret_text", "secret_key"];
 
-/** A Worker's versions, the latest first. */
-const versionsSchema = z.object({
-  items: z.array(z.object({ id: z.string() })),
-});
-
 /**
- * Whether all of `scriptName`'s traffic goes to its latest version: false
- * after a rollback, when a new version would keep the secrets of the
- * version rolled back from. True for a Worker with no versions yet.
- */
-export const latestIsDeployed = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string
-): Promise<boolean> => {
-  let latest: string | undefined = undefined;
-  try {
-    const { items } = await api.call(
-      { method: "GET", path: `${scriptPath(accountId, scriptName)}/versions` },
-      versionsSchema
-    );
-    latest = items[0]?.id;
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
-  }
-  if (latest === undefined) {
-    return true;
-  }
-  return (await liveVersion(api, accountId, scriptName)) === latest;
-};
-
-/** A version would keep the secrets of a version that isn't live. */
-export class RolledBackError extends Error {
-  constructor(scriptName: string) {
-    super(
-      `${scriptName}'s latest version isn't the deployed one (after a rollback), so a new version would keep its secrets: upload it with every secret (uploadVersionWithSecrets)`
-    );
-    this.name = "RolledBackError";
-  }
-}
-
-/**
- * The upload's form: the metadata, then each module under its name. The
- * version keeps the latest version's secrets (`"keep"`), or has exactly
- * `secrets`. Their values go only into this body.
+ * The upload's form: the metadata, then each module under its name. It
+ * keeps the latest version's secrets.
  */
 const uploadForm = async (
   api: CloudflareApi,
   accountId: string,
   path: string,
-  { releaseId, metadata, modules, assets }: WorkerUpload,
-  secrets: readonly Secret[] | "keep"
+  { releaseId, metadata, modules, assets }: WorkerUpload
 ): Promise<FormData> => {
   const assetsJwt =
     assets === undefined
@@ -314,15 +232,8 @@ const uploadForm = async (
       [
         JSON.stringify({
           ...metadata,
-          bindings: [
-            ...bindings,
-            ...(secrets === "keep" ? [] : secrets).map(({ name, value }) => ({
-              type: "secret_text",
-              name,
-              text: value,
-            })),
-          ],
-          ...(secrets === "keep" ? { keep_bindings: keptBindings } : {}),
+          bindings,
+          keep_bindings: keptBindings,
           ...(assetsJwt === undefined
             ? {}
             : { assets: { ...metadata.assets, jwt: assetsJwt } }),
@@ -339,114 +250,6 @@ const uploadForm = async (
     form.set(name, new File([content], name, { type }));
   }
   return form;
-};
-
-const versionSchema = z.object({ id: z.string(), number: z.number() });
-export type WorkerVersion = z.infer<typeof versionSchema>;
-
-/**
- * Uploads a version of `scriptName` with exactly `secrets`, every secret it
- * needs, keeping none, without deploying it: how a rollout changes secrets,
- * so they go live with the version's deployment and roll back with it.
- * Works after a rollback too, since it keeps nothing from the latest
- * version.
- */
-export const uploadVersionWithSecrets = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  upload: WorkerUpload,
-  secrets: readonly Secret[]
-): Promise<WorkerVersion> =>
-  await api.call(
-    {
-      method: "POST",
-      path: `${scriptPath(accountId, scriptName)}/versions`,
-      body: await uploadForm(
-        api,
-        accountId,
-        scriptPath(accountId, scriptName),
-        upload,
-        secrets
-      ),
-    },
-    versionSchema
-  );
-
-/**
- * Uploads a version of `scriptName` without deploying it, keeping the
- * deployed version's secrets. Refused (`RolledBackError`) after a rollback,
- * when it would keep another version's: upload with every secret then.
- */
-export const uploadVersion = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  upload: WorkerUpload
-): Promise<WorkerVersion> => {
-  if (!(await latestIsDeployed(api, accountId, scriptName))) {
-    throw new RolledBackError(scriptName);
-  }
-  return await api.call(
-    {
-      method: "POST",
-      path: `${scriptPath(accountId, scriptName)}/versions`,
-      body: await uploadForm(
-        api,
-        accountId,
-        scriptPath(accountId, scriptName),
-        upload,
-        "keep"
-      ),
-    },
-    versionSchema
-  );
-};
-
-/**
- * Uploads `scriptName` and deploys it at once: a Worker's first upload, or
- * a release with a Durable Object migration, which a version can't carry.
- *
- * Without `secrets` it keeps the latest version's secrets, so, like
- * `uploadVersion`, it's refused after a rollback. With `secrets`, every
- * secret the Worker needs, it has exactly those and keeps none, as
- * `uploadVersionWithSecrets` does: how a Durable Object migration, which
- * only a script upload can carry, deploys after a rollback. The metadata
- * is the same as a version's (Wrangler builds both with one form).
- *
- * Such a release isn't retried after a server error or no answer: if the
- * upload went through, its migration ran, and sending it again would be
- * refused on the migration's tag, or worse, apply it twice. The caller
- * reads the deployments to find out.
- */
-export const uploadScript = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  upload: WorkerUpload,
-  secrets?: readonly Secret[]
-): Promise<void> => {
-  if (
-    secrets === undefined &&
-    !(await latestIsDeployed(api, accountId, scriptName))
-  ) {
-    throw new RolledBackError(scriptName);
-  }
-  await api.call(
-    {
-      method: "PUT",
-      path: scriptPath(accountId, scriptName),
-      body: await uploadForm(
-        api,
-        accountId,
-        scriptPath(accountId, scriptName),
-        upload,
-        secrets ?? "keep"
-      ),
-      idempotent: upload.metadata.migrations === undefined,
-    },
-    z.unknown()
-  );
 };
 
 const serviceSchema = z.object({
@@ -510,129 +313,6 @@ export const setScriptSubdomain = async (
   );
 };
 
-/**
- * Cloudflare's refusal of a deployment that would change the Worker's
- * secrets, such as a rollback to a version from before a secret changed.
- */
-export const secretsWouldChangeCode = 10_220;
-
-/** Whether `error` is Cloudflare refusing a deployment that would change secrets. */
-export const isSecretsConflict = (error: unknown): boolean =>
-  error instanceof CloudflareApiError &&
-  error.codes.includes(secretsWouldChangeCode);
-
-/**
- * Splits `scriptName`'s traffic between `versions` by their percentages,
- * which add up to 100, noting why: a gradual deployment's step, or all of
- * it to one version (`deployVersion`). Each version runs with its own
- * secrets; `force` as for `deployVersion`.
- */
-export const deployVersions = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  versions: WorkerDeployment["versions"],
-  { message, force = false }: { message: string; force?: boolean }
-): Promise<WorkerDeployment> =>
-  await api.call(
-    {
-      method: "POST",
-      path: `${scriptPath(accountId, scriptName)}/deployments`,
-      ...(force ? { query: { force: "true" } } : {}),
-      json: {
-        strategy: "percentage",
-        versions,
-        annotations: { "workers/message": message },
-      },
-    },
-    deploymentSchema
-  );
-
-/**
- * Sends all of `scriptName`'s traffic to `versionId`, noting why. Secrets
- * belong to versions, so this deploys that version's secrets too: a
- * rollback reverts any secret changed since. Cloudflare refuses that
- * (`isSecretsConflict`) unless `force` says it's meant.
- */
-export const deployVersion = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  versionId: string,
-  options: { message: string; force?: boolean }
-): Promise<WorkerDeployment> =>
-  await deployVersions(
-    api,
-    accountId,
-    scriptName,
-    [{ version_id: versionId, percentage: 100 }],
-    options
-  );
-
-/**
- * Sets the secret `name` on `scriptName`, for first-time setup only. It
- * makes a new version from the latest one and deploys it at once, so
- * Cloudflare refuses it (10215) whenever the latest version isn't the one
- * deployed: while an uploaded version waits for its deployment, and after
- * any rollback. A rollout sets secrets with `uploadVersionWithSecrets`
- * instead. The value goes only into the request body: never into a path
- * or an error.
- */
-export const putSecret = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  secret: Secret
-): Promise<void> => {
-  await api.call(
-    {
-      method: "PUT",
-      path: `${scriptPath(accountId, scriptName)}/secrets`,
-      json: { name: secret.name, text: secret.value, type: "secret_text" },
-    },
-    z.unknown()
-  );
-};
-
-/** The names of `scriptName`'s secrets: the API never returns their values. */
-export const listSecretNames = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string
-): Promise<string[]> => {
-  const secrets = await api.call(
-    { method: "GET", path: `${scriptPath(accountId, scriptName)}/secrets` },
-    z.array(z.object({ name: z.string() }))
-  );
-  return secrets.map(({ name }) => name);
-};
-
-/**
- * Removes the secret `name` from `scriptName`, deploying a new version as
- * `putSecret` does. One that's already gone counts as removed, so a retried
- * step succeeds.
- */
-export const deleteSecret = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  name: string
-): Promise<void> => {
-  try {
-    await api.call(
-      {
-        method: "DELETE",
-        path: `${scriptPath(accountId, scriptName)}/secrets/${encodeURIComponent(name)}`,
-      },
-      z.unknown()
-    );
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
-  }
-};
-
 /** Replaces `scriptName`'s cron triggers with `crons`. */
 export const putSchedules = async (
   api: CloudflareApi,
@@ -647,23 +327,6 @@ export const putSchedules = async (
       path: `${scriptPath(accountId, scriptName)}/schedules`,
       json: crons.map((cron) => ({ cron })),
       ...(signal === undefined ? {} : { signal }),
-    },
-    z.unknown()
-  );
-};
-
-/** Creates or updates the Workflow `name`, run by `className` in `scriptName`. */
-export const putWorkflow = async (
-  api: CloudflareApi,
-  accountId: string,
-  name: string,
-  { className, scriptName }: { className: string; scriptName: string }
-): Promise<void> => {
-  await api.call(
-    {
-      method: "PUT",
-      path: `/accounts/${accountId}/workflows/${name}`,
-      json: { class_name: className, script_name: scriptName },
     },
     z.unknown()
   );
@@ -834,8 +497,10 @@ export const deleteTargetScript = async (
  * namespace has no gradual deployments), keeping the secrets its latest
  * version has (`keep_bindings`): a placed client's secrets are delivered
  * after it, by name (`putTargetSecret`). An upload that runs a Durable
- * Object migration isn't retried after a server error or no answer, as
- * `uploadScript`: the caller reads the script's migration tag to find out.
+ * Object migration isn't retried after a server error or no answer: if it
+ * went through, its migration ran, and sending it again would be refused
+ * on the migration's tag. The caller reads the script's migration tag to
+ * find out.
  */
 export const uploadTargetScript = async (
   api: CloudflareApi,
@@ -848,7 +513,7 @@ export const uploadTargetScript = async (
     {
       method: "PUT",
       path,
-      body: await uploadForm(api, target.accountId, path, upload, "keep"),
+      body: await uploadForm(api, target.accountId, path, upload),
       idempotent: upload.metadata.migrations === undefined,
       ...(signal === undefined ? {} : { signal }),
     },

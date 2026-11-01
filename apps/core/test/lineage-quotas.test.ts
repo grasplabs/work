@@ -3,36 +3,25 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import {
-  admitAttempt,
-  admitChild,
-  quotaPolicy,
-} from "../src/workflows/quotas.ts";
+import { admitAttempt } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { mockIdp } from "./idp.ts";
-import { racingDb } from "./racing-db.ts";
-import {
-  finished,
-  runObject,
-  sleeping,
-  withPolicyReadFailingOnce,
-  woken,
-} from "./runs.ts";
+import { withQuotas } from "./quota-limits.ts";
+import { finished, runObject, sleeping, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how often a step is tried and how long its steps run in all, each held
-// to the deployment's quota policy (`QUOTA_LIMITS`, which a test sets as
-// an operator would) and counted durably, so no retry, restart, child or
+// to the quota limits (`TEST_QUOTA_LIMITS`, which a test lowers to reach
+// them) and counted durably, so no retry, restart, child or
 // wait starts a count afresh. Runs, the engine, the dispatcher and core's
 // database are real. Child runs start the way core starts a run under
 // another (`startRun`'s `parent`): no App or run can name a parent.
@@ -41,54 +30,6 @@ const idp = mockIdp();
 
 /** Someone signed in, with their API. */
 type Builder = Awaited<ReturnType<typeof signedInApi>>;
-
-/**
- * The generation of the next policy a test sets: each a new one, higher
- * than any before, as an operator's must be (core applies none lower than
- * the highest it recorded, `quotaPolicy`).
- */
-let generations = 100;
-
-/** The policy core applies with `QUOTA_LIMITS` set to `value` (none: unset). */
-const policyUnder = async (value?: unknown) => {
-  env.QUOTA_LIMITS = value;
-  const { generation, limits } = await quotaPolicy(env);
-  return { generation, steps: limits.workflowSteps };
-};
-
-/** A policy setting `limits`, under a generation of its own. */
-const nextPolicy = (limits: Record<string, number>) => {
-  generations += 1;
-  return { generation: generations, limits };
-};
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/**
- * What `run` returns, with the operator's quota policy `limits` in force,
- * under a new generation; the deployment's own limits again after it,
- * under a newer one.
- */
-const withQuotas = async <Result>(
-  limits: Record<string, number>,
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const retryDelay = env.WORKFLOW_RETRY_DELAY_MS;
-  env.QUOTA_LIMITS = nextPolicy(limits);
-  // A step's retries come at once.
-  env.WORKFLOW_RETRY_DELAY_MS = "0";
-  try {
-    return await run();
-  } finally {
-    env.QUOTA_LIMITS = nextPolicy(configuredLimits);
-    if (retryDelay === undefined) {
-      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
-    } else {
-      env.WORKFLOW_RETRY_DELAY_MS = retryDelay;
-    }
-  }
-};
 
 /** Starts a run of `workflow` under `parent`, as core starts a child run. */
 const startChild = async (
@@ -229,7 +170,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("admit a lineage's next child by the quota policy as it is then, counting on from what the lineage already started", async () => {
+  it("admit a lineage's next child by the quota limits as they are then, counting on from what the lineage already started", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await noopApp(builder);
     const root = await builder.api.workflows.start(app, "noop");
@@ -256,7 +197,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("try a step no more often than a step may be tried, declaring the most retries it may or none, failing with its own error, and fewer once the operator lowers it", async () => {
+  it("try a step no more often than a step may be tried, declaring the most retries it may or none, failing with its own error, and fewer once the limit is lowered", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, {
       ...hanging("declared"),
@@ -747,159 +688,7 @@ ${working("c", 10)}
     );
   });
 
-  it("apply a policy only under a generation higher than any core recorded, or the highest with the limits recorded for it, and keep the last one otherwise", async () => {
-    const first = nextPolicy({ workflowSteps: 50 });
-    const higher = nextPolicy({ workflowSteps: 40 });
-
-    const result = {
-      first: await policyUnder(first),
-      // The same generation again, as recorded: it applies.
-      again: await policyUnder({ ...first, limits: { workflowSteps: 50 } }),
-      // The same generation with other limits: the recorded ones hold.
-      changed: await policyUnder({ ...first, limits: { workflowSteps: 10 } }),
-      higher: await policyUnder(higher),
-      // A lower generation, even as recorded once: ignored.
-      lower: await policyUnder(first),
-      // Taken away: the last recorded policy holds, not the platform's.
-      unset: await policyUnder(),
-    };
-    env.QUOTA_LIMITS = nextPolicy(configuredLimits);
-
-    expect(result).toStrictEqual({
-      first: { generation: first.generation, steps: 50 },
-      again: { generation: first.generation, steps: 50 },
-      changed: { generation: first.generation, steps: 50 },
-      higher: { generation: higher.generation, steps: 40 },
-      lower: { generation: higher.generation, steps: 40 },
-      unset: { generation: higher.generation, steps: 40 },
-    });
-  });
-
-  it("go on with a run whose quota policy can't be read for a moment as it loads, and complete it", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "steady",
-        `  return await step.do("a", { description: "Work" }, async () => 1);`,
-        { a: 1 }
-      )
-    );
-    const result = await withPolicyReadFailingOnce(async () => {
-      const run = await builder.api.workflows.start(app, "steady");
-      await finished(run.id);
-      return await builder.api.workflows.status(run.id);
-    });
-
-    expect({
-      failed: result.failed,
-      status: result.value.status,
-      output: result.value.output,
-    }).toStrictEqual({ failed: true, status: "completed", output: 1 });
-  });
-
-  it("refuse a step past the policy's steps as it is admitted, whatever limit the run loaded with while the policy couldn't be read", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Its own steps a to g (the SDK's $params is outside the allowance):
-    // f is its sixth.
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "long",
-        `${["a", "b", "c", "d", "e", "f", "g"].map((name) => working(name, 1)).join("\n")}
-  return 1;`,
-        { a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1 }
-      )
-    );
-
-    // The policy as the run's attempts are admitted: five steps. Its load
-    // can't read it, and counts by the limit it last read.
-    const result = await withQuotas(
-      { workflowSteps: 5 },
-      async () =>
-        await withPolicyReadFailingOnce(async () => {
-          const run = await builder.api.workflows.start(app, "long");
-          await finished(run.id);
-          return run.id;
-        })
-    );
-    const events = await allEvents();
-
-    expect({
-      failed: result.failed,
-      with: await failedWith(result.value),
-      completed: events
-        .filter(
-          ({ action, target }) =>
-            action === "workflow.step.completed" && target?.id === result.value
-        )
-        .map(({ detail }) => detail.step),
-    }).toStrictEqual({
-      failed: true,
-      with: "workflow.lineage_limit",
-      completed: ["$params", "a", "b", "c", "d", "e"],
-    });
-  });
-
-  it("refuse a step's run again after a wait for load past the policy's steps, whatever limit the run loaded with while the policy couldn't be read", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Its own steps: a, the pause and b, its third.
-    const app = await appWith(builder, {
-      ...workflowFiles(
-        "paced",
-        `${working("a", 1)}
-  await step.sleep("pause", { description: "Wait", duration: "3 seconds" });
-${working("b", 1)}
-  return 1;`,
-        { a: 1, b: 1 }
-      ),
-      ...workflowFiles("noop", "  return 1;"),
-    });
-    const holderRun = await builder.api.workflows.start(app, "noop");
-    await finished(holderRun.id);
-
-    const result = await withQuotas({ workflowPersonAttempts: 1 }, async () => {
-      // The person's one attempt at once held while the run pauses: b
-      // waits for load.
-      const run = await builder.api.workflows.start(app, "paced");
-      await sleeping(run.id, "pause");
-      const held = await admitAttempt(
-        env,
-        ownerOf(holderRun.id, app, builder.userId),
-        attemptOf(`hold:${run.id}`)
-      );
-      await vi.waitFor(
-        async () => {
-          await expect(busyWaitsOf(run.id)).resolves.toBeGreaterThan(0);
-        },
-        { timeout: 30_000, interval: 200 }
-      );
-      // The operator lowers the steps to one; the run's next load can't
-      // read the policy for its step limit (`stepLimitOf`), and counts by
-      // the limit it last read. The share coming back and the run's own
-      // wakes read the policy too, each in its own time: the read that
-      // fails is the load's, not whichever comes first.
-      return await withQuotas(
-        { workflowPersonAttempts: 1, workflowSteps: 1 },
-        async () =>
-          await withPolicyReadFailingOnce(
-            async () => {
-              await held.settle();
-              await finished(run.id);
-              return run.id;
-            },
-            { by: "stepLimitOf" }
-          )
-      );
-    });
-
-    expect({
-      failed: result.failed,
-      with: await failedWith(result.value),
-    }).toStrictEqual({ failed: true, with: "workflow.lineage_limit" });
-  });
-
-  it("count only a run's own steps against the operator's allowance, so an allowance of one runs a one-step workflow and refuses a second step", async () => {
+  it("count only a run's own steps against the allowance, so an allowance of one runs a one-step workflow and refuses a second step", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, {
       ...workflowFiles("one", `${working("a", 1)}\n  return 1;`, { a: 1 }),
@@ -924,52 +713,6 @@ ${working("b", 1)}
     expect(result).toStrictEqual({
       one: "completed",
       two: "workflow.too_many_steps",
-    });
-  });
-
-  it("admit by a generation recorded between an admission's read of the policy and its write, never by the older one it read", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await noopApp(builder);
-    const root = await builder.api.workflows.start(app, "noop");
-    await finished(root.id);
-    const parent = { id: root.id, rootRunId: null, depth: 0 };
-    // Each admission reads the policy under the platform's limits, then a
-    // newer generation, allowing one attempt a step and one level, is
-    // recorded just before its write.
-    const racing = (newer: Record<string, number>) => {
-      let recorded = false;
-      return {
-        ...env,
-        DB: racingDb(async () => {
-          if (!recorded) {
-            recorded = true;
-            await quotaPolicy({ ...env, QUOTA_LIMITS: nextPolicy(newer) });
-          }
-        }),
-      };
-    };
-
-    const owner = ownerOf(root.id, app, builder.userId);
-    const result = await withQuotas({}, async () => ({
-      // The step's first attempt ran; its second is the one raced.
-      attempt: await outcome(
-        (async () => {
-          await admitAttempt(env, owner, attemptOf("raced"));
-          return await admitAttempt(
-            racing({ workflowAttemptsPerStep: 1 }),
-            owner,
-            { ...attemptOf("raced"), number: 2 }
-          );
-        })()
-      ),
-      child: await outcome(
-        admitChild(racing({ workflowNestingLevels: 1 }), parent)
-      ),
-    }));
-
-    expect(result).toStrictEqual({
-      attempt: "workflow.too_many_attempts",
-      child: "workflow.lineage_limit",
     });
   });
 

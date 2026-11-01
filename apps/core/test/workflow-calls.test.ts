@@ -72,9 +72,8 @@ import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled, StepError } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { cpuLimitKill, modelCallLimitOf } from "../src/workflows/host.ts";
+import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
-import { quotaPolicy } from "../src/workflows/quotas.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
@@ -98,15 +97,15 @@ import {
   fakeProviderFor,
 } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { withQuotas } from "./quota-policies.ts";
+import { withQuotas } from "./quota-limits.ts";
 import {
   admittedFreely,
   liveStatus,
   resumed,
+  runInstance,
   runObject,
   stopped,
   whileEngineRefuses,
-  withPolicyReadFailingOnce,
   woken,
 } from "./runs.ts";
 import {
@@ -141,10 +140,6 @@ const allowedModel = "mistral/mistral-large-latest";
 const chooseModel = async (): Promise<void> => {
   await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
 };
-
-/** Whether `value` is a function, as host.ts's `modelCallLimitOf` is. */
-const isModelCallLimitOf = (value: unknown): value is typeof modelCallLimitOf =>
-  typeof value === "function";
 
 const identityOf = (userId: string, role: Role): Identity => ({
   userId,
@@ -183,8 +178,11 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
-/** The read of the quota policy, as the ledger admits a model request. */
-const quotaRead = /from "quota_policies"/iu;
+/**
+ * The read of a person's teams, as a model request's scopes are read just
+ * before the ledger admits it (model-budgets.ts, `limitedPersonOf`).
+ */
+const scopesRead = /from "team_members"/iu;
 
 /** A call's read of its run's authority (resource-authority.ts). */
 const authorityRead = /approval\.alias/iu;
@@ -509,6 +507,7 @@ const mailingWorkflow = async (
     plan = [],
     sharing,
     plain = false,
+    retry,
   }: {
     before?: unknown[];
     to?: string;
@@ -520,9 +519,24 @@ const mailingWorkflow = async (
      * run's output: nothing after the send is admitted or evaluated.
      */
     plain?: boolean;
+    /** A retry policy of a try's catch around the send. */
+    retry?: Record<string, unknown>;
   } = {}
 ) => {
   const key = await mailContract(admin);
+  const send = {
+    send: {
+      call: "grasp.connector",
+      with: {
+        binding: "mail",
+        operation: "mail.send",
+        arguments: { to, subject: "${ $params.token }" },
+      },
+      ...(plain
+        ? { output: { as: "${ {status: .messageId} }" } }
+        : { export: { as: "${ {sent: .messageId} }" } }),
+    },
+  };
   const { workflow, executable } = await published(by, {
     bindings: {
       mail: { kind: "connector", contract: key },
@@ -556,19 +570,11 @@ const mailingWorkflow = async (
               },
             },
           ]),
-      {
-        send: {
-          call: "grasp.connector",
-          with: {
-            binding: "mail",
-            operation: "mail.send",
-            arguments: { to, subject: "${ $params.token }" },
-          },
-          ...(plain
-            ? { output: { as: "${ {status: .messageId} }" } }
-            : { export: { as: "${ {sent: .messageId} }" } }),
-        },
-      },
+      ...[send].map((task) =>
+        retry === undefined
+          ? task
+          : { guard: { try: [task], catch: { retry } } }
+      ),
       ...(plain
         ? []
         : [pause, { finish: { set: { status: "${ $context.sent }" } } }]),
@@ -1476,7 +1482,7 @@ describe("grasp.model calls of JSON workflows", () => {
       if (
         authorized.once &&
         revoking.length === 0 &&
-        quotaRead.test(statement)
+        scopesRead.test(statement)
       ) {
         revoking.push(
           prepare(
@@ -1578,108 +1584,6 @@ describe("grasp.model calls of JSON workflows", () => {
       revokedRequests: 0,
       limited: { status: "failed", code: "workflow.model_call_limit" },
       limitedRequests: 1,
-    });
-  });
-});
-
-describe("a JSON workflow's model call limit, when the quota policy can't be read as its run loads", () => {
-  beforeAll(chooseModel);
-
-  it("holds the run to the limit this isolate last read, refusing a call past it", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    // Two model calls, and the workflow's own limit of two: only the
-    // host's ceiling, the policy's limit, can stop the second.
-    const key = `summary-${unique()}`;
-    await publishCatalogContract(env, admin, { key, kind: "model" });
-    const greet = (id: string) => ({
-      [id]: {
-        call: "grasp.model",
-        with: {
-          binding: "summary",
-          instructions: "Greet them.",
-          input: { who: "${ $workflow.input.who }" },
-          outputSchema: objectSchema({ line: { type: "string" } }),
-        },
-      },
-    });
-    const { workflow } = await published(ada, {
-      bindings: { summary: { kind: "model", contract: key } },
-      limits: { maxModelCalls: 2 },
-      tasks: [
-        greet("greet"),
-        greet("again"),
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    // A run loaded under a policy of one model call a lineage: the limit
-    // this isolate last read.
-    await providerAnswering(answer('{"line":"Hello Ada"}'));
-    const lowered = await withQuotas({ lineageModelRequests: 1 }, async () =>
-      endOf(await ended(ada, workflow.id, await started(ada, workflow.id)))
-    );
-    // The deployment's own limit again, recorded first, so the next read
-    // of it is one query: the load's, which fails.
-    await quotaPolicy(env);
-    const provider = await providerAnswering(
-      answer('{"line":"Hello Ada"}'),
-      answer('{"line":"Never sent"}')
-    );
-    const { failed, value } = await withPolicyReadFailingOnce(
-      async () =>
-        endOf(await ended(ada, workflow.id, await started(ada, workflow.id))),
-      { by: "modelCallLimitOf" }
-    );
-
-    expect({
-      lowered,
-      failed,
-      end: value,
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      lowered: { status: "failed", code: "workflow.model_call_limit" },
-      failed: true,
-      // The policy now admits a lineage's second request: the limit last
-      // read, not the platform's, refuses it.
-      end: { status: "failed", code: "workflow.model_call_limit" },
-      requests: 1,
-    });
-  });
-
-  it("holds a run on an isolate that never read the policy to the platform's limit", async () => {
-    // A fresh isolate's module, which has read no policy yet: host.ts
-    // loaded again, under an ID of its own. Not by resetting the module
-    // registry: the files after this one share its runtime (`isolate:
-    // false`), and their setup would load anew what it loads once per
-    // runtime, the env as configured among it (configured-env.ts).
-    const freshHost = "../src/workflows/host.ts?isolate=fresh";
-    const fresh: unknown = await import(
-      /* @vite-ignore */
-      freshHost
-    );
-    const freshLimitOf: unknown =
-      typeof fresh === "object" && fresh !== null
-        ? Reflect.get(fresh, "modelCallLimitOf")
-        : undefined;
-    if (
-      !isModelCallLimitOf(freshLimitOf) ||
-      freshLimitOf === modelCallLimitOf
-    ) {
-      throw new Error("Expected host.ts loaded afresh");
-    }
-    const { failed, value } = await withPolicyReadFailingOnce(
-      async () => await freshLimitOf(env),
-      { by: "modelCallLimitOf" }
-    );
-
-    expect({ failed, limit: value }).toStrictEqual({
-      failed: true,
-      limit: platformLimits.lineageModelRequests,
     });
   });
 });
@@ -2369,6 +2273,72 @@ describe("runs started by a restricted App", () => {
     });
   });
 
+  it("wait for their person when a send that failed for a moment is held on its retry, then send it once confirmed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Its first round can't reach the mail server for a moment, through
+    // its step's own attempts (connect lists the server's tools before it
+    // holds anything), so the try's retry calls again under the send's
+    // key, which connect holds for Ada.
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      to: "Ada",
+      plain: true,
+      plan: ["unavailable", "unavailable", "unavailable"],
+      retry: {
+        delay: { milliseconds: 10 },
+        limit: { attempt: { count: 2 } },
+      },
+    });
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Long enough for a host that rerun the held call at once to spend
+    // the run's steps on it.
+    await scheduler.wait(3000);
+    const runWhileHeld = await resourceRunFor(env, ada, workflow.id, runId);
+    const mailWhileHeld = await mail.did();
+    const whileHeld = {
+      status: runWhileHeld.status,
+      calls: mailWhileHeld.calls,
+    };
+    await confirmPendingAction(env, ada, held.id, held.inputHash);
+    const run = await ended(ada, workflow.id, runId);
+    // The steps the run started: one rerun of the held call, once Ada
+    // decided, never one for each check while she hadn't.
+    using events = await runInstance(runId).subscribe({
+      filter: ["attempt_started"],
+    });
+    const steps: string[] = [];
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one event at a time, in order
+      const { done, value } = await events.next();
+      if (done === true) {
+        break;
+      }
+      if (value.type === "attempt_started") {
+        steps.push(value.stepName);
+      }
+    }
+    const sent = await mail.did();
+    expect({
+      whileHeld,
+      end: endOf(run),
+      calls: sent.calls,
+      retried: steps.includes("task:send:retry:2-1"),
+      heldReruns: steps.filter((name) =>
+        /^task:send:retry:2:held:\d+:run-/u.test(name)
+      ).length,
+    }).toStrictEqual({
+      whileHeld: { status: "running", calls: 0 },
+      end: { status: "completed", output: { status: "message-1" } },
+      calls: 1,
+      retried: true,
+      heldReruns: 1,
+    });
+  });
+
   it("are judged by the model gateway's data rules as restricted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -2582,6 +2552,9 @@ const keptMarks = (): TriedOnceMarks => {
     markUnstarted: (key, attempt) => {
       unstarted.add(`${attempt}:${key}`);
     },
+    markStarted: (key, attempt) => {
+      unstarted.delete(`${attempt}:${key}`);
+    },
     unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
     keepFailure: (key, attempt, error) => {
       failures.set(`${attempt}:${key}`, error);
@@ -2793,6 +2766,74 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
         { name: "TimeoutError", code: null },
       ],
       ran: ["first", "greet, next activation"],
+      requests: 1,
+    });
+  });
+
+  it("makes once, in the next activation, a call whose attempt waited for a slot as its activation died", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const busy = Array.from({ length: 8 }, (_, index) => ({
+      [`busy-${index}`]: { set: { stage: "busy" } },
+    }));
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold, ...busy],
+    });
+    const runId = await started(ada, workflow.id);
+    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
+    const runKey = unique();
+    const marks = keptMarks();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      bindings,
+      failed,
+    });
+    // Eight attempts hold every slot of the activation, and never end.
+    for (const index of busy.keys()) {
+      void first.do(
+        `task:busy-${index}`,
+        adaData,
+        async () => await Promise.withResolvers<never>().promise
+      );
+    }
+    // The call's first attempt waits for a slot as its activation dies.
+    void first.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, first activation");
+      return await called(attempt);
+    });
+    await scheduler.wait(100);
+    const second = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await second.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, next activation");
+      return await called(attempt);
+    });
+    // (What the forged module then answers for its record isn't this
+    // test's: only that its call went out, once, in the next activation,
+    // never refused as left open.)
+    expect({
+      leftOpen: failed.filter(
+        (failure) =>
+          failure instanceof Object &&
+          "name" in failure &&
+          failure.name === "TimeoutError"
+      ),
+      ran,
+      requests: provider.requests.length,
+    }).toStrictEqual({
+      leftOpen: [],
+      ran: ["greet, next activation"],
       requests: 1,
     });
   });

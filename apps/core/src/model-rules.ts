@@ -254,12 +254,12 @@ export const judgeCall = async (
   rules: ModelRules,
   input: RulesInput,
   /**
-   * For a platform feature on Grasp's own key: whether its route goes to
-   * the EU (`platformRouteOf`). Where it goes decides whether an EU-only
-   * call may take it, never the deployment's EU models, which name the
-   * models of its own providers.
+   * Whether it is one of Grasp's own features, on Grasp's own key: always
+   * at its provider's EU data residency host (`platformRouteOf`), which
+   * is Grasp's to keep, so an EU-only call may take it. The deployment's
+   * EU models name the models of its own providers, never these.
    */
-  platformInEu?: boolean
+  platform = false
 ): Promise<{ ok: true; judged: Judged } | ({ ok: false } & Refusal)> => {
   const restricted = await restrictedWork(env, input);
   if (restricted === undefined) {
@@ -267,7 +267,7 @@ export const judgeCall = async (
   }
   const { eu, sensitive: dataRule } = rules;
   const euOnly = eu === undefined ? undefined : euOnlyBecause(eu, input);
-  const staysInEu = platformInEu ?? eu?.models.includes(input.model) === true;
+  const staysInEu = platform || eu?.models.includes(input.model) === true;
   if (euOnly !== undefined && !staysInEu) {
     return { ok: false, code: "model.eu_only", because: euOnly };
   }

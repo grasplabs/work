@@ -1,7 +1,6 @@
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -19,6 +18,7 @@ import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
@@ -30,12 +30,12 @@ import {
 
 // Fair admission of model requests (model-admission.ts): the client's
 // provider requests in flight at once, in all, for one person and of one
-// App, each held to its share in the deployment's quota policy, in the
+// App, each held to its share in the quota limits, in the
 // model ledger's one transaction with every budget; the calls waiting for
 // a share keep places in its queue, served by turn and first come, first
 // served, never behind a share that is full. The model provider behind
-// connect is the outside system (test/model-provider.ts). The ledger, the
-// policy and the audit log are real. Where a test needs a request in flight that nobody
+// connect is the outside system (test/model-provider.ts). The ledger and
+// the audit log are real. Where a test needs a request in flight that nobody
 // will settle (its isolate died), it admits one in the ledger as the
 // gateway would and walks away.
 
@@ -45,20 +45,17 @@ const mistral = "mistral/mistral-large-latest";
 const sonnet = "anthropic/claude-sonnet-4-5";
 
 /**
- * The tests' policy: three requests in flight for the whole client, and
+ * The tests' quota limits: three requests in flight for the whole client, and
  * three asked for each person and each App, which the gateway holds to two
  * each, one less than the client's, so one person or one App always leaves
  * room (`modelSharesOf`); and two places in the queue for each person.
  */
 const policy = {
-  generation: 2,
-  limits: {
-    ...quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits,
-    modelClientRequests: 3,
-    modelPersonRequests: 3,
-    modelAppRequests: 3,
-    modelQueuedPerPerson: 2,
-  },
+  ...configuredLimits,
+  modelClientRequests: 3,
+  modelPersonRequests: 3,
+  modelAppRequests: 3,
+  modelQueuedPerPerson: 2,
 };
 
 /** An answer that streams its first characters, then waits for `until`. */
@@ -75,12 +72,12 @@ const answered: ProviderReply = {
   outputTokens: 5,
 };
 
-/** Core's env under the tests' policy, with `more` over it. */
+/** Core's env under the tests' quota limits, with `more` over it. */
 const coreWith = (more: Partial<Env> = {}) => {
   const coreEnv: Env = {
     ...env,
     MODEL_GATEWAY: {},
-    QUOTA_LIMITS: policy,
+    TEST_QUOTA_LIMITS: policy,
     ...more,
   };
   return { call: models(coreEnv).call, agent: models(coreEnv).agent };
@@ -366,11 +363,15 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("holds no share while a transcription is open, so calls go on beside it", async () => {
     await fakeProviderFor([mistral], answered);
-    const coreEnv: Env = { ...env, MODEL_GATEWAY: {}, QUOTA_LIMITS: policy };
+    const coreEnv: Env = {
+      ...env,
+      MODEL_GATEWAY: {},
+      TEST_QUOTA_LIMITS: policy,
+    };
     // As many sockets open as the client has shares in all.
     const open = await Promise.all(
       Array.from(
-        { length: policy.limits.modelClientRequests },
+        { length: policy.modelClientRequests },
         async () =>
           await models(coreEnv).listen({
             model: "openai/gpt-4o-transcribe",
@@ -772,7 +773,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
-  it("gives a waiting call's place up when the policy can't be read as it asks again", async () => {
+  it("gives a waiting call's place up when its scopes can't be read as it asks again", async () => {
     const release = Promise.withResolvers<boolean>();
     let failing = false;
     // Core's database, failing once told to, as an unreachable one would.
@@ -800,7 +801,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       outcome(call(callBy(newPerson().userId, 0))),
     ];
     await until(() => fake.requests.length === 2);
-    // A run's step, whose call needs its lineage's policy for every ask.
+    // A run's step, whose call reads its scopes for every ask.
     const queue = queueOf();
     const step = outcome(
       call(
@@ -1071,44 +1072,6 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
-  it("holds back a call whose policy can't be read once the ledger knows a newer one", async () => {
-    // A ledger of this test's own, which a newer policy reached already.
-    const own = `ledger-${crypto.randomUUID()}`;
-    const ledgerNamespace = new Proxy(env.MODEL_LEDGER, {
-      get: (namespace, name): unknown =>
-        name === "getByName"
-          ? () => namespace.getByName(own)
-          : Reflect.get(namespace, name, namespace),
-    });
-    await env.MODEL_LEDGER.getByName(own).admit({
-      ...request("someone", null),
-      policyGeneration: policy.generation + 1,
-    });
-    // Core's database, failing only to read the quota policy.
-    const db = new Proxy(env.DB, {
-      get: (target, name): unknown =>
-        name === "prepare"
-          ? (query: string) => {
-              if (query.includes("quota_policies")) {
-                throw new Error("D1_ERROR: the database is unavailable");
-              }
-              return target.prepare(query);
-            }
-          : Reflect.get(target, name, target),
-    });
-    const { fake, call } = await gatewayWith([answered], {
-      DB: db,
-      MODEL_LEDGER: ledgerNamespace,
-    });
-
-    // Its shares, from the last policy read or the platform's own, would
-    // be above the newer policy's: it is held back, not admitted.
-    expect({
-      told: await outcome(call(callBy(newPerson().userId, 0))),
-      sent: fake.requests.length,
-    }).toStrictEqual({ told: "model.quota_policy_behind", sent: 0 });
-  });
-
   it("keeps a step's newer call's wait whatever an older call's late notes say", async () => {
     const db = drizzle(env.DB);
     const runId = `run-${crypto.randomUUID()}`;
@@ -1170,9 +1133,9 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       paused(release.promise),
       { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 }
     );
-    const before = { rules: env.MODEL_GATEWAY, quotas: env.QUOTA_LIMITS };
+    const before = { rules: env.MODEL_GATEWAY, quotas: env.TEST_QUOTA_LIMITS };
     env.MODEL_GATEWAY = {};
-    env.QUOTA_LIMITS = policy;
+    env.TEST_QUOTA_LIMITS = policy;
     try {
       // The owner's own two calls, elsewhere, fill the owner's share.
       const holding = [
@@ -1202,7 +1165,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     } finally {
       release.resolve(true);
       env.MODEL_GATEWAY = before.rules;
-      env.QUOTA_LIMITS = before.quotas;
+      env.TEST_QUOTA_LIMITS = before.quotas;
     }
   });
 
@@ -1231,9 +1194,9 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 }
     );
     // The runs the dispatcher runs use core's own env.
-    const before = { rules: env.MODEL_GATEWAY, quotas: env.QUOTA_LIMITS };
+    const before = { rules: env.MODEL_GATEWAY, quotas: env.TEST_QUOTA_LIMITS };
     env.MODEL_GATEWAY = {};
-    env.QUOTA_LIMITS = policy;
+    env.TEST_QUOTA_LIMITS = policy;
     try {
       // Two calls of the App, for others, fill its share.
       const appId = appIdSchema.parse(app);
@@ -1290,7 +1253,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     } finally {
       release.resolve(true);
       env.MODEL_GATEWAY = before.rules;
-      env.QUOTA_LIMITS = before.quotas;
+      env.TEST_QUOTA_LIMITS = before.quotas;
     }
   });
 });

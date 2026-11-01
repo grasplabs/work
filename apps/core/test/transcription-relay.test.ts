@@ -85,26 +85,20 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns under the deployment's rules `config` and the
- * platform's AI settings `platform`, budgets counted in `month`, and the realtime
- * sockets OpenAI's fake took meanwhile.
+ * What `run` returns under the deployment's rules `config`, budgets
+ * counted in `month`, and the realtime sockets OpenAI's fake took
+ * meanwhile.
  */
 const relaying = async <T>(
   run: () => Promise<T>,
-  {
-    config = {},
-    platform,
-    month,
-  }: { config?: object; platform?: unknown; month?: string } = {}
+  { config = {}, month }: { config?: object; month?: string } = {}
 ): Promise<{ upstream: Upstream; result: T }> => {
   const before = {
     gateway: env.MODEL_GATEWAY,
-    platform: env.PLATFORM_AI,
     month: env.MODEL_BUDGET_MONTH,
   };
   const { length: known } = await realtimeSockets();
   env.MODEL_GATEWAY = config;
-  Reflect.set(env, "PLATFORM_AI", platform);
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
@@ -114,7 +108,6 @@ const relaying = async <T>(
     return { upstream: { opened: sockets.slice(known) }, result };
   } finally {
     env.MODEL_GATEWAY = before.gateway;
-    env.PLATFORM_AI = before.platform;
     env.MODEL_BUDGET_MONTH = before.month;
   }
 };
@@ -946,65 +939,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it.each([
-    [
-      "the platform's settings name a model the gateway doesn't offer",
-      {},
-      { transcription: { provider: "openai", model: "gpt-9-transcribe" } },
-      "model.not_allowed",
-      "openai/gpt-9-transcribe",
-    ],
-    [
-      "the sensitive-data rule doesn't name it",
-      { sensitive: { models: [textModel] } },
-      undefined,
-      "model.sensitive_data",
-      transcriptionModel,
-    ],
-    [
-      "the deployment stays in the EU and Grasp's project is in the US, whatever its EU models list",
-      { eu: { deployment: true, models: [textModel, transcriptionModel] } },
-      { region: "us" },
-      "model.eu_only",
-      transcriptionModel,
-    ],
-  ] as const)(
-    "refuses a socket when %s, opening nothing upstream, audited as a refused model call",
-    async (_, config, platform, reason, model) => {
-      const { ada } = await openedTwo();
-      const head = await logHead();
-
-      const { upstream, result } = await relaying(
-        async () => {
-          const page = await listen();
-          page.start({
-            type: "start",
-            language: "en",
-            sampleRate: 16_000,
-            link: ada,
-          });
-          return await refusalOf(page);
-        },
-        { config, platform }
-      );
-
-      const events = await eventsAfter(head);
-      const refused = events.filter(({ action }) => action === "model.refused");
-      expect({
-        ...result,
-        upstream: upstream.opened.length,
-        refused: refused.map(({ detail }) => [detail?.reason, detail?.model]),
-      }).toStrictEqual({
-        errors: ["transcription.unavailable"],
-        code: 1011,
-        upstream: 0,
-        refused: [[reason, model]],
-      });
-    }
-  );
-
-  it("refuses a socket while the platform's AI settings don't parse, opening nothing upstream", async () => {
+  it("refuses a socket when the sensitive-data rule doesn't name it, opening nothing upstream, audited as a refused model call", async () => {
     const { ada } = await openedTwo();
+    const head = await logHead();
 
     const { upstream, result } = await relaying(
       async () => {
@@ -1017,13 +954,20 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         });
         return await refusalOf(page);
       },
-      { platform: { transcription: { provider: "elevenlabs" } } }
+      { config: { sensitive: { models: [textModel] } } }
     );
 
-    expect({ ...result, upstream: upstream.opened.length }).toStrictEqual({
+    const events = await eventsAfter(head);
+    const refused = events.filter(({ action }) => action === "model.refused");
+    expect({
+      ...result,
+      upstream: upstream.opened.length,
+      refused: refused.map(({ detail }) => [detail?.reason, detail?.model]),
+    }).toStrictEqual({
       errors: ["transcription.unavailable"],
       code: 1011,
       upstream: 0,
+      refused: [["model.sensitive_data", transcriptionModel]],
     });
   });
 

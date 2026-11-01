@@ -9,10 +9,11 @@ import type {
 } from "@earendil-works/pi-ai";
 
 import { adapterFor } from "./model-catalog.ts";
-import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
+import type { RouteApi } from "./model-catalog.ts";
 
-// How the model gateway (models.ts) reaches a model: a transport. The
-// gateway stays the one choke point whatever the transport: the
+// How the model gateway (models.ts) reaches a model: a route through
+// connect (model-transport-connect.ts). The gateway stays the one choke
+// point: the
 // organization's chosen models and the rules (model-rules.ts), the budgets
 // (model-budgets.ts), the model ledger's admission of every provider
 // request before it is sent, and the audit log all run before and around
@@ -33,36 +34,10 @@ import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 // - Typed failures: `failureOfResponse` names a refused response by what
 //   it means for the caller (`TransportFailure`), from its status and
 //   headers alone, never its body, which may quote the prompt.
-// - Capabilities: which providers a transport reaches, and what it can
-//   promise about payload logging and caching (`TransportCapabilities`).
-
-/**
- * The ways a deployment can reach its models: the provider's own API,
- * through connect, which holds the key (model-transport-connect.ts).
- */
-export const transportKinds = ["connect"] as const;
-export type TransportKind = (typeof transportKinds)[number];
-
-/** What a transport can do, as the gateway and the admin read it. */
-export interface TransportCapabilities {
-  /** The providers whose models it reaches. */
-  providers: readonly Provider[];
-  /**
-   * Whether every request it sends asks for its prompt and answer not to
-   * be logged by anything between the gateway and the model.
-   */
-  payloadLoggingOff: boolean;
-  /**
-   * Whether every request it sends asks not to be answered from a shared
-   * cache: a cached answer is one person's, and would be served to
-   * another.
-   */
-  sharedCacheOff: boolean;
-}
 
 /** One model reached one way: everything the gateway needs to send to it. */
 export interface TransportRoute {
-  transport: TransportKind;
+  transport: "connect";
   /** pi's model, pointed at the endpoint, under the name it has there. */
   model: Model<Api>;
   /** The API the endpoint speaks, which picks pi's adapter. */
@@ -89,14 +64,6 @@ export interface TransportRoute {
   logIdOf: (headers: Record<string, string>) => string | undefined;
 }
 
-/** A way to reach models. */
-export interface ModelTransport {
-  kind: TransportKind;
-  capabilities: TransportCapabilities;
-  /** The route to `ref`, or `undefined` when this transport doesn't reach it. */
-  route: (ref: ModelRef) => TransportRoute | undefined;
-}
-
 /**
  * Why a provider request failed, as the gateway acts on it:
  * - `auth`: the endpoint refused the credentials (401, 403). Nothing was
@@ -121,10 +88,6 @@ export type TransportFailure =
   | { kind: "refused"; status: number }
   | { kind: "provider_down"; status: number | undefined }
   | { kind: "budget" };
-
-/** Whether a request that failed `failure`'s way can't have been billed. */
-export const neverTakenOn = (failure: TransportFailure): boolean =>
-  failure.kind !== "provider_down";
 
 /**
  * What a refused response means (`TransportFailure`), from its status, the

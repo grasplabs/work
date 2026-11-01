@@ -1,7 +1,6 @@
 import { runActorOf } from "@grasp-os/shared/audit";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import { modelSpendListed } from "@grasp-os/shared/models";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -10,7 +9,6 @@ import { modelLedger } from "../src/model-ledger.ts";
 import type { LedgerScope } from "../src/model-ledger.ts";
 import { modelForRole, models, modelSettings } from "../src/models.ts";
 import type { ModelCall, ModelsNow } from "../src/models.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import { finished } from "./runs.ts";
@@ -94,10 +92,6 @@ const roomyFair = () => ({
     queuedPerApp: 1000,
   },
 });
-
-/** Values in order, as their JSON sorts. */
-const byJson = (one: unknown, other: unknown): number =>
-  JSON.stringify(one).localeCompare(JSON.stringify(other));
 
 /** The settings as an admin reads them from `coreEnv`. */
 const settingsIn = async (
@@ -271,8 +265,6 @@ describe("model settings", { timeout: 60_000 }, () => {
       },
       month: coreEnv.MODEL_BUDGET_MONTH,
       day: budgetDay(coreEnv),
-      // Nothing held for review: this file's first test.
-      held: [],
       // No App has a model binding here (resource-bindings.test.ts lists them).
       bindings: { listed: [], more: false },
     });
@@ -464,183 +456,6 @@ describe("model settings", { timeout: 60_000 }, () => {
       ].map((userId) => ({ type: "user", userId, name: null }))
     );
     expect(user?.spent[0]?.amount).toBe(0.9);
-  });
-
-  it("show admins the reservations held for review, and let them release or charge each, audited, telling them when one was already decided, and nobody else", async () => {
-    const coreEnv = envWith({ budgets: { user: { limit: 1 } } });
-    const period = coreEnv.MODEL_BUDGET_MONTH;
-    if (period === undefined) {
-      throw new Error("Each test counts in a month of its own");
-    }
-    const key = `held-${crypto.randomUUID()}`;
-    const ledger = modelLedger(env);
-    // Two requests whose scopes a release stored otherwise: set aside.
-    const ids = [crypto.randomUUID(), crypto.randomUUID()] as const;
-    for (const [index, id] of ids.entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await ledger.admit({
-        id,
-        period,
-        scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
-        model: mistral,
-        price: {
-          version: "test",
-          input: 1_000_000,
-          output: 1_000_000,
-          cacheRead: 0,
-          cacheWrite: 0,
-        },
-        reservedMicros: 10_000 * (index + 1),
-        actor: { type: "person", userId: key },
-        deadline: Date.now() + 60_000,
-        reconcileAt: Date.now() + 60_000,
-        fair: roomyFair(),
-      });
-    }
-    await runInDurableObject(ledger, (_instance, state) => {
-      for (const id of ids) {
-        state.storage.sql.exec(
-          "UPDATE requests SET scopes = 'not JSON' WHERE id = ?",
-          id
-        );
-      }
-    });
-    await Promise.all(
-      ids.map(async (id) => await ledger.settle(id, { by: "refused" }))
-    );
-    const { session, userId } = await signedInWithRole(idp, "admin");
-    const { core } = await openRpc(session, { coreEnv });
-    const admin = core.authenticate();
-    const builder = await signedInWithRole(idp, "builder");
-    const { core: builderCore } = await openRpc(builder.session, { coreEnv });
-    const ours = <Held extends { id: string }>(held: readonly Held[]) =>
-      held.filter(({ id }) => ids.includes(id));
-
-    const shown = await admin.models.settings();
-    const [releasing, charging] = ids;
-    await expect(
-      outcome(
-        builderCore.authenticate().models.resolveHeld(releasing, "release")
-      )
-    ).resolves.toBe("role.forbidden");
-    const before = Date.now();
-    const decided = [
-      await admin.models.resolveHeld(releasing, "release"),
-      await admin.models.resolveHeld(charging, "charge"),
-    ];
-    // Someone else's decision came first: this one changes nothing.
-    const again = await admin.models.resolveHeld(charging, "release");
-    await runDurableObjectAlarm(ledger);
-    const events = await allEvents();
-    const spentNow = await ledger.spendOf(period, ["user"], 1000);
-
-    expect({
-      shown: ours(shown.held)
-        .map(({ id, amount, model, releaseOnly }) => [
-          id,
-          amount,
-          model,
-          releaseOnly,
-        ])
-        .toSorted(byJson),
-      decided,
-      again: {
-        ...again,
-        decidedAt:
-          "decidedAt" in again &&
-          Date.parse(again.decidedAt) >= before &&
-          Date.parse(again.decidedAt) <= Date.now(),
-      },
-      after: ours(await admin.models.held()),
-      spent: spentNow.user?.find((row) => row.key === key),
-      audited: events
-        .filter(
-          ({ actor, detail }) =>
-            JSON.stringify(actor) ===
-              JSON.stringify({ type: "person", userId }) &&
-            ids.includes(String(detail.request))
-        )
-        .map(({ action, detail }) => [action, detail.request])
-        .toSorted(byJson),
-    }).toStrictEqual({
-      shown: [
-        [releasing, 0.01, mistral, false],
-        [charging, 0.02, mistral, false],
-      ].toSorted(byJson),
-      decided: [
-        { state: "decided", how: "release", amount: 0 },
-        { state: "decided", how: "charge", amount: 0.02 },
-      ],
-      again: {
-        state: "already_decided",
-        how: "charge",
-        amount: 0.02,
-        decidedAt: true,
-      },
-      after: [],
-      spent: { key, spentMicros: 20_000, reservedMicros: 0 },
-      audited: [
-        ["model.spend.charged", charging],
-        ["model.spend.released", releasing],
-      ].toSorted(byJson),
-    });
-  });
-
-  it("show admins which held reservations can only be released, as their budget record is damaged, and refuse to charge one", async () => {
-    const coreEnv = envWith({ budgets: { user: { limit: 1 } } });
-    const period = coreEnv.MODEL_BUDGET_MONTH;
-    if (period === undefined) {
-      throw new Error("Each test counts in a month of its own");
-    }
-    const key = `damaged-${crypto.randomUUID()}`;
-    const ledger = modelLedger(env);
-    const id = crypto.randomUUID();
-    await ledger.admit({
-      id,
-      period,
-      scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
-      model: mistral,
-      price: {
-        version: "test",
-        input: 1_000_000,
-        output: 1_000_000,
-        cacheRead: 0,
-        cacheWrite: 0,
-      },
-      reservedMicros: 10_000,
-      actor: { type: "person", userId: key },
-      deadline: Date.now() + 60_000,
-      reconcileAt: Date.now() + 60_000,
-      fair: roomyFair(),
-    });
-    // Set aside, and its person's spend gone with it.
-    await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE requests SET scopes = 'not JSON' WHERE id = ?",
-        id
-      );
-      state.storage.sql.exec("DELETE FROM spend WHERE key = ?", key);
-    });
-    await ledger.settle(id, { by: "refused" });
-    const { session } = await signedInWithRole(idp, "admin");
-    const { core } = await openRpc(session, { coreEnv });
-    const admin = core.authenticate();
-
-    const listed = await admin.models.held();
-    const charged = await admin.models.resolveHeld(id, "charge");
-    const released = await admin.models.resolveHeld(id, "release");
-
-    expect({
-      listed: listed
-        .filter((held) => held.id === id)
-        .map(({ releaseOnly }) => releaseOnly),
-      charged,
-      released,
-    }).toStrictEqual({
-      listed: [true],
-      charged: { state: "release_only" },
-      released: { state: "decided", how: "release", amount: 0 },
-    });
   });
 
   it("show admins this month's spend with no budget set: the total, and the workflows that spent most with their runs, and nobody else", async () => {

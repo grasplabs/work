@@ -34,7 +34,7 @@ export type OrganizationProviderId = z.infer<
 
 /**
  * Every provider: an organization's, and ElevenLabs, which only Grasp's
- * own speech feature reaches, on Grasp's key (@grasp-os/shared/platform-ai).
+ * own speech feature reaches, on Grasp's key (core's src/platform-ai.ts).
  */
 export const aiProviderIds = [
   ...organizationProviderIds,
@@ -141,7 +141,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-completions": "https://api.openai.com/v1",
     },
     // Its audio endpoints too, for Grasp's own speech and transcription
-    // (@grasp-os/shared/platform-ai): models, never files or an account's.
+    // (core's src/platform-ai.ts): models, never files or an account's.
     paths: [
       "/v1/responses",
       "/v1/chat/completions",
@@ -227,56 +227,39 @@ export const aiProviderHost = (provider: AiProviderId): string | undefined => {
 };
 
 /**
- * Where Grasp's own projects at OpenAI and ElevenLabs keep their data: the
- * EU (data residency projects, each answered at its provider's EU host
- * only) or the US. The platform's AI settings say which
- * (@grasp-os/shared/platform-ai).
+ * The host Grasp's own key for a provider goes to where it isn't the
+ * provider's usual one: its EU data residency host, for OpenAI and
+ * ElevenLabs. Grasp's own features always go there, in the EU whatever
+ * the deployment: keeping them there is Grasp's to do.
  */
-export const platformRegions = ["eu", "us"] as const;
-export type PlatformRegion = (typeof platformRegions)[number];
-
-/**
- * The hosts Grasp's own key for a provider goes to, by its project's
- * region, for a provider whose host depends on it: OpenAI's and
- * ElevenLabs's.
- */
-const platformHosts: Readonly<
-  Partial<Record<AiProviderId, Readonly<Record<PlatformRegion, string>>>>
-> = {
-  openai: { eu: "eu.api.openai.com", us: "api.openai.com" },
-  // ElevenLabs's EU data residency host, for a workspace there.
-  elevenlabs: { eu: "api.eu.residency.elevenlabs.io", us: "api.elevenlabs.io" },
+const platformHosts: Readonly<Partial<Record<AiProviderId, string>>> = {
+  openai: "eu.api.openai.com",
+  elevenlabs: "api.eu.residency.elevenlabs.io",
 };
 
 /** Where a platform feature's requests go on Grasp's own key, and where that is. */
 export interface PlatformRoute {
   host: string;
-  /** Its region, as the model ledger and the rules take it. */
+  /** Its region, as the model ledger records it. */
   region: AiProviderSpec["region"];
   /** Where it runs, in plain words. */
   whereItRuns: string;
 }
 
-const regionWords: Readonly<Record<PlatformRegion, string>> = {
-  eu: "European Union",
-  us: "United States",
-};
-
 /**
  * Where Grasp's own key for `provider` sends a platform feature's
- * requests, its project in `region`: the one place a platform region
- * becomes a host. None for a provider without a fixed host.
+ * requests: its EU data residency host where it has one, else its own.
+ * None for a provider without a fixed host.
  */
 export const platformRouteOf = (
-  provider: AiProviderId,
-  region: PlatformRegion
+  provider: AiProviderId
 ): PlatformRoute | undefined => {
-  const regional = platformHosts[provider];
-  if (regional !== undefined) {
+  const eu = platformHosts[provider];
+  if (eu !== undefined) {
     return {
-      host: regional[region],
-      region,
-      whereItRuns: `${aiProviders[provider].label}, ${regionWords[region]}`,
+      host: eu,
+      region: "eu",
+      whereItRuns: `${aiProviders[provider].label}, European Union`,
     };
   }
   const host = aiProviderHost(provider);
@@ -290,18 +273,11 @@ export const platformRouteOf = (
 };
 
 /**
- * Every host Grasp's own key for `provider` may be sent to, whichever
- * region its project is in: connect's allow-list for platform requests,
- * whose grant names the one host core chose (`platformRouteOf`).
+ * The one host Grasp's own key for `provider` may be sent to
+ * (`platformRouteOf`): connect pins a platform request to it.
  */
-export const platformHostsOf = (provider: AiProviderId): string[] => {
-  const regional = platformHosts[provider];
-  if (regional !== undefined) {
-    return Object.values(regional);
-  }
-  const host = aiProviderHost(provider);
-  return host === undefined ? [] : [host];
-};
+export const platformHostOf = (provider: AiProviderId): string | undefined =>
+  platformRouteOf(provider)?.host;
 
 /**
  * What core puts where the key goes, which connect replaces with the real
@@ -482,13 +458,11 @@ export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
  */
 export interface AiPlatformUse {
   feature: AiPlatformFeature;
-  /** The provider, and where it runs; none when the deployment does it itself. */
-  provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
   /**
-   * Off on this deployment: it keeps everything in the EU, and Grasp's
-   * project for the provider isn't there, so nothing is sent at all.
+   * The provider, and where it runs; none when the deployment does it
+   * itself (document conversion, while Grasp has no key for its provider).
    */
-  off: boolean;
+  provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
 }
 
 /** The organization's AI providers and its choice of models. */
@@ -504,8 +478,7 @@ export interface AiProvidersListing {
   choice: AiModelChoiceNow | null;
   /**
    * Who handles Grasp's own AI features (document conversion,
-   * transcription, speech), on Grasp's keys; none of a feature this
-   * deployment doesn't have, or whose settings don't parse.
+   * transcription, speech), on Grasp's keys.
    */
   platform: AiPlatformUse[];
 }

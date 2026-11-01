@@ -1,7 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
@@ -33,6 +32,7 @@ import {
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Independent workflows (workflow-resources.ts), from its threat model:
@@ -1390,12 +1390,11 @@ describe("creating workflows", () => {
     ).toBeTruthy();
   });
 
-  it("stops at the quota policy's cap per person, deleted ones included", async () => {
-    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
+  it("stops at the quota limits' cap per person, deleted ones included", async () => {
     const ada = await person("builder");
-    env.QUOTA_LIMITS = {
-      generation: configured.generation + 100,
-      limits: { ...configured.limits, workflowResourcesPerPerson: 2 },
+    env.TEST_QUOTA_LIMITS = {
+      ...configuredLimits,
+      workflowResourcesPerPerson: 2,
     };
     try {
       const first = await workflowOf(ada);
@@ -1405,10 +1404,7 @@ describe("creating workflows", () => {
         "workflow.resource_limit"
       );
     } finally {
-      env.QUOTA_LIMITS = {
-        generation: configured.generation + 101,
-        limits: configured.limits,
-      };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
   });
 });
