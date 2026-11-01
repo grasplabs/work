@@ -106,6 +106,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Kept something the chat can no longer read from the model`,
   },
   { action: "chat.file_attached", text: msg`Attached a file to a chat` },
+  {
+    action: "chat.file_removed",
+    text: msg`Removed a file from a chat before sending it`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   { action: "agent.call", text: msg`The agent looked something up` },
   {

@@ -517,14 +517,29 @@ const withFiles = (
   return files === undefined ? shown : { ...shown, files };
 };
 
-/** A chat file, as its person sees it, from its row. */
+/**
+ * A chat file's card columns: what its person and its agent see of it,
+ * never its text, which only reading the file loads (`chatFile`).
+ */
+const chatFileCard = {
+  id: chatFiles.id,
+  name: chatFiles.name,
+  type: chatFiles.type,
+  bytes: chatFiles.bytes,
+  createdAt: chatFiles.createdAt,
+};
+
+/** A chat file, as its person sees it, from its card's columns. */
 const chatFileOf = ({
   id,
   name,
   type,
   bytes,
   createdAt,
-}: typeof chatFiles.$inferSelect): ChatFile => ({
+}: Pick<
+  typeof chatFiles.$inferSelect,
+  "id" | "name" | "type" | "bytes" | "createdAt"
+>): ChatFile => ({
   id,
   name,
   type,
@@ -1432,7 +1447,7 @@ export class Workspace extends DurableObject<Env> {
           ...file,
           createdAt: new Date(),
         })
-        .returning()
+        .returning(chatFileCard)
         .get();
       this.#outboxed(by, "chat.file_attached", id, {
         file: row.id,
@@ -1446,13 +1461,47 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Removes a file `personId` attached to their own chat that no question
+   * carries yet (one taken out of the box after a send that failed), so
+   * it holds none of the chat's {@link chatFilesMax}. A file a question
+   * carried stays with it: refused as `agent.file_not_found`, as one the
+   * chat never had. Audited with its ID.
+   */
+  removeFile(
+    chatId: unknown,
+    personId: string,
+    fileId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    this.ctx.storage.transactionSync(() => {
+      const removed = this.#db
+        .delete(chatFiles)
+        .where(
+          and(
+            eq(chatFiles.chatId, id),
+            eq(chatFiles.id, fileId),
+            isNull(chatFiles.messageId)
+          )
+        )
+        .returning({ id: chatFiles.id })
+        .get();
+      if (removed === undefined) {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      this.#outboxed(by, "chat.file_removed", id, { file: removed.id });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
    * The chat's files, in the order they were attached, with the question
    * that carried each (`null` while none has), for its agent
    * (`env.chat.files()` in agent-apis.ts): never their text.
    */
   chatFiles(chatId: ChatId): (ChatFile & { question: number | null })[] {
     return this.#db
-      .select()
+      .select({ ...chatFileCard, messageId: chatFiles.messageId })
       .from(chatFiles)
       .where(eq(chatFiles.chatId, chatId))
       .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
@@ -1469,7 +1518,7 @@ export class Workspace extends DurableObject<Env> {
     fileId: string
   ): (ChatFile & { text: string }) | undefined {
     const row = this.#db
-      .select()
+      .select({ ...chatFileCard, text: chatFiles.text })
       .from(chatFiles)
       .where(and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, fileId)))
       .get();
@@ -1521,7 +1570,7 @@ export class Workspace extends DurableObject<Env> {
   #filesAfter(chatId: ChatId, after: number): Map<number, ChatFile[]> {
     const carried = new Map<number, ChatFile[]>();
     const rows = this.#db
-      .select()
+      .select({ ...chatFileCard, messageId: chatFiles.messageId })
       .from(chatFiles)
       .where(and(eq(chatFiles.chatId, chatId), gt(chatFiles.messageId, after)))
       .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
@@ -1551,6 +1600,7 @@ export class Workspace extends DurableObject<Env> {
       | "chat.moved"
       | "chat.draft_restored"
       | "chat.file_attached"
+      | "chat.file_removed"
       | "chat.draft_discarded",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}

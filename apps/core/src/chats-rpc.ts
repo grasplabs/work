@@ -573,6 +573,20 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  async removeFile(chatId: string, fileId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      if (typeof fileId !== "string") {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      await this.#chatsOf(person.userId).removeFile(
+        chatIdOf(chatId),
+        person.userId,
+        fileId,
+        actorOf(person)
+      );
+    });
+  }
+
   async send(chatId: string, question: ChatQuestion): Promise<void> {
     await withPerson(this.#check, async ({ userId, staff }) => {
       const id = chatIdOf(chatId);

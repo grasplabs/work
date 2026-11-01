@@ -11456,6 +11456,10 @@ msgid "Removed"
 msgstr "Supprimé"
 
 #: src/activity/audit-words.ts
+msgid "Removed a file from a chat before sending it"
+msgstr "A retiré un fichier d’une discussion avant de l’envoyer"
+
+#: src/activity/audit-words.ts
 msgid "Removed a member"
 msgstr "A retiré un membre"
 

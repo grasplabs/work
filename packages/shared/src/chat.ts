@@ -914,6 +914,12 @@ export interface ChatsApi {
    */
   attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
   /**
+   * Removes a file attached to the chat that no question carries yet,
+   * freeing its place among the chat's {@link chatFilesMax}. A file a
+   * question carried stays: refused as `agent.file_not_found`. Audited.
+   */
+  removeFile: (chatId: string, fileId: string) => Promise<void>;
+  /**
    * Asks the chat's agent a question. Resolves once the agent has taken
    * it; the answer streams to `watch`, and goes on without anyone
    * watching.

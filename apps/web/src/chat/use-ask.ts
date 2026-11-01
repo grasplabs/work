@@ -138,8 +138,16 @@ export const useAsk = (
   };
   const removeFile = (id: string): void => {
     setFiles((now) => now.filter((each) => each.id !== id));
+    // Core took it already (a send that failed after it): removed there
+    // too, so it holds none of the chat's places for files.
+    const known = attached.current.get(id);
     attached.current.delete(id);
     setFileProblem(undefined);
+    if (known !== undefined) {
+      void run(async (session) => {
+        await session.chats.removeFile(known.chatId, known.fileId);
+      });
+    }
   };
   const ask = async (
     question: string,

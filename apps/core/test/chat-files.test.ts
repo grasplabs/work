@@ -338,6 +338,71 @@ describe("files attached to a question", slow, () => {
     });
   });
 
+  it("free their place once their person removes one no question carried, and only then, audited", async () => {
+    const ann = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Full");
+    const files = [];
+    for (let index = 0; index < chatFilesMax; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as a person attaches them
+      const attached = await ann.api.chats.attachFile(chat.id, {
+        name: `part-${index}.txt`,
+        bytes: utf8(`Part ${index}`),
+      });
+      files.push(attached);
+    }
+    const [unsent, carried] = files;
+    if (unsent === undefined || carried === undefined) {
+      throw new Error("No files");
+    }
+    await answering(ann, says("Read."));
+    await ann.api.chats.send(chat.id, {
+      text: "Read this one.",
+      model,
+      files: [carried.id],
+    });
+    await settled(ann, chat.id);
+    const more = async () =>
+      await outcome(
+        ann.api.chats.attachFile(chat.id, {
+          name: "more.txt",
+          bytes: utf8("More"),
+        })
+      );
+
+    const full = await more();
+    const byBen = await outcome(ben.api.chats.removeFile(chat.id, unsent.id));
+    const carriedRemoved = await outcome(
+      ann.api.chats.removeFile(chat.id, carried.id)
+    );
+    const removed = await outcome(ann.api.chats.removeFile(chat.id, unsent.id));
+    const again = await outcome(ann.api.chats.removeFile(chat.id, unsent.id));
+    const events = await allEvents();
+
+    expect({
+      full,
+      byBen,
+      carriedRemoved,
+      removed,
+      again,
+      freed: await more(),
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.file_removed" && target?.id === chat.id
+        )
+        .map(({ detail }) => detail.file),
+    }).toStrictEqual({
+      full: "agent.too_many_files",
+      byBen: "agent.chat_not_found",
+      carriedRemoved: "agent.file_not_found",
+      removed: "ok",
+      again: "agent.file_not_found",
+      freed: "ok",
+      audited: [unsent.id],
+    });
+  });
+
   it("are their chat's person's alone, carried by one question, and go with the chat", async () => {
     const ann = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
