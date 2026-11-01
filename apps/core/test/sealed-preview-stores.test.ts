@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import type { DataStore } from "../src/data-store.ts";
 import { discardFixtureStore, openFixtureStore } from "../src/data-stores.ts";
+import { retryDisconnects } from "../src/members.ts";
 import { sweepPreviewStores } from "../src/sealed-previews.ts";
 import { openTestRun } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
@@ -15,8 +16,15 @@ import {
   retryOf,
   settled,
 } from "./preview-drafts.ts";
-import { chatsOf, outcome, previewStores, requestFor } from "./previews.ts";
+import {
+  chatsOf,
+  outcome,
+  outcomeOfText,
+  previewStores,
+  requestFor,
+} from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
+import { openRpc, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout
 // (sealed-previews.ts): the draft sealed into a draft release, and every
@@ -31,6 +39,28 @@ import { failure } from "./sealed-apps.ts";
 
 const idp = mockIdp();
 const { setUp } = previewDraftsOf(idp);
+
+/** A note created in the preview of `at`: its store made. */
+const createNote = async (at: Awaited<ReturnType<typeof setUp>>) =>
+  await at.builder.api.chats.previewFunction(
+    at.chatId,
+    at.app,
+    at.revision,
+    await requestFor(
+      at.builder,
+      { chatId: at.chatId, app: at.app, revision: at.revision },
+      "notes.create",
+      { title: "typed in" }
+    )
+  );
+
+/** Whether core still records preview store `id`. */
+const recordedStore = async (id: string) =>
+  (await env.DB.prepare(
+    "SELECT 1 AS here FROM preview_fixture_stores WHERE store_id = ?"
+  )
+    .bind(id)
+    .first()) !== null;
 
 describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
   it("forgets its draft release and discards its stores once the draft is dropped, and again once the chat goes", async () => {
@@ -430,6 +460,148 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       hungDelayed: true,
       triesWithin: 1,
       triesAfter: 2,
+    });
+  });
+
+  it("discards a person's preview stores once an admin removes them, keeping everyone else's, and leaves what it can't to the sweep", async () => {
+    const removed = await setUp();
+    const kept = await setUp();
+    await createNote(removed);
+    await createNote(kept);
+    const [removedStore] = await previewStores(
+      removed.builder,
+      removed.chatId,
+      removed.app
+    );
+    const [keptStore] = await previewStores(
+      kept.builder,
+      kept.chatId,
+      kept.app
+    );
+    const removedId = storeIdSchema.parse(removedStore?.store_id);
+    // Whose each is, as core records it.
+    const owners = await env.DB.prepare(
+      "SELECT store_id AS storeId, person_id AS personId FROM preview_fixture_stores WHERE store_id IN (?, ?)"
+    )
+      .bind(removedId, keptStore?.store_id ?? "")
+      .all<{ storeId: string; personId: string | null }>();
+    // One of theirs whose discard is refused (a listed store), and one
+    // recorded before core kept whose it is.
+    const refused = crypto.randomUUID();
+    const unowned = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO business_stores (id, owner_id, physical_namespace_role, created_at) VALUES (?, ?, 'data_store', ?)"
+      ).bind(refused, removed.builder.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO preview_fixture_stores (store_id, app_id, person_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(refused, removed.app, removed.builder.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO preview_fixture_stores (store_id, app_id, created_at) VALUES (?, ?, ?)"
+      ).bind(unowned, removed.app, Date.now()),
+    ]);
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(removed.builder.userId);
+    const sweptRefusal = await failure(
+      async () => await openFixtureStore(env, removedId).get("notes", "any")
+    );
+    // Their preview refuses them now, straight to the chat's object, and
+    // makes them no store again: the gate runs before a store is made.
+    const callAsRemoved = async () =>
+      outcomeOfText(
+        await chatsOf(removed.builder).previewFunction(
+          removed.chatId,
+          removed.builder.userId,
+          removed.app,
+          removed.revision,
+          await requestFor(
+            removed.builder,
+            {
+              chatId: removed.chatId,
+              app: removed.app,
+              revision: removed.revision,
+            },
+            "notes.titles"
+          )
+        )
+      );
+    const afterwards = [await callAsRemoved(), await callAsRemoved()];
+    const theirsLeft = await env.DB.prepare(
+      "SELECT store_id AS storeId FROM preview_fixture_stores WHERE person_id = ?"
+    )
+      .bind(removed.builder.userId)
+      .all<{ storeId: string }>();
+    expect({
+      owners: Object.fromEntries(
+        owners.results.map(({ storeId, personId }) => [
+          storeId === removedId ? "removed" : "kept",
+          personId,
+        ])
+      ),
+      removedGone: !(await recordedStore(removedId)),
+      removedDiscarded: sweptRefusal.includes("discarded"),
+      keptLeft: await recordedStore(keptStore?.store_id ?? ""),
+      refusedLeft: await recordedStore(refused),
+      unownedLeft: await recordedStore(unowned),
+      afterwards,
+      // Only the one whose discard was refused: none made after removal.
+      theirsLeft: theirsLeft.results.map(({ storeId }) => storeId),
+    }).toStrictEqual({
+      owners: { removed: removed.builder.userId, kept: kept.builder.userId },
+      removedGone: true,
+      removedDiscarded: true,
+      keptLeft: true,
+      refusedLeft: true,
+      unownedLeft: true,
+      afterwards: ["permission.person_inactive", "permission.person_inactive"],
+      theirsLeft: [refused],
+    });
+  });
+
+  it("discards a removed person's preview stores even when their connections can't be disconnected, and catches up any left from the cron", async () => {
+    const removed = await setUp();
+    await createNote(removed);
+    const [store] = await previewStores(
+      removed.builder,
+      removed.chatId,
+      removed.app
+    );
+    const storeId = storeIdSchema.parse(store?.store_id);
+    const admin = await signedInApi(idp, "admin");
+    // Connect can't be reached: the removal is pending, its previews go.
+    const connectDown = new Proxy(env.CONNECT, {
+      get: (target, key): unknown =>
+        key === "disconnectPersonal"
+          ? () => {
+              throw new Error("connect unreachable");
+            }
+          : Reflect.get(target, key),
+    });
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, CONNECT: connectDown },
+    });
+    const pending = await failure(
+      async () =>
+        await core.authenticate().members.remove(removed.builder.userId)
+    );
+    const afterRemoval = await recordedStore(storeId);
+    // A store of theirs left behind (a removal that ended first, say):
+    // the cron's catch-up discards it.
+    const left = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO preview_fixture_stores (store_id, app_id, person_id, created_at) VALUES (?, ?, ?, ?)"
+    )
+      .bind(left, removed.app, removed.builder.userId, Date.now())
+      .run();
+    await retryDisconnects(env);
+    expect({
+      pending,
+      afterRemoval,
+      leftAfterCron: await recordedStore(left),
+    }).toStrictEqual({
+      pending: "member.connections_pending",
+      afterRemoval: false,
+      leftAfterCron: false,
     });
   });
 

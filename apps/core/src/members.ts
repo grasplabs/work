@@ -54,6 +54,7 @@ import {
   invitations,
   memberRemovals,
   members,
+  previewFixtureStores,
   notifications,
   sessions,
   teamMembers,
@@ -68,6 +69,7 @@ import {
   releaseAddress,
 } from "./person-erasure.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
+import { discardPreviewStoresOf } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -357,7 +359,8 @@ const disconnectPersonal = async (
 /**
  * Removes `userId` from the organization for good (see `recordRemoval`),
  * then revokes what their chats' agent was granted or asked for there and
- * disconnects their personal connections (`disconnectPersonal`). Removing someone already
+ * disconnects their personal connections (`disconnectPersonal`), and
+ * discards their chats' preview stores (`discardPreviewStoresOf`). Removing someone already
  * removed only does the second part again, so a removal whose disconnect
  * failed can also be finished by trying again.
  */
@@ -385,9 +388,18 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
-  return {
-    connectionsDisconnected: await disconnectPersonal(env, by, target),
-  };
+  try {
+    return {
+      connectionsDisconnected: await disconnectPersonal(env, by, target),
+    };
+  } finally {
+    // What they typed into their chats' previews goes too, whether or not
+    // their connections did: they never reach those again. Never throws;
+    // a store it can't discard is left to the preview stores' sweep, to
+    // this removal tried again, or to the cron's catch-up
+    // (`retryDisconnects`).
+    await discardPreviewStoresOf(env, target);
+  }
 };
 
 /**
@@ -515,11 +527,46 @@ const setMemberRole = async (
 /** Most `disconnectPersonal` batches the clock has in flight at once. */
 const disconnectBatchesAtOnce = 4;
 
+/** Most removed people whose preview stores one cron run discards. */
+const removedPreviewsPerRun = 20;
+
+/**
+ * Discards the preview stores of removed people that still have some: a
+ * removal that ended before its own discard (`removeMember`) or whose
+ * discard failed is caught up here, a page of people per run. Never
+ * throws.
+ */
+const discardRemovedPreviews = async (env: Env): Promise<void> => {
+  try {
+    const owners = await drizzle(env.DB)
+      .selectDistinct({ userId: previewFixtureStores.personId })
+      .from(previewFixtureStores)
+      .innerJoin(
+        memberRemovals,
+        and(
+          eq(memberRemovals.userId, previewFixtureStores.personId),
+          eq(memberRemovals.organizationId, organizationId)
+        )
+      )
+      .orderBy(asc(previewFixtureStores.personId))
+      .limit(removedPreviewsPerRun);
+    for (const { userId } of owners) {
+      if (userId !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- one person at a time
+        await discardPreviewStoresOf(env, userId);
+      }
+    }
+  } catch (error) {
+    log.error("member.preview_discard_failed", errorFields(error));
+  }
+};
+
 /**
  * Disconnects what is still connected for removed people: everyone whose
  * disconnect hasn't completed yet, however long ago they were removed and
  * however many there are, and everyone removed within the last OAuth flow
- * lifetime, completed or not. A flow the person took back before the
+ * lifetime, completed or not, and discards removed people's preview stores
+ * still left (`discardRemovedPreviews`). A flow the person took back before the
  * removal (taking it needs their session) can still finish into a
  * connection after their disconnect completed; the flow's lifetime bounds
  * that with room to spare. First it revokes what their chats' agent was
@@ -598,6 +645,7 @@ export const retryDisconnects = async (env: Env): Promise<void> => {
   await Promise.all(
     Array.from({ length: disconnectBatchesAtOnce }, disconnectNext)
   );
+  await discardRemovedPreviews(env);
 };
 
 // Invitations: people join by signing in through the organization's IdP,

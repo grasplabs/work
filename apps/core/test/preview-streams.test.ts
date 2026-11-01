@@ -5,6 +5,7 @@ import {
   streamMaxRunning,
 } from "@grasp-os/shared/operation-limits";
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -284,6 +285,49 @@ describe(
   "a streaming action in a draft's preview",
   { timeout: 180_000 },
   () => {
+    it("refuses a streaming action of someone no longer a member before any store is made for them", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      const request = await streamRequest(
+        builder,
+        seat,
+        "notes.draft",
+        { title: "after removal" },
+        "removed"
+      );
+      // No longer an active member, as just after a removal while a
+      // session is still cached: straight to the chat's object.
+      await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+        .bind(builder.userId)
+        .run();
+      const frames = await chatsOf(builder).previewStream(
+        chatId,
+        builder.userId,
+        app,
+        revision,
+        request,
+        false
+      );
+      const text = await new Response(frames).text();
+      const lines = text.split("\n").filter((line) => line !== "");
+      const last = lines.at(-1);
+      const stores = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM preview_fixture_stores WHERE person_id = ?"
+      )
+        .bind(builder.userId)
+        .first<{ n: number }>();
+      expect({
+        ended:
+          last === undefined
+            ? undefined
+            : endOf(frameSchema.parse(JSON.parse(last))),
+        stores: stores?.n,
+      }).toStrictEqual({
+        ended: "permission.person_inactive",
+        stores: 0,
+      });
+    });
+
     it("streams whole progress, then its result, on the draft release and the preview's store, changing none of the App's data", async () => {
       const { builder, app, chatId, revision } = await setUp();
       const seat = { chatId, app, revision };
