@@ -7918,6 +7918,8 @@ msgstr "Limiet voor {name}"
 msgid "Limits per person"
 msgstr "Limieten per persoon"
 
+#: src/engines/app-own-link.tsx
+#: src/engines/app-page.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Link"
@@ -7945,6 +7947,11 @@ msgstr "Link verstuurd"
 #: src/onboarding/interview-words.ts
 msgid "Link out on {date}"
 msgstr "Link verstuurd op {date}"
+
+#. placeholder {0}: app.name
+#: src/engines/app-own-link.tsx
+msgid "Link to {0}"
+msgstr "Link naar {0}"
 
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
@@ -8081,6 +8088,10 @@ msgstr "Laag"
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Laag"
+
+#: src/engines/app-own-link.tsx
+msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
+msgstr "Kleine letters en cijfers, met enkele streepjes ertussen; niet de naam van een van de pagina's van de workspace."
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Made by {person} on {date}."
@@ -9358,6 +9369,7 @@ msgid "None waiting for an admin."
 msgstr "Geen wacht op een beheerder."
 
 #: src/brain/brain.ts
+#: src/engines/app-page.tsx
 msgid "None yet"
 msgstr "Nog geen"
 
@@ -10054,6 +10066,10 @@ msgstr "Alleen ik"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Alleen wie pakketten mag goedkeuren, ziet wat in de hele werkruimte is goedgekeurd."
 
+#: src/engines/app-own-link.tsx
+msgid "Only someone signed in to the workspace opens it."
+msgstr "Alleen wie in de workspace is ingelogd, opent hem."
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Alleen de eerste manier"
@@ -10312,6 +10328,10 @@ msgstr "Je gesprek wordt geopend…"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Gaat open bij {threshold}%"
+
+#: src/engines/app-own-link.tsx
+msgid "Opens the domain for the workspace's members who may use it, while it is published."
+msgstr "Opent het domein voor de leden van de workspace die het mogen gebruiken, zolang het gepubliceerd is."
 
 #: src/engines/resource-bindings.tsx
 msgid "Operations"
@@ -11475,6 +11495,10 @@ msgstr "Uit het brein verwijderen"
 msgid "Remove it"
 msgstr "Verwijderen"
 
+#: src/engines/app-own-link.tsx
+msgid "Remove link"
+msgstr "Link verwijderen"
+
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
 msgstr "Uitzondering voor {name} verwijderen"
@@ -12084,6 +12108,10 @@ msgstr "Gezegd dat het is gebeurd: {who}."
 msgid "Said yes"
 msgstr "Heeft ja gezegd"
 
+#: src/engines/app-own-link.tsx
+msgid "sales-pipeline"
+msgstr "verkooppijplijn"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Zelfde versie, andere inhoud: {changed}"
@@ -12118,6 +12146,10 @@ msgstr "Instructies opslaan"
 #: src/settings/ai-providers.tsx
 msgid "Save key"
 msgstr "Sleutel opslaan"
+
+#: src/engines/app-own-link.tsx
+msgid "Save link"
+msgstr "Link opslaan"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"

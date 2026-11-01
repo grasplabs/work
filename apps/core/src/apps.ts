@@ -177,6 +177,7 @@ export const toApp = (row: AppRow): App => ({
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
   status: row.status,
+  link: row.link,
   process: storedProcessOf(row.process),
   createdAt: row.createdAt.toISOString(),
 });
@@ -594,6 +595,7 @@ export const createApp = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: new Date(),
+    link: null,
     removedAt: null,
     removedBy: null,
   };

@@ -42,6 +42,7 @@ const app: ViewedApp = {
   currentVersion: 1,
   pendingVersion: null,
   status: "draft",
+  link: null,
   createdAt: "2026-10-20T08:00:00.000Z",
   role: "builder",
 };

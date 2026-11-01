@@ -53,6 +53,7 @@ const appAs = (role: ViewedApp["role"]): ViewedApp => ({
   currentVersion: null,
   pendingVersion: null,
   status: "draft",
+  link: null,
   createdAt: "2026-10-27T10:00:00.000Z",
   role,
 });

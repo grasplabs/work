@@ -7918,6 +7918,8 @@ msgstr "Limite de {name}"
 msgid "Limits per person"
 msgstr "Limites par personne"
 
+#: src/engines/app-own-link.tsx
+#: src/engines/app-page.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Link"
@@ -7945,6 +7947,11 @@ msgstr "Lien envoyé"
 #: src/onboarding/interview-words.ts
 msgid "Link out on {date}"
 msgstr "Lien envoyé le {date}"
+
+#. placeholder {0}: app.name
+#: src/engines/app-own-link.tsx
+msgid "Link to {0}"
+msgstr "Lien vers {0}"
 
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
@@ -8081,6 +8088,10 @@ msgstr "Faible"
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Faible"
+
+#: src/engines/app-own-link.tsx
+msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
+msgstr "Lettres minuscules et chiffres, séparés par de simples tirets ; pas le nom d'une des pages de l'espace de travail."
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Made by {person} on {date}."
@@ -9358,6 +9369,7 @@ msgid "None waiting for an admin."
 msgstr "Aucune en attente d’un admin."
 
 #: src/brain/brain.ts
+#: src/engines/app-page.tsx
 msgid "None yet"
 msgstr "Rien pour l’instant"
 
@@ -10054,6 +10066,10 @@ msgstr "Moi seul"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Seules les personnes autorisées à approuver des paquets voient ce qui est approuvé dans tout l’espace de travail."
 
+#: src/engines/app-own-link.tsx
+msgid "Only someone signed in to the workspace opens it."
+msgstr "Seule une personne connectée à l'espace de travail l'ouvre."
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Seulement la première façon"
@@ -10312,6 +10328,10 @@ msgstr "Ouverture de votre entretien…"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Ouvre à {threshold} %"
+
+#: src/engines/app-own-link.tsx
+msgid "Opens the domain for the workspace's members who may use it, while it is published."
+msgstr "Ouvre le domaine pour les membres de l'espace de travail qui peuvent l'utiliser, tant qu'il est publié."
 
 #: src/engines/resource-bindings.tsx
 msgid "Operations"
@@ -11475,6 +11495,10 @@ msgstr "Retirer du cerveau"
 msgid "Remove it"
 msgstr "Retirer"
 
+#: src/engines/app-own-link.tsx
+msgid "Remove link"
+msgstr "Retirer le lien"
+
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
 msgstr "Supprimer l'exception de {name}"
@@ -12084,6 +12108,10 @@ msgstr "Indiqué comme arrivé : {who}."
 msgid "Said yes"
 msgstr "A dit oui"
 
+#: src/engines/app-own-link.tsx
+msgid "sales-pipeline"
+msgstr "pipeline-commercial"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Même version, contenu différent : {changed}"
@@ -12118,6 +12146,10 @@ msgstr "Enregistrer les instructions"
 #: src/settings/ai-providers.tsx
 msgid "Save key"
 msgstr "Enregistrer la clé"
+
+#: src/engines/app-own-link.tsx
+msgid "Save link"
+msgstr "Enregistrer le lien"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
