@@ -250,6 +250,10 @@ const coreDb: D1State = {
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
+    agent_held_starts: transient(
+      `${core}held-starts.ts`,
+      "Starts a chat's agent asked for, held until its person confirms them, good for a while: one still waiting after a move is asked for again."
+    ),
     channel_conversations: exported(`${core}channels/door.ts`),
     chat_workflow_offers: transient(
       `${core}channels/workflow-offers.ts`,

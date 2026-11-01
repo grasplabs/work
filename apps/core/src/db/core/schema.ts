@@ -3966,6 +3966,61 @@ export const triggerSchedules = sqliteTable(
 );
 
 /**
+ * The starts of independent workflows a chat's agent asked for, held
+ * until the person it acts for confirms them in Grasp (src/held-starts.ts):
+ * the workflow and version, the input exactly as it would start (canonical
+ * JSON, with its SHA-256), the agent, its person and its chat, and the
+ * agent's key, scoped to the chat. One per chat and key: the agent asking
+ * again is the same start. Decided once: confirmed (with the start it
+ * made, or why that was refused) or declined; one not started past
+ * `expires_at` lapsed. The input is kept only while the start is open:
+ * emptied once it started (its run keeps it from then on, under run
+ * retention), was refused, declined or lapsed; and the row goes with its
+ * chat, or its person's erasure.
+ */
+export const agentHeldStarts = sqliteTable(
+  "agent_held_starts",
+  {
+    id: text().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    /** Null once the start is no longer open (held-starts.ts). */
+    input: text(),
+    inputHash: text("input_hash").notNull(),
+    key: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decision: text({ enum: ["confirmed", "declined"] }),
+    decidedAt: timestamp("decided_at"),
+    startId: text("start_id"),
+    /**
+     * Why its confirmed start was refused for good as it was admitted (the
+     * agent's grant or the person's role gone): it never starts. Null
+     * while it may: a confirmed start with neither this nor `start_id`
+     * stopped on the way, and its person may confirm it again.
+     */
+    refusal: text(),
+  },
+  (table) => [
+    uniqueIndex("agent_held_starts_key").on(table.chatId, table.key),
+    // A person's starts that wait.
+    index("agent_held_starts_person")
+      .on(table.personId, table.createdAt)
+      .where(sql`${table.decision} IS NULL`),
+    // Inputs still kept, by when they lapse: what the clock empties.
+    index("agent_held_starts_kept")
+      .on(table.expiresAt)
+      .where(sql`${table.input} IS NOT NULL`),
+  ]
+);
+
+/**
  * Where an event stands for a connector trigger that didn't start its run
  * (src/workflows/connector-triggers.ts), by the trigger and the event's
  * key: held back at its hourly limit since `held_since` (`settled` null),

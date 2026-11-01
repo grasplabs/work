@@ -188,6 +188,7 @@ import {
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
+import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
   audienceMaxMembers,
@@ -3833,6 +3834,8 @@ export class Workspace extends DurableObject<Env> {
         { userId: personId, actor: by },
         "chat_deleted"
       );
+      // Nor any workflow start its agent asked its person to confirm.
+      await dropHeldStarts(this.env, { chatId: id });
       // Every App it has a draft of, even one with no changes left: its
       // preview may still run.
       const drafted = this.#db

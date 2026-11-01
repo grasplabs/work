@@ -4932,6 +4932,18 @@ msgstr "Decision not found"
 msgid "Decisions"
 msgstr "Decisions"
 
+#: src/inbox/item-detail.tsx
+msgid "Decline"
+msgstr "Decline"
+
+#: src/inbox/item-detail.tsx
+msgid "Decline starting {name}"
+msgstr "Decline starting {name}"
+
+#: src/inbox/item-detail.tsx
+msgid "Declined: {name}."
+msgstr "Declined: {name}."
+
 #: src/workflows/resource-params.tsx
 msgid "Default"
 msgstr "Default"
@@ -13093,10 +13105,22 @@ msgstr "Stakeholder invited into Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder named: the {role}"
 
+#: src/inbox/item-detail.tsx
+msgid "Start"
+msgstr "Start"
+
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
 msgstr "Start"
+
+#: src/inbox/item-detail.tsx
+msgid "Start {name}"
+msgstr "Start {name}"
+
+#: src/inbox/items.ts
+msgid "Start {name}?"
+msgstr "Start {name}?"
 
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Start a chat in {name}"
@@ -13158,6 +13182,10 @@ msgstr "Started following a connection late: changes before then weren't read"
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
+
+#: src/inbox/item-detail.tsx
+msgid "Started: {name}."
+msgstr "Started: {name}."
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -15969,6 +15997,10 @@ msgstr "waits on your role, {role}"
 msgid "waits on your team, {team}"
 msgstr "waits on your team, {team}"
 
+#: src/inbox/items.ts
+msgid "Waits until"
+msgstr "Waits until"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Warsaw"
@@ -16275,6 +16307,10 @@ msgstr "What it says"
 #: src/brain/memory-page.tsx
 msgid "What it should say"
 msgstr "What it should say"
+
+#: src/inbox/item-detail.tsx
+msgid "What it starts with"
+msgstr "What it starts with"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
@@ -17039,6 +17075,11 @@ msgstr "Workflow not found"
 msgid "Workflow packages"
 msgstr "Workflow packages"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Workflow start"
+msgstr "Workflow start"
+
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"
 msgstr "Workflow tests fail:"
@@ -17404,6 +17445,10 @@ msgstr "Your answer"
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
+
+#: src/inbox/items.ts
+msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
+msgstr "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 
 #: src/interview/before.tsx
 msgid "Your choice"

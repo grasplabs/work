@@ -4932,6 +4932,18 @@ msgstr "Décision introuvable"
 msgid "Decisions"
 msgstr "Décisions"
 
+#: src/inbox/item-detail.tsx
+msgid "Decline"
+msgstr "Refuser"
+
+#: src/inbox/item-detail.tsx
+msgid "Decline starting {name}"
+msgstr "Refuser de lancer {name}"
+
+#: src/inbox/item-detail.tsx
+msgid "Declined: {name}."
+msgstr "Refusé : {name}."
+
 #: src/workflows/resource-params.tsx
 msgid "Default"
 msgstr "Par défaut"
@@ -13093,10 +13105,22 @@ msgstr "Partie prenante invitée dans Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Partie prenante désignée : {role}"
 
+#: src/inbox/item-detail.tsx
+msgid "Start"
+msgstr "Lancer"
+
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
 msgstr "Commencer"
+
+#: src/inbox/item-detail.tsx
+msgid "Start {name}"
+msgstr "Lancer {name}"
+
+#: src/inbox/items.ts
+msgid "Start {name}?"
+msgstr "Lancer {name} ?"
 
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Start a chat in {name}"
@@ -13158,6 +13182,10 @@ msgstr "A commencé à suivre une connexion en retard : les changements antérie
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "A commencé à suivre ce qui change sur une connexion"
+
+#: src/inbox/item-detail.tsx
+msgid "Started: {name}."
+msgstr "Lancé : {name}."
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -15969,6 +15997,10 @@ msgstr "attend votre rôle, {role}"
 msgid "waits on your team, {team}"
 msgstr "attend votre équipe, {team}"
 
+#: src/inbox/items.ts
+msgid "Waits until"
+msgstr "Attend jusqu'au"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Warsaw"
@@ -16275,6 +16307,10 @@ msgstr "Ce qu’il dit"
 #: src/brain/memory-page.tsx
 msgid "What it should say"
 msgstr "Ce qu'il devrait dire"
+
+#: src/inbox/item-detail.tsx
+msgid "What it starts with"
+msgstr "Ce avec quoi il démarre"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
@@ -17039,6 +17075,11 @@ msgstr "Workflow introuvable"
 msgid "Workflow packages"
 msgstr "Paquets du workflow"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Workflow start"
+msgstr "Lancement de workflow"
+
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"
 msgstr "Des tests de workflow échouent :"
@@ -17404,6 +17445,10 @@ msgstr "Votre réponse"
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Votre navigateur ne me laisse pas utiliser le micro. Autorisez-le à côté de l’adresse, puis réessayez."
+
+#: src/inbox/items.ts
+msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
+msgstr "L'agent de votre conversation a demandé à lancer ce workflow pour vous. Rien ne s'exécute avant que vous ne le confirmiez, avec exactement l'entrée affichée."
 
 #: src/interview/before.tsx
 msgid "Your choice"

@@ -23,6 +23,7 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
+import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
@@ -250,6 +251,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.run_details",
     period: "quarterHour",
     run: sweepRunDetails,
+  },
+  // What a lapsed held start was asked to run with (held-starts.ts).
+  {
+    name: "workflows.held_start_inputs",
+    period: "quarterHour",
+    run: sweepHeldStartInputs,
   },
   {
     name: "workflows.candidate_runs",
