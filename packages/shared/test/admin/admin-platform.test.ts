@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  behindOf,
   driftOf,
   needsOf,
-  ringsOf,
   standingOf,
 } from "../../src/admin/admin-platform.ts";
-import type { Platform, Rollout } from "../../src/admin/admin-platform.ts";
-import {
-  SAMPLE_PLATFORMS,
-  SAMPLE_RELEASES,
-} from "./fixtures/admin-platform-sample.ts";
+import type { Platform } from "../../src/admin/admin-platform.ts";
+import { SAMPLE_PLATFORMS } from "./fixtures/admin-platform-sample.ts";
 
-const { hartog, noordkade, veldkamp, vanrijn } = SAMPLE_PLATFORMS;
+const { hartog, noordkade, vanrijn } = SAMPLE_PLATFORMS;
 const [core] = noordkade.workers;
 
 describe("a company’s own platform", () => {
@@ -52,97 +47,23 @@ describe("a company’s own platform", () => {
     expect(driftOf(vanrijn)).toBe("unknown");
   });
 
-  it("counts how far behind the newest release it is, and a pinned one is never asked to catch up", () => {
-    expect(behindOf(noordkade, SAMPLE_RELEASES)).toBe(0);
-    expect(behindOf(veldkamp, SAMPLE_RELEASES)).toBe(1);
-    const old: Platform = {
-      ...veldkamp,
-      workers: veldkamp.workers.map((worker) => ({
-        ...worker,
-        release: "r405-c27b18f",
-      })),
-    };
-    expect(needsOf(old, SAMPLE_RELEASES)).toStrictEqual([
-      { kind: "behind", releases: 2 },
+  it("says what needs someone at Grasp, the most pressing first", () => {
+    expect(needsOf(noordkade)).toStrictEqual([]);
+    expect(needsOf(hartog).map((need) => need.kind)).toStrictEqual([
+      "failed",
+      "errors",
+      "secrets",
     ]);
     expect(
-      needsOf({ ...old, pinned: "r405-c27b18f" }, SAMPLE_RELEASES)
-    ).toStrictEqual([]);
-  });
-
-  it("says what needs someone at Grasp, the most pressing first", () => {
-    expect(needsOf(noordkade, SAMPLE_RELEASES)).toStrictEqual([]);
-    expect(
-      needsOf(hartog, SAMPLE_RELEASES).map((need) => need.kind)
-    ).toStrictEqual(["failed", "errors", "secrets"]);
-    expect(
-      [hartog, noordkade, vanrijn].map((platform) =>
-        standingOf(platform, SAMPLE_RELEASES)
-      )
+      [hartog, noordkade, vanrijn].map((platform) => standingOf(platform))
     ).toStrictEqual(["attention", "healthy", "none"]);
     const waiting: Platform = {
       ...vanrijn,
       status: "provisioning",
       provisioning: { step: "paid", state: "waiting", since: "2026-10-15" },
     };
-    expect(needsOf(waiting, SAMPLE_RELEASES)).toStrictEqual([
+    expect(needsOf(waiting)).toStrictEqual([
       { kind: "provisioning", step: "paid", state: "waiting" },
-    ]);
-  });
-});
-
-describe("how a release reaches every company", () => {
-  const rollout: Rollout = {
-    id: "ro",
-    kind: "release",
-    release: "r418-3f9c2ab",
-    status: "waiting",
-    ring: 1,
-    by: "Nick",
-    at: "2026-10-14",
-    targets: [
-      { org: "a", ring: 0, status: "done" },
-      { org: "b", ring: 1, status: "done" },
-      { org: "c", ring: 2, status: "pending" },
-      { org: "d", ring: 2, status: "pending" },
-    ],
-  };
-
-  it("goes ring by ring, and waits after each for someone at Grasp", () => {
-    expect(ringsOf(rollout).map((ring) => ring.state)).toStrictEqual([
-      "done",
-      "done",
-      "waiting",
-    ]);
-    // Approved past ring 1: ring 2's companies deploy.
-    const next: Rollout = {
-      ...rollout,
-      status: "running",
-      ring: 2,
-      targets: rollout.targets.map((target) =>
-        target.ring === 2 ? { ...target, status: "deploying" } : target
-      ),
-    };
-    expect(ringsOf(next).map((ring) => ring.state)).toStrictEqual([
-      "done",
-      "done",
-      "running",
-    ]);
-  });
-
-  it("does not count a ring as done when its rollout was cancelled part way", () => {
-    const cancelled: Rollout = {
-      ...rollout,
-      status: "cancelled",
-      ring: 2,
-      targets: rollout.targets.map((target) =>
-        target.ring === 2 ? { ...target, status: "stopped" } : target
-      ),
-    };
-    expect(ringsOf(cancelled).map((ring) => ring.state)).toStrictEqual([
-      "done",
-      "done",
-      "stopped",
     ]);
   });
 });

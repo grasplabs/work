@@ -26,7 +26,7 @@ export interface AdminEvent {
   action: string;
   /** The client it concerns, if any. */
   clientId?: string;
-  /** What it acted on within that client, such as a release or rollout id. */
+  /** What it acted on within that client, such as a release or a run. */
   target?: string;
   /** Identifiers and counts only; never secrets, tokens or response bodies. */
   detail?: Record<string, string | number | boolean>;

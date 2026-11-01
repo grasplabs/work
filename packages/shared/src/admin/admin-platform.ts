@@ -2,7 +2,7 @@
  * Each company's own Grasp as the admin runs it, and how a release reaches every company: the
  * records the admin (`apps/admin`) keeps, in the words its pages say them in. A company is a
  * client of the admin: its own Workers in Grasp's EU Workers for Platforms namespace, made and set
- * up by a provisioning run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
+ * up by a provisioning run, then kept on its channel's release by deploys. Pure: the pages only say what this works
  * out, from the records the admin reads.
  */
 
@@ -26,25 +26,15 @@ export const DEPLOY_STEPS = [
 ] as const;
 export type DeployStep = (typeof DEPLOY_STEPS)[number];
 
-/** The rings a release goes out in: 0 first (Grasp's own and the companies that asked to be first), then 1, then everyone else. */
-export const RINGS = [0, 1, 2] as const;
-export type Ring = (typeof RINGS)[number];
+/** The release channels a company follows, as the admin has them: Edge gets every release as it lands, Beta and Stable what Grasp promotes. */
+export const CHANNELS = ["edge", "beta", "stable"] as const;
+export type Channel = (typeof CHANNELS)[number];
 
-/**
- * The rings by name, as Grasp's staff say them: Alpha (Grasp's own test deployments, where a
- * release goes first), Beta (the companies that want the latest changes), then Production (the
- * safe tier, everyone else). Only the words: the rings stay numbers in every record.
- */
-export const RING_NAMES: Readonly<Record<Ring, string>> = {
-  0: "Alpha",
-  1: "Beta",
-  2: "Production",
-};
-
-/** A ring by its name; one past the named three by its number, as the admin allows any. */
-export const ringName = (ring: number): string => {
-  const named = RINGS.find((each) => each === ring);
-  return named === undefined ? `Ring ${ring}` : RING_NAMES[named];
+/** The channels by name, as Grasp's staff say them. */
+export const CHANNEL_NAMES: Readonly<Record<Channel, string>> = {
+  edge: "Edge",
+  beta: "Beta",
+  stable: "Stable",
 };
 
 /** The Workers the admin deploys into a company's account. */
@@ -72,7 +62,7 @@ export interface Deploy {
   step: DeployStep | null;
   /** Why it failed, as a code: never a token or a response. */
   error?: string;
-  /** Who started it: someone at Grasp, a rollout, or the system. */
+  /** Who started it: someone at Grasp, or the admin's reconciler. */
   by: string;
   /** When it started, and how long it took. */
   at: string;
@@ -116,8 +106,8 @@ export interface Platform {
   account: { id: string; name: string } | null;
   /** Where core answers before the address does: `<core>.<subdomain>.workers.dev`. */
   workersDev: string | null;
-  ring: Ring;
-  /** The release it stays on, whatever the rollouts. */
+  channel: Channel;
+  /** The release it stays on: promotions skip it. */
   pinned: string | null;
   /** The provisioning run, while there is one; none once the company is active, or before it starts. */
   provisioning: {
@@ -134,7 +124,7 @@ export interface Platform {
   } | null;
   /** Its derived secrets: their generation, when they last rotated, and whether that rotation is live. */
   secrets: { generation: number; rotated: string | null; live: boolean };
-  /** When staff last changed what a deploy sets on its core; a rollout deploys it again after such a change. */
+  /** When staff last changed what a deploy sets on its core: its next deploy carries it. */
   configChanged: string | null;
   resources: PlatformResource[];
   workers: PlatformWorker[];
@@ -148,33 +138,6 @@ export interface Platform {
   };
   /** The client in the admin, and the account in Cloudflare. */
   url: string | null;
-}
-
-export interface RolloutTarget {
-  org: string;
-  ring: Ring;
-  status:
-    | "pending"
-    | "deploying"
-    | "done"
-    | "failed"
-    | "rolled_back"
-    | "skipped"
-    | "stopped";
-  error?: string;
-}
-
-export interface Rollout {
-  id: string;
-  kind: "release" | "secrets";
-  release: string;
-  /** `waiting`: on someone at Grasp to approve the next ring. */
-  status: "running" | "waiting" | "done" | "failed" | "cancelled";
-  /** The ring it rolls out to, or waits after. */
-  ring: Ring;
-  by: string;
-  at: string;
-  targets: RolloutTarget[];
 }
 
 /** Whether what runs is what the admin made live: one version, another, two at once, or the release it is pinned off. */
@@ -226,22 +189,6 @@ export const errorRateOf = (platform: Platform): number | null => {
 /** An error rate at or above this needs a look. */
 export const ERROR_RATE = 0.01;
 
-/** How far behind the newest release it is: how many releases came after the one it runs. */
-export const behindOf = (
-  platform: Platform,
-  releases: readonly Release[]
-): number => {
-  const runs = releaseOf(platform);
-  if (runs === null || runs === "") {
-    return 0;
-  }
-  const newest = releases.toSorted(
-    (a, b) => b.on.localeCompare(a.on) || b.id.localeCompare(a.id)
-  );
-  const index = newest.findIndex((release) => release.id === runs);
-  return Math.max(index, 0);
-};
-
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 export type PlatformNeed =
   | { kind: "failed"; deploy: Deploy }
@@ -253,8 +200,7 @@ export type PlatformNeed =
     }
   | { kind: "drift"; drift: Exclude<Drift, "in_sync" | "unknown"> }
   | { kind: "errors"; rate: number }
-  | { kind: "secrets" }
-  | { kind: "behind"; releases: number };
+  | { kind: "secrets" };
 
 /** A provisioning run that stopped, waiting on staff or failed; none while it runs. */
 const stoppedProvisioning = (platform: Platform): PlatformNeed[] => {
@@ -274,10 +220,7 @@ const stoppedProvisioning = (platform: Platform): PlatformNeed[] => {
   ];
 };
 
-export const needsOf = (
-  platform: Platform,
-  releases: readonly Release[]
-): PlatformNeed[] => {
+export const needsOf = (platform: Platform): PlatformNeed[] => {
   const needs: PlatformNeed[] = [];
   const [last] = platform.deploys;
   if (last?.status === "failed") {
@@ -295,23 +238,17 @@ export const needsOf = (
   if (platform.status === "active" && !platform.secrets.live) {
     needs.push({ kind: "secrets" });
   }
-  // A pinned company stays behind on purpose.
-  const behind = isPinned(platform) ? 0 : behindOf(platform, releases);
-  if (behind >= 2) {
-    needs.push({ kind: "behind", releases: behind });
-  }
   return needs;
 };
 
 /** How a company's platform stands, as one word: not there yet, being set up, fine, or with something to look at. */
 export const standingOf = (
-  platform: Platform,
-  releases: readonly Release[]
+  platform: Platform
 ): "none" | "setup" | "healthy" | "attention" => {
   if (platform.status === "none") {
     return "none";
   }
-  if (needsOf(platform, releases).length > 0) {
+  if (needsOf(platform).length > 0) {
     return "attention";
   }
   if (platform.status === "provisioning") {
@@ -319,88 +256,3 @@ export const standingOf = (
   }
   return "healthy";
 };
-
-export type RingState =
-  | "done"
-  | "running"
-  | "waiting"
-  | "failed"
-  | "stopped"
-  | "todo";
-
-export interface RingProgress {
-  ring: Ring;
-  targets: RolloutTarget[];
-  done: number;
-  failed: number;
-  /** Stopped part way when the rollout was cancelled: never finished, never failed. */
-  stopped: number;
-  moving: number;
-  waiting: number;
-  state: RingState;
-}
-
-/** Where one ring of a rollout stands, from how many of its companies failed, stopped, deploy or wait. */
-const ringStateOf = (
-  rollout: Rollout,
-  ring: Ring,
-  {
-    failed,
-    stopped,
-    moving,
-    waiting,
-  }: Pick<RingProgress, "failed" | "stopped" | "moving" | "waiting">
-): RingState => {
-  if (failed > 0) {
-    return "failed";
-  }
-  // A cancelled rollout leaves the companies it was deploying to stopped: the ring never finished.
-  if (stopped > 0) {
-    return "stopped";
-  }
-  if (
-    ring < rollout.ring ||
-    (ring === rollout.ring && waiting + moving === 0)
-  ) {
-    return "done";
-  }
-  if (ring === rollout.ring) {
-    return "running";
-  }
-  // A rollout that waits does so after its ring: the next ring waits on someone at Grasp.
-  if (ring === rollout.ring + 1 && rollout.status === "waiting") {
-    return "waiting";
-  }
-  return "todo";
-};
-
-/** A rollout ring by ring: who is in it, and how many are done, failed, stopped, deploying or still to come. */
-export const ringsOf = (rollout: Rollout): RingProgress[] =>
-  RINGS.map((ring) => {
-    const targets = rollout.targets.filter((target) => target.ring === ring);
-    const done = targets.filter(
-      (target) => target.status === "done" || target.status === "skipped"
-    ).length;
-    const failed = targets.filter(
-      (target) => target.status === "failed" || target.status === "rolled_back"
-    ).length;
-    const stopped = targets.filter(
-      (target) => target.status === "stopped"
-    ).length;
-    const moving = targets.filter(
-      (target) => target.status === "deploying"
-    ).length;
-    const waiting = targets.filter(
-      (target) => target.status === "pending"
-    ).length;
-    return {
-      ring,
-      targets,
-      done,
-      failed,
-      stopped,
-      moving,
-      waiting,
-      state: ringStateOf(rollout, ring, { failed, stopped, moving, waiting }),
-    };
-  });

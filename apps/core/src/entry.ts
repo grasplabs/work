@@ -21,7 +21,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
-import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPath,
   provisionProbePath,
@@ -69,7 +68,6 @@ import {
   packageArtifactResponse,
   withoutArtifactToken,
 } from "./packages/serve.ts";
-import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
   connectVersionResponse,
@@ -345,7 +343,6 @@ const pathHandlers: ReadonlyMap<
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
   [adminKickoffPath, adminKickoffResponse],
-  [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);
 

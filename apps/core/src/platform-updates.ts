@@ -1,21 +1,12 @@
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { deploymentConfig } from "@grasp-os/shared/config";
-import { requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  platformChangeSchema,
-  platformUpdateMaxBytes,
-  platformUpdateMaxSkewMs,
-  platformUpdateNoticeSchema,
-  platformUpdatePurpose,
-} from "@grasp-os/shared/platform-change";
+import { platformChangeSchema } from "@grasp-os/shared/platform-change";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
-import { consoleSigned } from "./console-signed.ts";
+import { outboxedIfChanged } from "./audit-outbox.ts";
 import { platformVersions } from "./db/core/schema.ts";
-import { errorResponse } from "./errors.ts";
 
 // Platform updates in the client's Activity: every version the admin
 // deploys carries a `PLATFORM_CHANGE` var (@grasp-os/shared/platform-change)
@@ -25,10 +16,10 @@ import { errorResponse } from "./errors.ts";
 // same batch only if that insert added the row. So each version is
 // recorded at most once, however many clock runs see it at the same time,
 // and however often isolates of two versions alternate on the clock during
-// a gradual rollout. A rollback to a version already recorded is not
-// recorded again here: the admin tells core of it (`platformUpdatePath`,
-// below). The event waits in core's outbox for the clock's drain, this
-// run's or the next.
+// a gradual rollout. Every change the admin makes is a new version, a
+// rollback included (it promotes the release before), so nothing else
+// records one. The event waits in core's outbox for the clock's drain,
+// this run's or the next.
 //
 // A version made outside the admin (a `wrangler deploy`, which keeps the
 // vars) carries the previous version's `PLATFORM_CHANGE`; the event names
@@ -114,63 +105,4 @@ export const recordPlatformUpdate = async (
       log.warn("platform.update.table_missing", errorFields(error));
     }
   }
-};
-
-// A platform update that made no new version, a rollback to a version
-// core has run before, never reaches the clock above: the admin tells
-// core of it instead, at `platformUpdatePath`, signed (console-signed.ts).
-// It's recorded as `platform.updated`, the way the clock records a new
-// version, with the version the rollback went back to.
-
-/**
- * Takes the admin's notice of a platform update that made no new
- * version, and records it as `platform.updated`: 204. Anything but a
- * `POST` is a path core doesn't serve; a notice that's too large,
- * unsigned, signed otherwise, malformed or stale is refused (403) and
- * logged, recording nothing.
- */
-export const platformUpdateResponse = async (
-  request: Request,
-  env: Env,
-  requestId: string
-): Promise<Response> => {
-  if (request.method !== "POST") {
-    return errorResponse(
-      404,
-      requestErrors.create("request.not_found"),
-      requestId
-    );
-  }
-  const notice = await consoleSigned(request, env, {
-    purpose: platformUpdatePurpose,
-    schema: platformUpdateNoticeSchema,
-    maxBytes: platformUpdateMaxBytes,
-    maxSkewMs: platformUpdateMaxSkewMs,
-  });
-  if (typeof notice === "string") {
-    log.info("platform.update.refused", { reason: notice });
-    return errorResponse(
-      403,
-      requestErrors.create("request.forbidden"),
-      requestId
-    );
-  }
-  const { versionId, change } = notice;
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: { type: "system" },
-      action: "platform.updated",
-      target: { type: "version", id: versionId },
-      detail: {
-        versionId,
-        versionCreatedAt: null,
-        by: change.by,
-        what: change.what,
-        release: change.release,
-        changedAt: change.at,
-      },
-    }),
-  ]);
-  return new Response(null, { status: 204 });
 };
