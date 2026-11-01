@@ -102,7 +102,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // the client's audit log (staff-audit.ts): the one check they all ask.
     const check = staffAudited(env, connectionCheck);
     this.#check = check;
-    // Everything but the onboarding refuses staff who reach the onboarding alone.
+    // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
     this.#knowledge = new KnowledgeRpc(env, full);

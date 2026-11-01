@@ -29,7 +29,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { routeMember } from "./staff-audit.ts";
 
 // Core's link channel (spec 10.7.7, 32.3): whether a running App's screen,
 // through its page, may open a URL through one of its App's
@@ -270,7 +270,17 @@ export const appLinkResponse = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    `app.link.${route.kind}`,
+    {
+      app: route.app,
+      resource: route.resource,
+    }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -278,11 +288,6 @@ export const appLinkResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, `app.link.${route.kind}`, {
-    app: route.app,
-    resource: route.resource,
-  });
   const refusal = personRefusal(request.headers, person.userId);
   if (refusal !== undefined) {
     log.info("app_link.person_refused", { requestId, reason: refusal.code });

@@ -520,7 +520,7 @@ describe("whom an App is made for", slow, () => {
 });
 
 describe("the business process an App serves", slow, () => {
-  it("is set and cleared by its builders, Grasp staff among them, shown to everyone who opens it, audited, and only one of the list", async () => {
+  it("is set and cleared by its builders, never Grasp staff, shown to everyone who opens it, audited, and only one of the list", async () => {
     const [owner, builder, user] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
@@ -575,12 +575,12 @@ describe("the business process an App serves", slow, () => {
         {
           action: "app.updated",
           actor: { type: "person", userId: owner.userId },
-          detail: { process: null, previousProcess: "r2r" },
+          detail: { process: null, previousProcess: "o2c" },
         },
       ],
       unchanged: 0,
       refused: { user: "role.forbidden", unknown: "app.invalid" },
-      byStaff: "ok",
+      byStaff: "role.forbidden",
       after: null,
     });
   });

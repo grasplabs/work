@@ -554,17 +554,16 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       audited: [],
     });
 
-    // Grasp staff are admins, but never decide a client's permissions.
+    // Grasp staff never release a client's App, nor decide its permissions.
     const { core } = await openRpc(
       await signedIn(idp, "grasp-staff", staffPerson())
     );
-    await changedBy({ api: core.authenticate() }, app, "Changed by staff.");
-    const byStaff = await permissionsOf(admin, app);
-    expect(
-      byStaff.map(({ binding, status }) => ({ binding, status }))
-    ).toStrictEqual([
-      { binding: "NOTES_READ", status: "active" },
-      { binding: "GUESTS", status: "requested" },
-    ]);
+    const byStaff = await outcome(
+      changedBy({ api: core.authenticate() }, app, "Changed by staff.")
+    );
+    expect({
+      byStaff,
+      permissions: await permissionsOf(admin, app),
+    }).toStrictEqual({ byStaff: "role.forbidden", permissions: granted });
   });
 });

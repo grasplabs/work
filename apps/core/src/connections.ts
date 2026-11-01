@@ -46,7 +46,7 @@ import {
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
-import { identifyFull } from "./auth/identity.ts";
+import { identify } from "./auth/identity.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -56,7 +56,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
   setAppToolClass,
@@ -718,14 +718,18 @@ export const handleConnectionCallback = async (
   if (state === null || state === "") {
     return failed("connection.flow_invalid");
   }
-  const identity = await identifyFull(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const identity = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "connections.callback"
+  );
   if (identity === undefined) {
     // Spent, so the code in this URL can't be brought back to finish it.
     await env.CONNECT.abandonFlow(state);
     return failed(authErrors.create("auth.unauthenticated").code);
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, identity, "connections.callback");
   let finished: { connectionId: string; returnTo: string };
   try {
     finished = await env.CONNECT.finishConnection({
@@ -786,7 +790,13 @@ export const catalogLogoResponse = async (
   if (request.method !== "GET" || !source.success || named?.id === undefined) {
     return notFound();
   }
-  const person = await identifyFull(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "connections.catalog_logo"
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -794,8 +804,6 @@ export const catalogLogoResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "connections.catalog_logo");
   const logo = await env.CONNECT.catalogLogo({
     source: source.data,
     id: named.id,

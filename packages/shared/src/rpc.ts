@@ -56,8 +56,9 @@ export interface Identity {
   /** Grasp staff, signed in for a limited time; not a member of the organization. */
   staff: boolean;
   /**
-   * Grasp staff who reach the onboarding alone (`SIGN_IN`'s staff scope):
-   * every other namespace and route refuses them.
+   * Grasp staff, who reach the onboarding alone, whatever `SIGN_IN`'s
+   * staff scope: every other namespace and route refuses them. Set on
+   * every staff session.
    */
   onboardingOnly?: true;
   /** When the session ends (ISO 8601). */

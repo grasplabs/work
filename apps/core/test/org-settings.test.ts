@@ -72,7 +72,7 @@ describe("the organization's settings", () => {
     });
   });
 
-  it("are read by admins alone, and changed by the organization's own admins alone", async () => {
+  it("are read and changed by the organization's own admins alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const member = await signedInApi(idp, "user");
@@ -95,7 +95,7 @@ describe("the organization's settings", () => {
     }).toStrictEqual({
       builder: "role.forbidden",
       member: "role.forbidden",
-      staffReads: "ok",
+      staffReads: "role.forbidden",
       builderChanges: "role.forbidden",
       staffChanges: "role.forbidden",
       kept: {

@@ -41,7 +41,7 @@ import {
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
-import { identify } from "./auth/identity.ts";
+import { identify, identifyFull } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -55,7 +55,7 @@ import {
 import type { LeasedBuild } from "./screen-trust.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -676,7 +676,14 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "app.functions",
+    { app }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -684,8 +691,6 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -699,7 +704,7 @@ export const appFunctionResponse = async (
       // A missing lease is no build: unreviewed.
       lease: request.headers.get(screenLeaseHeader),
       operation: "call",
-      current: async () => await identify(env, request.headers),
+      current: async () => await identifyFull(env, request.headers),
     },
     requestId
   );
@@ -859,7 +864,14 @@ const admitCall = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "app.functions.stream",
+    { app }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -867,8 +879,6 @@ const admitCall = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions.stream", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -928,7 +938,7 @@ const stillDelivering = async (
   },
   stage: "push" | "delivery"
 ): Promise<void> => {
-  const now = await identify(env, headers);
+  const now = await identifyFull(env, headers);
   if (now?.userId !== call.person.userId) {
     throw authErrors.create("auth.unauthenticated");
   }

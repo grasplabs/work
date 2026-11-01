@@ -692,7 +692,7 @@ const readOf = ({ actor, action, target, provenance, detail }: AuditEvent) => ({
 });
 
 describe("Knowledge reads in the audit log", setUpTime, () => {
-  it("record every read, by an agent, an App, a person or staff, with provenance and no content", async () => {
+  it("record every read, by an agent, an App or a person, and none by staff, who are refused, with provenance and no content", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
     const { id } = await admin.api.apps.create({ name: `App ${unique()}` });
@@ -714,9 +714,10 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core: staffCore } = await openRpc(staffSession);
     const staff = staffCore.authenticate();
-    const { userId: staffId } = await staff.whoami();
+    await staff.whoami();
 
     let found: string[] = [];
+    let staffRead = "";
     const events = await auditedDuring(async () => {
       // An agent, through its tools; a refused read isn't one.
       const { hits } = await knowledge.search("note");
@@ -733,8 +734,8 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
       await admin.knowledge.history(noteId);
       await admin.knowledge.backlinks(noteId);
       await admin.knowledge.follow(noteId);
-      // Staff, reading a collection for everyone.
-      await staff.knowledge.read(noteId);
+      // Staff, refused a collection for everyone: no read.
+      staffRead = await outcome(staff.knowledge.read(noteId));
     });
     const agentActor = {
       type: "agent",
@@ -846,20 +847,15 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
           sensitive: false,
         },
       },
-      {
-        actor: { type: "staff", userId: staffId },
-        action: "knowledge.read",
-        target: note,
-        provenance: fromHandbook,
-        detail: { read: "document", version: 1, sensitive: false },
-      },
     ];
     expect({
       found: found.includes(noteId),
+      staffRead,
       reads: reads.map(readOf),
       content: JSON.stringify(reads).match(/See |Back to|note\.md/gu),
     }).toStrictEqual({
       found: true,
+      staffRead: "role.forbidden",
       reads: expected.map((read) => ({
         ...read,
         provenance: read.provenance.toSorted((one, other) =>

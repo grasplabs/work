@@ -29,7 +29,6 @@ import { newTeam, storedVersionTexts } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { connectWithoutGraspKeys } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
-import { signInConfig } from "./sign-in-config.ts";
 import {
   openRpc,
   outcome,
@@ -1018,7 +1017,7 @@ export default class extends WorkerEntrypoint {
     });
   });
 
-  it("save a staff member's upload while their window is open, and nothing once it closed", async () => {
+  it("save nothing a staff member uploaded, even while their window is open", async () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { userId } = await whoami(staffSession);
     const admin = await signedInApi(idp, "admin");
@@ -1033,33 +1032,10 @@ export default class extends WorkerEntrypoint {
     });
     await runMinuteTasks();
     await settled(whileOpen);
-    const afterClosing = await leftPending(staff, "travel-policy.docx", {
-      name: "closed.docx",
-      staff: true,
-    });
-    const before = env.SIGN_IN;
-    const day = 24 * 60 * 60_000;
-    env.SIGN_IN = {
-      ...signInConfig,
-      staff: {
-        ...signInConfig.staff,
-        opened: new Date(Date.now() - 2 * day).toISOString(),
-        until: new Date(Date.now() - day).toISOString(),
-      },
-    };
-    try {
-      await runMinuteTasks();
-      await settled(afterClosing);
-    } finally {
-      env.SIGN_IN = before;
-    }
 
-    expect({
-      open: await statusOf(whileOpen),
-      closed: await statusOf(afterClosing),
-    }).toStrictEqual({
-      open: { status: "ready", failure: null },
-      closed: { status: "failed", failure: "knowledge.forbidden" },
+    await expect(statusOf(whileOpen)).resolves.toStrictEqual({
+      status: "failed",
+      failure: "knowledge.forbidden",
     });
   });
 

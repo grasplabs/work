@@ -772,7 +772,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       expect(everywhere).not.toContain(key.slice(-4));
     });
 
-    it("audits Grasp staff's every read of the providers, naming nothing they hold", async () => {
+    it("refuses Grasp staff the providers, and audits each ask, naming nothing they hold", async () => {
       const key = newKey();
       const { admin: by } = await admin();
       await by.api.aiProviders.add({ provider: "openai", key });
@@ -782,15 +782,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const staff = core.authenticate();
       const { userId } = await staff.whoami();
 
-      const listing = await staff.aiProviders.list();
+      const listing = await outcome(staff.aiProviders.list());
       const adding = await outcome(
         staff.aiProviders.add({ provider: "anthropic", key: newKey() })
       );
 
-      expect(listing.providers.map(({ provider }) => provider)).toStrictEqual([
-        "openai",
-      ]);
-      expect(adding).toBe("role.forbidden");
+      expect({ listing, adding }).toStrictEqual({
+        listing: "role.forbidden",
+        adding: "role.forbidden",
+      });
       const audited = await auditedFor(userId, 2);
       const views = audited.filter(({ action }) => action === "staff.accessed");
       expect(views.map(({ detail }) => detail.surface)).toStrictEqual(

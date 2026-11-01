@@ -929,20 +929,23 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     list.stop();
   });
 
-  it("puts a staff member's connection and each of their queries in the client's audit log", async () => {
+  it("gives a staff member no token, and puts their ask in the client's audit log", async () => {
     const notes = await notesApp();
     const staff = await signedIn(idp, "grasp-staff", staffPerson());
-    const token = await tokenFor(staff, notes.app);
-    hostBrowser({ cookie: staff });
 
+    let status = 0;
     const events = await auditedDuring(
       async () => {
-        const client = portableClient(() => token);
-        const list = reading(client, notes.api.list, { pagination: {} });
-        await eventually(() => {
-          expect(list.now()).toStrictEqual([]);
+        const response = await routed(`${appTokenPath}/${notes.app}`, {
+          method: "POST",
+          headers: {
+            origin: clientOrigin,
+            "content-type": "application/json",
+            cookie: staff,
+          },
+          body: "{}",
         });
-        list.stop();
+        ({ status } = response);
       },
       { staffAccesses: true }
     );
@@ -950,11 +953,9 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       .filter(({ action }) => action === "staff.accessed")
       .map(({ detail, provenance }) => [detail.surface, provenance]);
 
-    expect(surfaces).toStrictEqual(
-      expect.arrayContaining([
-        ["app.live.connect", [notes.app]],
-        ["portableQueries.watchQuery", []],
-      ])
-    );
+    expect({ status, surfaces }).toStrictEqual({
+      status: 401,
+      surfaces: [["app.token", [notes.app]]],
+    });
   });
 });

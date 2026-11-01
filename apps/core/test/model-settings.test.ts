@@ -593,16 +593,18 @@ describe("model settings", { timeout: 60_000 }, () => {
     ).resolves.toBe("role.forbidden");
   });
 
-  it("read to Grasp staff too, through the admin role their access gives", async () => {
+  it("refused to Grasp staff, whatever role their access gives", async () => {
     await choose(mistral);
     const coreEnv = envWith();
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(session, { coreEnv });
     const staff = core.authenticate();
-    await expect(staff.whoami()).resolves.toMatchObject({ staff: true });
-    await expect(staff.models.settings()).resolves.toMatchObject({
-      models: [mistral],
-      rules: { state: "on", budgets: [] },
+    await expect(staff.whoami()).resolves.toMatchObject({
+      staff: true,
+      role: "admin",
     });
+    await expect(outcome(staff.models.settings())).resolves.toBe(
+      "role.forbidden"
+    );
   });
 });

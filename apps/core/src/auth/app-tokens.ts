@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { sessions, users } from "../db/core/schema.ts";
+import { reachesWorkspace } from "../session-check.ts";
 import { authFor, tokenKeysOf } from "./auth.ts";
 import { signInConfig } from "./config.ts";
 import { sessionIdentity } from "./identity.ts";
@@ -202,7 +203,8 @@ export const checkAppToken = async (
     return { ok: false, reason: "session_ended", userId, sessionId };
   }
   const person = await sessionIdentity(env, { userId, ...session });
-  return person === undefined
+  // Grasp staff reach no App (session-check.ts `reachesWorkspace`).
+  return person === undefined || !reachesWorkspace(person)
     ? { ok: false, reason: "no_access", userId, sessionId }
     : { ok: true, person, sessionId, expiresAt: read.data.exp * 1000 };
 };

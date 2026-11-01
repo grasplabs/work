@@ -37,11 +37,12 @@ import {
 } from "./sign-in.ts";
 
 // Every view and action of Grasp's staff is in the client's audit log
-// (GRA-1087, its threat model): staff may read everything, and each read,
-// over `/rpc` or a route, writes one entry the client's admins see, as
-// "(Grasp staff)", naming what was viewed and never what it holds. The
+// (GRA-1087, its threat model): each ask, over `/rpc` or a route, writes
+// one entry the client's admins see, as "(Grasp staff)", naming what was
+// asked and never what it holds. Outside the onboarding a staff session is
+// refused (staff-scope.test.ts), and the attempt is still on record. The
 // ways it can fail, tried here:
-// 1. A surface reads for staff and writes no entry.
+// 1. A surface staff ask, answered or refused, writes no entry.
 // 2. A page asking again floods the log, or a view of something else is
 //    folded into another's entry.
 // 3. An entry repeats what was read: a search's terms, a document's text.
@@ -124,7 +125,7 @@ const targetMethods = (
 const secret = `Salary${crypto.randomUUID().slice(0, 8)}`;
 
 describe("Grasp staff's views, audited", () => {
-  it("write one entry for each read, over /rpc or a route, without content", async () => {
+  it("write one entry for each ask, answered or refused, over /rpc or a route, without content", async () => {
     const admin = await signedInApi(idp, "admin");
     const { noteId } = await collectionWithNote(admin.api, {
       name: `Handbook ${secret}`,
@@ -345,9 +346,9 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (let time = 0; time < 5; time += 1) {
           // oxlint-disable-next-line no-await-in-loop -- a page asking again
-          await api.knowledge.getDocument(first.noteId);
+          await outcome(api.knowledge.getDocument(first.noteId));
         }
-        await api.knowledge.getDocument(second.noteId);
+        await outcome(api.knowledge.getDocument(second.noteId));
       },
       { staffAccesses: true }
     );
@@ -379,7 +380,7 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (const query of asked) {
           // oxlint-disable-next-line no-await-in-loop -- one ask after another
-          await api.knowledge.search(query);
+          await outcome(api.knowledge.search(query));
         }
       },
       { staffAccesses: true }
@@ -467,7 +468,7 @@ describe("Grasp staff's views, audited", () => {
         await Promise.all(
           Array.from(
             { length: 5 },
-            async () => await api.knowledge.getDocument(noteId)
+            async () => await outcome(api.knowledge.getDocument(noteId))
           )
         );
         for (const frame of frames) {
