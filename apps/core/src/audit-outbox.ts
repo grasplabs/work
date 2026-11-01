@@ -61,6 +61,13 @@ interface Outbox {
     appended: readonly string[],
     rejected: readonly OutboxRejected[]
   ) => Promise<void>;
+  /**
+   * What else is done with the events the log now has, before they leave
+   * the outbox: a drain cut short after it hands them over hands them
+   * over again, so it must do the same thing twice over. One that fails is
+   * logged, and never keeps the events from the log.
+   */
+  appended?: (events: readonly AuditEvent[]) => Promise<void>;
 }
 
 /**
@@ -128,9 +135,13 @@ const objectOutbox = (storage: SqlStorage): Outbox => ({
   },
 });
 
-/** Connect's outbox, over RPC. */
-const connectOutbox = (env: Pick<Env, "CONNECT">): Outbox => ({
+/** Connect's outbox, over RPC, and what is done with its events besides. */
+const connectOutbox = (
+  env: Pick<Env, "CONNECT">,
+  besides?: Outbox["appended"]
+): Outbox => ({
   name: "connect",
+  ...(besides === undefined ? {} : { appended: besides }),
   take: async () => await env.CONNECT.takeAuditEvents(),
   settle: async (appended, rejected) => {
     await env.CONNECT.ackAuditEvents([...appended], [...rejected]);
@@ -212,6 +223,24 @@ const gapFor = async (
   };
 };
 
+/** Hands `events`, which the log has, to what `outbox` does besides. */
+const handOver = async (
+  outbox: Outbox,
+  events: readonly AuditEvent[]
+): Promise<void> => {
+  if (outbox.appended === undefined || events.length === 0) {
+    return;
+  }
+  try {
+    await outbox.appended(events);
+  } catch (error) {
+    log.error("audit.outbox.hand_over_failed", {
+      outbox: outbox.name,
+      ...errorFields(error),
+    });
+  }
+};
+
 /**
  * Appends an outbox's oldest events to the log, in order, records any it
  * moves aside with an `audit.gap` (`gapFor`), then settles them: those the log has are removed, and two kinds are moved out to
@@ -257,6 +286,10 @@ const drainBatch = async (
       }
     }
     ({ appended } = result);
+    await handOver(
+      outbox,
+      events.filter(({ id }) => rowOf.has(id))
+    );
   }
   // The chain records what leaves it out before it is moved aside.
   const gaps = await Promise.all(
@@ -356,14 +389,19 @@ export const drainObjectOutbox = async (
  * Drains every outbox: the core and Knowledge databases' and connect's,
  * each on its own, so one that fails (connect unreachable, say) is logged
  * and leaves the others to drain. Returns how many events it appended.
- * The clock calls it.
+ * The clock calls it, with what connect's events are to tell people
+ * (connector-source-notices.ts).
  */
-export const drainAuditOutboxes = async (env: Env): Promise<number> => {
+export const drainAuditOutboxes = async (
+  env: Env,
+  /** What is done with connect's events besides (`Outbox.appended`). */
+  connectAppended?: Outbox["appended"]
+): Promise<number> => {
   const counts = await Promise.all(
     [
       databaseOutbox("core", env.DB),
       databaseOutbox("knowledge", env.KNOWLEDGE),
-      connectOutbox(env),
+      connectOutbox(env, connectAppended),
     ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))
   );
   return counts.reduce((total, count) => total + count, 0);

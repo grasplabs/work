@@ -1863,6 +1863,17 @@
   --icon-time: 0.6s;
 }
 
+/* The stroke drops in beside the envelope and its dot comes up after it. */
+.lucide-mail-warning > :nth-child(3) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+.lucide-mail-warning > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.22s;
+}
+
 /* The four corners move out. */
 .lucide-maximize > :nth-child(1) {
   --icon-move: icon-there;

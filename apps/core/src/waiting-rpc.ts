@@ -159,15 +159,21 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: failed runs, questions they were asked, and schedules of theirs that stopped. */
+/** The latest page of the person's notifications: failed runs, questions they were asked, schedules of theirs that stopped, and sources connect stopped hearing for their triggers. */
 const notificationItems = async (
-  { notifications, chats }: WaitingSources,
+  { notifications, chats, connections }: WaitingSources,
   { forMe }: Reader
 ): Promise<PartRead> => {
   const [page, models] = await Promise.all([
     notifications.list(),
     modelsOrNone(chats),
   ]);
+  // Named by their accounts as the person may see them: read only when a
+  // source connect stopped hearing is among them.
+  const named = page.notifications.some(({ type }) => type === "events_stopped")
+    ? await connections.list()
+    : [];
+  const connectionsById = new Map(named.map((listed) => [listed.id, listed]));
   const fixModel = models[0] ?? null;
   return {
     items: page.notifications.map((notification): WaitingItem => {
@@ -198,6 +204,24 @@ const notificationItems = async (
             id: `stoppedSchedule:${notification.id}`,
             verdicts: [],
             notification,
+          };
+        }
+        case "events_stopped": {
+          const connection = connectionsById.get(notification.connection);
+          return {
+            ...base,
+            kind: "stoppedEvents",
+            id: `stoppedEvents:${notification.id}`,
+            verdicts: [],
+            notification,
+            account:
+              connection === undefined
+                ? null
+                : {
+                    name: connection.accountName,
+                    source: connection.source,
+                    provider: connection.provider,
+                  },
           };
         }
         default: {

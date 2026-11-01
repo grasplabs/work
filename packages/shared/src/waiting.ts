@@ -16,6 +16,7 @@ import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
+  EventsStoppedNotification,
   GapAskedNotification,
   RunFailedNotification,
   TriggerStoppedNotification,
@@ -155,6 +156,23 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/**
+ * A mailbox or drive the person's triggers listen to, which connect
+ * stopped hearing: their triggers there start nothing new until it
+ * answers again.
+ */
+export interface StoppedEventsItem extends ItemBase {
+  kind: "stoppedEvents";
+  verdicts: never[];
+  notification: EventsStoppedNotification;
+  /** The connection's account and catalog entry, while the person may see it. */
+  account: {
+    name: string | null;
+    source: CatalogSource;
+    provider: string;
+  } | null;
+}
+
 /** A connection whose access ran out, which the person can sign in to again on its page. */
 export interface SignInAgainItem extends ItemBase {
   kind: "signInAgain";
@@ -182,6 +200,7 @@ export type WaitingItem =
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | StoppedEventsItem
   | SignInAgainItem
   | DecisionItem
   | HeldStartItem;

@@ -5371,6 +5371,10 @@ msgstr "Uitgetekend als workflow"
 msgid "Drawn as a workflow: {workflow}"
 msgstr "Uitgetekend als workflow: {workflow}"
 
+#: src/inbox/items.ts
+msgid "Drive"
+msgstr "Schijf"
+
 #: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
@@ -5932,6 +5936,7 @@ msgid "File"
 msgstr "Bestand"
 
 #: src/chat/builds.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Files"
@@ -8103,6 +8108,7 @@ msgstr "Gemaakt met Grasp op {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/inbox/items.ts
 #: src/onboarding/interview-actions.tsx
 msgid "Mail"
 msgstr "E-mail"
@@ -8114,6 +8120,10 @@ msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger 
 #: src/onboarding/review-parts.tsx
 msgid "Mail isn’t available on this hosting yet"
 msgstr "Mail is op deze hosting nog niet beschikbaar"
+
+#: src/inbox/items.ts
+msgid "Mailbox"
+msgstr "Postvak"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -9450,6 +9460,11 @@ msgctxt "lowest end of a rating of the interview"
 msgid "Not good"
 msgstr "Niet goed"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
+msgid "Not hearing"
+msgstr "Geen ontvangst"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Nog niet geïnterviewd."
@@ -10235,6 +10250,10 @@ msgstr "Open sinds het startsein van Grasp op {since}."
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat openen"
+
+#: src/inbox/item-detail.tsx
+msgid "Open the connection"
+msgstr "Verbinding openen"
 
 #: src/chat/thread.tsx
 msgid "Open the dashboard"
@@ -11259,6 +11278,10 @@ msgstr "Teruglezen"
 msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Teruglezen"
+
+#: src/inbox/items.ts
+msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
+msgstr "Het lezen bleef mislukken, dus je triggers daar starten voorlopig niets nieuws. Grasp blijft het proberen; als het niet terugkomt, controleer dan de verbinding."
 
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
@@ -14308,6 +14331,10 @@ msgstr "Het platform staat open voor iedereen in het bedrijf: het is nooit geslo
 #: src/settings/ai-providers.tsx
 msgid "the provider didn't answer"
 msgstr "de aanbieder niet antwoordde"
+
+#: src/inbox/items.ts
+msgid "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
+msgstr "De provider heeft de toegang geweigerd, dus je triggers daar starten niets nieuws. Meld je opnieuw aan bij de verbinding, of vraag wie haar beheert om de toegang terug te geven. Grasp vraagt het eens per dag opnieuw."
 
 #: src/settings/ai-providers.tsx
 msgid "the provider refused the call"
@@ -17380,6 +17407,22 @@ msgstr "Jouw verhaal"
 #: src/onboarding/knowledge-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Je team kan starten bij {threshold}%"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files"
+msgstr "Je triggers ontvangen geen nieuwe bestanden meer"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files at {name}"
+msgstr "Je triggers ontvangen geen nieuwe bestanden van {name} meer"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail"
+msgstr "Je triggers ontvangen geen nieuwe e-mail meer"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail at {name}"
+msgstr "Je triggers ontvangen geen nieuwe e-mail van {name} meer"
 
 #: src/interview/before.tsx
 msgid "Your words"
