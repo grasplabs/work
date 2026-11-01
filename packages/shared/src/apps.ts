@@ -880,3 +880,12 @@ export const appCallLimits = {
   depth: 3,
   calls: 32,
 } as const;
+
+/**
+ * The most an App's error carries to its caller besides its code (its
+ * details: the version, the method and the App's own message), as UTF-8
+ * JSON, in bytes. The App's message is cut to fit, never sent whole: an
+ * error reaches a screen, which is held to what it may receive whatever
+ * the App throws.
+ */
+export const appErrorDetailsBytes = 16 * 1024;

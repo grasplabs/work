@@ -635,6 +635,22 @@ const requireSenderFits = (
 };
 
 /**
+ * Refuses an `app` permission for anyone but an agent: an App, a workflow
+ * or a store reaches another App's functions only through an app resource
+ * an admin approved (resource-apps.ts).
+ */
+const requireAppCallerFits = (
+  subject: PermissionSubject,
+  object: PermissionObject
+): void => {
+  if (object.type === "app" && subject.type !== "agent") {
+    refuseRequest(
+      "subject: Only an agent calls an App's functions through a permission. An App calls another's through an app resource."
+    );
+  }
+};
+
+/**
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
  * workflow, and a connector trigger its event's read on its connection,
@@ -657,13 +673,7 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
-  // An App, a workflow or a store reaches another App's functions only
-  // through an app resource an admin approved (resource-apps.ts).
-  if (object.type === "app" && subject.type !== "agent") {
-    refuseRequest(
-      "subject: Only an agent calls an App's functions through a permission. An App calls another's through an app resource."
-    );
-  }
+  requireAppCallerFits(subject, object);
   // A connector trigger also hears its connection's events: which, the
   // one its version names, is `requireTriggerPins`'s to check.
   if (
