@@ -56,6 +56,7 @@ import {
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
+import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import {
   auditedBatch,
   outboxed,
@@ -1769,6 +1770,17 @@ export const makeCurrent = async (
           keep: previous === null && approved === 1,
         }),
         ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
+        // Its webhooks told of the version, with the change or not at all.
+        queuedWebhookDeliveries(
+          db,
+          {
+            app: appId,
+            event: "changed",
+            dedupe: `changed:${event.id}`,
+            version: number,
+          },
+          storedEvent(event.id)
+        ),
         // The store the arriving version's release binds now serves its
         // definition, and one the leaving version's bound and the arriving
         // one's doesn't serves none (each subquery finds no binding): core's

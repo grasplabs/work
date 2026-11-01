@@ -675,7 +675,7 @@ export const publicOperationOf = (
  *   call without a lease, an agent's, another App's or a workflow's names
  *   the version that runs.
  */
-const pinnedReference = async (
+export const pinnedReference = async (
   env: Env,
   release: Release,
   reference: FunctionRequest["reference"],
@@ -736,6 +736,12 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
+  /**
+   * Told of the call once it is resolved to `path`, a public function of
+   * its release, before it runs (a screen's, so a form it sends can be
+   * told to the App's webhooks). A paginated window's read is not told.
+   */
+  readonly onAdmitted?: (call: FunctionRequest, path: string) => void;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -1063,6 +1069,7 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
+    onAdmitted,
     sources = invocationSources(),
     byStaff,
   } = options;
@@ -1137,6 +1144,9 @@ const callFunction = async (
       chargeWindow,
       deadline,
     });
+  }
+  if (call.window === undefined) {
+    onAdmitted?.(call, path);
   }
   try {
     const invocation = await invocationFor(env, release, {
@@ -1328,7 +1338,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<FunctionCallOptions, "pinnedVersion"> = {}
+  options: Pick<FunctionCallOptions, "onAdmitted" | "pinnedVersion"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
