@@ -22,10 +22,11 @@ describe(findAiAttribution, () => {
       "Co-authored-by: Jkob <noreply@anthropic.com>",
       "Co-authored-by: Copilot <198982749+Copilot@users.noreply.github.com>",
       "Co-authored-by: Cursor Agent <cursoragent@cursor.com>",
+      "> **Generated with Claude Code**",
     ].join("\n");
 
     expect(findAiAttribution(message).map(({ line }) => line)).toStrictEqual([
-      5, 7, 8, 9, 10, 11, 12, 13, 14,
+      5, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     ]);
   });
 
@@ -36,6 +37,7 @@ describe(findAiAttribution, () => {
       "Anthropic's docs recommend short-term bearer tokens; Claude Code",
       "users read the same. Migrations are generated with `db:generate`.",
       '"models": ["openai/gpt-5.4", "anthropic/claude-sonnet-4-5"]',
+      'Remove the "Generated with Claude Code" footer from the template.',
       "",
       "Co-authored-by: Nick <nick@joingrasp.com>",
       "Co-authored-by: Jkob <jakob@joingrasp.com>",

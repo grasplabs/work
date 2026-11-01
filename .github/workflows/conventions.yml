@@ -42,9 +42,10 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
       - run: |
-          { printf '%s\n' "$PR_BODY"; git log --format=%B "$BASE..$HEAD"; } |
+          { printf '%s\n' "$PR_TITLE" "$PR_BODY"; git log --format=%B "$BASE..$HEAD"; } |
             node scripts/check-attribution.ts
         env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}

@@ -2,8 +2,9 @@
  * Commits on main name only the people who wrote them: no AI co-author
  * trailers, "Generated with" footers or links to an agent's session. The
  * commit-msg hook checks each commit; CI checks the PR description and every
- * commit of the PR, because the squash commit on main is the description
- * plus a Co-authored-by trailer for each co-author of those commits.
+ * commit of the PR and its title, because the squash commit on main is the
+ * title, the description and a Co-authored-by trailer for each co-author of
+ * those commits.
  *
  * usage: check-attribution.ts [file]   reads stdin without a file
  */
@@ -13,9 +14,13 @@ import { readFileSync } from "node:fs";
 const aiCoAuthor =
   /^\s*co-authored-by:.*\b(?:claude|anthropic|openai|chatgpt|codex|copilot|cursor|gemini|aider|devin)\b/iu;
 
-/** Footers and trailers agents add to what they write. */
+/**
+ * Footers and trailers agents add to what they write. A footer opens its
+ * line, after any emoji or Markdown around it ("🤖 ", "_", "> **"), so a
+ * sentence that quotes one is left alone.
+ */
 const aiFooters: readonly RegExp[] = [
-  /generated (?:with|by) \[?(?:claude|codex|cursor|copilot|gemini|aider|devin)/iu,
+  /^[^\p{L}\p{N}]*generated (?:with|by) \[?(?:claude|codex|cursor|copilot|gemini|aider|devin)/iu,
   /^\s*claude-session:/iu,
   /https:\/\/claude\.ai\/code\/session_/u,
 ];
