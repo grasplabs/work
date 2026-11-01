@@ -1520,6 +1520,45 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
+  it("purges more documents than one statement may bind values for", async () => {
+    const admin = await personOf("admin");
+    const name = `Visser${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // Past 25: four values each, 100 a statement at most.
+    const named = 30;
+    const documentIds: string[] = [];
+    for (let number = 1; number <= named; number += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document after another
+      const summary = await saveOver(
+        admin,
+        handbook.id,
+        `page-${number}.md`,
+        `# Page ${number}\n${name} wrote it.`
+      );
+      documentIds.push(summary.id);
+    }
+    const { result } = await purged(admin, {
+      type: "content",
+      documentIds,
+      terms: [name],
+      reason: "other",
+    });
+    const stillHolding = await Promise.all(
+      documentIds.map(async (documentId) => {
+        const texts = await versionTexts(documentId);
+        return texts.some((text) => text.includes(name));
+      })
+    );
+
+    expect({
+      documents: result.documents,
+      holding: stillHolding.filter(Boolean).length,
+    }).toStrictEqual({ documents: named, holding: 0 });
+  });
+
   it("saves a new version when only earlier versions held a term", async () => {
     const admin = await personOf("admin");
     const name = `Dekker${unique()}`;
