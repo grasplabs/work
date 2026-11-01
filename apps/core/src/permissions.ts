@@ -7,6 +7,7 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { connectorEventActions } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
@@ -41,6 +42,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   and,
@@ -66,7 +68,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { memberRole } from "./auth/identity.ts";
+import { activeStaffRole, memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
 import {
@@ -417,32 +419,20 @@ const parseId = (id: unknown): PermissionId => {
 };
 
 /**
- * An App's server code gets its env when it starts: restarting it after a
- * grant or revoke gives it an env as the records are now, and its screens'
- * live workflow watches read again. A revoked stub
- * it still holds is refused anyway, on its next call. Best effort: the
- * change stands if the App can't be reached.
+ * Tells App `subject`'s screens that what it may start changed, after a
+ * grant or revoke of one of its permissions, so their live workflow
+ * watches read again (screen-workflows.ts). Best effort: the change
+ * stands if the App's host can't be reached.
  */
-const restartApp = async (
+const tellPolicyChanged = async (
   env: Env,
   subject: PermissionSubject
 ): Promise<void> => {
   if (subject.type !== "app") {
     return;
   }
-  const host = appHost(env, subject.appId);
   try {
-    await host.restart("Its permissions changed.");
-  } catch (error) {
-    log.error("app.restart_failed", {
-      appId: subject.appId,
-      ...errorFields(error),
-    });
-  }
-  // Its screens' live workflow watches read again, whether or not it
-  // restarted: what the App may start changed (screen-workflows.ts).
-  try {
-    await host.workflowPolicyChanged();
+    await appHost(env, subject.appId).workflowPolicyChanged();
   } catch (error) {
     log.error("app.workflow_policy_tell_failed", {
       appId: subject.appId,
@@ -658,7 +648,8 @@ const requireSenderFits = (
 /**
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
- * workflow and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
+ * workflow, and a connector trigger its event's read on its connection,
+ * and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
  * collections alone. Only an agent writes a collection: an App, a workflow
  * and a store only read one (their collection stubs have no write), and
  * keep what they write in a business store, so `write` would give them
@@ -677,12 +668,17 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
+  // A connector trigger also hears its connection's events: which, the
+  // one its version names, is `requireTriggerPins`'s to check.
   if (
     subject.type === "trigger" &&
+    object.type !== "connection" &&
     (object.type !== "workflow" ||
       !actions.every((action) => action === "start"))
   ) {
-    refuseRequest("object: A trigger only starts a workflow.");
+    refuseRequest(
+      "object: A trigger only starts a workflow, or hears its connection's events."
+    );
   }
   requireSenderFits(subject, object, actions);
   if (
@@ -765,16 +761,75 @@ const requireStoreObject = async (
 };
 
 /**
+ * Refuses a connector trigger's grant on a connection but exactly the
+ * connection and part its current version names, for its event's read
+ * action alone.
+ */
+const requireTriggerHears = async (
+  env: Env,
+  triggerId: string,
+  object: Extract<PermissionObject, { type: "connection" }>,
+  actions: readonly string[]
+): Promise<void> => {
+  const heard = await drizzle(env.DB)
+    .select({
+      connectionId: triggerResourceVersions.connectionId,
+      resource: triggerResourceVersions.connectionResource,
+      eventType: triggerResourceVersions.eventType,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        eq(triggerResources.id, triggerId),
+        eq(triggerResources.kind, "connector"),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+  const action = Object.entries(connectorEventActions).find(
+    ([type]) => type === heard?.eventType
+  )?.[1];
+  if (
+    heard === undefined ||
+    heard.connectionId !== object.connectionId ||
+    heard.resource !== (object.resource ?? null) ||
+    action === undefined ||
+    actions.length !== 1 ||
+    actions[0] !== action
+  ) {
+    refuseRequest(
+      "object: A trigger's grant on a connection names its connection, and the read its event needs."
+    );
+  }
+};
+
+/**
  * Refuses a trigger's grant on any workflow but the one the trigger's
  * current version starts: a trigger starts one workflow, and its grant
- * names it. A trigger that isn't live names none.
+ * names it; on a connection, any but the one it hears
+ * (`requireTriggerHears`). A trigger that isn't live names none.
  */
 const requireTriggerPins = async (
   env: Env,
   subject: PermissionSubject,
-  object: PermissionObject
+  object: PermissionObject,
+  actions: readonly string[]
 ): Promise<void> => {
-  if (subject.type !== "trigger" || object.type !== "workflow") {
+  if (subject.type !== "trigger") {
+    return;
+  }
+  if (object.type === "connection") {
+    await requireTriggerHears(env, subject.triggerId, object, actions);
+    return;
+  }
+  if (object.type !== "workflow") {
     return;
   }
   const pinned = await drizzle(env.DB)
@@ -851,7 +906,7 @@ export const requestPermission = async (
   );
   await requireSubjectBuilder(subject, roles);
   requireObjectFits(subject, object, actions);
-  await requireTriggerPins(env, subject, object);
+  await requireTriggerPins(env, subject, object, actions);
   if (object.type === "workflow") {
     // Only someone with a role in the workflow names it: anyone else is
     // told it doesn't exist, as for one that doesn't.
@@ -1228,7 +1283,7 @@ export const grantPermission = async (
   }
   await tellKept(env, madeSensitive);
   const permission = toPermission(granted);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   await tellChat(env, permission, "granted");
   return permission;
 };
@@ -1591,7 +1646,7 @@ export const revokePermission = async (
     return toPermission((await findRow(env, found.id)) ?? found);
   }
   const permission = toPermission(revoked);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   // A chat's request that waited: revoking it decides it, so the chat's
   // agent is told, and its card goes.
   if (found.status === "requested") {
@@ -1694,14 +1749,33 @@ export const askedAgainBy = (
   permission.actions.some((action) => changesThings(permission.object, action));
 
 /**
+ * The role of the person work acts for, read now, while they may still
+ * have it done: a member's, or, for work a Grasp staff member started (its
+ * authority's server-set `staff` mark, GRA-1088), the staff role while
+ * their staff session is still valid (`activeStaffRole`). The mark is the
+ * only way past membership: staff on unmarked work count as no one, and a
+ * member on marked work as well. `undefined` for no one.
+ */
+export const personRole = async (
+  env: Env,
+  person: string,
+  staff: boolean | undefined
+): Promise<Role | undefined> =>
+  staff === true
+    ? await activeStaffRole(env, person)
+    : await memberRole(env.DB, person);
+
+/**
  * The person an App or agent acts for must still be in the organization:
- * nothing works for someone who has left or was removed.
+ * nothing works for someone who has left or was removed (`personRole`).
  */
 export const requireActivePerson = async (
   env: Env,
   authority: Authority
 ): Promise<void> => {
-  if (!(await memberRole(env.DB, authority.onBehalfOf))) {
+  if (
+    (await personRole(env, authority.onBehalfOf, authority.staff)) === undefined
+  ) {
     throw permissionErrors.create("permission.person_inactive");
   }
 };

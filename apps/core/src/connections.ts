@@ -51,6 +51,7 @@ import { listAppRequests, requestApp } from "./catalog-requests.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
+import { startOAuthConnection } from "./oauth-relay.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -391,11 +392,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     if (back === undefined) {
       throw connectionErrors.create("connection.invalid");
     }
-    return await this.#env.CONNECT.startConnection({
+    return await startOAuthConnection(this.#env, config, {
       person,
       provider,
       scope,
-      origin: config.origin,
       tenant,
       returnTo: `${back.pathname}${back.search}`,
       classes: await classesOn(this.#env),
@@ -705,13 +705,13 @@ export const handleConnectionCallback = async (
   if (request.method !== "GET" || config === undefined) {
     return undefined;
   }
-  // A flow that fails returns to the Connections page, where people start
+  // A flow that fails returns to the Integrations page, where people start
   // connecting and can read why: its own `returnTo` stays with connect,
   // which may never have found the flow.
-  const connectionsPage = new URL("/connections", config.origin);
+  const integrationsPage = new URL("/integrations", config.origin);
   const failed = (code: string): Response => {
-    connectionsPage.searchParams.set("connectionError", code);
-    return redirect(connectionsPage);
+    integrationsPage.searchParams.set("connectionError", code);
+    return redirect(integrationsPage);
   };
   const params = new URL(request.url).searchParams;
   const state = params.get("state");
@@ -740,7 +740,7 @@ export const handleConnectionCallback = async (
   }
   // A chat app may be waiting on it (channels/connect-own.ts).
   onConnected?.(identity.userId);
-  const back = onOrigin(config.origin, finished.returnTo) ?? connectionsPage;
+  const back = onOrigin(config.origin, finished.returnTo) ?? integrationsPage;
   back.searchParams.set("connection", finished.connectionId);
   return redirect(back);
 };

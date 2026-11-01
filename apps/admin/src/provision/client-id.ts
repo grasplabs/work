@@ -1,17 +1,31 @@
 /**
- * What's wrong with a client id staff typed, in words, checked with the
- * same rule the server applies (`newClientIdSchema`), so the form says so
- * before it sends anything.
+ * What's wrong with a web address staff typed for an organization, in
+ * plain words, checked with the same rule the server applies
+ * (`newClientIdSchema`), so the form says so as it is typed.
  */
 import { newClientIdSchema, reservedClientIds } from "@grasp-os/shared/router";
 
-/** Why `id` can't be a client's id, or null when it can. */
+/** The longest an organization's web address may be. */
+export const maxClientIdLength = 50;
+
+const allowed = /^[a-z0-9-]*$/u;
+
+/** Why `id` can't be an organization's web address, or null when it can. */
 export const clientIdProblem = (id: string): string | null => {
   if (newClientIdSchema.safeParse(id).success) {
     return null;
   }
-  if (reservedClientIds.has(id)) {
-    return `${id} is reserved for the platform's own hostnames (${[...reservedClientIds].join(", ")}): pick another.`;
+  if (id === "") {
+    return "Give it a web address.";
   }
-  return "A client id is its hostname: lowercase letters, digits and dashes, at most 50, starting and ending with a letter or digit.";
+  if (reservedClientIds.has(id)) {
+    return `${id} is reserved for Grasp itself: choose another.`;
+  }
+  if (!allowed.test(id)) {
+    return "Use only lowercase letters, digits and dashes.";
+  }
+  if (id.length > maxClientIdLength) {
+    return `Keep it to ${maxClientIdLength} characters at most.`;
+  }
+  return "Start and end it with a letter or digit.";
 };

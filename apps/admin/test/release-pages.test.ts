@@ -74,8 +74,10 @@ describe("the release pages", () => {
       second: major !== undefined,
       third: html.includes(`v${major ?? "?"}.1 · Third ${token}`),
       first: html.includes(`v${Number(major) - 1}.0 · First ${token}`),
-      // Its id is still there, under its name.
-      id: html.includes(`>${second.id}</span>`),
+      // Its id is still there, under its name, with its commit beside it.
+      id: html.includes(
+        `>${second.id} · ${second.manifest.commit.slice(0, 7)}</span>`
+      ),
       // The same version on its own page, read alone.
       own: own.html.includes(`>v${major ?? "?"}.1</h1>`),
     }).toStrictEqual({
@@ -132,9 +134,9 @@ describe("the release pages", () => {
   it("answer 404 for a release that isn't imported, or isn't a release id", async () => {
     const statuses = await Promise.all(
       [
-        "/platform/releases/r000000-0000000",
+        "/platform/releases/25.12.1",
         "/platform/releases/not-a-release",
-        `/platform/releases/diff?from=${first.id}&to=r000000-0000000`,
+        `/platform/releases/diff?from=${first.id}&to=25.12.1`,
         "/platform/releases/diff?from=..&to=x",
       ].map(async (path) => {
         const { status } = await page(path);

@@ -109,7 +109,7 @@ const toolPaging: Paging = { pageSize: 200, maxPages: 25 };
 
 /**
  * How long what Composio listed is kept: its catalog changes rarely, and
- * the Connections page shouldn't ask Composio every time it opens.
+ * the Integrations page shouldn't ask Composio every time it opens.
  */
 const cacheTtlMs = 10 * 60 * 1000;
 
@@ -124,7 +124,7 @@ interface Cached<Value> {
 // Per isolate, keyed by the SHA-256 of connect's Composio key (a rotated
 // key starts afresh) and what was listed. Only answers are kept: a failure
 // is asked again next time. Loads under way are shared: people opening the
-// Connections page at once ask Composio once (`loading`).
+// Integrations page at once ask Composio once (`loading`).
 interface Cache<Value> {
   values: Map<string, Cached<Value>>;
   loading: Map<string, Promise<Value>>;

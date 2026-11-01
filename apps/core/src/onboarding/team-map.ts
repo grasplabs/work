@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { organizations } from "../db/core/schema.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { Took } from "./store.ts";
 
 // A team's map, drawn from what its lead agreed to (GRA-365): what the team
@@ -205,7 +205,7 @@ export const drawTeamMap = async (
   brief: TeamBrief,
   count: (took: Took) => void
 ): Promise<TeamMap> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

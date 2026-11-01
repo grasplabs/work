@@ -52,7 +52,7 @@ import { auditableCode } from "./workflows/host.ts";
 //
 // They're computed once a UTC day and kept in `improvement_signals`, so
 // reading them is a few indexed queries. The first run of the 15-minute
-// cron trigger of a day that claims it (src/daily-claims.ts) computes
+// clock of a day that claims it (src/daily-claims.ts) computes
 // them, reading the audit log in the same pass as Knowledge's usage
 // signals (src/daily-signals.ts).
 //

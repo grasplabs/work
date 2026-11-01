@@ -281,7 +281,7 @@ export const readPayload = async <C>(
 /**
  * Marks `pending` rows past their grace `collecting`, then deletes the
  * objects of `collecting` rows and the rows, a page at a time. Resolves how
- * many it deleted; throws when R2 refuses a delete. The cron trigger runs it; a purge runs it right after
+ * many it deleted; throws when R2 refuses a delete. The clock runs it; a purge runs it right after
  * its batch, so what it erased leaves R2 too.
  */
 export const collectPayloads = async <C>(
@@ -338,7 +338,7 @@ export const collectPayloads = async <C>(
   }
 };
 
-/** The cron trigger's `collectPayloads`, every minute. */
+/** The clock's `collectPayloads`, every minute. */
 export const sweepPayloads = async <C>(
   brain: Brain<C>,
   now: Date

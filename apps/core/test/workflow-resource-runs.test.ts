@@ -3,7 +3,6 @@ import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import {
   maxLiveRunsPerPrincipal,
@@ -34,7 +33,7 @@ import type { Settled } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
-import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
+import { admitAttempt } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
   listResourceRuns,
@@ -48,12 +47,12 @@ import {
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import {
   admittedFreely,
   aroundEngine,
   runObject,
   whileEngineRefuses,
-  withPolicyReadFailingOnce,
 } from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
@@ -451,10 +450,10 @@ describe("runs of JSON workflows", () => {
     const workflow = await published(by, (name) =>
       definitionOf(name, [
         {
-          // A catch that retries isn't lowered (yet): no build.
-          guard: {
-            try: [{ attempt: { set: { status: "trying" } } }],
-            catch: { retry: { limit: { attempt: { count: 2 } } } },
+          // A nested list's timeout isn't lowered: no build.
+          check: {
+            do: [{ inner: { set: { status: "checking" } } }],
+            timeout: { after: { seconds: 5 } },
           },
         },
       ])
@@ -547,7 +546,7 @@ describe("runs of JSON workflows", () => {
       ])
     );
     const started = await start(by, waiting.id);
-    // Past the deployment's run retention (30 days) since it started.
+    // Past the run retention (30 days) since it started.
     await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
     const receipt = await env.DB.prepare(
       "SELECT input, params FROM workflow_start_receipts WHERE id = ?"
@@ -1060,6 +1059,113 @@ const attempted = async (
 };
 
 describe("an activation's share of core's CPU", () => {
+  it("admits nothing of an attempt it cuts off: the step's retry, under its key, is admitted with the engine's next number", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(name, [
+        { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+        { again: { set: { status: '${ "Hi, " + $workflow.input.who }' } } },
+      ])
+    );
+    const manifest = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const build = await loadWorkflowBuild(
+      env,
+      workflow.id,
+      1,
+      manifest?.hash ?? ""
+    );
+    const runId = crypto.randomUUID();
+    // What the lineage's admission was asked to admit, as it would record
+    // each attempt it admits (quotas.ts, `admitAttempt`).
+    const admitted: { key: string; number: number }[] = [];
+    // An activation of the run, its engine claiming each step's attempt
+    // `attempt` under the step's one key, its fuel `fuel`.
+    const activation = (attempt: number, fuel: number) =>
+      new ResourceRunHost(
+        env,
+        {
+          do: async (name, _config, fn) =>
+            await fn({ attempt, idempotencyKey: `key:${name}` }),
+          sleep: async () => {
+            await Promise.resolve();
+          },
+          sleepUntil: async () => {
+            await Promise.resolve();
+          },
+          waitForEvent: async () =>
+            await Promise.reject(new Error("No waits here")),
+          waitForMatch: async () =>
+            await Promise.reject(new Error("No waits here")),
+        },
+        {
+          runId,
+          workflowId: workflow.id,
+          version: 1,
+          principal: by.userId,
+          input: { who: "Ada" },
+          params: {},
+          createdAt: Date.now(),
+          build,
+          calling: {
+            runId,
+            rootRunId: runId,
+            workflowId: workflow.id,
+            version: 1,
+            principal: by.userId,
+            invoker: { type: "person", id: by.userId, appVersion: null },
+            bindings: new Map(),
+            restricted: false,
+          },
+          maxModelCalls: 1,
+        },
+        {
+          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+          tampered: () => {},
+          activationFuel: fuel,
+          admitAttempt: async (asked) => {
+            admitted.push({ key: asked.key, number: asked.number });
+            return await admittedFreely();
+          },
+        }
+      );
+    // Room for one attempt's worth: `greet` runs, `again` is cut off.
+    const first = activation(1, 2 ** 27);
+    const ranFirst = [
+      await attempted(first, "greet", 0),
+      await attempted(first, "again", 1),
+    ];
+    // The next activation: the engine's second attempt at `again`, which
+    // runs its expression to the end.
+    let retried: unknown;
+    await activation(2, 2 ** 28).do(
+      "task:again",
+      adaCaptured,
+      async (attempt) => {
+        retried = settledCode(
+          await attempt.evaluate(1, { input: { who: "Ada" }, output: null })
+        );
+        return null;
+      }
+    );
+
+    expect({ ranFirst, retried, admitted }).toStrictEqual({
+      ranFirst: [true, false],
+      retried: { ok: "Hi, Ada" },
+      // The cut-off attempt holds nothing of the lineage and records no
+      // receipt: the receipts skip its number, as CI saw attempt 3 follow
+      // 1 after a CPU kill (GRA-1096). It did spend one of the engine's
+      // attempts at the step (`stepConfig.retries`), as a kill does.
+      admitted: [
+        { key: "key:task:greet", number: 1 },
+        { key: "key:task:again", number: 2 },
+      ],
+    });
+  });
+
   it("cuts off an attempt the activation's expression fuel can't fund, as a CPU stop the next activation retries", async () => {
     const by = await builder();
     const workflow = await published(by, (name) =>
@@ -1310,7 +1416,7 @@ describe("whose word a run's row takes, and whose clock", () => {
     });
   });
 
-  it("shows what a run returned only within the retention the deployment has now", async () => {
+  it("shows what a run returned only within its retention", async () => {
     const by = await builder();
     const done = await published(by, (name) =>
       definitionOf(name, [{ finish: { set: { status: "done" } } }])
@@ -1328,45 +1434,49 @@ describe("whose word a run's row takes, and whose clock", () => {
     const failed = await start(by, failing.id);
     await ended(by, done.id, completed.runId);
     await ended(by, failing.id, failed.runId);
-    // Two days on, the deployment's retention shortened to one: the engine
-    // still holds both, under the retention they were admitted with.
-    const shorter = { ...env, RUN_RETENTION_DAYS: "1" };
+    // A day before their retention is over, and a day after: the engine
+    // still holds both, as it purges an ended run on its own clock.
+    const within = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 29 * 86_400_000);
+    let kept: WorkflowResourceRun;
+    try {
+      kept = await resourceRunFor(env, by, done.id, completed.runId);
+    } finally {
+      within.mockRestore();
+    }
     const later = vi
       .spyOn(Date, "now")
-      .mockReturnValue(Date.now() + 2 * 86_400_000);
+      .mockReturnValue(Date.now() + 31 * 86_400_000);
     let reads: WorkflowResourceRun[];
     try {
       reads = [
-        await resourceRunFor(env, by, done.id, completed.runId),
         // Past its retention, read with the engine unreachable: the row
         // alone says it all.
         await whileEngineRefuses(
           () => true,
-          async () =>
-            await resourceRunFor(shorter, by, done.id, completed.runId)
+          async () => await resourceRunFor(env, by, done.id, completed.runId)
         ),
-        await resourceRunFor(shorter, by, failing.id, failed.runId),
+        await resourceRunFor(env, by, failing.id, failed.runId),
         // The engine's record of it gone too, its retention over there: the
         // code the row kept as it failed.
         await aroundEngine(
           async (method, call) =>
             method === "status" ? undefined : await call(),
-          async () =>
-            await resourceRunFor(shorter, by, failing.id, failed.runId)
+          async () => await resourceRunFor(env, by, failing.id, failed.runId)
         ),
         // Or unreachable: the row alone says it.
         await whileEngineRefuses(
           () => true,
-          async () =>
-            await resourceRunFor(shorter, by, failing.id, failed.runId)
+          async () => await resourceRunFor(env, by, failing.id, failed.runId)
         ),
       ];
     } finally {
       later.mockRestore();
     }
-    const [kept, removed, removedFailure, purgedFailure, unreachable] = reads;
+    const [removed, removedFailure, purgedFailure, unreachable] = reads;
     expect({
-      kept: kept?.output,
+      kept: kept.output,
       removed: removed?.output,
       failure: removedFailure?.error,
       purged: purgedFailure?.error,
@@ -1374,33 +1484,9 @@ describe("whose word a run's row takes, and whose clock", () => {
     }).toStrictEqual({
       kept: { status: "done" },
       removed: undefined,
-      failure: { code: "expression.failed", message: removedText(shorter) },
-      purged: { code: "expression.failed", message: removedText(shorter) },
-      unreachable: { code: "expression.failed", message: removedText(shorter) },
-    });
-  });
-
-  it("keeps what a run returned removed once the sweep removed it, though the retention is lengthened after", async () => {
-    const by = await builder();
-    const done = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
-    const { runId } = await start(by, done.id);
-    await ended(by, done.id, runId);
-    // Swept two days on under a retention of one day, then read under the
-    // thirty days it was admitted with: the engine still holds it.
-    const later = Date.now() + 2 * 86_400_000;
-    await sweepRunDetails({ ...env, RUN_RETENTION_DAYS: "1" }, new Date(later));
-    const spied = vi.spyOn(Date, "now").mockReturnValue(later);
-    let read: WorkflowResourceRun;
-    try {
-      read = await resourceRunFor(env, by, done.id, runId);
-    } finally {
-      spied.mockRestore();
-    }
-    expect({ status: read.status, output: read.output }).toStrictEqual({
-      status: "completed",
-      output: undefined,
+      failure: { code: "expression.failed", message: removedText },
+      purged: { code: "expression.failed", message: removedText },
+      unreachable: { code: "expression.failed", message: removedText },
     });
   });
 
@@ -1696,30 +1782,18 @@ describe("whose word a run's row takes, and whose clock", () => {
 // kill is stood in for (cpu-kills.ts), as plain workerd enforces none.
 
 /**
- * The generation of the next quota policy a test sets: each higher than
- * any before, as an operator's must be (quotas.ts, `quotaPolicy`).
- */
-let generations = 100;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/**
- * What `run` returns with the operator's quota policy `limits` in force,
- * under a new generation; the deployment's own again after, under a
- * newer one.
+ * What `run` returns with the quota limits `limits` lowered; the
+ * deployment's own again after.
  */
 const withQuotas = async <Result>(
   limits: Record<string, number>,
   run: () => Promise<Result>
 ): Promise<Result> => {
-  generations += 1;
-  env.QUOTA_LIMITS = { generation: generations, limits };
+  env.TEST_QUOTA_LIMITS = limits;
   try {
     return await run();
   } finally {
-    generations += 1;
-    env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+    env.TEST_QUOTA_LIMITS = configuredLimits;
   }
 };
 
@@ -2157,7 +2231,7 @@ describe(
         receipts: receipts.length,
         lineage: await lineageOf(runId),
       };
-      // Past the deployment's run retention (30 days) since it ended.
+      // Past the run retention (30 days) since it ended.
       await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
       const receipt = await env.DB.prepare(
         "SELECT input FROM workflow_start_receipts WHERE id = ?"
@@ -2190,7 +2264,7 @@ describe(
       const admittedAt = Date.now();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?, 0)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?)"
         ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
         env.DB.prepare(
           "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
@@ -2447,7 +2521,7 @@ describe(
       );
       const receiptOfNobody = await outcome(
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'k', 1, 1, ?, 0, 0, 0, 0)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'k', 1, 1, ?, 0, 0, 0)"
         )
           .bind(nobody, runId)
           .run()
@@ -2481,69 +2555,6 @@ describe(
         moved: true,
         rooted: true,
       });
-    });
-
-    it("refuses a step past the policy's steps as it is admitted, whatever limit the run loaded with while the policy couldn't be read", async () => {
-      const by = await builder();
-      // Seven tasks, each a step of its own: the sixth is past five.
-      const workflow = await published(by, (name) =>
-        definitionOf(
-          name,
-          ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({
-            [id]: { set: { status: id } },
-          }))
-        )
-      );
-      // The policy as the run's attempts are admitted: five steps. Its
-      // load can't read it, and counts by the limit it last read.
-      const result = await withQuotas({ workflowSteps: 5 }, async () => {
-        // Recorded first, so each read of it later is one query.
-        await quotaPolicy(env);
-        // The load reads the policy for its model calls, then for its
-        // step limit: that read fails.
-        return await withPolicyReadFailingOnce(
-          async () => {
-            const { runId } = await start(by, workflow.id);
-            return await ended(by, workflow.id, runId);
-          },
-          { skip: 1 }
-        );
-      });
-      const receipts = await receiptsOf(result.value.id);
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        code: result.value.error?.code,
-        receipts: receipts.length,
-      }).toStrictEqual({
-        failed: true,
-        status: "failed",
-        code: "workflow.lineage_limit",
-        receipts: 5,
-      });
-    });
-
-    it("goes on with a run whose model call limit can't be read for a moment as it loads, and completes it", async () => {
-      const by = await builder();
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [{ a: { set: { status: "a" } } }])
-      );
-      // Recorded first, so each read of it later is one query. The load's
-      // read of its model call limit fails (`modelCallLimitOf`), as D1 can
-      // for a moment: the run counts by the limit last read, and goes on.
-      await quotaPolicy(env);
-      const result = await withPolicyReadFailingOnce(
-        async () => {
-          const { runId } = await start(by, workflow.id);
-          return await ended(by, workflow.id, runId);
-        },
-        { by: "modelCallLimitOf" }
-      );
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        error: result.value.error ?? null,
-      }).toStrictEqual({ failed: true, status: "completed", error: null });
     });
 
     it("checks what an attempt records while it still holds its admission, and settles it after", async () => {
@@ -2626,73 +2637,6 @@ describe(
       expect({ ok: settled.ok, happened }).toStrictEqual({
         ok: false,
         happened: ["record checked", "settled"],
-      });
-    });
-
-    it("refuses a step's run again after a wait for load past the policy's steps, whatever limit the run loaded with while the policy couldn't be read", async () => {
-      const by = await builder();
-      const hanging = await published(by, (name) =>
-        definitionOf(name, [{ finish: { set: { status: "done" } } }])
-      );
-      await forgedModule(hanging.id, hangingModule);
-      // Its own steps: a, the pause and b, its third.
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [
-          { a: { set: { status: "a" } } },
-          { pause: { wait: "PT5S" } },
-          { b: { set: { status: "b" } } },
-        ])
-      );
-      const result = await withQuotas(
-        { workflowPersonAttempts: 1 },
-        async () => {
-          const { runId } = await start(by, workflow.id);
-          // Once a has run, a hanging run takes the person's one attempt
-          // at once, so b waits for load.
-          await vi.waitFor(
-            async () => {
-              await expect(receiptsOf(runId)).resolves.toMatchObject([
-                { settled: 1 },
-              ]);
-            },
-            { timeout: 30_000, interval: 100 }
-          );
-          const holder = await start(by, hanging.id);
-          await vi.waitFor(
-            async () => {
-              await expect(loadWaitsOf(runId)).resolves.toBeGreaterThan(0);
-            },
-            { timeout: 30_000, interval: 200 }
-          );
-          // The operator lowers the steps to one; the run's next load
-          // can't read the policy, and counts by the limit it last read.
-          return await withQuotas(
-            { workflowPersonAttempts: 1, workflowSteps: 1 },
-            async () => {
-              // Recorded first, so each read of it later is one query. The
-              // load's read for its step limit fails (`stepLimitOf`): the
-              // holder's share coming back, the run's own wakes and
-              // admissions read it too, each in its own time.
-              await quotaPolicy(env);
-              return await withPolicyReadFailingOnce(
-                async () => {
-                  await terminateResourceRun(env, by, hanging.id, holder.runId);
-                  return await ended(by, workflow.id, runId);
-                },
-                { by: "stepLimitOf" }
-              );
-            }
-          );
-        }
-      );
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        code: result.value.error?.code,
-      }).toStrictEqual({
-        failed: true,
-        status: "failed",
-        code: "workflow.lineage_limit",
       });
     });
   }

@@ -109,7 +109,7 @@ export const FailureText = ({ error }: { error: RunHistoryError }) => {
   const { t } = useLingui();
   const message = error.message.trim();
   return (
-    <span className="text-destructive flex flex-col gap-0.5 text-xs">
+    <span className="text-status-attention flex flex-col gap-0.5 text-xs">
       <span>{message === "" ? t`This step failed.` : message}</span>
       <code className="text-muted-foreground">{error.code}</code>
     </span>
@@ -168,7 +168,7 @@ const StepItem = ({
           {item.kind === "compensation" ? t`Undoing ${label}` : label}
         </span>
         {state === "failed" ? (
-          <Badge variant="destructive">
+          <Badge variant="attention">
             <Trans context="an attempt of a step">Failed</Trans>
           </Badge>
         ) : null}

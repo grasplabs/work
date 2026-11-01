@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainErrors } from "../src/contract.ts";
+import { brainErrors, delegateCitesMax } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitiesWithSources,
   entitySources,
+  entitySourcesRead,
   relationsPerSource,
   runLinking,
   settleMs,
@@ -18,6 +20,7 @@ import {
   readRowsMax,
   relationsExplain,
   relationsFor,
+  relationsExplainRead,
   relationsRead,
 } from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
@@ -505,6 +508,84 @@ describe("typed relations", () => {
     });
   });
 
+  it("say where every claim an explanation weighed came from, one past the answer's cap too", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source first: its relation is weighed past the cap.
+    const files = Array.from({ length: 5 }, (_file, batch) =>
+      Array.from(
+        { length: batch === 0 ? 1 : relationsPerSource },
+        (_line, index) => `Person ${batch}-${index} owns ${thing}.`
+      )
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          files.map((lines) => [
+            lines.join("\n"),
+            {
+              entities: [
+                ...lines.map((line) => ({
+                  kind: "person",
+                  name: line.split(" owns ")[0] ?? "",
+                })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map((line) => ({
+                subject: line.split(" owns ")[0] ?? "",
+                predicate: "owns",
+                object: thing,
+                evidence: line,
+              })),
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const saved: string[] = [];
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- oldest first, in order
+      const doc = await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.join("\n")
+      );
+      saved.push(doc.id);
+      // oxlint-disable-next-line no-await-in-loop -- apart in time
+      await scheduler.wait(2);
+    }
+    const { explanation, considered } = await relationsExplainRead(
+      host.brain,
+      reader,
+      {
+        entityId: await entityOf(host, reader, thing),
+        hops: 1,
+        budget: { maxPaths: 1 },
+      }
+    );
+    const [oldest] = saved;
+
+    expect({
+      paths: explanation.paths.length,
+      oldestOnAPath: explanation.paths.some(({ relations }) =>
+        relations.some(
+          ({ sourceRef }) =>
+            sourceRef.kind === "document" && sourceRef.documentId === oldest
+        )
+      ),
+      // A chat labels the explanation with these (core's agent-brain.ts).
+      oldestWeighed: considered.documentIds.includes(oldest ?? ""),
+      collections: considered.collectionIds,
+    }).toStrictEqual({
+      paths: 1,
+      oldestOnAPath: false,
+      oldestWeighed: true,
+      collections: [collection.id],
+    });
+  });
+
   it("keep what was known before a correction, which supersedes it without rewriting it", async () => {
     const thing = `Payroll ${word()}`;
     const wrong = `Ben owns ${thing}.`;
@@ -815,6 +896,97 @@ describe("typed relations", () => {
       oneLetter: "brain.invalid",
       byStart: "ok",
       person: "ok",
+    });
+  });
+
+  it("answer a caller that isn't a person from no more sources than it pins, and say what that left out", async () => {
+    const thing = `Payroll ${word()}`;
+    const holders = Array.from(
+      { length: delegateCitesMax + 5 },
+      (_, index) => `Owner ${word()} ${index}`
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          holders.map((holder) => [
+            holder,
+            {
+              entities: [
+                { kind: "person", name: holder },
+                { kind: "process", name: thing },
+              ],
+              relations: [
+                {
+                  subject: holder,
+                  predicate: "owns",
+                  object: thing,
+                  evidence: `${holder} owns ${thing}.`,
+                },
+              ],
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Desk");
+    for (const [index, holder] of holders.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one source after another
+      await savedAndLinked(
+        host,
+        collection,
+        `holder-${index}.md`,
+        `${holder} owns ${thing}.`
+      );
+    }
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const agent = {
+      ...host.brain,
+      ports: {
+        ...host.brain.ports,
+        ownerOf: (): string => {
+          throw brainErrors.create("brain.denied");
+        },
+      },
+    };
+    const entityId = await entityOf(host, reader, thing);
+    /** What each read answers `as`, and how many versions it cites. */
+    const read = async (as: typeof host.brain) => {
+      const listed = await entitiesWithSources(as, reader, { query: thing });
+      const sources = await entitySourcesRead(as, reader, { entityId });
+      const { relations, truncated } = await relationsFor(as, reader, {
+        entityId,
+      });
+      const explained = await relationsExplain(as, reader, {
+        entityId,
+        hops: 1,
+        budget: { maxPaths: 50 },
+      });
+      return {
+        listed: [listed.sources.documents.length, listed.truncated],
+        sources: [sources.sources.length, sources.truncated],
+        relations: [relations.length, truncated],
+        explained: [explained.paths.length, explained.truncated],
+      };
+    };
+
+    expect({
+      agent: await read(agent),
+      person: await read(host.brain),
+    }).toStrictEqual({
+      // As many as it pins, the newest, and cut.
+      agent: {
+        listed: [delegateCitesMax, true],
+        sources: [delegateCitesMax, true],
+        relations: [delegateCitesMax, true],
+        explained: [delegateCitesMax, true],
+      },
+      // A person pins nothing: every one.
+      person: {
+        listed: [holders.length, false],
+        sources: [holders.length, false],
+        relations: [holders.length, false],
+        explained: [holders.length, false],
+      },
     });
   });
 });

@@ -34,7 +34,10 @@ const errorsIn = (file: string): string[] => {
     );
 };
 
-describe("the generated references", () => {
+// A whole program type-checked from cold: past the default 5 s on a
+// busy runner, so the time other type-check tests have
+// (apps/core/test/workflow-type-check.test.ts).
+describe("the generated references", { timeout: 120_000 }, () => {
   it("type-check as the App compiler checks them, workflows and all", () => {
     expect(errorsIn(references)).toStrictEqual([]);
   });

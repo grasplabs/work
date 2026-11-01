@@ -123,14 +123,49 @@ export interface TestPrincipal {
    * Starts a run of one of the workflows the App binds (`workflows` from
    * `#grasp`), as a screen's `useWorkflow` starts one: the same version,
    * run on the real engine, with nothing of the organization's around it.
-   * Calls that leave its own code (an App's, a store's, a model's, a
-   * connection's) are refused (`resource.unavailable`) for now. The run is
-   * removed as the test ends.
+   * A model call answers what the fixture gives its binding
+   * (`workflows.<alias>.models.<binding>`): no model is ever asked. A store
+   * call runs the App's public query or mutation the fixture names for its
+   * binding (`workflows.<alias>.operations.<binding>`) on this test's own
+   * store, which the test's principals read too. A binding the fixture
+   * gives nothing fails the run (`workflow.test_unfixtured`). Other calls
+   * that leave its own code (a connection's, Knowledge's, an action's) are
+   * refused (`resource.unavailable`). The run is removed as the test ends.
    */
   start: <Reference extends AnyWorkflowReference>(
     reference: Reference,
     input: WorkflowInputOf<Reference>
   ) => Promise<WorkflowTestRun<WorkflowOutputOf<Reference>>>;
+  /**
+   * Answers the decision `run` waits for in its task `task` (a
+   * `grasp.decision` call), as this principal: approved or declined, with
+   * `value` as the decision's contract takes it: inside loops, the item
+   * `answer.at` names, else the task's latest. Waits for the run to ask it,
+   * until the test's deadline; one already answered isn't waited on. Only
+   * the principal it asks answers it, one the fixture lets answer through
+   * its binding
+   * (`workflows.<alias>.deciders`), and only once, while the run goes on:
+   * anything else fails, as `t.rejectsCode` reads it (`decision.forbidden`,
+   * `decision.invalid`, `decision.closed`, `decision.not_found`).
+   */
+  respond: (
+    run: WorkflowTestRun,
+    task: string,
+    answer: TestDecisionAnswer
+  ) => Promise<void>;
+}
+
+/** How a test principal answers a run's decision (`respond`). */
+export interface TestDecisionAnswer {
+  readonly approved: boolean;
+  /** What the answer carries, as the decision's contract takes it. */
+  readonly value?: Json;
+  /**
+   * For a task inside `for` loops, the item it asks for: each loop's
+   * index, outermost first, such as `[1, 0]`. Without it, the task's
+   * latest decision.
+   */
+  readonly at?: readonly number[];
 }
 
 /**
@@ -418,6 +453,12 @@ export interface AppTestSession {
   runOutcome: (run: number) => Promise<string>;
   /** How many times run `run`'s task `task` completed its step. */
   completedCount: (run: number, task: string) => Promise<number>;
+  /**
+   * Answers, as principal `name`, the decision run `run` waits for:
+   * `request` is the answer's JSON text (`{ task, approved, value? }`), and
+   * the answer the JSON text of an `OperationResult` holding nothing.
+   */
+  respond: (name: string, run: number, request: string) => Promise<string>;
   /**
    * Ends the session: removes the runs its test started, releases the
    * live queries it left open, and discards its fixture store.
@@ -921,6 +962,24 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
       });
       return handle;
     }) as TestPrincipal["start"],
+    respond: async (
+      handle: WorkflowTestRun,
+      task: string,
+      { approved, value, at }: TestDecisionAnswer
+    ): Promise<void> => {
+      unwrapped(
+        await session.respond(
+          name,
+          numberOf(run, handle),
+          JSON.stringify({
+            task,
+            approved,
+            ...(value === undefined ? {} : { value }),
+            ...(at === undefined ? {} : { at }),
+          })
+        )
+      );
+    },
   });
 };
 

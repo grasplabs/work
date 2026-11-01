@@ -31,8 +31,6 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
-import { isPlainData } from "./app.ts";
-import type { AppAnswer } from "./app.ts";
 import {
   appFor,
   applyChanges,
@@ -54,6 +52,8 @@ import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { appBindingKinds, requestPermission } from "./permissions.ts";
+import { isPlainData } from "./plain-data.ts";
+import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave } from "./save-builds.ts";
@@ -341,7 +341,7 @@ export interface DraftCheck {
   };
   /**
    * What the preview of the draft in the person's side panel ran into so
-   * far (preview-reports.ts): any problem fails the check. `seen` is
+   * far (preview-reports.ts): any problem but a `warning` fails the check. `seen` is
    * false when it reported nothing on this revision within
    * {@link previewWaitMs}. With the newest of what the draft's server
    * code wrote with `console` there, the agent's calls included, which
@@ -548,7 +548,8 @@ export const checkFiles = async (
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
-    passed: built && preview.problems.length === 0,
+    // A warning (React's development warnings, say) shows, never fails.
+    passed: built && preview.problems.every(({ kind }) => kind === "warning"),
     screens: reported(builds.screens),
     server: reported(builds.server),
     workflows: reported(builds.workflows),
@@ -1183,7 +1184,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           jobRequestSchema,
           request
         );
-        const { workspaceId, chatId, runId } = this.ctx.props;
+        const { workspaceId, chatId, runId, staff } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
         if (kind === "propose") {
           const draft = await draftOf(this.env, this.ctx.props, id);
@@ -1209,7 +1210,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           await runEngine(this.env).createInternal({
             id: opened.id,
             workflow: "build",
-            input: { workspaceId, chatId, jobId: opened.id },
+            // The run's own staff mark goes with the job, as core set it.
+            input: {
+              workspaceId,
+              chatId,
+              jobId: opened.id,
+              ...(staff === true ? { staff: true } : {}),
+            },
           });
         } catch (error) {
           // No instance runs it: it ends here, failed, with the engine's
@@ -1423,7 +1430,9 @@ build: {
     /**
      * What the draft ran into so far in the preview in the person's side
      * panel (empty while nobody has it open): any problem fails the check,
-     * so fix what it says and check again. A preview reaches nothing
+     * so fix what it says and check again, but a \`warning\` (React's
+     * development warnings, such as a list without keys), which fails
+     * nothing: fix it when you can. A preview reaches nothing
      * outside it: a function's resource call (a connection, another App,
      * Knowledge, a model) rejects with \`resource.unavailable\`, and a
      * screen's workflow run with \`app.preview_side_effect\`. Handle either

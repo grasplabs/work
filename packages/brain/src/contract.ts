@@ -105,6 +105,13 @@ export const recallBudgetSchema = z.strictObject({
   maxItems: z.int().min(1).max(recallLimits.maxItems).optional(),
   maxTokens: z.int().min(1).max(recallLimits.maxTokens).optional(),
   deadlineMs: z.int().min(1).max(recallLimits.deadlineMs).optional(),
+  /**
+   * Whether the best of what the lanes found is ordered again by the
+   * deployment's model (GRA-304), on the caller's model budget and under
+   * the deployment's model rules, within the same deadline. Off unless
+   * asked: it spends a model call on every recall that asks.
+   */
+  rerank: z.boolean().optional(),
 });
 export type RecallBudget = z.infer<typeof recallBudgetSchema>;
 
@@ -255,7 +262,7 @@ export type NetworkPath = z.infer<typeof networkPathSchema>;
 export const memoryPackSchema = z.strictObject({
   id: idSchema,
   contractVersion: z.literal(brainContractVersion),
-  /** The retrieval policy that chose the evidence, such as `fulltext@2`. */
+  /** The retrieval policy that chose the evidence, such as `hybrid@1`. */
   retrievalPolicyVersion: z.string().min(1),
   items: z.array(memoryItemSchema).max(recallLimits.maxItems),
   /** Every source version the items cite, once each. */
@@ -403,6 +410,12 @@ export const memoryRecordSchema = z.strictObject({
   validTo: instantSchema.nullable(),
   recordedAt: instantSchema,
   reviewAt: instantSchema.nullable(),
+  /**
+   * One of the reader's own that rests on a collection they can't read
+   * now (GRA-1177): shown without its statement or what it cites, only so
+   * they can retire it. Absent otherwise.
+   */
+  withheld: z.literal(true).optional(),
 });
 export type MemoryRecord = z.infer<typeof memoryRecordSchema>;
 
@@ -797,9 +810,38 @@ export const entitySummarySchema = z.strictObject({
 });
 export type EntitySummary = z.infer<typeof entitySummarySchema>;
 
+/**
+ * The most document versions one entity or relation read hands a caller
+ * that isn't a person (an App's run, a chat's agent): each is pinned as
+ * evidence, and a run keeps at most 1000 (core's `runEvidenceMaxRows`), so
+ * a read cites about what a recall does and a run can make many. A read
+ * past it answers from the newest sources up to it, and says `truncated`.
+ */
+export const delegateCitesMax = 25;
+
+/**
+ * What `entities.list` answers a caller that isn't a person: the entities
+ * of its newest readable mentions, from at most `delegateCitesMax` source
+ * versions, and whether more were left out (`truncated`).
+ */
+export interface EntitiesAnswer {
+  entities: EntitySummary[];
+  truncated: boolean;
+}
+
 /** The readable sources that mention one entity. */
 export const entitySourcesInputSchema = z.strictObject({ entityId: idSchema });
 export type EntitySourcesInput = z.input<typeof entitySourcesInputSchema>;
+
+/**
+ * What `entities.sources` answers a caller that isn't a person: the newest
+ * readable sources that mention the entity, at most `delegateCitesMax`,
+ * and whether more were left out (`truncated`).
+ */
+export interface EntitySourcesAnswer {
+  sources: BrainSourceRef[];
+  truncated: boolean;
+}
 
 /**
  * The relations of one entity, as a subject or an object: those that hold

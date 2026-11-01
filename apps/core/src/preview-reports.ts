@@ -29,8 +29,15 @@ import type { ServerLog } from "@grasp-os/shared/screens";
 // (sealed-previews.ts: a store of its own, no resources), so it carries
 // none.
 
-/** Most problems kept of one revision: the first ones. */
+/** Most problems kept of one revision, warnings aside: the first ones. */
 const maxProblems = 10;
+
+/**
+ * Most warnings kept of one revision (React's development warnings, say):
+ * the first ones, in slots of their own, so warnings never take the place
+ * of a problem that fails a check.
+ */
+const maxWarnings = 10;
 
 /** Most lines of server `console` output kept of one revision: the newest. */
 const maxLogs = 50;
@@ -172,7 +179,8 @@ export class PreviewReports {
 
   /**
    * Keeps `problem`, one the preview of the draft of `app` at `revision`
-   * ran into, while there's room: the first ones.
+   * ran into, while there's room: the first ones, warnings in their own
+   * slots (`maxWarnings`), so no number of them pushes out a problem.
    */
   report(
     chatId: ChatId,
@@ -186,7 +194,11 @@ export class PreviewReports {
       return;
     }
     reports.seen = true;
-    if (reports.problems.length < maxProblems) {
+    const warning = problem.kind === "warning";
+    const kept = reports.problems.filter(
+      ({ kind }) => (kind === "warning") === warning
+    ).length;
+    if (kept < (warning ? maxWarnings : maxProblems)) {
       reports.problems.push(problem);
     }
   }

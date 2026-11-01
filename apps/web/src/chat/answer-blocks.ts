@@ -141,3 +141,59 @@ export const tableAs = (rows: string[][], format: TableFormat): string => {
     "\n"
   );
 };
+
+/** How a word lands while Grasp writes: it fades in where it lands. */
+const landing = [
+  "animate-in",
+  "fade-in",
+  "duration-300",
+  "motion-reduce:animate-none",
+];
+
+/** A run of whitespace, kept between the words it parts. */
+const spaces = /(?<space>\s+)/u;
+
+/**
+ * Puts each word under `node` in a span of its own that fades in. Code, in
+ * a block or inline, stays as it is, a whole.
+ */
+const wrapWords = (node: { children: Element["children"] }): void => {
+  node.children = node.children.flatMap((child): Element["children"] => {
+    if (child.type === "element") {
+      if (child.tagName !== "pre" && child.tagName !== "code") {
+        wrapWords(child);
+      }
+      return [child];
+    }
+    if (child.type !== "text" || child.value === "") {
+      return [child];
+    }
+    return child.value
+      .split(spaces)
+      .filter((piece) => piece !== "")
+      .map((piece) =>
+        piece.trim() === ""
+          ? { type: "text", value: piece }
+          : {
+              type: "element",
+              tagName: "span",
+              properties: { className: landing },
+              children: [{ type: "text", value: piece }],
+            }
+      );
+  });
+};
+
+/**
+ * Lets the words of the answer being written under `root` fade in where
+ * they land: those of its last block, where new words come, each in a
+ * span of its own (keyed by its place, so a word already there keeps its
+ * span as more come). The blocks before it are done, their words long
+ * landed, and stay plain text: each chunk wraps one block, not the answer.
+ */
+export const landWords = (root: { children: Element["children"] }): void => {
+  const last = root.children.findLast((child) => child.type === "element");
+  if (last?.type === "element") {
+    wrapWords({ children: [last] });
+  }
+};

@@ -1,4 +1,9 @@
 import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  readRelayRequest,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -17,6 +22,7 @@ import {
   signedInApi,
   signedInWithRole,
   staffPerson,
+  withSignIn,
 } from "./sign-in.ts";
 
 // Connecting an account, through core: the person starts over `/rpc`, the
@@ -74,7 +80,7 @@ describe("connecting an account", () => {
     const { url } = await anna.connections.start({
       provider: "microsoft",
       scope: "personal",
-      returnTo: "/connections?tab=mine",
+      returnTo: "/integrations?tab=mine",
     });
     const authorization = new URL(url);
     const response = await backFromProvider(anna.session, {
@@ -84,7 +90,7 @@ describe("connecting an account", () => {
     const [connection] = await anna.connections.list();
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?tab=mine&connection=${connection?.id}`
+      `${clientOrigin}/integrations?tab=mine&connection=${connection?.id}`
     );
     expect({
       cache: response.headers.get("cache-control"),
@@ -156,12 +162,12 @@ describe("connecting an account", () => {
     };
     const response = await backFromProvider(anna.session, query);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=connection.flow_invalid`
+      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
     );
     // The flow is spent: Mallory can't finish it either.
     const again = await backFromProvider(mallory.session, query);
     expect(again.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=connection.flow_invalid`
+      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
     );
     await expect(
       Promise.all([anna.connections.list(), mallory.connections.list()])
@@ -188,12 +194,12 @@ describe("connecting an account", () => {
     };
     const response = await backFromProvider(undefined, query);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=auth.unauthenticated`
+      `${clientOrigin}/integrations?connectionError=auth.unauthenticated`
     );
     // The same URL, brought back later with a session, finishes nothing.
     const later = await backFromProvider(anna.session, query);
     expect(later.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=connection.flow_invalid`
+      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
     );
     await expect(anna.connections.list()).resolves.toStrictEqual([]);
   });
@@ -210,20 +216,20 @@ describe("connecting an account", () => {
       state: authorization.searchParams.get("state") ?? "",
     });
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=connection.wrong_account`
+      `${clientOrigin}/integrations?connectionError=connection.wrong_account`
     );
   });
 
   it("sends the browser back only to a path on this origin", async () => {
     const anna = await person();
     const elsewhere = [
-      "//evil.test/connections",
+      "//evil.test/integrations",
       "/.//evil.test",
       "/\\evil.test",
       "/\t/evil.test",
       "https://evil.test/",
       "mailto:someone@evil.test",
-      "/connections#fragment",
+      "/integrations#fragment",
       `/${"a".repeat(600)}`,
     ];
     const refused = await Promise.all(
@@ -253,7 +259,7 @@ describe("connecting an account", () => {
       state: authorization.searchParams.get("state") ?? "",
     });
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?connectionError=connection.not_own_account`
+      `${clientOrigin}/integrations?connectionError=connection.not_own_account`
     );
   });
 
@@ -306,6 +312,69 @@ describe("connecting an account", () => {
       anna.connections.disconnect(connection?.id ?? "")
     ).resolves.toStrictEqual({ revoked: false });
     await expect(anna.connections.list()).resolves.toStrictEqual([]);
+  });
+});
+
+describe("connecting an account in relay mode", () => {
+  const hostedOrigin = "https://acme.ongrasp.app";
+  const relayOrigin = "https://auth.ongrasp.app";
+  const relayEnv = withSignIn({
+    origin: hostedOrigin,
+    callbackOrigin: relayOrigin,
+  });
+
+  it("goes from the person's browser through the provider, the relay and back to this client, and the connection is active", async () => {
+    const { session, person: claims } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session, {
+      origin: hostedOrigin,
+      coreEnv: relayEnv,
+    });
+    const { url } = await core.authenticate().connections.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/integrations",
+    });
+    const authorization = new URL(url);
+    // The provider sends the browser to the relay, with the code for the
+    // flow's state; the router checks this client signed it, with the
+    // secret it derives for it (core's ROUTER_SECRET), and sends it on.
+    const returned = new URL(`${relayOrigin}/callback/connections`);
+    returned.searchParams.set(
+      "code",
+      consentCode(authorization, acmeTenant, String(claims.oid))
+    );
+    returned.searchParams.set(
+      "state",
+      authorization.searchParams.get("state") ?? ""
+    );
+    const relayed = readRelayRequest(returned, "production");
+    const signed =
+      relayed !== null && (await relayStateValid(env.ROUTER_SECRET, relayed));
+    const onward = new URL(
+      relayed === null ? hostedOrigin : relayTarget(returned, relayed)
+    );
+    const response = await backFromProvider(
+      session,
+      Object.fromEntries(onward.searchParams),
+      relayEnv
+    );
+    const listed = await core.authenticate().connections.list();
+
+    expect({
+      redirect: authorization.searchParams.get("redirect_uri"),
+      signed,
+      onward: `${onward.origin}${onward.pathname}`,
+      status: response.status,
+      location: response.headers.get("location"),
+      connection: listed[0]?.status,
+    }).toStrictEqual({
+      redirect: `${relayOrigin}/callback/connections`,
+      signed: true,
+      onward: `${hostedOrigin}/api/connections/callback`,
+      status: 303,
+      location: `${hostedOrigin}/integrations?connection=${listed[0]?.id}`,
+      connection: "active",
+    });
   });
 });
 
@@ -426,7 +495,7 @@ describe("connecting a Composio toolkit", () => {
       "HUBSPOT_CREATE_CONTACT",
     ],
     consent: composioConsentText,
-    returnTo: "/connections?tab=shared",
+    returnTo: "/integrations?tab=shared",
   };
 
   it("goes from the admin's consent through Composio and back, to one shared connection", async () => {
@@ -442,7 +511,7 @@ describe("connecting a Composio toolkit", () => {
     const listed = await admin.connections.list();
     const connection = listed.find(({ provider }) => provider === "hubspot");
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/connections?tab=shared&connection=${connection?.id}`
+      `${clientOrigin}/integrations?tab=shared&connection=${connection?.id}`
     );
     // What the admin consented to: by them, for exactly these tools.
     expect(connection).toMatchObject({
@@ -488,7 +557,7 @@ describe("connecting a Composio toolkit", () => {
       outcome(
         admin.connections.connectToolkit({
           ...request,
-          returnTo: "//evil.test/connections",
+          returnTo: "//evil.test/integrations",
         })
       )
     ).resolves.toBe("connection.invalid");

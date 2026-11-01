@@ -22,7 +22,7 @@ import { startRun } from "./runs.ts";
 // fires for), and a key starts at most one run (runs.ts): delivery is at
 // least once, a start at most once per key.
 //
-// Schedules: core's cron trigger runs every minute and starts the runs of
+// Schedules: core's clock runs every minute and starts the runs of
 // schedules due by the minute it runs for, from their rows
 // (`next_run_at`). Simpler than an alarm per schedule: one query finds
 // everything due, nothing is armed or disarmed when a version changes,
@@ -37,12 +37,12 @@ import { startRun } from "./runs.ts";
 // and shown with its workflow (overview.ts). It starts again when its
 // parameter is set (params.ts) or a version is made current, which
 // registers its triggers anew (trigger-registry.ts). A start that works
-// clears the count. A schedule that missed times, while the cron trigger
+// clears the count. A schedule that missed times, while the clock
 // didn't run, starts one run for them all,
 // late, then goes on from the next time after. One whose parameter
 // changes goes on from the next time after the change (params.ts).
 
-/** Most due schedules one cron run starts; the rest start a minute later. */
+/** Most due schedules one clock run starts; the rest start a minute later. */
 const schedulesPerRun = 50;
 
 type DueSchedule = Pick<
@@ -166,7 +166,7 @@ const startScheduled = async (
 
 /**
  * Starts the runs of the schedules due by `now`, of Apps' current
- * versions. The cron trigger calls it every minute.
+ * versions. The clock calls it every minute.
  */
 export const startDueSchedules = async (
   env: Env,

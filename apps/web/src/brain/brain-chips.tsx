@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
 import { dotClass, tintClass } from "./brain-colors.ts";
-import { kindLabel, quoted } from "./brain.ts";
+import { kindLabel, statementWords } from "./brain.ts";
 import type { Note } from "./brain.ts";
 
 // Notes named on a page, and rows of them, as the prototype draws them
@@ -107,7 +107,9 @@ export const NoteChip = ({
             {i18n._(kindLabel[note.kind])}
           </span>
           <span className="font-medium">
-            {note.kind === "statement" ? quoted(note.title) : note.title}
+            {note.kind === "statement"
+              ? statementWords(note.id, note.title)
+              : note.title}
           </span>
           <span className="text-muted-foreground line-clamp-3">
             {note.summary}

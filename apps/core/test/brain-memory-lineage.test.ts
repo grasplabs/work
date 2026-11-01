@@ -9,9 +9,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { Reader } from "../src/knowledge/access.ts";
 import { portsOf } from "../src/knowledge/ports.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,
 // slice 4; the threat model is on the issue). It starts from the ways it
@@ -748,3 +749,172 @@ describe("a memory record's lineage", setUpTime, () => {
     });
   });
 });
+
+/** Record `memoryId` of a page, if it is there. */
+const ownOf = <R extends { id: string }>(
+  page: { records: readonly R[] },
+  memoryId: string
+): R | undefined => page.records.find(({ id }) => id === memoryId);
+
+/** What a record shows of itself: withheld, or with its words. */
+const withheld = (record: {
+  statement: string;
+  sourceRefs: readonly unknown[];
+  withheld?: true;
+}) => ({
+  statement: record.statement,
+  sourceRefs: record.sourceRefs.length,
+  withheld: record.withheld === true,
+});
+
+describe(
+  "a person's own record once they lose what it cites",
+  setUpTime,
+  () => {
+    // GRA-1177 (GRA-309; the rule is on the issue): a record follows its
+    // sources' restrictions for everyone, its owner too. Once they lose a
+    // collection it cites, recall leaves it out, and their own reads show
+    // it only withheld, without its words or what it cites, to retire.
+    it("leaves it out of their recall, shows it withheld in their own reads, and lets them, and only them, retire it", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const ada = await signedInApi(idp, "user");
+      const readers = await newTeam(admin, [ada]);
+      const cited = await documentIn(admin, {
+        name: `Readers ${unique()}`,
+        access: "teams",
+        teams: [readers],
+      });
+      const word = `quietfloor${unique().replaceAll("-", "")}`;
+      const memoryId = idOf(
+        await ada.api.knowledge.remember(
+          { kind: "fact", text: `Note ${word}`, sourceRefs: [cited] },
+          { idempotencyKey: key() }
+        )
+      );
+      const recalled = async () => {
+        const pack = await ada.api.knowledge.recall({ query: word });
+        return pack.items.some(({ statement }) => statement.includes(word));
+      };
+      const before = await recalled();
+      await callAuth("/organization/remove-team-member", admin.session, {
+        teamId: readers,
+        userId: ada.userId,
+      });
+      const after = await recalled();
+      const listed = ownOf(await ada.api.knowledge.memoriesList(), memoryId);
+      const got = await ada.api.knowledge.memoriesGet({ memoryId });
+      const lineage = await ada.api.knowledge.memoriesLineage({ memoryId });
+      const byAdmin = await codeOf(
+        admin.api.knowledge.memoriesRetire(
+          { memoryId },
+          { idempotencyKey: key(), expectedRevision: 1 }
+        )
+      );
+      const byAda = await codeOf(
+        ada.api.knowledge.memoriesRetire(
+          { memoryId },
+          { idempotencyKey: key(), expectedRevision: 1 }
+        )
+      );
+      const retired = ownOf(await ada.api.knowledge.memoriesList(), memoryId);
+
+      expect({
+        before,
+        after,
+        listed: listed === undefined ? null : withheld(listed),
+        got: withheld(got),
+        lineage: {
+          record: withheld(lineage.record),
+          restsOn: nodesOf(lineage),
+        },
+        byAdmin,
+        byAda,
+        retired: retired?.state,
+      }).toStrictEqual({
+        before: true,
+        after: false,
+        listed: { statement: "", sourceRefs: 0, withheld: true },
+        got: { statement: "", sourceRefs: 0, withheld: true },
+        lineage: {
+          record: { statement: "", sourceRefs: 0, withheld: true },
+          restsOn: [],
+        },
+        byAdmin: "brain.not_found",
+        byAda: "ok",
+        retired: "retired",
+      });
+    });
+
+    it("withholds their own correction citing what they lost in the lineage of what it corrected, and records each lineage read", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const ada = await signedInApi(idp, "user");
+      const readers = await newTeam(admin, [ada]);
+      const cited = await documentIn(admin, {
+        name: `Readers ${unique()}`,
+        access: "teams",
+        teams: [readers],
+      });
+      const word = `quietdesk${unique().replaceAll("-", "")}`;
+      // Resting on nothing; its correction cites the team's document.
+      const first = idOf(
+        await ada.api.knowledge.remember(
+          { kind: "fact", text: `Desk ${word}` },
+          { idempotencyKey: key() }
+        )
+      );
+      const correction = idOf(
+        await ada.api.knowledge.memoriesProposeChange(
+          {
+            memoryId: first,
+            statement: `Desk ${word}, by the window.`,
+            sourceRefs: [cited],
+          },
+          { idempotencyKey: key(), expectedRevision: 1 }
+        )
+      );
+      await callAuth("/organization/remove-team-member", admin.session, {
+        teamId: readers,
+        userId: ada.userId,
+      });
+      const lineageReads = async () => {
+        const events = await allEvents();
+        return events.filter(
+          ({ action, actor, detail }) =>
+            action === "knowledge.read" &&
+            actor.type === "person" &&
+            actor.userId === ada.userId &&
+            detail?.read === "memory.lineage"
+        ).length;
+      };
+      const readsBefore = await lineageReads();
+      const ofFirst = await ada.api.knowledge.memoriesLineage({
+        memoryId: first,
+      });
+      const ofCorrection = await ada.api.knowledge.memoriesLineage({
+        memoryId: correction,
+      });
+
+      expect({
+        supersededBy:
+          ofFirst.supersededBy === null
+            ? null
+            : {
+                id: ofFirst.supersededBy.id,
+                ...withheld(ofFirst.supersededBy),
+              },
+        correction: withheld(ofCorrection.record),
+        reads: (await lineageReads()) - readsBefore,
+      }).toStrictEqual({
+        supersededBy: {
+          id: correction,
+          statement: "",
+          sourceRefs: 0,
+          withheld: true,
+        },
+        correction: { statement: "", sourceRefs: 0, withheld: true },
+        // The withheld one's read too, of nothing it cites.
+        reads: 2,
+      });
+    });
+  }
+);

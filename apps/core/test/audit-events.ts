@@ -49,7 +49,7 @@ export const loggedEvents = async (): Promise<AuditEvent[]> => {
 };
 
 /**
- * Drains every outbox into the log, connect's included, as the cron trigger
+ * Drains every outbox into the log, connect's included, as the clock
  * does, and the onboarding store's, which only the store itself drains (in
  * the background after each change, then by its alarm). A change drains its
  * own outbox in the background, so a test that reads the log drains first

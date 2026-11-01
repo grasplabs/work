@@ -32,13 +32,15 @@ export const paramValueSchemas = {
   template: z.string().min(1).brand<"Template">(),
 };
 
-// The ISO 4217 codes the runtime knows, e.g. `EUR`.
-const currencies = new Set(Intl.supportedValuesOf("currency"));
+// The ISO 4217 codes the runtime knows, e.g. `EUR`: read from ICU at the
+// first check, not as the module loads.
+let currencies: ReadonlySet<string> | undefined;
 
 /** An ISO 4217 currency code, e.g. `EUR`. */
-export const currencySchema = z
-  .string()
-  .refine((code) => currencies.has(code), "Not an ISO 4217 currency code");
+export const currencySchema = z.string().refine((code) => {
+  currencies ??= new Set(Intl.supportedValuesOf("currency"));
+  return currencies.has(code);
+}, "Not an ISO 4217 currency code");
 
 export type ParamKind = keyof typeof paramValueSchemas;
 export type ParamValue<Kind extends ParamKind> = z.output<

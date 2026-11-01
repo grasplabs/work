@@ -9,6 +9,8 @@ import {
   isAppLayout,
   kitModuleName,
   kitModules,
+  kitPreviewModules,
+  previewRuntime,
   screenRuntime,
   limitErrors,
   computeModuleErrors,
@@ -20,10 +22,12 @@ import {
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
+  BuildMetrics,
   CompileTarget,
   Diagnostic,
   InspectTarget,
   ComputeModulesBuild,
+  IncrementalBuild,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
@@ -51,11 +55,18 @@ import { z } from "zod";
 import {
   forgetReceipts,
   keySchema,
+  lastUsedOf,
   refreshKept,
   sweepReceipts,
   throughCache,
+  usedNow,
 } from "./build-cache.ts";
 import type { Built, CacheEnv } from "./build-cache.ts";
+import {
+  incrementPrefixes,
+  keepIncrements,
+  readIncrements,
+} from "./module-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
@@ -192,6 +203,19 @@ const compilerCalls = {
 type BuildKind = keyof typeof compilerCalls;
 
 /**
+ * The compiler call a build of `kind` for `profile` runs: a chat's draft's
+ * screens are built instrumented for React Fast Refresh, on the preview
+ * kit (spec 19.2.1); every other build is the same for both profiles.
+ */
+const compilerCallOf = (
+  kind: BuildKind,
+  profile: BuildProfile
+): (typeof compilerCalls)[BuildKind] | readonly ["build", "preview-screens"] =>
+  kind === "screen" && profile === "preview"
+    ? ["build", "preview-screens"]
+    : compilerCalls[kind];
+
+/**
  * Whether the compiler's answer is shaped as a build: its code is core's
  * own, which reads the App's source and never runs it, so its answer is
  * trusted as the Loader's is; only a broken one is refused.
@@ -224,12 +248,16 @@ const isBuildShaped = (value: unknown): boolean =>
 const compiled = async (
   runner: PlatformRunner,
   kind: BuildKind,
-  files: AppFiles
+  files: AppFiles,
+  profile: BuildProfile,
+  /** The compiler call, when not the kind's own: what it answers as the build. */
+  call: () => Promise<unknown> = async () => {
+    const [method, target] = compilerCallOf(kind, profile);
+    return await runner.run("compiler", method, [target, files]);
+  }
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
-    const [method, target] = compilerCalls[kind];
-    const built = await runner.run("compiler", method, [target, files]);
-    return { built, cache: true };
+    return { built: await call(), cache: true };
   } catch (error) {
     // A JSON workflow's generated module is never its author's to fix,
     // and a stop of compute modules that the load made (a deadline, a
@@ -259,7 +287,7 @@ const compiled = async (
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a cached build is kept after it was last used: the cron's
+ * How long a cached build is kept after it was last used: the clock's
  * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
  * output for files core keeps, under its version, so one swept is built
  * again, the same, the next time it is asked for: what runs never rests
@@ -275,6 +303,73 @@ export const buildKeepMs = 30 * day;
  */
 const buildRefreshMs = buildKeepMs / 2;
 
+/** Whether `value` is what the compiler's `buildIncrementally` answers, its build aside. */
+const incrementalShaped = (
+  value: unknown
+): value is IncrementalBuild<unknown> =>
+  typeof value === "object" &&
+  value !== null &&
+  "built" in value &&
+  "fresh" in value &&
+  typeof value.fresh === "object" &&
+  value.fresh !== null &&
+  "metrics" in value &&
+  typeof value.metrics === "object" &&
+  value.metrics !== null;
+
+/**
+ * A screens build of `files` (spec 19.2, GRA-958), reusing what earlier
+ * builds kept of each file (module-cache.ts): the compiler checks each
+ * against the key it works out itself, and redoes the rest with every
+ * gate; what it made now is kept for the next. Its metrics: putting it
+ * together from what was kept, the compiler's run, and how much of each
+ * part was done now or reused.
+ */
+const compiledIncrementally = async (
+  env: BuildEnv,
+  runner: PlatformRunner,
+  files: AppFiles,
+  profile: BuildProfile,
+  leaseMs: number
+): Promise<{ built: unknown; cache: boolean }> => {
+  const preview = profile === "preview";
+  const [, target] = compilerCallOf("screen", profile);
+  const started = Date.now();
+  const reuse = await readIncrements(env, files, preview, buildRefreshMs);
+  const read = Date.now();
+  let answer: unknown;
+  const result = await compiled(runner, "screen", files, profile, async () => {
+    answer = await runner.run("compiler", "buildIncrementally", [
+      target,
+      files,
+      reuse,
+    ]);
+    if (!incrementalShaped(answer)) {
+      throw new TypeError(
+        "The compiler answered something else than an incremental build."
+      );
+    }
+    return answer.built;
+  });
+  const ran = Date.now();
+  const kept = incrementalShaped(answer)
+    ? await keepIncrements(env, files, preview, answer.fresh, leaseMs)
+    : 0;
+  log.info("build.compile", {
+    kind: "screen",
+    profile,
+    // Putting the build together: what was kept read, and kept now.
+    assemblyMs: read - started + (Date.now() - ran),
+    // The compiler's run: transforms, checks and the CSS.
+    executionMs: ran - read,
+    ...(incrementalShaped(answer)
+      ? (answer.metrics satisfies BuildMetrics)
+      : {}),
+    kept,
+  });
+  return result;
+};
+
 /** Where the builds' sweep left off: which kind, and R2's cursor in it. */
 const buildSweepKey = "builds-sweep.json";
 
@@ -285,13 +380,14 @@ const buildSweepBatch = 500;
 export const inspectionsPrefix = "inspections/";
 
 /**
- * The prefix each kind of build is cached under, inspected manifests, and
- * the bad bytes kept for operators (build-cache.ts), which all go after
- * the same time.
+ * The prefix each kind of build is cached under, inspected manifests, what
+ * screens builds keep of each file (module-cache.ts), and the bad bytes
+ * kept for operators (build-cache.ts), which all go after the same time.
  */
 const buildPrefixes = [
   ...Object.keys(compilerCalls).map((kind) => `${kind}-builds/`),
   inspectionsPrefix,
+  ...Object.values(incrementPrefixes),
   "build-quarantine/",
 ];
 
@@ -303,25 +399,9 @@ const buildSweepSchema = z.object({
   cursor: z.string().optional(),
 });
 
-/** What a cached build is written with: when it was last used. */
-const usedNow = (): R2PutOptions => ({
-  customMetadata: { usedAt: String(Date.now()) },
-});
-
-/**
- * When a cached build was last used: as it was last written, or, for one
- * written before builds said so, when it was uploaded.
- */
-const lastUsedOf = (object: R2Object): number => {
-  const usedAt = Number(object.customMetadata?.usedAt);
-  return Number.isFinite(usedAt) && usedAt > 0
-    ? usedAt
-    : object.uploaded.getTime();
-};
-
 /**
  * Deletes cached builds last used more than `buildKeepMs` before `now`,
- * from the cron: in code, not a bucket rule, so it runs wherever core
+ * from the clock: in code, not a bucket rule, so it runs wherever core
  * does. One page of one kind's prefix a run, at most `buildSweepBatch`
  * objects, from where the last run stopped; once a kind is done, the next
  * run starts the next. A build is never last used after it was uploaded,
@@ -516,7 +596,7 @@ const cachedBuild = async <Build>(
   // compiler call a kind makes (`compilerCalls`) builds again, rather than
   // serving what the old call built for as long as it is kept. Under its
   // profile too: a preview's build is never served as production's.
-  const [callMethod, callTarget] = compilerCalls[kind];
+  const [callMethod, callTarget] = compilerCallOf(kind, profile);
   const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${profile}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
@@ -536,7 +616,16 @@ const cachedBuild = async <Build>(
         // Held as long as a build may take, and a little more.
         leaseMs,
         async () => {
-          const answer = await compiled(runner, kind, files);
+          const answer =
+            kind === "screen"
+              ? await compiledIncrementally(
+                  env,
+                  runner,
+                  files,
+                  profile,
+                  leaseMs
+                )
+              : await compiled(runner, kind, files, profile);
           if (!isBuild(answer.built)) {
             throw new TypeError(
               "The compiler answered something else than a build."
@@ -865,7 +954,11 @@ export const versionScreens = async (
     async () =>
       await Promise.all([
         buildScreens(env, files, app, { profile }),
-        kitModules(env.ASSETS),
+        // A preview runs on the preview kit (spec 19.2.1), which its
+        // build's closures name.
+        profile === "preview"
+          ? kitPreviewModules(env.ASSETS)
+          : kitModules(env.ASSETS),
       ])
   );
   if (loaded === "late") {
@@ -892,7 +985,9 @@ export const versionScreens = async (
     }
     const code = {
       entry,
-      runtime: kitModuleName(screenRuntime),
+      runtime: kitModuleName(
+        profile === "preview" ? previewRuntime : screenRuntime
+      ),
       modules: pick(build.modules, closure.modules),
       kit: pick(kit, closure.kitModules),
       css: build.css,

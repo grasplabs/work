@@ -603,3 +603,71 @@ export interface WidgetMade {
   widget: CustomWidget;
   note: string | null;
 }
+
+/** The kinds of a widget's parts, as a widget being written shows them. */
+export const widgetPartTypes = [
+  "number",
+  "bars",
+  "trend",
+  "table",
+  "text",
+  "row",
+] as const;
+export type WidgetPartType = (typeof widgetPartTypes)[number];
+
+/**
+ * What can be read of a widget while its answer is still being written:
+ * its title so far, and the kinds of its parts in the order they came,
+ * a row's own parts after it. Nothing of it is kept or checked: the
+ * widget is the answer once it is whole (`widgetAnswer`).
+ */
+export interface WidgetDraft {
+  title: string | null;
+  parts: WidgetPartType[];
+}
+
+/** Where Grasp is in making or changing a widget, as it streams to the board. */
+export type WidgetProgress =
+  /** The model is writing the widget, or putting it right after `attempt` 1. */
+  | {
+      stage: "writing";
+      attempt: number;
+      attempts: number;
+      draft: WidgetDraft;
+    }
+  /** The answer is checked against the person's own rows. */
+  | { stage: "checking"; attempt: number; attempts: number }
+  /** It fits, and is being kept. */
+  | { stage: "keeping" };
+
+const draftTitlePattern = /"title"\s*:\s*"(?<title>(?:[^"\\]|\\.)*)/u;
+const draftPartPattern = /"type"\s*:\s*"(?<type>[a-z]+)"/gu;
+const isPartType = (value: string): value is WidgetPartType =>
+  widgetPartTypes.some((type) => type === value);
+
+/** A JSON string's characters as far as they came, without a half-written escape. */
+const unescaped = (raw: string): string => {
+  const whole = raw.replace(/\\(?:u[\da-fA-F]{0,3})?$/u, "");
+  try {
+    const value: unknown = JSON.parse(`"${whole}"`);
+    return typeof value === "string" ? value : whole;
+  } catch {
+    return whole;
+  }
+};
+
+/** What can be read of a widget from its answer's `text` so far. */
+export const widgetDraftOf = (text: string): WidgetDraft => {
+  const read = text.slice(0, widgetAnswerMaxChars);
+  const title = draftTitlePattern.exec(read)?.groups?.title;
+  return {
+    title:
+      title === undefined || title === ""
+        ? null
+        : unescaped(title).slice(0, 60),
+    parts: [...read.matchAll(draftPartPattern)].flatMap(({ groups }) => {
+      const type = groups?.type ?? "";
+      return isPartType(type) ? [type] : [];
+    }),
+  };
+};

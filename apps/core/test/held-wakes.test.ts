@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { appHost } from "../src/durable-objects.ts";
 import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, runInstance } from "./runs.ts";
 import { openRpc, outcome, signedInWithRole } from "./sign-in.ts";
 import {
@@ -349,16 +349,16 @@ describe("a held side effect's decision", { timeout: 60_000 }, () => {
     );
     // The minute's repair sends the wake that stood from before connect
     // was asked: the first step wakes, and runs on to the second.
-    await runCron({}, new Date(Date.now() + minute));
+    await runMinuteTasks({}, new Date(Date.now() + minute));
     const firstEnded = await waits.nextEnd("first");
     await waits.started("second", 5);
     const stillOwed = await owed(run.id);
     // Sent again, as connect's decision isn't known to have happened: it
     // wakes nothing of the second step, which waits on its own decision.
-    await runCron({}, new Date(Date.now() + 3 * minute));
+    await runMinuteTasks({}, new Date(Date.now() + 3 * minute));
     const secondEnded = await waits.nextEnd("second");
     // A day on, nothing more is sent.
-    await runCron({}, new Date(Date.now() + day + minute));
+    await runMinuteTasks({}, new Date(Date.now() + day + minute));
     const afterADay = await owed(run.id);
     const second = await heldOne(admin);
     await admin.api.pendingActions.confirm(second.id, second.inputHash);

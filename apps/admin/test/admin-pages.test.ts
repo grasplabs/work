@@ -3,22 +3,19 @@ import { env, exports } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { orgSections, sectionTo, sectionWords } from "../src/admin/sections.ts";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-frame-3b7e21";
-const tenantToken = "test-tenant-admin-token-admin-frame-8d0f54";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -33,7 +30,7 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
 const recordClient = async (
-  status: "provisioning" | "active",
+  status: "provisioning",
   clientId = `client-${crypto.randomUUID().slice(0, 8)}`
 ) => {
   const account = cloudflare.addAccount(`Acme ${clientId}`);
@@ -45,7 +42,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        accountId: account.id,
         status,
         createdAt: now,
         updatedAt: now,
@@ -56,16 +52,13 @@ const recordClient = async (
   return { clientId, name: `Acme ${clientId}`, account };
 };
 
-/** An active client running a new release, as a deploy made it live. */
+/** A live placed client running a new release, as its operation made it. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): the frame" });
-  await importReleases(env.RELEASES, db);
-  const client = await recordClient("active");
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, client.clientId, release.id)
-  );
-  return client;
+  const release = await placedRelease("feat(core): the frame");
+  const { clientId, account } = await livePlacedClient(cloudflare, 1, release, {
+    signIn: null,
+  });
+  return { clientId, name: `Acme ${clientId}`, account };
 };
 
 /**
@@ -209,8 +202,23 @@ const integrationsOf = ({
   toCome: html.includes("This section isn’t in the admin yet."),
 });
 
+/** Each section as an organization not read shows it. */
+const unread = (state: string[]) =>
+  orgSections
+    .filter((each) => each !== "setup")
+    .map((section) => ({
+      section,
+      status: 200,
+      title: true,
+      column: true,
+      failed: false,
+      fromCore: false,
+      toSetup: true,
+      state,
+    }));
+
 describe("the admin's frame", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // Only each test's own clients are listed: an earlier test's accounts
   // are gone from the fake, and the overview counts every client.
   beforeEach(async () => {
@@ -232,7 +240,7 @@ describe("the admin's frame", () => {
 
     const places = [
       "Overview",
-      "Integrations to build",
+      "Apps asked for",
       "Platform",
       "Ask Grasp",
       "Stephen Lab",
@@ -285,45 +293,27 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("says there is nothing to build yet where the integrations' table goes, and how a build goes, with no build to move on", async () => {
+  it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
     const { status, html } = await page("/integrations");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const steps = [
-      "A company’s workflow needs an app Composio does not have.",
-      "Build it starts Grasp’s agent on a branch of its own.",
-      "A person registers Grasp with the app and puts the keys in the admin.",
-      "The agent writes the connection and its tests",
-      "The merge goes into the next release",
-    ].map((step) => text.indexOf(step));
 
     expect({
       status,
-      title: html.includes(">Integrations to build</h1>"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      howItIsBuilt: html.includes(">How it is built</h2>"),
-      stepsInOrder:
-        steps.every((at) => at >= 0) &&
-        steps.toSorted((a, b) => a - b).every((at, i) => at === steps[i]),
-      // No sample builds, and nothing that would move one on.
+      title: html.includes(">Apps asked for</h1>"),
+      nothingAsked: html.includes("Nothing asked for yet"),
       table: html.includes("<table"),
       buttons: html
-        .slice(html.indexOf(">Integrations to build</h1>"))
+        .slice(html.indexOf(">Apps asked for</h1>"))
         .includes("<button"),
-      // Connect signs in with OAuth2 and API keys now (GRA-688).
-      firstByHand: text.includes("First, by hand"),
     }).toStrictEqual({
       status: 200,
       title: true,
-      nothingToBuild: true,
-      howItIsBuilt: true,
-      stepsInOrder: true,
+      nothingAsked: true,
       table: false,
       buttons: false,
-      firstByHand: false,
     });
   });
 
-  it("lists every app the companies asked Grasp for once, most asked first, each opening its build, and every company's request leading to it", async () => {
+  it("lists every app the companies asked Grasp for once, most asked first, and every company's request leading to it", async () => {
     const acme = await liveClient();
     const globex = await liveClient();
     const asked = (name: string, ago: number) => ({
@@ -364,17 +354,13 @@ describe("the admin's frame", () => {
       // Once each, the one two companies asked for first.
       rows: (html.match(/<tr/gu) ?? []).length - 1,
       order: exact !== -1 && twinfield > exact,
-      exact: [
-        rowText("exact-online").includes(
-          `Acme ${acme.clientId} and Acme ${globex.clientId}`
-        ),
-        rowText("exact-online").includes("Waiting for Grasp to start it"),
-      ],
+      exact: rowText("exact-online").includes(
+        `Acme ${acme.clientId} and Acme ${globex.clientId}`
+      ),
       twinfield: rowText("twinfield").includes(`Acme ${acme.clientId}`),
-      badge: text.includes("2 wait on Grasp"),
-      sidebar: sidebarOf(html).includes("2 apps wait on Grasp"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      // Its own request, on the company's Integrations, leads to the build.
+      sidebar: sidebarOf(html).includes("2 apps asked for"),
+      nothingAsked: html.includes("Nothing asked for yet"),
+      // Its own request, on the company's Integrations, leads to the app.
       companyAsked: company.html.includes(
         `href="/integrations?app=exact-online"`
       ),
@@ -383,11 +369,10 @@ describe("the admin's frame", () => {
       status: [200, 200],
       rows: 2,
       order: true,
-      exact: [true, true],
+      exact: true,
       twinfield: true,
-      badge: true,
       sidebar: true,
-      nothingToBuild: false,
+      nothingAsked: false,
       companyAsked: true,
       companyWords: true,
     });
@@ -612,69 +597,42 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, on the newest release", async () => {
-    await publishRelease({ notes: "feat(core): older" });
-    const newest = await publishRelease({ notes: "feat(core): newest" });
-    await importReleases(env.RELEASES, db);
-
+  it("offers to add an organization from the overview, asking only its name, web address, email domain, first admin and hosting", async () => {
     const overview = await page("/");
     const { status, html } = await page("/new-organization");
-    const main = html.slice(html.indexOf("<main"));
-    /** The choice `label` makes, up to the next one. */
-    const choiceOf = (label: string): string => {
-      const at = main.indexOf(label);
-      const start = main.lastIndexOf("<label", at);
-      return main.slice(start, main.indexOf("</label>", at));
-    };
-    const [hand, attio, rooms] = [
-      "By hand",
-      "A deal won in Attio",
-      "A proposal signed in Rooms",
-    ].map((label) => {
-      const choice = choiceOf(label);
-      return {
-        chosen: choice.includes('aria-checked="true"'),
-        disabled: choice.includes('aria-disabled="true"'),
-      };
-    });
-    const selected = main.slice(
-      main.lastIndexOf("<option", main.indexOf(" selected")),
-      main.indexOf("</option>", main.indexOf(" selected"))
-    );
-
+    const mainAt = html.indexOf("<main");
+    /** Whether the page's main part says `text`. */
+    const says = (text: string): boolean => html.includes(text, mainAt);
     expect({
       link: overview.html.includes('href="/new-organization"'),
       status,
-      title: main.includes("New organization</h1>"),
-      choices: { hand, attio, rooms },
-      why: [
-        "Not yet: the admin isn&#x27;t connected to Attio.",
-        "Not yet: the admin isn&#x27;t connected to Rooms.",
-      ].map((text) => main.includes(text)),
-      fields: [
-        "name",
-        "clientId",
-        "admins",
-        "domains",
-        "entraTenantId",
-        "googleHostedDomain",
-        "releaseId",
-        "ring",
-        "accountId",
-      ].every((field) => main.includes(`name="${field}"`)),
-      newest: selected.includes(`value="${newest.id}"`),
+      title: says("New organization</h1>"),
+      labels: [
+        "Name",
+        "Web address",
+        "Company email domain",
+        "First admin&#x27;s email",
+        "Grasp Cloud",
+        "On-premises",
+        "Keep data in the EU",
+      ].map(says),
+      // Its platform's domain after the web address.
+      suffix: says(".grasp.test"),
+      // Everything else has a default, put right on its Setup.
+      asked: [
+        "Ring",
+        "Entra tenant id",
+        "Release",
+        "Model spend",
+        "A deal won in Attio",
+      ].map(says),
     }).toStrictEqual({
       link: true,
       status: 200,
       title: true,
-      choices: {
-        hand: { chosen: true, disabled: false },
-        attio: { chosen: false, disabled: true },
-        rooms: { chosen: false, disabled: true },
-      },
-      why: [true, true],
-      fields: true,
-      newest: true,
+      labels: [true, true, true, true, true, true, true],
+      suffix: true,
+      asked: [false, false, false, false, false],
     });
   });
 
@@ -800,11 +758,11 @@ describe("the admin's frame", () => {
       contract: {
         title: contract.html.includes("Contract</h1>"),
         about: contract.html.includes(
-          "What was signed, what it gives the company, and what is billed."
+          "The seats taken, the agreements, and what is billed."
         ),
-        // Core holds no contract yet, from Rooms; nor is it linked in Rooms or Stripe.
+        // Not linked in Stripe yet.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
+          "Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
@@ -885,29 +843,18 @@ describe("the admin's frame", () => {
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
       summary: {
-        contract: html.includes("Not known yet"),
-        // Core holds no contract: it is neither a draft nor a fee of nothing.
-        draft: ["Being written", "not sent yet", "€0"].some((text) =>
-          html.includes(text)
+        // Core holds no contract: no status, terms, fee or seats it gives.
+        contract: ["Not known yet", "Being written", "not sent yet", "€0"].some(
+          (text) => html.includes(text)
         ),
-        seats: html.includes("taken; the contract isn’t known yet"),
+        seats: html.includes("are taken"),
         runs: html.includes("Still runs"),
         fee: html.includes("Fee a month"),
       },
-      terms: [
-        partOf("The terms").includes(
-          "Nothing is known about the contract yet."
-        ),
-        partOf("The terms").includes(
-          "Once Rooms is connected, this fills in by itself."
-        ),
-      ],
-      gives: [
-        partOf("What it gives the company").includes(
-          "Not known yet; 2 are taken."
-        ),
-        // What the model works out of AI use isn't what was used: the AI use section says what it is.
-        partOf("What it gives the company").includes("was used this month"),
+      parts: [
+        partOf("The terms"),
+        partOf("What it gives the company"),
+        partOf("Invoices"),
       ],
       agreements: {
         open: partOf("Agreed before the first interview").includes(
@@ -924,21 +871,16 @@ describe("the admin's frame", () => {
           "Who else handles the data"
         ),
       },
-      invoices: partOf("Invoices").includes(
-        "None known yet: nothing is known about the contract."
-      ),
     }).toStrictEqual({
       status: 200,
       toCome: false,
       summary: {
-        contract: true,
-        draft: false,
+        contract: false,
         seats: true,
         runs: false,
         fee: false,
       },
-      terms: [true, true],
-      gives: [true, false],
+      parts: ["", "", ""],
       agreements: {
         open: true,
         processing: true,
@@ -946,7 +888,6 @@ describe("the admin's frame", () => {
         council: true,
         others: true,
       },
-      invoices: true,
     });
   });
 
@@ -1214,70 +1155,66 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
+  it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
-
+    /** What a section of `client` says, on every section but its Setup. */
+    const sectionsOf = async (client: { clientId: string; name: string }) => {
+      const said = [];
+      for (const section of orgSections.filter((each) => each !== "setup")) {
+        const path = sectionTo[section].replace("$clientId", client.clientId);
+        // oxlint-disable-next-line no-await-in-loop -- pages render one at a time
+        const { status, html } = await page(path);
+        said.push({
+          section,
+          status,
+          title: html.includes(
+            `${section === "overview" ? client.name : sectionWords[section].title}</h1>`
+          ),
+          column:
+            columnOf(html, client.name).includes("Members") &&
+            columnOf(html, client.name).includes("Not read now"),
+          failed: html.includes("This couldn’t be shown"),
+          fromCore: ["Needs Grasp", "% known", "From the company"].some(
+            (text) => html.includes(text)
+          ),
+          toSetup: html.includes(
+            `href="/organizations/${client.clientId}/setup"`
+          ),
+          state: [
+            "isn’t set up yet",
+            "See its Setup progress",
+            "’s Grasp didn’t answer",
+            "Try again",
+          ].filter((text) => html.includes(text)),
+        });
+      }
+      return said;
+    };
+    const downSections = await sectionsOf(down);
+    const waitingSections = await sectionsOf(waiting);
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
     const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
-    const pageOf = (
-      { status, html }: { status: number; html: string },
-      name: string,
-      title = name
-    ) => ({
-      status,
-      title: html.includes(`${title}</h1>`),
-      column:
-        columnOf(html, name).includes("Members") &&
-        columnOf(html, name).includes("Not read now"),
-      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
-        html.includes(text)
-      ),
-      toSetup: html.includes(
-        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
-      ),
-    });
 
     expect({
-      down: pageOf(downPage, down.name),
+      downSections,
+      waitingSections,
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name, "Members"),
       membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
       // Its Setup is the admin's own record, read whatever its core does.
       setup: downSetup.html.includes("How it stands"),
-      waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
+      downSections: unread(["’s Grasp didn’t answer", "Try again"]),
+      waitingSections: unread(["isn’t set up yet", "See its Setup progress"]),
       downWhy: true,
-      downMembers: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       membersWhy: true,
       setup: true,
-      waiting: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       waitingWhy: true,
     });
   });

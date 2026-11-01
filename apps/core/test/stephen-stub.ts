@@ -1,6 +1,13 @@
+import { normalized } from "./brain-scoring.ts";
+import { modelStrings, resultsSinceQuestion } from "./brain-stub-model.ts";
+import type {
+  StephenCall,
+  StephenCase,
+  StephenContext,
+} from "./fixtures/stephen-cases.ts";
 /**
  * The model provider of Stephen's eval in CI (GRA-720): a stand-in behind
- * AI Gateway, the one outside system the run mocks, as the Brain baseline's
+ * connect, the one outside system the run mocks, as the Brain baseline's
  * is (brain-stub-model.ts). For each case it does what a careful Stephen
  * would: one code step that makes the case's connector calls and Knowledge
  * search through the agent's own `env`, then the case's answer, given only
@@ -12,14 +19,7 @@
  * when the case's own checks held: a stand-in for the judge's verdict, so
  * the judge's path through the gateway and ledger is still run.
  */
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
-import { normalized } from "./brain-scoring.ts";
-import { modelStrings, resultsSinceQuestion } from "./brain-stub-model.ts";
-import type {
-  StephenCall,
-  StephenCase,
-  StephenContext,
-} from "./fixtures/stephen-cases.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 
 /** Identifies the stub in a run's identity, as a model ID would. */
 export const stephenStubModel = "stephen-stub-careful/2026-10-24";
@@ -44,12 +44,12 @@ export type StephenTurn =
       checksHeld: boolean;
     };
 
-/** A model provider: what it answers each gateway request with, in a turn. */
+/** A model provider: what it answers each request with, in a turn. */
 export type StephenProvider = (
   turn: () => StephenTurn
 ) => (
-  requests: readonly GatewayRequest[]
-) => GatewayReply | Promise<GatewayReply>;
+  requests: readonly SentRequest[]
+) => ProviderReply | Promise<ProviderReply>;
 
 /** The judge's verdict line, which the harness reads (stephen-harness.ts). */
 export const verdictLine =
@@ -95,7 +95,7 @@ const stepCode = (
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
 
-const codeStep = (code: string, input: string): GatewayReply => ({
+const codeStep = (code: string, input: string): ProviderReply => ({
   text: "",
   toolCalls: [
     {
@@ -108,7 +108,7 @@ const codeStep = (code: string, input: string): GatewayReply => ({
   outputTokens: tokensOf(code),
 });
 
-const says = (text: string, input: string): GatewayReply => ({
+const says = (text: string, input: string): ProviderReply => ({
   text,
   inputTokens: tokensOf(input),
   outputTokens: tokensOf(text),

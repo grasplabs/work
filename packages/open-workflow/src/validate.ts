@@ -17,6 +17,8 @@ import { parseDefinitionText } from "./json-text.ts";
 import type { JsonValue } from "./json-text.ts";
 import { profileLimits, profileName } from "./limits.ts";
 import { checkReferences } from "./references.ts";
+import { sealStore } from "./stores.ts";
+import type { SealedStore } from "./stores.ts";
 
 /**
  * Validation of a workflow.json against grasp-open-workflow/1, in the order
@@ -49,6 +51,12 @@ export interface CheckedWorkflow {
   readonly schemas: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   /** Every expression, compiled for its stage, by its pointer. */
   readonly expressions: ReadonlyMap<string, CompiledExpression>;
+  /**
+   * The stores it declares, by name (stores.ts): what activating the
+   * version through the candidate flow creates, with its schema's hash and
+   * each operation's contract fingerprint.
+   */
+  readonly stores: ReadonlyMap<string, SealedStore>;
   /** Every task, with the scope (task IDs) it sits in. */
   readonly tasks: readonly {
     readonly id: string;
@@ -260,6 +268,11 @@ export const validateWorkflow = async (
       );
     }
   }
+  const stores = new Map<string, SealedStore>();
+  for (const [name, store] of checker.stores) {
+    // oxlint-disable-next-line no-await-in-loop -- a few digests, in order
+    stores.set(name, await sealStore(store));
+  }
   const workflow: CheckedWorkflow = Object.freeze({
     profile: profileName,
     identity: Object.freeze(identity),
@@ -268,6 +281,7 @@ export const validateWorkflow = async (
     bindings,
     schemas: checker.schemas,
     expressions,
+    stores,
     tasks: Object.freeze(
       checker.tasks.map((task) =>
         Object.freeze({

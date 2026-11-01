@@ -2,8 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { codeResults, codeStep, pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { codeResults, codeStep, configureObject, says } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { jobRowSchema } from "./build-jobs.ts";
@@ -24,6 +23,7 @@ import {
 } from "./build-jobs.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { runInstance } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -336,16 +336,14 @@ describe("build jobs", { timeout: 180_000 }, () => {
       );
       const instance = runInstance(job.id);
       await instance.terminate();
-      await pointAtGateway(
-        chat.stub,
-        fakeGateway(
-          codeStep(`export default async (self, env) => {
+      await fakeProvider(
+        codeStep(`export default async (self, env) => {
             const { status, version, error } = await env.build.job(${JSON.stringify(job.id)});
             return { status, version, error };
           };`),
-          says("It was proposed.")
-        )
+        says("It was proposed.")
       );
+      await configureObject(chat.stub);
       await chat.ask("How did it go?");
     } finally {
       env.FILES = files;

@@ -1,19 +1,24 @@
 /**
  * What someone at Grasp does to a company's own Grasp, in its Setup
  * (src/admin/setup.tsx), as the admin's own client page did before the
- * admin took it in: follow and steer setting it up (confirm Workers Paid,
- * resume), pin it to a release, move it to another ring, change how its
+ * admin took it in: pin it to a release, move it to another ring, change how its
  * people sign in, apply its settings now, rotate its secrets, roll it
  * back from the rollout that last reached it. Each is the same server
  * function, audited as the staff member Access vouches for, and each
  * reads the Setup again after, whether it worked or not.
  *
  * Also what is read live of its account once the Setup shows (reach,
- * errors, drift, shared secrets, cost), as the admin's grid read it,
+ * errors, drift, shared secrets), as the admin's grid read it,
  * and everything its audit log keeps of it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldDescription,
@@ -34,18 +39,16 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Link, useRouter } from "@tanstack/react-router";
+import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import type { AlertOutcome } from "../alerts.ts";
-import { usd } from "../clients/cost.tsx";
 import {
   applySettingsFn,
   fetchClientLive,
   fetchTeamsPackageFn,
   rotateSecretsFn,
-  sendTestAlertFn,
   setRingFn,
   setSealedSecretFn,
   setSignInFn,
@@ -59,12 +62,6 @@ import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
-import {
-  confirmClientWorkersPaid,
-  retryClient,
-} from "../provision/functions.ts";
-import type { ProvisioningView } from "../provision/queries.ts";
-import { useProvisionAction } from "../provision/use-action.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
@@ -72,7 +69,7 @@ import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
-import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
+import { Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -89,185 +86,6 @@ export const useRefreshSetup = (): Refresh => {
       sync: true,
     });
   };
-};
-
-const dashboard = (accountId: string): string =>
-  `https://dash.cloudflare.com/${accountId}`;
-
-// Setting it up.
-
-/** What someone at Grasp does while the run waits for Workers Paid. */
-const WorkersPaid = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const confirm = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () =>
-            await confirmClientWorkersPaid({
-              data: { clientId: view.clientId },
-            }),
-          refresh
-        )
-    );
-  };
-  return (
-    <>
-      <ol className="flex list-decimal flex-col gap-2 pl-5">
-        <li>
-          <a
-            className="underline underline-offset-4"
-            href={dashboard(view.client?.accountId ?? "")}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open the account in the Cloudflare dashboard
-          </a>{" "}
-          and upgrade it to Workers Paid.
-        </li>
-        <li>Turn on R2 in the same account: the deploy creates buckets.</li>
-        <li>Confirm below; the deploy starts at once.</li>
-      </ol>
-      {view.workersPaidConfirmed ? (
-        // Confirmed already: the run goes on by itself, and the page follows.
-        <p>Confirmed, waiting for the run.</p>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={busy} onClick={confirm} size="sm">
-            Workers Paid is on
-          </Button>
-          <Failure failure={failure} />
-        </div>
-      )}
-    </>
-  );
-};
-
-/** Why the run stopped, and resuming it. */
-const Stopped = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const resume = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () => await retryClient({ data: { clientId: view.clientId } }),
-          refresh
-        )
-    );
-  };
-  if (view.client === null) {
-    // It stopped before it recorded the company: nothing to resume.
-    return (
-      <>
-        <p>{`The run stopped: ${view.stopped?.error ?? "before it recorded the company"}.`}</p>
-        <p className="text-muted-foreground">
-          Fix what it says, or pick another account, and{" "}
-          <Link
-            className="hover:text-foreground underline underline-offset-4"
-            to="/new-organization"
-          >
-            add it again
-          </Link>{" "}
-          with the same address.
-        </p>
-      </>
-    );
-  }
-  let reason = "its run is gone (Workflows keeps a run for a while only)";
-  if (view.stopped !== null) {
-    reason = `${view.stopped.step} step: ${view.stopped.error}`;
-  } else if (view.run === "terminated") {
-    reason = "it was ended outside the admin";
-  } else if (view.run !== null && view.run !== "gone") {
-    reason = `it failed after its retries${
-      view.deploy === null || view.deploy.error === null
-        ? ""
-        : ` (${view.deploy.error})`
-    }`;
-  }
-  return (
-    <>
-      <p>{`The run stopped: ${reason}.`}</p>
-      <p className="text-muted-foreground">
-        Fix what it says, then resume: it picks up from the deploy if it got
-        that far, and makes nothing twice.
-      </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={busy} onClick={resume} size="sm">
-          Resume
-        </Button>
-        <Failure failure={failure} />
-      </div>
-    </>
-  );
-};
-
-/** Where setting a company up is now, and what someone at Grasp does there. */
-export const SettingUpNow = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  switch (view.phase) {
-    case "account": {
-      return (
-        <Body>
-          <p>Setting up: its Cloudflare account, then its record.</p>
-        </Body>
-      );
-    }
-    case "workers_paid": {
-      return (
-        <Body>
-          <WorkersPaid refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "deploying": {
-      return (
-        <Body>
-          <p>
-            {`Deploying ${view.deploy?.releaseId ?? "the release"}: ${
-              view.deploy?.step === null || view.deploy === null
-                ? "starting"
-                : `${view.deploy.step} done`
-            }.`}
-          </p>
-        </Body>
-      );
-    }
-    case "failed": {
-      return (
-        <Body>
-          <Stopped refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "active": {
-      return (
-        <Body>
-          <p>{`Live at https://${view.hostname ?? ""}, and passed its smoke check.`}</p>
-        </Body>
-      );
-    }
-    default: {
-      return null;
-    }
-  }
 };
 
 // Its releases.
@@ -452,21 +270,21 @@ export const RollBack = ({
     );
   };
   return (
-    <Body>
+    <CardContent>
       <p className="text-muted-foreground">
         {`Rolling it back from ${rollout.releaseId ?? "the secrets rollout"} puts back what it ran before, and waits for it.`}
       </p>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Rolling it back puts the shared secrets it ran before back. If you
-            revoked them at their providers, its people can&apos;t sign in or
-            reach their connections until the next secrets rollout.
-          </p>
-          <div className="flex flex-wrap gap-2">
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Rolling it back puts the shared secrets it ran before back. If you
+              revoked them at their providers, its people can&apos;t sign in or
+              reach their connections until the next secrets rollout.
+            </p>
+          </AlertDescription>
+          <AlertAction placement="below">
             <Button
               disabled={busy}
               onClick={rollBack}
@@ -484,8 +302,8 @@ export const RollBack = ({
             >
               Keep the new secrets
             </Button>
-          </div>
-        </div>
+          </AlertAction>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -505,7 +323,7 @@ export const RollBack = ({
           <Failure failure={failure} />
         </div>
       )}
-    </Body>
+    </CardContent>
   );
 };
 
@@ -515,12 +333,10 @@ export const RollBack = ({
 export const SignInChange = ({
   clientId,
   signIn,
-  overridden,
   refresh,
 }: {
   clientId: string;
   signIn: ClientSignInRecord | null;
-  overridden: boolean;
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
@@ -542,9 +358,6 @@ export const SignInChange = ({
         );
       }}
     >
-      {overridden ? (
-        <p>A SIGN_IN setting replaces this on deploy, until it is removed.</p>
-      ) : null}
       {/* Keyed by what was read: the fields start again from it after a save. */}
       <FieldGroup key={JSON.stringify(signIn)}>
         <SignInFields current={signIn} idPrefix="setup-sign-in" />
@@ -589,7 +402,7 @@ export const ApplySettings = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <Body>
+    <CardContent>
       <p>{pendingWords(configPending, pinned)}</p>
       {active ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -615,64 +428,7 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </Body>
-  );
-};
-
-/** What became of a test alert, in words. */
-const alertOutcomeWords: Readonly<Record<AlertOutcome, string>> = {
-  sent: "Sent: it should be in the alerts' channel now.",
-  held: "Held back: one went out less than a minute ago.",
-  no_channel:
-    "Not sent: Secrets Store has no STAFF_ALERTS_WEBHOOK, or it isn't a Discord webhook.",
-  failed: "Not sent: the channel refused it. Try again in a moment.",
-};
-
-/** Sends a test alert about client `clientId`; what became of it. */
-const testAlertOutcome = async (
-  clientId: string
-): Promise<AlertOutcome | "error"> => {
-  try {
-    return await sendTestAlertFn({ data: { clientId } });
-  } catch {
-    return "error";
-  }
-};
-
-/** Sending a test alert about it, to see staff alerts reach their channel. */
-export const TestAlert = ({ clientId }: { clientId: string }) => {
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<AlertOutcome | "error" | null>(null);
-  return (
-    <Body>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            void (async () => {
-              setOutcome(await testAlertOutcome(clientId));
-              setBusy(false);
-            })();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Send a test alert
-        </Button>
-        {outcome === null ? null : (
-          <output
-            className={
-              outcome === "sent" ? "text-muted-foreground" : "text-destructive"
-            }
-          >
-            {outcome === "error"
-              ? "The admin couldn't send it: read the page again and retry."
-              : alertOutcomeWords[outcome]}
-          </output>
-        )}
-      </div>
-    </Body>
+    </CardContent>
   );
 };
 
@@ -957,17 +713,17 @@ export const RotateSecrets = ({
     });
   };
   return (
-    <Body>
+    <CardContent>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Its people all sign in again once the next deploy makes the new
-            secrets live.
-          </p>
-          <div className="flex flex-wrap gap-2">
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Its people all sign in again once the next deploy makes the new
+              secrets live.
+            </p>
+          </AlertDescription>
+          <AlertAction placement="below">
             <Button
               disabled={busy}
               onClick={rotate}
@@ -985,8 +741,8 @@ export const RotateSecrets = ({
             >
               Keep them
             </Button>
-          </div>
-        </div>
+          </AlertAction>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -1009,7 +765,7 @@ export const RotateSecrets = ({
           ) : null}
         </div>
       )}
-    </Body>
+    </CardContent>
   );
 };
 
@@ -1030,22 +786,6 @@ const liveDriftWords: Record<ClientDriftState, string> = {
   unknown: "Not known",
 };
 
-const percent = new Intl.NumberFormat("en", {
-  style: "percent",
-  maximumFractionDigits: 1,
-});
-
-/** The last day's errors, in words: unknown, none asked, or their share. */
-const errorsWords = (day: LiveStatus["day"]): string => {
-  if (day === null) {
-    return "Not known";
-  }
-  if (day.requests === 0) {
-    return "No requests";
-  }
-  return `${percent.format(day.errors / day.requests)} of ${day.requests}`;
-};
-
 /** Whether it runs the shared secrets in Secrets Store now, in words. */
 const sharedWords = (current: boolean | null): string => {
   if (current === null) {
@@ -1053,12 +793,6 @@ const sharedWords = (current: boolean | null): string => {
   }
   return current ? "Current" : "Behind: a secrets rollout brings it up";
 };
-
-/** What it cost this month so far, with its AI Gateway share. */
-const costWords = (cost: LiveStatus["costUsd"]): string =>
-  cost === null
-    ? "Not known"
-    : `${usd.format(cost.workers + cost.ai)} (AI ${usd.format(cost.ai)})`;
 
 /** Its account read live, or not: still reading (null), or it failed. */
 type LiveRead = LiveStatus | "failed" | null;
@@ -1072,7 +806,6 @@ const liveRows = (
     value: reachWords[live.reach],
     attention: live.reach === "unreachable" || live.reach === "no_route",
   },
-  { label: "Errors, last 24 h", value: errorsWords(live.day) },
   {
     label: "Drift",
     value: liveDriftWords[live.drift],
@@ -1083,7 +816,6 @@ const liveRows = (
     value: sharedWords(live.sharedSecretsCurrent),
     attention: live.sharedSecretsCurrent === false,
   },
-  { label: "Cost this month", value: costWords(live.costUsd) },
 ];
 
 /** Client `clientId`'s live numbers, or `failed` when they couldn't be read. Never throws. */
@@ -1099,9 +831,7 @@ const readLive = async (clientId: string): Promise<LiveRead> => {
  * What its account shows now, read once the Setup shows and kept a
  * minute, as the admin's grid read it: whether the router reaches its
  * core, its errors over the last day, its drift, whether it runs the
- * shared secrets, and what it cost this month (an estimate: its Workers
- * Paid plan past what it includes, and AI Gateway spend; not storage or
- * Durable Objects). Only an active company is read.
+ * shared secrets. Only an active company is read.
  */
 export const LiveNumbers = ({
   clientId,

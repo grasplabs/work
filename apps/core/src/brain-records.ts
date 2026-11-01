@@ -33,14 +33,27 @@ import type {
   BrainRecord,
   BrainRecordType,
   BrainRecordsAdded,
+  VisionRecord,
 } from "@grasp-os/shared/brain-records";
 import { issuesOf } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, gte, like, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  like,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions, apps, brainRecords } from "./db/core/schema.ts";
@@ -69,11 +82,15 @@ import { inList } from "./db/d1.ts";
 // - A change without its record: the records and their audit event are one
 //   batch, kept together or not at all.
 // - The onboarding's records taken or forged: only the onboarding adds a
-//   workflow, a roster team's record or an `onb-` id
+//   workflow, a vision, a roster team's record or an `onb-` id
 //   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
 //   them (`brainRecordInputSchema`).
 // - A deleted interview left in the brain: the onboarding alone takes its
 //   own records out (`purgeOnboardingRecords`, as the system), whole.
+// - A replaced kickoff left counting: the onboarding alone retires what
+//   the old transcript gave (`retireOnboardingRecords`, as the system),
+//   audited. A retired record is kept, never deleted, and still reached by
+//   a content purge, but `brain.read` leaves it out; its id stays taken.
 // - A purged document left in the brain: the onboarding alone takes its
 //   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
 // - A purged name or passage left in a record, reaching agents through
@@ -97,6 +114,11 @@ interface Held {
   body: string;
   /** A purge rewrote it: the same id sent again leaves it as it is. */
   purged: boolean;
+  /**
+   * An admin took it out of the brain (brain-forget.ts): the same id sent
+   * again leaves it as removed, and nothing new may name it.
+   */
+  forgotten: boolean;
 }
 
 /** The records core holds among the ids `wanted`, of whatever type. */
@@ -113,6 +135,7 @@ const heldOf = async (
       type: brainRecords.type,
       body: brainRecords.body,
       purgedAt: brainRecords.purgedAt,
+      forgottenAt: brainRecords.forgottenAt,
     })
     .from(brainRecords)
     // Every id as one bound parameter: D1 binds at most 100 to a
@@ -121,9 +144,14 @@ const heldOf = async (
       sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`
     );
   return new Map(
-    rows.map(({ id, type, body, purgedAt }) => [
+    rows.map(({ id, type, body, purgedAt, forgottenAt }) => [
       id,
-      { type, body, purged: purgedAt !== null },
+      {
+        type,
+        body,
+        purged: purgedAt !== null,
+        forgotten: forgottenAt !== null,
+      },
     ])
   );
 };
@@ -213,6 +241,9 @@ const referencesOf = (record: BrainRecord): Reference[] => {
     case "goalLink": {
       return [{ type: "goal", id: record.goalId }];
     }
+    case "vision": {
+      return [{ type: "source", id: record.sourceId }];
+    }
     default: {
       return [];
     }
@@ -225,8 +256,7 @@ export interface OnboardingHeld {
   sources: ReadonlySet<string>;
   /**
    * Its teams a value may be for: the roster's, by the ids the admin gave
-   * them. Never a kickoff-only team: its id is its place in the reading
-   * (`team.kickoff-<n>`), which reading the kickoff again moves.
+   * them. The kickoff's teams are records of their own.
    */
   teams: ReadonlySet<string>;
 }
@@ -267,6 +297,7 @@ const types = [
   "goal",
   "goalVersion",
   "goalLink",
+  "vision",
 ] as const;
 
 /** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
@@ -320,9 +351,16 @@ const freshOf = (
 ): BrainRecord[] => {
   /** The records the call adds before the one being checked, by id. */
   const before = new Map<string, BrainRecordType>();
-  /** Whether `reference` is a record of its type, in the call or held. */
-  const isRecord = ({ type, id }: Reference): boolean => {
-    const found = before.get(id) ?? held.get(id)?.type;
+  /**
+   * Whether `reference` is a record of its type, in the call or held: for
+   * a record not held yet, one taken out of the brain isn't, so nothing
+   * new rests on what is gone.
+   */
+  const isRecord = ({ type, id }: Reference, adding: boolean): boolean => {
+    const stored = held.get(id);
+    const found =
+      before.get(id) ??
+      (adding && stored?.forgotten === true ? undefined : stored?.type);
     return (
       found !== undefined &&
       (type === "note" ? noteTypes.has(found) : found === type)
@@ -335,7 +373,7 @@ const freshOf = (
       fresh.push(record);
     } else if (
       stored.type !== record.type ||
-      (!stored.purged && stored.body !== bodyOf(record))
+      (!stored.purged && !stored.forgotten && stored.body !== bodyOf(record))
     ) {
       throw brainRecordErrors.create("brain.record_conflict", {
         issues: [`${keyOf(record)}: held already, differently`],
@@ -343,7 +381,7 @@ const freshOf = (
     }
     for (const reference of referencesOf(record)) {
       const known =
-        isRecord(reference) ||
+        isRecord(reference, stored === undefined) ||
         (reference.type === "source" && onboarding.sources.has(reference.id)) ||
         (reference.type === "team" && onboarding.teams.has(reference.id));
       if (!known) {
@@ -367,9 +405,12 @@ const requireRoom = async (
   env: Env,
   fresh: readonly BrainRecord[]
 ): Promise<void> => {
+  // Live records alone: a retired one (a replaced kickoff's) is kept but
+  // read by no one, so it takes no room from what replaces it.
   const counts = await drizzle(env.DB)
     .select({ type: brainRecords.type, held: count() })
     .from(brainRecords)
+    .where(isNull(brainRecords.retiredAt))
     .groupBy(brainRecords.type);
   for (const type of types) {
     const adding = fresh.filter((record) => record.type === type).length;
@@ -532,8 +573,9 @@ export const addBrainRecords = async (
 };
 
 /**
- * Keeps the onboarding's own records (GRA-367), as the system: its team
- * records, statements and drawn workflows, each type only it adds. They
+ * Keeps the onboarding's own records (GRA-367, GRA-528), as the system:
+ * its team records, statements, drawn workflows and the kickoff's vision,
+ * the last two types only it adds. They
  * may name `held`, the onboarding's sources and teams. In calls of at
  * most `brainRecordsMaxPerCall`, in order, so a record finds what an
  * earlier call kept; each call all or none, and a retry keeps what is
@@ -572,9 +614,15 @@ export const purgeOnboardingRecords = async (
   env: Env,
   ids: readonly string[]
 ): Promise<number> => {
-  const held = await heldOf(
-    env,
-    ids.filter((id) => id.startsWith(onboardingIdPrefix))
+  // One an admin took out of the brain holds no words, and stays: its id
+  // keeps the same claim, given again, from coming back.
+  const held = new Map(
+    [
+      ...(await heldOf(
+        env,
+        ids.filter((id) => id.startsWith(onboardingIdPrefix))
+      )),
+    ].filter(([, { forgotten }]) => !forgotten)
   );
   if (held.size === 0) {
     return 0;
@@ -693,6 +741,98 @@ export const purgeOnboardingDrawings = async (
   return gone;
 };
 
+/** A stored body as JSON; `undefined` when it isn't. */
+const parsedBody = (body: string): unknown => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The onboarding's records of `type` whose ids start with `prefix`, oldest
+ * first, that still count (not retired): what it gave the brain before, so
+ * it adds only what changed.
+ */
+export const onboardingRecordsOf = async (
+  env: Env,
+  type: BrainRecordType,
+  prefix: string
+): Promise<BrainRecord[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ body: brainRecords.body })
+    .from(brainRecords)
+    .where(
+      and(
+        eq(brainRecords.type, type),
+        like(brainRecords.id, `${onboardingIdPrefix}${prefix}%`),
+        isNull(brainRecords.retiredAt)
+      )
+    )
+    .orderBy(asc(brainRecords.position));
+  return rows.flatMap(({ body }) => {
+    // Written through the same schema: a row it can't read is left out,
+    // as `readBrainRecords` leaves it out.
+    const parsed = brainRecordSchema.safeParse(parsedBody(body));
+    return parsed.success ? [parsed.data] : [];
+  });
+};
+
+/**
+ * Retires, as the system, every record the onboarding gave the brain that
+ * still counts, whose id starts with one of `prefixes` (after `onb-`),
+ * but for those `keep` says to: what a replaced kickoff transcript gave. A
+ * retired record is kept, never deleted or written over, and left out of
+ * `brain.read`. One batch with its audit event, which names the records
+ * by id and counts them, never what they said. Returns how many it
+ * retired.
+ */
+export const retireOnboardingRecords = async (
+  env: Env,
+  prefixes: readonly string[],
+  keep: (id: string) => boolean
+): Promise<number> => {
+  const [first, ...more] = prefixes.map((prefix) =>
+    like(brainRecords.id, `${onboardingIdPrefix}${prefix}%`)
+  );
+  if (first === undefined) {
+    return 0;
+  }
+  const db = drizzle(env.DB);
+  const live = await db
+    .select({ id: brainRecords.id, type: brainRecords.type })
+    .from(brainRecords)
+    .where(and(or(first, ...more), isNull(brainRecords.retiredAt)))
+    .orderBy(asc(brainRecords.position));
+  const retiring = live.filter(({ id }) => !keep(id));
+  if (retiring.length === 0) {
+    return 0;
+  }
+  await auditedBatch(env, db, [
+    db
+      .update(brainRecords)
+      .set({ retiredAt: new Date() })
+      .where(
+        and(
+          inList(
+            brainRecords.id,
+            retiring.map(({ id }) => id)
+          ),
+          isNull(brainRecords.retiredAt)
+        )
+      ),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.retired",
+      target: { type: "brain", id: "records" },
+      provenance: retiring.slice(0, auditProvenanceMaxItems).map(keyOf),
+      detail: { retired: retiring.length },
+    }),
+  ]);
+  return retiring.length;
+};
+
 /** A dated value of a team, by the team it is for. */
 interface ForTeam<T> {
   teamId: string;
@@ -723,6 +863,13 @@ export interface HeldRecords {
   goals: Goal[];
   /** Later wordings and links of goals, before they join theirs. */
   goalChanges: GoalChange[];
+  /** The company's vision as it changed, oldest first: the newest counts. */
+  visions: Omit<VisionRecord, "type">[];
+  /**
+   * Team records that were retired (a replaced kickoff's), by id and name,
+   * oldest first: what was added for one goes to the team of its name.
+   */
+  retiredTeams: { id: string; name: string }[];
 }
 
 /** A later wording of a goal, or a link to it or off it, as added. */
@@ -745,7 +892,7 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
   switch (record.type) {
     case "source": {
       const { type: _source, ...source } = record;
-      held.sources.push(source);
+      held.sources.push({ ...source, forgettable: true });
       break;
     }
     case "tool": {
@@ -821,6 +968,11 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
     case "goalVersion":
     case "goalLink": {
       held.goalChanges.push(record);
+      break;
+    }
+    case "vision": {
+      const { type: _vision, ...vision } = record;
+      held.visions.push(vision);
       break;
     }
     default: {
@@ -909,6 +1061,77 @@ const withGoalChanges = (held: HeldRecords): void => {
   held.goalChanges = [];
 };
 
+/**
+ * What stays of a record an admin took out of the brain (brain-forget.ts):
+ * for a source, what still names it needs to say it was removed, so its
+ * kind and day; for anything else, nothing but what it was.
+ */
+export const forgottenBodyOf = (record: {
+  type: string;
+  id: string;
+  body: string;
+}): string => {
+  const { type, id } = record;
+  if (type !== "source") {
+    return canonicalJson({ type, id });
+  }
+  const parsed = brainRecordSchema.safeParse(parsedBody(record.body));
+  const source =
+    parsed.success && parsed.data.type === "source" ? parsed.data : undefined;
+  return canonicalJson({
+    type,
+    id,
+    ...(source === undefined ? {} : { kind: source.kind, date: source.date }),
+  });
+};
+
+const removedSourceSchema = z.strictObject({
+  type: z.literal("source"),
+  id: z.string(),
+  kind: z
+    .enum(["interview", "chat", "document", "import", "runLog"])
+    .default("document"),
+  date: z.iso.date().optional(),
+});
+
+/** A removed source as the brain shows it, from its tombstone; undefined for anything else. */
+const removedSourceOf = (body: string, at: Date): Source | undefined => {
+  const parsed = removedSourceSchema.safeParse(parsedBody(body));
+  if (!parsed.success) {
+    return undefined;
+  }
+  const removedAt = at.toISOString().slice(0, 10);
+  const { id, kind, date } = parsed.data;
+  return { id, kind, title: "", date: date ?? removedAt, removedAt };
+};
+
+/**
+ * `held` without what names a statement taken out of the brain: one that
+ * followed it up stands on its own, and a gap is no longer about it.
+ */
+const withoutForgotten = (
+  held: HeldRecords,
+  forgotten: ReadonlySet<string>
+): void => {
+  if (forgotten.size === 0) {
+    return;
+  }
+  held.statements = held.statements.map((statement) => {
+    if (
+      statement.followsUp === undefined ||
+      !forgotten.has(statement.followsUp)
+    ) {
+      return statement;
+    }
+    const { followsUp: _gone, ...rest } = statement;
+    return rest;
+  });
+  held.gaps = held.gaps.map((gap) => ({
+    ...gap,
+    about: gap.about.filter((id) => !forgotten.has(id)),
+  }));
+};
+
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const held: HeldRecords = {
@@ -924,12 +1147,45 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     drawings: [],
     goals: [],
     goalChanges: [],
+    visions: [],
+    retiredTeams: [],
   };
-  const rows = await drizzle(env.DB)
-    .select({ body: brainRecords.body })
-    .from(brainRecords)
-    .orderBy(asc(brainRecords.position));
-  for (const { body } of rows) {
+  const db = drizzle(env.DB);
+  const [rows, retired] = await Promise.all([
+    db
+      .select({
+        id: brainRecords.id,
+        body: brainRecords.body,
+        forgottenAt: brainRecords.forgottenAt,
+      })
+      .from(brainRecords)
+      // A retired record is kept, but no longer counts.
+      .where(isNull(brainRecords.retiredAt))
+      .orderBy(asc(brainRecords.position)),
+    db
+      .select({ body: brainRecords.body })
+      .from(brainRecords)
+      .where(
+        and(eq(brainRecords.type, "team"), isNotNull(brainRecords.retiredAt))
+      )
+      .orderBy(asc(brainRecords.position)),
+  ]);
+  for (const { body } of retired) {
+    const parsed = brainRecordSchema.safeParse(parsedBody(body));
+    if (parsed.success && parsed.data.type === "team") {
+      held.retiredTeams.push({ id: parsed.data.id, name: parsed.data.name });
+    }
+  }
+  const forgotten = new Set<string>();
+  for (const { id, body, forgottenAt } of rows) {
+    if (forgottenAt !== null) {
+      forgotten.add(id);
+      const removed = removedSourceOf(body, forgottenAt);
+      if (removed !== undefined) {
+        held.sources.push(removed);
+      }
+      continue;
+    }
     let record: BrainRecord;
     try {
       record = brainRecordSchema.parse(JSON.parse(body));
@@ -955,6 +1211,7 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   for (const team of held.teams) {
     datedInOrder(team);
   }
+  withoutForgotten(held, forgotten);
   withDrawings(held);
   withGoalChanges(held);
   return held;

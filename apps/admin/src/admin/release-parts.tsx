@@ -51,8 +51,8 @@ export const listed = (items: readonly string[]): string =>
   items.join(", ") || "none";
 
 const changeVariant = {
-  added: "default",
-  removed: "destructive",
+  added: "passed",
+  removed: "attention",
   changed: "secondary",
 } as const;
 

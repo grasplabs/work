@@ -14,8 +14,9 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { PageLoading } from "../../admin/failure.tsx";
+import { GraspOrganization } from "../../admin/grasp-organization.tsx";
 import { AdminPage } from "../../admin/page.tsx";
-import { Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
 import {
@@ -33,34 +34,27 @@ import {
 } from "../../admin/platform-parts.tsx";
 import {
   companiesOf,
-  errorRateLimit,
-  errorRateOf,
   nextRing,
   ringsOf,
   spreadOf,
 } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
+import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../../admin/readiness.ts";
 import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
-import { formatDate, formatPercent, whole } from "../../admin/words.ts";
+import { Section } from "../../admin/section.tsx";
+import { formatDate, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
+import { fetchPlatformSettings } from "../../platform-settings.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
 import { approveRolloutFn } from "../../rollout/functions.ts";
 import type { RolloutView } from "../../rollout/queries.ts";
 import { useRolloutAction } from "../../rollout/use-action.ts";
 import { thenRefresh } from "../../use-action.ts";
 
-const usd = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
 type Live = Record<string, LiveStatus> | "failed" | null;
-
-/** A cell with nothing to say: a dash, never a made-up number. */
-const Nothing = () => <span className="text-muted-foreground">–</span>;
 
 /** A day, as the admin's pages say it. */
 const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
@@ -137,12 +131,12 @@ const GoingOut = ({
 }) => {
   if (rollout === null) {
     return (
-      <Panel
+      <Section
         description="No release has been rolled out yet."
         title="Going out now"
       >
         {null}
-      </Panel>
+      </Section>
     );
   }
   const rings = ringsOf(rollout, rollout.targets);
@@ -153,11 +147,11 @@ const GoingOut = ({
   // A paused run takes no approval until staff resume it (its own page).
   const approvable = next !== null && rollout.run !== "paused";
   return (
-    <Panel
+    <Section
       action={
         <div className="flex flex-none items-start gap-2">
           <Link
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
+            className={buttonVariants({ size: "sm", variant: "ghost" })}
             params={{ rolloutId: rollout.id }}
             to="/platform/rollouts/$rolloutId"
           >
@@ -167,9 +161,7 @@ const GoingOut = ({
             <ApproveRing next={next} rolloutId={rollout.id} />
           ) : (
             <Badge
-              variant={
-                rollout.status === "failed" ? "destructive" : "secondary"
-              }
+              variant={rollout.status === "failed" ? "attention" : "secondary"}
             >
               {status}
             </Badge>
@@ -217,7 +209,7 @@ const GoingOut = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 };
 
@@ -236,7 +228,7 @@ const WhoRunsWhat = ({
     ({ clientIds }) => clientIds.length > 0
   );
   return (
-    <Panel
+    <Section
       description={`${whole(active)} ${active === 1 ? "company runs its" : "companies run their"} own Grasp. The newest release first.`}
       title="Who runs what"
     >
@@ -274,95 +266,62 @@ const WhoRunsWhat = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 };
 
 /** A company's row: how it stands, then its figures; it opens its Setup. */
 const CompanyRow = ({
   row,
-  live,
   standing,
   needs,
 }: {
   row: GridRow;
-  live: LiveStatus | undefined;
   standing: Standing;
   needs: PlatformNeed[];
-}) => {
-  const rate = errorRateOf(live);
-  return (
-    <TableRow className="relative">
-      <TableCell variant="card">
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <Link
-            className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-            params={{ clientId: row.id }}
-            to="/organizations/$clientId/setup"
-          >
-            {row.name}
-          </Link>
-          <span className="text-xs">
-            <StandingMark standing={standing} />
-          </span>
-          {needs.map((need) => (
-            <span className="text-status-attention text-xs" key={need.kind}>
-              {needWords(need)}
-            </span>
-          ))}
+}) => (
+  <TableRow className="relative">
+    <TableCell variant="card">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <Link
+          className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
+          params={{ clientId: row.id }}
+          to="/organizations/$clientId/setup"
+        >
+          {row.name}
+        </Link>
+        <span className="text-xs">
+          <StandingMark standing={standing} />
         </span>
-      </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @xl:table-cell"
-        variant="card"
-      >
-        {ringWords(row.ring)}
-      </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="card">
-        <span className="flex flex-col">
-          <span className="font-mono text-xs">{row.release ?? "–"}</span>
-          {row.pinnedReleaseId === null ? null : (
-            <span className="text-muted-foreground text-xs">Pinned</span>
-          )}
-        </span>
-      </TableCell>
-      <TableCell className="hidden text-right @3xl:table-cell" variant="card">
-        {live?.day ? (
-          <span className="tabular-nums">{whole(live.day.requests)}</span>
-        ) : (
-          <Nothing />
-        )}
-      </TableCell>
-      <TableCell className="hidden text-right @3xl:table-cell" variant="card">
-        {rate === null ? (
-          <Nothing />
-        ) : (
-          <span
-            className={cn(
-              "tabular-nums",
-              rate >= errorRateLimit && "text-status-attention"
-            )}
-          >
-            {formatPercent(rate)}
+        {needs.map((need) => (
+          <span className="text-status-attention text-xs" key={need.kind}>
+            {needWords(need)}
           </span>
+        ))}
+      </span>
+    </TableCell>
+    <TableCell
+      className="hidden whitespace-normal @xl:table-cell"
+      variant="card"
+    >
+      {ringWords(row.ring)}
+    </TableCell>
+    <TableCell className="hidden @2xl:table-cell" variant="card">
+      <span className="flex flex-col">
+        <span className="font-mono text-xs">{row.release ?? "–"}</span>
+        {row.pinnedReleaseId === null ? null : (
+          <span className="text-muted-foreground text-xs">Pinned</span>
         )}
-      </TableCell>
-      <TableCell className="hidden text-right @4xl:table-cell" variant="card">
-        {live?.costUsd ? (
-          <span className="tabular-nums">{usd.format(live.costUsd.ai)}</span>
-        ) : (
-          <Nothing />
-        )}
-      </TableCell>
-      <TableCell variant="card">
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground mx-auto size-4"
-        />
-      </TableCell>
-    </TableRow>
-  );
-};
+      </span>
+    </TableCell>
+    <TableCell variant="card">
+      <ChevronRightIcon
+        aria-hidden="true"
+        className="text-muted-foreground mx-auto size-4"
+      />
+    </TableCell>
+  </TableRow>
+);
 
 /** What the table says of where its figures come from. */
 const everyCompanyLine = (live: Live): string => {
@@ -386,7 +345,7 @@ const EveryCompany = ({
 }) => {
   const read = live === null || live === "failed" ? {} : live;
   return (
-    <Panel description={everyCompanyLine(live)} title="Every company">
+    <Section description={everyCompanyLine(live)} title="Every company">
       <div className="@container border-t">
         <Table className="table-fixed">
           <TableHeader>
@@ -398,24 +357,6 @@ const EveryCompany = ({
               <TableHead className="hidden w-36 @2xl:table-cell" variant="card">
                 Release
               </TableHead>
-              <TableHead
-                className="hidden w-32 text-right @3xl:table-cell"
-                variant="card"
-              >
-                Requests
-              </TableHead>
-              <TableHead
-                className="hidden w-24 text-right @3xl:table-cell"
-                variant="card"
-              >
-                Errors
-              </TableHead>
-              <TableHead
-                className="hidden w-28 text-right @4xl:table-cell"
-                variant="card"
-              >
-                Models
-              </TableHead>
               <TableHead className="w-9" variant="card">
                 <span className="sr-only">Open</span>
               </TableHead>
@@ -426,7 +367,6 @@ const EveryCompany = ({
               ({ row, standing, needs }) => (
                 <CompanyRow
                   key={row.id}
-                  live={read[row.id]}
                   needs={needs}
                   row={row}
                   standing={standing}
@@ -436,7 +376,7 @@ const EveryCompany = ({
           </TableBody>
         </Table>
       </div>
-    </Panel>
+    </Section>
   );
 };
 
@@ -449,7 +389,7 @@ const DoneHere = ({
   names: ReadonlyMap<string, string>;
 }) =>
   events.length === 0 ? null : (
-    <Panel
+    <Section
       description="What someone at Grasp did, as the admin keeps it."
       title="Done here"
     >
@@ -468,7 +408,7 @@ const DoneHere = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 
 /** The live figures of every active company, read once the page shows. */
@@ -489,7 +429,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * ring is the one thing done here.
  */
 const PlatformPage = () => {
-  const { rows, platform } = Route.useLoaderData();
+  const { rows, platform, readiness, settings } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -509,22 +449,24 @@ const PlatformPage = () => {
     <AdminPage
       action={
         <Link
-          className={buttonVariants({ size: "sm" })}
+          className={buttonVariants()}
           hash={startRolloutId}
           to="/platform/rollouts"
         >
           Start a rollout
         </Link>
       }
-      description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
+      description="Every company runs its own Grasp, in the EU, apart from every other company’s. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
       {/* The panels' type, as the prototype's sections set it. */}
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
+        <ReadinessPanel readiness={readiness} />
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
         <EveryCompany live={live} releases={platform.releases} rows={rows} />
+        <GraspOrganization settings={settings} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
@@ -534,11 +476,14 @@ const PlatformPage = () => {
 /** Every company's own deployment, and the rollout going out. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform] = await Promise.all([
+    const [rows, platform, readiness, settings] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
+      fetchReadiness(),
+      fetchPlatformSettings(),
     ]);
-    return { rows, platform };
+    return { rows, platform, readiness, settings };
   },
   component: PlatformPage,
+  pendingComponent: PageLoading,
 });

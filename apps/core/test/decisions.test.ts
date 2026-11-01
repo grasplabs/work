@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import {
   approvalApp,
   approvalNaming,
@@ -22,6 +21,7 @@ import {
 import type { Ask, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import {
   aroundEngine,
   endLiveRuns,
@@ -259,11 +259,11 @@ describe("decisions", { timeout: 60_000 }, () => {
     // next ones find nothing left to send; the run takes it once it is
     // back, days before the deadline.
     const minute = 60_000;
-    await runCron({}, new Date(Date.now() + minute));
-    await runCron({}, new Date(Date.now() + 2 * minute));
+    await runMinuteTasks({}, new Date(Date.now() + minute));
+    await runMinuteTasks({}, new Date(Date.now() + 2 * minute));
     await resumed(run.id);
     const output = await outputOf(builder, run.id);
-    await runCron({}, new Date(Date.now() + 3 * minute));
+    await runMinuteTasks({}, new Date(Date.now() + 3 * minute));
     const logged = await allEvents();
     const answers = logged.filter(
       ({ action, target }) =>
@@ -328,7 +328,7 @@ describe("decisions", { timeout: 60_000 }, () => {
         const hours = 60 * 60 * 1000;
         for (let repair = 1; repair <= 21; repair += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one repair at a time
-          await runCron({}, new Date(Date.now() + repair * 2 * hours));
+          await runMinuteTasks({}, new Date(Date.now() + repair * 2 * hours));
           if (repair >= 20) {
             // oxlint-disable-next-line no-await-in-loop -- one repair at a time
             counts.push(await owed(down.run.id));

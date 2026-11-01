@@ -122,6 +122,7 @@ export const releaseFiles = [
   compilerAssets.source,
   compilerAssets.kit,
   compilerAssets.kitModules,
+  compilerAssets.kitPreviewModules,
   compilerAssets.workflowSdkModules,
   compilerAssets.serverSdkModules,
   compilerAssets.packageBuilder,

@@ -144,6 +144,8 @@ export const storeAdapter: ResourceAdapter<"store"> = {
           onBehalfOf: caller.authority.onBehalfOf,
           mode: caller.authority.mode,
           appVersion: operation.release.manifest.resourceVersion,
+          // The same work's: staff-started, as its caller's authority says.
+          ...(caller.authority.staff === true ? { staff: true } : {}),
         };
         const ownerContext = { type: "app", appId: operation.owner } as const;
         if (await isRestricted(env, caller.authority, caller.context)) {
@@ -159,6 +161,7 @@ export const storeAdapter: ResourceAdapter<"store"> = {
         const called = callStoreOperation(env, consumer, operation, args, {
           actor: caller.actor,
           principal: caller.authority.onBehalfOf,
+          ...(caller.authority.staff === true ? { staff: true } : {}),
           requestId: context.requestId,
           deadline: context.deadline,
           idempotencyKey: context.idempotencyKey,

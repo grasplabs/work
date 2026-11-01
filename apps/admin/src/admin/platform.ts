@@ -11,12 +11,13 @@
  * are in, and the ring after the one it waits after is the next of
  * those, as approving it moves on to (src/rollout/control.ts).
  */
+import { compareReleaseIds } from "@grasp-os/shared/release-id";
+
 import type { GridRow, LiveStatus } from "../clients/grid.ts";
+import type { AttentionReason } from "../hosting/attention.ts";
+import type { NotStarted } from "../hosting/placement.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";
 import type { RolloutSummary, TargetView } from "../rollout/queries.ts";
-
-/** A last day's error rate at or above this needs a look. */
-export const errorRateLimit = 0.01;
 
 /** So many releases behind the newest, unpinned, needs a look. */
 export const behindLimit = 2;
@@ -143,7 +144,7 @@ export const ringsOf = (
 const newestFirst = (releases: readonly ReleaseSummary[]): ReleaseSummary[] =>
   releases.toSorted(
     (a, b) =>
-      b.builtAt.getTime() - a.builtAt.getTime() || b.id.localeCompare(a.id)
+      b.builtAt.getTime() - a.builtAt.getTime() || compareReleaseIds(b.id, a.id)
   );
 
 /**
@@ -184,14 +185,6 @@ export const spreadOf = (
   ];
 };
 
-/** Of the last day's requests, the share that ended in an error; null without any, or unread. */
-export const errorRateOf = (live: LiveStatus | undefined): number | null => {
-  const day = live?.day;
-  return day === undefined || day === null || day.requests === 0
-    ? null
-    : day.errors / day.requests;
-};
-
 /**
  * How many releases came after the one the company runs: 0 when it runs
  * none; every listed one when it runs a release older than all of them.
@@ -209,9 +202,12 @@ export const behindOf = (
 
 /** What about a company needs someone at Grasp, the most pressing first. */
 export type PlatformNeed =
+  | { kind: "needs_attention"; reason: AttentionReason }
+  | { kind: "not_started"; why: NotStarted | null }
+  | { kind: "stopped" }
+  | { kind: "setup_unread" }
   | { kind: "failed"; releaseId: string }
   | { kind: "drift"; drift: "drifted" | "split" | "off_pin" }
-  | { kind: "errors"; rate: number }
   | { kind: "behind"; releases: number };
 
 export const needsOf = (
@@ -223,16 +219,21 @@ export const needsOf = (
     return [];
   }
   const needs: PlatformNeed[] = [];
-  if (row.lastDeploy?.status === "failed") {
+  // Being set up: what waits for staff there, in place of a deploy's.
+  if (row.setup?.state === "needs_attention") {
+    needs.push({ kind: "needs_attention", reason: row.setup.reason });
+  } else if (row.setup?.state === "not_started") {
+    needs.push({ kind: "not_started", why: row.setup.why });
+  } else if (row.setup?.state === "stopped") {
+    needs.push({ kind: "stopped" });
+  } else if (row.setup?.state === "unread") {
+    needs.push({ kind: "setup_unread" });
+  } else if (row.lastDeploy?.status === "failed") {
     needs.push({ kind: "failed", releaseId: row.lastDeploy.releaseId });
   }
   const drift = live?.drift;
   if (drift === "drifted" || drift === "split" || drift === "off_pin") {
     needs.push({ kind: "drift", drift });
-  }
-  const rate = errorRateOf(live);
-  if (rate !== null && rate >= errorRateLimit) {
-    needs.push({ kind: "errors", rate });
   }
   // A pinned company stays behind on purpose.
   const behind = row.pinnedReleaseId === null ? behindOf(row, releases) : 0;
@@ -244,9 +245,8 @@ export const needsOf = (
 
 /**
  * How a company stands, as one word. `unread`: active, nothing recorded
- * needs a look, but its account wasn't read (yet, or the read failed or
- * timed out), so whether it drifted or errs isn't known; never called
- * healthy unread.
+ * needs a look, but it wasn't read (yet, or the read failed or timed
+ * out), so whether it drifted isn't known; never called healthy unread.
  */
 export type Standing =
   | "attention"
@@ -256,12 +256,12 @@ export type Standing =
   | "offboarded";
 
 /**
- * Whether the account was read for what a standing needs: its drift and
- * its last day's requests. A read that failed or timed out comes back with
- * them unknown (`gridLive`), which says nothing about either.
+ * Whether it was read for what a standing needs: its drift. A read that
+ * failed or timed out comes back with it unknown (`gridLive`), which says
+ * nothing about it.
  */
 const wasRead = (live: LiveStatus | undefined): boolean =>
-  live !== undefined && live.drift !== "unknown" && live.day !== null;
+  live !== undefined && live.drift !== "unknown";
 
 export const standingOf = (
   row: GridRow,

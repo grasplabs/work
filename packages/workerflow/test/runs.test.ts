@@ -449,48 +449,43 @@ describe("a journal of another schema", () => {
     await expect(wakeOf("napper", id)).resolves.toBeNull();
   });
 
-  it("upgrades a version-8 journal as it first reads it, then takes and fences controls", async () => {
+  it("starts a new run at this version, and refuses the one before, leaving its journal as it was", async () => {
     const id = newId();
     await workflow("napper").create({ id });
     await until("the run to sleep", async () => {
       const journal = await journalOf("napper", id);
       return journal.run.status === "waiting" ? journal : undefined;
     });
-    // As a version-8 journal is: its version, no control fence, no event
-    // attributes or matches, and no order of settled outcomes.
     const exec = async (query: string): Promise<unknown[]> =>
       await runInDurableObject(runObject("napper", id), (_, state) =>
         state.storage.sql.exec(query).toArray()
       );
-    await exec("UPDATE run SET schema = 8");
-    await exec("ALTER TABLE run DROP COLUMN control_fence");
-    await exec("ALTER TABLE events DROP COLUMN attributes");
-    await exec("ALTER TABLE steps DROP COLUMN event_match");
-    await exec("DROP INDEX events_sender");
-    await exec("ALTER TABLE events DROP COLUMN sender");
-    await exec("ALTER TABLE events DROP COLUMN reserved");
+    const fresh = await exec("SELECT schema FROM run");
+    // As a journal of the version before would be: no order of settled outcomes.
+    const before = journalSchemaVersion - 1;
+    await exec(`UPDATE run SET schema = ${before}`);
     await exec("DROP TRIGGER steps_settled_order");
     await exec("DROP INDEX steps_settled");
     await exec("ALTER TABLE steps DROP COLUMN settled");
-    const object = runObject("napper", id);
 
-    const status = await object.status();
-    const paused = await object.pause({ fence: 2 });
-    const late = await object.resume({ keepDeadlines: true, fence: 1 });
-    const state = await object.controlState();
-
+    // In the object: nothing crosses RPC to be logged.
+    await expect(
+      runInDurableObject(runObject("napper", id), (run) =>
+        run instanceof WorkflowRun ? run.status() : undefined
+      )
+    ).rejects.toThrow(
+      `schema ${before}, where this engine reads only schema ${journalSchemaVersion}`
+    );
     expect({
-      status,
-      paused,
-      late,
-      fence: state?.fence,
+      fresh,
       schema: await exec("SELECT schema FROM run"),
+      settled: await exec(
+        "SELECT name FROM pragma_table_info('steps') WHERE name = 'settled'"
+      ),
     }).toStrictEqual({
-      status: { status: "waiting" },
-      paused: "paused",
-      late: "fenced",
-      fence: 2,
-      schema: [{ schema: journalSchemaVersion }],
+      fresh: [{ schema: journalSchemaVersion }],
+      schema: [{ schema: before }],
+      settled: [],
     });
   });
 });

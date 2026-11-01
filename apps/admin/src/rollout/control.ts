@@ -11,7 +11,7 @@
  * with its targets and audit event, in one batch.
  */
 import { log } from "@grasp-os/shared/log";
-import { releaseIdSchema } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
   eq,
@@ -42,9 +42,10 @@ import {
   deploySecrets,
   MissingStoreSecretError,
 } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { hasEnded, instanceStatus } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { RolloutError } from "./errors.ts";
 import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
@@ -123,7 +124,11 @@ const settleEnded = async (env: Env, db: AdminDatabase): Promise<void> => {
     .where(inArray(rollouts.status, [...activeStatuses]));
   for (const { id, createdAt } of active) {
     // oxlint-disable-next-line no-await-in-loop -- one, as a rule
-    const { status } = await instanceStatus(env.ROLLOUT, id, createdAt);
+    const { status } = await instanceStatus(
+      adminWorkflow(env, adminWorkflows.rollout),
+      id,
+      createdAt
+    );
     if (hasEnded(status)) {
       // oxlint-disable-next-line no-await-in-loop -- one, as a rule
       await failRollout(db, id, "run_ended");
@@ -159,7 +164,7 @@ const mostWorkers = clientWorkers.worker.enumValues.length;
  * ring 0 then `input.scope`, and returns the rollout's id. Refused while
  * another rollout is running or waiting (`rollout_running`), when no
  * active client is in scope, when a ring past 0 or a client it names adds
- * no one past ring 0 (`ring_zero_only`), and when its run would take more
+ * no one past ring 0 (`ring_zero_only`), when its run would take more
  * steps than `stepBudget` (`too_large`).
  */
 export const startRollout = async (
@@ -206,7 +211,7 @@ export const startRollout = async (
       "No active client past ring 0 is in scope"
     );
   }
-  // Refused rather than left to stop part way at Workflows' step limit.
+  // Refused rather than left to grow past the step budget part way.
   const manifest =
     releaseId === null ? null : await importedManifest(db, releaseId);
   const internal = targets.filter(({ ring }) => ring === first.ring).length;
@@ -258,7 +263,7 @@ export const startRollout = async (
       db
         .insert(rolloutTargets)
         .select(
-          sql`SELECT ${id}, ${clientId}, ${ring}, 'pending', NULL, NULL, NULL, ${now} WHERE EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${id})`
+          sql`SELECT ${id}, ${clientId}, ${ring}, 'pending', NULL, NULL, NULL, NULL, NULL, ${now} WHERE EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${id})`
         )
     )
   );
@@ -274,7 +279,10 @@ export const startRollout = async (
     startedBy: { email: staff.email, sub: staff.sub },
   };
   try {
-    await env.ROLLOUT.create({ id, params });
+    await adminWorkflow<RolloutParams>(env, adminWorkflows.rollout).create({
+      id,
+      params,
+    });
   } catch (error) {
     // Its run never started: it no longer holds the admin's one rollout.
     await failRollout(db, id, "run_not_created");
@@ -302,7 +310,7 @@ const resendApproval = async (
     .from(rolloutTargets)
     .where(eq(rolloutTargets.rolloutId, rollout.id));
   const { instance, status } = await instanceStatus(
-    env.ROLLOUT,
+    adminWorkflow(env, adminWorkflows.rollout),
     rollout.id,
     rollout.createdAt
   );
@@ -417,7 +425,9 @@ export const approveRollout = async (
   if (!approved) {
     throw notWaiting;
   }
-  const instance = await env.ROLLOUT.get(rolloutId);
+  const instance = await adminWorkflow(env, adminWorkflows.rollout).get(
+    rolloutId
+  );
   await instance.sendEvent({ type: approvalEvent(next), payload: {} });
 };
 
@@ -525,7 +535,9 @@ export const retryRollout = async (
   if (!retried) {
     throw notWaiting;
   }
-  const instance = await env.ROLLOUT.get(rolloutId);
+  const instance = await adminWorkflow(env, adminWorkflows.rollout).get(
+    rolloutId
+  );
   await instance.sendEvent({ type: retryEvent(round), payload: {} });
 };
 
@@ -540,7 +552,11 @@ const runOf = async (env: Env, db: AdminDatabase, rolloutId: string) => {
   }
   return {
     row,
-    ...(await instanceStatus(env.ROLLOUT, rolloutId, row.createdAt)),
+    ...(await instanceStatus(
+      adminWorkflow(env, adminWorkflows.rollout),
+      rolloutId,
+      row.createdAt
+    )),
   };
 };
 

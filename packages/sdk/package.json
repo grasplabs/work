@@ -4,7 +4,9 @@
   "description": "Workflow SDK and screen hooks: the only API App code sees",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/preview-refresh.ts"
+  ],
   "imports": {
     "#grasp": "./test/notes/.grasp/references.ts",
     "#grasp/server": "./test/notes/.grasp/server.ts",
@@ -30,7 +32,9 @@
     "./form-binding": "./src/form-binding.ts",
     "./react": "./src/react.ts",
     "./screen": "./src/screen.ts",
-    "./screen-runtime": "./src/screen-runtime.ts"
+    "./screen-runtime": "./src/screen-runtime.ts",
+    "./preview-refresh": "./src/preview-refresh.ts",
+    "./preview-runtime": "./src/preview-runtime.ts"
   },
   "dependencies": {
     "@babel/parser": "catalog:",
@@ -39,6 +43,7 @@
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",
     "capnweb": "catalog:",
+    "react-refresh": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

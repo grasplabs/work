@@ -64,12 +64,13 @@ export const tellOfferedRunEnd = async (
         )
       )
       .returning();
+    const adapter = told.length === 0 ? undefined : await teamsAdapter(env);
     for (const offer of told) {
-      if (offer.threadId === null) {
+      if (adapter === undefined || offer.threadId === null) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- at most one per run
-      await teamsAdapter(env).postMessage(
+      await adapter.postMessage(
         offer.threadId,
         say(line, localeOf(offer.locale), { workflow: offer.workflowName })
       );

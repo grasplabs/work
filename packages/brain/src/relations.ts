@@ -5,6 +5,7 @@ import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import {
   brainErrors,
+  delegateCitesMax,
   explainPathsMax,
   relationsExplainInputSchema,
   relationsGetInputSchema,
@@ -22,7 +23,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
-import { kindOf, requireBrainRead } from "./entities.ts";
+import { kindOf, requireBrainRead, withinCites } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -394,6 +395,22 @@ export const readable = async <C>(
  * `conflicting`. A caller that labels what it was handed (a chat) labels
  * it with all of them.
  */
+/** The source version a relation cites, as `withinCites` keys it. */
+const citeOf = ({ sourceRef }: RelationView): string =>
+  sourceRef.kind === "document"
+    ? `doc:${sourceRef.documentId}:${sourceRef.version}`
+    : `memory:${sourceRef.memoryId}:${sourceRef.revision}`;
+
+/** Where `considered` came from: its collections and documents, each once. */
+const consideredIds = (considered: readonly ReadSource[]) => ({
+  collectionIds: [
+    ...new Set(considered.flatMap(({ collectionId }) => collectionId ?? [])),
+  ],
+  documentIds: [
+    ...new Set(considered.flatMap(({ documentId }) => documentId ?? [])),
+  ],
+});
+
 export const relationsRead = async <C>(
   brain: Brain<C>,
   reader: C,
@@ -407,28 +424,29 @@ export const relationsRead = async <C>(
     relationsGetInputSchema,
     input
   );
+  const scope = await scopeOf(brain, reader);
   const {
-    relations: read,
+    relations: newest,
     cut,
     considered,
-  } = await readable(brain, await scopeOf(brain, reader), query);
+  } = await readable(brain, scope, query);
+  // A caller that isn't a person (it has no memories here) is answered
+  // from the newest sources it can pin (`delegateCitesMax`).
+  const { within: read, truncated: uncited } =
+    scope.owner === undefined
+      ? withinCites(newest, delegateCitesMax, ({ view }) => [citeOf(view)])
+      : { within: newest, truncated: false };
   await reportRead(brain, reader, considered, {
     read: "relations",
     relations: read.length,
     considered: considered.length,
   });
   return {
-    answer: { relations: read.map(({ view }) => view), truncated: cut },
-    considered: {
-      collectionIds: [
-        ...new Set(
-          considered.flatMap(({ collectionId }) => collectionId ?? [])
-        ),
-      ],
-      documentIds: [
-        ...new Set(considered.flatMap(({ documentId }) => documentId ?? [])),
-      ],
+    answer: {
+      relations: read.map(({ view }) => view),
+      truncated: cut || uncited,
     },
+    considered: consideredIds(considered),
   };
 };
 
@@ -474,13 +492,17 @@ const stepsFrom = (
  * may read now, so a relation they can't read neither shows nor decides
  * where a path goes; nothing is scored. Bounded by paths, by
  * `explainFanOut` entities gone on from, and by a deadline: what any of
- * them cut is `truncated`.
+ * them cut is `truncated`. With where every claim it weighed came from
+ * (`considered`), as `relationsRead` answers it.
  */
-export const relationsExplain = async <C>(
+export const relationsExplainRead = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<RelationsExplanation> => {
+): Promise<{
+  explanation: RelationsExplanation;
+  considered: { collectionIds: string[]; documentIds: string[] };
+}> => {
   const {
     entityId,
     hops = 2,
@@ -540,10 +562,34 @@ export const relationsExplain = async <C>(
     );
   }
   truncated ||= !room;
+  // A caller that isn't a person is answered the paths whose sources it
+  // can pin, first first (`delegateCitesMax`).
+  const { within: answered, truncated: uncited } =
+    scope.owner === undefined
+      ? withinCites(paths, delegateCitesMax, ({ relations }) =>
+          relations.map(citeOf)
+        )
+      : { within: paths, truncated: false };
   await reportRead(brain, reader, considered, {
     read: "relations.explain",
     relations: read.length,
     considered: considered.length,
   });
-  return { paths, truncated };
+  return {
+    explanation: { paths: answered, truncated: truncated || uncited },
+    considered: consideredIds(considered),
+  };
+};
+
+/**
+ * The paths out from `entityId` (`relationsExplainRead`), without where
+ * what it weighed came from.
+ */
+export const relationsExplain = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<RelationsExplanation> => {
+  const { explanation } = await relationsExplainRead(brain, reader, input);
+  return explanation;
 };

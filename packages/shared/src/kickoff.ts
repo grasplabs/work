@@ -28,6 +28,20 @@ export const visionFields = [
 export type VisionField = (typeof visionFields)[number];
 export const visionFieldSchema = z.enum(visionFields);
 
+/**
+ * The fields the company's vision is made of (core's
+ * onboarding/kickoff-records.ts): what the kickoff said about each, and
+ * the sponsor's answer, reach every member through the brain.
+ */
+export const kickoffVisionFields = {
+  ambition: "goals",
+  whyNow: "pain",
+} as const satisfies Record<string, VisionField>;
+
+/** Whether what is said or answered about `field` is shared with every member, as the vision. */
+export const isVisionShared = (field: VisionField): boolean =>
+  Object.values<VisionField>(kickoffVisionFields).includes(field);
+
 /** The longest transcript taken, in characters: about three hours of talk. */
 export const transcriptMaxLength = 240_000;
 /** Too short to be a conversation. */
@@ -135,4 +149,6 @@ export const kickoffErrors = defineErrorFamily({
   "kickoff.not_read":
     "The conversation couldn't be read just now. Try again in a moment.",
   "kickoff.invalid": "That isn't something the kickoff takes.",
+  "kickoff.purged":
+    "An admin purged words from the kickoff while this was being read. Bring the transcript in again.",
 });

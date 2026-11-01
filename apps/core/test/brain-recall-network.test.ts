@@ -93,8 +93,8 @@ describe("a person's recall through core", setUpTime, () => {
         ]),
       ]),
     }).toStrictEqual({
-      policy: "fulltext@3+traversal@1",
-      routes: ["fulltext", "network"],
+      policy: "hybrid@1+traversal@1",
+      routes: ["exact", "fulltext", "network"],
       added: [uses.evidence],
       paths: [[thing, ["typed_assertion", "uses", collectionId]]],
     });

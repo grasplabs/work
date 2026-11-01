@@ -24,7 +24,7 @@ import { runOf } from "./resource-runs.ts";
 // core's outbox, `workflow_emitted_events`, to what consumes platform
 // events: system triggers (platform specification 15.1, "Platform outbox
 // event; declared resource/event type; dedupe by event ID";
-// trigger-resources.ts). Core's cron trigger drains it every minute
+// trigger-resources.ts). Core's clock drains it every minute
 // (`drainEmittedEvents`). Threat model, and how each is closed:
 //
 // - An event starting a trigger's run twice: a lost acknowledgement, a

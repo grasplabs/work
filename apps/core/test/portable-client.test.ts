@@ -1220,7 +1220,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
   it("refuses a token the same keys signed that isn't typed as an App token", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
-    const auth = authFor(env, signInConfig(env));
+    const auth = await authFor(env, signInConfig(env));
     if (auth === undefined) {
       throw new Error("Sign-in isn't configured");
     }

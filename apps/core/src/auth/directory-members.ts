@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import { accounts, members, organizations, users } from "../db/core/schema.ts";
+import { entraSubject, isErasedSubject } from "../erased-people.ts";
 import { notRemoved, organizationId } from "./auth.ts";
 import { directoryProviderId } from "./config.ts";
 
@@ -23,6 +24,10 @@ import { directoryProviderId } from "./config.ts";
 //   answered (channels/door.ts).
 // - Someone an admin removed comes back from the directory: a removal is
 //   kept after the membership goes, and every insert here checks it.
+// - Someone an admin removed and then erased comes back from the
+//   directory: their accounts went, so the directory would make them a
+//   new member; the keyed hash of their object id kept by the erasure
+//   (erased-people.ts) is checked first, and makes nobody.
 // - Two people for one: the directory's account is unique per object id
 //   (`accounts_provider_account_idx`), so two first messages make one
 //   member. Their first Microsoft sign-in, whose verified ID token names
@@ -38,7 +43,7 @@ const placeholderEmail = (oid: string): string =>
 /**
  * Makes the person the directory holds under `oid` a member, unless the
  * directory made them already or an admin removed them. Answers the
- * member's user id, or null for someone removed.
+ * member's user id, or null for someone removed or erased.
  */
 export const memberFromDirectory = async (
   env: Env,
@@ -46,6 +51,9 @@ export const memberFromDirectory = async (
   person: DirectoryPerson,
   now = new Date()
 ): Promise<string | null> => {
+  if (await isErasedSubject(env, [entraSubject(oid)])) {
+    return null;
+  }
   const db = drizzle(env.DB);
   const userId = crypto.randomUUID();
   const madeAlready = sql`EXISTS (

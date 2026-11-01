@@ -14,11 +14,12 @@ import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
-import { model, pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { model, configureObject, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { workflowFiles, workflowsApp } from "./workflow-apps.ts";
@@ -257,7 +258,7 @@ describe("a workflow run's outcome", () => {
     await failedOnce(run);
     const lost = await eventsOf(run);
     // The clock's catch-up, with the Brain back.
-    await runCron();
+    await runMinuteTasks();
     const seq = await runCursor();
 
     expect({
@@ -290,7 +291,7 @@ describe("a workflow run's outcome", () => {
     )
       .bind(`workflow.run:${run}`, run, Date.now())
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await executionsOf(run),
@@ -307,7 +308,7 @@ describe("a workflow run's outcome", () => {
     const run = await runningRun(app, builder.userId);
 
     await completed(run);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -323,7 +324,7 @@ describe("a workflow run's outcome", () => {
     await completed(run, { ...env, KNOWLEDGE: unreachable });
     await failedOnce(run);
     await admin.api.members.remove(builder.userId);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -367,7 +368,7 @@ describe("a workflow run's outcome", () => {
     await failedOnce(run);
     const recordedBefore = await executionsOf(run);
     await admin.api.members.remove(builder.userId);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       recordedBefore,
@@ -393,7 +394,7 @@ describe("a workflow run's outcome", () => {
     const racing = lostReply(
       async () => {
         await admin.api.members.remove(builder.userId);
-        await runCron();
+        await runMinuteTasks();
       },
       () => {
         lost = true;
@@ -407,7 +408,7 @@ describe("a workflow run's outcome", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -437,7 +438,7 @@ describe("a workflow run's outcome", () => {
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
     // Still a member: the delivery made again finds the run eligible.
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       recordedBefore,
@@ -477,7 +478,7 @@ describe("a workflow run's outcome", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -502,10 +503,7 @@ describe("a workflow run's outcome", () => {
       { timeout: 10_000, interval: 100 }
     );
 
-    await sweepRunDetails(
-      { ...env, RUN_RETENTION_DAYS: "1" },
-      new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-    );
+    await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 60 * 60 * 1000));
 
     expect({
       captured,
@@ -516,10 +514,11 @@ describe("a workflow run's outcome", () => {
 });
 
 /** A member with their own chats, answered by `replies`. */
-const chatter = async (...replies: Parameters<typeof fakeGateway>) => {
+const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const stub = workspace(env, personalWorkspaceId(person.userId));
-  await pointAtGateway(stub, fakeGateway(...replies));
+  await fakeProvider(...replies);
+  await configureObject(stub);
   const chat = await person.api.chats.create("Questions");
   const id = chatIdSchema.parse(chat.id);
   const ask = async () => await stub.ask(id, { text: "Hello?", model });
@@ -633,7 +632,8 @@ describe("a chat turn's outcome", () => {
     const dee = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const stub = workspace(env, personalWorkspaceId(ann.userId));
-    await pointAtGateway(stub, fakeGateway(says("Floor 3."), says("Floor 4.")));
+    await fakeProvider(says("Floor 3."), says("Floor 4."));
+    await configureObject(stub);
     const agentId = crypto.randomUUID();
     /** Ann asks in the group, as its door does, with who is in it now. */
     const askInGroup = async (members: string[]) =>

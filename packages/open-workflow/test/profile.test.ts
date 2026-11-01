@@ -87,6 +87,22 @@ const probe = (tasks: unknown[], use?: unknown) =>
   );
 
 const done = { finish: { set: { status: "done" } } };
+
+/** A listen whose one filter correlates its subject under `name`. */
+const correlatedListen = (name: string) => ({
+  await: {
+    listen: {
+      to: {
+        one: {
+          with: { type: "grasp.job.completed" },
+          correlate: { [name]: { from: "${ .subject }" } },
+        },
+      },
+    },
+    timeout: { after: { minutes: 1 } },
+    metadata: { grasp: { binding: "jobEvents" } },
+  },
+});
 const withDocument = (changes: Record<string, unknown>) => ({
   ...noteSummary,
   document: { ...noteSummary.document, ...changes },
@@ -733,6 +749,24 @@ describe("tasks and calls", () => {
       {
         code: "profile.unsupported_feature",
         pointer: "/do/0/await/listen/to/until",
+        taskId: "await",
+      },
+    ],
+    [
+      "a correlation with an empty name",
+      probe([correlatedListen("")]),
+      {
+        code: "profile.invalid_value",
+        pointer: "/do/0/await/listen/to/one/correlate/",
+        taskId: "await",
+      },
+    ],
+    [
+      "a correlation with a name longer than the build seals",
+      probe([correlatedListen("j".repeat(65))]),
+      {
+        code: "profile.invalid_value",
+        pointer: `/do/0/await/listen/to/one/correlate/${"j".repeat(65)}`,
         taskId: "await",
       },
     ],

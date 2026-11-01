@@ -19,13 +19,23 @@ import {
   mailIngressRequest,
   mailRejectedStatus,
 } from "@grasp-os/shared/mail-ingress";
+import { authRelayHost, stageNamed, stageOfHost } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import {
+  readRelayRequest,
+  relayKindOf,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
 import {
   deriveRouterSecret,
   routerHostKey,
   routerClientIpHeader,
   routerHostSchema,
   routerSecretHeader,
+  routerTargetOf,
 } from "@grasp-os/shared/router";
+import type { RouterTarget } from "@grasp-os/shared/router";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { clientAddress } from "./client-address.ts";
@@ -33,7 +43,7 @@ import { routeCache } from "./route-cache.ts";
 
 /** Where one hostname goes, and the secret its core expects. */
 interface Route {
-  origin: string;
+  target: RouterTarget;
   secret: string;
 }
 
@@ -53,9 +63,10 @@ const routes = routeCache<Route | null>(maxCachedHosts, routeCacheMs);
 
 /**
  * Reads a host's entry from the map and derives its secret. An entry that
- * doesn't parse, or names anything but an https `*.workers.dev` origin,
- * routes nowhere. Throws when the router key can't be read, so nothing is
- * forwarded (and nothing cached) without the right secret.
+ * doesn't parse (a script that isn't a script's name, an origin that isn't
+ * https `*.workers.dev`, both or neither) routes nowhere. Throws when the
+ * router key can't be read, so nothing is forwarded (and nothing cached)
+ * without the right secret.
  */
 const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
   const stored = await env.HOSTS.get(host, "json");
@@ -67,15 +78,26 @@ const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
     log.error("router.host_refused", { host });
     return null;
   }
-  const { clientId, coreUrl, generation } = parsed.data;
+  const { clientId, generation } = parsed.data;
   const routerKey = await env.ROUTER_KEY.get();
   return {
-    origin: new URL(coreUrl).origin,
+    target: routerTargetOf(parsed.data),
     secret: await deriveRouterSecret(routerKey, clientId, generation),
   };
 };
 
+/**
+ * The route of `host`, or null for none. A host of the other stage is
+ * never this router's, whatever its map holds: staging's clients are
+ * below production's domain (@grasp-os/shared/names, `stageOfHost`). A
+ * router whose STAGE names neither stage routes nothing: it never takes
+ * itself for production's.
+ */
 const routeFor = async (host: string, env: Env): Promise<Route | null> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined || stageOfHost(host) !== stage) {
+    return null;
+  }
   const cached = routes.get(host, Date.now());
   if (cached !== undefined) {
     return cached.value;
@@ -84,6 +106,31 @@ const routeFor = async (host: string, env: Env): Promise<Route | null> => {
   routes.set(host, route, Date.now());
   return route;
 };
+
+/**
+ * Sends `request` to `route`'s core and answers what core answers: into its
+ * user Worker through the dispatch namespace (`DISPATCHER`) for a script,
+ * never over the internet; over the internet only to an https
+ * `*.workers.dev` origin. Either way to that one core alone: a script the
+ * namespace doesn't have throws, as a failed fetch does, and nothing is
+ * tried in its place (GRA-283).
+ */
+const toCore = async (
+  route: Route,
+  request: Request,
+  env: Env
+): Promise<Response> =>
+  route.target.kind === "dispatch"
+    ? await env.DISPATCHER.get(route.target.script).fetch(request)
+    : await fetch(request);
+
+/**
+ * The URL a request for `host` goes to: on its hostname for a script, so
+ * its core sees the address it was asked at; on its core's own origin for
+ * an origin.
+ */
+const coreUrlFor = (route: Route, host: string, path: string): string =>
+  `${route.target.kind === "dispatch" ? `https://${host}` : route.target.origin}${path}`;
 
 /** The most of core's reason for a bounce the sender is told. */
 const maxBounceReason = 500;
@@ -215,9 +262,147 @@ const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
   return undefined;
 };
 
+/** The OAuth relay's pages: a fixed title and line each, never anything a request carried. */
+const relayPages = {
+  invalid: {
+    status: 400,
+    title: "This sign-in can't go on",
+    line: "The link it came back with isn't valid, or is too old. Go back to your Grasp workspace and start again.",
+  },
+  unknownClient: {
+    status: 404,
+    title: "This workspace isn't available",
+    line: "The workspace this sign-in started at isn't served here. Go back to it and start again.",
+  },
+  notFound: {
+    status: 404,
+    title: "Not found",
+    line: "There is nothing at this address.",
+  },
+  methodNotAllowed: {
+    status: 405,
+    title: "Not allowed",
+    line: "This address only takes your browser coming back from signing in.",
+  },
+  rateLimited: {
+    status: 429,
+    title: "Too many attempts",
+    line: "Wait a minute, then go back to your Grasp workspace and start again.",
+  },
+  unavailable: {
+    status: 503,
+    title: "Try again in a moment",
+    line: "Grasp couldn't finish this just now. Go back to your Grasp workspace and start again.",
+  },
+} as const;
+type RelayPage = keyof typeof relayPages;
+
 /**
- * Forwards each request on a client's hostname to that client's core, with
- * the router secret so a client's workers.dev address is no back door.
+ * The headers of every answer the relay makes: never stored, never
+ * framed, never leaking its URL (an OAuth code, a state) to where it
+ * leads, with HSTS on https.
+ */
+const relayHeaders = (url: URL): Headers => {
+  const headers = new Headers({
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  });
+  if (url.protocol === "https:") {
+    headers.set("strict-transport-security", strictTransportSecurity);
+  }
+  return headers;
+};
+
+/** One of the relay's plain pages (`relayPages`). */
+const relayPage = (url: URL, page: RelayPage): Response => {
+  const { status, title, line } = relayPages[page];
+  const headers = relayHeaders(url);
+  headers.set("content-type", "text/html; charset=utf-8");
+  if (page === "methodNotAllowed") {
+    headers.set("allow", "GET");
+  }
+  if (page === "rateLimited") {
+    headers.set("retry-after", String(limitPeriodS));
+  }
+  return new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><h1>${title}</h1><p>${line}</p></html>`,
+    { status, headers }
+  );
+};
+
+/**
+ * The OAuth relay (@grasp-os/shared/oauth-relay), on this stage's relay
+ * host: sends a browser an IdP brought back on to the client whose
+ * signed state it carries, at that client's own callback, with the
+ * client's own state. Only a GET to one of its two paths, within the
+ * sign-in limit for the caller's address, with a state that names a
+ * client in the map and that client's MAC, no older than the relay
+ * allows; anything else gets a plain page and goes nowhere. It reads
+ * nothing of the code, forwards nothing to a core, and logs the client's
+ * hostname alone.
+ */
+const oauthRelay = async (
+  request: Request,
+  url: URL,
+  env: Env,
+  stage: Stage
+): Promise<Response> => {
+  const relayHost = authRelayHost(stage);
+  if (relayKindOf(url.pathname) === undefined) {
+    return relayPage(url, "notFound");
+  }
+  if (request.method !== "GET") {
+    return relayPage(url, "methodNotAllowed");
+  }
+  // Per address across clients, before anything is looked up: a flood of
+  // guessed states costs no map reads.
+  if (!(await withinLimit(env.AUTH_RATE_LIMIT, request, relayHost))) {
+    log.warn("router.rate_limited", { host: relayHost });
+    return relayPage(url, "rateLimited");
+  }
+  const relayed = readRelayRequest(url, stage);
+  if (relayed === null) {
+    log.info("router.relay_refused", { reason: "malformed" });
+    return relayPage(url, "invalid");
+  }
+  let route: Route | null;
+  try {
+    route = await routeFor(relayed.host, env);
+  } catch (error) {
+    log.error("router.route_failed", {
+      host: relayed.host,
+      ...errorFields(error),
+    });
+    return relayPage(url, "unavailable");
+  }
+  // Unknown, or offboarded: offboarding takes the hostname out of the map.
+  if (route === null) {
+    log.info("router.relay_refused", {
+      host: relayed.host,
+      reason: "unknown_client",
+    });
+    return relayPage(url, "unknownClient");
+  }
+  if (!(await relayStateValid(route.secret, relayed))) {
+    log.warn("router.relay_refused", {
+      host: relayed.host,
+      reason: "bad_state",
+    });
+    return relayPage(url, "invalid");
+  }
+  const headers = relayHeaders(url);
+  headers.set("location", relayTarget(url, relayed));
+  log.info("router.relay_forwarded", { host: relayed.host });
+  return new Response(null, { status: 302, headers });
+};
+
+/**
+ * Forwards each request on a client's hostname to that client's core (its
+ * user Worker through the dispatch namespace, or its workers.dev origin:
+ * `toCore`), with the router secret so a core is reached through the
+ * router alone.
  * Pass-through only: the method, path, query, headers and body go as they
  * came (but for Host, the router secret and the client-IP header),
  * WebSocket upgrades included, and core's response comes back as it
@@ -227,6 +412,20 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const host = routerHostKey(url.hostname);
+    // The relay only on this router's own stage's host, and only when
+    // STAGE names one exactly: never production's by default.
+    const stage = stageNamed(env.STAGE);
+    if (stage !== undefined && host === authRelayHost(stage)) {
+      return await oauthRelay(request, url, env, stage);
+    }
+    // No client is `auth` (reservedClientIds): a map entry for such a
+    // host, at any domain, is never forwarded to.
+    if (host.startsWith("auth.")) {
+      if (stage === undefined) {
+        log.error("router.relay_stage_unset", { host });
+      }
+      return relayPage(url, "notFound");
+    }
 
     let route: Route | null;
     try {
@@ -267,15 +466,20 @@ export default {
       headers.set(routerClientIpHeader, clientIp);
     }
     try {
-      return await fetch(`${route.origin}${url.pathname}${url.search}`, {
-        method: request.method,
-        headers,
-        body: request.body,
-        redirect: "manual",
-      });
+      return await toCore(
+        route,
+        new Request(coreUrlFor(route, host, `${url.pathname}${url.search}`), {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+        }),
+        env
+      );
     } catch (error) {
       // The error's kind only: a failed fetch's message or stack can carry
-      // the target URL, and with it an OAuth callback's code and state.
+      // the target URL, and with it an OAuth callback's code and state; a
+      // dispatch's names the client's script.
       log.error("router.forward_failed", {
         host,
         errorName: error instanceof Error ? error.name : typeof error,
@@ -316,7 +520,7 @@ export default {
       return;
     }
     const { mail, request } = await mailIngressRequest(
-      route.origin,
+      coreUrlFor(route, host, ""),
       route.secret,
       {
         to: message.to,
@@ -325,7 +529,7 @@ export default {
         sentAt: new Date().toISOString(),
       }
     );
-    const response = await fetch(request);
+    const response = await toCore(route, request, env);
     const fields = {
       host,
       message: mail.sha256,

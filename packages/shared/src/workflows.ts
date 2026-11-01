@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import { z } from "zod";
 
+import type { ProviderTrouble } from "./ai-providers.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, RunId, WorkflowId } from "./ids.ts";
@@ -8,6 +9,11 @@ import type { Json } from "./json.ts";
 import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
+import type { RunFilterStatus } from "./run-filter.ts";
+import type { WorkflowRunStatus } from "./workflow-resources.ts";
+
+export { runFilterStatuses } from "./run-filter.ts";
+export type { RunFilterStatus } from "./run-filter.ts";
 
 // A workflow is code in an App (`workflows/<id>.ts`), written with the
 // workflow SDK. Each run is pinned to the App version it started on, and
@@ -95,6 +101,8 @@ export const workflowErrors = defineErrorFamily({
   // own: the audit log and failure reports carry these instead.
   "workflow.step_failed": "A step of the workflow failed.",
   "workflow.run_failed": "The workflow run failed.",
+  "workflow.compensation_failed":
+    "The workflow run failed, and undoing what it had done failed too.",
 });
 
 /**
@@ -174,23 +182,47 @@ export interface CronSchedule {
 }
 
 /**
+ * How a schedule treats a local time the spring change skips (2:30 on the
+ * night clocks go from 2:00 to 3:00): App schedules fire it an hour later,
+ * at the same minute of the hour after; independent schedule triggers skip
+ * it (platform specification 15.2), so no run starts for a time that
+ * never was.
+ */
+export type SkippedTime = "shift" | "skip";
+
+/** Most skipped times in a row one call steps past before giving up. */
+const maxSkippedTimes = 1000;
+
+/**
  * When `schedule` next fires strictly after `after`, to the minute;
  * undefined for an expression that isn't five cron fields, a time zone the
  * runtime doesn't know, or an expression that names no time to come (the
- * 30th of February).
+ * 30th of February). A time the autumn change repeats fires once, the
+ * first time; one the spring change skips as `skipped` says.
  */
 export const nextScheduledRun = (
   { cron, timeZone }: CronSchedule,
-  after: Date
+  after: Date,
+  skipped: SkippedTime = "shift"
 ): Date | undefined => {
   if (!isTimeZone(timeZone)) {
     return undefined;
   }
   try {
-    return (
-      new Cron(cron, { timezone: timeZone, mode: "5-part" }).nextRun(after) ??
-      undefined
-    );
+    const schedule = new Cron(cron, { timezone: timeZone, mode: "5-part" });
+    let next = schedule.nextRun(after) ?? undefined;
+    if (skipped === "shift") {
+      return next;
+    }
+    // croner moves a skipped local time to the hour after; that moved time
+    // doesn't match the expression itself, which is how it is told apart.
+    for (let step = 0; step < maxSkippedTimes; step += 1) {
+      if (next === undefined || schedule.match(next)) {
+        return next;
+      }
+      next = schedule.nextRun(next) ?? undefined;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -417,6 +449,14 @@ export const triggerDeclarationsSchema = z
 export const coreStepPrefix = "$grasp:";
 
 /**
+ * What a decision task's waits for its answer, and its looks after them,
+ * start with (core's workflows/resource-host.ts): core's steps, so they
+ * count against none of the run's steps however long it waits, each named
+ * `<prefix><its task's step>:wait:<round>` or `…:woken:<round>`.
+ */
+export const decisionPollStepPrefix = `${coreStepPrefix}decision:`;
+
+/**
  * The idempotency key of a run's step, as the SDK hands it to the step
  * and core requires it on the step's connection calls: the run ID
  * (encoded, so no run ID and step name make another's key) and the step's
@@ -460,6 +500,8 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.server_unavailable",
   "connect.call_in_progress",
   "model.failed",
+  // A provider that didn't answer: what `model.failed` said of it before.
+  "model.provider_unavailable",
   "model.budget_busy",
   // Nothing was sent; a share of the model requests in flight comes back
   // as they end, and a provider's rate as its window passes.
@@ -575,6 +617,11 @@ export interface RunSummary {
   compensation?: {
     cause: "failure" | "cancellation";
     activity: "running" | "waiting" | "paused";
+    /**
+     * After a failure, what the run failed with, to those who see why a
+     * run failed (its person and admins): as `error` once it ends.
+     */
+    originalError?: { code: string; message: string };
   };
   /** Why it failed, once failed: a code and message, no values. */
   error?: { code: string; message: string };
@@ -586,6 +633,13 @@ export interface RunSummary {
    * again at the latest. Throttling, not a fault of the workflow.
    */
   queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
+  /**
+   * While it is `queued` because a model call of it failed on the
+   * organization's own AI provider key: the provider, what it showed (it
+   * refuses the key, isn't answering, or is limiting requests), and since
+   * when. It goes on by itself once calls work.
+   */
+  aiProvider?: { since: number; provider: string; trouble: ProviderTrouble };
   /**
    * What the person asking may do now, as the host would admit it, and a
    * control the host admitted that the engine is still applying.
@@ -745,12 +799,6 @@ export type WorkflowTrigger = { position: number } & (
       type: "email";
       /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
       localPart: string;
-      /**
-       * The whole address people send to: the local part at the
-       * deployment's inbound mail domain (`INBOUND_MAIL_DOMAIN`); null
-       * while the deployment has none set.
-       */
-      address: string | null;
     }
   | { type: "event"; event: string }
 );
@@ -778,6 +826,19 @@ export interface RunQueue {
   retryAt: string;
 }
 
+/**
+ * What a `queued` run waits for when a model call of it failed on the
+ * organization's own AI provider key: the provider, what it showed, by
+ * the HTTP class seen (it refuses the key, isn't answering, or is limiting
+ * requests), and since when (ISO 8601). It goes on by itself once calls
+ * work; an admin can replace a key.
+ */
+export interface RunAiProviderWait {
+  since: string;
+  provider: string;
+  trouble: ProviderTrouble;
+}
+
 /** One run of a workflow. */
 export interface WorkflowRun {
   id: RunId;
@@ -790,6 +851,8 @@ export interface WorkflowRun {
   status: RunStatus;
   /** While it is `queued`: the share it waits for, and when it asks again. */
   queued?: RunQueue;
+  /** While it is `queued` for its AI provider: which, what it showed, and since when. */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
   /**
@@ -811,9 +874,9 @@ export interface WorkflowRun {
   failure?: RunFailure;
   /**
    * Set once its details are removed, its retention over: an ended run
-   * keeps them for the deployment's `RUN_RETENTION_DAYS`, 30 days unless
-   * set, counted from when it ended. The same wherever the run is read.
-   * The run itself stays: what it was, how it ended, when and for whom.
+   * keeps them for 30 days, counted from when it ended. The same wherever
+   * the run is read. The run itself stays: what it was, how it ended, when
+   * and for whom.
    */
   detailsRemoved?: true;
 }
@@ -1143,19 +1206,6 @@ export const callReviewed = (
   );
 };
 
-/**
- * What the Runs list is filtered by: runs waiting for a decision, running
- * otherwise (paused ones too), failed, or done (completed or cancelled).
- */
-export const runFilterStatuses = [
-  "waiting",
-  "running",
-  "failed",
-  "done",
-] as const;
-
-export type RunFilterStatus = (typeof runFilterStatuses)[number];
-
 /** Which runs `WorkflowsApi.runs` lists; each field narrows it. */
 export interface RunFilter {
   app?: string;
@@ -1225,6 +1275,8 @@ export interface WorkflowSummary {
     status: RunStatus;
     /** While it is `queued`: the share it waits for. */
     queued?: RunQueue;
+    /** While it is `queued` for its AI provider: which, what it showed, and since when. */
+    aiProvider?: RunAiProviderWait;
     createdAt: string;
   } | null;
   /** Its runs waiting for a decision now. */
@@ -1408,6 +1460,76 @@ export interface ConnectionWorkflows {
 }
 
 /**
+ * Who a run waits on, as its open decision names them: a role, a team, or
+ * the reader themselves (`you`). Only for a wait that is the reader's own.
+ */
+export type TodayWaitsOn =
+  | { kind: "role"; role: string }
+  | { kind: "team"; team: string }
+  | { kind: "you" };
+
+/** One run of a workflow on the company's day (`WorkflowsApi.today`). */
+export interface TodayRun {
+  id: string;
+  /** When it started and ended (ISO 8601); `endedAt` null while it goes on. */
+  startedAt: string;
+  endedAt: string | null;
+  status: WorkflowRunStatus;
+  /**
+   * Whether it went by itself (`alone`) or a person came in (`people`): it
+   * asked someone for a decision, as the handled-versus-alone counts have
+   * it.
+   */
+  went: "alone" | "people";
+  /**
+   * What it waits on now, if it waits on the reader: whom its decision
+   * names, since when, and the decision to answer. A wait on anyone else
+   * shows only as `waitsOnOthers`, with neither whom nor since when.
+   */
+  waits: {
+    decision: string;
+    on: TodayWaitsOn;
+    since: string;
+    asks: string;
+  } | null;
+  /** It waits on someone other than the reader. */
+  waitsOnOthers: boolean;
+  /**
+   * The run it came from, by its lineage: an App run's root, an
+   * independent run's parent; only a run of today the reader sees, null
+   * otherwise.
+   */
+  from: string | null;
+}
+
+/** A workflow that worked today, with its runs of the day, oldest first. */
+export type TodayLane = (
+  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { kind: "independent"; id: string; name: string }
+) & { runs: TodayRun[] };
+
+/**
+ * The runs of the company's day across the workflows the reader may see,
+ * a lane per workflow that worked: the day in the organization's time
+ * zone, from its midnight to now. A run the reader may not see is counted
+ * (`unseen`), never named, nor its workflow.
+ */
+export interface WorkflowsToday {
+  /** The day's start, and now (ISO 8601). */
+  from: string;
+  now: string;
+  timeZone: string;
+  lanes: TodayLane[];
+  /**
+   * The day's oldest runs the reader may see that the lanes leave out, on
+   * a day with more runs than one read takes; the newest are on the lanes.
+   */
+  cutOff: number;
+  /** Runs of the day in workflows, or of people, the reader may not see. */
+  unseen: number;
+}
+
+/**
  * A signed-in person's workflows. Anyone with a role in the App
  * (`AppsApi`) starts and follows its runs, and its builders cancel them;
  * every call checks the session and the person's role again.
@@ -1461,6 +1583,12 @@ export interface WorkflowsApi {
    * decisions they asked people for.
    */
   activity: (query?: RunActivityQuery) => Promise<RunActivity>;
+  /**
+   * The runs of the company's day across the workflows the person may
+   * see, App and independent alike, a lane per workflow that worked; runs
+   * they may not see only counted.
+   */
+  today: () => Promise<WorkflowsToday>;
   /** One workflow of an App's current version. */
   get: (app: string, workflow: string) => Promise<WorkflowDetail>;
   /**
@@ -1483,6 +1611,11 @@ export interface WorkflowsApi {
     workflow: string,
     team: string | null
   ) => Promise<WorkflowSummary>;
+  /**
+   * The organization's teams, by name, that a workflow's team may be set
+   * to (`setTeam`); for admins and builders, never Grasp staff.
+   */
+  teams: () => Promise<{ id: string; name: string }[]>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.

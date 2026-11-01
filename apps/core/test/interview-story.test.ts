@@ -13,7 +13,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
   approve,
@@ -27,13 +26,14 @@ import {
   quick,
   revisionsOf,
 } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { routed } from "./sign-in.ts";
 
 // The read-back (src/onboarding/story.ts and the store's agreement): Stephen
 // tells a part of what he wrote down back as a short story, the person puts
 // lines right and agrees, and only what they agreed to reaches the drawing
-// of their work. AI Gateway is the outside system, faked behind the AI
-// binding. The ways it can fail, tried here:
+// of their work. The model provider is the outside system, faked behind
+// connect. The ways it can fail, tried here:
 //
 // - A story that says more than the lines, or other things: it is no story,
 //   and the page reads the lines as they stand.
@@ -54,7 +54,7 @@ const lines = [
   { id: "f3", text: "You put the parcel on the belt." },
 ];
 
-const told = (sentences: StorySentence[]): GatewayReply => ({
+const told = (sentences: StorySentence[]): ProviderReply => ({
   text: JSON.stringify({ sentences }),
   inputTokens: 900,
   outputTokens: 60,

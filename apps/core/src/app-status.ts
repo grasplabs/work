@@ -1,9 +1,9 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App, AppStatus } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
@@ -14,7 +14,6 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { apps } from "./db/core/schema.ts";
-import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
 import { stopsUnsettled } from "./workflows/resource-runs.ts";
@@ -39,7 +38,7 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 // - Learning that a draft exists: it is answered as an App that isn't
 //   there (`app.not_found`), in lists and errors alike.
 // - A trigger or run outliving the archive: archiving cancels the App's
-//   unfinished runs (`cancelRunsOf`), the cron trigger cancels any left or
+//   unfinished runs (`cancelRunsOf`), the clock cancels any left or
 //   started in a race with it (`cancelArchivedRuns`), and a start reads
 //   the status again once its row is written (`startRun`). A restore
 //   waits for the stops still settling (`cancelledBeforeRestore`).
@@ -74,20 +73,6 @@ const transitions = {
 export type AppTransition = keyof typeof transitions;
 
 /**
- * Tells the App's host its people's access may have changed, so open
- * screens look again (access-revocations.ts), and restarts its server
- * code, which lets go of what they subscribed to. Best effort: every push
- * checks again anyway.
- */
-const closeScreens = async (env: Env, app: App): Promise<void> => {
-  try {
-    await appHost(env, app.id).restart("Its status changed.");
-  } catch (error) {
-    log.error("app.restart_failed", { appId: app.id, ...errorFields(error) });
-  }
-};
-
-/**
  * App `app`'s status, with when it last changed in ms (null while it never
  * has), read together: the fence a transition writes under.
  */
@@ -112,7 +97,7 @@ const maxCancelPages = 10;
 /**
  * Finishes, before a restore, the cancels its archive still owes: every
  * unfinished run of the App not yet asked to cancel (a cancel that failed,
- * one the cron trigger hadn't reached, or a start that overlapped the
+ * one the clock hadn't reached, or a start that overlapped the
  * archive's write), so none of them goes on as the App's again. While it
  * is archived nothing of it starts, so each is the archive's.
  */
@@ -129,7 +114,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   const by = row?.by ?? { userId: app.owner, staff: false };
   // A page at a time, until a page comes back short. A cancel that failed
   // refuses the restore: once restored, nothing would ask again, and the
-  // run would go on as the App's (the cron trigger asks while archived).
+  // run would go on as the App's (the clock asks while archived).
   let finished = false;
   for (let page = 0; page < maxCancelPages && !finished; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
@@ -151,7 +136,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
     finished = asked < cancelPage;
   }
   if (!finished) {
-    // Too many to finish in one call: the restore waits for the cron trigger.
+    // Too many to finish in one call: the restore waits for the clock.
     throw appErrors.create("app.conflict");
   }
   // A short page proves every cancel was asked, not that every stop of a
@@ -159,7 +144,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   // sender that died before sending, is skipped for `stopRetryMs`. Once
   // restored, no repair looks at the App's runs again, so such a run would
   // go on. So the restore waits until each claimed stop has ended its run,
-  // the cron trigger sending again any that was lost. Keeping a repair
+  // the clock sending again any that was lost. Keeping a repair
   // alive across the restore instead would have to tell an archive's stops
   // apart from runs the restored App starts afresh.
   if (await stopsUnsettled(env, app.id)) {
@@ -236,7 +221,10 @@ export const changeStatus = async (
         and(
           eq(apps.id, found.id),
           eq(apps.status, found.status),
-          sql`${apps.statusChangedAt} IS ${fence}`
+          sql`${apps.statusChangedAt} IS ${fence}`,
+          // Removed meanwhile (app-removal.ts), it stays removed: a
+          // removal changes neither its status nor when that changed.
+          isNull(apps.removedAt)
         )
       )
       .returning(),
@@ -257,8 +245,9 @@ export const changeStatus = async (
   }
   const app = toApp(changed);
   if (found.status === "published" || to === "archived") {
+    // Open screens look again (access-revocations.ts), and stop where the
+    // status no longer serves them.
     await tellKept(env, revocations);
-    await closeScreens(env, app);
   }
   if (to === "archived") {
     await cancelRunsOf(env, by, app.id, now);

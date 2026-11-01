@@ -54,6 +54,16 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
+test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+  page,
+}) => {
+  await page.goto(`/interview#${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "This interview can't be opened" })
+  ).toBeVisible();
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+});
+
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({
   context,
   page,
@@ -123,9 +133,7 @@ test("names each member's actions for them, and asks before making someone an ad
   // Everyone signed in here has the same name.
   const { admin, one, two } = peopleIn("memberActions");
   await signInTo(context, admin);
-  // An old link leads to Settings → Members and roles.
-  await page.goto("/members");
-  await expect(page).toHaveURL(/\/settings\/members$/u);
+  await page.goto("/settings/members");
 
   for (const person of [one, two]) {
     const who = `Person (${person.email})`;
@@ -183,7 +191,7 @@ for (const [where, path, landed] of [
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
     });
-    await page.getByRole("button", { name: /User$/u }).click();
+    await page.getByRole("button", { name: "Person", exact: true }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
     await expect(page.getByText("Signing out didn't work")).toBeVisible();
@@ -191,7 +199,9 @@ for (const [where, path, landed] of [
       page.getByText("You're still signed in. Try again in a moment.")
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
-    await expect(page.getByRole("button", { name: /User$/u })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Person", exact: true })
+    ).toBeVisible();
   });
 }
 
@@ -229,8 +239,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
-  browser,
   context,
+  newContext,
   page,
 }) => {
   const { admin, member } = peopleIn("workspaceSettings");
@@ -248,7 +258,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await expect(zone).toHaveText(/^Amsterdam/u);
   await expect(page.getByText("European Union")).toBeVisible();
 
-  const other = await browser.newContext();
+  const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
   await theirs.goto("/settings/workspace");
@@ -310,6 +320,55 @@ test("invites someone with a role, says what each role may do, and withdraws the
     .getByRole("button", { name: `Withdraw the invitation of ${email}` })
     .click();
   await expect(members.getByText(email)).toHaveCount(0);
+});
+
+test("an admin makes a team, puts someone in it and takes them off, renames it and deletes it", async ({
+  context,
+  page,
+}) => {
+  const { admin, member } = peopleIn("teams");
+  await signInTo(context, admin);
+  await page.goto("/settings/members");
+  await page.getByRole("tab", { name: "Teams" }).click();
+  const teams = page.getByRole("region", { name: "Teams" });
+  const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
+
+  await teams.getByRole("button", { name: "New team" }).click();
+  const create = page.getByRole("dialog", { name: "New team" });
+  await create.getByRole("textbox", { name: "Name" }).fill(name);
+  await create.getByRole("button", { name: "Create team" }).click();
+  await expect(create).toBeHidden();
+  await expect(teams.getByText(name, { exact: true })).toBeVisible();
+
+  await teams.getByRole("button", { name: `Members of ${name}` }).click();
+  const team = page.getByRole("dialog", { name: `Members of ${name}` });
+  await team.getByRole("combobox", { name: "Add a member" }).click();
+  await page
+    .getByRole("option", { name: `Person (${member.email})`, exact: true })
+    .click();
+  await team.getByRole("button", { name: "Add", exact: true }).click();
+  const inTeam = team.getByRole("list", { name: `Members of ${name}` });
+  await expect(inTeam.getByText(member.email)).toBeVisible();
+  await team.getByRole("button", { name: `Take Person off ${name}` }).click();
+  await expect(team.getByText("Nobody is in this team yet.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(team).toBeHidden();
+
+  const renamed = `${name} and legal`;
+  await teams.getByRole("button", { name: `Actions for ${name}` }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  const rename = page.getByRole("dialog", { name: `Rename ${name}` });
+  await rename.getByRole("textbox", { name: "Name" }).fill(renamed);
+  await rename.getByRole("button", { name: "Rename" }).click();
+  await expect(teams.getByText(renamed, { exact: true })).toBeVisible();
+
+  await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await page
+    .getByRole("dialog", { name: `Delete ${renamed}?` })
+    .getByRole("button", { name: "Delete" })
+    .click();
+  await expect(teams.getByText(renamed, { exact: true })).toHaveCount(0);
 });
 
 test("shows the members page only to someone signed in, and never signs them out for core failing", async ({
@@ -544,13 +603,19 @@ test("never sends what it gave up on while core was out of reach, once core is b
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
 
-  // Core is back. Trying again asks who is signed in once more: that is the
-  // only status read sent, not the one the page gave up on as well.
+  // Core is back. Trying the page again reads the brain once more: that is
+  // the only read of it sent, not the one the page gave up on as well. The
+  // shell knew who was signed in already, and asks core nothing for it.
   refusing = false;
-  await page.getByRole("button", { name: "Try again" }).click();
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Try again" })
+    .click();
   await expect(
     page.getByRole("complementary", { name: "The brain" })
   ).toBeVisible({ timeout: reconnectMs });
-  const pings = sent.filter((message) => message.includes('["ping"]'));
-  expect(pings).toHaveLength(1);
+  const brainReads = sent.filter((message) =>
+    message.includes('["brain","read"]')
+  );
+  expect(brainReads).toHaveLength(1);
 });

@@ -181,6 +181,7 @@ describe("Grasp's go", () => {
       sponsor: null,
       context: noContext,
       waiting: 0,
+      mailSends: true,
       progress: {
         teams: [],
         // Both leads talked; half of the others did.

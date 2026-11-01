@@ -212,6 +212,25 @@ const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
   );
 };
 
+/**
+ * The exact lane's one pass (exact.ts): any of `phrases`, each its words
+ * in a row, whole, in the words index. Never a prefix, a trigram or a
+ * typo: an identifier found almost is another identifier.
+ */
+const exactPassesOf = (phrases: readonly (readonly string[])[]): Pass[] => {
+  const asked = phrases.map((words) => quoted(words.join(" ")));
+  return asked.length === 0
+    ? []
+    : [
+        {
+          table: "search_words",
+          pass: 0,
+          match: asked.join(" OR "),
+          terms: asked,
+        },
+      ];
+};
+
 /** Each FTS table's columns: title, description, headings, text. */
 const columnsOf: Readonly<Record<string, readonly string[]>> = {
   search_words: ["title", "description", "headings", "text"],
@@ -574,15 +593,26 @@ export const searchSections = async <C>(
    * the query's words, ranked by the words each holds (`matchesSql`); and recorded as a
    * recall (`searchRecord`).
    */
-  recall?: { among?: readonly string[] }
+  recall?: {
+    among?: readonly string[];
+    /**
+     * For a recall's exact lane (exact.ts): the sections that hold any of
+     * these, each its words in a row, in place of the query's words.
+     */
+    exact?: readonly (readonly string[])[];
+  }
 ): Promise<{
   sections: FoundSection[];
   coverage: SearchCoverage;
   provenance: Provenance;
 }> => {
-  const terms = termsOf(
+  const asked = termsOf(
     knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
   );
+  const exact = recall?.exact?.filter((phrase) => phrase.length > 0);
+  // An exact read counts the words of its phrases, as it asks for them.
+  const terms =
+    exact === undefined ? asked : [...new Set(exact.flat())].slice(0, maxTerms);
   const {
     collectionId: scope,
     type,
@@ -650,7 +680,10 @@ export const searchSections = async <C>(
   // Every section of a document repeats its title and description, so a
   // document ranks by its best section, and its sections follow one another
   // in the order their own headings and text match.
-  const passes = passesOf(terms, recall === undefined ? " AND " : " OR ");
+  const passes =
+    exact === undefined
+      ? passesOf(terms, recall === undefined ? " AND " : " OR ")
+      : exactPassesOf(exact);
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (

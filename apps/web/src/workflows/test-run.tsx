@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { followedTrace } from "./followed-trace.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A test run of a workflow's current version, started with input the
@@ -51,6 +52,8 @@ export const TestRun = ({
   useEffect(() => {
     let stopped = runId === null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Its doors are read once: the run's version, so its diagram, stays.
+    let drawn: WorkflowRunTrace["diagram"] | undefined;
     const follow = async (): Promise<void> => {
       try {
         if (runId === null) {
@@ -58,12 +61,16 @@ export const TestRun = ({
         }
         const read = await core.withSession(
           async (session) =>
-            await session.workflowResources.runTrace(workflow, runId)
+            await session.workflowResources.runTrace(workflow, runId, {
+              doors: drawn === undefined,
+            })
         );
         if (stopped) {
           return;
         }
-        setTrace(read);
+        const followed = followedTrace(read, drawn);
+        drawn = followed.diagram;
+        setTrace(followed);
         setFailure(undefined);
         if (!settled(read)) {
           timer = setTimeout(() => {

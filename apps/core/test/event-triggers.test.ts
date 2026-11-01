@@ -15,8 +15,8 @@ import { appWith } from "./workflow-apps.ts";
 
 // Event triggers: core delivers the events connections report, which
 // start the workflows whose trigger names the event, in Apps with a
-// permission on its connection. Tests deliver events as core's cron
-// trigger does with those it takes from connect (event-sources.test.ts
+// permission on its connection. Tests deliver events as core's clock
+// does with those it takes from connect (event-sources.test.ts
 // goes the whole way, from the provider).
 
 const idp = mockIdp();

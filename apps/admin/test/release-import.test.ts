@@ -4,6 +4,7 @@ import {
   moduleKey,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
+import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -104,6 +105,29 @@ const assetOf = (release: TestRelease): string => {
 const sameSizeOther = (text: string): string =>
   text.replaceAll(/[0-9a-f]/gu, (char) => (char === "0" ? "1" : "0"));
 
+/** A release of about as many blobs as one built from main today. */
+/** 700 static assets of `token`'s own: as many blobs as a release from main. */
+const largeAssets = (token: string): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: 700 }, (_, index) => [
+      `/asset-${index}.txt`,
+      `${token} ${index}`,
+    ])
+  );
+
+/** A release of about as many blobs as one built from main today. */
+const largeRelease = async (notes: string) =>
+  await publishRelease({ notes, assets: largeAssets(crypto.randomUUID()) });
+
+/** Every read `reads` counted, the manifests' included. */
+const allReads = (reads: ReadonlyMap<string, number>): number =>
+  [...reads.values()].reduce((sum, count) => sum + count, 0);
+
+const blobReadsOf = (reads: ReadonlyMap<string, number>): number[] =>
+  [...reads]
+    .filter(([key]) => key.startsWith("blobs/"))
+    .map(([, count]) => count);
+
 describe("importing releases", () => {
   it("records a published release once its blobs verify, and audits it", async () => {
     const release = await publishRelease({ notes: "feat(core): one" });
@@ -172,6 +196,28 @@ describe("importing releases", () => {
     ).toStrictEqual([true, true]);
     await expect(releaseRow(release.id)).resolves.toBeDefined();
     await expect(importEvents(release.id)).resolves.toHaveLength(1);
+  });
+
+  it("imports a manifest with top-level fields it doesn't know, keeping it as published", async () => {
+    const built = await buildRelease({ notes: "feat(core): more fields" });
+    const manifestText = `${JSON.stringify(
+      {
+        ...built.manifest,
+        compatibility: { interfaces: { connect: { serves: 3, calls: {} } } },
+        platformLimits: { workflowSteps: 1000 },
+      },
+      null,
+      2
+    )}\n`;
+    await putBlobs(built);
+    await putManifest({ ...built, manifestText });
+
+    const result = await runImport();
+
+    expect(result.imported).toContain(built.id);
+    await expect(releaseRow(built.id)).resolves.toMatchObject({
+      manifest: manifestText,
+    });
   });
 
   it("skips a release until its manifest is written", async () => {
@@ -314,22 +360,12 @@ CREATE TABLE t (id TEXT);`,
     expect(result.imported).toContain(good.id);
   });
 
-  it("refuses a manifest that names another release or commit, or isn't a manifest", async () => {
+  it("refuses a manifest that names another release, or isn't a manifest", async () => {
     const release = await publishRelease({ notes: "feat(core): elsewhere" });
     const moved = nextReleaseId();
     await env.RELEASES.put(manifestKey(moved), release.manifestText);
     const garbled = nextReleaseId();
     await env.RELEASES.put(manifestKey(garbled), "{ not json");
-    // Its own id, but a commit its id's short SHA doesn't name.
-    const otherCommit = await buildRelease({ notes: "feat(core): commit" });
-    await putBlobs(otherCommit);
-    await env.RELEASES.put(
-      manifestKey(otherCommit.id),
-      JSON.stringify({
-        ...otherCommit.manifest,
-        commit: sameSizeOther(otherCommit.manifest.commit),
-      })
-    );
     const huge = nextReleaseId();
     await env.RELEASES.put(
       manifestKey(huge),
@@ -346,7 +382,7 @@ CREATE TABLE t (id TEXT);`,
 
     const result = await runImport();
 
-    const refused = [moved, garbled, otherCommit.id, huge, bom.id, invalidUtf8];
+    const refused = [moved, garbled, huge, bom.id, invalidUtf8];
     expect(result.failed).toStrictEqual(expect.arrayContaining(refused));
     const rows = await Promise.all(refused.map(releaseRow));
     expect(rows.filter((row) => row !== undefined)).toStrictEqual([]);
@@ -368,6 +404,28 @@ CREATE TABLE t (id TEXT);`,
     const second = await runImport();
 
     expect(second.imported).toContain(oldest);
+  });
+
+  it("takes the newest release by year, month and N as numbers, never as text", async () => {
+    // A month after every other release in the file's bucket.
+    const month = new Date(Date.UTC(2099, 11, 15));
+    const ids: string[] = [];
+    for (let n = 1; n <= 10; n += 1) {
+      ids.push(nextPublishedId(ids, month));
+    }
+    const [ninth = "", tenth = ""] = ids.slice(-2);
+    for (const id of [ninth, tenth]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      const release = await buildRelease({ notes: `feat(core): ${id}` }, id);
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await putBlobs(release);
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await putManifest(release);
+    }
+
+    const result = await runImport();
+
+    expect(result.imported.slice(0, 2)).toStrictEqual([tenth, ninth]);
   });
 
   it("counts two runs' failures of the same release at once as two attempts", async () => {
@@ -408,9 +466,10 @@ CREATE TABLE t (id TEXT);`,
     ]);
   });
 
-  it("refuses a release naming more blobs than a run may read for one, before reading them", async () => {
+  it("refuses a release naming more blobs than it may, before reading them", async () => {
     const token = crypto.randomUUID();
-    const release = await publishRelease({
+    // Its manifest alone: none of its blobs is read.
+    const release = await buildRelease({
       notes: "feat(core): too many blobs",
       assets: Object.fromEntries(
         Array.from({ length: MAX_BLOBS_PER_RELEASE + 1 }, (_, index) => [
@@ -419,6 +478,7 @@ CREATE TABLE t (id TEXT);`,
         ])
       ),
     });
+    await putManifest(release);
     const { store, reads } = countingStore();
 
     const result = await runImport(store);
@@ -464,6 +524,103 @@ CREATE TABLE t (id TEXT);`,
 
     expect(first.imported).toStrictEqual([newest, middle]);
     expect(second.imported).toContain(oldest);
+  });
+
+  it("imports a release of 700 blobs a batch a run, reading each blob once", async () => {
+    const release = await largeRelease("feat(core): 700 blobs");
+    const { store, reads } = countingStore();
+
+    const first = await runImport(store);
+    // Every read of the run, each manifest's and blob's alike.
+    const readFirst = allReads(reads);
+    const second = await runImport(store);
+    const readSecond = allReads(reads) - readFirst;
+    const blobReads = blobReadsOf(reads);
+
+    expect({
+      first: first.imported.includes(release.id),
+      firstFailed: first.failed.includes(release.id),
+      firstWithinReads: readFirst <= MAX_READS_PER_RUN,
+      secondWithinReads: readSecond <= MAX_READS_PER_RUN,
+      second: second.imported.includes(release.id),
+      everyBlobOnce: blobReads.every((count) => count === 1),
+      blobs: blobReads.length,
+    }).toStrictEqual({
+      first: false,
+      firstFailed: false,
+      firstWithinReads: true,
+      secondWithinReads: true,
+      second: true,
+      everyBlobOnce: true,
+      blobs: release.blobs.size,
+    });
+    await expect(importEvents(release.id)).resolves.toHaveLength(1);
+  });
+
+  it("checks a release from its first blob again once its manifest was replaced partway", async () => {
+    const assets = largeAssets(crypto.randomUUID());
+    const release = await publishRelease({
+      notes: "feat(core): before",
+      assets,
+    });
+    const { store, reads } = countingStore();
+    const first = await runImport(store);
+    // The blobs the first run checked, before the manifest changed.
+    const checked = [...release.blobs.keys()].filter(
+      (key) => (reads.get(key) ?? 0) === 1
+    );
+    // Another manifest under the same id: the same blobs, another note.
+    const replaced = await buildRelease(
+      { notes: "feat(core): after", assets },
+      release.id
+    );
+    await putManifest(replaced);
+
+    const second = await runImport(store);
+    const third = await runImport(store);
+    const row = await releaseRow(release.id);
+
+    expect({
+      first: first.imported.includes(release.id),
+      checkedSome: checked.length > 0,
+      // Each read again, so checked from the start, and not imported yet.
+      readAgain: checked.every((key) => reads.get(key) === 2),
+      second: second.imported.includes(release.id),
+      third: third.imported.includes(release.id),
+      note: row?.manifest.includes("feat(core): after"),
+    }).toStrictEqual({
+      first: false,
+      checkedSome: true,
+      readAgain: true,
+      second: false,
+      third: true,
+      note: true,
+    });
+  });
+
+  it("fails a large release on a blob in a later batch, and checks it from its first blob next attempt", async () => {
+    const release = await largeRelease("feat(core): 700 blobs, one broken");
+    const [lastKey, lastBytes] = [...release.blobs].at(-1) ?? [];
+    if (lastKey === undefined || lastBytes === undefined) {
+      throw new Error("expected a blob");
+    }
+    await env.RELEASES.put(
+      lastKey,
+      sameSizeOther(new TextDecoder().decode(lastBytes))
+    );
+
+    const first = await runImport();
+    const second = await runImport();
+    expect(second.failed).toContain(release.id);
+    expect(first.failed).not.toContain(release.id);
+
+    await env.RELEASES.put(lastKey, lastBytes);
+    const { store, reads } = countingStore();
+    await runImport(store, { now: inMinutes(10) });
+    const third = await runImport(store, { now: inMinutes(10) });
+
+    expect(third.imported).toContain(release.id);
+    expect(blobReadsOf(reads)).toHaveLength(release.blobs.size);
   });
 
   it("reads the whole listing, a page at a time", async () => {

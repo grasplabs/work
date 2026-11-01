@@ -1,3 +1,8 @@
+import { aiGrantHeader } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderKey,
+  AiProviderRoutes,
+} from "@grasp-os/shared/ai-providers";
 import type { OutboxedAuditEvent } from "@grasp-os/shared/audit";
 import {
   capabilityErrors,
@@ -30,6 +35,7 @@ import type {
   Disconnect,
   RequireClassRights,
   DisconnectPersonal,
+  ErasePersonal,
   FinishConnection,
   HeldCall,
   HeldOutcome,
@@ -55,10 +61,6 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
-import type {
-  LandscapeConnection,
-  LandscapeRead,
-} from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   NpmAdvisories,
@@ -68,6 +70,14 @@ import type {
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import {
+  aiProviderRoutes,
+  listAiProviderKeys,
+  modelFetch,
+  modelSocket,
+  removeAiProviderKey,
+  saveAiProviderKey,
+} from "./ai-providers.ts";
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
 import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
@@ -77,7 +87,7 @@ import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
 import { requireClassRights } from "./class-rights.ts";
-import { clock, tickClock } from "./clock.ts";
+import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
   startToolkitConnection,
@@ -106,7 +116,6 @@ import {
   takeConnectorEvents,
 } from "./events.ts";
 import { hrConnections, readHr } from "./hr.ts";
-import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   npmAdvisories,
@@ -140,6 +149,7 @@ import {
   dropForEndedRun,
   dropForBinding,
   dropForEndedRuns,
+  dropForRemovedApp,
   dropStaleBinding,
   heldFor,
   declineChatActions,
@@ -151,6 +161,8 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { erasePersonal } from "./person-erasure.ts";
+import { probeBindings } from "./probe.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -263,30 +275,20 @@ export default class Connect
   extends WorkerEntrypoint<Env>
   implements ConnectApi
 {
-  // oxlint-disable-next-line class-methods-use-this -- the Worker's fetch handler
-  override fetch(request: Request): Response {
+  /**
+   * Connect's health, and the one model request that can't go over RPC: a
+   * realtime WebSocket core's gateway decided, to the provider's own URL
+   * with its grant (`modelSocket`, src/ai-providers.ts).
+   */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.has(aiGrantHeader)) {
+      return await modelSocket(this.env, signingKeys(this.env), request);
+    }
     const { pathname } = new URL(request.url);
     if (pathname === "/health") {
       return Response.json({ ok: true });
     }
     return new Response("Not found", { status: 404 });
-  }
-
-  /**
-   * Every minute: the clock's explicit tick (src/clock.ts), which drops
-   * OAuth and Composio flows nobody finished, deletes at Composio what
-   * earlier tries couldn't, and seals what a rotated key sealed again.
-   */
-  override async scheduled(controller?: ScheduledController): Promise<void> {
-    try {
-      await tickClock(
-        this.env,
-        this.ctx,
-        controller?.scheduledTime ?? Date.now()
-      );
-    } catch (error) {
-      log.error("cron.failed", errorFields(error));
-    }
   }
 
   /**
@@ -300,7 +302,25 @@ export default class Connect
     return await clock(this.env).ensureRegistered();
   }
 
-  // The audit outbox (src/audit.ts). Core's cron trigger takes the events
+  /**
+   * Whether each of connect's private bindings answers a no-op, for the
+   * admin's provisioning probe, which core makes (src/probe.ts).
+   */
+  async probeBindings(): Promise<Record<string, boolean>> {
+    return await probeBindings(this.env);
+  }
+
+  /**
+   * The version answering, from its version metadata; null where there is
+   * none (plain workerd). Core names it to the admin's signed requests
+   * alone (core's src/provision-probe.ts): in a Workers for
+   * Platforms namespace, how the admin reads which version connect runs.
+   */
+  version(): string | null {
+    return this.env.CF_VERSION_METADATA?.id ?? null;
+  }
+
+  // The audit outbox (src/audit.ts). Core's clock takes the events
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
 
@@ -312,7 +332,7 @@ export default class Connect
     await ackAuditEvents(this.env, appended, rejected);
   }
 
-  // Connector events (src/events.ts). Core's cron trigger sends who
+  // Connector events (src/events.ts). Core's clock sends who
   // listens where, then takes the events read, delivers them to workflows,
   // and settles them.
 
@@ -382,6 +402,12 @@ export default class Connect
     return await disconnectPersonal(this.env, request);
   }
 
+  async erasePersonal(
+    request: ErasePersonal
+  ): Promise<{ connections: number }> {
+    return await erasePersonal(this.env, request);
+  }
+
   async abandonFlow(state: string): Promise<void> {
     await abandonFlow(this.env, state);
   }
@@ -436,6 +462,43 @@ export default class Connect
     return await channelFetch(this.env, platform, request);
   }
 
+  // AI providers (src/ai-providers.ts): the organization's own keys,
+  // sealed here and never answered back, and every model request core's
+  // gateway decided, sent on with the credential its grant names.
+
+  async saveAiProviderKey(
+    request: unknown,
+    by: unknown
+  ): Promise<AiProviderKey> {
+    return await saveAiProviderKey(this.env, request, by);
+  }
+
+  async removeAiProviderKey(provider: unknown, by: unknown): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider, by);
+  }
+
+  async aiProviderKeys(): Promise<AiProviderKey[]> {
+    return await listAiProviderKeys(this.env);
+  }
+
+  async aiProviderRoutes(): Promise<AiProviderRoutes> {
+    return await aiProviderRoutes(this.env);
+  }
+
+  async modelFetch(
+    request: unknown,
+    grant: unknown,
+    stop?: unknown
+  ): Promise<Response> {
+    return await modelFetch(
+      this.env,
+      signingKeys(this.env),
+      request,
+      grant,
+      stop
+    );
+  }
+
   // The catalog (src/catalog.ts): what can be connected.
 
   async catalog(): Promise<Catalog> {
@@ -448,16 +511,6 @@ export default class Connect
 
   async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
     return await catalogLogo(this.env, request);
-  }
-
-  // The application landscape (src/landscape.ts): for core's sync only.
-
-  async landscapeConnections(): Promise<LandscapeConnection[]> {
-    return await landscapeConnections(this.env);
-  }
-
-  async readLandscape(request: unknown): Promise<LandscapeRead> {
-    return await readLandscape(this.env, request);
   }
 
   // The directory (src/directory.ts): for the onboarding, and to know the
@@ -620,6 +673,10 @@ export default class Connect
 
   async dropForBinding(request: unknown): Promise<void> {
     await dropForBinding(this.env, request);
+  }
+
+  async dropForRemovedApp(request: unknown): Promise<void> {
+    await dropForRemovedApp(this.env, request);
   }
 
   async dropStaleBinding(request: unknown): Promise<void> {

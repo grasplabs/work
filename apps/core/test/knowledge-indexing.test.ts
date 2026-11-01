@@ -10,9 +10,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Search holds one generation of each document, published after the save
@@ -275,7 +275,7 @@ describe("publishing search generations", () => {
       fresh: await foundVersions(api, fresh, collectionId),
       coverage,
     };
-    await runCron({}, new Date(Date.now() + 5 * 60_000));
+    await runMinuteTasks({}, new Date(Date.now() + 5 * 60_000));
     const indexed = await settledIndexing(api, collectionId, first.id);
 
     expect({
@@ -412,7 +412,7 @@ describe("publishing search generations", () => {
     });
   });
 
-  it("starts the indexing the cron trigger finds never started", async () => {
+  it("starts the indexing the clock finds never started", async () => {
     const { api } = await knowledgeOf();
     const { id: collectionId } = await api.createCollection(shared());
     const word = `Repaired${unique()}`;
@@ -432,9 +432,9 @@ describe("publishing search generations", () => {
       restore();
     }
     // Within a while of the save, its run may still be on its way.
-    await runCron();
+    await runMinuteTasks();
     const soon = indexingOf(await listed(api, collectionId, saved.id));
-    await runCron({}, new Date(Date.now() + 5 * 60_000));
+    await runMinuteTasks({}, new Date(Date.now() + 5 * 60_000));
     const indexed = await settledIndexing(api, collectionId, saved.id);
 
     expect({
@@ -563,8 +563,8 @@ describe("publishing search generations", () => {
       restore();
     }
     const whileFailed = await foundVersions(api, name, collectionId);
-    // Nobody purges again: the cron trigger starts its run again.
-    await runCron({}, new Date(Date.now() + 20 * 60_000));
+    // Nobody purges again: the clock starts its run again.
+    await runMinuteTasks({}, new Date(Date.now() + 20 * 60_000));
     const indexed = await settledIndexing(api, collectionId, document.id);
 
     expect({
@@ -658,7 +658,7 @@ describe("publishing search generations", () => {
       down();
     }
     // Run again, and its own publish fails once more: no waiting on the
-    // cron trigger's backoff for the next run.
+    // clock's backoff for the next run.
     const again = await api.preparePurge(purgeOf(document.id, name));
     const once = failNextPublish();
     let refused: unknown;
@@ -723,7 +723,7 @@ describe("publishing search generations", () => {
     )
       .bind(maxIndexReruns, Date.now(), purged.id, other.id)
       .run();
-    await runCron({}, new Date(Date.now() + 25 * 60 * 60_000));
+    await runMinuteTasks({}, new Date(Date.now() + 25 * 60 * 60_000));
     const rerun = await settledIndexing(api, collectionId, purged.id);
     const left = await listed(api, collectionId, other.id);
     const events = await allEvents();
@@ -791,7 +791,7 @@ describe("publishing search generations", () => {
         .run();
     });
     try {
-      await runCron();
+      await runMinuteTasks();
     } finally {
       restore();
     }

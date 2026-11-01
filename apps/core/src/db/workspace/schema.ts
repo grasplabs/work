@@ -151,6 +151,31 @@ export const chatMessages = sqliteTable(
 );
 
 /**
+ * What each message of a chat said, as plain text (chat-search.ts), and
+ * the same folded to lower case, which a search looks through: empty for
+ * a message that said nothing (a step's result). One row per message, cut
+ * to `saidMax`, so no row outgrows what a Durable Object's SQLite keeps
+ * in one, however long the chat. Written as each message is stored; a
+ * message kept before it existed gets its row the first time a search
+ * needs it.
+ */
+export const chatSearchText = sqliteTable(
+  "chat_search_text",
+  {
+    messageId: integer("message_id")
+      .primaryKey()
+      .references(() => chatMessages.id),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    said: text().notNull(),
+    folded: text().notNull(),
+  },
+  (table) => [index("chat_search_text_chat").on(table.chatId, table.messageId)]
+);
+
+/**
  * What a chat's agent has read from, each source once: the collections and
  * connections its code read through the chat's APIs, and, for a chat
  * started to fix a failed run, the run and its App's sources. Every model
@@ -629,20 +654,6 @@ export const customWidgets = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.personId, table.id] })]
 );
-
-/**
- * A person's own choice of the emails Grasp sends them, once they changed
- * it: a row for each person who saved theirs; one never saved gets every
- * email (`defaultEmailPreferences`). Kept in their own Workspace object,
- * as their dashboard is.
- */
-export const emailPreferences = sqliteTable("email_preferences", {
-  personId: text("person_id").primaryKey(),
-  needsYou: integer("needs_you", { mode: "boolean" }).notNull(),
-  weeklySummary: integer("weekly_summary", { mode: "boolean" }).notNull(),
-  billingProblems: integer("billing_problems", { mode: "boolean" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
 
 /**
  * The draft release a chat's preview of its draft of an App runs

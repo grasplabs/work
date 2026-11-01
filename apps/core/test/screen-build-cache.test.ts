@@ -404,7 +404,10 @@ describe("the build cache", { timeout: 120_000 }, () => {
       compiled: 2,
       production,
       preview,
-      sameCode: true,
+      // A preview's screen is built for React Fast Refresh on the preview
+      // kit (preview-refresh-build.test.ts), so not even its code is
+      // production's.
+      sameCode: false,
       sameArtifact: false,
     });
   });

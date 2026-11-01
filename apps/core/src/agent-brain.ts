@@ -1,15 +1,21 @@
 import type {
   BrainSourceRef,
-  EntitySummary,
+  EntitiesAnswer,
+  EntitySourcesAnswer,
   MemoryPack,
   RelationsAnswer,
   RelationsExplanation,
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
-import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
+import {
+  entitiesWithSources,
+  entitySourcesRead,
+} from "@grasp-os/brain/entities";
 import { recallWithSources } from "@grasp-os/brain/recall";
-import { relationsExplain, relationsRead } from "@grasp-os/brain/relations";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { PinnedVersion, VersionRef } from "@grasp-os/brain/recall-store";
+import { relationsExplainRead, relationsRead } from "@grasp-os/brain/relations";
 import {
   readSkillWithSources,
   selectSkillWithSources,
@@ -23,15 +29,18 @@ import {
   chatAuthority,
   chatContext,
   endedBy,
+  recordRunReads,
   recordSources,
   recordToolCall,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { brainGaps } from "./brain-rpc.ts";
+import { brainDocumentRead, brainGrantRead } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
+import { citedVersions } from "./workflows/run-evidence.ts";
 
 // The company brain for a chat's code: `await env.brain.recall({ query })`
 // and `await env.brain.gaps()`. Its recall is the SDK's Brain binding
@@ -91,32 +100,108 @@ interface AgentGap {
 interface Delegated<T> {
   value: T;
   /** The collections it read from, and the documents it hands over. */
-  sources: { collections: readonly string[]; documents: readonly string[] };
+  sources: {
+    collections: readonly string[];
+    documents: readonly PinnedVersion[];
+  };
   detail: Record<string, string | number>;
 }
 
-/** The brain, as a chat's code reads it. */
 /**
- * What a read cites, for the chat's provenance (its documents, once each)
- * and for its call record (how many it cited).
+ * Records what a Brain read of the chat's code read from, before it is
+ * handed over: its collections with the chat (`recordSources`), and with
+ * the run the agent's `brain` grant and each document handed over too
+ * (history-access.ts), pinned as its text was, so the run's result is
+ * withheld from the model once that grant is revoked or a document is
+ * erased, moved or purged, though its collection may still be read. Only ever added to: a later read that
+ * finds nothing lifts nothing.
  */
-const citing = (
+const recordBrainRead = async (
+  env: Env,
+  scope: AgentScope,
+  collections: readonly string[],
+  documents: readonly PinnedVersion[]
+): Promise<void> => {
+  await recordSources(env, scope, collections, [
+    ...new Set(documents.map(({ documentId }) => documentId)),
+  ]);
+  await recordRunReads(env, scope, [
+    brainGrantRead,
+    ...documents.map((pin) => brainDocumentRead(pin)),
+  ]);
+};
+
+/** The document versions of `refs`, once each. */
+const versionsOf = (refs: readonly BrainSourceRef[]): VersionRef[] => [
+  ...new Map(
+    refs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            [
+              `${ref.documentId}:${ref.version}`,
+              {
+                documentId: ref.documentId,
+                collectionId: ref.collectionId,
+                version: ref.version,
+              },
+            ] as const,
+          ]
+        : []
+    )
+  ).values(),
+];
+
+/**
+ * What a read cites, for the chat's provenance (its collections, and each
+ * document version pinned as its text was, `pinsOf`) and for its call
+ * record (how many it cited): `reader` must still read them all, or the
+ * read is refused (`brain.not_found`).
+ */
+const citing = async (
+  env: Env,
+  reader: Reader,
   refs: readonly BrainSourceRef[]
-): Pick<Delegated<unknown>, "sources" | "detail"> => {
-  const documents = refs.flatMap((ref) =>
-    ref.kind === "document" ? [ref] : []
-  );
+): Promise<Pick<Delegated<unknown>, "sources" | "detail">> => {
+  const versions = versionsOf(refs);
   return {
     sources: {
       collections: [
-        ...new Set(documents.map(({ collectionId }) => collectionId)),
+        ...new Set(versions.map(({ collectionId }) => collectionId)),
       ],
-      documents: [...new Set(documents.map(({ documentId }) => documentId))],
+      documents: await d1BrainStore(brainOf(env)).pinsOf(reader, versions),
     },
     detail: { sources: refs.length },
   };
 };
 
+/**
+ * What a relations read hands over, `citing` the sources of `refs`, and
+ * labelled with every collection a claim it weighed came from
+ * (`considered`): a claim past the answer's cap still decided whether one
+ * is `conflicting`, so revoking any of them withholds the answer.
+ */
+const weighing = async (
+  env: Env,
+  reader: Reader,
+  refs: readonly BrainSourceRef[],
+  considered: { collectionIds: readonly string[] }
+): Promise<Pick<Delegated<unknown>, "sources" | "detail">> => {
+  const handed = await citing(env, reader, refs);
+  return {
+    ...handed,
+    sources: {
+      ...handed.sources,
+      collections: [
+        ...new Set([
+          ...handed.sources.collections,
+          ...considered.collectionIds,
+        ]),
+      ],
+    },
+  };
+};
+
+/** The brain, as a chat's code reads it. */
 export class BrainAgentApi
   extends WorkerEntrypoint<Env, AgentScope>
   implements
@@ -148,22 +233,25 @@ export class BrainAgentApi
 
   /** The recall, read as the chat's delegate, with its sources recorded. */
   async #recalled(scope: AgentScope, input: unknown): Promise<MemoryPack> {
-    const { pack, sources } = await readAsDelegate(
+    const { pack, sources, pins } = await readAsDelegate(
       this.env,
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) =>
-        await recallWithSources(brainOf(this.env), reader, input)
+      async (reader) => {
+        const brain = brainOf(this.env);
+        const recalled = await recallWithSources(brain, reader, input);
+        return {
+          ...recalled,
+          pins: await d1BrainStore(brain).pinsOf(
+            reader,
+            citedVersions(recalled.pack)
+          ),
+        };
+      }
     );
     // Every collection it read from, found or not, as a search records.
-    await recordSources(this.env, scope, sources, [
-      ...new Set(
-        pack.sourceVersions.flatMap((ref) =>
-          ref.kind === "document" ? [ref.documentId] : []
-        )
-      ),
-    ]);
+    await recordBrainRead(this.env, scope, sources, pins);
     return pack;
   }
 
@@ -202,8 +290,9 @@ export class BrainAgentApi
    */
   async skillsRead(input: unknown): Promise<SkillRead> {
     return await this.#delegated("brain.skills.read", async (reader) => {
+      const brain = brainOf(this.env);
       const { read, provenance } = await readSkillWithSources(
-        brainOf(this.env),
+        brain,
         reader,
         input
       );
@@ -211,7 +300,13 @@ export class BrainAgentApi
         value: read,
         sources: {
           collections: provenance.collectionIds,
-          documents: [read.skill.documentId],
+          documents: await d1BrainStore(brain).pinsOf(reader, [
+            {
+              documentId: read.skill.documentId,
+              collectionId: read.skill.collectionId,
+              version: read.skill.version,
+            },
+          ]),
         },
         detail: { version: read.skill.version },
       };
@@ -223,27 +318,38 @@ export class BrainAgentApi
    * start (at least two characters, as for every caller that isn't a
    * person): the Brain's own read, as the chat's agent.
    */
-  async entities(input: unknown): Promise<EntitySummary[]> {
+  async entities(input: unknown): Promise<EntitiesAnswer> {
     return await this.#delegated("brain.entities", async (reader) => {
-      const { entities, sources } = await entitiesWithSources(
-        brainOf(this.env),
+      const brain = brainOf(this.env);
+      const { entities, sources, truncated } = await entitiesWithSources(
+        brain,
         reader,
         input
       );
-      // The sources whose mentions named them, as recall records its own.
+      // The sources whose mentions named them, pinned, as recall records
+      // its own.
       return {
-        value: entities,
-        sources,
+        value: { entities, truncated },
+        sources: {
+          collections: sources.collections,
+          documents: await d1BrainStore(brain).pinsOf(
+            reader,
+            sources.documents
+          ),
+        },
         detail: { entities: entities.length },
       };
     });
   }
 
   /** The readable sources that mention one entity, at their versions. */
-  async entitySources(input: unknown): Promise<BrainSourceRef[]> {
+  async entitySources(input: unknown): Promise<EntitySourcesAnswer> {
     return await this.#delegated("brain.entitySources", async (reader) => {
-      const refs = await entitySources(brainOf(this.env), reader, input);
-      return { value: refs, ...citing(refs) };
+      const answer = await entitySourcesRead(brainOf(this.env), reader, input);
+      return {
+        value: answer,
+        ...(await citing(this.env, reader, answer.sources)),
+      };
     });
   }
 
@@ -258,23 +364,14 @@ export class BrainAgentApi
         reader,
         input
       );
-      const handed = citing(answer.relations.map(({ sourceRef }) => sourceRef));
       return {
         value: answer,
-        ...handed,
-        // Labelled with every collection a claim it weighed came from, not
-        // only the answered ones': a claim past the cap still decided
-        // whether one is `conflicting`, so revoking any of them withholds
-        // the answer.
-        sources: {
-          ...handed.sources,
-          collections: [
-            ...new Set([
-              ...handed.sources.collections,
-              ...considered.collectionIds,
-            ]),
-          ],
-        },
+        ...(await weighing(
+          this.env,
+          reader,
+          answer.relations.map(({ sourceRef }) => sourceRef),
+          considered
+        )),
       };
     });
   }
@@ -285,18 +382,21 @@ export class BrainAgentApi
    */
   async relationsExplain(input: unknown): Promise<RelationsExplanation> {
     return await this.#delegated("brain.relationsExplain", async (reader) => {
-      const explained = await relationsExplain(
+      const { explanation, considered } = await relationsExplainRead(
         brainOf(this.env),
         reader,
         input
       );
       return {
-        value: explained,
-        ...citing(
-          explained.paths.flatMap(({ relations }) =>
+        value: explanation,
+        ...(await weighing(
+          this.env,
+          reader,
+          explanation.paths.flatMap(({ relations }) =>
             relations.map(({ sourceRef }) => sourceRef)
-          )
-        ),
+          ),
+          considered
+        )),
       };
     });
   }
@@ -321,7 +421,7 @@ export class BrainAgentApi
         undefined,
         read
       );
-      await recordSources(
+      await recordBrainRead(
         this.env,
         scope,
         done.sources.collections,
@@ -449,10 +549,10 @@ brain: {
     filters?: { collectionIds?: string[] };
     budget?: { maxItems?: number; maxTokens?: number; deadlineMs?: number };
   }): Promise<MemoryPack>;
-  /** The people, teams, processes and things its sources mention, by the start of a name (two characters at least): needs the brain permission. */
-  entities(input: { query: string; limit?: number }): Promise<Entity[]>;
-  /** The sources that mention one entity, at their versions: documents, or the person's own memories. */
-  entitySources(input: { entityId: string }): Promise<Relation["sourceRef"][]>;
+  /** The people, teams, processes and things its sources mention, by the start of a name (two characters at least): needs the brain permission. \`truncated\`: they come from its newest sources only, so say some may be missing. */
+  entities(input: { query: string; limit?: number }): Promise<{ entities: Entity[]; truncated: boolean }>;
+  /** The newest sources that mention one entity, at their versions. \`truncated\`: more mention it than came back. */
+  entitySources(input: { entityId: string }): Promise<{ sources: Relation["sourceRef"][]; truncated: boolean }>;
   /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. \`truncated\`: more relations exist than came back, so say what you show isn't all of them. */
   relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<{ relations: Relation[]; truncated: boolean }>;
   /** How one entity connects to others, one or two relations out (\`hops\`, default 2), each path with every relation's passage, within \`budget\` (at most 50 paths); \`truncated\` when it was cut. Quote the evidence along the path. */

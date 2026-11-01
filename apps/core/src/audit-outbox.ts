@@ -1,4 +1,5 @@
 import type { BrainEvent } from "@grasp-os/brain/events";
+import { appErrors } from "@grasp-os/shared/apps";
 import {
   auditEntrySchema,
   auditEventSchema,
@@ -26,6 +27,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
 import { auditOutbox } from "./db/core/schema.ts";
+import { isRemovedAppRefusal } from "./db/d1.ts";
 
 // A change to the core or Knowledge database that must be audited stores
 // its event in that database's outbox (each has an `audit_outbox` table) in
@@ -38,11 +40,11 @@ import { auditOutbox } from "./db/core/schema.ts";
 // same step as the removals, so every row leaves the outbox and every drain
 // reads its head. Right after a change, core drains the
 // outbox it wrote in the background (`waitUntil`), so the change doesn't
-// wait on the log; the cron trigger drains all three every minute,
+// wait on the log; the clock drains all three every minute,
 // connect's over RPC, which is how connect's events reach the log at all
 // (connect can't reach core).
 
-/** Most batches one cron drain of an outbox appends: 5,000 events. */
+/** Most batches one clock drain of an outbox appends: 5,000 events. */
 const drainMaxBatches = 50;
 
 /** One outbox, as a drain reads it: its oldest events, and settling them. */
@@ -354,7 +356,7 @@ export const drainObjectOutbox = async (
  * Drains every outbox: the core and Knowledge databases' and connect's,
  * each on its own, so one that fails (connect unreachable, say) is logged
  * and leaves the others to drain. Returns how many events it appended.
- * The cron trigger calls it.
+ * The clock calls it.
  */
 export const drainAuditOutboxes = async (env: Env): Promise<number> => {
   const counts = await Promise.all(
@@ -376,12 +378,22 @@ type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
 /**
  * Drains `db`'s outbox, the one a change just wrote, one batch, in the
  * background: the change doesn't wait on the log, and its event normally
- * reaches it a moment later. A drain that fails is logged; the cron
+ * reaches it a moment later. A drain that fails is logged; the clock
  * trigger drains the event later.
  */
 const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
   const name = db.$client === env.KNOWLEDGE ? "knowledge" : "core";
   waitUntil(drainLogged(env, databaseOutbox(name, db.$client), 1));
+};
+
+/**
+ * Drains connect's outbox soon, one batch, in the background: after a
+ * change connect recorded in its own outbox (an AI provider's key), so its
+ * event reaches the log a moment later rather than at the clock's next
+ * drain. A drain that fails is logged; the clock drains it later.
+ */
+export const drainConnectOutboxSoon = (env: Env): void => {
+  waitUntil(drainLogged(env, connectOutbox(env), 1));
 };
 
 /** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
@@ -519,7 +531,17 @@ export const auditedBatch = async <
   db: AuditedDatabase,
   statements: T
 ): Promise<BatchResponse<T>> => {
-  const results = await db.batch(statements);
+  let results: BatchResponse<T>;
+  try {
+    results = await db.batch(statements);
+  } catch (error) {
+    // A write that read the App before it was removed and landed after:
+    // refused by the database, answered as for an App that isn't there.
+    if (isRemovedAppRefusal(error)) {
+      throw appErrors.create("app.not_found");
+    }
+    throw error;
+  }
   drainSoon(env, db);
   return results;
 };

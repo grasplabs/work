@@ -1,17 +1,16 @@
 /**
- * How the admin's Workflows (provisioning, src/provision/workflow.ts,
- * and rollouts, src/rollout/workflow.ts) run their steps: their retry
- * configs, and how a step fails. A failure a retry can fix is retried;
- * any other stops the run at once (`NonRetryableError`, carrying its
- * code). Either way nothing a step returns or throws carries a token or a
- * response body: Workflows stores both (threat model R17, CO3).
+ * How the admin's runs on Workerflow (src/workflow-runs.ts: provisioning,
+ * applies, rollouts and rollbacks) run their steps: their retry configs,
+ * and how a step fails. A failure a retry can fix is retried; any other
+ * stops the run at once (`NonRetryableError`, carrying its code). Either
+ * way nothing a step returns or throws carries a token or a response body:
+ * a run's journal keeps both (threat model R17, CO3).
  */
-import { NonRetryableError } from "cloudflare:workflows";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
 
 import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";
 import { MissingStoreSecretError } from "./deploy/context.ts";
-import { errorCode } from "./deploy/deploy.ts";
-import { DeployError } from "./deploy/errors.ts";
+import { errorCode, DeployError } from "./deploy/errors.ts";
 import type { DeployErrorCode } from "./deploy/errors.ts";
 
 /** Quick steps: a few API calls or a row. */
@@ -23,11 +22,14 @@ export const quickStep = {
 /**
  * A deploy, or a phase of one: uploads, migrations and a smoke check of
  * up to about 80 s. A retry resumes the same deploy, so it's retried less
- * often, and later.
+ * often, and later. Its timeout is the longest a Workerflow attempt runs
+ * (its 14-minute handler budget). An attempt that runs out goes on beside
+ * its retry, so each attempt takes the client for itself first
+ * (src/runners.ts, `takeAttempt`), and one that timed out acts no more.
  */
 export const deployStepConfig = {
   retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
-  timeout: "30 minutes",
+  timeout: "14 minutes",
 } as const;
 
 /** Deploy failures a retry can fix: a new version still starting, a name race, a flaky query. */
@@ -79,10 +81,10 @@ export const asStepError = (error: unknown): Error => {
 
 /** `task` as a step runs it, its failures as `asStepError` makes them. */
 export const guarded =
-  <T>(task: () => Promise<T>) =>
-  async (): Promise<T> => {
+  <T, Args extends unknown[]>(task: (...args: Args) => Promise<T>) =>
+  async (...args: Args): Promise<T> => {
     try {
-      return await task();
+      return await task(...args);
     } catch (error) {
       throw asStepError(error);
     }
@@ -93,17 +95,6 @@ export const guarded =
  * (`NonRetryableError: <code>: ...`), left off what's recorded.
  */
 const errorNamePrefix = /^\w*Error: /u;
-
-/**
- * The prefix of what the Workflows engine throws into a run it stops
- * itself (a pause, a terminate, a restart): the run isn't failing, so it
- * rethrows it at once and records nothing.
- */
-const engineAbortPrefix = "Aborting engine:";
-
-/** Whether `error` is the Workflows engine stopping the run (`engineAbortPrefix`). */
-export const isEngineAbort = (error: unknown): boolean =>
-  error instanceof Error && error.message.startsWith(engineAbortPrefix);
 
 /** What a run records of the failure that stopped it: its code and our words. */
 export const stopReason = (error: unknown): string =>

@@ -2,12 +2,20 @@ import { eventFingerprint } from "@grasp-os/sdk/host";
 import type { BoundWorkflow } from "@grasp-os/sdk/host";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { coreStepPrefix } from "@grasp-os/shared/workflows";
+import {
+  coreStepPrefix,
+  decisionPollStepPrefix,
+} from "@grasp-os/shared/workflows";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
-import { workflowResourceRuns } from "../db/core/schema.ts";
-import { decisionOfEventType } from "../decisions/decisions.ts";
+import { workflowDecisions, workflowResourceRuns } from "../db/core/schema.ts";
+import {
+  answerableByNow,
+  decisionOfEventType,
+  resourceDecisionPending,
+} from "../decisions/decisions.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { runObjectOf } from "./engine.ts";
 
@@ -26,7 +34,8 @@ import { runObjectOf } from "./engine.ts";
 //   its checks), once a round; or a step waiting for a share of what runs
 //   at once (`quota`), as core's own steps of that are named
 //   (`$grasp:wait:<key>:busy:<round>…`, host.ts), once a step;
-// - a person's decision (`…:decision:wait:<round>`), by the decision's ID
+// - a person's decision (its wait, `$grasp:decision:<task step>:wait:<round>`,
+//   read as `<task step>:decision:wait:<round>`), by the decision's ID
 //   its event names (decisions.ts, `decisionEventType`), as its key the
 //   decision binding its task asks through, one the release sealed;
 // - an event a listen task waits for (`task:<task>` of a listen task):
@@ -42,6 +51,11 @@ import { runObjectOf } from "./engine.ts";
 // (`canRespond` is false). Read after the run's row, whose revision a
 // snapshot carries: a wait opened or closed since moves that revision on
 // (resource-runs.ts, `projectResourceRun`), so the screen reads it again.
+
+/** A decision wait, as `withRespond` reads one. */
+const decisionWaitSchema = z
+  .looseObject({ kind: z.literal("decision"), id: z.string() })
+  .transform((wait) => ({ id: wait.id, wait }));
 
 /** The most waits a snapshot lists, as the SDK reads them (`maxWaits`). */
 const maxWaits = 256;
@@ -59,6 +73,17 @@ const heldCheck = /^:held:(?<round>\d+):\d+:check$/u;
 const heldRun = /^:held:\d+:run$/u;
 const decisionWait = /^:decision:wait:\d+$/u;
 const decisionLook = /^:decision:(?:asked|reached|outcome|woken:\d+)$/u;
+/** A try's retry of a task's step: a round of it, and the backoff before one. */
+const retryRound = /^:retry:\d+$/u;
+const retryBackoff = /^:retry:\d+:wait$/u;
+/**
+ * A step of a retried round (resource-host.ts, `#retried`): core's own
+ * steps of a held call or a decision in the round, `:retry:<round>` then
+ * what they are as in a first round. The round's own steps (`retryRound`,
+ * `retryBackoff`) are the retry's, not these.
+ */
+const retriedStep =
+  /^:retry:(?<round>\d+)(?<inner>:(?:held|decision):[a-z0-9:]+)$/u;
 
 /** The prefix of core's own steps of a wait (host.ts, `waitStepPrefix`). */
 const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;
@@ -173,12 +198,16 @@ const retryWait = (wait: Pending, task: string, title: string): Json => ({
   purpose: "retry",
 });
 
-/** The hold a held call's wait or check is, once a round (`holding`). */
+/**
+ * The hold a held call's wait or check is, once a round (`holding`), of
+ * the retried round `retry` names, if one.
+ */
 const heldOf = (
   wait: Pending,
   id: string,
   rest: string,
-  holding: Set<string>
+  holding: Set<string>,
+  retry = ""
 ): Json[] | undefined => {
   const isWait = wait.type === "waitForEvent" && heldWait.test(rest);
   const isCheck = wait.type === "retry" && heldCheck.test(rest);
@@ -186,7 +215,7 @@ const heldOf = (
     return undefined;
   }
   const round = (heldWait.exec(rest) ?? heldCheck.exec(rest))?.groups?.round;
-  const once = `${id}:${round ?? ""}`;
+  const once = `${id}${retry}:${round ?? ""}`;
   if (holding.has(once)) {
     return [];
   }
@@ -197,9 +226,17 @@ const heldOf = (
 /** The timer a task's sleep or retry is, if it is one a screen reads. */
 const timerOf = (wait: Pending, id: string, rest: string): Json[] => {
   if (wait.type === "retry") {
-    return rest === "" || heldRun.test(rest) || decisionLook.test(rest)
+    return rest === "" ||
+      heldRun.test(rest) ||
+      decisionLook.test(rest) ||
+      retryRound.test(rest)
       ? [retryWait(wait, id, id)]
       : [];
+  }
+  // A try's backoff before it runs a failed step again (resource-host.ts,
+  // `#retried`): a retry, as the engine's own are.
+  if (retryBackoff.test(rest)) {
+    return wait.deadline === null ? [] : [retryWait(wait, id, id)];
   }
   return rest === "" && wait.deadline !== null
     ? [
@@ -230,7 +267,7 @@ const decisionOf = (
         {
           ...fieldsOf(decision, id, key, id, wait),
           kind: "decision",
-          // The reference says whether a person may answer it here.
+          // Whether its viewer may answer it is theirs (`withRespond`).
           canRespond: false,
         },
       ]
@@ -289,14 +326,23 @@ const taskWaitsOf = (
   if (task === undefined || wait.openedAt === null) {
     return [];
   }
-  const held = heldOf(wait, id, rest, holding);
+  // A retried round's held call or decision reads as a first round's.
+  const retried = retriedStep.exec(rest)?.groups;
+  const step = retried?.inner ?? rest;
+  const held = heldOf(
+    wait,
+    id,
+    step,
+    holding,
+    retried === undefined ? "" : `:retry:${retried.round ?? ""}`
+  );
   if (held !== undefined) {
     return held;
   }
   if (wait.type !== "waitForEvent") {
-    return timerOf(wait, id, rest);
+    return timerOf(wait, id, step);
   }
-  if (decisionWait.test(rest)) {
+  if (decisionWait.test(step)) {
     return decisionOf(wait, id, task, context);
   }
   return rest === "" ? awaitedOf(wait, id, task, context) : [];
@@ -329,6 +375,25 @@ const coreWaitsOf = (wait: Pending, holding: Set<string>): Json[] => {
     : [];
 };
 
+/** A decision task's wait or look, past `decisionPollStepPrefix`. */
+const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
+
+/**
+ * `name`, a decision task's wait or look as core names it (its own steps,
+ * under `decisionPollStepPrefix`), read as its task's step:
+ * `<task step>:decision:<wait|woken>:<round>`; any other name as it is.
+ */
+const taskStepName = (name: string): string => {
+  if (!name.startsWith(decisionPollStepPrefix)) {
+    return name;
+  }
+  const poll = decisionPoll.exec(name.slice(decisionPollStepPrefix.length));
+  const { step, part, round } = poll?.groups ?? {};
+  return step === undefined || part === undefined || round === undefined
+    ? name
+    : `${step}:decision:${part}:${round}`;
+};
+
 /**
  * The waits a screen is shown of `pending`, the engine's list of a run's
  * open waits, read against its build and release (`context`): each of a
@@ -342,7 +407,7 @@ export const shownWaits = (
   const waits: Json[] = [];
   const holding = new Set<string>();
   for (const wait of pending) {
-    const step = taskStep.exec(wait.name)?.groups;
+    const step = taskStep.exec(taskStepName(wait.name))?.groups;
     const shown =
       step?.id === undefined
         ? coreWaitsOf(wait, holding)
@@ -452,5 +517,63 @@ export const runWaits = async (
     events: new Map(fingerprints),
     child: waitsChild ? await onlyChild(env, run.id) : undefined,
     canSend,
+  });
+};
+
+/** Who a snapshot's waits are shown to, as answering its decisions goes. */
+export interface WaitViewer {
+  readonly userId: string;
+  /** Grasp staff answer no client's decision (decisions.ts). */
+  readonly staff?: boolean;
+  /**
+   * Whether the run's restricted mode is the App's: only then is a
+   * decision of it the App's screen's to answer (screen-runs.ts,
+   * `appDecision`).
+   */
+  readonly sameRestriction: boolean;
+}
+
+/**
+ * `waits` with each decision's `canRespond` the viewer's (spec 10.7.2):
+ * whether they may answer it there now, as the decision service has it
+ * (`answerableByNow`: eligible, still pending), never for staff, and only
+ * where the run's restricted mode is the App's. Read in one statement for
+ * every decision listed.
+ */
+export const withRespond = async (
+  env: Env,
+  runId: string,
+  waits: readonly Json[],
+  viewer: WaitViewer
+): Promise<Json[]> => {
+  const decisions = waits.flatMap((wait) => {
+    const parsed = decisionWaitSchema.safeParse(wait);
+    return parsed.success ? [parsed.data.id] : [];
+  });
+  if (
+    decisions.length === 0 ||
+    viewer.staff === true ||
+    !viewer.sameRestriction
+  ) {
+    return [...waits];
+  }
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({ id: workflowDecisions.id })
+    .from(workflowDecisions)
+    .where(
+      and(
+        eq(workflowDecisions.resourceRunId, runId),
+        inArray(workflowDecisions.id, decisions),
+        resourceDecisionPending(new Date()),
+        answerableByNow(db, viewer.userId)
+      )
+    );
+  const answerable = new Set(rows.map(({ id }) => id));
+  return waits.map((wait) => {
+    const parsed = decisionWaitSchema.safeParse(wait);
+    return parsed.success && answerable.has(parsed.data.id)
+      ? { ...parsed.data.wait, canRespond: true }
+      : wait;
   });
 };

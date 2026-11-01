@@ -6,19 +6,18 @@ import {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
+import { admitAttempt } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
-import { racingDb } from "./racing-db.ts";
+import { withQuotas } from "./quota-limits.ts";
 import { finished, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's host calls: every call its steps' attempts make through
-// their hosts, counted durably on the lineage, held to the deployment's
-// quota policy (`QUOTA_LIMITS`, which a test lowers as an operator would),
+// their hosts, counted durably on the lineage, held to the
+// quota limits (`TEST_QUOTA_LIMITS`, which a test lowers to reach them),
 // so no retry, restart, child or attempt that dies mid-step starts the
 // count afresh, and calls racing each other never pass it. Runs, the
 // engine, the dispatcher and core's database are real.
@@ -316,7 +315,6 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 50,
-          generation: lastGeneration() - 1,
         },
       },
     });
@@ -325,7 +323,7 @@ ${calling("over", 1)}
   it("refuse an attempt's calls past the limit without asking the database again, and admit no new attempt of the lineage", async () => {
     const lineage = await lineageOf();
     const result = await withQuotas({ lineageHostCalls: 2 }, async () => {
-      // Its environment as the policy is now.
+      // Its environment as the limits are now.
       const { counted, env: counting } = countingDb();
       const admission = await admitAttempt(counting, lineage, attemptOf("a"));
       const allowed = [
@@ -357,51 +355,8 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 2,
-          generation: lastGeneration() - 1,
         },
       },
-    });
-  });
-
-  it("reserve a block by the policy as it is as the block is reserved, never by an older one read just before a newer was recorded", async () => {
-    const lineage = await lineageOf();
-
-    const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
-      // The first block is reserved under the policy allowing 50; the
-      // second reads it too, but a policy allowing one call is recorded
-      // just before its write.
-      let lowered = false;
-      const arm = { armed: false };
-      const racing = {
-        ...env,
-        DB: racingDb(async () => {
-          if (arm.armed && !lowered) {
-            lowered = true;
-            await quotaPolicy({
-              ...env,
-              QUOTA_LIMITS: nextPolicy({ lineageHostCalls: 1 }),
-            });
-          }
-        }),
-      };
-      const admission = await admitAttempt(racing, lineage, attemptOf("a"));
-      const first = await outcome(admission.hostCall());
-      arm.armed = true;
-      const second = await refusalOf(admission.hostCall());
-      return { first, second, lowered };
-    });
-
-    expect(result).toStrictEqual({
-      first: "ok",
-      second: {
-        code: "workflow.lineage_limit",
-        details: {
-          limit: "hostCalls",
-          max: 1,
-          generation: lastGeneration() - 1,
-        },
-      },
-      lowered: true,
     });
   });
 
@@ -453,48 +408,6 @@ ${calling("over", 1)}
     expect(result).toStrictEqual({
       unawaited: "execution.stale_attempt",
       calls: 4,
-    });
-  });
-
-  it("admit a call by a limit an operator raised between the policy's read and the block's write, and keep admitting after it", async () => {
-    const lineage = await lineageOf();
-
-    const result = await withQuotas({ lineageHostCalls: 2 }, async () => {
-      // The third call's block reads the policy allowing two, then one
-      // allowing 50 is recorded just before its write.
-      let raised = false;
-      const arm = { armed: false };
-      const racing = {
-        ...env,
-        DB: racingDb(async () => {
-          if (arm.armed && !raised) {
-            raised = true;
-            await quotaPolicy({
-              ...env,
-              QUOTA_LIMITS: nextPolicy({ lineageHostCalls: 50 }),
-            });
-          }
-        }),
-      };
-      const admission = await admitAttempt(racing, lineage, attemptOf("a"));
-      const spent = [
-        await outcome(admission.hostCall()),
-        await outcome(admission.hostCall()),
-      ];
-      arm.armed = true;
-      const third = await outcome(admission.hostCall());
-      const later = [
-        await outcome(admission.hostCall()),
-        await outcome(admission.hostCall()),
-      ];
-      return { spent, third, later, raised };
-    });
-
-    expect(result).toStrictEqual({
-      spent: ["ok", "ok"],
-      third: "ok",
-      later: ["ok", "ok"],
-      raised: true,
     });
   });
 });

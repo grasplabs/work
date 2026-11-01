@@ -11,11 +11,6 @@ export const acmeDomain = "acme.test";
 export const clients = {
   microsoft: { id: "grasp-connect-entra", secret: "entra-connect-secret" },
   google: { id: "grasp-connect-google", secret: "google-connect-secret" },
-  /** The application landscape's own Entra app. */
-  microsoftLandscape: {
-    id: "grasp-landscape-entra",
-    secret: "entra-landscape-secret",
-  },
   /** The directory's own Entra app and Google client. */
   microsoftDirectory: {
     id: "grasp-directory-entra",

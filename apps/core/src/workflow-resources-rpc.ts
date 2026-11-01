@@ -1,10 +1,15 @@
-import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
+import type {
+  WorkflowCandidateTrace,
+  WorkflowRunTrace,
+} from "@grasp-os/shared/workflow-diagrams";
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
+  PendingWorkflowBindings,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
+  WorkflowItemTest,
   WorkflowMember,
   WorkflowParams,
   WorkflowResource,
@@ -13,15 +18,21 @@ import type {
   WorkflowResourceVersion,
   WorkflowStart,
   WorkflowVersionSource,
+  WorkflowActivity,
+  WorkflowFile,
+  WorkflowKnowledge,
 } from "@grasp-os/shared/workflow-resources";
 
 import {
   bindWorkflowToApp,
+  listAppWorkflowBindings,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
+import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { pendingWorkflowBindings } from "./workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   listWorkflowBindings,
@@ -33,9 +44,16 @@ import {
 } from "./workflow-catalog.ts";
 import {
   editWorkflowDraft,
+  editWorkflowStep,
   publishWorkflowDraft,
   workflowDraft,
 } from "./workflow-drafts.ts";
+import { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
+import {
+  workflowActivity,
+  workflowFiles,
+  workflowKnowledge,
+} from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
 import {
   createWorkflowResource,
@@ -45,6 +63,7 @@ import {
   publishWorkflowVersion,
   releaseWorkflowName,
   setWorkflowAskable,
+  setWorkflowProcess,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowAskable,
@@ -56,9 +75,11 @@ import {
 import { startWorkflow } from "./workflow-starts.ts";
 import {
   candidateRunFor,
+  candidateRunTrace,
   startCandidateRun,
   terminateCandidateRun,
 } from "./workflows/candidate-runs.ts";
+import { itemTestFor, startItemTest } from "./workflows/item-tests.ts";
 import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
 import {
   listResourceRuns,
@@ -77,11 +98,17 @@ export class WorkflowResourcesRpc
 {
   readonly #env: Env;
   readonly #check: SessionCheck;
+  readonly #lifecycle: WorkflowLifecycleRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#lifecycle = new WorkflowLifecycleRpc(env, check);
+  }
+
+  get lifecycle(): WorkflowLifecycleRpc {
+    return this.#lifecycle;
   }
 
   async create(name: string): Promise<WorkflowResource> {
@@ -124,6 +151,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await editWorkflowDraft(this.#env, person, id, input)
+    );
+  }
+
+  async editStep(id: string, input: unknown): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await editWorkflowStep(this.#env, person, id, input)
     );
   }
 
@@ -177,6 +211,13 @@ export class WorkflowResourcesRpc
     );
   }
 
+  async askableWorkflows(): Promise<{ id: string; name: string }[]> {
+    return await withPerson(this.#check, async (person) => {
+      const listed = await askableFor(this.#env, person);
+      return listed.map(({ id, name }) => ({ id, name }));
+    });
+  }
+
   async setAskable(id: string, askable: unknown): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await setWorkflowAskable(this.#env, person, id, askable);
@@ -198,6 +239,13 @@ export class WorkflowResourcesRpc
     );
   }
 
+  async setProcess(id: string, process: unknown): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await setWorkflowProcess(this.#env, person, id, process)
+    );
+  }
+
   async run(id: string, runId: string): Promise<WorkflowResourceRun> {
     return await withPerson(
       this.#check,
@@ -209,6 +257,27 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await listResourceRuns(this.#env, person, id)
+    );
+  }
+
+  async knowledge(id: string): Promise<WorkflowKnowledge[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowKnowledge(this.#env, person, id)
+    );
+  }
+
+  async files(id: string): Promise<WorkflowFile[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowFiles(this.#env, person, id)
+    );
+  }
+
+  async activity(id: string): Promise<WorkflowActivity[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowActivity(this.#env, person, id)
     );
   }
 
@@ -240,10 +309,39 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async runTrace(id: string, runId: string): Promise<WorkflowRunTrace> {
+  async candidateRunTrace(
+    id: string,
+    runId: string
+  ): Promise<WorkflowCandidateTrace> {
     return await withPerson(
       this.#check,
-      async (person) => await resourceRunTrace(this.#env, person, id, runId)
+      async (person) => await candidateRunTrace(this.#env, person, id, runId)
+    );
+  }
+
+  async startItemTest(id: string, input: unknown): Promise<WorkflowItemTest> {
+    return await withPerson(
+      this.#check,
+      async (person) => await startItemTest(this.#env, person, id, input)
+    );
+  }
+
+  async itemTest(id: string, testId: string): Promise<WorkflowItemTest> {
+    return await withPerson(
+      this.#check,
+      async (person) => await itemTestFor(this.#env, person, id, testId)
+    );
+  }
+
+  async runTrace(
+    id: string,
+    runId: string,
+    options?: unknown
+  ): Promise<WorkflowRunTrace> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await resourceRunTrace(this.#env, person, id, runId, options)
     );
   }
 
@@ -304,6 +402,13 @@ export class WorkflowResourcesRpc
     });
   }
 
+  async pendingBindings(): Promise<PendingWorkflowBindings[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await pendingWorkflowBindings(this.#env, person)
+    );
+  }
+
   async bindToApp(id: string, input: unknown): Promise<AppWorkflowBinding> {
     return await withPerson(
       this.#check,
@@ -315,6 +420,13 @@ export class WorkflowResourcesRpc
     await withPerson(this.#check, async (person) => {
       await unbindWorkflowFromApp(this.#env, person, binding);
     });
+  }
+
+  async appBindings(app: string): Promise<AppWorkflowBinding[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listAppWorkflowBindings(this.#env, person, app)
+    );
   }
 
   async catalog(): Promise<CatalogContractEntry[]> {

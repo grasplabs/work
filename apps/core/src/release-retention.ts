@@ -5,7 +5,7 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -99,7 +99,7 @@ export const releaseGraceMs = 24 * 60 * 60_000;
 
 /**
  * How old a deletion mark must be before someone else takes it over: an
- * hour, longer than any invocation of core runs (a request's or a cron's
+ * hour, longer than any invocation of core runs (a request's or a clock's
  * wall-clock limit is 15 minutes), so its owner has stopped for good.
  */
 export const markTakeoverMs = 60 * 60_000;
@@ -655,9 +655,10 @@ const deleteRelease = async (
       .returning({ appId: sdkReleaseManifests.appId }),
     db.delete(sdkResourceBindings).where(
       and(
-        // A release's own store bindings: a workflow resource's bindings
-        // (workflow-resources.ts) are never an App release's.
-        eq(sdkResourceBindings.kind, "store"),
+        // A release's own store binding and the stores it declares: a
+        // workflow resource's bindings (workflow-resources.ts) are never
+        // an App release's.
+        inArray(sdkResourceBindings.kind, ["store", "storeResource"]),
         eq(sdkResourceBindings.resourceId, key.app),
         eq(sdkResourceBindings.resourceVersion, key.version),
         gone
@@ -730,7 +731,7 @@ export const queueOrphanedReservations = async (
 };
 
 /**
- * The retention sweep (see the header), from the cron: notes which
+ * The retention sweep (see the header), from the clock: notes which
  * releases are current, deletes lapsed leases, marks releases nothing
  * keeps, unmarks those something keeps again, deletes those marked a
  * grace ago that still nothing keeps, with the bytes no other release

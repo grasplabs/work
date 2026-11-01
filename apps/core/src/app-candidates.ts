@@ -124,7 +124,6 @@ const blockedCodes: ReadonlySet<string> = new Set([
   "data.store_unavailable",
   "migration.busy",
   "migration.pending",
-  "migration.sample_busy",
   "operation.deadline_exceeded",
   "screen.build_slow",
   "version.seal_busy",

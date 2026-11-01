@@ -1,6 +1,5 @@
-// Before anything builds a schema, as in core.ts.
-import "./zod-jitless.ts";
 import { authErrors } from "@grasp-os/shared/errors";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
 
@@ -170,6 +169,8 @@ export class CoreConnection {
   #wake: (() => void) | undefined;
   /** The App frames on the connection, each told once it ends. */
   readonly #frames = new Set<(why: SessionEnded) => void>();
+  /** Told each time core refuses a call for the person's role. */
+  readonly #roleRefusals = new Set<() => void>();
 
   constructor({
     onSessionEnded,
@@ -221,7 +222,30 @@ export class CoreConnection {
     run: (session: Session) => Promise<T>,
     signal = deadline()
   ): Promise<T> {
-    return await run(await this.session(signal));
+    const session = await this.session(signal);
+    try {
+      return await run(session);
+    } catch (error) {
+      // Their role may have changed under the page (an admin made a
+      // member): whoever knows who is signed in asks core again.
+      if (roleErrors.codeOf(error) === "role.forbidden") {
+        for (const refused of this.#roleRefusals) {
+          refused();
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Tells `onRefused` each time core refuses a call `withSession` ran for
+   * the person's role. Returns what stops it listening.
+   */
+  onRoleRefused(onRefused: () => void): () => void {
+    this.#roleRefusals.add(onRefused);
+    return () => {
+      this.#roleRefusals.delete(onRefused);
+    };
   }
 
   /**
@@ -514,6 +538,102 @@ export const loadCoreStatus = async (
   } catch {
     return { connected: false, signInOptions: [] };
   }
+};
+
+/**
+ * How long what the frame read for every page (who is signed in, the
+ * sidebar's counts, the chat's models) is shown as it is before it is read
+ * again, behind the page, on the way to another one.
+ */
+export const frameReadMs = 30_000;
+
+/** What core last said of who is signed in, per connection, and when. */
+interface KnownStatus {
+  status: CoreStatus;
+  at: number;
+  /** The ask behind the page under way, if one is. */
+  asking?: Promise<void>;
+}
+
+const knownStatuses = new WeakMap<CoreConnection, KnownStatus>();
+
+/** The connections whose role refusals the shell listens for. */
+const listening = new WeakSet<CoreConnection>();
+
+/** Asks core again behind the page, keeping what it says once it answers. */
+const askAgainBehind = async (
+  core: CoreConnection,
+  known: KnownStatus
+): Promise<void> => {
+  const status = await loadCoreStatus(core);
+  if (knownStatuses.get(core) !== known) {
+    return;
+  }
+  if (!status.connected) {
+    // Core couldn't say: what it said last stands, and the next page asks.
+    known.asking = undefined;
+  } else if (status.identity === undefined) {
+    // Nobody now: the next page asks core itself, and is sent to sign in.
+    knownStatuses.delete(core);
+  } else {
+    // oxlint-disable-next-line no-use-before-define -- each starts the other, only once both exist
+    remember(core, status);
+  }
+};
+
+/** Asks core again behind the page now, unless an ask is under way. */
+const askNowBehind = (core: CoreConnection): void => {
+  const known = knownStatuses.get(core);
+  if (known !== undefined && known.asking === undefined) {
+    known.asking = askAgainBehind(core, known);
+  }
+};
+
+/**
+ * Keeps what core said of who is signed in, and asks again as soon as core
+ * refuses a call for the person's role.
+ */
+const remember = (core: CoreConnection, status: CoreStatus): void => {
+  knownStatuses.set(core, { status, at: Date.now() });
+  if (!listening.has(core)) {
+    listening.add(core);
+    core.onRoleRefused(() => {
+      askNowBehind(core);
+    });
+  }
+};
+
+/**
+ * The shell's `loadCoreStatus`, asked on every way to a page: core is
+ * asked the first time, and every time until it answered with someone
+ * signed in; from then on that answer serves at once. Core is asked again
+ * behind the page on the first way to a page once the answer is older than
+ * {@link frameReadMs}, and at once when core refuses a call for the
+ * person's role (a role lowered under the page): a changed role, team or
+ * name shows from the page opened after that answer. A tab left alone shows
+ * what it knew until one of those happens. While core is out of reach the
+ * answer still serves, and each page shows its own reads failing. A round
+ * trip on every click bought nothing a person could see: a session that
+ * ends (signed out, revoked, removed, someone else signed in) is no answer
+ * this waits for, as core closes the connection on it within seconds
+ * (`sessionRecheckMs`) and the connection, once it reconnects, ends the
+ * page (`CoreConnection`).
+ */
+export const shellStatus = async (
+  core: CoreConnection
+): Promise<CoreStatus> => {
+  const known = knownStatuses.get(core);
+  if (known === undefined) {
+    const status = await loadCoreStatus(core);
+    if (status.connected && status.identity !== undefined) {
+      remember(core, status);
+    }
+    return status;
+  }
+  if (Date.now() - known.at >= frameReadMs) {
+    askNowBehind(core);
+  }
+  return known.status;
 };
 
 /**

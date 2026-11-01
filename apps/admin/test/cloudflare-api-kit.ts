@@ -68,13 +68,19 @@ export interface AccountState {
   /** Buckets by jurisdiction: a name is unique only within one. */
   buckets: { name: string; jurisdiction: string }[];
   /**
+   * The buckets with objects in them, by name, which R2 refuses to delete
+   * (409) until a lifecycle rule has expired them.
+   */
+  fullBuckets: Set<string>;
+  /** Each bucket's lifecycle rules, by name, as the last PUT set them. */
+  lifecycles: Map<string, Json>;
+  /**
    * The jurisdiction R2 reports for every bucket, whatever it's in: a test
    * of an API that answers other than asked.
    */
   r2Reports?: string;
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
-  gateways: Json[];
   /** Its zones, each with the domains Email Sending sends from in it. */
   zones: ZoneState[];
   scripts: Map<string, ScriptState>;
@@ -83,7 +89,6 @@ export interface AccountState {
    * Workers by script name. A test adds a namespace; uploads fill it.
    */
   namespaces: Map<string, Map<string, ScriptState>>;
-  workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */
   assets: Set<string>;
   /** Assets upload sessions: each token, and the hashes still to upload. */
@@ -99,6 +104,25 @@ export interface AccountState {
   unhealthy?: number;
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
+  /**
+   * What its Workers' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
+   * The version its cores name for their connect instead of its live one
+   * (@grasp-os/shared/provision-probe), as an isolate of an old version
+   * still answering would; null as a connect that doesn't answer, or has
+   * no version metadata.
+   */
+  connectAnswering?: string | null;
+  /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
   /**
    * Where its Workers redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
@@ -120,6 +144,8 @@ export interface AccountState {
         asClient?: string;
         down?: readonly string[];
         clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
       };
   /**
    * The platform update notices its core took, signed with the key its
@@ -143,14 +169,15 @@ export interface AccountState {
    * something that isn't a snapshot.
    */
   admin?: AdminSnapshot | "absent" | "ended" | "garbled";
+  /** True for a core that answers the AI status request with a redirect elsewhere. */
+  aiRedirect?: boolean;
   /**
-   * `absent` for a core from before the quota policy report, which answers
-   * it 404. Otherwise its core answers the policy it applies, as core does:
-   * the highest generation any of its versions went live with, with the
-   * limits it first went live with. `redirect` for one that answers
-   * with a redirect elsewhere.
+   * What its core answers the admin's signed AI status request with
+   * (@grasp-os/shared/ai-status-report): no provider connected unless set.
+   * As JSON, so a core on an earlier release, which answers an older shape
+   * (`AiStatusReport` as it was then), can be played too.
    */
-  quotaPolicy?: "absent" | "redirect";
+  ai?: unknown;
   /**
    * What its core does once a snapshot request arrives, before answering
    * it: waits, as a slow or hanging one does, or throws, as a dropped
@@ -177,18 +204,6 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
-  /**
-   * What the analytics API reports for it (`/graphql`): its Workers'
-   * requests and CPU time this month, its AI Gateway's spend, and its
-   * requests and errors over the last day. Unset, it reports nothing.
-   */
-  usage?: {
-    monthRequests: number;
-    monthCpuTimeUs: number;
-    monthAiCost: number;
-    dayRequests: number;
-    dayErrors: number;
-  };
 }
 
 /** A call the fake got. */

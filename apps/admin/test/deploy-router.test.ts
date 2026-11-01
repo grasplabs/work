@@ -100,6 +100,9 @@ const hostsWith = (readBack?: string): RouterHosts & { writes: number } => {
       hosts.writes += 1;
       await kv.put(key, value);
     },
+    delete: async (key: string) => {
+      await kv.delete(key);
+    },
   };
   return hosts;
 };

@@ -46,6 +46,37 @@ export const readOrganization = async (env: Env): Promise<Organization> => {
 };
 
 /**
+ * When the company's day that `now` falls on began: the last midnight in
+ * its time zone at or before `now`, in milliseconds since the epoch, and
+ * the zone it was read in. Read in UTC should the stored zone no longer
+ * be one the runtime knows.
+ */
+export const startOfCompanyDay = async (
+  env: Env,
+  now: number = Date.now()
+): Promise<{ start: number; timeZone: string }> => {
+  const { timeZone: stored } = await readOrganization(env);
+  const midnight = { cron: "0 0 * * *" };
+  // A day is at most 25 hours long, across a change of the clocks.
+  const earliest = new Date(now - 26 * 60 * 60 * 1000);
+  const known =
+    nextScheduledRun({ ...midnight, timeZone: stored }, earliest) !== undefined;
+  const timeZone = known ? stored : defaultTimeZone;
+  let start = nextScheduledRun({ ...midnight, timeZone }, earliest);
+  if (start === undefined) {
+    throw new Error("Midnight always comes");
+  }
+  for (
+    let next = nextScheduledRun({ ...midnight, timeZone }, start);
+    next !== undefined && next.getTime() <= now;
+    next = nextScheduledRun({ ...midnight, timeZone }, next)
+  ) {
+    start = next;
+  }
+  return { start: start.getTime(), timeZone };
+};
+
+/**
  * When the company's day that `now` falls on ends: the next midnight in
  * its time zone, in milliseconds since the epoch. Read in UTC should the
  * stored zone no longer be one the runtime knows.

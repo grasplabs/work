@@ -1,10 +1,6 @@
 import { auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
-import {
-  createExecutionContext,
-  createScheduledController,
-} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { z } from "zod";
@@ -12,10 +8,10 @@ import type { z } from "zod";
 import { auditLog } from "../src/audit-log.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
-import worker from "../src/index.ts";
 import { published, verifiedCandidate } from "./apps.ts";
 import { allEvents, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks, runQuarterHourTasks } from "./maintenance.ts";
 import { outcome, refusal, signedInApi, unique } from "./sign-in.ts";
 
 // Improvement signals from runs, decisions and the audit log, computed
@@ -129,15 +125,6 @@ const racingWhen = (
         : value;
     },
   });
-};
-
-/** Runs core's cron trigger `schedule`, as Cloudflare does. */
-const cron = async (schedule: string): Promise<void> => {
-  await worker.scheduled(
-    createScheduledController({ cron: schedule }),
-    env,
-    createExecutionContext()
-  );
 };
 
 /** A claim of `day`'s computation, started `ago` before `day`, unfinished. */
@@ -983,7 +970,7 @@ describe("improvement signals", () => {
 
   it("leave a day alone while another computation's claim on it is recent", async () => {
     const now = nextDay();
-    // Claimed 16 minutes ago: longer than between cron runs, within the lease.
+    // Claimed 16 minutes ago: longer than between clock runs, within the lease.
     await env.DB.prepare(
       "INSERT INTO improvement_signal_computations (id, day, started_at) VALUES (?, ?, ?)"
     )
@@ -999,7 +986,7 @@ describe("improvement signals", () => {
     await expect(computationsOf(now)).resolves.toBe(0);
   });
 
-  it("are computed once when two cron runs claim the same day at once", async () => {
+  it("are computed once when two clock runs claim the same day at once", async () => {
     const now = nextDay();
 
     await Promise.all([
@@ -1116,12 +1103,12 @@ describe("improvement signals", () => {
     }).toStrictEqual({ computed: 0, claims: { earlier: 0, now: 3 } });
   });
 
-  it("are computed on the 15-minute cron trigger, not the every-minute one", async () => {
+  it("are computed by the clock's quarter-hour tasks, not its every-minute ones", async () => {
     const today = new Date();
 
-    await cron("* * * * *");
+    await runMinuteTasks();
     const everyMinute = await computationsOf(today);
-    await cron("*/15 * * * *");
+    await runQuarterHourTasks();
 
     expect({ everyMinute, signals: await computationsOf(today) }).toStrictEqual(
       {

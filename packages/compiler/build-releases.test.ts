@@ -39,6 +39,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.source,
         compilerAssets.kit,
         compilerAssets.kitModules,
+        compilerAssets.kitPreviewModules,
         compilerAssets.workflowSdkModules,
         compilerAssets.serverSdkModules,
         compilerAssets.packageBuilder,

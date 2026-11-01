@@ -5,16 +5,20 @@ import * as React from "react";
 function Avatar({
   className,
   size = "default",
+  shape = "circle",
   ...props
 }: AvatarPrimitive.Root.Props & {
   size?: "default" | "xs" | "sm" | "lg";
+  /** `square`, a rounded square: the signed-in person's own, in the sidebar's foot. */
+  shape?: "circle" | "square";
 }) {
   return (
     <AvatarPrimitive.Root
       data-slot="avatar"
       data-size={size}
+      data-shape={shape}
       className={cn(
-        "group/avatar after:border-border relative flex size-8 shrink-0 rounded-full select-none after:absolute after:inset-0 after:rounded-full after:border after:mix-blend-darken data-[size=lg]:size-10 data-[size=sm]:size-6 data-[size=xs]:size-4 dark:after:mix-blend-lighten",
+        "group/avatar after:border-border relative flex size-8 shrink-0 rounded-full select-none after:absolute after:inset-0 after:rounded-full after:border after:mix-blend-darken data-[shape=square]:rounded-lg data-[shape=square]:after:rounded-lg data-[size=lg]:size-10 data-[size=sm]:size-6 data-[size=xs]:size-4 dark:after:mix-blend-lighten",
         className
       )}
       {...props}
@@ -24,10 +28,13 @@ function Avatar({
 
 function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
   return (
+    // The portrait fades in as it arrives, on its opacity alone, instead of
+    // popping in. A page that has portraits gives the fallback a `delay`, so
+    // the initials stand in only when the portrait is slow.
     <AvatarPrimitive.Image
       data-slot="avatar-image"
       className={cn(
-        "aspect-square size-full rounded-full object-cover",
+        "aspect-square size-full rounded-full object-cover transition-opacity duration-150 group-data-[shape=square]/avatar:rounded-lg data-starting-style:opacity-0 motion-reduce:transition-none",
         className
       )}
       {...props}
@@ -43,7 +50,7 @@ function AvatarFallback({
     <AvatarPrimitive.Fallback
       data-slot="avatar-fallback"
       className={cn(
-        "bg-muted text-muted-foreground flex size-full items-center justify-center rounded-full text-sm group-data-[size=sm]/avatar:text-xs group-data-[size=xs]/avatar:text-[0.5rem]",
+        "bg-muted text-muted-foreground flex size-full items-center justify-center rounded-full text-sm group-data-[shape=square]/avatar:rounded-lg group-data-[size=sm]/avatar:text-xs group-data-[size=xs]/avatar:text-[0.5rem]",
         className
       )}
       {...props}

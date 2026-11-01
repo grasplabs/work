@@ -10,13 +10,15 @@ import { ArrowLeftIcon } from "lucide-react";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { InterviewActions } from "../onboarding/interview-actions.tsx";
 import { SettingsError } from "../settings/settings-parts.tsx";
 
 // One interview, as Grasp's staff see it (GRA-329): where it stands, who
 // held it and on which version of their text, and its numbers. Never a
 // word of it: nobody at Grasp reads what anyone said, so core sends none.
 // Opening it is in the audit log first (core's staff-rpc.ts), by the
-// interview's own id, without the person.
+// interview's own id, without the person. Below it, what staff do to help
+// them in (onboarding/interview-actions.tsx).
 
 /** How many characters of a text's mark name it: as a commit's short hash does. */
 const shortMark = 12;
@@ -135,7 +137,10 @@ const Interview = () => {
         </Button>
       </div>
       {loaded.state === "ready" ? (
-        <Reader read={loaded.data} />
+        <>
+          <Reader read={loaded.data} />
+          <InterviewActions read={loaded.data} />
+        </>
       ) : (
         <div className="bg-card overflow-hidden rounded-xl border">
           <NotLoadedState heading="h2" page={loaded} />

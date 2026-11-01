@@ -8,12 +8,13 @@ import { z } from "zod";
 import { runEngine } from "./engine.ts";
 import { acceptedEventData, pinnedEventDataOf } from "./event-contracts.ts";
 import {
+  attributesOf,
   contentType,
   eventTypeKey,
   storedEventSchema,
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import { callingRunOf, requireCallAuthority } from "./resource-authority.ts";
 import { runOf } from "./resource-runs.ts";
 
@@ -71,18 +72,6 @@ import { runOf } from "./resource-runs.ts";
 //   forgets the events nothing had taken (@grasp-os/workerflow,
 //   `forgetIn`), and a delivery of one sent again after that is admitted
 //   anew, as the event the restart forgot.
-
-/**
- * The attributes a listen's filter may match an event by, as the engine
- * keeps them beside it: every attribute of its envelope but its type
- * (which `eventTypeKey` keeps), its data and its time.
- */
-const attributesOf = (stored: StoredEvent): Record<string, string> => ({
-  id: stored.id,
-  source: stored.source,
-  datacontenttype: stored.datacontenttype,
-  ...(stored.subject === undefined ? {} : { subject: stored.subject }),
-});
 
 /** Text on one line: no control characters. */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
@@ -260,8 +249,7 @@ export const admitRunEvent = async (
   // A run its lineage's age has passed can take no more steps: an event
   // it would never take isn't accepted. An independent run is its
   // lineage's root.
-  const policy = await quotaPolicy(env);
-  if (Date.now() - row.createdAt.getTime() >= policy.limits.workflowAgeMs) {
+  if (Date.now() - row.createdAt.getTime() >= quotaLimits(env).workflowAgeMs) {
     throw workflowResourceErrors.create("workflow.event_refused");
   }
   const id = await eventIdOf(event);

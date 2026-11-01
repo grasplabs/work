@@ -24,9 +24,10 @@ import {
 } from "../src/knowledge/uploads.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, storedVersionTexts } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
+import { connectWithoutGraspKeys } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -48,9 +49,6 @@ import {
 // ever downloaded as an attachment, by those who may read its document.
 
 const idp = mockIdp();
-
-/** The one model the tests' gateway allows (vite.config.ts). */
-const testModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** A test file, from the fixtures the test assets serve. */
 const fixture = async (name: string): Promise<Uint8Array> => {
@@ -308,21 +306,18 @@ const wordFile = (document: string, styles: string): Uint8Array => {
 // Vitest's default five seconds on a loaded runner. Sixty fits the
 // longest, with room for signing in.
 describe("uploads", { timeout: 60_000 }, () => {
-  // Every test here runs as a deployment whose config keeps everything in
-  // the EU, so each file is extracted in the sandbox, whatever its
-  // collection. Which extractor a file gets is upload-routing.test.ts's.
-  let gatewayBefore: unknown;
+  // Every test here runs as a deployment where connect holds no key of
+  // Grasp's (as on-prem), so each file is extracted in the sandbox,
+  // whatever its collection. Which extractor a file gets is
+  // upload-routing.test.ts's.
+  let connectBefore: Env["CONNECT"];
   beforeAll(() => {
-    gatewayBefore = env.MODEL_GATEWAY;
-    env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [testModel],
-      eu: { models: [testModel], deployment: true },
-    };
+    connectBefore = env.CONNECT;
+    env.CONNECT = connectWithoutGraspKeys(connectBefore);
   });
 
   afterAll(() => {
-    env.MODEL_GATEWAY = gatewayBefore;
+    env.CONNECT = connectBefore;
   });
 
   it("make a PDF, a Word file and a workbook searchable by section", async () => {
@@ -451,7 +446,7 @@ describe("uploads", { timeout: 60_000 }, () => {
     const earlier = await leftPending(person, "travel-policy.docx", {
       name: "Policy.docx",
     });
-    await runCron();
+    await runMinuteTasks();
     const ended_ = await ended(person.api, earlier);
     const document = await person.api.knowledge.getDocument(
       later.documentId ?? ""
@@ -762,11 +757,11 @@ export default class extends WorkerEntrypoint {
 }
 `;
     const load = env.LOADER.load.bind(env.LOADER);
-    const loading = vi
-      .spyOn(env.LOADER, "load")
-      .mockImplementation((code) =>
-        load({ ...code, modules: { "extractor.js": takenOver } })
-      );
+    const loading = vi.spyOn(env.LOADER, "load").mockImplementation((code) =>
+      // The extractor's own module taken over; the quiet Loader's wrapper
+      // around it kept, as core loads it.
+      load({ ...code, modules: { ...code.modules, "extractor.js": takenOver } })
+    );
     let markdown: string;
     try {
       ({ markdown } = await localExtractor(env)({
@@ -860,7 +855,7 @@ export default class extends WorkerEntrypoint {
       ]);
     });
     await failUpload({ ...env, DB: core }, id, "internal.unexpected");
-    await runCron();
+    await runMinuteTasks();
     const cleanups = await env.DB.prepare(
       "SELECT count(*) AS n FROM upload_cleanups WHERE upload_id = ?"
     )
@@ -920,13 +915,13 @@ export default class extends WorkerEntrypoint {
       bytes: await fixture("offices.xlsx"),
     });
     const storedAtFirst = await originalStored(person.collectionId, again.id);
-    // Once nothing can still be storing it, the cron trigger deletes it.
+    // Once nothing can still be storing it, the clock deletes it.
     await env.DB.prepare(
       "UPDATE upload_cleanups SET created_at = 0 WHERE upload_id = ?"
     )
       .bind(again.id)
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       upload: await outcome(person.api.uploads.get(again.id)),
@@ -1036,7 +1031,7 @@ export default class extends WorkerEntrypoint {
       name: "open.docx",
       staff: true,
     });
-    await runCron();
+    await runMinuteTasks();
     await settled(whileOpen);
     const afterClosing = await leftPending(staff, "travel-policy.docx", {
       name: "closed.docx",
@@ -1053,7 +1048,7 @@ export default class extends WorkerEntrypoint {
       },
     };
     try {
-      await runCron();
+      await runMinuteTasks();
       await settled(afterClosing);
     } finally {
       env.SIGN_IN = before;
@@ -1085,7 +1080,7 @@ export default class extends WorkerEntrypoint {
     await env.DB.prepare("DELETE FROM team_members WHERE user_id = ?")
       .bind(member.userId)
       .run();
-    await runCron();
+    await runMinuteTasks();
     const { documents } = await admin.api.knowledge.listDocuments(collectionId);
 
     await expect(ended(member.api, id)).resolves.toMatchObject({
@@ -1345,7 +1340,7 @@ export default class extends WorkerEntrypoint {
   it("start the run of an upload that core stopped before starting it", async () => {
     const person = await personWithCollection();
     const id = await leftPending(person, "travel-policy.docx");
-    await runCron();
+    await runMinuteTasks();
 
     await expect(ended(person.api, id)).resolves.toMatchObject({
       status: "ready",
@@ -1369,7 +1364,7 @@ export default class extends WorkerEntrypoint {
     await env.DB.prepare("UPDATE uploads SET id = ? WHERE id = ?")
       .bind(id, `${id}-moved`)
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     await expect(person.api.uploads.get(id)).resolves.toMatchObject({
       status: "failed",

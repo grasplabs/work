@@ -9,11 +9,11 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection, storedGrant } from "./knowledge.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -65,7 +65,7 @@ interface Made {
  * the replies `script` makes for them.
  */
 const setUp = async (
-  script: (made: Made) => GatewayReply[],
+  script: (made: Made) => ProviderReply[],
   personRole?: "user"
 ) => {
   const admin = await signedInApi(idp, "admin");

@@ -7,28 +7,29 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
 import { messagesAnHourOf } from "../src/person-limits.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // The limits a company's admins set per person (D8): reserved against by
 // the model ledger as one more scope beside Grasp's budgets, never above
 // them, and read by the chat door for its messages an hour. Admins set
 // them over `/rpc`; model calls go through the real gateway and ledger,
-// with AI Gateway as the outside system, a fake behind the AI binding.
+// with the model provider behind connect as the outside system
+// (test/model-provider.ts).
 // Each test has a ledger of its own, so no limit it sets reaches another
 // file's calls.
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 
-/** Costs $0.029526 from Llama 3.3, at its list prices. */
-const dearAnswer = { text: "Hi.", inputTokens: 100_000, outputTokens: 100 };
+/** Costs $0.02515 from Mistral Large, at its list prices. */
+const dearAnswer = { text: "Hi.", inputTokens: 50_000, outputTokens: 100 };
 
 let monthsUsed = 0;
 
@@ -39,17 +40,23 @@ const newMonth = (): string => {
 };
 
 /**
- * Core's env with Grasp's `budgets`, a fake gateway answering `replies`
- * dear answers, and a model ledger of its own.
+ * Core's env with Grasp's `budgets` and a model ledger of its own; with
+ * `replies`, a provider answering that many dear answers.
  */
-const deploymentWith = (budgets: Record<string, unknown>, replies = 0) => {
+const deploymentWith = async (
+  budgets: Record<string, unknown>,
+  replies = 0
+) => {
   const ledger = crypto.randomUUID();
-  const fake = fakeGateway(
-    ...Array.from({ length: replies }, () => dearAnswer)
-  );
+  if (replies > 0) {
+    await fakeProviderFor(
+      [mistral],
+      ...Array.from({ length: replies }, () => dearAnswer)
+    );
+  }
   const coreEnv: Env = {
     ...env,
-    MODEL_GATEWAY: { gateway: "grasp-os-test", models: [workersAi], budgets },
+    MODEL_GATEWAY: { budgets },
     MODEL_BUDGET_MONTH: newMonth(),
     MODEL_LEDGER: new Proxy(env.MODEL_LEDGER, {
       get: (namespace, name): unknown =>
@@ -58,8 +65,7 @@ const deploymentWith = (budgets: Record<string, unknown>, replies = 0) => {
           : Reflect.get(namespace, name, namespace),
     }),
   };
-  const modelsEnv: ModelsEnv = { ...coreEnv, AI: fake.binding };
-  return { coreEnv, ledger, call: models(modelsEnv).call };
+  return { coreEnv, ledger, call: models(coreEnv).call };
 };
 
 /** An admin's `ModelsApi` on `coreEnv`, and their user ID. */
@@ -69,13 +75,13 @@ const adminOn = async (coreEnv: Env) => {
   return { ...admin, models: core.authenticate().models };
 };
 
-/** A capped call to Llama made by `userId` in an App of theirs. */
+/** A capped call to Mistral Large made by `userId` in an App of theirs. */
 const helloBy = async (userId: string) => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Person limits" });
   const appId = appIdSchema.parse(id);
   return (): ModelCall<undefined> => ({
-    model: workersAi,
+    model: mistral,
     maxTokens: 100,
     input: "Hello.",
     purpose: "chat.turn",
@@ -134,7 +140,7 @@ const person = (userId: string): PersonLimitSubject => ({
 
 describe("person limits", { timeout: 60_000 }, () => {
   it("hold a person to the monthly limit an admin set for them, and no one else", async () => {
-    const { coreEnv, call } = deploymentWith({ user: { limit: 1 } }, 5);
+    const { coreEnv, call } = await deploymentWith({ user: { limit: 1 } }, 5);
     const { models: admin } = await adminOn(coreEnv);
     const ada = await signedInApi(idp, "user");
     const bea = await signedInApi(idp, "user");
@@ -144,7 +150,7 @@ describe("person limits", { timeout: 60_000 }, () => {
       monthly: 0.05,
       messagesAnHour: null,
     });
-    // $0.0295 a call: the second takes Ada past $0.05.
+    // $0.02515 a call: the second takes Ada past $0.05.
     const outcomes = await inTurn(3, async () => await call(adas()));
     const told = await toldBy(call(adas()));
     const bes = await outcome(call(beas()));
@@ -183,13 +189,13 @@ describe("person limits", { timeout: 60_000 }, () => {
       ada: {
         from: "person",
         limit: { monthly: 0.05, messagesAnHour: null },
-        spent: (29_526 * 2) / 1_000_000,
+        spent: (25_150 * 2) / 1_000_000,
       },
     });
   });
 
   it("list each exception by its person's name, past the hundred a query can bind", async () => {
-    const { coreEnv } = deploymentWith({ user: { limit: 1 } });
+    const { coreEnv } = await deploymentWith({ user: { limit: 1 } });
     const { models: admin } = await adminOn(coreEnv);
     const people = await Promise.all(
       Array.from(
@@ -216,7 +222,7 @@ describe("person limits", { timeout: 60_000 }, () => {
   });
 
   it("never lift a person above Grasp's budgets: a limit above one is refused, and none leaves Grasp's in charge", async () => {
-    const { coreEnv, call } = deploymentWith(
+    const { coreEnv, call } = await deploymentWith(
       { user: { limit: 0.05 }, deployment: { limit: 10 } },
       3
     );
@@ -246,9 +252,10 @@ describe("person limits", { timeout: 60_000 }, () => {
       messagesAnHour: null,
     });
     const outcomes = await inTurn(3, async () => await call(adas()));
-    const deploymentOnly = await adminOn(
-      deploymentWith({ deployment: { limit: 0.5 } }).coreEnv
-    );
+    const { coreEnv: deploymentOnlyEnv } = await deploymentWith({
+      deployment: { limit: 0.5 },
+    });
+    const deploymentOnly = await adminOn(deploymentOnlyEnv);
 
     expect({
       above,
@@ -276,7 +283,7 @@ describe("person limits", { timeout: 60_000 }, () => {
   });
 
   it("give the chat door each person's messages an hour: their own, else their teams' most, else the default", async () => {
-    const { coreEnv } = deploymentWith({});
+    const { coreEnv } = await deploymentWith({});
     const { models: admin, session } = await adminOn(coreEnv);
     const [ada, bea, cem, dov] = await Promise.all([
       signedInApi(idp, "user"),
@@ -363,7 +370,7 @@ describe("person limits", { timeout: 60_000 }, () => {
   });
 
   it("audit every change in the admin's name, with what it replaced, and let only admins make one", async () => {
-    const { coreEnv, ledger } = deploymentWith({ user: { limit: 5 } });
+    const { coreEnv, ledger } = await deploymentWith({ user: { limit: 5 } });
     const { models: admin, userId: adminId } = await adminOn(coreEnv);
     const ada = await signedInApi(idp, "user");
     const builder = await signedInApi(idp, "builder");

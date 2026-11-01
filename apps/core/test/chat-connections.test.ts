@@ -379,7 +379,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const mine = await personalMail(person.userId);
     const shared = await mailConnection([], mailWithSearch);
-    // First: objects may share the env a gateway is pointed in.
+    // First: someone else's chats, before this person's provider answers.
     const theirs = await personalChatsOf(someone.userId);
     const theirChat = await theirs.newChat();
     const chats = await personalChatsOf(

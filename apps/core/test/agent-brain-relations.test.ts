@@ -4,6 +4,7 @@ import type { IndexStep } from "@grasp-os/brain/indexing";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { withheldResult } from "../src/agent.ts";
 import { portsOf } from "../src/knowledge/ports.ts";
 import {
   codeResults,
@@ -41,7 +42,7 @@ const linkedHandbook = async (
   text: string,
   answer: unknown,
   teams?: string[]
-): Promise<string> => {
+): Promise<{ collectionId: string; documentId: string }> => {
   const { id: collectionId } = await admin.api.knowledge.createCollection({
     name: `Handbook ${unique()}`,
     ...(teams === undefined
@@ -59,19 +60,19 @@ const linkedHandbook = async (
     extractEntities: async () => await Promise.resolve(answer),
   });
   await runLinking(brain, { source: `doc:${saved.id}`, version: 1 }, once);
-  return collectionId;
+  return { collectionId, documentId: saved.id };
 };
 
 /** A chat's code that lists `query`'s entities and reads the first's relations. */
 const readRelations = (query: string) =>
   codeStep(
-    `export default async (self, env) => { try { const [found] = await env.brain.entities({ query: ${JSON.stringify(query)} }); return await env.brain.relations({ entityId: found.id }); } catch (error) { return error.message; } };`
+    `export default async (self, env) => { try { const { entities: [found] } = await env.brain.entities({ query: ${JSON.stringify(query)} }); return await env.brain.relations({ entityId: found.id }); } catch (error) { return error.message; } };`
   );
 
 /** A chat's code that explains how `query`'s first entity connects, as names. */
 const explainRelations = (query: string) =>
   codeStep(
-    `export default async (self, env) => { const [found] = await env.brain.entities({ query: ${JSON.stringify(query)} }); const { paths, truncated } = await env.brain.relationsExplain({ entityId: found.id }); return { paths: paths.map(({ relations, to }) => [...relations.map(({ evidence }) => evidence), to.name]), truncated }; };`
+    `export default async (self, env) => { const { entities: [found] } = await env.brain.entities({ query: ${JSON.stringify(query)} }); const { paths, truncated } = await env.brain.relationsExplain({ entityId: found.id }); return { paths: paths.map(({ relations, to }) => [...relations.map(({ evidence }) => evidence), to.name]), truncated }; };`
   );
 
 /** A chat's code that lists every entity, naming no start. */
@@ -79,27 +80,37 @@ const listEverything = codeStep(
   "export default async (self, env) => { try { return await env.brain.entities({}); } catch (error) { return error.code ?? error.message; } };"
 );
 
+/** A chat's code that returns what `read` answers, or its refusal. */
+const reading = (read: string) =>
+  codeStep(
+    `export default async (self, env) => { try { return await ${read}; } catch (error) { return error.code ?? error.message; } };`
+  );
+
 describe("a chat's entity and relation reads", setUpTime, () => {
   it("read what the chat's sources say, each with its passage, once the agent holds the brain permission", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const thing = `Onboarding ${unique()}`;
     const said = `Anna owns ${thing} from 2026-10-01.`;
-    const collectionId = await linkedHandbook(admin, `# Owners\n${said}\n`, {
-      entities: [
-        { kind: "person", name: "Anna" },
-        { kind: "process", name: thing },
-      ],
-      relations: [
-        {
-          subject: "Anna",
-          predicate: "owns",
-          object: thing,
-          validFrom: "2026-10-01",
-          evidence: said,
-        },
-      ],
-    });
+    const { collectionId } = await linkedHandbook(
+      admin,
+      `# Owners\n${said}\n`,
+      {
+        entities: [
+          { kind: "person", name: "Anna" },
+          { kind: "process", name: thing },
+        ],
+        relations: [
+          {
+            subject: "Anna",
+            predicate: "owns",
+            object: thing,
+            validFrom: "2026-10-01",
+            evidence: said,
+          },
+        ],
+      }
+    );
     const { stub, agent, newChat } = await personalChatsOf(
       person.userId,
       readRelations(thing),
@@ -173,7 +184,7 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     const thing = `Onboarding ${unique()}`;
     const owns = `Anna owns ${thing}.`;
     const uses = `${thing} uses Personio.`;
-    const collectionId = await linkedHandbook(admin, `${owns}\n${uses}\n`, {
+    const { collectionId } = await linkedHandbook(admin, `${owns}\n${uses}\n`, {
       entities: [
         { kind: "person", name: "Anna" },
         { kind: "process", name: thing },
@@ -256,6 +267,95 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       admin: [["Bram", said]],
       member: [],
       memberSees: [],
+    });
+  });
+
+  it("withhold what each read handed over from every later request once a document it cites is gone, though its collection may still be read", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const thing = `Onboarding ${unique()}`;
+    const said = `Anna owns ${thing}.`;
+    const { collectionId, documentId } = await linkedHandbook(admin, said, {
+      entities: [
+        { kind: "person", name: "Anna" },
+        { kind: "process", name: thing },
+      ],
+      relations: [
+        { subject: "Anna", predicate: "owns", object: thing, evidence: said },
+      ],
+    });
+    const [found] = await admin.api.knowledge.entities({ query: thing });
+    const entityId = found?.id ?? "-";
+    const { stub, provider, agent, newChat } = await personalChatsOf(
+      person.userId,
+      reading(`env.brain.entities({ query: ${JSON.stringify(thing)} })`),
+      says("Noted."),
+      reading(
+        `env.brain.entitySources({ entityId: ${JSON.stringify(entityId)} })`
+      ),
+      says("Noted."),
+      reading(`env.brain.relations({ entityId: ${JSON.stringify(entityId)} })`),
+      says("Noted."),
+      reading(
+        `env.brain.relationsExplain({ entityId: ${JSON.stringify(entityId)} })`
+      ),
+      says("Noted."),
+      says("Still."),
+      says("Gone."),
+      says("Gone."),
+      says("Gone."),
+      says("Gone.")
+    );
+    await requestGranted(idp, admin, readCollection(agent, collectionId));
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const entities = await newChat();
+    await entities.ask("Go.");
+    const sources = await newChat();
+    await sources.ask("Go.");
+    const relations = await newChat();
+    await relations.ask("Go.");
+    const explained = await newChat();
+    await explained.ask("Go.");
+    /** Whether the next turn of `chat` still sent `handed`. */
+    const nextTurn = async (chat: typeof entities, handed: string) => {
+      const before = provider.requests.length;
+      await chat.ask("And now?");
+      const body = JSON.stringify(provider.requests[before]?.body);
+      return {
+        handed: body.includes(handed),
+        withheld: body.includes(withheldResult),
+      };
+    };
+    const answered = await codeResults(stub, relations.chat.id);
+    const read = answered.some(({ text }) => text.includes(said));
+    const kept = await nextTurn(relations, said);
+    // Erased from the Brain, as a purge erases it: its collection stays,
+    // and the agent may still read it.
+    await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+      .bind(documentId)
+      .run();
+
+    expect({
+      read,
+      kept,
+      entities: await nextTurn(entities, entityId),
+      sources: await nextTurn(sources, documentId),
+      relations: await nextTurn(relations, said),
+      explained: await nextTurn(explained, said),
+    }).toStrictEqual({
+      read: true,
+      // Still readable: the next turn sends what the read handed over.
+      kept: { handed: true, withheld: false },
+      // Each read pinned the document version it cites: gone, withheld.
+      entities: { handed: false, withheld: true },
+      sources: { handed: false, withheld: true },
+      relations: { handed: false, withheld: true },
+      explained: { handed: false, withheld: true },
     });
   });
 });

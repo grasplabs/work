@@ -9,6 +9,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
 import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
@@ -132,7 +136,7 @@ const Section = ({
   children: ReactNode;
 }) => (
   <section aria-label={title}>
-    <h2 className="bg-row-group flex h-14 items-center border-b px-5 font-medium">
+    <h2 className="bg-row-group text-row-group-foreground flex h-14 items-center border-b px-5 font-medium">
       {title}
     </h2>
     {children}
@@ -449,6 +453,69 @@ const HeldItem = ({
 };
 
 /**
+ * A start of a workflow a chat's agent asked for: confirming starts it,
+ * as the agent acting for the person, with exactly the input shown, which
+ * is all shown before either button.
+ */
+const HeldStartItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "heldStart" }>;
+}) => {
+  const { t } = useLingui();
+  const { start } = source;
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const name = start.workflowName;
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`Start`,
+          name: t`Start ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.confirm(start.id, start.inputHash);
+              },
+              t`Started: ${name}.`
+            );
+          },
+        },
+        {
+          label: t`Decline`,
+          name: t`Decline starting ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.decline(start.id);
+              },
+              t`Declined: ${name}.`
+            );
+          },
+        },
+      ]}
+      busy={busy}
+      extra={
+        <div className="flex flex-col gap-2">
+          <h3 className="font-medium">
+            <Trans>What it starts with</Trans>
+          </h3>
+          <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
+            <code className="font-mono">
+              {JSON.stringify(start.input, null, 2)}
+            </code>
+          </pre>
+        </div>
+      }
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
+/**
  * A change whose answer was lost: "It happened" or "It didn't happen", each
  * asked once more, as on the dashboard's pile (`outcome-card.tsx`). Saying
  * it didn't happen lets it go out again, so it waits while part of what was
@@ -718,6 +785,204 @@ const FailedItem = ({
   );
 };
 
+/**
+ * A version of a workflow asked to go live: approved or sent back here,
+ * through the workflow's lifecycle, which checks again that the person
+ * may and that it is still the version waiting.
+ */
+const WorkflowGoLiveDetail = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "workflowGoLive" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { item } = source;
+  const { busy, failure, run } = useCoreAction();
+  const who = frame.item.context;
+  const { version } = item;
+  // Read again once it is decided. A refused decision stays, with why.
+  const decide = async (
+    verdict: "approve" | "reject",
+    said: string
+  ): Promise<void> => {
+    await run(async (session) => {
+      await session.workflowResources.lifecycle.decideGoLive(item.workflow.id, {
+        version,
+        verdict,
+        revision: item.revision,
+      });
+      frame.onSaid(said);
+      await router.invalidate({ sync: true });
+    });
+  };
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`Approve`,
+          name: t`Let version ${version} of ${who} go live`,
+          onPress: async () => {
+            await decide("approve", t`Live: ${who}, version ${version}.`);
+          },
+        },
+        {
+          label: t`Send back`,
+          name: t`Send version ${version} of ${who} back`,
+          onPress: async () => {
+            await decide("reject", t`Sent back: ${who}, version ${version}.`);
+          },
+        },
+      ]}
+      busy={busy}
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
+type PendingBinding = Extract<
+  InboxSource,
+  { type: "bindings" }
+>["item"]["pending"]["bindings"][number];
+
+/**
+ * One binding that waits: what it reaches, and, where core offers targets
+ * that would serve it, the choice of one and Approve; otherwise where it is
+ * approved instead.
+ */
+const BindingRow = ({
+  binding,
+  onApprove,
+  busy,
+}: {
+  binding: PendingBinding;
+  onApprove: (target: PendingBinding["offered"][number]) => Promise<void>;
+  busy: boolean;
+}) => {
+  const { t } = useLingui();
+  const id = useId();
+  const [chosen, setChosen] = useState(0);
+  const { alias, kind, contractId, offered } = binding;
+  const choice = offered[chosen];
+  // What an offered target is, in words: what it names, or what it is.
+  const wordsOf = ({ target, label }: PendingBinding["offered"][number]) => {
+    if (target.kind === "event") {
+      return t`The events its contract admits`;
+    }
+    if (target.kind === "files") {
+      return t`The run's own files`;
+    }
+    return label === "" ? target.kind : label;
+  };
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border px-4 py-3">
+      <span className="flex flex-wrap items-center gap-2">
+        <code className="font-mono">{alias}</code>
+        <span className="text-muted-foreground">
+          {t`${kind}: ${contractId}`}
+        </span>
+      </span>
+      {choice === undefined ? (
+        <p className="text-muted-foreground">
+          {t`Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page.`}
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          {offered.length === 1 ? (
+            <span>{wordsOf(choice)}</span>
+          ) : (
+            <NativeSelect
+              aria-label={t`What ${alias} reaches`}
+              id={id}
+              onChange={(event) => {
+                setChosen(Number(event.target.value));
+              }}
+              value={String(chosen)}
+            >
+              {offered.map((each, at) => (
+                <NativeSelectOption
+                  key={JSON.stringify(each.target)}
+                  value={String(at)}
+                >
+                  {wordsOf(each)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+          <Button
+            aria-label={t`Approve ${alias}`}
+            disabled={busy}
+            onClick={() => {
+              void onApprove(choice);
+            }}
+            size="sm"
+          >
+            <Trans>Approve</Trans>
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+};
+
+/**
+ * A version of a workflow whose bindings no admin approved: each approved
+ * here for the version shown, through the workflow's own approval, which
+ * checks again that the person is an admin and that the target serves.
+ */
+const BindingsDetail = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "bindings" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { workflow, version, bindings } = source.item.pending;
+  const { busy, failure, run } = useCoreAction();
+  const approve = async (
+    alias: string,
+    offered: PendingBinding["offered"][number]
+  ): Promise<void> => {
+    await run(async (session) => {
+      await session.workflowResources.approveBinding(workflow.id, {
+        alias,
+        target: offered.target,
+        reviewed: { version },
+      });
+      const { name } = workflow;
+      frame.onSaid(t`Approved: ${alias} of ${name}.`);
+      await router.invalidate({ sync: true });
+    });
+  };
+  return (
+    <ItemFrame
+      acts={[]}
+      busy={busy}
+      extra={
+        <ul aria-label={t`Its bindings`} className="flex flex-col gap-2">
+          {bindings.map((binding) => (
+            <BindingRow
+              binding={binding}
+              busy={busy}
+              key={binding.alias}
+              onApprove={async (offered) => {
+                await approve(binding.alias, offered);
+              }}
+            />
+          ))}
+        </ul>
+      }
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
@@ -744,6 +1009,9 @@ export const ItemDetail = (frame: Frame) => {
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
   }
+  if (source.type === "heldStart") {
+    return <HeldStartItem frame={frame} source={source} />;
+  }
   if (source.type === "outcome") {
     return <OutcomeItem frame={frame} source={source} />;
   }
@@ -755,6 +1023,12 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "failed") {
     return <FailedItem frame={frame} source={source} />;
+  }
+  if (source.type === "workflowGoLive") {
+    return <WorkflowGoLiveDetail frame={frame} source={source} />;
+  }
+  if (source.type === "bindings") {
+    return <BindingsDetail frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };

@@ -190,13 +190,13 @@ const deliver = async (
   activity: unknown,
   authorization: string | undefined,
   doorEnv: Env = teamsEnv(),
-  adapters: (adaptersEnv: Env) => ReturnType<typeof channelAdapters> = (
+  adapters: (adaptersEnv: Env) => ReturnType<typeof channelAdapters> = async (
     adaptersEnv
-  ) => channelAdapters(adaptersEnv, { teamsKeys: fileKeys })
+  ) => await channelAdapters(adaptersEnv, { teamsKeys: fileKeys })
 ): Promise<{ status: number; handled: number }> => {
   const chat = new Chat({
     userName: "Stephen",
-    adapters: adapters(doorEnv),
+    adapters: await adapters(doorEnv),
     state: durableObjectState(env.CHAT_STATE),
     logger: "silent",
   });
@@ -466,7 +466,7 @@ describe("every adapter", () => {
     try {
       const chat = new Chat({
         userName: "Stephen",
-        adapters: channelAdapters(teamsEnv()),
+        adapters: await channelAdapters(teamsEnv()),
         state: durableObjectState(env.CHAT_STATE),
         logger: "silent",
       });
@@ -555,8 +555,11 @@ describe("keys Microsoft rotates", () => {
     keys = teamsKeys();
   });
   const deliverFresh = async (activity: unknown, authorization: string) =>
-    await deliver(activity, authorization, teamsEnv(), (freshEnv) =>
-      channelAdapters(freshEnv, { teamsKeys: keys })
+    await deliver(
+      activity,
+      authorization,
+      teamsEnv(),
+      async (freshEnv) => await channelAdapters(freshEnv, { teamsKeys: keys })
     );
 
   it("are fetched again once for a burst of unknown key ids, a minute on", async () => {

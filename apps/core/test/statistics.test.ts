@@ -26,7 +26,14 @@ import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
-import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+  whoami,
+} from "./sign-in.ts";
 
 // Statistics (src/statistics.ts) through an App's sealed functions: a
 // statistics resource its actions declare (`resource.statistics`), which
@@ -865,6 +872,60 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       audited: [
         { target: { type: "app", id: watched }, refused: "permission.denied" },
       ],
+    });
+  });
+
+  it("are read for work a Grasp staff member started while their staff session lasts, audited as theirs, and never for staff on unmarked work", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const reader = await boundApp(builder);
+    const watched = await countedApp(admin);
+    const permissionId = permissionIdSchema.parse(
+      await grantPlatform(builder, reader)
+    );
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId } = await whoami(session);
+    const query = {
+      measure: "platform.workflow_runs",
+      days: 7,
+      where: { app: watched },
+    };
+    const readAs = async (staff: boolean) =>
+      await readStatistics(
+        env,
+        {
+          subject: { type: "app", appId: reader },
+          onBehalfOf: userId,
+          mode: "interactive",
+          appVersion: await currentVersion(reader),
+          ...(staff ? { staff: true } : {}),
+        },
+        query,
+        permissionId
+      );
+    let marked: unknown;
+    const events = await auditedDuring(async () => {
+      marked = await readAs(true);
+    });
+    const unmarked = await failure(async () => await readAs(false));
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND staff = 1")
+      .bind(userId)
+      .run();
+    const sessionEnded = await failure(async () => await readAs(true));
+
+    expect({
+      read: z.object({ groups: z.array(z.unknown()) }).safeParse(marked)
+        .success,
+      auditedAs: events
+        .filter(({ action }) => action === "statistics.read")
+        .map(({ actor }) => ("staff" in actor ? actor.staff : undefined)),
+      unmarked,
+      sessionEnded,
+    }).toStrictEqual({
+      read: true,
+      auditedAs: [userId],
+      unmarked: "permission.person_inactive",
+      sessionEnded: "permission.person_inactive",
     });
   });
 

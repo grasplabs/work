@@ -83,8 +83,13 @@ interface SessionCall {
   method: string;
   args: ArgumentSpec[];
   capabilities: Record<string, CapabilitySpec>;
-  /** Whether the isolate gets `nodejs_compat`, the one flag a call may add. */
+  /** Whether the isolate gets `nodejs_compat`: core's own platform code. */
   nodejsCompat: boolean;
+  /**
+   * Whether the isolate gets `nodejs_als`, `AsyncLocalStorage` alone: the
+   * other flag a call may add, for workflow code's run bindings.
+   */
+  asyncContext: boolean;
   /**
    * Core's own platform modules (the App compiler, the package
    * builder), too large for one message or not JavaScript, read through
@@ -229,6 +234,14 @@ const consoleSinkOf = (
     : false;
 };
 
+/** A call's `asyncContext`: absent is false; anything but a boolean, undefined. */
+const asyncContextOf = (given: unknown): boolean | undefined => {
+  if (given === undefined) {
+    return false;
+  }
+  return typeof given === "boolean" ? given : undefined;
+};
+
 /** `body` as a call, or undefined for anything else. */
 export const sessionCallOf = (body: unknown): SessionCall | undefined => {
   if (!isRecord(body)) {
@@ -275,6 +288,10 @@ export const sessionCallOf = (body: unknown): SessionCall | undefined => {
   if (consoleSink === false) {
     return undefined;
   }
+  const asyncContext = asyncContextOf(body.asyncContext);
+  if (asyncContext === undefined) {
+    return undefined;
+  }
   return {
     mainModule,
     modules,
@@ -283,6 +300,7 @@ export const sessionCallOf = (body: unknown): SessionCall | undefined => {
     args: argSpecs,
     capabilities: specs,
     ...platform,
+    asyncContext,
     consoleSink,
   };
 };
@@ -390,11 +408,23 @@ class Session extends CapnwebTarget {
         ? await readChunkedModules(parsed.chunkedModules, reader)
         : {};
     const { compatibilityFlags } = this.#settings;
+    // Node.js on where the call asks for it: the flags that turn it off
+    // (`isolateSettings`) dropped. The same list the isolate loads with is
+    // the one its quiet module is made for.
+    const flags = [
+      // On by default at the host's date: the flags that turn it off
+      // dropped, never `nodejs_compat` named, which only makes workerd
+      // print that it needn't be.
+      ...(parsed.nodejsCompat
+        ? compatibilityFlags.filter(
+            (flag) => !flag.startsWith("no_nodejs_compat")
+          )
+        : compatibilityFlags),
+      ...(parsed.asyncContext ? ["nodejs_als"] : []),
+    ];
     const nodejsCompat = hasNodeModules({
       compatibilityDate: this.#settings.compatibilityDate,
-      compatibilityFlags: parsed.nodejsCompat
-        ? [...compatibilityFlags, "nodejs_compat"]
-        : compatibilityFlags,
+      compatibilityFlags: flags,
     });
     const modules = { ...parsed.modules, ...chunked };
     // Printing nothing to the process's output, the deployment's logs;
@@ -414,9 +444,7 @@ class Session extends CapnwebTarget {
           });
     const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
-      compatibilityFlags: parsed.nodejsCompat
-        ? [...compatibilityFlags, "nodejs_compat"]
-        : compatibilityFlags,
+      compatibilityFlags: flags,
       ...loaded,
       env: {},
       globalOutbound: null,

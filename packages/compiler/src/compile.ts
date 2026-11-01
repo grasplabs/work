@@ -1,5 +1,6 @@
 import Babel from "@babel/standalone";
 import reactCompiler from "babel-plugin-react-compiler";
+import reactRefresh from "react-refresh/babel";
 
 /**
  * The directives that switch the React Compiler off for the function (or
@@ -43,6 +44,27 @@ const refuseCompilerOptOuts = () => ({
 });
 
 /**
+ * What a preview build's modules call to register their components with
+ * React Fast Refresh, and to track their hooks (spec 19.2.1): names no
+ * App code has reason to use, which the module's header defines
+ * (`refreshHeader`).
+ */
+export const refreshNames = {
+  register: "__graspRefreshReg",
+  signature: "__graspRefreshSig",
+} as const;
+
+/** How a module is compiled. */
+export interface CompileOptions {
+  /**
+   * For a chat's preview (spec 19.2.1): instrumented for React Fast
+   * Refresh, after the React Compiler, which resets a component's memo
+   * cache when its source changes. Never for production.
+   */
+  readonly refresh?: boolean;
+}
+
+/**
  * Compiles one TypeScript or TSX file to a JavaScript module in one Babel
  * pass: the React Compiler, then types stripped and JSX turned into calls to
  * `react/jsx-runtime`. `plugins` run first, on the source as written. Like
@@ -50,11 +72,18 @@ const refuseCompilerOptOuts = () => ({
  * compile, and refuses a directive that would switch it off
  * (`refuseCompilerOptOuts`). `enableReanimatedCheck` is off: the check
  * calls `require.resolve`, which a Worker doesn't have.
+ *
+ * With `refresh`, the React Compiler resets a component's memo cache when
+ * its source changes, and React Fast Refresh's instrumentation runs after
+ * it, in the same pass, as React's own tooling orders them: each component
+ * is registered through `refreshNames`, with its full hook signature (no
+ * hashing, which would need Node's crypto).
  */
 export const compileModule = (
   source: string,
   filename: string,
-  plugins: unknown[] = []
+  plugins: unknown[] = [],
+  { refresh = false }: CompileOptions = {}
 ): string => {
   const isTSX = filename.endsWith(".tsx");
   // Babel unwraps the plugin's CommonJS default export itself, the same way
@@ -73,13 +102,26 @@ export const compileModule = (
           target: "19",
           panicThreshold: "all_errors",
           enableReanimatedCheck: false,
-          // Otherwise on whenever the compiling process has
-          // NODE_ENV=development, for Fast Refresh: the same file would
-          // compile to other code, and the kit to another version,
-          // depending on who built it.
-          environment: { enableResetCacheOnSourceFileChanges: false },
+          // Set either way: left out, it is on whenever the compiling
+          // process has NODE_ENV=development, and the same file would
+          // compile to other code depending on who built it. On only for
+          // a preview, whose components Fast Refresh swaps.
+          environment: { enableResetCacheOnSourceFileChanges: refresh },
         },
       ],
+      ...(refresh
+        ? [
+            [
+              reactRefresh,
+              {
+                skipEnvCheck: true,
+                emitFullSignatures: true,
+                refreshReg: refreshNames.register,
+                refreshSig: refreshNames.signature,
+              },
+            ],
+          ]
+        : []),
     ],
     // Presets run after plugins, in reverse order: types go first.
     presets: [

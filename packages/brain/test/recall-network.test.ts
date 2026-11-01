@@ -203,7 +203,7 @@ describe("a recall's network route", () => {
       truncated: all.truncated,
       modelCalls: calls.count - callsBefore,
     }).toStrictEqual({
-      plain: [1, undefined, "fulltext@3"],
+      plain: [1, undefined, "hybrid@1"],
       all: [
         `from ${thing}: ${thing} uses ${secret}`,
         `from ${thing}: ${thing} uses ${tool}`,
@@ -223,10 +223,10 @@ describe("a recall's network route", () => {
         `${thing} uses ${tool}.`,
         `${tool} runs on ${cloud}.`,
       ].toSorted(),
-      policy: "fulltext@3+traversal@1",
+      policy: "hybrid@1+traversal@1",
       coverage: {
         state: "complete",
-        queriedRoutes: ["fulltext", "network"],
+        queriedRoutes: ["exact", "fulltext", "network"],
         omittedRoutes: [{ route: "semantic", reason: "not_enabled" }],
       },
       truncated: false,

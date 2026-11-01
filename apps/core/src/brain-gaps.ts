@@ -277,7 +277,7 @@ export const askAboutGap = async (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${owner}, 'gap_asked', NULL, NULL, NULL, NULL, ${gap.id}, ${now}, ${now}, NULL WHERE ${storedEvent(event.id)} AND ${activeMember(owner)}`
+        sql`SELECT ${crypto.randomUUID()}, ${owner}, 'gap_asked', NULL, NULL, NULL, NULL, ${gap.id}, ${now}, ${now}, NULL, NULL WHERE ${storedEvent(event.id)} AND ${activeMember(owner)}`
       )
       .onConflictDoNothing();
   const [asked] = await auditedBatch(env, db, [

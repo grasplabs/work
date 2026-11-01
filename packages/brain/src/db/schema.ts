@@ -30,24 +30,6 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * The migrations were squashed into one (0000_brain.sql) in a hard cut:
- * every database runs from it.
- */
-export const compatibleFromMigration = 0;
-
-/**
  * Audit events of changes to this database that haven't reached the
  * host's audit log yet. Each is written in the same batch as its change
  * (audit.ts), as the host's `audit.eventOf` port made it, so a change is
@@ -148,7 +130,7 @@ export const documents = sqliteTable(
     indexFailure: text("index_failure"),
     /**
      * Which run indexes the current version: 0 for the first, one more for
-     * each the cron trigger starts again after the one before failed.
+     * each the clock starts again after the one before failed.
      */
     indexRun: integer("index_run").notNull().default(0),
     /** When indexing the current version last failed for good. */

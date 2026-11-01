@@ -20,23 +20,6 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * Every migration so far only expands.
- */
-export const compatibleFromMigration = 0;
-
-/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -401,7 +384,7 @@ export const composioFlows = sqliteTable(
  * What connect made at Composio and still has to delete there: a flow
  * that didn't finish, or a connection that was disconnected, while
  * Composio didn't take the deletion or connect had no Composio key. The
- * cron trigger tries again at `retry_at`, waiting longer after each failed
+ * clock tries again at `retry_at`, waiting longer after each failed
  * `attempts`, until everything is gone. An account left there may hold
  * tokens, so nothing is forgotten.
  */
@@ -457,9 +440,31 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
+ * A revoke at its provider still owed for a disconnected connection
+ * (GRA-1191): the provider was down, or refused, when it was
+ * disconnected. Its sealed tokens stay in `connection_tokens` until the
+ * revoke goes through, so the cron trigger can try again
+ * (`retryRevocations`, src/revocations.ts); the connection is
+ * disconnected, so nothing calls with them meanwhile. `attempts` counts
+ * the failed tries, each waiting longer, until `retry_at`.
+ */
+export const tokenRevocations = sqliteTable(
+  "token_revocations",
+  {
+    connectionId: text("connection_id")
+      .primaryKey()
+      .references(() => connections.id),
+    attempts: integer().notNull().default(0),
+    retryAt: timestamp("retry_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("token_revocations_retry_idx").on(table.retryAt)]
+);
+
+/**
  * Audit events core hasn't appended to the audit log yet. Each call's
  * events are stored here, with the call's own result where it has one;
- * core's cron trigger takes them and acknowledges those it appended
+ * core's clock takes them and acknowledges those it appended
  * (src/audit.ts). `event` is the event as JSON.
  */
 export const auditOutbox = sqliteTable("audit_outbox", {
@@ -585,3 +590,31 @@ export const connectorEvents = sqliteTable(
     index("connector_events_connection_idx").on(table.connectionId),
   ]
 );
+
+/**
+ * People whose erasure has begun (person-erasure.ts), by their user ID:
+ * connect makes nothing new of theirs once it has, so nothing a flow or a
+ * call still under way finishes after the erasure emptied what was theirs
+ * comes back. Never removed: an erasure is final.
+ */
+export const erasedPeople = sqliteTable("erased_people", {
+  userId: text("user_id").primaryKey(),
+  beganAt: timestamp("began_at").notNull(),
+});
+
+/**
+ * The organization's own key for each AI provider (ai-providers.ts),
+ * sealed with the vault, bound to its provider and, for an
+ * OpenAI-compatible endpoint, the base URL it goes to: a key moved to
+ * another row, or a base URL changed in the database, doesn't open. Never
+ * read back to core: only its mask, its first and last characters.
+ */
+export const aiProviderKeys = sqliteTable("ai_provider_keys", {
+  provider: text().primaryKey(),
+  sealed: text().notNull(),
+  mask: text().notNull(),
+  /** Only for an OpenAI-compatible endpoint: the base URL its key goes to. */
+  baseUrl: text("base_url"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

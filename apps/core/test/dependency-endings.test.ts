@@ -151,7 +151,7 @@ const storedLock = async ({ app, request }: Approved) => {
   return row ? graspLockSchema.parse(JSON.parse(row.lock)) : undefined;
 };
 
-/** Whether the artifact `hash`'s files are queued for the cron to delete. */
+/** Whether the artifact `hash`'s files are queued for the clock to delete. */
 const queuedForCleanup = async (hash: string): Promise<boolean> => {
   const row = await env.DB.prepare(
     "SELECT key FROM package_cleanups WHERE key = ?"

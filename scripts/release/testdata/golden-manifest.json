@@ -10,44 +10,6 @@
     }
   },
   "commit": "0000000000000000000000000000000000000000",
-  "compatibility": {
-    "databases": {
-      "grasp-os-connect": {
-        "compatibleFrom": 0,
-        "schema": 0
-      },
-      "grasp-os-core": {
-        "compatibleFrom": 0,
-        "schema": 0
-      },
-      "grasp-os-knowledge": {
-        "compatibleFrom": 0,
-        "schema": 0
-      }
-    },
-    "interfaces": {
-      "connect": {
-        "calls": {},
-        "serves": 1
-      },
-      "core": {
-        "calls": {
-          "connect": {
-            "max": 1,
-            "min": 1
-          }
-        }
-      }
-    },
-    "sdkProtocols": {
-      "max": 2,
-      "min": 2
-    },
-    "workflowJournal": {
-      "max": 9,
-      "min": 8
-    }
-  },
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,
@@ -55,7 +17,7 @@
   "packages": {
     "zod": "0.0.0-fixture"
   },
-  "releaseId": "r000001-0000000",
+  "releaseId": "26.01.1",
   "workers": {
     "connect": {
       "bindings": [
@@ -72,15 +34,17 @@
           "id": "$D1_DB_ID",
           "name": "DB",
           "type": "d1"
+        },
+        {
+          "name": "CF_VERSION_METADATA",
+          "type": "version_metadata"
         }
       ],
       "compatibilityFlags": [
         "nodejs_compat",
         "global_fetch_strictly_public"
       ],
-      "crons": [
-        "* * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",
@@ -127,7 +91,8 @@
       },
       "previewUrls": false,
       "requiredSecrets": [
-        "CAPABILITY_SIGNING_KEY"
+        "CAPABILITY_SIGNING_KEY",
+        "TOKEN_ENCRYPTION_KEY"
       ],
       "workersDev": false
     },
@@ -237,10 +202,6 @@
           "type": "r2_bucket"
         },
         {
-          "name": "AI",
-          "type": "ai"
-        },
-        {
           "name": "EMAIL",
           "type": "send_email"
         },
@@ -261,10 +222,7 @@
       "compatibilityFlags": [
         "nodejs_compat"
       ],
-      "crons": [
-        "* * * * *",
-        "*/15 * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",

@@ -225,8 +225,8 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   await expect(
     row.getByRole("link", { name: `Open the domain ${name}` })
   ).toHaveAttribute("href", `/domains/${app}`);
-  // A run waits for a decision: it needs attention.
-  await page.getByRole("tab", { name: "Needs attention" }).click();
+  // A run waits for a decision: it needs someone, and the tab counts it.
+  await page.getByRole("tab", { name: /^Needs you/u }).click();
   await expect(page).toHaveURL(/tab=needs/u);
   await expect(
     page
@@ -235,8 +235,23 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
       .getByRole("link", { name: "approval", exact: true })
   ).toBeVisible();
 
-  // The waiting run comes first on the Runs tab, with where to decide it.
+  // Runs: today's lanes over the log. The App's workflow has a lane, its
+  // waiting run a dot that follows the item ("Where is it").
   await page.getByRole("tab", { name: "Runs" }).click();
+  await expect(page).toHaveURL(/tab=runs/u);
+  const today = page.getByRole("region", { name: "Today" });
+  await expect(
+    today.getByRole("link", { name: `${name} · approval` }).first()
+  ).toBeVisible(pageRead);
+  await today
+    .getByRole("button", { name: /waits on/u })
+    .first()
+    .click();
+  await expect(
+    today.getByRole("heading", { name: "Where is it" })
+  ).toBeVisible();
+
+  // The waiting run comes first on the Runs tab, with where to decide it.
   const first = page.getByRole("row").nth(1);
   await expect(first).toContainText("Waiting for a decision", pageRead);
   await first.getByRole("link", { name: "Decide" }).click();
@@ -301,6 +316,99 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   // Above the invoice's total now: nobody is asked, and it books.
   await expect(report).toContainText('- book {"total":800000}');
   await expect(report).not.toContainText("review#ask");
+
+  // Back on Runs, the waiting run approved in today's lanes: once its
+  // five seconds to undo are over, the log under them says how it stands
+  // now, without the page being opened again.
+  await page.goto("/workflows?tab=runs");
+  const lanes = page.getByRole("region", { name: "Today" });
+  const waitingRow = page
+    .getByRole("row")
+    .filter({ hasText: name })
+    .filter({ has: page.getByRole("link", { name: "approval", exact: true }) });
+  await expect(waitingRow).toContainText("Waiting for a decision", pageRead);
+  await lanes
+    .getByRole("button", { name: /waits on/u })
+    .first()
+    .click();
+  await lanes.getByRole("button", { name: "Approve", exact: true }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Confirm" })
+    .click();
+  await expect(lanes.getByText(/^Approved in \d+ s$/u)).toBeVisible();
+  await expect(waitingRow).not.toContainText("Waiting for a decision", {
+    timeout: 30_000,
+  });
+
+  // Another run waits, and is answered elsewhere while the page stays
+  // open: a filter chosen and taken back reads the log again, rather than
+  // showing it as the page first read it.
+  const again = await withApi(builder, async (api) => {
+    const { id } = await api.workflows.start(app, "approval");
+    await expect(async () => {
+      const waiting = await api.workflows.runs({ app, status: "waiting" });
+      expect(waiting.runs.map(({ id: runId }) => runId)).toContain(id);
+    }).toPass({ timeout: 30_000 });
+    return id;
+  });
+  await page.goto("/workflows?tab=runs");
+  const stillWaiting = page
+    .getByRole("row")
+    .filter({ hasText: name })
+    .filter({ hasText: "Waiting for a decision" });
+  await expect(stillWaiting).toHaveCount(1, pageRead);
+  await withApi(builder, async (api) => {
+    const asked = await api.decisions.waiting();
+    const decision = asked.find(({ run }) => run === again);
+    expect(decision).toBeDefined();
+    const id = decision?.id ?? "";
+    const review = await api.decisions.review(id, { approved: true });
+    if (review.state === "review") {
+      const { confirmation } = await api.decisions.confirm(
+        id,
+        review.decision.revision,
+        review.response
+      );
+      await api.decisions.answer(id, review.response, confirmation);
+    }
+  });
+  const status = page.getByRole("combobox", { name: "Status" });
+  await status.click();
+  await page.getByRole("option", { name: "Done" }).click();
+  await expect(page).toHaveURL(/status=done/u);
+  await status.click();
+  await page.getByRole("option", { name: "All" }).click();
+  await expect(page).not.toHaveURL(/status=/u);
+  // Both of its runs listed again (not the moment the log is loading,
+  // with no rows at all), and neither waits any more.
+  await expect(
+    page
+      .getByRole("row")
+      .filter({ hasText: name })
+      .filter({
+        has: page.getByRole("link", { name: "approval", exact: true }),
+      })
+  ).toHaveCount(2, pageRead);
+  await expect(stillWaiting).toHaveCount(0);
+
+  // An address filtering by a workflow the domain's current version
+  // doesn't list (renamed or removed since): it stays, as core still
+  // filters kept runs by that name, and the Workflow filter shows it,
+  // said to be no longer the domain's, rather than the other workflows'
+  // runs under a filter that can't say why.
+  await page.goto(`/workflows?tab=runs&app=${app}&workflow=retired-workflow`);
+  await expect(page.getByRole("combobox", { name: "Workflow" })).toContainText(
+    "retired-workflow (no longer in this domain)",
+    pageRead
+  );
+  await expect(page).toHaveURL(/workflow=retired-workflow/u);
+  await expect(page.getByText("No runs match these filters.")).toBeVisible();
+  // Another domain chosen is a new selection: the workflow goes with it.
+  const domain = page.getByRole("combobox", { name: "Domain" });
+  await domain.click();
+  await page.getByRole("option", { name: "All" }).click();
+  await expect(page).not.toHaveURL(/workflow=/u);
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({

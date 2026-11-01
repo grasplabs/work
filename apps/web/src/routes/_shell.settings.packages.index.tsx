@@ -1,4 +1,8 @@
-import type { DependencySubjectsInForce } from "@grasp-os/shared/dependencies";
+import type {
+  DependencyApprover,
+  DependencySubjectsInForce,
+} from "@grasp-os/shared/dependencies";
+import { isAdmin } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -17,6 +21,8 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
+import { PackageApprovers } from "../settings/package-approvers.tsx";
 import {
   SettingsError,
   SettingsLoading,
@@ -30,7 +36,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // workflow's approvals here, since a workflow has no page of its own.
 // Core lists nothing to anyone else; it checks the permission on every
 // call. A page at a time, each next page asked for: every App and
-// workflow is there however many there are.
+// workflow is there however many there are. Below it, for an admin, who
+// may approve packages (settings/package-approvers.tsx).
 
 const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   const { t } = useLingui();
@@ -165,27 +172,54 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   );
 };
 
+/** Who approves packages, as core answered an admin. */
+const Approvers = ({
+  read,
+  editable,
+}: {
+  read: Loaded<DependencyApprover[]>;
+  editable: boolean;
+}) => {
+  const { t } = useLingui();
+  if (read.state === "ready") {
+    return <PackageApprovers approvers={read.data} editable={editable} />;
+  }
+  return (
+    <SettingsSection title={t`Who approves packages`}>
+      <div className="border-t">
+        <NotLoadedState heading="h3" page={read} />
+      </div>
+    </SettingsSection>
+  );
+};
+
 const Packages = () => {
   const { t } = useLingui();
-  const page = Route.useLoaderData();
+  const { page, approvers } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   return (
-    <SettingsSection
-      description={
-        <Trans>
-          The domains and workflows that may use approved npm packages. Open one
-          to retire or revoke what was approved for it.
-        </Trans>
-      }
-      title={t`Packages`}
-    >
-      {page.state === "ready" ? (
-        <Subjects listed={page.data} />
-      ) : (
-        <div className="border-t">
-          <NotLoadedState heading="h3" page={page} />
-        </div>
+    <>
+      <SettingsSection
+        description={
+          <Trans>
+            The domains and workflows that may use approved npm packages. Open
+            one to retire or revoke what was approved for it.
+          </Trans>
+        }
+        title={t`Packages`}
+      >
+        {page.state === "ready" ? (
+          <Subjects listed={page.data} />
+        ) : (
+          <div className="border-t">
+            <NotLoadedState heading="h3" page={page} />
+          </div>
+        )}
+      </SettingsSection>
+      {approvers === undefined ? null : (
+        <Approvers editable={!identity.staff} read={approvers} />
       )}
-    </SettingsSection>
+    </>
   );
 };
 
@@ -193,9 +227,20 @@ export const Route = createFileRoute("/_shell/settings/packages/")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: Packages,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.dependencies.inForce()
-    ),
+  loader: async ({ context: { core, identity } }) => {
+    // Who approves is for admins only: nobody else is asked.
+    const [page, approvers] = await Promise.all([
+      loadFromCore(
+        core,
+        async (session) => await session.dependencies.inForce()
+      ),
+      isAdmin(identity.role)
+        ? loadFromCore(
+            core,
+            async (session) => await session.dependencies.approvers()
+          )
+        : undefined,
+    ]);
+    return { page, approvers };
+  },
 });

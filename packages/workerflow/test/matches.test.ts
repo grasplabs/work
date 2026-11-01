@@ -3,19 +3,16 @@
 // takes the oldest event that matches, sent before it was reached or
 // after, and never one another wait took; an event that doesn't match
 // stays in the inbox and wakes nothing.
-import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
 import { encode } from "../src/codec.ts";
 import type { EventMatch } from "../src/contracts.ts";
 import type { InstanceEvent } from "../src/instance.ts";
-import { journalSchemaVersion } from "../src/journal.ts";
 import {
   alarmOf,
   ended,
   journalOf,
   newId,
-  runObject,
   suspendedOn,
   workflow,
 } from "./helpers.ts";
@@ -74,16 +71,6 @@ const job = (subject: string): EventMatch => ({
   type: "job-completed",
   attributes: { subject },
 });
-
-/** Runs `change` on the run object's storage of the `approval` run `id`. */
-const runInObject = async (
-  id: string,
-  change: (sql: SqlStorage) => void
-): Promise<void> => {
-  await runInDurableObject(runObject("approval", id), (_, state) => {
-    change(state.storage.sql);
-  });
-};
 
 /** A match's most attributes: `subject`, and 15 more. */
 const mostAttributes = (subject: string): Record<string, string> => {
@@ -353,36 +340,5 @@ describe("a wait for a match", () => {
       status: "complete",
       output: ["while paused"],
     });
-  });
-
-  it("upgrades a version-9 journal as it first reads it, and takes events with attributes then", async () => {
-    const id = newId();
-    await workflow("approval").create({ id });
-    await suspendedOn("approval", id, "approval");
-    await runInObject(id, (sql) => {
-      sql.exec("UPDATE run SET schema = 9");
-      sql.exec("ALTER TABLE events DROP COLUMN attributes");
-      sql.exec("ALTER TABLE steps DROP COLUMN event_match");
-      sql.exec("DROP INDEX events_sender");
-      sql.exec("ALTER TABLE events DROP COLUMN sender");
-      sql.exec("ALTER TABLE events DROP COLUMN reserved");
-      sql.exec("DROP TRIGGER steps_settled_order");
-      sql.exec("DROP INDEX steps_settled");
-      sql.exec("ALTER TABLE steps DROP COLUMN settled");
-    });
-
-    const approval = await workflow("approval").get(id);
-    await approval.sendEvent({
-      type: "approved",
-      payload: "yes",
-      attributes: { subject: "s" },
-    });
-
-    await expect(ended("approval", id)).resolves.toMatchObject({
-      status: "complete",
-      output: { approved: { payload: "yes" } },
-    });
-    const { run } = await journalOf("approval", id);
-    expect(run.schema).toBe(journalSchemaVersion);
   });
 });

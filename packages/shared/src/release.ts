@@ -28,6 +28,7 @@
 import { z } from "zod";
 
 import { toHex } from "./encoding.ts";
+import { releaseIdSchema } from "./release-id.ts";
 
 /** The manifest shape the admin must understand (see the header comment). */
 export const MANIFEST_VERSION = 1;
@@ -65,12 +66,7 @@ export const workerNameSchema = z
 /** The placeholder a D1 binding's id is in the manifest, filled in per account. */
 export const d1IdPlaceholder = (binding: string): string => `$D1_${binding}_ID`;
 
-// `r<run>-<sha7>` from CI, `dev-<time>` locally. It becomes an R2 prefix, so
-// nothing else is allowed in it.
-const RELEASE_ID = /^(?:r\d{6,}-[0-9a-f]{7}|dev-[0-9a-z]+)$/u;
-
-/** A release's id: `r<run6>-<sha7>` from CI, `dev-<time>` locally. */
-export const releaseIdSchema = z.string().regex(RELEASE_ID);
+const commitSchema = z.string().regex(/^[0-9a-f]{40}$/u);
 
 const workerEntrySchema = z.strictObject({
   /** The Worker's name in every client account. */
@@ -128,85 +124,12 @@ const workerEntrySchema = z.strictObject({
 /** Everything the manifest says about one Worker. */
 export type WorkerEntry = z.infer<typeof workerEntrySchema>;
 
-/** Versions from `min` to `max`, both included. */
-const versionRangeSchema = z
-  .strictObject({ min: z.int().positive(), max: z.int().positive() })
-  .refine(({ min, max }) => min <= max, "A range's min is at most its max");
-
-/**
- * A D1 database's schema, by migration number: the `0016` of
- * `0016_pending_action_keys.sql`. Migrations are numbered in the order
- * they're applied, so a schema is its newest migration's number.
- */
-const migrationNumberSchema = z.int().nonnegative();
-
-/** What a release's code needs of one D1 database, and what its schema keeps. */
-const databaseSchemaSchema = z
-  .strictObject({
-    /**
-     * The schema its code needs: its newest migration, which a deploy
-     * applies before any of its code runs.
-     */
-    schema: migrationNumberSchema,
-    /**
-     * The oldest schema whose code still runs on this one: code of a
-     * release whose newest migration is older doesn't. A migration that
-     * only expands leaves it where it is; one that contracts (drops or
-     * renames what an older release's code uses) raises it.
-     */
-    compatibleFrom: migrationNumberSchema,
-  })
-  .refine(
-    ({ schema, compatibleFrom }) => compatibleFrom <= schema,
-    "A schema is compatible from no later than itself"
-  );
-
-/**
- * What a release's code works with, which the admin checks before it
- * makes the release live in a client (spec 40.3): every Worker that
- * calls another must call the version that one serves, at each step of a
- * deploy or rollback, since a client's Workers switch one at a time; and
- * the release must read every workflow journal and run every App
- * release the client's current code may have left, and run on every D1
- * database's schema the client's migrations left: a deploy applies the
- * release's migrations first, but a rollback applies none, and a
- * release's code may run on the schema of a later one only as far as
- * that one's migrations kept it working.
- */
-export const releaseCompatibilitySchema = z.strictObject({
-  /**
-   * By app: the version of the interface it serves the release's other
-   * Workers, if it serves one, and the versions of each other Worker's
-   * interface it calls correctly.
-   */
-  interfaces: z.record(
-    z.string(),
-    z.strictObject({
-      serves: z.int().positive().optional(),
-      calls: z.record(z.string(), versionRangeSchema),
-    })
-  ),
-  /** The workflow journal schemas core's engine reads. */
-  workflowJournal: versionRangeSchema,
-  /** The SDK protocol versions of the App releases core runs. */
-  sdkProtocols: versionRangeSchema,
-  /**
-   * By name, each D1 database it ships migrations for. Releases built
-   * before it was declared have none, and the admin checks their
-   * schemas only by the old rule: migrations only expand for the release
-   * before, and a rollback goes back no further than that release.
-   */
-  databases: z.record(workerNameSchema, databaseSchemaSchema).optional(),
-});
-
-export type ReleaseCompatibility = z.infer<typeof releaseCompatibilitySchema>;
-
-/** The release manifest (see the header comment). */
-export const releaseManifestSchema = z.strictObject({
+/** The release manifest (see the header comment); unknown top-level fields are ignored. */
+export const releaseManifestSchema = z.object({
   manifestVersion: z.literal(MANIFEST_VERSION),
   releaseId: releaseIdSchema,
   /** The full commit SHA it was built from. */
-  commit: z.string().regex(/^[0-9a-f]{40}$/u),
+  commit: commitSchema,
   createdAt: z.iso.datetime(),
   /**
    * The release note: the squash commit's subject, which is the merged pull
@@ -222,11 +145,6 @@ export const releaseManifestSchema = z.strictObject({
   workers: z.record(z.string(), workerEntrySchema),
   /** Every asset blob, by content key. */
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
-  /**
-   * What its code works with. Releases built before it was declared
-   * have none, and the admin makes none of those live.
-   */
-  compatibility: releaseCompatibilitySchema.optional(),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;
@@ -241,6 +159,12 @@ export const assetKey = (hash: string): string => `blobs/assets/${hash}`;
 /** Where a release's manifest is stored; written last. */
 export const manifestKey = (releaseId: string): string =>
   `releases/${releaseId}/manifest.json`;
+/**
+ * Where CI's publish records the release a commit was published as (its
+ * id, as text), written once that release's manifest is: a re-run of the
+ * commit's publish finds it there and publishes nothing again.
+ */
+export const commitKey = (commit: string): string => `commits/${commit}`;
 
 /** Bytes whose buffer is a plain `ArrayBuffer`, as Web Crypto takes them. */
 export type Bytes = Uint8Array<ArrayBuffer>;
@@ -477,11 +401,19 @@ const check = async (
  * checked for every place the manifest names it; a reader that keeps what
  * it returns holds exactly the bytes that were checked. Throws on the
  * first mismatch.
+ *
+ * `from` and `to` check only the blobs at those places, in the order the
+ * manifest names them (the same for the same manifest), so a reader with a
+ * bound on its reads can check a release a batch at a time.
  */
 export const verifyReleaseBlobs = async (
   manifest: ReleaseManifest,
   read: ReadBlob,
-  { concurrency = VERIFY_CONCURRENCY }: { concurrency?: number } = {}
+  {
+    concurrency = VERIFY_CONCURRENCY,
+    from = 0,
+    to,
+  }: { concurrency?: number; from?: number; to?: number } = {}
 ): Promise<void> => {
   const verifyOne = async ([key, expectations]: [
     string,
@@ -498,7 +430,11 @@ export const verifyReleaseBlobs = async (
       await check(key, bytes, expectation);
     }
   };
-  await mapConcurrently([...expectationsOf(manifest)], concurrency, verifyOne);
+  await mapConcurrently(
+    [...expectationsOf(manifest)].slice(from, to),
+    concurrency,
+    verifyOne
+  );
 };
 
 /** How many blobs a release names: what verifying it reads, besides its manifest. */

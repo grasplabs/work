@@ -4,7 +4,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, exists, or, sql } from "drizzle-orm";
+import { and, eq, exists, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -85,35 +85,6 @@ const openInItsStatus = (by: Person): SQL => {
 export const requireNotArchived = (app: Pick<App, "status">): void => {
   if (app.status === "archived") {
     throw appErrors.create("app.archived");
-  }
-};
-
-/**
- * Refuses a call into App `app` its status doesn't serve, read now: an
- * archived App serves nobody (`app.archived`), and only a published App
- * serves other Apps' calls of its exports and independent workflows' runs
- * (`app.not_published`), so a draft's code never runs for them. For the
- * App's host, as a call begins and before each stub call its code makes
- * (app.ts, app-bindings.ts), whoever let the call in.
- */
-export const requireServes = async (
-  env: Env,
-  app: AppId,
-  admission: { type: string } | undefined
-): Promise<void> => {
-  const row = await drizzle(env.DB)
-    .select({ status: apps.status })
-    .from(apps)
-    .where(eq(apps.id, app))
-    .get();
-  if (row === undefined) {
-    throw appErrors.create("app.not_found");
-  }
-  requireNotArchived(row);
-  const forOthers =
-    admission?.type === "export" || admission?.type === "workflowRun";
-  if (forOthers && row.status !== "published") {
-    throw appErrors.create("app.not_published");
   }
 };
 
@@ -203,10 +174,10 @@ export const requireAppRole = async (
  * are read now; their role in the organization is the session's that let
  * them in (Grasp staff are admins only by their session), which the
  * session's own checks follow within seconds. Not `appFor` (apps.ts):
- * apps.ts imports this file, and the App's stubs (app-bindings.ts), which
- * call this, are reached from apps.ts through its workflow imports, so it
- * would close a cycle. The role check is the same `requireAppRole`; only
- * the App's row is read here.
+ * apps.ts imports this file, and the workflow runs that call this
+ * (workflows/runs.ts) are reached from apps.ts through its workflow
+ * imports, so it would close a cycle. The role check is the same
+ * `requireAppRole`; only the App's row is read here.
  */
 export const requireStillOpen = async (
   env: Env,
@@ -322,11 +293,14 @@ export const appsBuiltBy = async (
  * refused when they open it, with why.
  */
 export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
+  // A removed App (app-removal.ts) is nobody's, an admin's included.
+  const kept = isNull(apps.removedAt);
   if (isAdmin(by.role)) {
-    return undefined;
+    return kept;
   }
   const db = drizzle(env.DB);
   return and(
+    kept,
     or(
       eq(apps.ownerId, by.userId),
       exists(
@@ -351,6 +325,10 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
 export const appsOwnedOrSharedNow = (userId: string): SQL =>
   sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})))))`;
 
+/** That App `app` isn't removed (app-removal.ts) when the statement runs. */
+const kept = (app: AppId): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.removedAt} IS NOT NULL)`;
+
 /**
  * That `by` still has a role in `app` when the statement runs, as SQL: an
  * admin (as their session said), the App's owner, or someone it is shared
@@ -361,7 +339,7 @@ export const appsOwnedOrSharedNow = (userId: string): SQL =>
  */
 export const stillOpenTo = (by: Person, app: AppId): SQL => {
   if (isAdmin(by.role)) {
-    return sql`1`;
+    return kept(app);
   }
   const theirs = sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})))`;
   const role = sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirs}))`;
@@ -369,7 +347,7 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
   const builds = canBuild(by.role)
     ? sql` OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder' AND ${theirs})`
     : sql``;
-  return sql`(${role} AND (EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')${builds}))`;
+  return sql`(${role} AND (EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')${builds}) AND ${kept(app)})`;
 };
 
 /**
