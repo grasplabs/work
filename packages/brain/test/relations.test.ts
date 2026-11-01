@@ -10,6 +10,7 @@ import {
   entitySourcesRead,
   relationsPerSource,
   runLinking,
+  sameAsFor,
   settleMs,
   sweepLinking,
 } from "../src/entities.ts";
@@ -884,6 +885,7 @@ describe("typed relations", () => {
       sources: await code(
         entitySources(refused.brain, reader, { entityId: id })
       ),
+      sameAs: await code(sameAsFor(refused.brain, reader, id)),
       everyName: await code(entitiesFor(agent.brain, reader, {})),
       oneLetter: await code(entitiesFor(agent.brain, reader, { query: "a" })),
       byStart: await code(entitiesFor(agent.brain, reader, { query: "an" })),
@@ -892,6 +894,7 @@ describe("typed relations", () => {
       relations: "brain.denied",
       entities: "brain.denied",
       sources: "brain.denied",
+      sameAs: "brain.denied",
       everyName: "brain.invalid",
       oneLetter: "brain.invalid",
       byStart: "ok",
