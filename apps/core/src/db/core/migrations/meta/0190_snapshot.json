@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "83696930-ab63-4b52-b81e-1dc7190a4981",
+  "id": "8ac21ba5-933b-4e87-ab72-6a521168e2d5",
   "prevId": "cd77265f-7598-4b94-8b30-3f2319e25bd4",
   "tables": {
     "access_revocations": {
@@ -1163,6 +1163,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "budget": {
+          "name": "budget",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -2158,6 +2165,20 @@
         },
         "removed_by": {
           "name": "removed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_workspace_id": {
+          "name": "provisional_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_chat_id": {
+          "name": "provisional_chat_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

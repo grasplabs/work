@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "12bd8f04-c8a6-4790-bf91-0a7b37e1a315",
-  "prevId": "83696930-ab63-4b52-b81e-1dc7190a4981",
+  "id": "d167af70-968a-4147-bcb5-ea0997d97500",
+  "prevId": "8ac21ba5-933b-4e87-ab72-6a521168e2d5",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -2162,6 +2162,20 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "provisional_workspace_id": {
+          "name": "provisional_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_chat_id": {
+          "name": "provisional_chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -2680,6 +2694,138 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "build_admission_queue": {
+      "name": "build_admission_queue",
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enqueued_at": {
+          "name": "enqueued_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "waiting_for": {
+          "name": "waiting_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn": {
+          "name": "turn",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_seq": {
+          "name": "owner_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "build_admission_queue_order_idx": {
+          "name": "build_admission_queue_order_idx",
+          "columns": [
+            "seen_at",
+            "turn",
+            "enqueued_at"
+          ],
+          "isUnique": false
+        },
+        "build_admission_queue_subject_idx": {
+          "name": "build_admission_queue_subject_idx",
+          "columns": [
+            "subject",
+            "resource",
+            "seen_at"
+          ],
+          "isUnique": false
+        },
+        "build_admission_queue_resource_idx": {
+          "name": "build_admission_queue_resource_idx",
+          "columns": [
+            "resource",
+            "seen_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "build_commit_fences": {
+      "name": "build_commit_fences",
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "build_commit_fences_job_id_seq_pk": {
+          "columns": [
+            "job_id",
+            "seq"
+          ],
+          "name": "build_commit_fences_job_id_seq_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "build_leases": {
       "name": "build_leases",
       "columns": {
@@ -2693,6 +2839,20 @@
         "seq": {
           "name": "seq",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -2726,6 +2886,15 @@
             "admitted_at"
           ],
           "isUnique": false
+        },
+        "build_leases_resource_idx": {
+          "name": "build_leases_resource_idx",
+          "columns": [
+            "resource",
+            "admitted_at"
+          ],
+          "isUnique": false,
+          "where": "settled_at IS NULL"
         }
       },
       "foreignKeys": {},
@@ -6485,8 +6654,24 @@
           "autoincrement": false,
           "default": 0
         },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
         "resource": {
           "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "step_hash": {
+          "name": "step_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -6515,6 +6700,15 @@
         "run_lineage_attempts_running_idx": {
           "name": "run_lineage_attempts_running_idx",
           "columns": [
+            "admitted_at"
+          ],
+          "isUnique": false,
+          "where": "settled_at IS NULL"
+        },
+        "run_lineage_attempts_subject_idx": {
+          "name": "run_lineage_attempts_subject_idx",
+          "columns": [
+            "subject",
             "admitted_at"
           ],
           "isUnique": false,
@@ -9174,6 +9368,121 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_admission_queue": {
+      "name": "workflow_admission_queue",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step_hash": {
+          "name": "step_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enqueued_at": {
+          "name": "enqueued_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "waiting_for": {
+          "name": "waiting_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn": {
+          "name": "turn",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_deadline": {
+          "name": "attempt_deadline",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workflow_admission_queue_order_idx": {
+          "name": "workflow_admission_queue_order_idx",
+          "columns": [
+            "seen_at",
+            "turn",
+            "enqueued_at"
+          ],
+          "isUnique": false
+        },
+        "workflow_admission_queue_subject_idx": {
+          "name": "workflow_admission_queue_subject_idx",
+          "columns": [
+            "subject",
+            "resource",
+            "seen_at"
+          ],
+          "isUnique": false
+        },
+        "workflow_admission_queue_resource_idx": {
+          "name": "workflow_admission_queue_resource_idx",
+          "columns": [
+            "resource",
+            "seen_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "workflow_admission_queue_run_id_step_hash_pk": {
+          "columns": [
+            "run_id",
+            "step_hash"
+          ],
+          "name": "workflow_admission_queue_run_id_step_hash_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
