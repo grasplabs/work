@@ -252,30 +252,6 @@ export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
   };
 };
 
-/**
- * The shared secrets, and the key their fingerprints are made with
- * (`sharedSecretPrints`), read from Secrets Store: only these, so a
- * rollback's check of them (src/rollout/rollback.ts) needs nothing else.
- */
-export const sharedStoreSecrets = async (
-  env: Env
-): Promise<Pick<DeploySecrets, "clientKey" | "shared">> => {
-  const shared = await sharedValues(env);
-  return { clientKey: await storeSecret(env, "CLIENT_KEY"), shared };
-};
-
-/**
- * The keys telling a client's core of a platform update needs, read from
- * Secrets Store (src/rollout/activity.ts): only these, so nothing else
- * missing stops it.
- */
-export const activityKeys = async (
-  env: Env
-): Promise<Pick<DeploySecrets, "routerKey" | "clientKey">> => ({
-  routerKey: await storeSecret(env, "ROUTER_KEY"),
-  clientKey: await storeSecret(env, "CLIENT_KEY"),
-});
-
 /** The admin var `value`, trimmed; undefined while it's unset or empty. */
 const varOf = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim() ?? "";

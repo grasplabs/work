@@ -34,11 +34,8 @@ export const releases = sqliteTable("releases", {
   manifestSha256: text("manifest_sha256").notNull(),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
-  /**
-   * Whether its note is a feature, which starts the next major version
-   * (src/releases/version.ts): kept on import, so versions are counted
-   * without reading every manifest. Null only for one imported before it.
-   */
+  /** Read by nothing since release channels (src/rollout/): dropped once
+   * the admin that stopped reading it is live (expand, then contract). */
   feature: integer({ mode: "boolean" }),
 });
 
@@ -108,7 +105,8 @@ export const clients = sqliteTable(
      * keys are kept for a window from here (src/deploy/secrets.ts).
      */
     rotationLiveAt: timestamp("rotation_live_at"),
-    /** The rollout ring it's in: 0 first. */
+    /** Read by nothing since release channels (src/rollout/): dropped once
+     * the admin that stopped reading it is live (expand, then contract). */
     ring: integer().notNull().default(1),
     /**
      * The release channel it follows (src/rollout/channels.ts): a release
@@ -178,17 +176,15 @@ export const clients = sqliteTable(
      * are read each time (src/crm/attio.ts). Null until it is linked.
      */
     attioCompanyId: text("attio_company_id"),
-    /** The release it stays on while pinned, whatever the rollouts. */
+    /** The release it stays on while pinned: promotions skip it. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
-  // What a rollout reaches: the active clients of a ring or two
-  // (src/rollout/targets.ts).
+  // What a promotion reaches: the active clients of a channel
+  // (src/rollout/channels.ts).
   (table) => [
     index("clients_status_ring_idx").on(table.status, table.ring),
-    // What the reconciler reads: the active clients of a channel
-    // (src/rollout/reconciler.ts).
     index("clients_status_channel_idx").on(table.status, table.channel),
   ]
 );
@@ -196,9 +192,8 @@ export const clients = sqliteTable(
 /**
  * The runner that's a client's current one (src/runners.ts): the
  * only one that may change what its account runs. A provisioning run (a
- * run per attempt), a deploy by the reconciler (its run,
- * src/rollout/deploy.ts), a rollout while it deploys the client (its run),
- * or a rollback of the client (its run).
+ * run per attempt), a rollout while it deploys the client (its run), or
+ * applying its settings (its run).
  * Each claims it with one conditional write naming the runner it
  * replaces, so however many act at once, one wins: the single runner a
  * client's deploy relies on. No foreign key: a provisioning run is
@@ -209,9 +204,8 @@ export const clientRuns = sqliteTable("client_runs", {
   clientId: text("client_id").primaryKey(),
   /**
    * The runner's id: a provisioning attempt's run
-   * (`<clientId>-<random>`), a deploy's (`deploy-<random>`), a rollout's
-   * (the rollout's id), a
-   * rollback's (`rollback-<random>`), or applying the client's settings
+   * (`<clientId>-<random>`), a rollout's (the rollout's id), or applying
+   * the client's settings
    * (`apply-<random>`, src/clients/apply.ts).
    */
   runId: text("run_id").notNull(),
@@ -223,7 +217,7 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/hosting/workflow.ts).
    */
   kind: text({
-    enum: ["deploy", "rollout", "rollback", "apply", "provision_placed"],
+    enum: ["deploy", "apply", "provision_placed"],
   }).notNull(),
   /**
    * The runner's attempt that holds the client, for a runner on Workerflow
@@ -260,7 +254,56 @@ export const clientWorkers = sqliteTable(
   (table) => [primaryKey({ columns: [table.clientId, table.worker] })]
 );
 
-/** Rolling a release (or only new secrets) out to clients, ring by ring. */
+/**
+ * Each client's last deploy by the reconciler (src/rollout/reconciler.ts),
+ * and its claim while it runs: a deploy starts only by replacing the row
+ * as it was read (its `runId`), in the same batch as the client's runner
+ * claim (src/runners.ts), so two ticks never deploy one client twice.
+ * The lease is the run's own life: a `deploying` row whose run ended
+ * without saying so is settled as failed on the next tick.
+ */
+export const clientDeploys = sqliteTable("client_deploys", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id),
+  /** The release it deploys or deployed: the client's target then. */
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  /** The deploy's run (src/rollout/deploy.ts). */
+  runId: text("run_id").notNull(),
+  status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
+  /** Why it failed: a code, never a message or a response body. */
+  error: text(),
+  startedAt: timestamp("started_at").notNull(),
+  /** When it ended; null while it runs. */
+  endedAt: timestamp("ended_at"),
+});
+
+/**
+ * The shared secrets staff last rolled out (src/rollout/shared-secrets.ts): one
+ * row, `id` 1. The reconciler deploys again every client whose Workers
+ * run other ones. Fingerprints only: keyed hashes that tell nothing of a
+ * secret.
+ */
+export const rolledOutSecrets = sqliteTable("rolled_out_secrets", {
+  /** Always 1: one set of shared secrets. */
+  id: integer().primaryKey(),
+  /** Each shared secret's fingerprint in Secrets Store then, by name: JSON. */
+  prints: text().notNull(),
+  /**
+   * The secrets it rotated: those some active client ran another value of
+   * then, as JSON names. Only these may have an old value to revoke.
+   */
+  rotated: text().notNull(),
+  rolledOutBy: text("rolled_out_by").notNull(),
+  rolledOutAt: timestamp("rolled_out_at").notNull(),
+});
+
+/**
+ * The old rollout jobs. Read by nothing since release channels (src/rollout/): dropped once
+ * the admin that stopped reading it is live (expand, then contract).
+ */
 export const rollouts = sqliteTable(
   "rollouts",
   {
@@ -293,7 +336,7 @@ export const rollouts = sqliteTable(
   ]
 );
 
-/** One client in a rollout, and how far it got. */
+/** A client in an old rollout job: dropped with `rollouts`. */
 export const rolloutTargets = sqliteTable(
   "rollout_targets",
   {
@@ -352,32 +395,6 @@ export const rolloutTargets = sqliteTable(
     index("rollout_targets_client_idx").on(table.clientId),
   ]
 );
-
-/**
- * Each client's last deploy by the reconciler (src/rollout/reconciler.ts),
- * and its claim while it runs: a deploy starts only by replacing the row
- * as it was read (its `runId`), in the same batch as the client's runner
- * claim (src/runners.ts), so two ticks never deploy one client twice.
- * The lease is the run's own life: a `deploying` row whose run ended
- * without saying so is settled as failed on the next tick.
- */
-export const clientDeploys = sqliteTable("client_deploys", {
-  clientId: text("client_id")
-    .primaryKey()
-    .references(() => clients.id),
-  /** The release it deploys or deployed: the client's target then. */
-  releaseId: text("release_id")
-    .notNull()
-    .references(() => releases.id),
-  /** The deploy's run (src/rollout/deploy.ts). */
-  runId: text("run_id").notNull(),
-  status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
-  /** Why it failed: a code, never a message or a response body. */
-  error: text(),
-  startedAt: timestamp("started_at").notNull(),
-  /** When it ended; null while it runs. */
-  endedAt: timestamp("ended_at"),
-});
 
 /**
  * A secret of a client's own that can't be derived, such as its Teams

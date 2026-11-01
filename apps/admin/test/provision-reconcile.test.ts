@@ -30,7 +30,7 @@ import worker from "../src/server.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, destination, release, staff } from "./hosting.ts";
+import { db, destination, onChannel, release, staff } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -82,7 +82,6 @@ const added = async (
     hosting,
     clientId: `acme-${crypto.randomUUID().slice(0, 8)}`,
     name: "Acme",
-    ring: 1,
     signIn: {
       domains: ["acme.test"],
       admins: ["ada@acme.test"],
@@ -166,7 +165,8 @@ describe("provisioning that heals itself", () => {
   useStoreSecrets({ deployer: token });
   beforeAll(async () => {
     await destination();
-    await importedRelease();
+    // A new client follows Stable: provisioned on its release.
+    await onChannel(await importedRelease());
   });
   beforeEach(() => {
     // Attempts log why they stopped; alerts with no channel are logged.
@@ -346,7 +346,7 @@ describe("provisioning that heals itself", () => {
     });
   });
 
-  it("waits on a release that can't go there until a newer one is imported, then resumes onto it", async () => {
+  it("waits on a release that can't go there until another is promoted to its channel, then resumes onto it", async () => {
     const clientId = await added();
     const runId = await startedByStaff(clientId);
     const [operation] = await db
@@ -358,6 +358,9 @@ describe("provisioning that heals itself", () => {
 
     const waiting = await reconcileClient(env, clientId, later());
     const newer = await importedRelease();
+    // Imported alone, it changes nothing; promoted to Stable, it's the target.
+    const stillWaiting = await reconcileClient(env, clientId, later());
+    await onChannel(newer);
     const resumed = await reconcileClient(env, clientId, later());
     const [after] = await db
       .select({ releaseId: clientProvisions.releaseId })
@@ -366,12 +369,14 @@ describe("provisioning that heals itself", () => {
 
     expect({
       waiting,
+      stillWaiting,
       resumed,
       from: operation?.releaseId === newer,
       to: after?.releaseId,
       starts: runs.started.length,
     }).toStrictEqual({
       waiting: "needs_staff",
+      stillWaiting: "needs_staff",
       resumed: "resumed",
       from: false,
       to: newer,
@@ -389,7 +394,7 @@ describe("provisioning that heals itself", () => {
       .update(clientProvisions)
       .set({ progress: JSON.stringify({ migrated: { core: "v99" } }) })
       .where(eq(clientProvisions.clientId, clientId));
-    await importedRelease();
+    await onChannel(await importedRelease());
     using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const lasting = await reconcileClient(env, clientId, later());

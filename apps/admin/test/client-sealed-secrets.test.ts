@@ -60,7 +60,7 @@ const signingSecret = (): string => crypto.randomUUID().replaceAll("-", "");
 const liveClient = async () => {
   const release = await placedRelease("feat(connect): its bot");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { account } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name: clientId,
     signIn: null,
@@ -181,7 +181,7 @@ describe("a client's Teams bot secret", () => {
       name: "TEAMS_BOT_SECRET",
       value: first,
     });
-    // A rollout deploys it next, even on the release it runs.
+    // Its next deploy carries it, even on the release it runs.
     const pending = await targetClient(db, acme.clientId);
     await redeploy(acme.clientId, acme.releaseId);
     await redeploy(other.clientId, other.releaseId);

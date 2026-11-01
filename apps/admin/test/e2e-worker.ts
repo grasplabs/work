@@ -8,13 +8,14 @@
  *   isolate, where the runs' steps run too. Requests to this machine
  *   (Vite's dev server) go out as usual; anything else is refused.
  * - Each Worker upload takes seconds, as a real one may: a journey sees
- *   a rollout run before it's done.
+ *   a deploy run before it's done.
  * - Access: the dev bypass (`DEV_ACCESS_EMAIL`, src/access.ts), which holds
  *   only for requests to this machine.
  * - `POST /__e2e/seed` seeds what a journey starts from,
  *   `POST /__e2e/seed-placed` the placed-client journey's,
  *   `POST /__e2e/seed-organizations` the organization sections' and
  *   `POST /__e2e/seed-create` the create journey's (test/e2e-seed.ts).
+ *   `POST /__e2e/tick` runs the cron's reconciler once.
  *   `POST /__e2e/core` holds a seeded core's snapshot answer for a while,
  *   or lets it answer at once again, and answers how many snapshots it
  *   answered so far. `POST /__e2e/fault` makes one of the admin's server
@@ -25,6 +26,7 @@ import { loopbackHosts } from "@grasp-os/shared/router";
 import { toCrossJSONAsync } from "seroval";
 import { z } from "zod";
 
+import { reconcile } from "../src/rollout/reconciler.ts";
 import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
@@ -172,35 +174,36 @@ export default {
   ...server,
   fetch: async (request: Request, env: Env) => {
     const url = new URL(request.url);
+    // The journeys' own routes answer requests to this machine alone.
+    if (
+      url.pathname.startsWith("/__e2e/") &&
+      !loopbackHosts.has(url.hostname)
+    ) {
+      return new Response("Forbidden", { status: 403 });
+    }
     if (url.pathname === "/__e2e/seed" && request.method === "POST") {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       // The seed offboards every client before it, so their accounts go
       // too: the fake starts again, as each test's does, and never runs
       // out of the databases it keeps clients' data in.
       cloudflare.reset();
       return Response.json(await seed(cloudflare, tokens));
     }
+    // The cron's reconciler, once: what a journey waits on, as a deploy
+    // starts at the next tick (src/rollout/reconciler.ts).
+    if (url.pathname === "/__e2e/tick" && request.method === "POST") {
+      await reconcile(env);
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === "/__e2e/seed-create" && request.method === "POST") {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       return Response.json(await seedCreate(cloudflare, tokens));
     }
     if (url.pathname === "/__e2e/seed-placed" && request.method === "POST") {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       return Response.json(await seedPlaced(cloudflare, tokens));
     }
     if (
       url.pathname === "/__e2e/seed-organizations" &&
       request.method === "POST"
     ) {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       const seeded = await seedOrganizations(cloudflare, tokens);
       cores.set(seeded.answered.clientId, seeded.answered.account);
       return Response.json({
@@ -209,9 +212,6 @@ export default {
       });
     }
     if (url.pathname === "/__e2e/fault" && request.method === "POST") {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       Reflect.set(
         globalThis,
         faultKey,
@@ -224,9 +224,6 @@ export default {
       return fault;
     }
     if (url.pathname === "/__e2e/core" && request.method === "POST") {
-      if (!loopbackHosts.has(url.hostname)) {
-        return new Response("Forbidden", { status: 403 });
-      }
       return await steerCore(request);
     }
     return await server.fetch(request, env);

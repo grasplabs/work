@@ -210,7 +210,6 @@ describe("an organization's jurisdiction", () => {
       {
         clientId,
         name: "Own Servers",
-        ring: 1,
         hosting: "on_prem",
         signIn: {
           domains: ["acme.test"],

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   auditEvents,
+  channels,
   clientAdminReads,
   clientPlacements,
   clientResources,
@@ -20,14 +21,14 @@ import {
   fetchClientHosting,
   offboardPlacedClientFn,
   placeAndProvisionFn,
-  releasePlacedClientFn,
-  rollbackPlacedClientFn,
 } from "../src/hosting/functions.ts";
 import {
   allocateClientResources,
   placeClient,
 } from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
+import { pinClient } from "../src/rollout/channels.ts";
+import { pinClientFn } from "../src/rollout/functions.ts";
 import { claimRun } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
@@ -106,23 +107,31 @@ const hostingOf = async (clientId: string) => {
   return view;
 };
 
+/**
+ * Places and provisions client `clientId` on `releaseId`, in
+ * `destinationId` (the automatic one for null), as `email` through the
+ * admin's entry: staff pin it to the release first, as provisioning
+ * starts a client on the release it should run.
+ */
 const place = async (
   clientId: string,
   releaseId: string,
   destinationId: string | null,
   email: string | null = caller
-) =>
-  await callServerFn(
+) => {
+  await pinClient(env, staff, { clientId, releaseId });
+  return await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId, destinationId },
+    { clientId, destinationId },
     { email }
   );
+};
 
-/** Trying it again, as its Setup's button does: no release or destination named. */
+/** Trying it again, as its Setup's button does: no destination named. */
 const retry = async (clientId: string) =>
   await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId: null, destinationId: null },
+    { clientId, destinationId: null },
     { email: caller }
   );
 
@@ -326,7 +335,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("tries a stopped provisioning again on the newest release, a fix released since included", async () => {
+  it("tries a stopped provisioning again on the release it should run now, a fix it was pinned to since included", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
@@ -334,6 +343,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     await place(clientId, own, null);
     await latestStopped(attempts);
     const fixed = await importedRelease();
+    await pinClient(env, staff, { clientId, releaseId: fixed });
 
     // Retry, as its Setup's button asks: no release named.
     const retried = await retry(clientId);
@@ -347,13 +357,45 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: fixed, switched: [caller] });
   });
 
-  it("tries a stopped provisioning again on its own release when no newer release is imported", async () => {
+  it("provisions a new client with its channel's release, not a newer one only Edge has", async () => {
+    await destination();
+    const clientId = await client();
+    const stable = await importedRelease();
+    await db
+      .insert(channels)
+      .values({ id: "stable", releaseId: stable, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: channels.id,
+        set: { releaseId: stable },
+      });
+    // Newer, on Edge alone.
+    await importedRelease();
+    using attempts = followAttempts();
+
+    try {
+      // Started as the cron and Setup start it: no release named.
+      const started = await retry(clientId);
+      await latestStopped(attempts);
+      const hosting = await hostingOf(clientId);
+      const operation = await operationOf(clientId);
+      expect({
+        started: started.refused,
+        suggested: hosting.suggestedReleaseId,
+        operation: operation?.releaseId,
+      }).toStrictEqual({ started: null, suggested: stable, operation: stable });
+    } finally {
+      await db.delete(channels);
+    }
+  });
+
+  it("tries a stopped provisioning again on its own release while it should still run it, a newer import notwithstanding", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
+    await importedRelease();
 
     const retried = await retry(clientId);
     await latestStopped(attempts);
@@ -432,15 +474,17 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       placement: { destinationId: shared },
     });
 
-    // Stopped with nothing live: a newer release takes its operation
-    // over, and resuming offers the newest; an older one,
-    // or another destination, is refused.
+    // Stopped with nothing live: resuming offers the release it should
+    // run, a newer one only once staff pin it, which then takes its
+    // operation over; an older one, or another destination, is refused.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);
     const switched = await place(clientId, newer, null);
+    const offeredOnceSwitched = await hostingOf(clientId);
     await latestStopped(attempts);
     expect({
       offered: offered.suggestedReleaseId,
+      offeredOnceSwitched: offeredOnceSwitched.suggestedReleaseId,
       moved: await place(clientId, releaseId, other),
       switched,
       operation: await operationOf(clientId),
@@ -448,7 +492,8 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       older: await place(clientId, releaseId, null),
       after: await operationOf(clientId),
     }).toMatchObject({
-      offered: newer,
+      offered: releaseId,
+      offeredOnceSwitched: newer,
       moved: { refused: "placement_changed" },
       switched: { refused: null },
       operation: {
@@ -618,7 +663,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     await expect(
       callServerFn(
         placeAndProvisionFn,
-        { clientId, releaseId, destinationId: null },
+        { clientId, destinationId: null },
         { email: caller, from: "https://elsewhere.test" }
       )
     ).rejects.toThrow("The server function answered 403");
@@ -634,75 +679,41 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("offers staff a live placed client's later release, and the rollback to the one before, and refuses both to anyone Access doesn't vouch for", async () => {
+  it("offers staff to pin a live placed client to a release, and refuses pinning to anyone Access doesn't vouch for", async () => {
     const destinationId = await destination();
     const clientId = await client();
-    const [before, current, later] = [
-      await importedRelease(),
-      await importedRelease(),
-      await importedRelease(),
-    ];
+    const later = await importedRelease();
     await placeClient(db, staff, { clientId, destinationId });
-    const now = new Date();
-    await db.insert(clientProvisions).values({
-      id: crypto.randomUUID(),
-      clientId,
-      releaseId: current,
-      previousReleaseId: before,
-      status: "done",
-      step: "route",
-      startedBy: caller,
-      createdAt: now,
-      updatedAt: now,
-    });
     await db
       .update(clients)
       .set({ status: "active" })
       .where(eq(clients.id, clientId));
 
     const { status, html } = await page(
-      `/organizations/${clientId}/setup`,
+      `/organizations/${clientId}/setup?tab=releases`,
       caller
     );
-    // Its release left running by a runner that has ended: resumed from
-    // here, the release it was of offered first.
-    await db
-      .update(clientProvisions)
-      .set({ status: "running", step: "core" })
-      .where(eq(clientProvisions.clientId, clientId));
-    const stopped = await page(`/organizations/${clientId}/setup`, caller);
-    await db
-      .update(clientProvisions)
-      .set({ status: "done", step: "route" })
-      .where(eq(clientProvisions.clientId, clientId));
-    const refused = await Promise.all([
-      callServerFn(
-        releasePlacedClientFn,
-        { clientId, releaseId: later },
-        { email: null }
-      ).then(() => "answered", String),
-      callServerFn(rollbackPlacedClientFn, { clientId }, { email: null }).then(
-        () => "answered",
-        String
-      ),
-    ]);
+    const refused = await callServerFn(
+      pinClientFn,
+      { clientId, releaseId: later },
+      { email: null }
+    ).then(() => "answered", String);
+    const pinned = await db
+      .select({ pinnedReleaseId: clients.pinnedReleaseId })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
 
     expect({
       status,
-      release: html.includes("Release it"),
-      rollBack: html.includes(`Roll back to ${before}`),
-      resume: stopped.html.includes("Resume the release"),
-      place: html.includes("Place and start provisioning"),
-      refused: refused.map((answer) => answer.includes("answered 403")),
-      operation: await operationOf(clientId),
-    }).toMatchObject({
+      offer: html.includes("Pin it to"),
+      refused: refused.includes("answered 403"),
+      pinned,
+    }).toStrictEqual({
       status: 200,
-      release: true,
-      rollBack: true,
-      resume: true,
-      place: false,
-      refused: [true, true],
-      operation: { releaseId: current, status: "done" },
+      offer: true,
+      refused: true,
+      pinned: { pinnedReleaseId: null },
     });
   });
 

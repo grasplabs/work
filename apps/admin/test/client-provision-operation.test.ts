@@ -21,6 +21,7 @@ import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
+  clientDeploys,
   clientWorkers,
   clientProvisions,
   clientResources,
@@ -53,11 +54,10 @@ import {
   startClientRelease,
 } from "../src/hosting/operation.ts";
 import { operationErrorWords } from "../src/hosting/words.ts";
-import {
-  provisionPlacedClient,
-  releasePlacedClient,
-} from "../src/hosting/workflow.ts";
+import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
+import { pinClient } from "../src/rollout/channels.ts";
+import { reconcile } from "../src/rollout/reconciler.ts";
 import {
   claimRun,
   currentRun,
@@ -3330,47 +3330,6 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("releases a live client through its run, as staff start it, and a start at the same moment that loses the claim changes nothing", async () => {
-    const first = await importRelease("dedicated");
-    const { clientId } = await liveClient(first);
-    const later = await importRelease("dedicated", {
-      notes: "feat(core): later",
-    });
-    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
-    // Another release asked for at once: it claims nothing, so it never
-    // changes the operation the winning attempt runs.
-    const other = await importRelease("dedicated", {
-      notes: "feat(core): other",
-    });
-    const [won, lost] = await Promise.all([
-      codeOf(
-        releasePlacedClient(env, staff, clientId, {
-          releaseId: later.releaseId,
-        })
-      ),
-      codeOf(
-        releasePlacedClient(env, staff, clientId, {
-          releaseId: other.releaseId,
-        })
-      ),
-    ]);
-    await attemptEnded(attempts.started[0], "complete");
-    const operation = await operationOf(clientId);
-    const answers = [won, lost].toSorted();
-    const { started } = attempts;
-    expect({
-      answers,
-      attempts: started.length,
-      runs: await runs(clientId),
-      operation,
-    }).toMatchObject({
-      answers: ["already_running", "started"],
-      attempts: 1,
-      runs: { core: operation?.releaseId, connect: operation?.releaseId },
-      operation: { status: "done" },
-    });
-  });
-
   // Offboarding, then deleting its resources (src/hosting/offboarding.ts):
   // the threat model is in its header.
 
@@ -3980,27 +3939,24 @@ describe("a release's runner crashing, and another action on the client after", 
     }
   );
 
-  it("offboards or releases a client asked for both at once, never both: the loser changes nothing", async () => {
+  it("offboards or deploys a client asked for both at once, never both: the loser changes nothing", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {
       notes: "feat(core): later",
     });
     const hostname = `${clientId}.${domain}`;
-    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
-    const [offboarded, released] = await Promise.all([
+    // Pinned to a later release: the reconciler's next tick deploys it.
+    await pinClient(env, staff, { clientId, releaseId: later.releaseId });
+    using deploys = startsOf(adminWorkflows.deploy);
+    const [offboarded] = await Promise.all([
       codeOf(offboardPlacedClient(env, staff, clientId)),
-      codeOf(
-        releasePlacedClient(env, staff, clientId, {
-          releaseId: later.releaseId,
-        })
-      ),
+      reconcile(env),
     ]);
-    const { started } = attempts;
-    // A run the offboarding refused ends errored.
+    const { started } = deploys;
     await Promise.all(
       started.map(async (id) => {
-        await ended(adminWorkflows.provisionPlacedClient, id);
+        await ended(adminWorkflows.deploy, id);
       })
     );
     const client = await db
@@ -4012,51 +3968,55 @@ describe("a release's runner crashing, and another action on the client after", 
     const offboardWon = offboarded === "started";
 
     expect({
-      oneWon: offboardWon !== (released === "started"),
+      oneWon: offboardWon !== started.length > 0,
       status: client?.status,
       routed: route !== null,
     }).toStrictEqual({
       oneWon: true,
       status: offboardWon ? "offboarded" : "active",
-      // Offboarded: never routed again; released: still served.
+      // Offboarded: never routed again; deployed: still served.
       routed: !offboardWon,
     });
   });
 
-  it("holds the client while it offboards: a release asked for as its hostname is deleted can't claim it, and starts nothing", async () => {
+  it("holds the client while it offboards: a reconciler tick as its hostname is deleted can't claim it, and deploys nothing", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {
       notes: "feat(core): later",
     });
-    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
-    let meanwhile = "not asked";
+    await pinClient(env, staff, { clientId, releaseId: later.releaseId });
+    using deploys = startsOf(adminWorkflows.deploy);
+    let ticked = false;
     const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
     const deleting = vi
       .spyOn(env.ROUTER_HOSTS, "delete")
       .mockImplementationOnce(async (key: string) => {
-        // A release asked for while offboarding deletes the route.
-        meanwhile = await codeOf(
-          releasePlacedClient(env, staff, clientId, {
-            releaseId: later.releaseId,
-          })
-        );
+        // The cron's tick while offboarding deletes the route.
+        await reconcile(env);
+        ticked = true;
         await remove(key);
       });
 
     const offboarded = await codeOf(offboardPlacedClient(env, staff, clientId));
     deleting.mockRestore();
-    const { started } = attempts;
+    const deploy = await db
+      .select({ clientId: clientDeploys.clientId })
+      .from(clientDeploys)
+      .where(eq(clientDeploys.clientId, clientId))
+      .get();
 
     expect({
       offboarded,
-      meanwhile,
-      started: started.length,
+      ticked,
+      started: deploys.started.length,
+      deploy,
       route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
     }).toStrictEqual({
       offboarded: "started",
-      meanwhile: "already_running",
+      ticked: true,
       started: 0,
+      deploy: undefined,
       route: null,
     });
   });

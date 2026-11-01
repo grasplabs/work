@@ -5,14 +5,15 @@ import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { setRing } from "../src/clients/settings.ts";
 import { adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
+import { clientDeploys, clients } from "../src/db/schema.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
+import { setClientChannel } from "../src/rollout/channels.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { aiStatusOf, emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { onChannel } from "./hosting.ts";
 import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
@@ -34,7 +35,7 @@ const liveClient = async (snapshot: AdminSnapshot) => {
   const release = await placedRelease("feat(core): the setup");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Acme ${clientId}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { account } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name,
     signIn: null,
@@ -88,7 +89,7 @@ describe("an organization's Setup", () => {
         `${acme.clientId}.`,
         "Healthy",
         acme.release,
-        "Beta",
+        "Stable",
         "Open its Grasp",
         "Its activity",
       ].map((text) => header.includes(text)),
@@ -136,12 +137,13 @@ describe("an organization's Setup", () => {
         "Read what runs",
       ].map((text) => resources.html.includes(text)),
       releases: {
-        follows: releases.html.includes("Follows the rollouts"),
+        follows: releases.html.includes("Follows its channel"),
         runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
           acme.release
         ),
         runsThis: releases.html.includes("Runs this"),
-        latestRollout: releases.html.includes("Not in one yet"),
+        shouldRun: releases.html.includes("No release on its channel yet"),
+        lastDeploy: releases.html.includes("None yet"),
         // Only the newest are listed, and the whole list is a link away.
         allReleases: sectionOf(releases.html, "Recent releases").includes(
           'href="/platform/releases"'
@@ -167,7 +169,8 @@ describe("an organization's Setup", () => {
         follows: true,
         runs: true,
         runsThis: true,
-        latestRollout: true,
+        shouldRun: true,
+        lastDeploy: true,
         allReleases: true,
       },
       settings: true,
@@ -176,12 +179,25 @@ describe("an organization's Setup", () => {
 
   it("says what needs a look, most pressing first, and what staff did by hand", async () => {
     const acme = await liveClient(emptyAdminSnapshot("Acme"));
-    // Two releases since the one it runs.
-    await publishRelease({ notes: "fix(core): one" });
-    await publishRelease({ notes: "fix(core): two" });
+    const beta = await publishRelease({ notes: "fix(core): on beta" });
     await importReleases(env.RELEASES, db);
+    await onChannel(beta.id, "beta");
     await rotateClientSecrets(db, staff, acme.clientId, new Date());
-    await setRing(env, staff, { clientId: acme.clientId, ring: 2 });
+    await setClientChannel(env, staff, {
+      clientId: acme.clientId,
+      channel: "beta",
+    });
+    // Its deploy of Beta's release failed, as the reconciler records it.
+    const now = new Date();
+    await db.insert(clientDeploys).values({
+      clientId: acme.clientId,
+      releaseId: beta.id,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_400_10000",
+      startedAt: now,
+      endedAt: now,
+    });
     const base = `/organizations/${acme.clientId}/setup`;
 
     const status = await page(base);
@@ -189,8 +205,8 @@ describe("an organization's Setup", () => {
     const settings = await page(`${base}?tab=settings`);
     const needs = textOf(sectionOf(status.html, "What needs a look"));
     const lines = [
+      `Its deploy of ${beta.id} failed`,
       "New secrets wait to reach it",
-      "2 releases behind the newest.",
     ];
     const done = textOf(sectionOf(history.html, "Done here"));
 
@@ -202,14 +218,10 @@ describe("an organization's Setup", () => {
       inOrder: lines
         .map((line) => needs.indexOf(line))
         .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
-      ring: textOf(sectionOf(status.html, "How it stands")).includes(
-        "Production"
+      channel: textOf(sectionOf(status.html, "How it stands")).includes("Beta"),
+      done: ["Moved it to Beta.", "Rotated its secrets.", staff.email].map(
+        (text) => done.includes(text)
       ),
-      done: [
-        "Moved it to Production.",
-        "Rotated its secrets.",
-        staff.email,
-      ].map((text) => done.includes(text)),
       // What the system did itself isn't by hand.
       created: done.includes("client.create"),
       secretsLive: textOf(sectionOf(settings.html, "Its secrets")).includes(
@@ -222,7 +234,7 @@ describe("an organization's Setup", () => {
       standing: true,
       needs: [true, true],
       inOrder: true,
-      ring: true,
+      channel: true,
       done: [true, true, true],
       created: false,
       secretsLive: true,
@@ -353,7 +365,7 @@ describe("an organization's Setup", () => {
     const base = `/organizations/${acme.clientId}/setup`;
     await db
       .update(clients)
-      .set({ ring: 0 })
+      .set({ channel: "edge" })
       .where(eq(clients.id, acme.clientId));
 
     const odd = await page(`${base}?tab=nothing`);
@@ -362,12 +374,12 @@ describe("an organization's Setup", () => {
     expect({
       status: odd.status,
       onStatus: odd.html.includes("From contract to go"),
-      ring: textOf(sectionOf(odd.html, "How it stands")).includes("Alpha"),
+      channel: textOf(sectionOf(odd.html, "How it stands")).includes("Edge"),
       unknown: unknown.status,
     }).toStrictEqual({
       status: 200,
       onStatus: true,
-      ring: true,
+      channel: true,
       unknown: 404,
     });
   });

@@ -87,7 +87,7 @@ import type { Stage } from "@grasp-os/shared/names";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
-import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
@@ -232,7 +232,7 @@ export const provisionOperationErrorCodes = [
   "release_behind_migration",
   /**
    * The release failed its probe once live and was rolled back to the
-   * release before on its own: a rollout counts the client failed.
+   * release before on its own: its deploy counts as failed.
    */
   "release_rolled_back",
 ] as const;
@@ -722,23 +722,6 @@ const releaseAction = ({
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
 
 /**
- * Throws unless client `clientId` may go back to release `back`, as a
- * rollback would: by the Durable Object migrations each of its scripts
- * was seen at (`assertCanGo`), before anything of the rollback is claimed
- * or uploaded.
- */
-export const assertCanRollBack = async (
-  db: AdminDatabase,
-  clientId: string,
-  back: string
-): Promise<void> => {
-  const operation = await provisionOf(db, clientId);
-  if (operation !== undefined) {
-    await assertCanGo(db, operation, back, true);
-  }
-};
-
-/**
  * Whether `operation` has `target` already, so starting it changes
  * nothing: done on it, unless asked to run it `again` (its settings or
  * secrets as they are now); failed on it, or left running by a runner
@@ -930,7 +913,7 @@ export const startClientRelease = async (
         status: "running",
         step: null,
         error: null,
-        // A change of its own, counted: what a rollout's rollback reads.
+        // A change of its own, counted.
         change: operation.change + 1,
         what: target === operation.releaseId ? (what ?? "settings") : "release",
         startedBy: actorName(actor),
@@ -1171,7 +1154,7 @@ const noteSuperseded = async (
  * What's left: Cloudflare may still apply a call whose sender died, or one
  * still unanswered past this bound, after a rollback that waited it out
  * has made its own. Nothing here can see that call land; the client would
- * then run the rollout's Worker while the admin records the rollback's,
+ * then run the deploy's Worker while the admin records the rollback's,
  * until drift (src/rollout/drift.ts) shows it and the next run replaces it.
  */
 const sendSettleMs = 5 * 60_000;
@@ -1359,9 +1342,8 @@ const sendHolding = async (
 /**
  * Whether no call sent for client `clientId`'s change `change` is still
  * on its way (`sendHolding`): none marked for it, or each marked at least
- * `sendSettleMs` ago. What a runner that took the client over checks,
- * step by step, before it changes the client's Workers itself
- * (src/rollout/rollback.ts).
+ * `sendSettleMs` ago: what a runner that took the client over waits for
+ * before it changes the client's Workers itself.
  */
 export const sendsSettled = async (
   db: AdminDatabase,
@@ -1591,32 +1573,6 @@ const load = async (
     client,
     readAt,
   };
-};
-
-/** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
-const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
-  or(
-    gt(releases.builtAt, row.builtAt),
-    and(eq(releases.builtAt, row.builtAt), gt(releases.id, row.id))
-  );
-
-/**
- * The newest imported release (by when built, then id); with `newerThan`,
- * only one built after that one. Null when there is none. What a client
- * is provisioned with when staff don't pick one, and what a retry moves a
- * stopped one forward to.
- */
-export const newestRelease = async (
-  db: AdminDatabase,
-  newerThan?: { id: string; builtAt: Date }
-): Promise<string | null> => {
-  const [row] = await db
-    .select({ id: releases.id })
-    .from(releases)
-    .where(newerThan === undefined ? undefined : newerThanRow(newerThan))
-    .orderBy(desc(releases.builtAt), desc(releases.id))
-    .limit(1);
-  return row?.id ?? null;
 };
 
 /**

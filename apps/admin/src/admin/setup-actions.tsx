@@ -1,9 +1,9 @@
 /**
  * What someone at Grasp does to a company's own Grasp, in its Setup
  * (src/admin/setup.tsx), as the admin's own client page did before the
- * admin took it in: pin it to a release, move it to another ring, change how its
- * people sign in, apply its settings now, rotate its secrets, roll it
- * back from the rollout that last reached it. Each is the same server
+ * admin took it in: pin it to a release, move it to another channel,
+ * change how its people sign in, apply its settings now, rotate its
+ * secrets. Each is the same server
  * function, audited as the staff member Access vouches for, and each
  * reads the Setup again after, whether it worked or not.
  *
@@ -38,37 +38,36 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import { Link, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { z } from "zod";
 
 import {
   applySettingsFn,
   fetchClientLive,
   fetchTeamsPackageFn,
   rotateSecretsFn,
-  setRingFn,
   setSealedSecretFn,
   setSignInFn,
   setTeamsBotFn,
 } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { HistoryEntry } from "../clients/queries.ts";
-import type { ClientSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
+import { channelIds } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
+import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
-import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
+import { pinClientFn, setChannelFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
-import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
@@ -90,7 +89,7 @@ export const useRefreshSetup = (): Refresh => {
 
 // Its releases.
 
-/** Pinning it to a release, and letting it follow the rollouts again. */
+/** Pinning it to a release, and letting it follow its channel again. */
 export const PinRelease = ({
   clientId,
   pinned,
@@ -103,8 +102,6 @@ export const PinRelease = ({
   releases: readonly {
     id: string;
     notes: string;
-    versionMajor?: number | null;
-    versionMinor?: number | null;
   }[];
   refresh: Refresh;
 }) => {
@@ -144,8 +141,8 @@ export const PinRelease = ({
         </NativeSelect>
         <FieldDescription>
           {pinned === null
-            ? "Not pinned: every rollout reaches it."
-            : `Pinned to ${pinned}: rollouts of any other release skip it.`}
+            ? "Not pinned: it gets each release promoted to its channel."
+            : `Pinned to ${pinned}: promotions skip it. Unpinned, it goes to its channel's release.`}
         </FieldDescription>
       </Field>
       <div className="flex flex-wrap items-center gap-2">
@@ -175,155 +172,68 @@ export const PinRelease = ({
   );
 };
 
-/** Moving it to another ring. */
-export const RingChange = ({
+/** Moving it to another release channel, which deploys it to that channel's release. */
+export const ChannelChange = ({
   clientId,
-  ring,
+  channel,
   refresh,
 }: {
   clientId: string;
-  ring: number;
+  channel: Channel;
   refresh: Refresh;
 }) => {
-  const { busy, failure, run } = useSettingsAction();
+  const { busy, failure, run } = useRolloutAction();
   return (
     <form
       className="flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
-        const next = Number(textOf(new FormData(event.currentTarget), "ring"));
+        const next = channelIds.find(
+          (each) =>
+            each === textOf(new FormData(event.currentTarget), "channel")
+        );
+        if (next === undefined) {
+          return;
+        }
         void run(
           async () =>
             await thenRefresh(
-              async () => await setRingFn({ data: { clientId, ring: next } }),
+              async () =>
+                await setChannelFn({ data: { clientId, channel: next } }),
               refresh
             )
         );
       }}
     >
       <Field>
-        <FieldLabel htmlFor="setup-ring">Ring</FieldLabel>
+        <FieldLabel htmlFor="setup-channel">Channel</FieldLabel>
         <NativeSelect
           className="max-w-48"
-          defaultValue={String(ring)}
-          id="setup-ring"
-          // Keyed by the ring: it starts again from the one read after each change.
-          key={ring}
-          name="ring"
+          defaultValue={channel}
+          id="setup-channel"
+          // Keyed by the channel: it starts again from the one read after each change.
+          key={channel}
+          name="channel"
         >
-          {ringChoices(ring).map((choice) => (
-            <NativeSelectOption key={choice} value={String(choice)}>
-              {ringWords(choice)}
+          {channelIds.map((choice) => (
+            <NativeSelectOption key={choice} value={choice}>
+              {channelWords[choice]}
             </NativeSelectOption>
           ))}
         </NativeSelect>
         <FieldDescription>
-          When rollouts reach it: Alpha (our own deployments) first, then Beta
-          (organisations that want the latest changes), then Production.
-          Rollouts started from now on use it.
+          Edge gets every release as it lands, Beta and Stable the release
+          someone at Grasp promotes. Moving it deploys that channel&apos;s
+          release, unless it&apos;s pinned.
         </FieldDescription>
       </Field>
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={busy} size="sm" type="submit" variant="outline">
-          Save ring
+          Save channel
         </Button>
         <Failure failure={failure} />
       </div>
     </form>
-  );
-};
-
-/** A rollout target's statuses once a step of it started there: what a rollback can undo. */
-const reached: ReadonlySet<NonNullable<ClientSetup["rollout"]>["target"]> =
-  new Set(["deploying", "done", "failed", "stopped"]);
-
-/**
- * Rolling it back from the latest rollout that reached it, to what it ran
- * before. A secrets rollout's rollback puts the old shared secrets back,
- * which may be revoked at their providers already: asked first.
- */
-export const RollBack = ({
-  clientId,
-  rollout,
-  refresh,
-}: {
-  clientId: string;
-  rollout: ClientSetup["rollout"];
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useRolloutAction();
-  const [confirming, setConfirming] = useState(false);
-  if (rollout === null || !reached.has(rollout.target)) {
-    return null;
-  }
-  const rollBack = () => {
-    setConfirming(false);
-    void run(
-      async () =>
-        await thenRefresh(
-          async () =>
-            await rollbackClientFn({
-              data: { rolloutId: rollout.id, clientId },
-            }),
-          refresh
-        )
-    );
-  };
-  return (
-    <CardContent>
-      <p className="text-muted-foreground">
-        {`Rolling it back from ${rollout.releaseId ?? "the secrets rollout"} puts back what it ran before, and waits for it.`}
-      </p>
-      {confirming ? (
-        <Alert variant="destructive">
-          <TriangleAlertIcon aria-hidden />
-          <AlertDescription>
-            <p>
-              Rolling it back puts the shared secrets it ran before back. If you
-              revoked them at their providers, its people can&apos;t sign in or
-              reach their connections until the next secrets rollout.
-            </p>
-          </AlertDescription>
-          <AlertAction placement="below">
-            <Button
-              disabled={busy}
-              onClick={rollBack}
-              size="sm"
-              variant="destructive"
-            >
-              Roll back anyway
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              Keep the new secrets
-            </Button>
-          </AlertAction>
-        </Alert>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            disabled={busy}
-            onClick={() => {
-              if (rollout.kind === "secrets") {
-                setConfirming(true);
-              } else {
-                rollBack();
-              }
-            }}
-            size="sm"
-            variant="outline"
-          >
-            Roll it back
-          </Button>
-          <Failure failure={failure} />
-        </div>
-      )}
-    </CardContent>
   );
 };
 
@@ -378,12 +288,12 @@ const pendingWords = (
   pinned: string | null
 ): string => {
   if (!configPending) {
-    return "Its core runs its sign-in as it is. A change reaches it with its next deploy: apply it now, or a rollout that reaches it deploys it.";
+    return "Its core runs its sign-in as it is. A change reaches it with its next deploy: apply it now, or its next release carries it.";
   }
   if (pinned !== null) {
-    return `Sign-in changed since its last deploy. It's pinned to ${pinned}, so only a rollout of that release reaches it: apply it now.`;
+    return `Sign-in changed since its last deploy. It's pinned to ${pinned}, so no new release carries it: apply it now.`;
   }
-  return "Sign-in changed since its last deploy: apply it now, or the next rollout that reaches it deploys it, even on the release it runs.";
+  return "Sign-in changed since its last deploy: apply it now, or its next release carries it.";
 };
 
 /** What waits for its next deploy, and applying its settings now. */
@@ -870,22 +780,6 @@ export const LiveNumbers = ({
 
 // Everything the audit log keeps of it.
 
-/** The actions whose target is a rollout's id: the others name a version, a release or nothing. */
-const rolloutActions: ReadonlySet<string> = new Set([
-  "rollout.client_start",
-  "rollout.client_done",
-  "rollout.client_skip",
-  "rollout.client_stop",
-  "rollout.rollback",
-  "rollout.client_rolled_back",
-]);
-
-/** The rollout an entry names, to link its page; null for any other. */
-const rolloutOf = (entry: HistoryEntry): string | null =>
-  rolloutActions.has(entry.action) && z.uuid().safeParse(entry.target).success
-    ? entry.target
-    : null;
-
 /** Everything the audit log keeps of it, the newest first. */
 export const History = ({ history }: { history: HistoryEntry[] }) =>
   history.length === 0 ? (
@@ -909,48 +803,33 @@ export const History = ({ history }: { history: HistoryEntry[] }) =>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {history.map((entry) => {
-            const rolloutId = rolloutOf(entry);
-            return (
-              <TableRow key={entry.id}>
-                <TableCell variant="card">
-                  <span className="tabular-nums">{formatTime(entry.at)}</span>
-                </TableCell>
-                <TableCell variant="card">
-                  <span className="font-mono text-xs">{entry.action}</span>
-                </TableCell>
-                <TableCell
-                  className="hidden whitespace-normal @xl:table-cell"
-                  variant="card"
-                >
-                  <span className="text-muted-foreground">{entry.actor}</span>
-                </TableCell>
-                <TableCell className="hidden @2xl:table-cell" variant="card">
-                  {rolloutId === null ? (
-                    <span className="font-mono text-xs">
-                      {entry.target ?? ""}
-                    </span>
-                  ) : (
-                    <Link
-                      className="hover:text-foreground font-mono text-xs underline underline-offset-4"
-                      params={{ rolloutId }}
-                      to="/platform/rollouts/$rolloutId"
-                    >
-                      {rolloutId.slice(0, 8)}
-                    </Link>
-                  )}
-                </TableCell>
-                <TableCell
-                  className="hidden whitespace-normal @3xl:table-cell"
-                  variant="card"
-                >
-                  <span className="font-mono text-xs break-all">
-                    {entry.detail ?? ""}
-                  </span>
-                </TableCell>
-              </TableRow>
-            );
-          })}
+          {history.map((entry) => (
+            <TableRow key={entry.id}>
+              <TableCell variant="card">
+                <span className="tabular-nums">{formatTime(entry.at)}</span>
+              </TableCell>
+              <TableCell variant="card">
+                <span className="font-mono text-xs">{entry.action}</span>
+              </TableCell>
+              <TableCell
+                className="hidden whitespace-normal @xl:table-cell"
+                variant="card"
+              >
+                <span className="text-muted-foreground">{entry.actor}</span>
+              </TableCell>
+              <TableCell className="hidden @2xl:table-cell" variant="card">
+                <span className="font-mono text-xs">{entry.target ?? ""}</span>
+              </TableCell>
+              <TableCell
+                className="hidden whitespace-normal @3xl:table-cell"
+                variant="card"
+              >
+                <span className="font-mono text-xs break-all">
+                  {entry.detail ?? ""}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </div>

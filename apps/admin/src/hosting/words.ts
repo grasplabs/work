@@ -251,7 +251,7 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   hosted_on_prem:
     "It runs on its own premises: Grasp's cloud sets nothing up for it.",
   no_release:
-    "No imported release can provision it yet: CI publishes one per merge, and the admin imports it within 5 minutes. Look at Releases if none comes.",
+    "Its channel has no release yet: promote a release to it first, from Platform.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
@@ -302,7 +302,7 @@ export const notStartedWords = (why: NotStarted | null): string => {
     return "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.";
   }
   if (why === "no_release") {
-    return "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.";
+    return "Not started: its channel has no release yet. Promote a release to it first, from Platform.";
   }
   return "Not started: provision it from Hosting.";
 };

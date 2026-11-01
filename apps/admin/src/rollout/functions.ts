@@ -1,9 +1,10 @@
 /**
- * The rollout pages' server functions, behind the Access check every
- * request passes (src/access.ts). The changes act as the verified staff
- * member the request comes from, and answer a refusal as its code
+ * The channels' server functions, behind the Access check every request
+ * passes (src/access.ts). The changes act as the verified staff member the
+ * request comes from, and answer a refusal as its code
  * (`RolloutErrorCode`), which the page words; anything else fails.
  */
+import { log } from "@grasp-os/shared/log";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
@@ -14,151 +15,75 @@ import {
   deploySecrets,
   MissingStoreSecretError,
 } from "../deploy/context.ts";
+import { errorCode } from "../deploy/errors.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
-  approveRollout,
-  ringChecksSchema,
-  cancelRollout,
-  pauseRollout,
+  channelSchema,
   pinClient,
   pinSchema,
-  resumeRollout,
-  retryRollout,
-  startRollout,
-  startRolloutSchema,
-} from "./control.ts";
+  promoteRelease,
+  promoteSchema,
+  retryChannel,
+  retrySchema,
+  setClientChannel,
+} from "./channels.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
 import { RolloutError } from "./errors.ts";
 import type { RolloutErrorCode } from "./errors.ts";
-import { getRollout, listRollouts, rolloutOptions } from "./queries.ts";
-import { rollbackClientAndWait, rollbackRingAndWait } from "./rollback.ts";
-import type { RingRollback } from "./rollback.ts";
+import { reconcile } from "./reconciler.ts";
 import {
   checkRevocation,
+  rollOutSecrets,
   sharedSecretsStatus,
   storeCheck,
 } from "./shared-secrets.ts";
 
-const rolloutSchema = z.object({ rolloutId: z.uuid() });
 const clientSchema = z.object({ clientId: z.string().min(1) });
 
-/** What a change answers: what it made, or why it was refused. */
-export type RolloutChange<T> =
-  | { done: T; refused: null }
-  | { done: null; refused: RolloutErrorCode };
+/** What a change answers: done, or why it was refused. */
+export type RolloutChange =
+  | { done: true; refused: null }
+  | { done: false; refused: RolloutErrorCode };
 
-/** Runs `task`, a refusal answered as its code. */
-const change = async <T>(task: () => Promise<T>): Promise<RolloutChange<T>> => {
+/**
+ * Runs `task`, a refusal answered as its code, then the reconciler once,
+ * so what staff changed starts deploying now rather than at the cron's
+ * next tick. A tick that fails is logged: the cron runs the next.
+ */
+const change = async (task: () => Promise<void>): Promise<RolloutChange> => {
   try {
-    return { done: await task(), refused: null };
+    await task();
   } catch (error) {
     if (error instanceof RolloutError) {
-      return { done: null, refused: error.code };
+      return { done: false, refused: error.code };
     }
     throw error;
   }
+  try {
+    await reconcile(env);
+  } catch (error) {
+    log.error("reconcile.failed", { error: errorCode(error) });
+  }
+  return { done: true, refused: null };
 };
 
-export const fetchRollouts = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const db = adminDatabase(env.DB);
-    return {
-      rollouts: await listRollouts(db),
-      options: await rolloutOptions(db),
-    };
-  }
-);
-
-export const fetchRollout = createServerFn({ method: "GET" })
-  .validator(rolloutSchema)
-  .handler(async ({ data }) => await getRollout(env, data.rolloutId));
-
-export const startRolloutFn = createServerFn({ method: "POST" })
-  .validator(startRolloutSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => await startRollout(env, context.staff, data))
-  );
-
-export const approveRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema.extend({ checks: ringChecksSchema }))
+export const promoteReleaseFn = createServerFn({ method: "POST" })
+  .validator(promoteSchema)
   .handler(
     async ({ data, context }) =>
       await change(async () => {
-        await approveRollout(env, context.staff, data.rolloutId, data.checks);
-        return data.rolloutId;
+        await promoteRelease(env, context.staff, data);
       })
   );
 
-export const retryRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema)
+export const retryChannelFn = createServerFn({ method: "POST" })
+  .validator(retrySchema)
   .handler(
     async ({ data, context }) =>
       await change(async () => {
-        await retryRollout(env, context.staff, data.rolloutId);
-        return data.rolloutId;
+        await retryChannel(env, context.staff, data);
       })
-  );
-
-export const pauseRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await pauseRollout(env, context.staff, data.rolloutId);
-        return data.rolloutId;
-      })
-  );
-
-export const resumeRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await resumeRollout(env, context.staff, data.rolloutId);
-        return data.rolloutId;
-      })
-  );
-
-export const cancelRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await cancelRollout(env, context.staff, data.rolloutId);
-        return data.rolloutId;
-      })
-  );
-
-export const rollbackClientFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema.extend(clientSchema.shape))
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await rollbackClientAndWait(
-          env,
-          context.staff,
-          data.rolloutId,
-          data.clientId
-        );
-        return data.clientId;
-      })
-  );
-
-export const rollbackRingFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema.extend({ ring: z.int().nonnegative() }))
-  .handler(
-    async ({ data, context }) =>
-      await change(
-        async (): Promise<RingRollback[]> =>
-          await rollbackRingAndWait(
-            env,
-            context.staff,
-            data.rolloutId,
-            data.ring
-          )
-      )
   );
 
 export const pinClientFn = createServerFn({ method: "POST" })
@@ -167,9 +92,24 @@ export const pinClientFn = createServerFn({ method: "POST" })
     async ({ data, context }) =>
       await change(async () => {
         await pinClient(env, context.staff, data);
-        return data.clientId;
       })
   );
+
+export const setChannelFn = createServerFn({ method: "POST" })
+  .validator(channelSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await setClientChannel(env, context.staff, data);
+      })
+  );
+
+export const rollOutSecretsFn = createServerFn({ method: "POST" }).handler(
+  async ({ context }) =>
+    await change(async () => {
+      await rollOutSecrets(env, context.staff);
+    })
+);
 
 /**
  * A client's drift, read live from its account, with whether it runs the
@@ -196,7 +136,9 @@ export const fetchDrift = createServerFn({ method: "GET" })
       await deployerApi(env),
       db,
       data.clientId,
-      store === null ? undefined : { fetch, secrets: store }
+      store === null
+        ? undefined
+        : { dispatcher: env.DISPATCHER, secrets: store }
     );
     if (drift === null) {
       return null;
@@ -211,10 +153,10 @@ export const fetchDrift = createServerFn({ method: "GET" })
   });
 
 /**
- * Whether secrets rollout `rolloutId`'s old shared secrets can be
- * revoked, read live from every active client's account when staff ask,
- * a few at a time, each within a deadline.
+ * Whether the last secrets rollout's old shared secrets can be revoked,
+ * read live from every active client's account when staff ask, a few at a
+ * time, each within a deadline.
  */
-export const checkRevocationFn = createServerFn({ method: "GET" })
-  .validator(rolloutSchema)
-  .handler(async ({ data }) => await checkRevocation(env, data.rolloutId));
+export const checkRevocationFn = createServerFn({ method: "GET" }).handler(
+  async () => await checkRevocation(env)
+);

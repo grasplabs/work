@@ -59,7 +59,7 @@ const inDays = (days: number): string =>
 const liveClient = async (name: string) => {
   const release = await placedRelease("feat(connect): its bot");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { account } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name,
     signIn: null,
@@ -192,7 +192,7 @@ describe("a client's Teams bot", () => {
       name: "TEAMS_BOT_SECRET",
       value: `Bq8~${crypto.randomUUID().replaceAll("-", "")}`,
     });
-    // A rollout deploys it next, even on the release it runs.
+    // Its next deploy carries it, even on the release it runs.
     const pending = await targetClient(db, acme.clientId);
     await redeploy(acme.clientId, acme.releaseId);
     await redeploy(other.clientId, other.releaseId);

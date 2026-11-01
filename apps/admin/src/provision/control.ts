@@ -24,8 +24,6 @@ import { ProvisionError } from "./errors.ts";
 export const provisionInputSchema = z.object({
   clientId: newClientIdSchema,
   name: z.string().trim().min(1).max(100),
-  /** The rollout ring it's in: Production's unless staff move it on Setup. */
-  ring: z.int().nonnegative().default(1),
   /** How its people sign in: every deploy makes core's `SIGN_IN` from it. */
   signIn: clientSignInSchema,
   /**
@@ -104,7 +102,6 @@ export const createClient = async (
       .values({
         id: clientId,
         name: parsed.name,
-        ring: parsed.ring,
         signIn: JSON.stringify(parsed.signIn),
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
@@ -118,7 +115,6 @@ export const createClient = async (
       action: "client.create",
       clientId,
       detail: {
-        ring: parsed.ring,
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
         ...(parsed.attioCompanyId === undefined

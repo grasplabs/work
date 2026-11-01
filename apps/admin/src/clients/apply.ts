@@ -1,12 +1,12 @@
 /**
- * Applying a client's settings now, without waiting for a rollout: its
+ * Applying a client's settings now, without waiting for its next release: its
  * operation run again for the release it runs (src/hosting/operation.ts),
  * so its core gets its sign-in and settings, and a rotation of its
  * secrets that waits goes live. Staff start it from the client's page.
  *
  * It's a runner like the others (src/runners.ts): it claims the client
  * with the same conditional write, audited (`client.apply_settings`), so
- * it never runs beside a rollout, a rollback or provisioning, and its
+ * it never runs beside a deploy or provisioning, and its
  * workflow (`applyClient`, on Workerflow: src/workflow-runs.ts) runs the
  * operation as that runner and releases the client when it's done,
  * whether it worked or not.
@@ -82,7 +82,7 @@ const releaseQuietly = async (
  * runner has it (`client_busy`).
  *
  * The release checked here only decides whether to start: the run reads
- * the release it deploys again once it holds the client, so a rollout
+ * the release it deploys again once it holds the client, so a deploy
  * that lands before the claim is the release it deploys.
  */
 export const applySettings = async (

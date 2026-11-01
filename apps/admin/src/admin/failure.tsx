@@ -55,7 +55,7 @@ const Back = ({ label, to }: { label: string; to: BackTo }) => (
 );
 
 /** Where a page that isn't there leads back to. */
-type BackTo = "/" | "/platform/rollouts";
+type BackTo = "/";
 
 /**
  * The level of a failure's title, as the workspace's `ErrorState` has it:

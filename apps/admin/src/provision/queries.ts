@@ -4,13 +4,15 @@ import { eq } from "drizzle-orm";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { needsAttentionOf } from "../hosting/attention.ts";
 import type { NeedsAttention } from "../hosting/attention.ts";
-import { newestRelease, provisionOf } from "../hosting/operation.ts";
+import { provisionOf } from "../hosting/operation.ts";
 import { clientHostingOf } from "../hosting/organization.ts";
 import { startDestination } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
+import { targetReleaseOf } from "../rollout/targets.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
 
 /**
@@ -35,11 +37,12 @@ export interface ProvisioningView {
   hostname: string | null;
   client: {
     name: string;
-    ring: number;
+    /** The release channel it follows (src/rollout/channels.ts). */
+    channel: Channel;
     status: "provisioning" | "active" | "offboarded";
     createdBy: string | null;
     createdAt: Date;
-    /** The release rollouts leave it on, if it's pinned (src/rollout/control.ts). */
+    /** The release promotions leave it on, if it's pinned (src/rollout/channels.ts). */
     pinnedReleaseId: string | null;
   };
   /**
@@ -81,7 +84,8 @@ export const notStartedOf = async (
   if (destination.destinationId === null) {
     return "no_destination";
   }
-  return (await newestRelease(db)) === null ? "no_release" : null;
+  const target = await targetReleaseOf(db, clientId);
+  return (target?.releaseId ?? null) === null ? "no_release" : null;
 };
 
 /** Client `clientId`'s provisioning, or null when the admin has no record of it. */
@@ -93,7 +97,7 @@ export const getProvisioning = async (
   const [client] = await db
     .select({
       name: clients.name,
-      ring: clients.ring,
+      channel: clients.channel,
       status: clients.status,
       createdBy: clients.createdBy,
       createdAt: clients.createdAt,

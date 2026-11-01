@@ -10,6 +10,7 @@ import {
   clientWorkers,
 } from "../src/db/schema.ts";
 import type { Channel } from "../src/db/schema.ts";
+import { PlacementError, placeAndProvision } from "../src/hosting/placement.ts";
 import {
   pinClient,
   promoteRelease,
@@ -23,7 +24,11 @@ import { adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
+import {
+  livePlacedClient,
+  placedClientRecord,
+  placedRelease,
+} from "./placed.ts";
 import { ended, followAdminRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -38,6 +43,8 @@ import { useStoreSecrets } from "./secrets-store.ts";
 //   staff retry;
 // - a release that reaches Edge while Edge deploys, dropped;
 // - a client moved to another channel left on its old channel's release;
+// - a new client started on a release its channel doesn't have, or on
+//   none while its channel has none;
 // - two ticks at once deploying one client twice.
 
 const token = "test-deployer-token-channels-3b7f2c";
@@ -45,7 +52,7 @@ const cloudflare = mockCloudflareApi(token);
 
 /** A live client on `releaseId`, following `channel`, its id `id` when given. */
 const live = async (channel: Channel, releaseId: string, id?: string) =>
-  await livePlacedClient(cloudflare, 1, releaseId, {
+  await livePlacedClient(cloudflare, releaseId, {
     channel,
     ...(id === undefined ? {} : { id }),
   });
@@ -351,6 +358,35 @@ describe("release channels", () => {
       onStable,
       onBeta: await releasesOf(moved.clientId),
     }).toStrictEqual({ onStable: on(before), onBeta: on(release) });
+  });
+
+  it("provisions a new client on its channel's release, and a Stable one waits while Stable has none", async () => {
+    const stableRelease = await placedRelease("feat(core): goes to stable");
+    const edgeRelease = await placedRelease("feat(core): only on edge");
+    const waiting = await placedClientRecord(cloudflare);
+    await releaseToEdge(env, [stableRelease]);
+    const refused = await placeAndProvision(env, staff, {
+      clientId: waiting.clientId,
+      destinationId: null,
+    }).then(
+      () => null,
+      (error: unknown) => (error instanceof PlacementError ? error.code : error)
+    );
+    await promoteTo("stable", stableRelease);
+    await releaseToEdge(env, [edgeRelease]);
+    await using runs = followRuns();
+
+    const runId = await placeAndProvision(env, staff, {
+      clientId: waiting.clientId,
+      destinationId: null,
+    });
+    await ended(adminWorkflows.provisionPlacedClient, runId);
+    await runs.converge();
+
+    expect({
+      refused,
+      provisioned: await releasesOf(waiting.clientId),
+    }).toStrictEqual({ refused: "no_release", provisioned: on(stableRelease) });
   });
 
   it("never deploys one client twice from two ticks at once", async () => {

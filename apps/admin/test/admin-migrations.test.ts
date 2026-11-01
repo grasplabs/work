@@ -184,4 +184,44 @@ describe("the admin's migrations, on rows", () => {
       table: [],
     });
   });
+
+  it("put every client on Stable, and leave a client an old rollout job held to the next deploy's claim", async () => {
+    const db = migrationDb();
+    const { before, it: channels } = upTo("0047_reconciler_takes_over.sql");
+    await applyD1Migrations(db, before);
+    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+    const now = Date.now();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO clients (id, name, created_at, updated_at) VALUES (?1, ?1, ?2, ?2)"
+        )
+        .bind(clientId, now),
+      db
+        .prepare(
+          "INSERT INTO client_runs (client_id, run_id, kind, claimed_at) VALUES (?1, 'rollout-1', 'rollout', ?2)"
+        )
+        .bind(clientId, now),
+    ]);
+
+    await applyD1Migrations(db, [channels]);
+    const read = async (query: string) => {
+      const { results } = await db.prepare(query).all();
+      return results;
+    };
+
+    expect({
+      clients: await read(
+        `SELECT id, channel FROM clients WHERE id = '${clientId}'`
+      ),
+      runs: await read(
+        `SELECT client_id, run_id, kind FROM client_runs WHERE client_id = '${clientId}'`
+      ),
+      channels: await read("SELECT id FROM channels"),
+    }).toStrictEqual({
+      clients: [{ id: clientId, channel: "stable" }],
+      runs: [{ client_id: clientId, run_id: "rollout-1", kind: "deploy" }],
+      channels: [],
+    });
+  });
 });

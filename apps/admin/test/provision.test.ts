@@ -18,7 +18,7 @@ import { getProvisioning } from "../src/provision/queries.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, destination, release, staff } from "./hosting.ts";
+import { db, destination, onChannel, release, staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
 import { startsOf } from "./runs.ts";
 
@@ -51,7 +51,6 @@ const signIn = {
 const inputOf = (input: Partial<ProvisionInput> = {}): ProvisionInput => ({
   clientId: `client-${crypto.randomUUID().slice(0, 8)}`,
   name: "Acme",
-  ring: 2,
   signIn,
   ...input,
 });
@@ -133,13 +132,17 @@ describe("adding a client", () => {
       const noDestination = await setupOf(await add());
       await destination();
       const noRelease = await setupOf(await add());
+      const older = await importedRelease();
+      // Imported alone, a release isn't its channel's.
       await importedRelease();
-      const releaseId = await importedRelease();
+      const imported = await setupOf(await add());
+      await onChannel(older);
       const started = await setupOf(await add());
 
       expect({
         noDestination,
         noRelease,
+        imported: imported.notStarted,
         started: {
           operation: started.operation,
           audited: started.audited.slice(0, 4),
@@ -162,9 +165,11 @@ describe("adding a client", () => {
           operation: null,
           audited: ["client.create"],
         },
-        // The newest release, in the one destination that meets its policy.
+        imported: "no_release",
+        // Its channel's release, Stable's, in the one destination that
+        // meets its policy: not a newer one only imported.
         started: {
-          operation: releaseId,
+          operation: older,
           audited: [
             "client.create",
             "client.place",
@@ -175,7 +180,7 @@ describe("adding a client", () => {
         attempts: 1,
         words: [
           "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.",
-          "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.",
+          "Not started: its channel has no release yet. Promote a release to it first, from Platform.",
         ],
       });
     } finally {
@@ -199,7 +204,7 @@ describe("adding a client", () => {
       row: {
         name: row?.name,
         status: row?.status,
-        ring: row?.ring,
+        channel: row?.channel,
         attio: row?.attioCompanyId,
         createdBy: row?.createdBy,
         signIn: recordedSignIn,
@@ -210,7 +215,7 @@ describe("adding a client", () => {
       row: {
         name: "Acme",
         status: "provisioning",
-        ring: 2,
+        channel: "stable",
         attio: companyId,
         createdBy: staff.email,
         signIn,
@@ -222,17 +227,14 @@ describe("adding a client", () => {
   it("is placed and provisioned from there, in the destination that meets its policy", async () => {
     await destination();
     const releaseId = await importedRelease();
+    await onChannel(releaseId);
     const input = inputOf();
     await createClient(env, staff, input);
     using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const placed = await callServerFn(
       placeAndProvisionFn,
-      {
-        clientId: input.clientId,
-        releaseId,
-        destinationId: null,
-      },
+      { clientId: input.clientId, destinationId: null },
       { email: staff.email }
     );
 

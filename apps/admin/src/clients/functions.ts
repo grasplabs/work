@@ -18,9 +18,7 @@ import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
 import {
-  ringInputSchema,
   sealedSecretInputSchema,
-  setRing,
   setSealedSecret,
   setSignIn,
   setTeamsBot,
@@ -102,13 +100,6 @@ export const fetchClientSetup = createServerFn({ method: "GET" })
 export const fetchClientAiStatus = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await clientAiStatus(env, data.clientId));
-
-export const setRingFn = createServerFn({ method: "POST" })
-  .validator(ringInputSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => await setRing(env, context.staff, data))
-  );
 
 /** Applies a client's settings now: a deploy of the release it runs, live at once. */
 export const applySettingsFn = createServerFn({ method: "POST" })

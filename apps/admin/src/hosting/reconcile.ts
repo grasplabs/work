@@ -12,8 +12,9 @@
  * - something passing (`retry`): resumed, after 0, 5, 15 and 60 minutes,
  *   then every 4 hours; once it has been resumed `attentionAfterAttempts`
  *   times without getting through, it needs a person's look too;
- * - the release (`release`): resumed once a newer release fits it, as
- *   resuming takes the newest that does; until then it needs a person;
+ * - the release (`release`): resumed once another release is promoted
+ *   to its channel, as resuming takes its target; until then it needs a
+ *   person;
  * - anything a person must look at first (`staff`): nothing is resumed,
  *   and it needs a person.
  *
@@ -34,10 +35,11 @@ import { eq } from "drizzle-orm";
 
 import { adminDatabase, audit } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import { clients, releases } from "../db/schema.ts";
+import { clients } from "../db/schema.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { getProvisioning } from "../provision/queries.ts";
+import { targetReleaseOf } from "../rollout/targets.ts";
 import {
   autoResumeAction,
   episodeOf,
@@ -45,11 +47,7 @@ import {
 } from "./attention.ts";
 import type { Episode } from "./attention.ts";
 import { InventoryError } from "./inventory.ts";
-import {
-  newestRelease,
-  ProvisionOperationError,
-  provisionOf,
-} from "./operation.ts";
+import { ProvisionOperationError, provisionOf } from "./operation.ts";
 import { clientHostingOf } from "./organization.ts";
 import { PlacementError, placeAndProvision } from "./placement.ts";
 import { failureCause } from "./words.ts";
@@ -84,31 +82,29 @@ const isDue = ({ attempts, lastAttemptAt }: Episode, now: Date): boolean => {
 };
 
 /**
- * The newest release built after client `clientId`'s operation's recorded
- * one (`newestRelease`, the one ordering of releases: when built, then
- * id); null when there is none, or it has no operation.
+ * Whether client `clientId`'s target (src/rollout/desired.ts) is another
+ * release than its operation's: a release promoted since, that resuming
+ * would take.
  */
-const newerRelease = async (
+const targetMoved = async (
   db: AdminDatabase,
   clientId: string
-): Promise<string | null> => {
+): Promise<boolean> => {
   const operation = await provisionOf(db, clientId);
-  if (operation === undefined) {
-    return null;
-  }
-  const recorded = await db
-    .select({ id: releases.id, builtAt: releases.builtAt })
-    .from(releases)
-    .where(eq(releases.id, operation.releaseId))
-    .get();
-  return recorded === undefined ? null : await newestRelease(db, recorded);
+  const target = await targetReleaseOf(db, clientId);
+  return (
+    operation !== undefined &&
+    target?.releaseId !== undefined &&
+    target.releaseId !== null &&
+    target.releaseId !== operation.releaseId
+  );
 };
 
 /**
  * Resumes client `clientId`'s provisioning as `actor`, as staff resume it
  * from Setup: where it is placed or in the automatic
- * destination, on the newest release (or the one its operation runs,
- * when none is newer). Returns the attempt's id;
+ * destination, on the release it should run (src/rollout/desired.ts).
+ * Returns the attempt's id;
  * refused as `placeAndProvision` refuses, `already_running` while an
  * attempt is still going.
  */
@@ -119,9 +115,6 @@ export const resumeProvisioning = async (
 ): Promise<string> =>
   await placeAndProvision(env, actor, {
     clientId,
-    // The newest release, else the one it runs: as a retry
-    // from Setup picks it (src/hosting/placement.ts).
-    releaseId: null,
     destinationId: null,
   });
 
@@ -147,12 +140,12 @@ export type Reconciled =
   | "resumed"
   /** Stopped for something passing, and its next resume isn't due yet. */
   | "backing_off"
-  /** Stopped for something a person must look at, or a release none newer replaces. */
+  /** Stopped for something a person must look at, or a release no promotion replaced yet. */
   | "needs_staff"
   /** Resuming was refused: something else got there first. */
   | "refused";
 
-/** What client `clientId`'s stop needs, a release cause becoming a retry once a newer release fits it. */
+/** What client `clientId`'s stop needs, a release cause becoming a retry once its target moved on. */
 const causeOf = async (
   db: AdminDatabase,
   clientId: string,
@@ -162,7 +155,7 @@ const causeOf = async (
   if (cause !== "release") {
     return cause;
   }
-  return (await newerRelease(db, clientId)) === null ? "release" : "retry";
+  return (await targetMoved(db, clientId)) ? "retry" : "release";
 };
 
 /** Looks at client `clientId` once at `now`, and resumes it or tells staff as it needs. */
