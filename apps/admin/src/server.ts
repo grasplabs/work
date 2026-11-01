@@ -7,9 +7,7 @@
  * nothing but the open-source app's code.
  *
  * The admin can have a hostname of its own (src/admin-host.ts). Its pages
- * are served from the root; old addresses (everything once under `/admin`,
- * the old Releases, Rollouts and client pages) redirect to where their
- * page is now (src/moved-pages.ts).
+ * are served from the root.
  *
  * `POST /discord/interactions` is the one route outside Access: Discord
  * posts Grasp's bot's interactions there (src/admin/discord.ts), so it
@@ -51,7 +49,6 @@ import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
-import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
@@ -70,18 +67,13 @@ const withStaff = withAccess(async (request, staff) =>
 );
 
 export default {
-  // Past the Access check, a page may move from where it was to where it
-  // is now (src/moved-pages.ts), or to the admin's own hostname
+  // Past the Access check, a page may move to the admin's own hostname
   // (src/admin-host.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) => {
     if (new URL(request.url).pathname === discordInteractionsPath) {
       return await discordInteraction(request, env, waitUntil);
     }
-    return await withStaff(
-      request,
-      env,
-      () => movedPageRedirect(request) ?? adminHostRedirect(request, env)
-    );
+    return await withStaff(request, env, () => adminHostRedirect(request, env));
   },
   scheduled: async (controller, env) => {
     if (controller.cron === digestCron) {
