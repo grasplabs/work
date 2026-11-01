@@ -1013,7 +1013,7 @@ const Today = ({
   const [selected, setSelected] = useState<number | null>(null);
   const { id } = record.evidence;
   // Who does it and has not talked, and whom the one reminder can still go to.
-  const doers = view.org.real?.doers.get(id) ?? [];
+  const doers = view.org.real.doers.get(id) ?? [];
   const waiting = view.people.filter(
     (each) =>
       doers.includes(each.person.id) &&

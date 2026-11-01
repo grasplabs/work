@@ -71,6 +71,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Not hearing",
     context: "inbox item kind: a mailbox or drive connect stopped hearing",
   }),
+  bindingApproval: msg({
+    message: "Bindings",
+    context:
+      "inbox item kind: what a workflow reaches, for an admin to approve",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -94,6 +99,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   stoppedEvents: MailWarningIcon,
+  bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };
 

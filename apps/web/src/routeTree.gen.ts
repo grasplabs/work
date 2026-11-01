@@ -53,11 +53,9 @@ import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
-import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
 import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
-import { Route as ShellSettingsPulseRouteImport } from './routes/_shell.settings.pulse'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
 import { Route as ShellSettingsStephenRouteImport } from './routes/_shell.settings.stephen'
@@ -308,12 +306,6 @@ const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsNotificationsRoute =
-  ShellSettingsNotificationsRouteImport.update({
-    id: '/notifications',
-    path: '/notifications',
-    getParentRoute: () => ShellSettingsRoute,
-  } as any)
 const ShellSettingsOnboardingRoute = ShellSettingsOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
@@ -327,11 +319,6 @@ const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
 const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
-const ShellSettingsPulseRoute = ShellSettingsPulseRouteImport.update({
-  id: '/pulse',
-  path: '/pulse',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
 const ShellSettingsSecurityRoute = ShellSettingsSecurityRouteImport.update({
@@ -510,11 +497,9 @@ export interface FileRoutesByFullPath {
   '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
-  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
-  '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
   '/settings/stephen': typeof ShellSettingsStephenRoute
@@ -582,11 +567,9 @@ export interface FileRoutesByTo {
   '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
-  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
-  '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
   '/settings/stephen': typeof ShellSettingsStephenRoute
@@ -659,11 +642,9 @@ export interface FileRoutesById {
   '/_shell/settings/brain': typeof ShellSettingsBrainRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
-  '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
-  '/_shell/settings/pulse': typeof ShellSettingsPulseRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
   '/_shell/settings/stephen': typeof ShellSettingsStephenRoute
@@ -736,11 +717,9 @@ export interface FileRouteTypes {
     | '/settings/brain'
     | '/settings/members'
     | '/settings/models'
-    | '/settings/notifications'
     | '/settings/onboarding'
     | '/settings/outcomes'
     | '/settings/profile'
-    | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
     | '/settings/stephen'
@@ -808,11 +787,9 @@ export interface FileRouteTypes {
     | '/settings/brain'
     | '/settings/members'
     | '/settings/models'
-    | '/settings/notifications'
     | '/settings/onboarding'
     | '/settings/outcomes'
     | '/settings/profile'
-    | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
     | '/settings/stephen'
@@ -884,11 +861,9 @@ export interface FileRouteTypes {
     | '/_shell/settings/brain'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
-    | '/_shell/settings/notifications'
     | '/_shell/settings/onboarding'
     | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
-    | '/_shell/settings/pulse'
     | '/_shell/settings/security'
     | '/_shell/settings/spend'
     | '/_shell/settings/stephen'
@@ -1247,13 +1222,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsModelsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/notifications': {
-      id: '/_shell/settings/notifications'
-      path: '/notifications'
-      fullPath: '/settings/notifications'
-      preLoaderRoute: typeof ShellSettingsNotificationsRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/onboarding': {
       id: '/_shell/settings/onboarding'
       path: '/onboarding'
@@ -1273,13 +1241,6 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/settings/profile'
       preLoaderRoute: typeof ShellSettingsProfileRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
-    '/_shell/settings/pulse': {
-      id: '/_shell/settings/pulse'
-      path: '/pulse'
-      fullPath: '/settings/pulse'
-      preLoaderRoute: typeof ShellSettingsPulseRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/security': {
@@ -1525,11 +1486,9 @@ interface ShellSettingsRouteChildren {
   ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
-  ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
   ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
-  ShellSettingsPulseRoute: typeof ShellSettingsPulseRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
   ShellSettingsStephenRoute: typeof ShellSettingsStephenRoute
@@ -1546,11 +1505,9 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsBrainRoute: ShellSettingsBrainRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
-  ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
   ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
-  ShellSettingsPulseRoute: ShellSettingsPulseRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
   ShellSettingsStephenRoute: ShellSettingsStephenRoute,

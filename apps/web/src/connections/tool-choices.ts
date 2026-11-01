@@ -8,6 +8,8 @@ import type { CatalogTool, ComposioToolRule } from "@grasp-os/shared/connect";
 export interface AllowedTool {
   name: string;
   read: boolean;
+  /** The input property naming its one resource, when its rule has one. */
+  resource?: string;
 }
 
 /**
@@ -33,13 +35,24 @@ export const withRead = (
   name: string,
   read: boolean
 ): AllowedTool[] =>
-  allowed.map((tool) => (tool.name === name ? { name, read } : tool));
+  allowed.map((tool) => (tool.name === name ? { ...tool, read } : tool));
 
 /**
- * What connecting submits: a tool marked read-only with its rule, any other
- * by name alone, which connect takes for a side effect.
+ * What connecting or a change submits: a tool marked read-only, or with a
+ * resource property, as its rule, any other by name alone, which connect
+ * takes for a side effect. A change replaces the whole list, so a rule's
+ * resource goes with it, whatever was switched.
  */
 export const toolRules = (
   allowed: readonly AllowedTool[]
 ): (string | ComposioToolRule)[] =>
-  allowed.map(({ name, read }) => (read ? { name, read } : name));
+  allowed.map(({ name, read, resource }) => {
+    if (!read && resource === undefined) {
+      return name;
+    }
+    return {
+      name,
+      ...(read ? { read } : {}),
+      ...(resource === undefined ? {} : { resource }),
+    };
+  });

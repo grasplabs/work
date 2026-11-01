@@ -9,6 +9,7 @@ import type {
   AuditPage,
   AuditRecord,
 } from "@grasp-os/shared/audit-log";
+import { chatPlatformName } from "@grasp-os/shared/chat";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -38,7 +39,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 
-import { platformName } from "../chat-platforms.ts";
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
 import type { Directory } from "../directory.ts";
@@ -202,9 +202,17 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
  * Where the browser downloads what `search` matches as `format`: core's
  * export route, which it writes to disk as it arrives, however long.
  */
-const exportHref = (search: LogSearch, format: AuditExportFormat): string => {
+export const exportHref = (
+  search: LogSearch,
+  format: AuditExportFormat,
+  archive = false
+): string => {
   const params = new URLSearchParams();
   params.set("format", format);
+  if (archive) {
+    // With what retention archived, in the chain's order (`AuditApi.export`).
+    params.set("archive", "1");
+  }
   for (const [name, value] of Object.entries(auditFilterOf(search) ?? {})) {
     if (typeof value === "string") {
       params.set(name, value);
@@ -273,7 +281,7 @@ const doerOf = (
   if (actor.type === "person") {
     const name = personName(directory, actor.userId);
     if (actor.via !== undefined) {
-      const app = platformName(actor.via);
+      const app = chatPlatformName(actor.via);
       return { label: i18n._(msg`${name}, in ${app}`), id: actor.userId };
     }
     return { label: name, id: actor.userId };
@@ -286,7 +294,7 @@ const doerOf = (
     const { agentId } = actor;
     const person = personName(directory, actor.onBehalfOf);
     if (actor.via !== undefined) {
-      const app = platformName(actor.via);
+      const app = chatPlatformName(actor.via);
       return {
         label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
         id: actor.agentId,
@@ -547,10 +555,13 @@ export const LogRecords = ({
   first,
   search,
   directory,
+  archive = false,
 }: {
   first: AuditPage;
   search: LogSearch;
   directory: Directory;
+  /** Pages of the archive, where retention moved older events, not of the log. */
+  archive?: boolean;
 }) => {
   const [older, setOlder] = useState<AuditRecord[]>([]);
   const [next, setNext] = useState(first.next);
@@ -558,9 +569,10 @@ export const LogRecords = ({
   const { t } = useLingui();
   const records = [...first.records, ...older];
   const loadOlder = async (before: number): Promise<void> => {
-    const page = await run(
-      async (session) =>
-        await session.audit.search(auditFilterOf(search), before)
+    const page = await run(async ({ audit }) =>
+      archive
+        ? await audit.searchArchive(auditFilterOf(search), before)
+        : await audit.search(auditFilterOf(search), before)
     );
     if (page !== undefined) {
       setOlder((shown) => [...shown, ...page.records]);

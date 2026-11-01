@@ -78,6 +78,7 @@ import type {
   SaveInput,
   SearchOptions,
   SearchResults,
+  SharedChat,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -101,6 +102,7 @@ import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
 import { uploadErasure } from "./uploads.ts";
@@ -227,6 +229,13 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await memoriesPublish(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** The shared chats the person is in that a record can be published into. */
+  async sharedChats(): Promise<SharedChat[]> {
+    return await this.#asReader(
+      async (reader) => await sharedChatsOf(this.#env, reader)
     );
   }
 
