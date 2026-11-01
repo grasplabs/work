@@ -939,6 +939,7 @@ const workflowRuns: DurableObjectState = {
     grasp_action_model_calls: exported(`${core}workflows/run-object.ts`),
     grasp_run_cancelled: exported(`${core}workflows/run-object.ts`),
     grasp_run_shares: exported(`${core}workflows/run-object.ts`),
+    grasp_scope_fences: exported(`${core}workflows/run-object.ts`),
   },
 };
 
