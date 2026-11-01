@@ -92,6 +92,7 @@ import {
   startAction,
 } from "./cards.tsx";
 import { pressCard } from "./press.ts";
+import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import { rateRequest } from "./stephen-requests.ts";
@@ -118,25 +119,6 @@ export const channelAdapters = async (
 
 /** A platform the door has an adapter for. */
 type Platform = keyof Awaited<ReturnType<typeof channelAdapters>>;
-
-/**
- * Whether the deployment set `platform` up: Teams once it has the bot's id
- * and the client's Entra tenant, Slack once it has the app's signing
- * secret, without which every request would be refused anyway.
- */
-const isSetUp = (env: Env, platform: string): platform is Platform => {
-  if (platform === "slack") {
-    return (
-      env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""
-    );
-  }
-  return (
-    platform === "teams" &&
-    env.TEAMS_BOT_ID !== undefined &&
-    env.TEAMS_BOT_ID !== "" &&
-    signInConfig(env)?.entra?.tenantId !== undefined
-  );
-};
 
 /** Largest request a platform may post: a Teams activity is far smaller. */
 const maxBodyBytes = 256 * 1024;

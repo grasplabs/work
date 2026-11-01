@@ -10,6 +10,8 @@ import {
   personOnChannel,
   sweepChannelLinks,
 } from "../src/channels/accounts.ts";
+import { stephenReachFor } from "../src/channels/where.ts";
+import { slackApp, teamsBot } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -216,8 +218,9 @@ describe("linking a chat account", { timeout: 60_000 }, () => {
         outcome(api.channelAccounts.preview(secret)),
         outcome(api.channelAccounts.link(secret)),
         outcome(api.channelAccounts.unlink(crypto.randomUUID())),
+        outcome(api.channelAccounts.reach()),
       ])
-    ).resolves.toStrictEqual(Array.from({ length: 4 }, () => "role.forbidden"));
+    ).resolves.toStrictEqual(Array.from({ length: 5 }, () => "role.forbidden"));
     await expect(
       personOnChannel(env, "slack", platformUserId)
     ).resolves.toBeNull();
@@ -353,5 +356,72 @@ describe("a linked chat account", { timeout: 60_000 }, () => {
       personOnChannel(env, "slack", platformUserId)
     ).resolves.toBeNull();
     await expect(me.api.channelAccounts.list()).resolves.toStrictEqual([]);
+  });
+});
+
+describe("where to reach Stephen", { timeout: 60_000 }, () => {
+  it("lists each chat app set up, with only what the app shows anyone", async () => {
+    const me = await signedInApi(idp, "user");
+
+    const reach = await me.api.channelAccounts.reach();
+
+    expect(reach).toStrictEqual([
+      {
+        platform: "teams",
+        href: `https://teams.microsoft.com/l/chat/0/0?users=28:${teamsBot.id}`,
+      },
+      { platform: "slack", href: null },
+    ]);
+    expect(JSON.stringify(reach)).not.toContain(slackApp.signingSecret);
+  });
+
+  it("leaves out an app that isn't set up", async () => {
+    const me = await signedInApi(idp, "user");
+
+    const reach = await stephenReachFor(
+      { ...env, SLACK_SIGNING_SECRET: "" },
+      me.userId
+    );
+
+    expect(reach).toStrictEqual([
+      expect.objectContaining({ platform: "teams" }),
+    ]);
+  });
+
+  it("leaves out an app Stephen doesn't answer them in, and every one while he is off", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const me = await signedInApi(idp, "user");
+    // A team of nobody: the person isn't in it.
+    const team = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Sales', 'organization', ?)"
+    )
+      .bind(team, Date.now())
+      .run();
+    try {
+      await admin.api.connections.setStephenPlace(
+        "slack",
+        { who: "teams", teams: [team] },
+        true
+      );
+      const narrowed = await me.api.channelAccounts.reach();
+      await admin.api.connections.setStephenReach(false, { who: "everyone" });
+      const off = await me.api.channelAccounts.reach();
+
+      expect({
+        narrowed: narrowed.map(({ platform }) => platform),
+        off,
+      }).toStrictEqual({
+        narrowed: ["teams"],
+        off: [],
+      });
+    } finally {
+      await admin.api.connections.setStephenReach(true, { who: "everyone" });
+      await admin.api.connections.setStephenPlace(
+        "slack",
+        { who: "asStephen" },
+        true
+      );
+    }
   });
 });

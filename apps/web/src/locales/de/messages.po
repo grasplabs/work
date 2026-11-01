@@ -6151,6 +6151,10 @@ msgstr "Finanzen und Buchhaltung"
 msgid "Find a team or a person"
 msgstr "Team oder Person finden"
 
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Sie finden Stephen unter „Apps“ in Ihrem Slack-Workspace."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Befunde"
@@ -10319,6 +10323,7 @@ msgstr "Nur die Admins Ihrer Organisation können eine Änderung an einem Speich
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Öffnen"
 
@@ -10370,6 +10375,10 @@ msgstr "Öffnen"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "{name} öffnen"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Öffnen Sie einen Chat mit Stephen oder suchen Sie ihn unter den Apps in Teams."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -10443,6 +10452,10 @@ msgstr "Offen seit {date}. Bis zur Antwort bleibt das unbekannt, nie null."
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Offen seit dem Go von Grasp am {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Stephen in {app} öffnen, in einem neuen Tab"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -16945,6 +16958,10 @@ msgstr "Wo die Arbeit weitergeht"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Wo die Workflows stehen"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Wo Sie Stephen erreichen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"

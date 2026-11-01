@@ -2,6 +2,7 @@ import type {
   ChannelAccount,
   ChannelLinkPreview,
   ChannelLinkRefusal,
+  ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
 import {
@@ -23,6 +24,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
 import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import { WhereStephen } from "./where-stephen.tsx";
 
 // Settings › Security › Chat apps: the person's accounts on chat platforms
 // that are linked to them, so Grasp knows it is them writing there, and a
@@ -31,8 +33,12 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // them), and the card says whose account it is, by the platform's own
 // name for it, so a link someone forwarded doesn't pass for theirs.
 
-/** What the section shows: the linked accounts, and the link waiting, if any. */
+/**
+ * What the section shows: where to reach Stephen, the linked accounts,
+ * and the link waiting, if any.
+ */
 export interface ChatAccounts {
+  reach: ChannelReach[];
   accounts: ChannelAccount[];
   pending?: { secret: string; preview: ChannelLinkPreview };
 }
@@ -245,9 +251,10 @@ export const ChatAccountsSection = ({
       </SettingsSection>
     );
   }
-  const { accounts, pending } = chat.data;
+  const { reach, accounts, pending } = chat.data;
   return (
     <SettingsSection description={description} title={t`Chat apps`}>
+      <WhereStephen reach={reach} />
       {pending === undefined ? null : (
         <SettingsBody>
           <PendingLink pending={pending} />
