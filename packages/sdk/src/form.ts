@@ -138,6 +138,20 @@ export interface FormFailure {
   readonly category: GraspError["category"];
 }
 
+/**
+ * Whether a resend that failed with `error` may not have run (a sign-out,
+ * the request budget, a busy sandbox), so its outcome is as unknown as it
+ * was: kept, key and all, so the next submit sends it again rather than
+ * anew, by the same rule the session client keeps the key's person by.
+ * Not once someone else signed in: then it was the person's before. Nor
+ * once a decision's answer sent again finds it closed (answered, or past
+ * its deadline): a definite end, nothing more to send.
+ */
+const leavesResendUnknown = (error: GraspError): boolean =>
+  error.code !== "auth.principal_changed" &&
+  error.code !== "decision.closed" &&
+  !settlesSubmission(error);
+
 /** What a form shows of its submission, beside its fields' own state. */
 export interface FormStatus {
   readonly phase: SubmitPhase;
@@ -1384,15 +1398,9 @@ export class FormBinding {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;
     }
-    // A resend that may not have run (a sign-out, the request budget, a
-    // busy sandbox) leaves its outcome as unknown as it was: kept, key and
-    // all, so the next submit sends it again rather than anew, by the same
-    // rule the session client keeps the key's person by. Not once someone
-    // else signed in: then it was the person's before.
     if (
       (submission.key !== undefined || submission.again !== undefined) &&
-      error.code !== "auth.principal_changed" &&
-      !settlesSubmission(error)
+      leavesResendUnknown(error)
     ) {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;

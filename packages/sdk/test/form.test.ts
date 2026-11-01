@@ -771,6 +771,39 @@ describe("a decision form", () => {
     });
   });
 
+  it("unlocks once an answer sent again finds its decision closed, which it shows, sending nothing more", async () => {
+    let pages = 0;
+    const { binding, form, asked } = decisionForm(async () => {
+      pages += 1;
+      await Promise.resolve();
+      if (pages === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // Answered by someone else, or past its deadline, meanwhile.
+      throw Object.assign(new Error("Closed."), { code: "decision.closed" });
+    });
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    await refusedWith(binding.submit());
+    const closed = await refusedWith(binding.submit());
+    const status = binding.status();
+
+    expect({
+      closed,
+      status: {
+        phase: status.phase,
+        locked: status.locked,
+        failure: status.failure?.code,
+      },
+      asked: asked.length,
+    }).toStrictEqual({
+      closed: "decision.closed",
+      // A definite end: no answer left to send again.
+      status: { phase: "idle", locked: false, failure: "decision.closed" },
+      asked: 2,
+    });
+  });
+
   it("keeps the draft when the person cancels the page's confirmation, recording nothing", async () => {
     const { binding, form, asked } = decisionForm(async () => {
       await Promise.resolve();
