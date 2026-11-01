@@ -1283,7 +1283,9 @@ export const sdkResourceBindings = sqliteTable(
      * for a workflow's `operation` binding): written in the approval's own
      * batch and reset when it is revoked or replaced, so the row names what
      * serves the binding only while an approval does. Null for a target the
-     * seal or publication chose.
+     * seal or publication chose. Set exactly when `target_path` is, which
+     * the database enforces (migration 0182), so no store an approval
+     * resolved is named without it.
      */
     approvalId: text("approval_id"),
   },

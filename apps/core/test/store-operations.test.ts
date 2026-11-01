@@ -1540,6 +1540,21 @@ describe("a workflow calling a store's public operation", () => {
     await seal(crm, 2);
     await setCurrentVersion(env, crm.owner, crm.app, 2);
     await sweptAway(crm.app, 1);
+    // The store is counted by the approval its row names: no write leaves
+    // the row naming the store without it, so none hides the consumer.
+    const unnamed = await env.DB.prepare(
+      "UPDATE sdk_resource_bindings SET approval_id = NULL WHERE resource_id = ? AND alias = 'lookup'"
+    )
+      .bind(workflow.id)
+      .run()
+      .then(
+        () => "written",
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes("names its store only with its approval")
+            ? "refused"
+            : error
+      );
     const refused = await deleteStore(env, crm.owner, crm.store).then(
       () => null,
       (error: unknown) =>
@@ -1549,10 +1564,13 @@ describe("a workflow calling a store's public operation", () => {
     );
     await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
     await deleteStore(env, crm.owner, crm.store);
-    expect(refused).toStrictEqual({
-      code: "data.store_consumed",
-      message:
-        "One workflow calls this store's operations through an approval. Revoke that approval first, then delete the store.",
+    expect({ unnamed, refused }).toStrictEqual({
+      unnamed: "refused",
+      refused: {
+        code: "data.store_consumed",
+        message:
+          "One workflow calls this store's operations through an approval. Revoke that approval first, then delete the store.",
+      },
     });
   });
 
