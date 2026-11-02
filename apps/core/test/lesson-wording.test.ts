@@ -9,11 +9,9 @@ import { fakeProviderFor, testModel } from "./model-provider.ts";
 // on the issue): one call through the model gateway, recorded as the
 // Brain's upkeep, given what the lesson holds and nothing else.
 
-const euModel = "openai/gpt-5.4";
-
 describe("a lesson's wording", () => {
   it("asks the gateway with the lesson's facts alone, recorded as the Brain's upkeep", async () => {
-    const provider = await fakeProviderFor([testModel, euModel], {
+    const provider = await fakeProviderFor([testModel], {
       text: JSON.stringify({ wording: "Tidying invoices kept failing." }),
       inputTokens: 80,
       outputTokens: 10,
@@ -28,15 +26,7 @@ describe("a lesson's wording", () => {
         "workflow:invoices/tidy failed 3 of its last 4 finished runs on app:invoices@3.",
     };
 
-    const wording = await wordLesson(
-      {
-        ...env,
-        MODEL_GATEWAY: {
-          sensitive: { models: [euModel], connections: [] },
-        },
-      },
-      facts
-    );
+    const wording = await wordLesson(env, facts);
     const sent = JSON.stringify(provider.requests.map(({ body }) => body));
     const events = await allEvents();
     const call = events.findLast(

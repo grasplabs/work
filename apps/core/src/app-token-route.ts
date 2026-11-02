@@ -10,7 +10,7 @@ import { signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { admitted } from "./screens-rpc.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { routeMember } from "./staff-audit.ts";
 
 // `POST /api/app-tokens/<app>`: the person's own session gets a token for
 // one App of theirs, for a portable host to call its functions with
@@ -51,15 +51,19 @@ export const appTokenResponse = async (
     );
   }
   const session = await signedInSession(env, request.headers);
-  if (session === undefined) {
+  // A staff member's ask is in the client's audit log, refused or not
+  // (staff-audit.ts): Grasp staff reach no App.
+  const person =
+    session === undefined
+      ? undefined
+      : await routeMember(env, session.person, "app.token", { app });
+  if (session === undefined || person === undefined) {
     return errorResponse(
       401,
       authErrors.create("auth.unauthenticated"),
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, session.person, "app.token", { app });
   try {
     const id = await admitted(env, session.person, app);
     const issued = await issueAppToken(env, session, id);

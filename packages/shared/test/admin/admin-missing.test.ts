@@ -1,19 +1,29 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { missingOf } from "../../src/admin/admin-missing.ts";
+import { adminOrgOf } from "../../src/admin/admin-snapshot-adapter.ts";
 import { adminViewOf } from "../../src/admin/admin-view.ts";
 import { recordOf } from "../../src/admin/onboarding-admin-record.ts";
 import type {
   StepRecord,
   WorkRecord,
 } from "../../src/admin/onboarding-admin-record.ts";
-import { SAMPLE_ORGS } from "./fixtures/admin-sample.ts";
+import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
+import { bothTalked, client, orders } from "./fixtures/bakkerij.ts";
 
-const [noordkade] = SAMPLE_ORGS;
-const view = adminViewOf(noordkade, noordkade.seed, "2026-10-02");
-const found = recordOf(view, "claims");
+const drawn = adminOrgOf(
+  {
+    ...bothTalked,
+    works: { works: [orders], rules: STARTING_ORG_RULES, counted: [] },
+  },
+  client
+);
+const found = recordOf(
+  adminViewOf(drawn.org, drawn.state, "2026-10-14"),
+  "orders"
+);
 if (found === null) {
-  throw new Error("Noordkade's sample has no claims to record");
+  throw new Error("Bakkerij has no orders to record");
 }
 const claims = found;
 

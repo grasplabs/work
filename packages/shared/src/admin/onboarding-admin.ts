@@ -1,7 +1,6 @@
 import type { InterviewFact, InterviewLine } from "./interview-turn.ts";
 import type { Interviewer } from "./interviewer.ts";
 import {
-  MISTAKES,
   needsSplit,
   PHASES,
   STARTING_RULES,
@@ -9,7 +8,6 @@ import {
   workflowState,
 } from "./interviews.ts";
 import type {
-  HypothesisState,
   PersonState,
   Phase,
   RecordField,
@@ -17,6 +15,7 @@ import type {
   WorkflowEvidence,
   WorkflowRules,
   WorkflowState,
+  MISTAKES,
 } from "./interviews.ts";
 import { DEFAULT_THRESHOLD, LISTEN_DAYS, WEIGHTS } from "./onboarding.ts";
 import type { DirectoryTeam } from "./onboarding.ts";
@@ -30,11 +29,10 @@ export type MemberRole = "owner" | "admin" | "builder" | "user" | "viewer";
 
 /**
  * Grasp's own side of an onboarding: every organization from its first conversation until Grasp
- * opens, as a model that can be played day by day. One organization is its teams, its people and
- * the work they do; from those and the day, everything else follows: who has a link, who talked,
- * what each interview brought, and how far each workflow is known under that organization's own
- * rules. Pure, and the same for the same organization and day, so the admin can step back and
- * forth. The sample organizations are made up, and only the tests read them.
+ * opens. One organization is its teams, its people and the work they do, with what really happened
+ * there as core's admin snapshot has it (`admin-snapshot-adapter.ts`); from those and the day,
+ * everything else follows: who has a link, who talked, what each interview brought, and how far
+ * each workflow is known under that organization's own rules. Pure.
  */
 
 /** How a link reaches someone. Email unless Grasp picks another way for a team. */
@@ -466,11 +464,8 @@ export interface Org {
   sponsor: string;
   /** The day the team is told, and the team leads get their link. */
   start: string;
-  /**
-   * How many days its interviews run, as its plan has it: from five days to six weeks. The samples
-   * leave it out and run the fourteen days they were written for (`listenDays`).
-   */
-  days?: number;
+  /** How many days its interviews run, as its plan has it: from five days to six weeks. */
+  days: number;
   teams: OrgTeam[];
   works: Work[];
   /** What the library expects of a team that turns out not to be done there. */
@@ -506,16 +501,13 @@ export interface Org {
   running?: Record<string, WorkRun>;
   /** Where it starts. */
   seed: OrgState;
-  /** Made here, in this browser: it has no people to play the interviews with. */
-  made?: true;
-  /** Onboarded for real: what really happened there, in place of the sample's dice (`org-adapter.ts`). */
-  real?: RealHappened;
+  /** What really happened there. */
+  real: RealHappened;
 }
 
 /**
- * What really happened at an organization Grasp onboards for real: its people, what their links
- * and interviews did, in days since the interviews started, and what each told about their work.
- * Where it is there, nothing is played.
+ * What really happened at an organization: its people, what their links and interviews did, in
+ * days since the interviews started, and what each told about their work.
  */
 export interface RealHappened {
   people: Person[];
@@ -577,34 +569,12 @@ export interface Unknown {
   works: boolean;
 }
 
-const clamp = (value: number, min = 0, max = 1) =>
-  Math.min(Math.max(value, min), max);
-const smooth = (edge0: number, edge1: number, value: number) => {
-  const x = clamp((value - edge0) / (edge1 - edge0));
-  return x * x * (3 - 2 * x);
-};
-
-/** A number from 0 up to 1 that is always the same for the same words: the sample's dice. */
-/* oxlint-disable no-bitwise, unicorn/prefer-code-point, operator-assignment -- a 32-bit string hash on UTF-16 units, as the prototype's: every sample number comes from it */
-export const unit = (key: string): number => {
-  let hash = 2_166_136_261;
-  for (let index = 0; index < key.length; index += 1) {
-    hash ^= key.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  hash += 0x6d_2b_79_f5;
-  let mixed = Math.imul(hash ^ (hash >>> 15), 1 | hash);
-  mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-  return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
-};
-/* oxlint-enable no-bitwise, unicorn/prefer-code-point, operator-assignment */
-
 /**
- * How many days an organization's interviews run: its own plan's length, or the samples' fourteen.
- * Everything that asks when the links close, or how far the weeks are, asks this and never
- * `LISTEN_DAYS` itself, so a six-week plan does not close after two.
+ * How many days an organization's interviews run: its own plan's length. Everything that asks when
+ * the links close, or how far the weeks are, asks this and never `LISTEN_DAYS` itself, so a
+ * six-week plan does not close after two.
  */
-export const listenDays = (org: Org): number => org.days ?? LISTEN_DAYS;
+export const listenDays = (org: Org): number => org.days;
 
 /** The date `day` days after the team was told. */
 export const dateOn = (org: Org, day: number): string => {
@@ -613,50 +583,8 @@ export const dateOn = (org: Org, day: number): string => {
   return date.toISOString().slice(0, 10);
 };
 
-/** The day that is `count` working days after `day`: weekends do not count. */
-export const workingDaysAfter = (
-  org: Org,
-  day: number,
-  count: number
-): number => {
-  let at = day;
-  let left = count;
-  while (left > 0) {
-    at += 1;
-    const weekday = new Date(`${dateOn(org, at)}T12:00:00Z`).getUTCDay();
-    if (weekday !== 0 && weekday !== 6) {
-      left -= 1;
-    }
-  }
-  return at;
-};
-
 /** After this many working days, whoever has not finished gets one reminder. Then nothing. */
 export const REMIND_AFTER = 3;
-
-/** When in the weeks a team's lead talks, 0 to 1: one after another, the quiet team last. The same curve as `listeningAt`. */
-const leadAt = (team: DirectoryTeam, index: number): number =>
-  0.05 + index * 0.025 + (team.pace < 0.4 ? 0.28 : 0);
-
-/**
- * The day a team's lead talks: their team's links go out the same day, to everyone on the lead's
- * list. Played for the samples only, over their fourteen days; a real organization's days come
- * from what really happened (`RealHappened`).
- */
-export const leadDay = (team: DirectoryTeam, index: number): number =>
-  Math.max(1, Math.ceil(leadAt(team, index) * LISTEN_DAYS - 1e-9));
-
-/** How many of a team, the lead aside, have finished their interview by `day`. Played for the samples only, like `leadDay`. */
-export const membersTalked = (
-  team: DirectoryTeam,
-  index: number,
-  day: number
-): number =>
-  Math.round(
-    (team.people - 1) *
-      team.pace *
-      smooth(leadAt(team, index) + 0.04, 1, clamp(day / LISTEN_DAYS))
-  );
 
 /** The first conversation as it stands: the one brought in here, or the organization's own. */
 export const transcriptOf = (org: Org, state: OrgState): string =>
@@ -722,111 +650,6 @@ export const turnsOf = (transcript: string): SaidTurn[] => {
   return turns;
 };
 
-const FIRST_NAMES = [
-  "Lisa",
-  "Tim",
-  "Sanne",
-  "Bram",
-  "Emma",
-  "Lars",
-  "Sophie",
-  "Jeroen",
-  "Fleur",
-  "Niels",
-  "Anouk",
-  "Rens",
-  "Iris",
-  "Stijn",
-  "Lotte",
-  "Koen",
-  "Maud",
-  "Thijs",
-  "Eline",
-  "Wouter",
-  "Femke",
-  "Sander",
-  "Marit",
-  "Jasper",
-  "Noor",
-  "Pieter",
-  "Esmee",
-  "Bas",
-  "Julia",
-  "Martijn",
-  "Roos",
-  "Dennis",
-  "Laura",
-  "Rik",
-  "Mila",
-  "Joris",
-  "Tessa",
-  "Maarten",
-  "Vera",
-  "Luuk",
-  "Kim",
-  "Hugo",
-  "Britt",
-  "Olaf",
-  "Jet",
-  "Daniël",
-  "Carlijn",
-  "Floris",
-  "Hanna",
-  "Wessel",
-  "Yara",
-  "Gijs",
-  "Marieke",
-];
-const LAST_NAMES = [
-  "de Vries",
-  "Jansen",
-  "van den Berg",
-  "Bakker",
-  "Visser",
-  "Smit",
-  "Meijer",
-  "de Boer",
-  "Mulder",
-  "de Groot",
-  "Bos",
-  "Vos",
-  "Peters",
-  "Hendriks",
-  "van Leeuwen",
-  "Dekker",
-  "Brouwer",
-  "de Wit",
-  "Dijkstra",
-  "Smits",
-  "de Graaf",
-  "van der Meer",
-  "van der Linden",
-  "Kok",
-  "Jacobs",
-  "de Haan",
-  "Vermeulen",
-  "van den Heuvel",
-  "van der Veen",
-  "van den Broek",
-  "de Bruijn",
-  "Schouten",
-  "van Beek",
-  "Willems",
-  "van Vliet",
-  "Hoekstra",
-  "Maas",
-  "Verhoeven",
-  "Koster",
-  "van Dam",
-  "Prins",
-  "Blom",
-  "Huisman",
-  "Peeters",
-  "de Jong",
-  "Kuipers",
-  "van Dijk",
-];
-
 /** Someone who works at the organization, as the sign-in and the HR platform have them. */
 export interface Person {
   id: string;
@@ -838,94 +661,8 @@ export interface Person {
   work: string | null;
 }
 
-const rosters = new WeakMap<Org, Person[]>();
-
-const personOf = (
-  team: OrgTeam,
-  index: number,
-  name: string,
-  work: string | null
-): Person => ({
-  id: `${team.id}-${index}`,
-  name,
-  first: name.split(" ")[0] ?? name,
-  team: team.id,
-  lead: index === 0,
-  work,
-});
-
-/** Which piece of work each of `members` people is asked about: by each work's share, spread so the first few do not all do the same. */
-const routed = (members: number, works: Work[]): string[] => {
-  if (works.length === 0) {
-    return [];
-  }
-  const total = works.reduce((sum, work) => sum + work.share, 0);
-  const exact = works.map((work) => (members * work.share) / total);
-  const counts = exact.map((value) => Math.floor(value));
-  let left = members - counts.reduce((sum, count) => sum + count, 0);
-  const byRest = exact
-    .map((value, index) => ({ index, rest: value - Math.floor(value) }))
-    .toSorted((a, b) => b.rest - a.rest || a.index - b.index);
-  for (const { index } of byRest) {
-    if (left <= 0) {
-      break;
-    }
-    counts[index] = (counts[index] ?? 0) + 1;
-    left -= 1;
-  }
-  return works
-    .flatMap((work, index) =>
-      Array.from({ length: counts[index] ?? 0 }, (_, place) => ({
-        id: work.id,
-        at: (place + 0.5) / (counts[index] ?? 0),
-        index,
-      }))
-    )
-    .toSorted((a, b) => a.at - b.at || a.index - b.index)
-    .map((each) => each.id);
-};
-
-/** Everyone at the organization, team by team with the lead first. The same every time. */
-export const peopleOf = (org: Org): Person[] => {
-  if (org.real) {
-    return org.real.people;
-  }
-  const kept = rosters.get(org);
-  if (kept) {
-    return kept;
-  }
-  const used = new Set(
-    org.teams.flatMap((team) => [team.leader, ...(team.named ?? [])])
-  );
-  let drawn = 0;
-  const draw = () => {
-    for (;;) {
-      const name = `${FIRST_NAMES[(drawn * 7 + 2) % FIRST_NAMES.length]} ${LAST_NAMES[(drawn * 5 + 1) % LAST_NAMES.length]}`;
-      drawn += 1;
-      if (!used.has(name)) {
-        used.add(name);
-        return name;
-      }
-    }
-  };
-  const roster = org.teams.flatMap((team) => {
-    const works = routed(
-      team.people - 1,
-      org.works.filter((work) => work.team === team.id)
-    );
-    const members = Array.from({ length: team.people - 1 }, (_, index) =>
-      personOf(
-        team,
-        index + 1,
-        team.named?.[index] ?? draw(),
-        works[index] ?? null
-      )
-    );
-    return [personOf(team, 0, team.leader, null), ...members];
-  });
-  rosters.set(org, roster);
-  return roster;
-};
+/** Everyone at the organization, team by team with the lead first. */
+export const peopleOf = (org: Org): Person[] => org.real.people;
 
 /** What happens to one person's link over the interviews, in days since the team was told. */
 export interface Timeline {
@@ -940,153 +677,9 @@ export interface Timeline {
   order: number;
 }
 
-/** Where interviews that stop halfway stop, by part: most where the numbers are asked. */
-const STOPS: [Phase, number][] = [
-  ["anchor", 0.05],
-  ["story", 0.15],
-  ["steps", 0.2],
-  ["exceptions", 0.2],
-  ["numbers", 0.28],
-  ["result", 0.12],
-];
-
-const stopPhase = (key: string): Phase => {
-  let left = unit(`${key}/phase`);
-  for (const [phase, share] of STOPS) {
-    left -= share;
-    if (left < 0) {
-      return phase;
-    }
-  }
-  return "numbers";
-};
-
-const timelines = new WeakMap<Org, Map<string, Timeline>>();
-
-/**
- * Every person's two weeks. A lead talks on their team's day; the same day everyone on the
- * lead's list gets a link. As many of a team finish as its pace says, in an order of their own;
- * of the rest a few stop halfway, some open the link and leave it, and some never open it.
- * Whoever has not finished after three working days gets one reminder.
- */
-export const timelinesOf = (org: Org): Map<string, Timeline> => {
-  if (org.real) {
-    return org.real.timelines;
-  }
-  const kept = timelines.get(org);
-  if (kept) {
-    return kept;
-  }
-  const all = new Map<string, Timeline>();
-  const roster = peopleOf(org);
-  // Only the samples are played, and they run the fourteen days their curve was written for.
-  const last = LISTEN_DAYS - 1;
-  const reminded = (sent: number, completed: number | null) => {
-    const on = workingDaysAfter(org, sent, REMIND_AFTER);
-    return on <= last && (completed === null || completed > on) ? on : null;
-  };
-  const key = (person: Person) => `${org.id}/${person.id}`;
-  for (const [index, team] of org.teams.entries()) {
-    const day = leadDay(team, index);
-    const lead = roster.find(
-      (person) => person.team === team.id && person.lead
-    );
-    if (lead) {
-      // A quiet team's lead opens the link late, after the reminder.
-      const opened = Math.max(
-        0,
-        day -
-          (team.pace < 0.4 ? 1 : Math.floor(unit(`${key(lead)}/opened`) * 2))
-      );
-      all.set(lead.id, {
-        sent: 0,
-        opened,
-        stopped: null,
-        completed: day,
-        reminded: reminded(0, day),
-        order: 0,
-      });
-    }
-    // Whoever is named in the sample talks first; the rest in an order of their own.
-    const turn = (person: Person) =>
-      team.named?.includes(person.name) === true
-        ? team.named.indexOf(person.name) - team.named.length
-        : unit(`${key(person)}/order`);
-    const members = roster
-      .filter((person) => person.team === team.id && !person.lead)
-      .toSorted((a, b) => turn(a) - turn(b));
-    const talks = membersTalked(team, index, LISTEN_DAYS);
-    const stoppers = Math.round((team.people - 1 - talks) * 0.18);
-    for (const [place, person] of members.entries()) {
-      const own = key(person);
-      if (place < talks) {
-        let completed = LISTEN_DAYS;
-        for (let at = 1; at <= LISTEN_DAYS; at += 1) {
-          if (membersTalked(team, index, at) >= place + 1) {
-            completed = at;
-            break;
-          }
-        }
-        completed = Math.max(completed, day);
-        const opened = Math.max(
-          day,
-          completed - Math.floor(unit(`${own}/opened`) * 3)
-        );
-        // Some stop once and come back to finish: the link carries on where they were.
-        const paused = unit(`${own}/paused`) < 0.15 && completed > opened;
-        const stopped = paused
-          ? {
-              day: Math.max(
-                opened,
-                completed - 1 - Math.floor(unit(`${own}/pause`) * 2)
-              ),
-              phase: stopPhase(own),
-            }
-          : null;
-        all.set(person.id, {
-          sent: day,
-          opened,
-          stopped,
-          completed,
-          reminded: reminded(day, completed),
-          order: place + 1,
-        });
-      } else if (place < talks + stoppers) {
-        const opened = Math.min(
-          last,
-          day + Math.floor(unit(`${own}/opened`) * 7)
-        );
-        const stopped = {
-          day: Math.min(last, opened + Math.floor(unit(`${own}/stopped`) * 2)),
-          phase: stopPhase(own),
-        };
-        all.set(person.id, {
-          sent: day,
-          opened,
-          stopped,
-          completed: null,
-          reminded: reminded(day, null),
-          order: place + 1,
-        });
-      } else {
-        const opened =
-          unit(`${own}/opens`) < 0.55
-            ? Math.min(last, day + Math.floor(unit(`${own}/opened`) * 9))
-            : null;
-        all.set(person.id, {
-          sent: day,
-          opened,
-          stopped: null,
-          completed: null,
-          reminded: reminded(day, null),
-          order: place + 1,
-        });
-      }
-    }
-  }
-  timelines.set(org, all);
-  return all;
-};
+/** What happens to every person's link, in days since the team was told. */
+export const timelinesOf = (org: Org): Map<string, Timeline> =>
+  org.real.timelines;
 
 /** Where someone stands, as Grasp sees it: the company's six states; before those, no link yet; and away, for whom nothing waits. */
 export type LinkState = PersonState | "waiting" | "away";
@@ -1154,9 +747,6 @@ const stateOn = (
   }
   return "invited";
 };
-
-/** At most this many of a team are in their interview at the same moment. */
-const TALKING = 2;
 
 /** What each interview fills in, by what was said: the record's fifteen fields. */
 const FIELDS: [RecordField, (telling: Telling) => boolean][] = [
@@ -1290,95 +880,9 @@ export const factsSaid = (
   return all.filter((fact) => saidBefore(fact, stoppedAt));
 };
 
-const jitter = (value: number, key: string, spread = 0.2) =>
-  Math.max(1, Math.round(value * (1 - spread + unit(key) * spread * 2)));
-
-/** What `person` says about `work`: most of it, never all, and their own version of the numbers. */
-// oxlint-disable-next-line complexity -- ported as the prototype has it, one part of a telling after another; the sample's numbers come from it
-export const tellingOf = (org: Org, person: Person, work: Work): Telling => {
-  if (org.real) {
-    return org.real.told.get(`${person.id}/${work.id}`) ?? NOTHING_TOLD;
-  }
-  const key = `${org.id}/${person.id}/${work.id}`;
-  const says = (what: string, chance: number) =>
-    unit(`${key}/${what}`) < chance;
-  const steps = work.steps.flatMap((_, index) =>
-    says(`step:${index}`, index === 0 ? 0.96 : 0.86) ? [index] : []
-  );
-  const { differs } = work;
-  // Of the people who do it, every third tells the step that goes two ways the other way.
-  const other =
-    peopleOf(org)
-      .filter((each) => each.work === work.id)
-      .indexOf(person) %
-      3 ===
-    1;
-  const telling: Telling = {
-    start: says("start", 0.95),
-    steps,
-    end: steps.includes(work.steps.length - 1),
-    way:
-      differs && steps.includes(differs.step)
-        ? { step: differs.step, other }
-        : null,
-    waits: (work.waits ?? []).flatMap((_, index) =>
-      says(`wait:${index}`, 0.7) ? [index] : []
-    ),
-    differently: (work.differently ?? []).flatMap((_, index) =>
-      says(`differently:${index}`, 0.55) ? [index] : []
-    ),
-    decides: work.decides !== undefined && says("decides", 0.6),
-    own: work.own !== undefined && says("own", 0.55),
-    ai: work.ai !== undefined && says("ai", 0.3),
-    volume: says("volume", 0.95)
-      ? [
-          jitter(work.volume[0], `${key}/quiet`),
-          jitter(work.volume[1], `${key}/busy`),
-        ]
-      : null,
-    takes: says("takes", 0.9)
-      ? [
-          jitter(work.takes[0], `${key}/least`),
-          jitter(work.takes[1], `${key}/normal`),
-          jitter(work.takes[2], `${key}/most`),
-        ]
-      : null,
-    wrong: says("wrong", 0.7)
-      ? Math.min(
-          9,
-          Math.max(0, work.wrong + Math.round(unit(`${key}/wrongs`) * 2 - 1))
-        )
-      : null,
-    right: says("right", 0.86),
-    ask: work.ask !== undefined && says("ask", 0.7),
-    next: says("next", 0.9),
-    example: says("example", 0.3)
-      ? `${work.item[0].replaceAll(" ", "-")}-${100 + Math.floor(unit(`${key}/file`) * 900)}.${says("pdf", 0.5) ? "pdf" : "png"}`
-      : null,
-    term: work.term !== undefined && says("term", 0.35),
-    out: [],
-  };
-  // A busy week is never quieter than a quiet one, and the longest never shorter than a normal one.
-  if (telling.volume) {
-    telling.volume[1] = Math.max(telling.volume[1], telling.volume[0]);
-  }
-  if (telling.takes) {
-    // SAFETY: three numbers sorted are three numbers.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    telling.takes = telling.takes.toSorted((a, b) => a - b) as [
-      number,
-      number,
-      number,
-    ];
-  }
-  // Now and then someone takes a line out again when it is read back.
-  const said = factsSaid(telling, null);
-  const taken = said[Math.floor(unit(`${key}/outs`) * said.length)];
-  if (says("out", 0.12) && said.length > 3 && taken !== undefined) {
-    telling.out = [taken];
-  }
-  return telling;
-};
+/** What `person` told about `work`: nothing, where they did not talk about it. */
+export const tellingOf = (org: Org, person: Person, work: Work): Telling =>
+  org.real.told.get(`${person.id}/${work.id}`) ?? NOTHING_TOLD;
 
 /** The fields of the record what someone told fills in. */
 export const filledBy = (telling: Telling): RecordField[] =>
@@ -1419,26 +923,6 @@ export interface Interview {
 
 /** The kinds of mistake an interviewer makes, as the review scores them. */
 export type MistakeKind = keyof typeof MISTAKES;
-// SAFETY: the keys of `MISTAKES`, which `MistakeKind` is.
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const MISTAKE_KINDS = Object.keys(MISTAKES) as MistakeKind[];
-const ALL_MISTAKES = MISTAKE_KINDS.reduce(
-  (sum, kind) => sum + MISTAKES[kind],
-  0
-);
-
-/** A kind of mistake, as often as that kind has ways to go wrong. */
-const mistakeKind = (key: string): MistakeKind => {
-  let left = unit(key) * ALL_MISTAKES;
-  for (const kind of MISTAKE_KINDS) {
-    left -= MISTAKES[kind];
-    if (left < 0) {
-      return kind;
-    }
-  }
-  return "formulation";
-};
-
 /** What Grasp did by hand that changes who talks and what counts: nothing, unless given. */
 export type ByHand = Partial<
   Pick<OrgState, "rules" | "settled" | "deleted" | "away" | "counted">
@@ -1450,180 +934,18 @@ export const READ_ONE_IN = 5;
 /** For this many days after an interview, the person can ask for it to be deleted. */
 export const DELETE_DAYS = 7;
 
-/** How the people of a sample rate their interview: two in three say so, most of them well. */
-const RATED: [rating: number, share: number][] = [
-  [5, 0.42],
-  [4, 0.36],
-  [3, 0.14],
-  [2, 0.06],
-  [1, 0.02],
-];
-
-const ratingOf = (key: string): number | null => {
-  if (unit(`${key}/rates`) >= 0.66) {
-    return null;
-  }
-  let left = unit(`${key}/rating`);
-  for (const [rating, share] of RATED) {
-    left -= share;
-    if (left < 0) {
-      return rating;
-    }
-  }
-  return 4;
-};
-
-/** A lead's interview brings the team's work, with how much of it there is and who to ask first. */
-const leadFacts = (org: Org, person: Person): number =>
-  org.works.filter((work) => work.team === person.team).length * 2;
-
-/** Which fields of the record a fact fills in. */
-const fieldsOf = (fact: string): RecordField[] => {
-  const [what = ""] = fact.split(":");
-  const fields: Record<string, RecordField[]> = {
-    start: ["trigger"],
-    step: ["steps", "done"],
-    term: ["terms"],
-    wait: ["waits"],
-    next: ["handoffs", "next"],
-    differently: ["exceptions"],
-    decides: ["decisions"],
-    own: ["workarounds"],
-    ai: ["workarounds"],
-    volume: ["volume"],
-    takes: ["time"],
-    wrong: ["rework"],
-    right: ["result"],
-    ask: ["result"],
-    example: ["cases"],
-  };
-  return fields[what] ?? [];
-};
-
-/** How many mistakes an interview has, as the dice fall: most none, a few several. */
-const mistakesOf = (dice: number): number => {
-  if (dice < 0.55) {
-    return 0;
-  }
-  if (dice < 0.86) {
-    return 1;
-  }
-  return dice < 0.97 ? 2 : 3;
-};
-
-/** How long an interview took: a lead's longer, one that stopped by how far it got. */
-const minutesOf = (
-  key: string,
-  person: Person,
-  approved: boolean,
-  stoppedAt: Phase | null
-): number => {
-  if (!approved) {
-    return 2 + PHASES.indexOf(stoppedAt ?? "story") * 2;
-  }
-  return person.lead
-    ? 26 + Math.floor(unit(`${key}/minutes`) * 9)
-    : 9 + Math.floor(unit(`${key}/minutes`) * 8);
-};
-
 /** The interviews there are by `day`, newest first: the ones agreed to, and the ones that stopped and were not picked up again yet. */
 export const interviewsAt = (
   org: Org,
   day: number,
   { deleted = [], away = [] }: ByHand = {}
-): Interview[] => {
-  if (org.real) {
-    return org.real.interviews.filter(
-      (interview) =>
-        interview.day <= day &&
-        !deleted.includes(interview.id) &&
-        !away.includes(interview.id)
-    );
-  }
-  const lines = timelinesOf(org);
-  const teamOf = new Map(org.teams.map((team, index) => [team.id, index]));
-  // oxlint-disable-next-line complexity -- ported as the prototype has it, one interview with everything it brought; the sample's numbers come from it
-  const found = peopleOf(org).flatMap((person): Interview[] => {
-    const timeline = lines.get(person.id);
-    if (!timeline || deleted.includes(person.id) || away.includes(person.id)) {
-      return [];
-    }
-    const approved = timeline.completed !== null && timeline.completed <= day;
-    const stopped =
-      !approved && timeline.stopped !== null && timeline.stopped.day <= day;
-    if (!approved && !stopped) {
-      return [];
-    }
-    const key = `${org.id}/${person.id}`;
-    const work = org.works.find((each) => each.id === person.work) ?? null;
-    const stoppedAt = approved ? null : (timeline.stopped?.phase ?? null);
-    const telling = work ? tellingOf(org, person, work) : null;
-    const said = telling ? factsSaid(telling, stoppedAt) : [];
-    const dice = unit(`${key}/mistakes`);
-    const mistakes = mistakesOf(dice);
-    // What they were asked and could not say: how many, how long, how often it comes in wrong, who gets it next.
-    const unsaid = telling
-      ? (
-          [
-            ["volume", telling.volume === null],
-            ["takes", telling.takes === null],
-            ["wrong", telling.wrong === null],
-            ["next", !telling.next],
-          ] as const
-        ).filter(([part, open]) => open && saidBefore(part, stoppedAt)).length
-      : 0;
-    return [
-      {
-        id: person.id,
-        person,
-        kind: person.lead ? "lead" : "employee",
-        work,
-        day: approved
-          ? (timeline.completed ?? day)
-          : (timeline.stopped?.day ?? day),
-        approved,
-        stoppedAt,
-        minutes: minutesOf(key, person, approved, stoppedAt),
-        typed: unit(`${key}/typed`) < 0.3,
-        telling,
-        filled: telling
-          ? FIELDS.filter(
-              ([field, has]) =>
-                has(telling) &&
-                said.some((fact) => fieldsOf(fact).includes(field))
-            ).map(([field]) => field)
-          : [],
-        facts: person.lead ? leadFacts(org, person) : said.length,
-        out: approved && telling ? telling.out.length : 0,
-        mistakes,
-        kinds: Array.from({ length: mistakes }, (_, at) =>
-          mistakeKind(`${key}/mistake:${at}`)
-        ),
-        followUps: approved ? unsaid : 0,
-        toRead: false,
-        rating: approved ? ratingOf(key) : null,
-        // A sample's people choose as its dice fall: a little under half of them Claire.
-        interviewer: unit(`${key}/interviewer`) < 0.46 ? "claire" : "stephen",
-      },
-    ];
-  });
-  // One in five of the finished ones is read by a person, in the order they came in.
-  const finished = found
-    .filter((interview) => interview.approved)
-    .toSorted(
-      (a, b) =>
-        a.day - b.day ||
-        (teamOf.get(a.person.team) ?? 0) - (teamOf.get(b.person.team) ?? 0)
-    );
-  for (const [index, interview] of finished.entries()) {
-    interview.toRead = index % READ_ONE_IN === 0;
-  }
-  return found.toSorted(
-    (a, b) =>
-      b.day - a.day ||
-      (teamOf.get(a.person.team) ?? 0) - (teamOf.get(b.person.team) ?? 0)
+): Interview[] =>
+  org.real.interviews.filter(
+    (interview) =>
+      interview.day <= day &&
+      !deleted.includes(interview.id) &&
+      !away.includes(interview.id)
   );
-};
 
 /** How far one piece of work is known, under the organization's own rules. */
 export interface WorkEvidence extends WorkflowEvidence {
@@ -1668,20 +990,15 @@ export const evidenceAt = (
 ): WorkEvidence[] => {
   const lines = timelinesOf(org);
   const roster = peopleOf(org);
-  // oxlint-disable-next-line complexity -- ported as the prototype has it, one piece of work under the organization's rules; the sample's numbers come from it
+  // oxlint-disable-next-line complexity -- one piece of work under the organization's rules, worked out in one place
   return org.works.flatMap((work): WorkEvidence[] => {
-    const index = org.teams.findIndex((team) => team.id === work.team);
-    const team = org.teams[index];
-    // A real team's work is there once its lead talked; a sample's once its lead's day has come.
-    if (team === undefined || (!org.real && leadDay(team, index) > day)) {
+    if (!org.teams.some((team) => team.id === work.team)) {
       return [];
     }
     // Whoever is away these weeks is not waited for: the work is known from the others.
-    const doing = org.real?.doers.get(work.id);
+    const doing = org.real.doers.get(work.id) ?? [];
     const doers = roster.filter(
-      (person) =>
-        (doing ? doing.includes(person.id) : person.work === work.id) &&
-        !away.includes(person.id)
+      (person) => doing.includes(person.id) && !away.includes(person.id)
     );
     // An interview deleted on request counts for nothing: what only that person said is gone with it.
     const talked = doers
@@ -1796,54 +1113,6 @@ export const evidenceAt = (
   });
 };
 
-/** What a team probably does, until an interview confirms it or shows it is not so. */
-export interface TeamHypothesis {
-  name: string;
-  state: HypothesisState;
-  regulated: boolean;
-  /** Not in the library: the lead or an interview brought it. */
-  found: boolean;
-}
-
-/** A team's hypotheses on `day`: what the library expects, confirmed by the first agreed interview or dropped when the lead does not name it; and what the lead named that the library did not expect. */
-export const hypothesesOf = (
-  org: Org,
-  team: OrgTeam,
-  day: number,
-  told: boolean
-): TeamHypothesis[] => {
-  const index = org.teams.indexOf(team);
-  const leadTalked =
-    told &&
-    (org.real ? org.real.heard.has(team.id) : leadDay(team, index) <= day);
-  const known = told ? evidenceAt(org, day) : [];
-  const works = org.works
-    .filter((work) => work.team === team.id)
-    .flatMap((work): TeamHypothesis[] => {
-      if (work.found && !leadTalked) {
-        return [];
-      }
-      const approved = known.find((each) => each.id === work.id)?.approved ?? 0;
-      return [
-        {
-          name: work.name,
-          state: approved > 0 ? "confirmed" : "hypothesis",
-          regulated: work.regulated === true,
-          found: work.found === true,
-        },
-      ];
-    });
-  const dropped = org.dropped
-    .filter((each) => each.team === team.id)
-    .map((each): TeamHypothesis => ({
-      name: each.name,
-      state: leadTalked ? "dropped" : "hypothesis",
-      regulated: each.regulated === true,
-      found: false,
-    }));
-  return [...works, ...dropped];
-};
-
 /** What still has to happen for a team before anything else. */
 export type TeamNext =
   /** The team does not take part. */
@@ -1896,7 +1165,6 @@ export type Need =
   | { kind: "paused" }
   | { kind: "transcript" }
   | { kind: "ask"; fields: VisionField[] }
-  | { kind: "research" }
   | { kind: "conflict"; source: ResearchSource; text: string }
   | { kind: "agreement"; what: keyof Agreed }
   | { kind: "lead"; team: OrgTeam; lead: string }
@@ -2014,7 +1282,7 @@ const noCounts = (): Record<LinkState, number> => ({
 });
 
 /**
- * A team counts as quiet when the link closes within this many days of the samples' fourteen and
+ * A team counts as quiet when the link closes within this many days of two weeks and
  * fewer than this share has talked. A shorter plan has a window as much shorter (`quietDays`).
  */
 const QUIET_DAYS = 4;
@@ -2066,37 +1334,23 @@ const nextOf = ({
     : { kind: "talking", left: waiting };
 };
 
-/** For an organization made here the research is not run: it never stands in the way. */
-const researchStage = (
-  org: Org,
-  state: OrgState,
-  read: boolean
-): StageStatus => {
-  if (state.research === "done") {
-    return "done";
-  }
-  return read && !org.made && !org.real ? "now" : "later";
-};
-
-/** A real organization's links do not open before everything is agreed, first conversation or not. */
-const agreedStage = (
-  org: Org,
-  state: OrgState,
-  read: boolean,
-  invited: boolean
-): StageStatus => {
+/** The links do not open before everything is agreed, first conversation or not. */
+const agreedStage = (state: OrgState, invited: boolean): StageStatus => {
   if (invited) {
     return "done";
-  }
-  if (!read && !org.real) {
-    return "later";
   }
   return state.agreed.processing && state.agreed.assessment ? "waits" : "now";
 };
 
+/**
+ * Stages nothing waits for. The first conversation is Grasp's own to bring in: it is what Stephen
+ * starts from, so until he has read it Grasp is asked for it all the same. No research is run.
+ */
+const optional = (each: Stage) =>
+  each === "research" || each === "conversation";
+
 /** Where each stage stands. */
 const stagesOf = ({
-  org,
   state,
   read,
   invited,
@@ -2108,7 +1362,6 @@ const stagesOf = ({
   open,
   ready,
 }: {
-  org: Org;
   state: OrgState;
   read: boolean;
   invited: boolean;
@@ -2121,12 +1374,7 @@ const stagesOf = ({
   open: boolean;
   ready: boolean;
 }): Record<Stage, StageStatus> => {
-  let connected: StageStatus = "later";
-  if (leadsKnown) {
-    connected = "done";
-  } else if (read || org.real) {
-    connected = "waits";
-  }
+  const connected: StageStatus = leadsKnown ? "done" : "waits";
   let leads: StageStatus = "later";
   if (leadsTalked) {
     leads = "done";
@@ -2150,8 +1398,9 @@ const stagesOf = ({
   }
   return {
     conversation: read ? "done" : "now",
-    research: researchStage(org, state, read),
-    agreed: agreedStage(org, state, read, invited),
+    // Grasp runs no research of its own: it never stands in the way.
+    research: state.research === "done" ? "done" : "later",
+    agreed: agreedStage(state, invited),
     connected,
     leads,
     interviews,
@@ -2161,12 +1410,12 @@ const stagesOf = ({
 
 // oxlint-disable-next-line complexity -- ported as the prototype has it: the whole organization on one day, worked out in one place; every admin test pins it
 export const viewOf = (org: Org, state: OrgState): OrgView => {
-  const told = state.client === "told" && !org.made;
-  // The links close when the organization's own plan ends, not after the samples' two weeks.
+  const told = state.client === "told";
+  // The links close when the organization's own plan ends.
   const days = listenDays(org);
   const day = told ? Math.min(Math.max(Math.round(state.day), 0), days) : 0;
   const closed = told && day >= days;
-  const known = state.client !== "none" && !org.made;
+  const known = state.client !== "none";
   const leadsKnown = state.client === "leads" || state.client === "told";
   const lines = timelinesOf(org);
   const roster = known ? peopleOf(org) : [];
@@ -2187,27 +1436,11 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   const works = told ? evidenceAt(org, day, notWaitedFor).filter(takes) : [];
   const vision = visionOf(org, state);
 
-  const teams = (known ? org.teams : []).map((team, index): TeamView => {
+  const teams = (known ? org.teams : []).map((team): TeamView => {
     const off = left.has(team.id);
     const channel = state.channels[team.id] ?? team.channel ?? "email";
     const mine = roster.filter((person) => person.team === team.id);
-    // Who is in their interview right now: the next few to finish.
-    let talkingNow: string[] = [];
-    if (org.real) {
-      talkingNow = mine
-        .filter((person) => org.real?.talking.has(person.id) === true)
-        .map((person) => person.id);
-    } else if (told && day < days) {
-      talkingNow = mine
-        .filter((person) => lines.get(person.id)?.completed === day + 1)
-        .toSorted(
-          (a, b) =>
-            (lines.get(a.id)?.order ?? 0) - (lines.get(b.id)?.order ?? 0)
-        )
-        .slice(0, TALKING)
-        .map((person) => person.id);
-    }
-    const talking = new Set(talkingNow);
+    const { talking } = org.real;
     // oxlint-disable-next-line complexity -- ported as the prototype has it: one person on one day, every way their link can stand
     const people = mine.map((person): PersonView => {
       const timeline = lines.get(person.id);
@@ -2288,15 +1521,8 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       counts[each.state] += 1;
     }
     const lead = people.find((each) => each.person.lead) ?? null;
-    let sent: number | null = null;
-    let heard: number | null = null;
-    if (org.real) {
-      sent = org.real.sent.get(team.id) ?? null;
-      heard = org.real.heard.get(team.id) ?? null;
-    } else if (told && leadDay(team, index) <= day) {
-      sent = leadDay(team, index);
-      heard = sent;
-    }
+    const sent = org.real.sent.get(team.id) ?? null;
+    const heard = org.real.heard.get(team.id) ?? null;
     const waiting = people.length - counts.completed - counts.away;
     const next = nextOf({ off, leadsKnown, told, closed, sent, waiting, lead });
     return {
@@ -2365,10 +1591,10 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   }));
   // Where the organization counts it itself, its own number stands: the company sees that one.
   const percent =
-    org.real?.known ?? sources.reduce((sum, each) => sum + each.points, 0);
+    org.real.known ?? sources.reduce((sum, each) => sum + each.points, 0);
   const knowledge: OrgKnowledge = {
     // Core's number comes without its parts: the admin's own would not add up to it, so none.
-    sources: org.real?.known === undefined ? sources : [],
+    sources: org.real.known === undefined ? sources : [],
     percent,
     threshold: state.threshold,
     ready: percent >= state.threshold,
@@ -2376,7 +1602,6 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   };
   const open = state.opened !== null;
   const stages = stagesOf({
-    org,
     state,
     read,
     invited,
@@ -2388,16 +1613,11 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     open,
     ready: knowledge.ready,
   });
-  // At a real organization the first conversation is Grasp's own to bring in: nothing waits for it,
-  // but it is what Stephen starts from, so until he has read it Grasp is asked for it all the same.
-  const optional = (each: Stage) =>
-    ((org.made === true || org.real !== undefined) && each === "research") ||
-    (org.real !== undefined && each === "conversation");
   const stage =
     STAGES.find((each) => stages[each] !== "done" && !optional(each)) ?? "open";
 
   const needs: Need[] = [];
-  if (told && org.real?.paused === true) {
+  if (told && org.real.paused === true) {
     needs.push({ kind: "paused" });
   }
   if (!read) {
@@ -2408,9 +1628,6 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     : [];
   if (missing.length > 0) {
     needs.push({ kind: "ask", fields: missing });
-  }
-  if (read && state.research === "none" && !org.made && !org.real) {
-    needs.push({ kind: "research" });
   }
   if (state.research === "done") {
     for (const finding of org.research) {
@@ -2423,7 +1640,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       }
     }
   }
-  if (org.real ? !invited : read && !told) {
+  if (!invited) {
     for (const what of ["processing", "assessment"] as const) {
       if (!state.agreed[what]) {
         needs.push({ kind: "agreement", what });
@@ -2435,7 +1652,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   }
   if (told && !closed) {
     // The quiet window shrinks with a shorter plan, so a five-day plan's team is not quiet on its
-    // first day; fourteen days and more keep the samples' four.
+    // first day; fourteen days and more keep four.
     const quietDays = Math.min(
       QUIET_DAYS,
       Math.ceil((days * QUIET_DAYS) / LISTEN_DAYS)

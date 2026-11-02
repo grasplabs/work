@@ -123,11 +123,9 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   }
   const { org, state } = view;
   const work: Work = evidence.work;
-  // At a real organization, everyone who told about it counts, whatever they were asked about.
+  // Everyone who told about it counts, whatever they were asked about.
   const about = (interview: Interview) =>
-    org.real
-      ? org.real.told.has(`${interview.person.id}/${id}`)
-      : interview.work?.id === id;
+    org.real.told.has(`${interview.person.id}/${id}`);
   const interviews = view.interviews
     .filter((interview) => interview.approved && about(interview))
     .toSorted((a, b) => a.day - b.day);
@@ -385,7 +383,7 @@ export const stephenOf = (view: OrgView): StephenStats => {
     stops,
     kinds,
     look: finished.filter((interview) => interview.mistakes > 1),
-    reviewed: view.org.real === undefined,
+    reviewed: false,
     started: view.interviews.length,
     rating: ratingsOf(finished),
     chose: INTERVIEWERS.map((interviewer) => {

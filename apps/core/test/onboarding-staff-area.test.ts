@@ -57,9 +57,8 @@ const progress = (text = sentinel): InterviewProgress => ({
 });
 
 /**
- * An onboarding running since yesterday, its agreements not all in: Ops,
- * without a lead, whose two people's links are out, and one of them has
- * talked.
+ * An onboarding running since yesterday: Ops, without a lead, whose two
+ * people's links are out, and one of them has talked.
  */
 const running = async () => {
   const store = onboardingStore(env);
@@ -90,11 +89,6 @@ const running = async () => {
   const key = await sha256Hex("oli's device");
   await store.openLink(mark, null, key);
   await store.saveInterview(mark, key, 0, progress());
-  // The risk assessment taken back: the agreements aren't all in.
-  await store.setAgreements(
-    { processing: true, assessment: false, council: "none" },
-    by
-  );
   return { store, ids };
 };
 
@@ -112,14 +106,14 @@ describe("Grasp's onboarding area", () => {
       interviews: stage("interviews")?.todos,
       needs,
     }).toStrictEqual({
-      agreements: "now",
+      agreements: "done",
       people: "done",
       interviews: [
         { kind: "plan", done: true },
         { kind: "linksOut", done: true, count: 2, of: 2 },
         { kind: "talked", done: false, count: 1, of: 2 },
       ],
-      needs: [{ kind: "agreement", what: "assessment" }],
+      needs: [],
     });
   });
 

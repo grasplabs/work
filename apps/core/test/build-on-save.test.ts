@@ -6,21 +6,16 @@ import { describe, expect, it } from "vite-plus/test";
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave } from "../src/save-builds.ts";
 import { reviewScreens } from "../src/screen-trust-rpc.ts";
-import {
-  buildScreens,
-  buildServer,
-  buildWorkflows,
-  screenCode,
-} from "../src/screens.ts";
+import { buildScreens, screenCode } from "../src/screens.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Saving an App's files builds them at once, so the version opens without
 // building, and whoever saved (an agent, most of all) hears what doesn't
 // build in the same call. A build never fails the save, and one that
-// can't finish is reported as such within a bound.
+// can't finish is reported as such within a bound. Gone with App
+// workflows: a save building an App's own workflows.
 
 const idp = mockIdp();
 
@@ -30,18 +25,6 @@ const screen = (text: string): Record<string, string> => ({
 
 export default function Desk() {
   return <Button>${text}</Button>;
-}
-`,
-});
-
-/** Server code that answers `text`. */
-const server = (text: string): Record<string, string> => ({
-  "app/server.ts": `import { DurableObject } from "cloudflare:workers";
-
-export class App extends DurableObject {
-  hello(): string {
-    return "${text}";
-  }
 }
 `,
 });
@@ -71,7 +54,7 @@ const newApp = async (
 };
 
 describe("building on save", { timeout: 60_000 }, () => {
-  it("builds a saved version's screens, server code and workflows, so it opens without building", async () => {
+  it("builds a saved version's screens, so it opens without building", async () => {
     const builder = await signedInApi(idp, "builder");
     // Files no other test builds, so nothing is in the cache before.
     const unique = crypto.randomUUID();
@@ -79,11 +62,7 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     const { version, builds } = await builder.api.apps.files.commit(
       app,
-      {
-        ...screen(unique),
-        ...server(unique),
-        ...workflowFiles("saved", `  return "${unique}";`),
-      },
+      screen(unique),
       "Save"
     );
     const files = await versionFiles(env, appIdSchema.parse(app), version);
@@ -91,22 +70,11 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     expect(builds).toStrictEqual({
       screens: { status: "ok", diagnostics: [] },
-      server: { status: "ok", diagnostics: [] },
-      workflows: { status: "ok", diagnostics: [] },
+      workflows: { status: "none", diagnostics: [] },
     });
-    // Opening, calling and running it load what the save built.
+    // Opening it loads what the save built.
     await expect(
       buildScreens(unbuilt, files, "app-test")
-    ).resolves.toMatchObject({
-      ok: true,
-    });
-    await expect(
-      buildServer(unbuilt, files, "app-test")
-    ).resolves.toMatchObject({
-      ok: true,
-    });
-    await expect(
-      buildWorkflows(unbuilt, files, "app-test", {})
     ).resolves.toMatchObject({
       ok: true,
     });
@@ -121,9 +89,6 @@ describe("building on save", { timeout: 60_000 }, () => {
   return <p>{count}</p>;
 }
 `,
-      "app/server.ts": `import { readFileSync } from "node:fs";
-export class App {}
-`,
     };
 
     const committed = await builder.api.apps.files.commit(
@@ -132,20 +97,18 @@ export class App {}
       "Broken"
     );
 
-    const { screens, server: serverBuild, workflows } = committed.builds;
+    const { screens, workflows } = committed.builds;
 
     const [typeError] = screens.diagnostics;
 
     expect({
       screens: [screens.status, ...where(screens)],
-      server: [serverBuild.status, ...where(serverBuild)],
       workflows: workflows.status,
       column: typeError?.column,
       message:
         typeError?.message.includes("not assignable to type 'number'") ?? false,
     }).toStrictEqual({
       screens: ["failed", "screens/desk.tsx:2 TS2322 error"],
-      server: ["failed", "app/server.ts:1 imports error"],
       workflows: "none",
       column: 9,
       message: true,
@@ -185,7 +148,6 @@ export class App {}
           error:
             "The build couldn't run now. It runs again when this is first used.",
         },
-        server: { status: "none" },
         workflows: { status: "none" },
       },
     });
@@ -243,7 +205,6 @@ export class App {}
             error:
               "The build didn't finish in time. It runs again when this is first used.",
           },
-          server: { status: "none", diagnostics: [] },
           workflows: { status: "none", diagnostics: [] },
         },
         firstUse: true,

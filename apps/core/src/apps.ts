@@ -17,7 +17,6 @@ import type {
   App,
   AppContents,
   AppOverview,
-  CurrentExports,
   AppFiles,
   AppRole,
   AppVersion,
@@ -55,7 +54,8 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import { exportsIn } from "./app-exports.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
+import { refuseV1Server } from "./app-v1-server.ts";
 import {
   auditedBatch,
   outboxed,
@@ -215,6 +215,18 @@ export const changeEntry = (
   action,
   target: { type: "app", id: app },
   detail,
+});
+
+/** Where a chat's agent created an App, while nobody accepted it yet. */
+export interface ProvisionalOrigin {
+  readonly workspaceId: string;
+  readonly chatId: string;
+}
+
+/** An App row's provisional columns, for `origin` or none. */
+export const provisionalColumns = (origin: ProvisionalOrigin | undefined) => ({
+  provisionalWorkspaceId: origin?.workspaceId ?? null,
+  provisionalChatId: origin?.chatId ?? null,
 });
 
 /**
@@ -570,7 +582,12 @@ export const createApp = async (
   by: Acting,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * Where a chat's agent creates it: provisional there until its first
+   * version is made current (app-removal.ts, `reapAbandonedApps`).
+   */
+  provisional?: ProvisionalOrigin
 ): Promise<App> => {
   requireBuilder(by);
   const { name, description, blueprint } = appErrors.parse(
@@ -596,6 +613,7 @@ export const createApp = async (
     createdAt: new Date(),
     removedAt: null,
     removedBy: null,
+    ...provisionalColumns(provisional),
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
@@ -804,24 +822,6 @@ export const listScreens = async (
   });
 };
 
-/**
- * What an App's current version exports to other Apps, for anyone with a
- * role in it, people and the agent alike: read from its row alone, no
- * files.
- */
-export const appExports = async (
-  env: Env,
-  by: Person,
-  app: unknown
-): Promise<CurrentExports> => {
-  const { id, currentVersion } = await appFor(env, by, app, "user");
-  if (currentVersion === null) {
-    return { version: null, exports: {} };
-  }
-  const row = await findVersion(env, id, currentVersion);
-  return { version: currentVersion, exports: row.exports };
-};
-
 /** An App's files at `version`, or at its latest version without one. */
 export const readFiles = async (
   env: Env,
@@ -936,7 +936,7 @@ export const commitFiles = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  const exported = exportsIn(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -955,7 +955,6 @@ export const commitFiles = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls,
-    exports: exported,
     proposedBy: null,
     workflowBindings,
   };
@@ -1075,6 +1074,15 @@ export const draftOverLatest = async (
   app: AppId,
   { base, changes }: DraftChanges
 ): Promise<DraftOverLatest> => {
+  // A draft saved before its agent was refused writes under `workflows/`
+  // may hold such a change still: it goes over the latest version, to be
+  // proposed, no more than it is written. A builder's workflow it doesn't change, or deletes,
+  // stands (app-no-workflows.ts).
+  refuseAppWorkflows(
+    Object.entries(changes).flatMap(([path, content]) =>
+      content === null ? [] : [path]
+    )
+  );
   const { latest, files } = await latestFiles(env, app);
   const parent = latest?.version ?? null;
   if (parent !== base) {
@@ -1141,7 +1149,7 @@ export const proposeDraft = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  const exported = exportsIn(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -1159,7 +1167,6 @@ export const proposeDraft = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls,
-    exports: exported,
     proposedBy: by.via ?? null,
     workflowBindings,
   };
@@ -1725,6 +1732,10 @@ export const makeCurrent = async (
           .set({
             currentVersion: number,
             pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
+            // Accepted: an App a chat created is provisional no more, and
+            // is never reaped (app-removal.ts).
+            provisionalWorkspaceId: null,
+            provisionalChatId: null,
           })
           .where(
             and(

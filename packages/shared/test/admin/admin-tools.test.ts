@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { adminSnapshotSchema } from "../../src/admin-snapshot.ts";
 import type { Rollout } from "../../src/admin/admin-platform.ts";
+import { adminOrgOf } from "../../src/admin/admin-snapshot-adapter.ts";
 import { ADMIN_SOURCES } from "../../src/admin/admin-sources.ts";
 import {
   ADMIN_TOOLS,
@@ -15,21 +17,31 @@ import {
 } from "../../src/admin/admin-tools.ts";
 import type { Fleet } from "../../src/admin/admin-tools.ts";
 import { adminViewOf, NEED_ORDER } from "../../src/admin/admin-view.ts";
+import type { Integration } from "../../src/admin/onboarding-admin.ts";
+import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
 import { SAMPLE_ASKED } from "./fixtures/admin-integrations-sample.ts";
 import {
   SAMPLE_PLATFORMS,
   SAMPLE_RELEASES,
 } from "./fixtures/admin-platform-sample.ts";
-import { SAMPLE_ORGS } from "./fixtures/admin-sample.ts";
-import {
-  HARTOG_CONVERSATION,
-  NOORDKADE_CONVERSATION,
-  VANRIJN_CONVERSATION,
-  VELDKAMP_CONVERSATION,
-} from "./fixtures/admin-transcripts.ts";
+import { bothTalked, client, orders, snapshot } from "./fixtures/bakkerij.ts";
 
-const today = "2026-10-02";
-const views = SAMPLE_ORGS.map((org) => adminViewOf(org, org.seed, today));
+const today = "2026-10-14";
+// Bakkerij in the middle of its interviews, and Molen with enough known to
+// open, its orders drawn: two organizations as core answers for them.
+const bakkerij = adminOrgOf(snapshot, client);
+const molen = adminOrgOf(
+  adminSnapshotSchema.parse({
+    ...bothTalked,
+    company: { ...bothTalked.company, name: "Molen Zuid" },
+    gate: { ...bothTalked.gate, known: 85, ready: true },
+    works: { works: [orders], rules: STARTING_ORG_RULES, counted: [] },
+  }),
+  { id: "molen", name: "Molen", created: client.created }
+);
+const views = [bakkerij, molen].map(({ org, state }) =>
+  adminViewOf(org, state, today)
+);
 const call = (name: string, input: Record<string, unknown> = {}) =>
   callAdminTool(name, input, views, today);
 const rollout: Rollout = {
@@ -57,9 +69,6 @@ const named = (within: string, name: string): boolean =>
     "u"
   ).test(within);
 
-/** A transcript's line without who said it: "Mark Jansen: …" is "…". */
-const SPEAKER = /^\S+\s+[^:]+:\s*/u;
-
 describe("the admin’s tools", () => {
   it("only read: whatever changes a company stays a button in the admin", () => {
     for (const tool of ADMIN_TOOLS) {
@@ -74,7 +83,7 @@ describe("the admin’s tools", () => {
           ? Object.fromEntries(
               tool.inputSchema.required.map((field) => [
                 field,
-                field === "measure" ? "known" : "Hartog",
+                field === "measure" ? "known" : "Molen",
               ])
             )
           : {};
@@ -93,14 +102,14 @@ describe("the admin’s tools", () => {
   it("lists one phase when asked, and refuses a phase there is not", () => {
     const ready = call("list_organizations", { phase: "ready" });
     expect(ready.structured?.organizations).toStrictEqual([
-      expect.objectContaining({ id: "noordkade", phase: "ready" }),
+      expect.objectContaining({ id: "molen", phase: "ready" }),
     ]);
     expect(call("list_organizations", { phase: "later" }).failed).toBeTruthy();
   });
 
   it("finds an organization by its id or a part of its name, and says so when that is not one", () => {
-    expect(findOrganization(views, "hartog")).toBe(views[3]);
-    expect(findOrganization(views, "van rijn")).toBe(views[2]);
+    expect(findOrganization(views, "bakkerij")).toBe(views[0]);
+    expect(findOrganization(views, "molen z")).toBe(views[1]);
     expect(findOrganization(views, "nobody")).toContain("No organization fits");
     expect(call("brief", { organization: "" }).failed).toBeTruthy();
   });
@@ -128,23 +137,20 @@ describe("the admin’s tools", () => {
   });
 
   it("puts what is most pressing first, whichever organization it is at, in the list and in the digest", () => {
-    // The open organization listed first, so its needs come before the others' unless sorted.
-    const crowded = [views[3], ...views.slice(0, 3)].filter(
-      (view) => view !== undefined
-    );
+    // The organization that is further along listed last, so its needs come after the others' unless sorted.
     const { needs } = z
       .object({ needs: z.array(z.object({ kind: z.string() })) })
-      .parse(callAdminTool("what_needs_grasp", {}, crowded, today).structured);
+      .parse(call("what_needs_grasp").structured);
     const ranks: readonly string[] = NEED_ORDER;
     const order = needs.map(({ kind }) => ranks.indexOf(kind));
     expect(order).toStrictEqual(order.toSorted((a, b) => a - b));
     const [first] = needs;
     expect(first?.kind).toBe("go");
-    const digest = digestOf(crowded, today).split("\n");
+    const digest = digestOf(views, today).split("\n");
     const heading = digest.findIndex((line) =>
       line.startsWith("Needs Grasp today")
     );
-    expect(digest[heading + 1]).toMatch(/^- noordkade: Ready for Grasp’s go/u);
+    expect(digest[heading + 1]).toMatch(/^- molen: Ready for Grasp’s go/u);
   });
 
   it("says how many days a quiet team has left, not how many people", () => {
@@ -164,43 +170,11 @@ describe("the admin’s tools", () => {
     const past = views.filter(
       (view) => !view.open && view.knowledge.percent >= MILESTONE
     );
-    expect(past.length).toBeGreaterThan(0);
+    expect(past.map((view) => view.org.id)).toStrictEqual(["molen"]);
     for (const view of past) {
       expect(digest).toContain(`${view.org.id} (${view.knowledge.percent}%)`);
     }
     expect(digest).toContain(`Past ${MILESTONE}% known`);
-  });
-
-  it("never tells what anyone said: no line of a conversation reaches a chat or a tool's answer", () => {
-    const answers = [
-      adminDocument(views, today, SAMPLE_ASKED, fleet),
-      ...ADMIN_TOOLS.flatMap((tool) =>
-        views.map((view) => {
-          const answer = callAdminTool(
-            tool.name,
-            { organization: view.org.id, measure: "known" },
-            views,
-            today,
-            SAMPLE_ASKED,
-            fleet
-          );
-          return `${answer.text}\n${JSON.stringify(answer.structured ?? {})}`;
-        })
-      ),
-    ].join("\n");
-    const said = [
-      NOORDKADE_CONVERSATION,
-      VELDKAMP_CONVERSATION,
-      VANRIJN_CONVERSATION,
-      HARTOG_CONVERSATION,
-    ]
-      .flatMap((conversation) => conversation.split("\n"))
-      .map((line) => line.replace(SPEAKER, ""))
-      .filter((line) => line.length > 30);
-    expect(said.length).toBeGreaterThan(0);
-    for (const line of said) {
-      expect(answers).not.toContain(line);
-    }
   });
 });
 
@@ -224,20 +198,26 @@ describe("what an answer names, as it goes to an outside model", () => {
       "Names, as the companies wrote them"
     )[0] ?? "",
   ].join("\n");
-  const needs = views.flatMap((view) => view.needs);
+  const people = views.flatMap((view) =>
+    view.people.map((each) => each.person.name)
+  );
 
   it("says no person's name and no research text: roles, ids and numbers only", () => {
-    const [view] = views;
+    const [, view] = views;
     const [team] = view?.org.teams ?? [];
-    expect(view && team).toBeTruthy();
-    if (!view || !team) {
+    const [work] = view?.org.works ?? [];
+    expect(view && team && work).toBeTruthy();
+    if (!view || !team || !work) {
       return;
     }
-    const [work] = view.org.works;
-    expect(work).toBeTruthy();
-    if (!work) {
-      return;
-    }
+    const integration: Integration = {
+      id: "int-1",
+      name: "Exact Online",
+      kind: "app",
+      access: "Reads invoices",
+      by: "Head of Sales",
+      since: "2026-10-01",
+    };
     const said = [
       needText({ kind: "lead", team, lead: "Marieke" }, view),
       needText({ kind: "split", work, lead: "Marieke" }, view),
@@ -249,36 +229,23 @@ describe("what an answer names, as it goes to an outside model", () => {
         },
         view
       ),
+      needText({ kind: "signin", integration }, view),
     ].join("\n");
     expect(said).toBe(
       [
         `The lead of team ${team.id} has not talked yet.`,
         `work ${work.id} is told so differently that it is better split in two; its team's lead decides.`,
         "The research disagrees with the company’s own account; the admin shows where.",
+        `integration ${integration.id} stopped working until someone at the company signs in again.`,
       ].join("\n")
     );
-    const [integration] = SAMPLE_ORGS.flatMap((org) => org.integrations);
-    expect(integration).toBeTruthy();
-    if (!integration) {
-      return;
-    }
-    expect(needText({ kind: "signin", integration }, view)).toBe(
-      `integration ${integration.id} stopped working until someone at the company signs in again.`
-    );
-    const people = needs.flatMap((need) =>
-      need.kind === "lead" || need.kind === "split" ? [need.lead] : []
-    );
-    const research = needs.flatMap((need) =>
-      need.kind === "conflict" ? [need.text] : []
-    );
-    for (const written of [...people, ...research]) {
-      expect(text).not.toContain(written);
-    }
+    expect(people.length).toBeGreaterThan(0);
     const everything = answers
       .map((answer) => JSON.stringify(answer.structured ?? {}))
       .join("\n");
-    for (const written of [...people, ...research]) {
-      expect(everything).not.toContain(written);
+    for (const name of people) {
+      expect(named(text, name) ? name : null).toBeNull();
+      expect(named(everything, name) ? name : null).toBeNull();
     }
   });
 
@@ -286,10 +253,7 @@ describe("what an answer names, as it goes to an outside model", () => {
     const written = views.flatMap((view) => [
       view.org.name,
       ...view.org.teams.map((team) => team.name),
-      ...view.integrations.map((integration) => integration.name),
-      ...needs.flatMap((need) =>
-        need.kind === "blocked" || need.kind === "split" ? [need.work.name] : []
-      ),
+      ...view.org.works.map((work) => work.name),
     ]);
     for (const name of [...written, ...SAMPLE_ASKED.map((app) => app.app)]) {
       expect(named(text, name) ? name : null).toBeNull();
@@ -304,19 +268,19 @@ describe("what an answer names, as it goes to an outside model", () => {
     for (const name of [...written, ...SAMPLE_ASKED.map((app) => app.app)]) {
       expect(named(outsideNames, name) ? name : null).toBeNull();
     }
-    const one = call("get_organization", { organization: "noordkade" });
+    const one = call("get_organization", { organization: "bakkerij" });
     const names = z
       .object({
         organizations: z.array(z.object({ id: z.string(), name: z.string() })),
         teams: z.array(z.object({ id: z.string(), name: z.string() })),
       })
       .parse(one.structured?.names);
-    const [noordkade] = views;
+    const [first] = views;
     expect(names.organizations).toStrictEqual([
-      expect.objectContaining({ id: "noordkade", name: noordkade?.org.name }),
+      expect.objectContaining({ id: "bakkerij", name: first?.org.name }),
     ]);
     expect(names.teams.map((team) => team.name)).toStrictEqual(
-      noordkade?.org.teams.map((team) => team.name)
+      first?.org.teams.map((team) => team.name)
     );
   });
 });

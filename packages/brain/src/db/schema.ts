@@ -735,6 +735,35 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
 });
 
 /**
+ * The documents a content purge named, and when (GRA-1121): written before
+ * the purge reaches anything, the host's copies included, so a copy made
+ * from one that lands after the purge forgot that document's copies is
+ * found and forgotten too (../erasures.ts), by the rowid: a rowid table,
+ * never WITHOUT ROWID. Each document's ID and a hash of its place, never
+ * its name or a term: the erasure's own record.
+ */
+export const brainErasedDocuments = sqliteTable(
+  "brain_erased_documents",
+  {
+    purgeId: text("purge_id").notNull(),
+    documentId: text("document_id").notNull(),
+    /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
+    place: text().notNull(),
+    erasedAt: timestamp("erased_at").notNull(),
+    /**
+     * When the purge had forgotten the host's copies and rewritten what it
+     * names, or stopped trying: null while it runs (../erasures.ts).
+     */
+    doneAt: timestamp("done_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.purgeId, table.documentId] }),
+    // A copy's check, by the place it read (and the rowid, as its mark).
+    index("brain_erased_documents_place_idx").on(table.place),
+  ]
+);
+
+/**
  * The people a personal purge forgot, and when: a capture of their work
  * from before then, delivered again after a lost reply or a restart, is
  * never recorded again, and never makes them a member again
@@ -991,6 +1020,45 @@ export const brainEntityKeys = sqliteTable(
       .references(() => brainEntities.id, { onDelete: "cascade" }),
   },
   (table) => [index("brain_entity_keys_entity_idx").on(table.entityId)]
+);
+
+/**
+ * A decision on whether two entities of different collections are one
+ * (GRA-1080): `same`, with the source a reviewer who reads both cites as
+ * evidence, or `different`; who decided is the audit log's to say.
+ * Entity IDs only, never a name or a person, the pair in
+ * order (`entityA` < `entityB`), each end gone with its entity, so an
+ * erased entity leaves no decision behind. It never rewrites an entity's
+ * ID: a reader sees it only where they read both sides.
+ */
+export const brainEntityMatches = sqliteTable(
+  "brain_entity_matches",
+  {
+    entityA: text("entity_a")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    entityB: text("entity_b")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    decision: text({ enum: ["same", "different"] }).notNull(),
+    /** The evidence for `same`: a document, at its version. */
+    evidenceDocumentId: text("evidence_document_id"),
+    evidenceVersion: integer("evidence_version"),
+    /**
+     * The person who decided it, as the host's `ownerOf` names them: only
+     * they, or whoever the host's `mayReplaceMatch` lets, replace it.
+     */
+    decidedBy: text("decided_by").notNull(),
+    decidedAt: timestamp("decided_at").notNull(),
+    /** Moves on with every write: a replacement names the one it read. */
+    revision: integer().notNull().default(1),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entityA, table.entityB] }),
+    index("brain_entity_matches_b_idx").on(table.entityB),
+    // A purge of the evidence finds its decisions (purge.ts).
+    index("brain_entity_matches_evidence_idx").on(table.evidenceDocumentId),
+  ]
 );
 
 /**

@@ -63,6 +63,7 @@ const interviewingSnapshot = (): AdminSnapshot => {
     openedAt: state === "invited" ? null : start,
     remindedAt: null,
     deletedAt: null,
+    failedMail: null,
     state,
     code: linkCode,
     url: `https://acme.grasp.test/i/${linkCode}`,

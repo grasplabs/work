@@ -47,12 +47,7 @@ import { turnSource } from "../src/brain-capture.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { modelLedger } from "../src/model-ledger.ts";
-import {
-  configureObject,
-  model,
-  setObjectEnv,
-  transcript,
-} from "./agent-chat.ts";
+import { model, setObjectEnv, transcript } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
@@ -518,19 +513,14 @@ const grantedKeys = (company: BrainCompany): string[] => [
 ];
 
 /**
- * The month and day the run's model calls count in, whatever the clock
- * says: a run across midnight at a month's end still reads one total.
+ * The month the run's model calls count in, whatever the clock says: a
+ * run across midnight at a month's end still reads one total.
  */
 export const brainBudgetMonth = "2400-01";
-export const brainBudgetDay = "2400-01-01";
 
-/** Gives `stub` the run's model rules, its calls counted in the run's month. */
-const pointAt = async (stub: Workspace["stub"], sent: Provider["sent"]) => {
-  await configureObject(stub, { rules: sent.rules });
-  await setObjectEnv(stub, {
-    MODEL_BUDGET_MONTH: brainBudgetMonth,
-    MODEL_BUDGET_DAY: brainBudgetDay,
-  });
+/** Has `stub`'s calls counted in the run's month. */
+const pointAt = async (stub: Workspace["stub"]) => {
+  await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
 };
 
 /** What the ledger has charged for the run's model calls, in micros. */
@@ -938,13 +928,9 @@ const revokeAccess = async (
  * A chat in another Workspace object of `place`'s person, its agent
  * granted what `place`'s is, pointed at the same provider.
  */
-const elsewhereOf = async (
-  company: BrainCompany,
-  place: Workspace,
-  sent: Provider["sent"]
-) => {
+const elsewhereOf = async (company: BrainCompany, place: Workspace) => {
   const other = await workspaceOf(company, place.persona);
-  await pointAt(other.stub, sent);
+  await pointAt(other.stub);
   const chat = await other.stub.createChat(
     "Baseline elsewhere",
     company.people[place.persona].userId,
@@ -978,17 +964,12 @@ interface Hold {
   streamed: string;
 }
 
-/**
- * The model the organization chose and its chats ask, and the model rules
- * a run's objects get (`MODEL_GATEWAY`): the tests' model, with no rules,
- * by default.
- */
+/** The model the organization chose and its chats ask: the tests' model, by default. */
 export interface BrainModelSetup {
   model: string;
-  rules: Record<string, unknown>;
 }
 
-const testModelSetup: BrainModelSetup = { model, rules: {} };
+const testModelSetup: BrainModelSetup = { model };
 
 /**
  * The run's one model provider, behind every persona's object: trials run
@@ -1694,7 +1675,7 @@ const runTrial = async (
   const { sent, setTurn } = provider;
   // Every object of the class may share one env, and an evicted one gets
   // a new one: pointed at the provider before each trial.
-  await pointAt(place.stub, sent);
+  await pointAt(place.stub);
   const chat = await place.stub.createChat(
     `Baseline ${task.id}`,
     person.userId,
@@ -1704,7 +1685,7 @@ const runTrial = async (
   // there first: set up before the trial, as it isn't the trial's change.
   const elsewhere =
     arm === "readElsewhereFirst"
-      ? await elsewhereOf(company, place, sent)
+      ? await elsewhereOf(company, place)
       : undefined;
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
@@ -1758,7 +1739,7 @@ const runTrial = async (
       if (cold) {
         await evictDurableObject(place.stub);
         started = performance.now();
-        await pointAt(place.stub, sent);
+        await pointAt(place.stub);
       } else {
         started = performance.now();
       }
@@ -1969,7 +1950,7 @@ const runDurabilityCase = async (
 ): Promise<DurabilityCase> => {
   const person = company.people[task.persona];
   const { sent, setTurn } = provider;
-  await pointAt(place.stub, sent);
+  await pointAt(place.stub);
   const chat = await place.stub.createChat(
     `Durability ${kind} ${task.id}`,
     person.userId,
@@ -2062,7 +2043,7 @@ const runDurabilityCase = async (
     const latencyMs =
       performance.now() - started - (provider.observingMs() - observedBefore);
     // Woken again, as the next call to the object would.
-    await pointAt(place.stub, sent);
+    await pointAt(place.stub);
     await chatRows.keep();
     const stateAfter = await trialStateOf(place, chat.id, knowledge);
     const changedTables = [
@@ -2100,7 +2081,7 @@ const runDurabilityCase = async (
     // A restart of an object at rest, as a deploy between two turns makes:
     // its memory goes, its storage stays.
     await evictDurableObject(place.stub);
-    await pointAt(place.stub, sent);
+    await pointAt(place.stub);
   }
   const afterRestart = await lastSaid(place, chat.id);
   const chatAfterRestart = JSON.stringify(
@@ -2194,7 +2175,7 @@ export interface RunIdentity {
   prompt: string[];
   /** The skills the personas' catalogs list, and each one's text. */
   skills: string;
-  /** Access, grants, model rules, protocol and budgets. */
+  /** Access, grants, protocol and budgets. */
   policy: string;
   harness: string;
   split: BrainSplit;
@@ -2268,7 +2249,7 @@ export interface BrainRunOptions {
   respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
-  /** The model the chats ask and the model rules: the tests' model, no rules, by default. */
+  /** The model the chats ask: the tests' model, by default. */
   modelSetup?: BrainModelSetup;
   /** The build, pinned in the identity of a run outside CI. */
   build?: BrainBuild;
@@ -2434,7 +2415,7 @@ const warmUp = async (
 ) => {
   for (const place of places.values()) {
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    await pointAt(place.stub, provider.sent);
+    await pointAt(place.stub);
     provider.setTurn({ phase: "prior" });
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
     const chat = await place.stub.createChat(
@@ -2629,7 +2610,6 @@ export const runBrainBaseline = async (
           key,
           actions: ["read"],
         })),
-        rules: modelSetup.rules,
         protocol: answerProtocol,
         budgets: { searchedSections, fullContextChars },
       }),

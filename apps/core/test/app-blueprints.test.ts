@@ -25,7 +25,6 @@ import {
   unique,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Blueprints: a builder marks a version of an App as a blueprint, and
 // whoever has a role in the App and builds creates an App of their own
@@ -35,7 +34,9 @@ import { workflowFiles } from "./workflow-apps.ts";
 // coming along instead of a request, a request naming a connection or
 // another App the creator may not see, a blueprint made of a version
 // nobody marked, someone without a role in the App (or who doesn't build,
-// or staff) copying it, and a change nobody recorded.
+// or staff) copying it, and a change nobody recorded. Gone with App
+// workflows: a copy's own workflows typed by the bindings the code it
+// copies was written for.
 
 const idp = mockIdp();
 
@@ -161,14 +162,13 @@ const mailboxOf = async (owner: Person): Promise<string> => {
 // sleeps; sixty seconds is room for a slow runner, as the other tests
 // that release Apps give theirs.
 describe("blueprints", { timeout: 60_000 }, () => {
-  it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or another App", async () => {
+  it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or a workflow", async () => {
     const [owner, maker] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
     ]);
     const admin = await signedInApi(idp, "admin");
     const source = await notesApp(owner);
-    const hidden = await notesApp(owner);
     const [{ collectionId: handbook }, { collectionId: later }] =
       await Promise.all([
         collectionWithNote(admin.api, {
@@ -206,12 +206,6 @@ describe("blueprints", { timeout: 60_000 }, () => {
         object: { type: "workflow", workflowId: flow.id },
         actions: ["start"],
         binding: "REPORT",
-      },
-      {
-        subject: { type: "app", appId: source },
-        object: { type: "app", appId: hidden },
-        actions: ["read"],
-        binding: "HIDDEN_CRM",
       },
     ];
     for (const request of asked) {
@@ -260,7 +254,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
       ),
       // Nothing it answers or lists names another App, a connection or a
       // workflow.
-      names: [hidden, mail.id, mailbox, flow.id].filter(
+      names: [mail.id, mailbox, flow.id].filter(
         (id) =>
           JSON.stringify(created).includes(id) ||
           JSON.stringify(theirs).includes(id)
@@ -345,60 +339,6 @@ describe("blueprints", { timeout: 60_000 }, () => {
       copies: 0,
       filesLeft: 0,
     });
-  });
-
-  it("type a copy's workflows as the code it copies was, though it asks for none of the source's connections", async () => {
-    const [owner, maker] = await Promise.all([
-      personApi("builder"),
-      personApi("builder"),
-    ]);
-    const { id: source } = await owner.api.apps.create({
-      name: `Mail ${unique()}`,
-    });
-    const mail = await mailConnection();
-    await owner.api.permissions.request({
-      ...outlook(source, "MAIL"),
-      object: { type: "connection", connectionId: mail.id },
-    });
-    // Reads MAIL's answer as a connection's: typed only while MAIL is.
-    await release(
-      owner,
-      source,
-      workflowFiles(
-        "sender",
-        `  return await step.do("send", { description: "Send" }, async () => {
-    if (input === "never") {
-      return (await env.MAIL.call("mail.send", {})).output.length;
-    }
-    return 1;
-  });`,
-        { send: 1 }
-      )
-    );
-    // MAIL is then a collection: what the blueprint declares, and the copy
-    // asks for, as it is marked.
-    const admin = await signedInApi(idp, "admin");
-    const [mailRequest] = await owner.api.permissions.list({
-      type: "app",
-      appId: source,
-    });
-    await admin.api.permissions.revoke(mailRequest?.id ?? "");
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Mail ${unique()}`,
-      access: "everyone",
-    });
-    await owner.api.permissions.request(
-      readCollection({ type: "app", appId: source }, collectionId, "MAIL")
-    );
-    await share(owner, source, maker, "user");
-    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
-    const created = await maker.api.apps.blueprints.create(blueprint, named);
-    // Its first version is made current as the source's was, MAIL read as
-    // the connection its code was written for; MAIL grants the copy
-    // nothing until it holds a permission of its own.
-    await expect(
-      outcome(maker.api.apps.versions.setCurrent(created.app.id, 1))
-    ).resolves.toBe("ok");
   });
 
   it("create an App with the same code and none of the data, audited", async () => {
