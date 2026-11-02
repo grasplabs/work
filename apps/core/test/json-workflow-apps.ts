@@ -24,6 +24,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { signedInSession } from "../src/auth/identity.ts";
 import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
+import { runObject } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 
@@ -182,6 +183,29 @@ export const endedRun = async (
   runId: string
 ): Promise<WorkflowResourceRun> =>
   await runOnce(by, id, runId, ({ endedAt }) => endedAt !== null);
+
+/**
+ * Ends every JSON workflow run a test left live in the engine: a run held
+ * an hour would go on in the background of whatever test file runs next
+ * (see `endLiveRuns` in runs.ts, which ends App runs). A run the engine
+ * has no record of has nothing to end.
+ */
+export const endLiveResourceRuns = async (): Promise<void> => {
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM workflow_resource_runs WHERE status IN ('starting', 'running', 'paused')"
+  ).all<{ id: string }>();
+  await Promise.all(
+    results.map(async ({ id }) => {
+      const status = await runObject(id).status();
+      if (
+        status !== undefined &&
+        !["complete", "errored", "terminated"].includes(status.status)
+      ) {
+        await runObject(id).terminate({ rollback: false });
+      }
+    })
+  );
+};
 
 /** The App every bound workflow here is bound to: one screen, one alias. */
 const boundAppFiles = (alias: string): Record<string, string> => ({
