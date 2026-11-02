@@ -10,7 +10,6 @@ import {
   clientProvisions,
   clients,
   clientRuns,
-  hostingDestinations,
   releases,
 } from "../src/db/schema.ts";
 import { DiscardError, discardClient } from "../src/hosting/discard.ts";
@@ -33,6 +32,7 @@ import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { client, db, destination, release, staff } from "./hosting.ts";
+import { ownId } from "./own-destination.ts";
 import { callServerFn, page } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import type { Starts } from "./runs.ts";
@@ -109,20 +109,15 @@ const hostingOf = async (clientId: string) => {
 const place = async (
   clientId: string,
   releaseId: string,
-  destinationId: string | null,
   email: string | null = caller
 ) =>
-  await callServerFn(
-    placeAndProvisionFn,
-    { clientId, releaseId, destinationId },
-    { email }
-  );
+  await callServerFn(placeAndProvisionFn, { clientId, releaseId }, { email });
 
-/** Trying it again, as its Setup's button does: no release or destination named. */
+/** Trying it again, as its Setup's button does: no release named. */
 const retry = async (clientId: string) =>
   await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId: null, destinationId: null },
+    { clientId, releaseId: null },
     { email: caller }
   );
 
@@ -173,50 +168,20 @@ const latestStopped = async ({ started }: Starts): Promise<void> => {
 
 describe("placing a client and provisioning it, through the admin's entry", () => {
   useStoreSecrets({ deployer: token });
-  // The database outlives each test: earlier tests' destinations stop
-  // serving the policy, so each test chooses among its own alone.
-  beforeEach(async () => {
-    await db.update(hostingDestinations).set({ accountId: null });
+  beforeEach(() => {
     // Attempts log why they stopped.
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("picks the one shared destination it provisions in, and places the client there", async () => {
-    const shared = await destination();
-    const dedicated = await destination({
-      kind: "dedicated",
-      namespace: null,
-    });
-    const workerd = await destination({
-      kind: "workerd",
-      accountId: null,
-      namespace: null,
-    });
+  it("places the client in its stage's destination", async () => {
     const clientId = await client();
     const releaseId = await importedRelease();
 
     const view = await hostingOf(clientId);
-    const mine = new Set([shared, dedicated, workerd]);
-    const offered = view.destinations.filter(({ id }) => mine.has(id));
-    expect({
-      automatic: view.automatic,
-      kinds: offered.map(({ kind }) => kind),
-      problems: Object.fromEntries(
-        offered.map(({ id, problems }) => [id, problems])
-      ),
-    }).toStrictEqual({
-      automatic: { destinationId: shared, reason: null },
-      // Shared first, then dedicated, then workerd.
-      kinds: ["workers_for_platforms", "dedicated", "workerd"],
-      problems: {
-        [shared]: [],
-        [dedicated]: [],
-        [workerd]: [{ kind: "not_provisionable" }],
-      },
-    });
+    expect(view.destinationId).toBe(ownId);
 
     using attempts = followAttempts();
-    const result = await place(clientId, releaseId, null);
+    const result = await place(clientId, releaseId);
     await latestStopped(attempts);
 
     expect({
@@ -227,7 +192,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       startedBy: await actorsOf(clientId, "client.provision_placed"),
     }).toMatchObject({
       result: { refused: null },
-      placement: { destinationId: shared },
+      placement: { destinationId: ownId },
       operation: {
         releaseId,
         status: "failed",
@@ -240,27 +205,30 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     expect(result.runId).toBeTypeOf("string");
   });
 
-  it("never falls back to a dedicated destination when no shared one can take it", async () => {
-    await destination({ kind: "dedicated", namespace: null });
+  it("places nothing on an admin whose STAGE names no stage", async () => {
     const clientId = await client();
     const releaseId = await importedRelease();
-    // This admin's own shared destination isn't one it provisions in.
-    await db.update(hostingDestinations).set({ accountId: null });
-
-    const view = await hostingOf(clientId);
-    expect({
-      automatic: view.automatic,
-      refused: await place(clientId, releaseId, null),
-      placement: await placementOf(clientId),
-    }).toStrictEqual({
-      automatic: { destinationId: null, reason: "none" },
-      refused: { runId: null, refused: "no_automatic_destination" },
-      placement: undefined,
-    });
+    const stage = env.STAGE;
+    env.STAGE = "";
+    try {
+      const view = await hostingOf(clientId);
+      expect({
+        destinationId: view.destinationId,
+        notStarted: view.notStarted,
+        refused: await place(clientId, releaseId),
+        placement: await placementOf(clientId),
+      }).toStrictEqual({
+        destinationId: null,
+        notStarted: "no_destination",
+        refused: { runId: null, refused: "no_destination" },
+        placement: undefined,
+      });
+    } finally {
+      env.STAGE = stage;
+    }
   });
 
   it("leaves a client whose last run was another kind's unplaced, for that run's own path", async () => {
-    await destination();
     const clientId = await client();
     const releaseId = await importedRelease();
     // Another kind's run ended without saying so, long enough ago that
@@ -273,7 +241,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
 
     expect({
-      refused: await place(clientId, releaseId, null),
+      refused: await place(clientId, releaseId),
       placement: await placementOf(clientId),
       operation: await operationOf(clientId),
       run: await db
@@ -288,50 +256,11 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("picks, of several shared destinations, the one with the fewest clients, the oldest on a tie, and places there", async () => {
-    const older = await destination();
-    const newer = await destination();
-    // Recorded a day apart: the tie between them goes to the older.
-    await db
-      .update(hostingDestinations)
-      .set({ createdAt: new Date(Date.now() - 86_400_000) })
-      .where(eq(hostingDestinations.id, older));
-    const first = await client();
-    const second = await client();
-    const releaseId = await importedRelease();
-
-    const tied = await hostingOf(first);
-    using attempts = followAttempts();
-    const placedFirst = await place(first, releaseId, null);
-    await latestStopped(attempts);
-    // The older one now has a client: the next goes in the other.
-    const fewer = await hostingOf(second);
-    const placedSecond = await place(second, releaseId, null);
-    await latestStopped(attempts);
-
-    expect({
-      tied: tied.automatic,
-      placedFirst: placedFirst.refused,
-      firstIn: await placementOf(first),
-      fewer: fewer.automatic,
-      placedSecond: placedSecond.refused,
-      secondIn: await placementOf(second),
-    }).toStrictEqual({
-      tied: { destinationId: older, reason: null },
-      placedFirst: null,
-      firstIn: { destinationId: older },
-      fewer: { destinationId: newer, reason: null },
-      placedSecond: null,
-      secondIn: { destinationId: newer },
-    });
-  });
-
   it("tries a stopped provisioning again on the newest release, a fix released since included", async () => {
-    await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
-    await place(clientId, own, null);
+    await place(clientId, own);
     await latestStopped(attempts);
     const fixed = await importedRelease();
 
@@ -348,11 +277,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   });
 
   it("tries a stopped provisioning again on its own release when no newer release is imported", async () => {
-    await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
-    await place(clientId, own, null);
+    await place(clientId, own);
     await latestStopped(attempts);
 
     const retried = await retry(clientId);
@@ -366,38 +294,11 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: own, switched: [] });
   });
 
-  it("places the client in a dedicated destination staff choose", async () => {
-    await destination();
-    const dedicated = await destination({
-      kind: "dedicated",
-      namespace: null,
-    });
-    const clientId = await client();
-    const releaseId = await importedRelease();
-
-    using attempts = followAttempts();
-    await expect(place(clientId, releaseId, dedicated)).resolves.toMatchObject({
-      refused: null,
-    });
-    await latestStopped(attempts);
-
-    await expect(placementOf(clientId)).resolves.toStrictEqual({
-      destinationId: dedicated,
-    });
-    const { placement } = await hostingOf(clientId);
-    expect(placement).toMatchObject({
-      destinationId: dedicated,
-      placedBy: caller,
-    });
-  });
-
   it("resumes the client's one operation where it stopped, keeps it where it's placed, and refuses another release", async () => {
-    const shared = await destination();
-    const other = await destination({ kind: "dedicated", namespace: null });
     const clientId = await client();
     const releaseId = await importedRelease();
     using attempts = followAttempts();
-    await place(clientId, releaseId, null);
+    await place(clientId, releaseId);
     await latestStopped(attempts);
     const first = await operationOf(clientId);
 
@@ -416,7 +317,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       going: false,
     });
 
-    const resumed = await place(clientId, releaseId, null);
+    const resumed = await place(clientId, releaseId);
     await latestStopped(attempts);
     const again = await operationOf(clientId);
     const { started } = attempts;
@@ -429,27 +330,24 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       resumed: { refused: null },
       operation: first?.id,
       attempts: 2,
-      placement: { destinationId: shared },
+      placement: { destinationId: ownId },
     });
 
     // Stopped with nothing live: a newer release takes its operation
-    // over, and resuming offers the newest; an older one,
-    // or another destination, is refused.
+    // over, and resuming offers the newest; an older one is refused.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);
-    const switched = await place(clientId, newer, null);
+    const switched = await place(clientId, newer);
     await latestStopped(attempts);
     expect({
       offered: offered.suggestedReleaseId,
-      moved: await place(clientId, releaseId, other),
       switched,
       operation: await operationOf(clientId),
       switchedBy: await actorsOf(clientId, "provision.switch_release"),
-      older: await place(clientId, releaseId, null),
+      older: await place(clientId, releaseId),
       after: await operationOf(clientId),
     }).toMatchObject({
       offered: newer,
-      moved: { refused: "placement_changed" },
       switched: { refused: null },
       operation: {
         id: first?.id,
@@ -464,11 +362,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   });
 
   it("says an operation left running with no attempt at all is gone, for staff to resume", async () => {
-    await destination();
     const clientId = await client();
     const releaseId = await importedRelease();
     using attempts = followAttempts();
-    await place(clientId, releaseId, null);
+    await place(clientId, releaseId);
     await latestStopped(attempts);
     // Running, as an attempt that never recorded its end leaves it, and
     // no runner holds it any more.
@@ -605,11 +502,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   });
 
   it("refuses anyone Access doesn't vouch for, placing and reading nothing", async () => {
-    await destination();
     const clientId = await client();
     const releaseId = await importedRelease();
 
-    await expect(place(clientId, releaseId, null, null)).rejects.toThrow(
+    await expect(place(clientId, releaseId, null)).rejects.toThrow(
       "The server function answered 403"
     );
     await expect(
@@ -618,7 +514,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     await expect(
       callServerFn(
         placeAndProvisionFn,
-        { clientId, releaseId, destinationId: null },
+        { clientId, releaseId },
         { email: caller, from: "https://elsewhere.test" }
       )
     ).rejects.toThrow("The server function answered 403");
