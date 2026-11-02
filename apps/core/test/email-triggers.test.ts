@@ -53,7 +53,7 @@ describe("email triggers", () => {
     expect(read).toMatchObject({
       from: "ben@acme.test",
       subject: "Invoice INV-7",
-      text: "Please pay by Friday.\n",
+      text: "Please pay by Friday.",
       truncated: false,
       attachments: ["inv-7.pdf:5"],
     });
