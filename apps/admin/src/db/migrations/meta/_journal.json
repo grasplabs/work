@@ -337,6 +337,13 @@
       "when": 1793636478846,
       "tag": "0047_reconciler_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1793647647628,
+      "tag": "0048_drop_destination_kind",
+      "breakpoints": true
     }
   ]
 }
