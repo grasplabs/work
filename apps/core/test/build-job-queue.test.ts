@@ -12,7 +12,6 @@ import { codeResults, codeStep, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   desk,
-  intake,
   submitProposal,
   holdFiles,
   storedTrees,
@@ -214,7 +213,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
         },
         appIdSchema.parse(crypto.randomUUID()),
         { base: null, revision: 1 },
-        { "screens/desk.tsx": desk, ...intake },
+        { "screens/desk.tsx": desk },
         lost.signal
       );
       stopped = "built";
