@@ -2,7 +2,9 @@
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { isolateCall } from "../../src/workflows/code.ts";
+import { isolateCall, runOwnerOf } from "../../src/workflows/code.ts";
+import { release } from "../apps.ts";
+import { allEvents } from "../audit-events.ts";
 import { mockIdp } from "../idp.ts";
 import {
   definitionOf,
@@ -15,8 +17,15 @@ import {
   startedBy,
 } from "../json-workflow-apps.ts";
 import { fakeProviderFor } from "../model-provider.ts";
-import { liveStatus, sleeping, woken } from "../runs.ts";
-import { unique } from "../sign-in.ts";
+import {
+  endLiveRuns,
+  liveStatus,
+  sleeping,
+  whileEngineRefuses,
+  woken,
+} from "../runs.ts";
+import { signedInApi, unique } from "../sign-in.ts";
+import { workflowFiles } from "../workflow-apps.ts";
 
 // An independent JSON workflow's runs on-prem, in their sessions: one per
 // load, owned by the workflow, let go of while a run waits, and waited for
@@ -25,11 +34,12 @@ import { unique } from "../sign-in.ts";
 // Already covered: a load across a wait, and a listen's event after it
 // (json-workflow-runs.test.ts). Gone with App workflows: the budget of
 // time a run's own code spends between steps, which a JSON run has none
-// of. Not covered, a platform gap: a run cancelled while the engine
-// refuses the stop still takes a place and runs once one frees up, as an
-// App run's marked object kept it from doing.
+// of. Kept as an App run until JSON cancels have it, a platform gap: a
+// run cancelled while the engine refuses the stop never takes a place (a
+// JSON run still takes one and runs once one frees up).
 
-const { signedIn } = jsonWorkflowAppsOf(mockIdp());
+const idp = mockIdp();
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
 const extractionModel = "mistral/mistral-large-latest";
 
@@ -159,5 +169,58 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
       whileFull: "running",
       after: { status: "completed", output: { status: "Hello, Ada" } },
     });
+  });
+});
+
+/** A workflow of one step, as `workflowFiles` writes it. */
+const oneStep = workflowFiles(
+  "single",
+  `  return await step.do("only", { description: "The only step" }, async () => "done");`,
+  { only: "done" }
+);
+
+/** The steps of `run` the audit log has, each as its action and step. */
+const stepsOf = async (run: string): Promise<string[]> => {
+  const events = await allEvents();
+  return events.flatMap(({ action, target, detail }) =>
+    action.startsWith("workflow.step.") && target?.id === run
+      ? [`${action} ${String(detail.step)}`]
+      : []
+  );
+};
+
+// Kept until JSON cancels stop a run waiting for a place: an App
+// workflow's run, as before.
+describe("an App workflow's runs on-prem", runTime, () => {
+  afterEach(endLiveRuns);
+
+  it("stops a run's wait for a place once the run is cancelled, its activation not yet ended: it never takes one", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Runs" });
+    await release(builder, app, oneStep);
+    // The App's runs' one place, held.
+    const letGo = holdPlace(runOwnerOf(app));
+    const run = await builder.api.workflows.start(app, "single");
+    // Well into its wait: it has asked for a place, and been refused, more
+    // than once.
+    await scheduler.wait(12_000);
+    // Marked cancelled in its object, but the engine not told yet: its
+    // activation goes on, as it does until a cancel is finished.
+    const cancelled = await whileEngineRefuses(
+      (method) => method === "terminate",
+      async () =>
+        await builder.api.workflows.cancel(run.id).then(
+          () => "cancelled",
+          () => "cancelled, the engine not yet told"
+        )
+    );
+    await letGo();
+    // Longer than the longest wait between a load's asks (30 s): a load
+    // still waiting would have taken the place by now, and run.
+    await scheduler.wait(35_000);
+    expect({
+      cancelled: cancelled.startsWith("cancelled"),
+      steps: await stepsOf(run.id),
+    }).toStrictEqual({ cancelled: true, steps: [] });
   });
 });
