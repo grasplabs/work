@@ -1,7 +1,8 @@
 /**
  * What the admin's Platform page reads beside the client grid
- * (`fetchClientGrid`, `fetchGridLive`): what staff did (`staffEvents`), as
- * the admin recorded it.
+ * (`fetchClientGrid`, `fetchGridLive`): each channel's progress and its
+ * promotion history (src/rollout/progress.ts), and what staff did
+ * (`staffEvents`). All of it is what the admin recorded.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
@@ -11,6 +12,9 @@ import { clientGrid } from "../clients/grid.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { auditEvents } from "../db/schema.ts";
+import type { PromotionEvent } from "../rollout/channels.ts";
+import { channelsProgress } from "../rollout/progress.ts";
+import type { ChannelProgress } from "../rollout/progress.ts";
 import { platformCounts } from "./platform.ts";
 import type { PlatformCounts } from "./platform.ts";
 
@@ -79,17 +83,26 @@ export const staffEvents = async (db: AdminDatabase): Promise<StaffEvent[]> => {
   );
 };
 
-/** What the Platform page reads of staff's actions. */
+/** What the Platform page reads of the channels and staff's actions. */
 export interface PlatformData {
+  /** Edge, Beta, Stable. */
+  channels: ChannelProgress[];
+  /** Every change of a channel's release, newest first. */
+  history: PromotionEvent[];
   /** What staff did, the latest first (`staffEvents`). */
   events: StaffEvent[];
 }
 
-export const platformData = async (envOf: Env): Promise<PlatformData> => ({
-  events: await staffEvents(adminDatabase(envOf.DB)),
-});
+export const platformData = async (envOf: Env): Promise<PlatformData> => {
+  const db = adminDatabase(envOf.DB);
+  const [{ channels, history }, events] = await Promise.all([
+    channelsProgress(db),
+    staffEvents(db),
+  ]);
+  return { channels, history, events };
+};
 
-/** The Platform page's staff's actions. */
+/** The Platform page's channels, history and staff's actions. */
 export const fetchPlatform = createServerFn({ method: "GET" }).handler(
   async () => await platformData(env)
 );

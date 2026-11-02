@@ -8,8 +8,19 @@ import { cn } from "@grasp-os/ui/lib/utils";
  */
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
+import type { ClientProgress } from "../rollout/progress.ts";
 import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, Standing } from "./platform.ts";
+
+/** Where a company stands against its channel. */
+export const clientStateWords: Record<ClientProgress["state"], string> = {
+  up_to_date: "Up to date",
+  deploying: "Deploying",
+  waiting: "Waiting",
+  failed: "Failed",
+  pinned: "Pinned",
+  no_release: "No release yet",
+};
 
 export const standingWords: Record<Standing, string> = {
   attention: "Needs a look",
