@@ -510,7 +510,7 @@ describe("an organization from core's admin snapshot", () => {
     ]);
   });
 
-  it("reads a contract and work core doesn't hold as unknown, not as a draft or as none", () => {
+  it("reads a contract core doesn't hold as unknown, not as a draft or as none, and its work as core sends it", () => {
     const { view } = shown();
     const { org, state } = adminOrgOf(snapshot, client);
     const real = {
@@ -524,9 +524,10 @@ describe("an organization from core's admin snapshot", () => {
       contractNeed: view.needs.some((need) => need.kind === "contract"),
       counted: portfolioOf([view]).counted,
     }).toStrictEqual({
-      unknown: { contract: true, works: true },
+      unknown: { contract: true, works: false },
       contractNeed: false,
-      counted: { fees: 0, value: 0 },
+      // Its hours are counted from the work core sends; its fees not yet.
+      counted: { fees: 0, value: 1 },
     });
     // Once core holds them, the draft contract waits for Grasp as before.
     expect({
@@ -666,7 +667,6 @@ describe("an organization from core's admin snapshot", () => {
         ...interview,
         summary: "The orders come in by phone and get lost",
       })),
-      works: [{ name: "Taking orders", steps: ["Write it down"] }],
       contract: { plan: "Grasp", fee: 4000 },
       gate: { ...answer.gate, parts: [{ source: "kickoff", known: 0.6 }] },
       usage: answer.usage.map((day) => ({
@@ -687,11 +687,10 @@ describe("an organization from core's admin snapshot", () => {
 
   it("shows staff a drawn piece of work with each person's numbers apart, its open questions, under the organization's rules", () => {
     const rules = { ...STARTING_ORG_RULES, people: 2 };
-    const { org, state } = adminOrgOf(bothTalked, client, {
-      works: [orders],
-      rules,
-      counted: ["orders"],
-    });
+    const { org, state } = adminOrgOf(
+      { ...bothTalked, works: { works: [orders], rules, counted: ["orders"] } },
+      client
+    );
     const view = adminViewOf(org, state, "2026-10-14");
     const record = recordOf(view, "orders");
     const missing = record

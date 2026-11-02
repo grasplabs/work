@@ -14,24 +14,42 @@ import type {
  * it is known, how many of the people who do it talked, how many of its
  * steps enough of them described, and how much is still missing, all as
  * the model counts them (`workflowListOf`). The rules that say when one
- * counts as known are behind their own button.
+ * counts as known are behind their own button, and staff change them
+ * there; each row counts its work as known by hand, or draws it again
+ * from what its people agreed to. Each change is a command to the
+ * company's Grasp (commands.tsx).
  *
  * Not here yet, as the prototype has it: a row opening the work's own
- * record (its steps on the canvas, who described which, and Grasp's
- * actions on it), and changing the rules, which core doesn't hold.
+ * record (its steps on the canvas, and who described which).
  */
+import {
+  SETTLERS,
+  STARTING_ORG_RULES,
+} from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   OrgRules,
   Settler,
 } from "@grasp-os/shared/admin/onboarding-admin";
+import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
 import { Progress } from "@grasp-os/ui/components/progress";
 import {
   Select,
@@ -56,8 +74,9 @@ import {
 } from "@grasp-os/ui/components/toggle-group";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
+import { CommandButton, CommandFailure, useCommand } from "./commands.tsx";
 import { EmptySection } from "./section.tsx";
 
 const all = "all";
@@ -171,40 +190,72 @@ const Meter = ({
   );
 };
 
-/** One rule: what it is and why, and what it is set to. */
-const Rule = ({
+/** One rule as a number field: what it is and why, with its bounds. */
+const RuleField = ({
   label,
   description,
   value,
+  min,
+  max,
+  onChange,
 }: {
   label: string;
   description: string;
-  value: string;
-}) => (
-  <div className="flex flex-col gap-1 border-t py-3 first:border-t-0 first:pt-0">
-    <dt className="flex flex-col gap-0.5">
-      <span>{label}</span>
-      <span className="text-muted-foreground">{description}</span>
-    </dt>
-    <dd className="font-medium">{value}</dd>
-  </div>
-);
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) => {
+  const id = useId();
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Input
+        className="w-28"
+        id={id}
+        max={max}
+        min={min}
+        onChange={(event) => {
+          onChange(event.target.valueAsNumber);
+        }}
+        type="number"
+        value={Number.isNaN(value) ? "" : value}
+      />
+      <FieldDescription>{description}</FieldDescription>
+    </Field>
+  );
+};
 
 /**
  * The rules that say when a workflow counts as known at this
- * organization, as they stand. Every organization starts with the same
- * values; changing them isn't in the admin yet.
+ * organization, as they stand, for staff to change. Every organization
+ * starts with the same values, and can go back to them.
  */
 const Rules = ({
+  clientId,
   rules,
   open,
   onOpenChange,
 }: {
+  clientId: string;
   rules: OrgRules;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const fewer = rules.people - 1;
+  const settlesId = useId();
+  const { busy, failure, give } = useCommand(clientId);
+  const [draft, setDraft] = useState<OrgRules>(rules);
+  const set = (change: Partial<OrgRules>) => {
+    setDraft({ ...draft, ...change });
+  };
+  const parsed = orgRulesSchema.safeParse(draft);
+  const starting = JSON.stringify(rules) === JSON.stringify(STARTING_ORG_RULES);
+  const save = async (next: OrgRules | null): Promise<void> => {
+    if (await give({ type: "onboarding.rules", payload: { rules: next } })) {
+      onOpenChange(false);
+    }
+  };
+  const fewer = draft.people - 1;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-2xl">
@@ -212,43 +263,174 @@ const Rules = ({
           <DialogTitle>When a workflow is known</DialogTitle>
           <DialogDescription>
             For this organization only. Every organization starts with the same
-            values; changing them isn’t in the admin yet.
+            values.
           </DialogDescription>
         </DialogHeader>
-        <dl className="flex flex-col text-sm">
-          <Rule
-            description="People who do the work themselves. The lead’s own account is a guess, never one of them."
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (parsed.success) {
+              void save(parsed.data);
+            }
+          }}
+        >
+          <RuleField
+            description={`People who do the work themselves, or ${fewer} and a document, a log or an example. The lead’s own account is a guess, never one of them.`}
             label="People per step"
-            value={`${rules.people}, or ${fewer} and a document, a log or an example`}
+            max={10}
+            min={1}
+            onChange={(people) => {
+              set({ people });
+            }}
+            value={draft.people}
           />
-          <Rule
-            description="Fewer than this, and the workflow is still being mapped."
+          <RuleField
+            description="Approved interviews before it is checked. Fewer, and the workflow is still being mapped."
             label="Before it is checked"
-            value={`${rules.minInterviews} approved ${plural(rules.minInterviews, "interview", "interviews")}`}
+            max={30}
+            min={1}
+            onChange={(minInterviews) => {
+              set({ minInterviews });
+            }}
+            value={draft.minInterviews}
           />
-          <Rule
-            description="Then more interviews would only repeat what is known."
+          <RuleField
+            description="How many of the last interviews are looked at for new facts."
+            label="Interviews looked at"
+            max={10}
+            min={1}
+            onChange={(run) => {
+              set({ run });
+            }}
+            value={draft.run}
+          />
+          <RuleField
+            description={`It stops once those added less than this share of new facts, in percent: then more interviews would only repeat what is known. Now ${percent.format(draft.stopShare)}.`}
             label="When it stops"
-            value={`The last ${rules.run} added less than ${percent.format(rules.stopShare)} new facts`}
+            max={100}
+            min={0}
+            onChange={(share) => {
+              set({ stopShare: share / 100 });
+            }}
+            value={Math.round(draft.stopShare * 1000) / 10}
           />
-          <Rule
-            description="Probably two workflows in one, or teams that work differently."
+          <RuleField
+            description="After this many interviews, Stephen asks the lead to split it: probably two workflows in one, or teams that work differently."
             label="When it does not settle"
-            value={`After ${rules.maxInterviews} interviews, Stephen asks the lead to split it`}
+            max={50}
+            min={1}
+            onChange={(maxInterviews) => {
+              set({ maxInterviews });
+            }}
+            value={draft.maxInterviews}
           />
-          <Rule
-            description="Most differences are findings: it depends on the case, the office or the date. Only one nobody can explain needs someone to settle it."
-            label="When people say different things"
-            value={`${settlerWords[rules.settles]} settles one nobody can explain`}
-          />
-        </dl>
+          <Field>
+            <FieldLabel htmlFor={settlesId}>
+              When people say different things
+            </FieldLabel>
+            <NativeSelect
+              className="w-72"
+              id={settlesId}
+              onChange={(event) => {
+                const settles = SETTLERS.find(
+                  (each) => each === event.target.value
+                );
+                if (settles !== undefined) {
+                  set({ settles });
+                }
+              }}
+              value={draft.settles}
+            >
+              {SETTLERS.map((each) => (
+                <NativeSelectOption key={each} value={each}>
+                  {settlerWords[each]}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <FieldDescription>
+              Most differences are findings: it depends on the case, the office
+              or the date. Only one nobody can explain needs someone to settle
+              it.
+            </FieldDescription>
+          </Field>
+          {parsed.success ? null : (
+            <p className="text-status-attention">
+              One of these is out of its bounds.
+            </p>
+          )}
+          <CommandFailure failure={failure} />
+          <DialogFooter>
+            {starting ? null : (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void save(null);
+                }}
+                type="button"
+                variant="ghost"
+              >
+                Back to where every organization starts
+              </Button>
+            )}
+            <Button disabled={busy || !parsed.success} type="submit">
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
 };
 
+/** What Grasp can do for one workflow: count it as known by hand, or stop; draw it again. */
+const WorkActions = ({
+  clientId,
+  row,
+}: {
+  clientId: string;
+  row: WorkflowRow;
+}) => {
+  const { id, byHand, work } = row.work;
+  return (
+    <span className="flex flex-wrap items-start justify-end gap-2">
+      <CommandButton
+        clientId={clientId}
+        command={{
+          type: "onboarding.count_as_known",
+          payload: { work: id, counted: !byHand },
+        }}
+        label={
+          byHand
+            ? `Stop counting ${work.name} as known`
+            : `Count ${work.name} as known`
+        }
+        variant="ghost"
+      >
+        {byHand ? "Stop counting" : "Count as known"}
+      </CommandButton>
+      <CommandButton
+        clientId={clientId}
+        command={{ type: "onboarding.draw_again", payload: { work: id } }}
+        label={`Draw ${work.name} again`}
+        variant="ghost"
+      >
+        Draw again
+      </CommandButton>
+    </span>
+  );
+};
+
 /** One piece of work in the table. */
-const WorkRow = ({ row, team }: { row: WorkflowRow; team: string }) => {
+const WorkRow = ({
+  row,
+  team,
+  clientId,
+}: {
+  row: WorkflowRow;
+  team: string;
+  clientId: string;
+}) => {
   const { work, standing } = row;
   const stage = work.byHand
     ? "Counted as known by Grasp"
@@ -300,6 +482,9 @@ const WorkRow = ({ row, team }: { row: WorkflowRow; team: string }) => {
       <TableCell className="hidden @xl:table-cell" variant="roomy">
         <StageLine label={stage} standing={standing} />
       </TableCell>
+      <TableCell className="whitespace-normal" variant="roomy">
+        <WorkActions clientId={clientId} row={row} />
+      </TableCell>
     </TableRow>
   );
 };
@@ -309,7 +494,13 @@ const WorkRow = ({ row, team }: { row: WorkflowRow; team: string }) => {
  * its interviews at all (`view.unknown.works`), there is no work to list,
  * and the section says it isn't known yet rather than that none was found.
  */
-export const OrgWorkflows = ({ view }: { view: AdminView }) => {
+export const OrgWorkflows = ({
+  view,
+  clientId,
+}: {
+  view: AdminView;
+  clientId: string;
+}) => {
   const [team, setTeam] = useState<string>(all);
   const [standing, setStanding] = useState<Standing | typeof all>(all);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -457,11 +648,15 @@ export const OrgWorkflows = ({ view }: { view: AdminView }) => {
                   >
                     Stage
                   </TableHead>
+                  <TableHead className="w-60" variant="card">
+                    <span className="sr-only">What Grasp can do</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.map((row) => (
                   <WorkRow
+                    clientId={clientId}
                     key={row.work.id}
                     row={row}
                     team={teamNames.get(row.work.team) ?? ""}
@@ -473,11 +668,14 @@ export const OrgWorkflows = ({ view }: { view: AdminView }) => {
         )}
       </div>
 
-      <Rules
-        onOpenChange={setRulesOpen}
-        open={rulesOpen}
-        rules={view.state.rules}
-      />
+      {rulesOpen ? (
+        <Rules
+          clientId={clientId}
+          onOpenChange={setRulesOpen}
+          open={rulesOpen}
+          rules={view.state.rules}
+        />
+      ) : null}
     </div>
   );
 };

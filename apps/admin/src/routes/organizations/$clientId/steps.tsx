@@ -16,6 +16,7 @@ const Steps = () => {
   return (
     <OrgSteps
       clientId={admin.client.id}
+      gate={admin.snapshot.gate}
       paused={admin.snapshot.paused}
       stage={stage ?? view.stage}
       view={view}
