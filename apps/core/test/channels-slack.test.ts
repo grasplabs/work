@@ -12,14 +12,12 @@ import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { configureObject, says } from "./agent-chat.ts";
+import { says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -479,10 +477,9 @@ describe("a press on a card in Slack", () => {
 describe("a linked person's question in Slack", () => {
   it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
     const answer = "Parental leave lasts sixteen weeks.";
-    const { userId, slackUser, api } = await linkedPerson();
+    const { slackUser, api } = await linkedPerson();
     // One provider for the organization: it answers both chats.
     const provider = await fakeProvider(says(answer), says(answer));
-    await configureObject(workspace(env, personalWorkspaceId(userId)));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;

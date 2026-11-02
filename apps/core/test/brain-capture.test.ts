@@ -14,7 +14,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
-import { model, configureObject, says } from "./agent-chat.ts";
+import { model, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -518,7 +518,6 @@ const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const stub = workspace(env, personalWorkspaceId(person.userId));
   await fakeProvider(...replies);
-  await configureObject(stub);
   const chat = await person.api.chats.create("Questions");
   const id = chatIdSchema.parse(chat.id);
   const ask = async () => await stub.ask(id, { text: "Hello?", model });
@@ -633,7 +632,6 @@ describe("a chat turn's outcome", () => {
     const admin = await signedInApi(idp, "admin");
     const stub = workspace(env, personalWorkspaceId(ann.userId));
     await fakeProvider(says("Floor 3."), says("Floor 4."));
-    await configureObject(stub);
     const agentId = crypto.randomUUID();
     /** Ann asks in the group, as its door does, with who is in it now. */
     const askInGroup = async (members: string[]) =>

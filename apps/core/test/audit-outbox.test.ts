@@ -1,4 +1,4 @@
-import { auditOutboxTakeMax } from "@grasp-os/shared/audit";
+import { auditEventSchema, auditOutboxTakeMax } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -245,6 +245,32 @@ describe("draining core's outbox", () => {
 
     await expect(storedWith([event.id])).resolves.toStrictEqual([event]);
     await expect(waitingIn(env.DB, [event.id])).resolves.toStrictEqual([]);
+  });
+
+  it("removes a kept event that names the Grasp staff member whose work it was, without a gap, as the log has it", async () => {
+    // As an earlier release kept a staff-started run's event: in the log,
+    // its outbox row not yet removed.
+    const event = auditEventSchema.parse({
+      ...newEvent("workflow.run.started"),
+      actor: {
+        type: "workflow",
+        appId: crypto.randomUUID(),
+        workflowId: "report",
+        runId: crypto.randomUUID(),
+        staff: "staff-1",
+      },
+    });
+    await auditLog(env).append([event]);
+    await store(event);
+
+    await runMinuteTasks();
+
+    expect({
+      logged: await storedWith([event.id]),
+      left: await waitingIn(env.DB, [event.id]),
+      rejected: await rejectedWith([event.id]),
+      gaps: await gapsNaming([event.id]),
+    }).toStrictEqual({ logged: [event], left: [], rejected: [], gaps: [] });
   });
 
   it("moves stored events the log can't take out of the outbox, however many, and appends the ones after them in the same run", async () => {

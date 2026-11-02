@@ -2,10 +2,7 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
-import type {
-  AdminAskAnswer,
-  AdminAskRequest,
-} from "@grasp-os/shared/admin-ask";
+import type { AdminCommandEnvelope } from "@grasp-os/shared/admin-command";
 import type {
   AdminKickoffRequest,
   AdminKickoffView,
@@ -187,15 +184,6 @@ export interface AccountState {
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
   /**
-   * What its core answers Ask Grasp's signed question with
-   * (@grasp-os/shared/admin-ask), as Grasp's own core: an answer, or
-   * `no_model` for a core with no model it may send the document to (503).
-   * Unset, it answers "An answer.".
-   */
-  ask?: AdminAskAnswer | "no_model";
-  /** The questions its core took, as each signed request sent them. */
-  asked: AdminAskRequest[];
-  /**
    * What its core answers the admin's signed kickoff request with
    * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
    * or `shut_out` for a company that keeps Grasp's staff out (403). Unset,
@@ -204,6 +192,14 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
+  /**
+   * What its core answers a signed command with, when it doesn't apply it
+   * (@grasp-os/shared/admin-command): core's status and code. Unset, it
+   * applies every command.
+   */
+  commandRefusal?: { status: number; code: string };
+  /** The commands its core took, as each signed envelope sent them. */
+  commands: AdminCommandEnvelope[];
 }
 
 /** A call the fake got. */

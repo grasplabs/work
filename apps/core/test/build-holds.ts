@@ -62,3 +62,39 @@ export const holdingBuilds = (
         : value;
     },
   });
+
+/**
+ * Core's database with the first statement on `table` that binds `bind`
+ * waiting for `held`: one ask held on its way, say a person's check, while
+ * the rest go on.
+ */
+export const holdingFirst = (
+  db: D1Database,
+  held: Promise<unknown>,
+  table: string,
+  bind: string
+): D1Database => {
+  let taken = false;
+  return new Proxy(db, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): D1PreparedStatement => {
+          const statement = target.prepare(query);
+          return query.includes(table)
+            ? heldStatement(statement, held, (binds) => {
+                if (taken || !binds.includes(bind)) {
+                  return false;
+                }
+                taken = true;
+                return true;
+              })
+            : statement;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+};

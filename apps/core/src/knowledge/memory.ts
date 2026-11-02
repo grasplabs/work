@@ -41,8 +41,8 @@ import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, versionFiles } from "../apps.ts";
-import { teamsOf } from "../auth/identity.ts";
-import { personRole, requireActivePerson } from "../permissions.ts";
+import { memberRole, teamsOf } from "../auth/identity.ts";
+import { requireActivePerson } from "../permissions.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 import {
@@ -224,7 +224,7 @@ const findFiles = async (
   wanted: Wanted[]
 ): Promise<Found[]> => {
   const userId = authority.onBehalfOf;
-  const role = await personRole(env, userId, authority.staff);
+  const role = await memberRole(env.DB, userId);
   if (!role) {
     throw permissionErrors.create("permission.person_inactive");
   }

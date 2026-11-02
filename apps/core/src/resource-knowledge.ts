@@ -51,8 +51,7 @@ import type {
 // permission: only while it is active and allows reading, only what the
 // person the call acts for may read too. A read from a sensitive
 // collection puts the App in restricted mode before anything is returned
-// (connect then holds its side effects for the person, and the model
-// gateway applies the data rules), and every read's provenance is noted
+// (connect then holds its side effects for the person), and every read's provenance is noted
 // in the invocation's sources, which go back to the caller with the
 // answer and feed its later model requests. A remote search is a snapshot,
 // answered once, never a live query.

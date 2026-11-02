@@ -88,14 +88,11 @@ import type { Took } from "./store.ts";
 //   admin has minutes a day (`heardBudgets`), which a socket holds as it
 //   opens (the store's `transcriptionOpened`), so sockets opened side by
 //   side share one budget; the router limits sockets opened per address.
-//   And the deployment's own budgets bound it all together (GRA-1064): the
-//   model gateway admits each socket as it opens, for the seconds it
+//   The model gateway admits each socket as it opens, for the seconds it
 //   holds, before the upstream is opened (models.ts, `listen`), judged by
-//   the rules as any model call, and refused as one
-//   when a budget has no room (`transcription.over_budget`); once it
-//   closed, it is charged the seconds it heard, and audited as a model
-//   call, never with anything heard. The relay's own limits stay a
-//   second bound, below the budgets.
+//   the rules as any model call; once it closed, it is charged the
+//   seconds it heard, and audited as a model call, never with anything
+//   heard.
 // - Tell the company who talked, and when: a session on a link is noted
 //   in the onboarding's own log, which only staff read; an admin's is in
 //   the audit log, opened and closed, with its ID and seconds. The
@@ -130,20 +127,15 @@ const purpose = "onboarding.transcription";
 const gatewayRefusals: Partial<
   Record<string, Parameters<typeof transcriptionErrors.create>[0]>
 > = {
-  "model.over_budget": "transcription.over_budget",
-  "model.budget_busy": "transcription.busy",
   "model.queued": "transcription.busy",
   "model.unconfigured": "transcription.unavailable",
   "model.not_allowed": "transcription.unavailable",
-  "model.eu_only": "transcription.unavailable",
-  "model.sensitive_data": "transcription.unavailable",
   "model.unpriced": "transcription.unavailable",
 };
 
-/** Refusals that leave the session as `limited`: a budget, the link's or the deployment's. */
+/** Refusals that leave the session as `limited`: the link's minutes, or a busy gateway. */
 const limitedCodes: ReadonlySet<string> = new Set([
   "transcription.limited",
-  "transcription.over_budget",
   "transcription.busy",
 ]);
 

@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e0d3b79f-d1b4-4237-aa85-40054df548c5",
-  "prevId": "0f6bba3f-40d2-4fb0-9fda-55dfe3e91b8d",
+  "id": "036914b9-eb2f-47fa-a6f0-674bc77f082e",
+  "prevId": "529d6e4a-d9c4-45d7-b88f-3e3511e3977c",
   "tables": {
     "audit_outbox": {
       "name": "audit_outbox",
@@ -479,6 +479,123 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "brain_entity_matches": {
+      "name": "brain_entity_matches",
+      "columns": {
+        "entity_a": {
+          "name": "entity_a",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_b": {
+          "name": "entity_b",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_document_id": {
+          "name": "evidence_document_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "evidence_version": {
+          "name": "evidence_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "brain_entity_matches_b_idx": {
+          "name": "brain_entity_matches_b_idx",
+          "columns": [
+            "entity_b"
+          ],
+          "isUnique": false
+        },
+        "brain_entity_matches_evidence_idx": {
+          "name": "brain_entity_matches_evidence_idx",
+          "columns": [
+            "evidence_document_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "brain_entity_matches_entity_a_brain_entities_id_fk": {
+          "name": "brain_entity_matches_entity_a_brain_entities_id_fk",
+          "tableFrom": "brain_entity_matches",
+          "tableTo": "brain_entities",
+          "columnsFrom": [
+            "entity_a"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "brain_entity_matches_entity_b_brain_entities_id_fk": {
+          "name": "brain_entity_matches_entity_b_brain_entities_id_fk",
+          "tableFrom": "brain_entity_matches",
+          "tableTo": "brain_entities",
+          "columnsFrom": [
+            "entity_b"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "brain_entity_matches_entity_a_entity_b_pk": {
+          "columns": [
+            "entity_a",
+            "entity_b"
+          ],
+          "name": "brain_entity_matches_entity_a_entity_b_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "brain_episode_members": {
       "name": "brain_episode_members",
       "columns": {
@@ -689,6 +806,67 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "brain_erased_documents": {
+      "name": "brain_erased_documents",
+      "columns": {
+        "purge_id": {
+          "name": "purge_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "place": {
+          "name": "place",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "erased_at": {
+          "name": "erased_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "done_at": {
+          "name": "done_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "brain_erased_documents_place_idx": {
+          "name": "brain_erased_documents_place_idx",
+          "columns": [
+            "place"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brain_erased_documents_purge_id_document_id_pk": {
+          "columns": [
+            "purge_id",
+            "document_id"
+          ],
+          "name": "brain_erased_documents_purge_id_document_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "brain_erased_evidence": {
       "name": "brain_erased_evidence",
       "columns": {
@@ -708,227 +886,6 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_export_files": {
-      "name": "brain_export_files",
-      "columns": {
-        "export_id": {
-          "name": "export_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rows": {
-          "name": "rows",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cursor": {
-          "name": "cursor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "object": {
-          "name": "object",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "stored": {
-          "name": "stored",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "brain_export_files_export_id_brain_exports_id_fk": {
-          "name": "brain_export_files_export_id_brain_exports_id_fk",
-          "tableFrom": "brain_export_files",
-          "tableTo": "brain_exports",
-          "columnsFrom": [
-            "export_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "brain_export_files_export_id_name_pk": {
-          "columns": [
-            "export_id",
-            "name"
-          ],
-          "name": "brain_export_files_export_id_name_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_exports": {
-      "name": "brain_exports",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "by": {
-          "name": "by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'running'"
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "manifest_sha256": {
-          "name": "manifest_sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "manifest_object": {
-          "name": "manifest_object",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "collection_ids": {
-          "name": "collection_ids",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "purge_mark": {
-          "name": "purge_mark",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "claim": {
-          "name": "claim",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "brain_exports_state_idx": {
-          "name": "brain_exports_state_idx",
-          "columns": [
-            "state"
-          ],
-          "isUnique": false
-        },
-        "brain_exports_running_idx": {
-          "name": "brain_exports_running_idx",
-          "columns": [
-            "state"
-          ],
-          "isUnique": true,
-          "where": "\"brain_exports\".\"state\" = 'running'"
-        }
-      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -1825,191 +1782,6 @@
           "name": "brain_payloads_state_idx",
           "columns": [
             "state",
-            "created_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_purge_steps": {
-      "name": "brain_purge_steps",
-      "columns": {
-        "purge_id": {
-          "name": "purge_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "step": {
-          "name": "step",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'queued'"
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "counts": {
-          "name": "counts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "brain_purge_steps_purge_id_brain_purges_id_fk": {
-          "name": "brain_purge_steps_purge_id_brain_purges_id_fk",
-          "tableFrom": "brain_purge_steps",
-          "tableTo": "brain_purges",
-          "columnsFrom": [
-            "purge_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "brain_purge_steps_purge_id_step_pk": {
-          "columns": [
-            "purge_id",
-            "step"
-          ],
-          "name": "brain_purge_steps_purge_id_step_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_purges": {
-      "name": "brain_purges",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "by": {
-          "name": "by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "counts": {
-          "name": "counts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "superseded_by": {
-          "name": "superseded_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "attempt": {
-          "name": "attempt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "attempt_at": {
-          "name": "attempt_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "brain_purges_open_key_idx": {
-          "name": "brain_purges_open_key_idx",
-          "columns": [
-            "key"
-          ],
-          "isUnique": true,
-          "where": "\"brain_purges\".\"completed_at\" IS NULL AND \"brain_purges\".\"superseded_by\" IS NULL"
-        },
-        "brain_purges_created_idx": {
-          "name": "brain_purges_created_idx",
-          "columns": [
             "created_at"
           ],
           "isUnique": false

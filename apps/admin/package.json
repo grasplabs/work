@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/newsreader": "catalog:",
     "@grasp-os/connector-kit": "workspace:*",

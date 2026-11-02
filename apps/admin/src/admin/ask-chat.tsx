@@ -3,7 +3,7 @@
  * (`components/admin/admin-ask.tsx`) in the platform's chat design: when
  * empty, its heading over the box and the questions to start from as a
  * list of rows; then the conversation, the box under it. No files and no
- * model choice: Grasp's own core picks the model. Each question goes with
+ * model choice: Ask Grasp's model is fixed (src/admin/ask.ts). Each question goes with
  * the admin's document as the page shows it now (src/admin/ask-document.ts)
  * and the conversation so far; an answer can be stopped while it comes,
  * copied, and asked again.
@@ -42,32 +42,11 @@ interface Said {
  * what to do next.
  */
 const refusals: Readonly<Record<AskRefusal, string>> = {
-  grasp_client_unset:
-    "Ask Grasp isn’t set up: the admin doesn’t know which organization is Grasp’s own. Choose it under Grasp’s own organization on Platform.",
-  grasp_client_unknown:
-    "Ask Grasp isn’t set up: the organization chosen as Grasp’s own is gone or offboarded. Choose Grasp’s own organization again on Platform.",
-  grasp_client_not_active:
-    "Ask Grasp can’t ask yet: Grasp’s own organization isn’t live. Open its Setup and finish setting it up, or resume it there.",
-  secret_missing:
-    "Ask Grasp can’t sign the question: a secret is missing from Secrets Store. Add it to the stage’s 1Password Environment, then run Deploy platform.",
-  no_client_domain:
-    "Ask Grasp can’t find Grasp’s own organization: no client domain is set for this stage (CLIENT_DOMAIN). Set it in the admin’s vars for this stage (apps/admin/wrangler.jsonc), then run Deploy platform.",
-  not_routed:
-    "Ask Grasp can’t reach Grasp’s own organization: the router has no route to it. Open its Setup and release it again, which writes its route.",
-  core_unreachable:
-    "Ask Grasp can’t reach Grasp’s own organization: it runs on Workers for Platforms and the admin has no dispatcher binding to reach it by. Bind DISPATCHER to the clients’ namespace for this stage (apps/admin/wrangler.jsonc), then run Deploy platform.",
+  no_key:
+    "Ask Grasp isn’t set up: Grasp’s OpenAI key (OPENAI_API_KEY) is missing from Secrets Store. Add it to the stage’s 1Password Environment, then run Deploy platform.",
   too_long: "This conversation is too long to send at once. Start a new one.",
-  refused: "Grasp’s own platform turned the question away.",
-  no_model:
-    "Grasp’s own platform has no model it may send every company’s numbers to.",
   not_answered: "Grasp didn’t answer. Ask again in a moment.",
 };
-
-/** What the chat says for `answer`, refused: a missing secret named. */
-const refusalWords = (answer: AskAnswer & { refused: AskRefusal }): string =>
-  answer.refused === "secret_missing" && answer.secret !== undefined
-    ? `Ask Grasp can’t sign the question: ${answer.secret} is missing from Secrets Store. Add it to the stage’s 1Password Environment, then run Deploy platform.`
-    : refusals[answer.refused];
 
 /** The questions to start from: one organization's call first, when the chat was opened for it. */
 const startersFor = (name: string | undefined): string[] => [
@@ -228,7 +207,7 @@ export const AskChat = ({
               ? `${answer.text}\n\n(The answer stopped at its length limit.)`
               : answer.text,
           }
-        : { role: "assistant", text: refusalWords(answer), failed: true },
+        : { role: "assistant", text: refusals[answer.refused], failed: true },
     ]);
   };
   const send = (text: string) => {

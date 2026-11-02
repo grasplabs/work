@@ -251,7 +251,7 @@ export const integrationsOf = (
   asOf: string
 ): IntegrationView[] => {
   const { org, state } = view;
-  if (org.made || state.client === "none") {
+  if (state.client === "none") {
     return [];
   }
   const further = state.client === "leads" || state.client === "told";

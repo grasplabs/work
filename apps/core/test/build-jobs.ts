@@ -30,24 +30,6 @@ export default function Desk() {
 }
 `;
 
-/** A workflow of the draft, with its tests: what a check keeps. */
-export const intake = {
-  "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("intake", { params: {}, input: z.unknown() }, async (step, { input }) => {
-  return await step.do("read", { description: "Read the invoice" }, async () => input as Json);
-});
-`,
-  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./intake.ts";
-
-export default workflowTests(definition, [
-  { name: "runs", mocks: { read: 1 }, expect: {} },
-]);
-`,
-};
-
 /** The screen with its button restyled, which @shadcn/lint refuses. */
 export const restyled = desk.replace(
   '<Button variant="outline">',
@@ -67,7 +49,7 @@ export const returned = (text: string | undefined): unknown =>
 /** Creates the App, writes a draft that passes, and submits its proposal. */
 export const submitProposal = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk, ...intake })});
+  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
   return await env.build.submit(app.id, { kind: "propose", message: "An invoice desk" });
 };`;
 
