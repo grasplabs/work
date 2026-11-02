@@ -9,7 +9,7 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -25,11 +25,11 @@ import { brainOf } from "./ports.ts";
 // and the active grants Apps and agents hold on the Brain and on those
 // collections. IDs, kinds and actions alone.
 
-/** A grant's actions, as stored (JSON). */
-const actionsOf = (stored: string): string[] => {
-  const parsed = z.array(z.string()).safeParse(JSON.parse(stored));
-  return parsed.success ? parsed.data : [];
-};
+/** Rows one page of core's parts reads. */
+const hostPageRows = 100;
+
+/** Where a page of collection teams goes on: after this collection and team. */
+const teamKeySchema = z.tuple([z.string(), z.string()]);
 
 /** What core adds to an export (`OnExport`). */
 export const coreExport = (env: Env): OnExport => ({
@@ -37,54 +37,87 @@ export const coreExport = (env: Env): OnExport => ({
   // company content (onboarding/documents.ts); interview records are
   // core's own (brain_records), never in the Brain.
   excluded: [onboardingDocumentsCollection],
-  files: async (collectionIds) => {
-    const db = drizzle(env.DB);
-    // The IDs bound as one parameter (`inList`): a company may have more
-    // collections than D1 binds to one statement.
-    const ids = [...collectionIds];
-    const teams =
-      ids.length === 0
-        ? []
-        : await db
-            .select()
-            .from(collectionTeams)
-            .where(inList(collectionTeams.collectionId, ids));
-    const grants = await db
-      .select({
-        id: permissions.id,
-        subjectType: permissions.subjectType,
-        subjectId: permissions.subjectId,
-        objectType: permissions.objectType,
-        objectId: permissions.objectId,
-        actions: permissions.actions,
-        binding: permissions.binding,
-        grantedBy: permissions.grantedBy,
-      })
-      .from(permissions)
-      .where(
-        and(
-          eq(permissions.status, "active"),
-          or(
-            eq(permissions.objectType, "platform"),
-            ids.length === 0
-              ? undefined
-              : and(
-                  eq(permissions.objectType, "collection"),
-                  inList(permissions.objectId, ids)
-                )
+  // Each a page at a time, keyed by its own key: neither is ever read
+  // whole (the Brain's `pagedFile`). The IDs bound as one parameter
+  // (`inList`): a company may have more collections than D1 binds to one
+  // statement.
+  files: [
+    {
+      name: "collection-teams",
+      page: async (collectionIds, after) => {
+        if (collectionIds.length === 0) {
+          return [];
+        }
+        const [collectionId, teamId] =
+          after === null ? [] : teamKeySchema.parse(JSON.parse(after));
+        const rows = await drizzle(env.DB)
+          .select()
+          .from(collectionTeams)
+          .where(
+            and(
+              inList(collectionTeams.collectionId, collectionIds),
+              collectionId === undefined || teamId === undefined
+                ? undefined
+                : or(
+                    gt(collectionTeams.collectionId, collectionId),
+                    and(
+                      eq(collectionTeams.collectionId, collectionId),
+                      gt(collectionTeams.teamId, teamId)
+                    )
+                  )
+            )
           )
-        )
-      );
-    // On the platform, only the grants to the Brain itself.
-    const brainGrants = grants.filter(
-      ({ objectType, actions }) =>
-        objectType === "collection" || actionsOf(actions).includes("brain")
-    );
-    return [
-      { name: "collection-teams", rows: teams },
-      { name: "grants", rows: brainGrants },
-    ];
-  },
+          .orderBy(
+            asc(collectionTeams.collectionId),
+            asc(collectionTeams.teamId)
+          )
+          .limit(hostPageRows);
+        return rows.map((row) => ({
+          key: JSON.stringify([row.collectionId, row.teamId]),
+          row,
+        }));
+      },
+    },
+    {
+      name: "grants",
+      page: async (collectionIds, after) => {
+        const rows = await drizzle(env.DB)
+          .select({
+            id: permissions.id,
+            subjectType: permissions.subjectType,
+            subjectId: permissions.subjectId,
+            objectType: permissions.objectType,
+            objectId: permissions.objectId,
+            actions: permissions.actions,
+            binding: permissions.binding,
+            grantedBy: permissions.grantedBy,
+          })
+          .from(permissions)
+          .where(
+            and(
+              eq(permissions.status, "active"),
+              or(
+                // On the platform, only the grants to the Brain itself.
+                and(
+                  eq(permissions.objectType, "platform"),
+                  sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
+                ),
+                collectionIds.length === 0
+                  ? undefined
+                  : and(
+                      eq(permissions.objectType, "collection"),
+                      inList(permissions.objectId, collectionIds)
+                    )
+              ),
+              after === null ? undefined : gt(permissions.id, after)
+            )
+          )
+          .orderBy(asc(permissions.id))
+          .limit(hostPageRows);
+        return rows.map((row) => ({ key: row.id, row }));
+      },
+    },
+  ],
 });
 
 /** How long one clock tick writes exports for. */

@@ -1,13 +1,20 @@
 import { env } from "cloudflare:workers";
+import { inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { createBrain } from "../src/brain.ts";
 import type { Brain } from "../src/brain.ts";
+import { ensureCollection } from "../src/collections.ts";
+import {
+  brainMemories,
+  collections as collectionsTable,
+} from "../src/db/schema.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   advanceExport,
   exportFile,
+  exportFileBytes,
   exportLeaseMs,
   exportStatus,
   manifestName,
@@ -15,6 +22,7 @@ import {
   startExport,
 } from "../src/exports.ts";
 import type { HostExportFile, OnExport } from "../src/exports.ts";
+import type { Json } from "../src/json.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import type { OnErase } from "../src/purge.ts";
@@ -61,9 +69,21 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
 };
 
 /** A host that adds `files` of its own. */
-const hostWith = (files: () => HostExportFile[] = () => []): OnExport => ({
+const hostWith = (files: readonly HostExportFile[] = []): OnExport => ({
   excluded: [],
-  files: async () => await Promise.resolve(files()),
+  files,
+});
+
+/** A part of the host's holding `rows`, a page of two at a time. */
+const hostPart = (name: string, rows: readonly Json[]): HostExportFile => ({
+  name,
+  page: async (_, after) =>
+    await Promise.resolve(
+      rows
+        .map((row, at) => ({ row, key: String(at).padStart(8, "0") }))
+        .filter(({ key }) => after === null || key > after)
+        .slice(0, 2)
+    ),
 });
 
 /** `brain` with its ports changed as `change` says. */
@@ -101,6 +121,33 @@ const fileText = async (
   name: string
 ): Promise<string> =>
   await new Response(await exportFile(brain, admin, exportId, name)).text();
+
+/** The rows of every file of part `prefix` of a complete export, by file. */
+const partRows = async (
+  brain: Brain<Caller>,
+  exportId: string,
+  prefix: string
+): Promise<{ file: string; rows: unknown[] }[]> => {
+  const manifest = manifestSchema.parse(
+    JSON.parse(await fileText(brain, exportId, manifestName))
+  );
+  const files = manifest.files
+    .map(({ name }) => name)
+    .filter((name) => new RegExp(`^${prefix}-\\d{4}\\.jsonl$`, "u").test(name));
+  const read: { file: string; rows: unknown[] }[] = [];
+  for (const file of files) {
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time, as each is large
+    const text = await fileText(brain, exportId, file);
+    read.push({
+      file,
+      rows: text
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line): unknown => JSON.parse(line)),
+    });
+  }
+  return read;
+};
 
 /** Each file the manifest names, and whether its download has its checksum. */
 const checked = async (brain: Brain<Caller>, exportId: string) => {
@@ -182,7 +229,7 @@ describe("exporting the company's Brain", () => {
       restoredFrom: null,
     });
     const ended = await ranToEnd(brain, exportId, onExport);
-    const listed = await fileText(brain, exportId, "collections.jsonl");
+    const listed = await fileText(brain, exportId, "collections-0001.jsonl");
     const collections = new Set(
       listed
         .trim()
@@ -246,20 +293,18 @@ describe("exporting the company's Brain", () => {
     await purge(brain, admin, input, again.token, noCopies);
   });
 
-  it("writes the host's files again, all from one ask, after a run stopped among them", async () => {
+  it("goes on with a part from the file a run stopped before, after another takes it over", async () => {
     const { brain } = testHost();
     await newCollection(brain, "Plans");
-    let asked = 0;
-    const onExport = hostWith(() => {
-      asked += 1;
-      return asked === 1
-        ? [
-            { name: "grants", rows: [{ ask: 1 }] },
-            { name: "teams", rows: [{ ask: 1 }] },
-          ]
-        : [{ name: "grants", rows: [{ ask: 2 }] }];
-    });
-    // The first run stops among the host's files: its second upload never
+    // A part of the host's three files long: each row more than half of
+    // one (`exportFileBytes`).
+    const overHalf = Math.floor(exportFileBytes / 2) + 1;
+    const rows = Array.from({ length: 3 }, (_, at) => ({
+      at,
+      text: "x".repeat(overHalf),
+    }));
+    const onExport = hostWith([hostPart("big", rows)]);
+    // The first run stops at the part's second file: its upload never
     // ends, as a run whose isolate went away.
     let stopped = false;
     const cut = withPorts(brain, {
@@ -269,7 +314,7 @@ describe("exporting the company's Brain", () => {
         head: env.BLOBS.head.bind(env.BLOBS),
         list: env.BLOBS.list.bind(env.BLOBS),
         put: async (key, value, options) => {
-          if (key.endsWith("-host-teams.jsonl")) {
+          if (key.endsWith("-host-big-0002.jsonl")) {
             stopped = true;
             // Never ends.
             await Promise.withResolvers<never>().promise;
@@ -286,23 +331,24 @@ describe("exporting the company's Brain", () => {
       clock: () => new Date(Date.now() + exportLeaseMs + 60_000),
     });
     const ended = await ranToEnd(later, exportId, onExport);
-    const files = await checked(brain, exportId);
+    const files = await partRows(brain, exportId, "host-big");
 
     expect({
       ended,
-      whole: files.every(({ matches }) => matches),
-      hostFiles: files
-        .map(({ name }) => name)
-        .filter((name) => name.startsWith("host-")),
-      hosted: await fileText(brain, exportId, "hosted.jsonl"),
-      grants: await fileText(brain, exportId, "host-grants.jsonl"),
+      whole: await whole(brain, exportId),
+      files: files.map(({ file }) => file),
+      rows: files.flatMap(({ rows: held }) =>
+        held.map((row) => z.object({ at: z.number() }).parse(row).at)
+      ),
     }).toStrictEqual({
       ended: "ok",
       whole: true,
-      // The second ask's alone: none of the first's left beside it.
-      hostFiles: ["host-grants.jsonl"],
-      hosted: `${JSON.stringify({ name: "host-grants.jsonl" })}\n`,
-      grants: `${JSON.stringify({ ask: 2 })}\n`,
+      files: [
+        "host-big-0001.jsonl",
+        "host-big-0002.jsonl",
+        "host-big-0003.jsonl",
+      ],
+      rows: [0, 1, 2],
     });
   });
 
@@ -317,7 +363,7 @@ describe("exporting the company's Brain", () => {
         head: env.BLOBS.head.bind(env.BLOBS),
         list: env.BLOBS.list.bind(env.BLOBS),
         put: async (key, value, options) => {
-          if (key.endsWith("-memories.jsonl")) {
+          if (key.endsWith("-memories-0001.jsonl")) {
             throw new Error("The bucket is out of reach");
           }
           return await env.BLOBS.put(key, value, options);
@@ -348,7 +394,7 @@ describe("exporting the company's Brain", () => {
       message: null,
       restoredFrom: null,
     });
-    const onExport = hostWith(() => [{ name: "grants", rows: [{ a: 1 }] }]);
+    const onExport = hostWith([hostPart("grants", [{ a: 1 }])]);
     const exportId = await begun(brain, onExport);
     // The first run's first upload waits until the second run is done.
     const { promise: held, resolve: release } =
@@ -558,7 +604,7 @@ describe("exporting the company's Brain", () => {
     const downloaded = await outcome(
       (async () =>
         await new Response(
-          await exportFile(racing, admin, exportId, "collections.jsonl")
+          await exportFile(racing, admin, exportId, "collections-0001.jsonl")
         ).text())()
     );
 
@@ -583,5 +629,126 @@ describe("exporting the company's Brain", () => {
       left: [],
       downloadsAudited: 0,
     });
+    // Finished, as its host's copies come back in reach: exports may run.
+    const input = {
+      type: "content",
+      documentIds: [plan.id],
+      terms: ["route"],
+      reason: "erasure_request",
+    };
+    const again = await preparePurge(brain, admin, input, noCopies);
+    await purge(brain, admin, input, again.token, noCopies);
   });
+
+  // Runs last: what it writes is large, and goes once it has run.
+  it(
+    "splits each of the Brain's parts across files once it outgrows one, losing and repeating no row",
+    { timeout: 120_000 },
+    async () => {
+      const { brain } = testHost();
+      const big = "x".repeat(1_000_000);
+      const many = 9;
+      // Collections and memory records: few, each near a megabyte.
+      const collectionIds = Array.from({ length: many }, () =>
+        crypto.randomUUID()
+      );
+      for (const id of collectionIds) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another
+        await ensureCollection(
+          brain,
+          {
+            id,
+            name: `Shelf ${id}`,
+            description: big,
+            owner: "owner",
+            access: "everyone",
+            sensitive: false,
+            source: "here",
+            createdAt: new Date(),
+          },
+          admin.actor
+        );
+      }
+      const now = new Date();
+      const memoryIds = Array.from({ length: many }, () => crypto.randomUUID());
+      for (const id of memoryIds) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another
+        await brain.db.insert(brainMemories).values({
+          id,
+          revision: 1,
+          scope: "company",
+          scopeId: null,
+          ownerId: "owner",
+          kind: "fact",
+          statement: big,
+          sourceRefs: "[]",
+          state: "accepted",
+          indexingState: "pending",
+          recordedAt: now,
+          updatedAt: now,
+        });
+      }
+      // Erasure records: many, each small, as they are.
+      const evidence = 90_000;
+      await env.BRAIN.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${String(evidence)})
+       INSERT INTO brain_erased_evidence (evidence_id, erased_at)
+       SELECT 'split-evidence-' || printf('%08d', i), ? FROM n`
+      )
+        .bind(now.getTime())
+        .run();
+      try {
+        const onExport = hostWith();
+        const exportId = await begun(brain, onExport);
+        const ended = await ranToEnd(brain, exportId, onExport);
+        const idsIn = async (
+          prefix: string,
+          field: string,
+          among: Set<string>
+        ) => {
+          const files = await partRows(brain, exportId, prefix);
+          const ids = files.flatMap(({ rows }) =>
+            rows.flatMap((row) => {
+              const id = z.record(z.string(), z.unknown()).parse(row)[field];
+              return typeof id === "string" && among.has(id) ? [id] : [];
+            })
+          );
+          return {
+            files: files.length > 1,
+            once: ids.length === among.size && new Set(ids).size === among.size,
+          };
+        };
+        const evidenceIds = new Set(
+          Array.from(
+            { length: evidence },
+            (_, at) => `split-evidence-${String(at + 1).padStart(8, "0")}`
+          )
+        );
+
+        expect({
+          ended,
+          whole: await whole(brain, exportId),
+          collections: await idsIn("collections", "id", new Set(collectionIds)),
+          memories: await idsIn("memories", "id", new Set(memoryIds)),
+          erasures: await idsIn("erasures", "evidenceId", evidenceIds),
+        }).toStrictEqual({
+          ended: "ok",
+          whole: true,
+          collections: { files: true, once: true },
+          memories: { files: true, once: true },
+          erasures: { files: true, once: true },
+        });
+      } finally {
+        await env.BRAIN.prepare(
+          "DELETE FROM brain_erased_evidence WHERE evidence_id LIKE 'split-evidence-%'"
+        ).run();
+        await brain.db
+          .delete(brainMemories)
+          .where(inArray(brainMemories.id, memoryIds));
+        await brain.db
+          .delete(collectionsTable)
+          .where(inArray(collectionsTable.id, collectionIds));
+      }
+    }
+  );
 });

@@ -2,9 +2,11 @@ import { ensureCollection } from "@grasp-os/brain/collections";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { collectionTeams, permissions } from "../src/db/core/schema.ts";
 import { keepAudience } from "../src/knowledge/access.ts";
 import {
   advanceExports,
@@ -225,7 +227,7 @@ describe("exporting the company's Brain", setUpTime, () => {
         purged: all.includes(purgedWord),
         purgeRecord: files.some(
           ({ name, text }) =>
-            name === "erasures.jsonl" && text.includes('"type":"purge"')
+            name.startsWith("erasures-") && text.includes('"type":"purge"')
         ),
       },
       byOther: await statusOf(other.session, exportId, "manifest.json"),
@@ -239,14 +241,12 @@ describe("exporting the company's Brain", setUpTime, () => {
       format: "grasp-brain-export",
       checksums: true,
       names: [
-        "collections.jsonl",
+        "collections-N.jsonl",
         "documents-N.jsonl",
-        "erasures.jsonl",
-        "host-collection-teams.jsonl",
-        "host-grants.jsonl",
-        // That the host's files are all written, naming them.
-        "hosted.jsonl",
-        "memories.jsonl",
+        "erasures-N.jsonl",
+        "host-collection-teams-N.jsonl",
+        "host-grants-N.jsonl",
+        "memories-N.jsonl",
       ],
       holds: {
         kept: true,
@@ -397,7 +397,7 @@ describe("exporting the company's Brain", setUpTime, () => {
     });
   });
 
-  it("holds every collection, more than D1 binds to one statement", async () => {
+  it("holds every collection, and core's parts of each, more than D1 binds to one statement or one page reads", async () => {
     const admin = await signedInApi(idp, "admin");
     const brain = brainOf(env);
     const many = 120;
@@ -421,18 +421,62 @@ describe("exporting the company's Brain", setUpTime, () => {
         { type: "system" }
       );
     }
+    // Each read by a team, and granted to an agent: more rows of core's
+    // parts than one page of them reads.
+    const db = drizzle(env.DB);
+    const team = `team-${unique()}`;
+    const now = new Date();
+    const writes = ids.flatMap((id) => [
+      db.insert(collectionTeams).values({ collectionId: id, teamId: team }),
+      db.insert(permissions).values({
+        id: crypto.randomUUID(),
+        subjectType: "agent",
+        subjectId: `agent-${unique()}`,
+        objectType: "collection",
+        objectId: id,
+        actions: JSON.stringify(["read"]),
+        binding: "{}",
+        status: "active",
+        requestedBy: admin.userId,
+        requestedAt: now,
+        grantedBy: admin.userId,
+        grantedAt: now,
+      }),
+    ]);
+    const [first, ...rest] = writes;
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
     const { token } = await admin.api.knowledge.prepareBrainExport();
     const { exportId } = await admin.api.knowledge.startBrainExport(token);
     const done = await finished(admin, exportId);
-    const response =
-      done.state === "complete"
-        ? await download(admin.session, exportId, "collections.jsonl")
-        : undefined;
-    const collections = (await response?.text()) ?? "";
+    /** How many of `ids` part `prefix`'s files hold, each counted once. */
+    const heldIn = async (prefix: string): Promise<number> => {
+      const texts = await Promise.all(
+        done.files
+          .filter(({ name }) => name.startsWith(`${prefix}-`))
+          .map(async ({ name }) => {
+            const response = await download(admin.session, exportId, name);
+            return await response.text();
+          })
+      );
+      const lines = texts.join("").split("\n");
+      return ids.filter(
+        (id) => lines.filter((line) => line.includes(id)).length === 1
+      ).length;
+    };
     expect({
       state: done.state,
       reason: done.reason,
-      held: ids.filter((id) => collections.includes(id)).length,
-    }).toStrictEqual({ state: "complete", reason: null, held: many });
+      collections: await heldIn("collections"),
+      teams: await heldIn("host-collection-teams"),
+      grants: await heldIn("host-grants"),
+    }).toStrictEqual({
+      state: "complete",
+      reason: null,
+      collections: many,
+      teams: many,
+      grants: many,
+    });
   });
 });
