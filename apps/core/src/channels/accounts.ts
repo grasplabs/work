@@ -13,6 +13,7 @@ import type {
   ChannelLinkOutcome,
   ChannelLinkPreview,
   ChannelLinkRefusal,
+  ChannelReach,
   ChannelUnlinked,
 } from "@grasp-os/shared/channel-accounts";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -29,13 +30,14 @@ import { channelAccounts, channelLinks } from "../db/core/schema.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { stephenReachFor } from "./where.ts";
 
 // A person's accounts on chat platforms whose messages carry no Entra
-// object id (Slack, WhatsApp, Telegram...), linked to their Grasp person,
+// object id (Slack), linked to their Grasp person,
 // so the agent knows who writes there. The ways it can fail, and what
 // stops each:
 //
-// - Someone claims another's account by name, email or phone number: a
+// - Someone claims another's account by name or email: a
 //   link is only ever bound to the platform's own verified sender id
 //   (Chat SDK's `message.author.userId`), which the door hands to
 //   `offerChannelLink`; nothing a person types names an account.
@@ -52,9 +54,9 @@ import type { SessionCheck } from "../session-check.ts";
 //   (members.ts), and `personOnChannel` knows active members only.
 // - Grasp staff link an account: they aren't the company's people; every
 //   method refuses them.
-// - The audit log, append-only, keeps a phone number: an event names the
-//   account by its own id and its platform, never the platform's id (on
-//   WhatsApp that is the number).
+// - The audit log, append-only, keeps the platform's id for an account:
+//   an event names the account by its own id and its platform, never the
+//   platform's id.
 //
 // A link someone forwards to a colleague, who signs in and confirms,
 // links the sender's account to the colleague: the confirm card shows the
@@ -223,6 +225,12 @@ export class ChannelAccountsRpc
     });
   }
 
+  async reach(): Promise<ChannelReach[]> {
+    return await this.#asMember(
+      async ({ userId }) => await stephenReachFor(this.#env, userId)
+    );
+  }
+
   async preview(secret: string): Promise<ChannelLinkPreview> {
     return await this.#asMember(async ({ userId }) => {
       const row = await this.#linkOf(secret);
@@ -285,7 +293,7 @@ export class ChannelAccountsRpc
               WHERE ${channelLinks.secretHash} = ${secretHash} AND changes() > 0`
           )
           .onConflictDoNothing(),
-        // Never the platform's id: on WhatsApp it is a phone number.
+        // Never the platform's id.
         outboxedIfChanged(db, {
           actor: actorOf(person),
           action: "channel_account.linked",

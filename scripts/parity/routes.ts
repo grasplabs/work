@@ -65,11 +65,6 @@ export const parityRoutes: readonly ParityRoute[] = [
     grasp: "/settings/models",
   },
   {
-    name: "settings-notifications",
-    prototype: "/settings/notifications",
-    grasp: "/settings/notifications",
-  },
-  {
     name: "settings-security",
     prototype: "/settings/security",
     grasp: "/settings/security",
@@ -88,11 +83,6 @@ export const parityRoutes: readonly ParityRoute[] = [
     name: "settings-billing",
     prototype: "/settings/billing",
     grasp: "/settings/billing",
-  },
-  {
-    name: "settings-pulse",
-    prototype: "/settings/pulse",
-    grasp: "/settings/pulse",
   },
 ];
 

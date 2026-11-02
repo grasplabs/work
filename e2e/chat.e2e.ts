@@ -40,6 +40,36 @@ const scopeOf = (window: ReturnType<Page["getByRole"]>, name: string) =>
   });
 
 /**
+ * Waits until the page reads nothing from core for its pages: the router it
+ * keeps on `window.__TSR_ROUTER__` neither loads a page nor reads one
+ * again behind the page shown (a match's `isFetching`, which outlasts
+ * `isLoading` when a page already shown is read again).
+ */
+const readsNothing = async (page: Page): Promise<void> => {
+  await page.waitForFunction(() => {
+    const router: unknown = Reflect.get(window, "__TSR_ROUTER__");
+    return (
+      typeof router === "object" &&
+      router !== null &&
+      "state" in router &&
+      typeof router.state === "object" &&
+      router.state !== null &&
+      "isLoading" in router.state &&
+      router.state.isLoading === false &&
+      "matches" in router.state &&
+      Array.isArray(router.state.matches) &&
+      router.state.matches.every(
+        (match: unknown) =>
+          typeof match === "object" &&
+          match !== null &&
+          "isFetching" in match &&
+          match.isFetching === false
+      )
+    );
+  });
+};
+
+/**
  * A write the chat's agent asked for, as connect holds it for `person`:
  * written straight into connect's local database, as a call from the
  * chat's code would leave it (held-writes are core's tests too).
@@ -281,6 +311,54 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(waiting).toHaveCount(0);
 });
 
+test("a person attaches files to a question, takes one off, and sees the question carry the other", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const plan = `plan-${tag}.md`;
+  const notes = `notes-${tag}.txt`;
+  const question = `What does the plan say ${tag}?`;
+  await page.goto("/");
+
+  // Picked with the button's file input: each shows as a card in the box.
+  const picker = page.locator('input[type="file"]');
+  await picker.setInputFiles([
+    {
+      name: plan,
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Plan\n\nShip it."),
+    },
+    { name: notes, mimeType: "text/plain", buffer: Buffer.from("Notes") },
+  ]);
+  await page.getByRole("button", { name: `Remove ${notes}` }).click();
+  await expect(page.getByText(notes)).toHaveCount(0);
+  await expect(page.getByText(plan)).toBeVisible();
+  // A type core doesn't take stays out, and the box says why.
+  await picker.setInputFiles({
+    name: "setup.exe",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("MZ"),
+  });
+  await expect(page.getByText(/Only PDF, Word/u)).toBeVisible();
+  await expect(page.getByText("setup.exe")).toHaveCount(0);
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  // The question shows the file it carried; the box is empty again.
+  const asked = page
+    .getByRole("list", { name: "Messages" })
+    .getByRole("listitem")
+    .first();
+  await expect(asked).toContainText(question);
+  await expect(asked).toContainText(plan);
+  await expect(
+    page.getByRole("button", { name: `Remove ${plan}` })
+  ).toHaveCount(0);
+});
+
 test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
   pageOf,
 }) => {
@@ -449,6 +527,11 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     `Out of reach ${tag}.`
   );
+  // Sent, the question has Chat read its list again (use-ask.ts), behind
+  // what the page already shows. A read the drop cuts off fails the page,
+  // not the follow, so the drop waits for that read: under load it is
+  // still on its way once the turn has ended.
+  await readsNothing(page);
 
   // The page's connection drops and none gets in: following stops, and
   // says why, once the page has waited its few seconds for a connection.

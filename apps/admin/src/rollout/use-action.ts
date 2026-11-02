@@ -31,6 +31,10 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "The rollback didn't finish: check the client's drift, then try again.",
   secrets_store_incomplete:
     "Secrets Store is missing a shared secret: run Deploy platform with secrets only first.",
+  promotion_not_allowed:
+    "A release goes Edge, then Beta, then Stable, and a channel goes back only to a release it had.",
+  channel_changed:
+    "The channel changed just now: look at it again before promoting.",
 };
 
 /** A staff action on a rollout (`useAction`), its refusals worded. */

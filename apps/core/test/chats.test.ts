@@ -21,13 +21,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { maxChatsPerPerson } from "../src/workspace.ts";
-import {
-  codeStep,
-  model,
-  configureObject,
-  pausedReply,
-  says,
-} from "./agent-chat.ts";
+import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
@@ -71,7 +65,6 @@ const answering = async (
   ...replies: ProviderReply[]
 ) => {
   const provider = await fakeProvider(...replies);
-  await configureObject(objectOf(someone));
   return provider;
 };
 
@@ -1069,7 +1062,6 @@ describe("chats", () => {
         pause: { until: thinking.promise },
       },
     });
-    await configureObject(objectOf(ann));
     const chat = await ann.chats.create("Sums");
     const follower = await follow(ann.chats, chat.id);
 

@@ -48,7 +48,8 @@ interface InterviewsSearch {
 }
 
 const Interviews = () => {
-  const { view } = useOrganization();
+  const { view, admin } = useOrganization();
+  const clientId = admin.client.id;
   const { tab = "teams" } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   return (
@@ -71,12 +72,16 @@ const Interviews = () => {
       </TabsList>
       <TabsContent value="teams">
         <div className="mt-4 flex flex-col gap-6">
-          <InterviewTeams view={view} />
+          <InterviewTeams clientId={clientId} view={view} />
         </div>
       </TabsContent>
       <TabsContent value="people">
         <div className="mt-4 flex flex-col gap-6">
-          <InterviewPeople view={view} />
+          <InterviewPeople
+            clientId={clientId}
+            links={admin.snapshot.links}
+            view={view}
+          />
         </div>
       </TabsContent>
       <TabsContent value="transcripts">
@@ -91,7 +96,11 @@ const Interviews = () => {
       </TabsContent>
       <TabsContent value="setup">
         <div className="mt-4 flex flex-col gap-6">
-          <InterviewersSetup view={view} />
+          <InterviewersSetup
+            clientId={clientId}
+            setupRead={admin.snapshot.setup}
+            view={view}
+          />
         </div>
       </TabsContent>
     </Tabs>

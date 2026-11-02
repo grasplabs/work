@@ -43,7 +43,7 @@
     "run_worker_first": true,
   },
   // The admin sets the deployment config vars below (SIGN_IN,
-  // MODEL_GATEWAY, PLATFORM_CHANGE) through the API; without this, every deploy
+  // PLATFORM_CHANGE) through the API; without this, every deploy
   // would delete them, as Wrangler deletes the vars it doesn't find here.
   "keep_vars": true,
   // Every secret core needs: deploys fail while one is unset, and local dev
@@ -60,11 +60,10 @@
   // names, ENTRA_CLIENT_SECRET and GOOGLE_CLIENT_SECRET. Without them nobody
   // can sign in.
   //
-  // So are the model gateway's rules: the `MODEL_GATEWAY` var
-  // (src/models.ts, src/model-rules.ts), the client's rules for model calls.
-  // It needs no secret: every provider key is connect's, the organization's
-  // own (which its admins add in Settings) and Grasp's. Until an admin
-  // connects an AI provider, model calls fail as `model.no_provider`.
+  // Model calls need no secret: every provider key is connect's, the
+  // organization's own (which its admins add in Settings) and Grasp's.
+  // Until an admin connects an AI provider, model calls fail as
+  // `model.no_provider`.
   //
   // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
   // version, and what they changed, which the clock records in the audit log

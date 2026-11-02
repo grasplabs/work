@@ -58,13 +58,15 @@ export type InboxKind =
   | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
+  | "revokedPackage"
+  | "stoppedEvents"
   | "bindingApproval"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
-  | { kind: "independentWorkflow"; workflow: string }
+  | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -90,6 +92,8 @@ export type InboxSource =
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
+  | { type: "revoked"; notification: PackageRevokedNotification }
+  | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -138,6 +142,8 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
+  revokedPackage: "apps",
+  stoppedEvents: "workflows",
   bindingApproval: "workflows",
   decision: "workflows",
 };
@@ -286,9 +292,9 @@ const outcomeItems = (
 /** A permission an App or agent asked for, which an admin grants or rejects. */
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
-    const { directory, exports } = pending;
+    const { directory } = pending;
     const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory, exports);
+    const object = objectOf(request, directory);
     const actions = formatList(request.actions);
     const who = t`${subject}: ${actions} on ${object}`;
     const { binding } = request;
@@ -549,6 +555,122 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** Packages of an App or workflow revoked as malware: what the notification says of it. */
+type PackageRevokedNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "package_revoked" }
+>;
+
+/** What a revocation is about: its name and the page it is replaced on. */
+const revokedSubject = (
+  subject: PackageRevokedNotification["subject"]
+): { name: string; about: Target } =>
+  subject.type === "app"
+    ? {
+        name: subject.appName,
+        about: { kind: "engine", engine: subject.app },
+      }
+    : {
+        name: subject.workflowName,
+        about: { kind: "independentWorkflow", workflow: subject.workflow },
+      };
+
+/** Packages of an App or workflow the person builds or approved, revoked because one was reported as malware. */
+const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "package_revoked") {
+      return [];
+    }
+    const { at, advisory } = notification;
+    const { name, about } = revokedSubject(notification.subject);
+    const revoked = `${notification.package.name}@${notification.package.version}`;
+    return [
+      {
+        id: `revoked:${notification.id}`,
+        kind: "revokedPackage",
+        title: t`Packages of ${name} were revoked as malware`,
+        context: name,
+        body: [
+          t`${revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of ${name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved.`,
+        ],
+        facts: [
+          { label: t`Package`, value: revoked },
+          { label: t`Advisory`, value: advisory },
+          { label: t`Revoked`, value: formatDateTime(at) },
+        ],
+        about,
+        forWhom: { person: me },
+        date: at,
+        urgent: true,
+        source: { type: "revoked", notification },
+      },
+    ];
+  });
+
+/** Connect stopped hearing a source: what the notification says of it. */
+type EventsStoppedNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "events_stopped" }
+>;
+
+/** The title of a stopped source: what it stopped hearing, at whose account when the feed named it. */
+const stoppedTitle = (mail: boolean, name: string | undefined): string => {
+  if (name === undefined) {
+    return mail
+      ? t`Your triggers stopped hearing new mail`
+      : t`Your triggers stopped hearing new files`;
+  }
+  return mail
+    ? t`Your triggers stopped hearing new mail at ${name}`
+    : t`Your triggers stopped hearing new files at ${name}`;
+};
+
+/** A mailbox or drive the person's triggers listen to, which connect stopped hearing. */
+const stoppedEventsItems = (
+  failed: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "events_stopped") {
+      return [];
+    }
+    const { at, reason, resource } = notification;
+    const mail = notification.event.endsWith(".mail.received");
+    const account = failed.accounts?.get(notification.connection);
+    const name = account?.name ?? undefined;
+    return [
+      {
+        id: `stoppedEvents:${notification.id}`,
+        kind: "stoppedEvents",
+        title: stoppedTitle(mail, name),
+        context: name ?? (mail ? t`Mail` : t`Files`),
+        body: [
+          reason === "refused"
+            ? t`The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day.`
+            : t`Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection.`,
+        ],
+        facts: [
+          ...(resource === null
+            ? []
+            : [{ label: mail ? t`Mailbox` : t`Drive`, value: resource }]),
+          { label: t`Stopped`, value: formatDateTime(at) },
+        ],
+        ...(account === undefined
+          ? {}
+          : {
+              about: {
+                kind: "integration",
+                integration: integrationKey(account.source, account.provider),
+              },
+            }),
+        forWhom: { person: me },
+        date: at,
+        urgent: true,
+        source: { type: "stoppedEvents", notification },
+      },
+    ];
+  });
+
 /** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
 const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -563,9 +685,15 @@ const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         title: t`The schedule of ${workflowName} stopped`,
         context: workflowName,
         body: [
-          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time.`,
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time.`,
         ],
         facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
+        // Its Triggers tab, where its owner turns it on again.
+        about: {
+          kind: "independentWorkflow",
+          workflow: notification.workflow,
+          tab: "triggers",
+        },
         forWhom: { person: me },
         date: at,
         urgent: false,
@@ -686,6 +814,8 @@ export const inboxItems = (
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
+    ...(failed === undefined ? [] : revokedItems(failed, me)),
+    ...(failed === undefined ? [] : stoppedEventsItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };

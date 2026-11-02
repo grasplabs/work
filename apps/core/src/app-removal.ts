@@ -1,22 +1,39 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appIntegrations,
   appMembers,
+  appVersions,
   appResourceBindings,
   appWorkflowBindings,
   apps,
   permissions,
 } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
 import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
@@ -96,6 +113,79 @@ const removedSql = (app: string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.removedAt} IS NOT NULL)`;
 
 /**
+ * The statements that end App `appId`'s grants, bindings, members and
+ * hand-added integrations, each only once the batch's first statement
+ * removed it (`removedSql`), for the remover `revoker` names.
+ */
+const endedWith = (
+  db: DrizzleD1Database,
+  appId: string,
+  revoker: string,
+  now: Date
+) => {
+  const gone = removedSql(appId);
+  return [
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: revoker, revokedAt: now })
+      .where(
+        and(
+          ne(permissions.status, "revoked"),
+          or(
+            and(
+              eq(permissions.subjectType, "app"),
+              eq(permissions.subjectId, appId)
+            ),
+            and(
+              eq(permissions.objectType, "app"),
+              eq(permissions.objectId, appId)
+            )
+          ),
+          gone
+        )
+      ),
+    db
+      .update(appResourceBindings)
+      .set({ status: "revoked", revokedBy: revoker, revokedAt: now })
+      .where(
+        and(
+          eq(appResourceBindings.appId, appId),
+          eq(appResourceBindings.status, "active"),
+          gone
+        )
+      ),
+    db
+      .update(appWorkflowBindings)
+      .set({ status: "removed", removedBy: revoker, removedAt: now })
+      .where(
+        and(
+          eq(appWorkflowBindings.appId, appId),
+          eq(appWorkflowBindings.status, "active"),
+          gone
+        )
+      ),
+    db.delete(appMembers).where(and(eq(appMembers.appId, appId), gone)),
+    db
+      .delete(appIntegrations)
+      .where(and(eq(appIntegrations.appId, appId), gone)),
+  ] as const;
+};
+
+/** What follows a removal, best effort: its entry, its held actions. */
+const afterRemoval = async (env: Env, appId: string): Promise<void> => {
+  // Its Apps-collection entry: its name, description and AGENTS.md go.
+  await forgetAppEntry(env, appId);
+  // Its held actions in connect, which nobody can confirm now, go as
+  // expired ones do, recorded there. Best effort: confirming one checks
+  // its binding, which is revoked, and refuses it all the same.
+  try {
+    await env.CONNECT.dropForRemovedApp({ appId });
+  } catch (error) {
+    log.warn("app.held_drop_failed", { appId, ...errorFields(error) });
+  }
+};
+
+/**
  * Removes the archived App `input` names, for its owner or an admin of
  * the organization, never Grasp staff (see the header). Answers nothing.
  */
@@ -126,7 +216,6 @@ export const removeApp = async (
     throw appErrors.create("app.stops_pending");
   }
   const now = new Date();
-  const gone = removedSql(found.id);
   const [[removed]] = await auditedBatch(env, db, [
     db
       .update(apps)
@@ -155,64 +244,200 @@ export const removeApp = async (
       target: { type: "app", id: found.id },
       detail: { name: found.name },
     }),
-    db
-      .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
-      .where(
-        and(
-          ne(permissions.status, "revoked"),
-          or(
-            and(
-              eq(permissions.subjectType, "app"),
-              eq(permissions.subjectId, found.id)
-            ),
-            and(
-              eq(permissions.objectType, "app"),
-              eq(permissions.objectId, found.id)
-            )
-          ),
-          gone
-        )
-      ),
-    db
-      .update(appResourceBindings)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
-      .where(
-        and(
-          eq(appResourceBindings.appId, found.id),
-          eq(appResourceBindings.status, "active"),
-          gone
-        )
-      ),
-    db
-      .update(appWorkflowBindings)
-      .set({ status: "removed", removedBy: by.userId, removedAt: now })
-      .where(
-        and(
-          eq(appWorkflowBindings.appId, found.id),
-          eq(appWorkflowBindings.status, "active"),
-          gone
-        )
-      ),
-    db.delete(appMembers).where(and(eq(appMembers.appId, found.id), gone)),
-    db
-      .delete(appIntegrations)
-      .where(and(eq(appIntegrations.appId, found.id), gone)),
+    ...endedWith(db, found.id, by.userId, now),
   ]);
   if (removed === undefined) {
     throw appErrors.create("app.conflict");
   }
-  // Its Apps-collection entry: its name, description and AGENTS.md go.
-  await forgetAppEntry(env, found.id);
-  // Its held actions in connect, which nobody can confirm now, go as
-  // expired ones do, recorded there. Best effort: confirming one checks
-  // its binding, which is revoked, and refuses it all the same.
+  await afterRemoval(env, found.id);
+};
+
+/**
+ * How long an App a chat created stays provisional with nothing made
+ * current and its draft untouched before it is reaped.
+ */
+export const abandonedAfterMs = 7 * 24 * 3_600_000;
+
+/** Most Apps one reaping run reaps. */
+const reapedPerRun = 20;
+
+/**
+ * Most candidates one reaping run looks at, oldest first: ones kept for
+ * now (a draft written since, say) are passed over, so they never stand
+ * in the way of abandoned Apps behind them.
+ */
+const examinedPerRun = 200;
+
+/**
+ * When the chat draft an App was created in was last written, or
+ * undefined when that can't be read now (the App is then kept).
+ */
+const draftWrittenAt = async (
+  env: Env,
+  workspaceId: string,
+  chatId: string,
+  appId: string
+): Promise<number | null | undefined> => {
   try {
-    await env.CONNECT.dropForRemovedApp({ appId: found.id });
+    return await workspace(
+      env,
+      workspaceIdSchema.parse(workspaceId)
+    ).draftWrittenAt(chatIdSchema.parse(chatId), appId);
   } catch (error) {
-    log.warn("app.held_drop_failed", {
-      appId: found.id,
-      ...errorFields(error),
-    });
+    log.warn("app.reap_draft_unread", { appId, ...errorFields(error) });
+    return undefined;
+  }
+};
+
+/**
+ * Reaps `app` unless its chat's draft was written since `before` or can't
+ * be read: whether it was.
+ */
+/**
+ * No version of the App the statement is on committed at `before` or
+ * since, through `apps.files.commit` or a chat: nobody works on it.
+ */
+const notCommittedSince = (db: DrizzleD1Database, before: Date) =>
+  notExists(
+    db
+      .select({ one: sql`1` })
+      .from(appVersions)
+      .where(
+        and(eq(appVersions.appId, apps.id), gte(appVersions.createdAt, before))
+      )
+  );
+
+const reapIfAbandoned = async (
+  env: Env,
+  db: DrizzleD1Database & { $client: D1Database },
+  app: {
+    id: string;
+    name: string;
+    workspaceId: string | null;
+    chatId: string | null;
+  },
+  before: Date
+): Promise<boolean> => {
+  if (app.workspaceId === null || app.chatId === null) {
+    return false;
+  }
+  const written = await draftWrittenAt(
+    env,
+    app.workspaceId,
+    app.chatId,
+    app.id
+  );
+  // Its draft unreadable, or written since: kept for now.
+  if (
+    written === undefined ||
+    (written !== null && written > before.getTime())
+  ) {
+    return false;
+  }
+  const now = new Date();
+  const [[removed]] = await auditedBatch(env, db, [
+    db
+      .update(apps)
+      .set({
+        status: "archived",
+        removedAt: now,
+        removedBy: "system",
+        // A release it put up for review goes with it, as `removeApp`'s.
+        pendingVersion: null,
+        provisionalWorkspaceId: null,
+        provisionalChatId: null,
+      })
+      .where(
+        and(
+          eq(apps.id, app.id),
+          isNotNull(apps.provisionalChatId),
+          isNull(apps.currentVersion),
+          isNull(apps.removedAt),
+          // No version committed since, in the same statement: a commit
+          // after this App was picked keeps it, and the rest of the batch
+          // goes with the removal (`removedSql`).
+          notCommittedSince(db, before)
+        )
+      )
+      .returning({ id: apps.id }),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "app.removed",
+      target: { type: "app", id: app.id },
+      detail: { name: app.name, reason: "provisional_abandoned" },
+    }),
+    ...endedWith(db, app.id, "system", now),
+  ]);
+  if (removed === undefined) {
+    return false;
+  }
+  await afterRemoval(env, app.id);
+  return true;
+};
+
+/**
+ * Reaps the Apps chats created that nobody accepted and nobody works on
+ * (GRA-161): provisional, never made current, created before
+ * `abandonedAfterMs` ago, and their chat's draft unwritten as long (or
+ * gone), and no version committed since (`apps.files.commit`). Each is
+ * removed as `removeApp` removes one, by the platform,
+ * recorded as `app.removed` with reason `provisional_abandoned`, in one
+ * batch that requires it still provisional, never made current, not
+ * removed and no version committed since: an acceptance or a commit
+ * meanwhile keeps it. Its draft is read right before that batch; a draft
+ * lives in its chat's object, outside that batch. Run by the cron
+ * trigger: at most `reapedPerRun` reaped and `examinedPerRun` looked at
+ * a run.
+ */
+export const reapAbandonedApps = async (env: Env, at: Date): Promise<void> => {
+  const db = drizzle(env.DB);
+  const before = new Date(at.getTime() - abandonedAfterMs);
+  let after: { createdAt: Date; id: string } | undefined;
+  let reaped = 0;
+  for (let examined = 0; examined < examinedPerRun;) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, oldest first
+    const page = await db
+      .select({
+        id: apps.id,
+        name: apps.name,
+        createdAt: apps.createdAt,
+        workspaceId: apps.provisionalWorkspaceId,
+        chatId: apps.provisionalChatId,
+      })
+      .from(apps)
+      .where(
+        and(
+          isNotNull(apps.provisionalChatId),
+          isNull(apps.currentVersion),
+          isNull(apps.removedAt),
+          lt(apps.createdAt, before),
+          // A version committed since, through `apps.files.commit` or a
+          // chat: someone works on it.
+          notCommittedSince(db, before),
+          after === undefined
+            ? undefined
+            : or(
+                gt(apps.createdAt, after.createdAt),
+                and(eq(apps.createdAt, after.createdAt), gt(apps.id, after.id))
+              )
+        )
+      )
+      .orderBy(asc(apps.createdAt), asc(apps.id))
+      .limit(reapedPerRun);
+    const last = page.at(-1);
+    if (last === undefined) {
+      return;
+    }
+    examined += page.length;
+    after = last;
+    for (const app of page) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      if (await reapIfAbandoned(env, db, app, before)) {
+        reaped += 1;
+        if (reaped >= reapedPerRun) {
+          return;
+        }
+      }
+    }
   }
 };

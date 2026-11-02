@@ -21,6 +21,7 @@ import {
 import {
   createTriggerResource,
   deleteTriggerResource,
+  listWorkflowTriggers,
   setTriggerEnabled,
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
@@ -656,10 +657,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     await dueAt(ungranted.id, occurrence, maxFailedStarts - 1);
     await startDueScheduleTriggers(env);
     const stopped = await scheduleOf(ungranted.id);
+    const listedStopped = await listWorkflowTriggers(env, admin, workflow.id);
     const told = await listNotifications(env, admin);
     // Enabled again while enabled: its schedule starts again.
     await setTriggerEnabled(env, admin, ungranted.id, true);
     const restarted = await scheduleOf(ungranted.id);
+    const listedRestarted = await listWorkflowTriggers(env, admin, workflow.id);
     const ungrantedRuns = await runsOf(ungranted.id);
     const logged = await allEvents();
     const about = logged.filter(
@@ -675,6 +678,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         backedOff: (afterOutage?.attempts ?? 0) > 0,
       },
       stopped: { next: stopped?.nextAt, failedStarts: stopped?.failedStarts },
+      // As its page shows it: stopped, the other not; then not, once enabled.
+      shownStopped: listedStopped.map(({ id, stopped: shown }) => [id, shown]),
+      shownRestarted: listedRestarted.map(({ id, stopped: shown }) => [
+        id,
+        shown,
+      ]),
       told: told.notifications
         .filter(({ type }) => type === "trigger_stopped")
         .map((notification) =>
@@ -695,6 +704,14 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       outage: { next: occurrence.getTime(), failedStarts: 0, backedOff: true },
       stopped: { next: null, failedStarts: maxFailedStarts },
+      shownStopped: [
+        [failing.id, false],
+        [ungranted.id, true],
+      ],
+      shownRestarted: [
+        [failing.id, false],
+        [ungranted.id, false],
+      ],
       told: [
         {
           trigger: ungranted.id,

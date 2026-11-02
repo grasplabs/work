@@ -142,22 +142,6 @@ const lines = {
     fr: "Vous m’avez envoyé beaucoup de messages en peu de temps. Attendez un instant, puis posez-moi à nouveau votre question.",
     es: "Me has enviado muchos mensajes en poco tiempo. Espera un momento y vuelve a preguntarme.",
   },
-  /** Over the limit the company's admin set for this person. */
-  personLimit: {
-    en: "You've reached the limit your company set for you. If you need more, ask your admin.",
-    nl: "Je hebt de limiet bereikt die je bedrijf voor je heeft ingesteld. Heb je meer nodig, vraag het dan aan je beheerder.",
-    de: "Sie haben das Limit erreicht, das Ihr Unternehmen für Sie festgelegt hat. Wenn Sie mehr brauchen, wenden Sie sich an Ihren Admin.",
-    fr: "Vous avez atteint la limite que votre entreprise a fixée pour vous. Si vous avez besoin de plus, contactez votre administrateur.",
-    es: "Has alcanzado el límite que tu empresa ha fijado para ti. Si necesitas más, pregunta a tu administrador.",
-  },
-  /** The company's model budget is spent. */
-  budget: {
-    en: "Your company has used up its AI budget for now, so I can't answer. Ask your admin, or try again later.",
-    nl: "Je bedrijf heeft zijn AI-budget voorlopig opgebruikt, dus ik kan niet antwoorden. Vraag het aan je beheerder of probeer het later opnieuw.",
-    de: "Ihr Unternehmen hat sein KI-Budget vorerst aufgebraucht, deshalb kann ich nicht antworten. Wenden Sie sich an Ihren Admin oder versuchen Sie es später noch einmal.",
-    fr: "Votre entreprise a épuisé son budget d’IA pour le moment, je ne peux donc pas répondre. Contactez votre administrateur ou réessayez plus tard.",
-    es: "Tu empresa ha agotado su presupuesto de IA por ahora, así que no puedo responder. Pregunta a tu administrador o vuelve a intentarlo más tarde.",
-  },
   /** The model is busy or unavailable. */
   busy: {
     en: "The AI model is busy right now. Try again in a minute.",

@@ -9,8 +9,6 @@ import {
 } from "./e2e/people.ts";
 import {
   corePort,
-  e2eModel,
-  e2eThinkingModel,
   connectConfig,
   idpOrigin,
   idpPort,
@@ -223,12 +221,13 @@ export default defineConfig({
         // was lost) checking every 2 s at first, not every minute, so a
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
-        // The Models page shows the rules and budgets.
+        // Who core's mail is from (src/mail.ts), as a deployment sets it:
+        // the onboarding names its domain for the admin to let through.
         devVar(
-          "MODEL_GATEWAY",
+          "MAIL_FROM",
           JSON.stringify({
-            eu: { models: [e2eModel, e2eThinkingModel], deployment: true },
-            budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
+            name: "Stephen at Grasp",
+            address: "onboarding@mail.localhost",
           })
         ),
       ].join(" "),

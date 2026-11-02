@@ -38,6 +38,9 @@ const statusOf = (run: ExtractView): string => {
     case "cancelled": {
       return "Cancelled";
     }
+    case "unavailable": {
+      return "No longer yours to see";
+    }
     case "queued": {
       return "Waiting its turn to read the notes";
     }

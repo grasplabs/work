@@ -95,13 +95,37 @@ export interface Use<
 /** Any declared use. */
 export type AnyUse = Use<string, UseKind, string>;
 
+/** How a connector call is made: where its files are kept, or read from. */
+export interface ConnectorCallOptions {
+  /**
+   * For a read that answers a file (`mail.readAttachment`, say): the alias
+   * of the action's own files use, declared with `write`, to keep it in as
+   * a file of the run. The answer then names the file (`file`) in place of
+   * its content, so a file larger than a step holds can be read.
+   */
+  readonly into?: string;
+  /**
+   * For a write that attaches run files (`mail.send`'s `attachments`, say):
+   * the alias of the action's own files use, declared with `read`, whose
+   * files the arguments' `attachments` name by ID (`{ file }`). Core
+   * resolves each to a file of this run only, sends its bytes with the
+   * write, and a held write shows each by name, type, size and digest.
+   * Without it, a call naming files is refused.
+   */
+  readonly from?: string;
+}
+
 /** A connector binding, as an action calls it. */
 export interface ConnectorResource<Operation extends string = string> {
   /**
    * Calls `operation` of the connector the binding serves, with `args`:
    * one the use declared, or the host refuses it.
    */
-  readonly call: (operation: Operation, args: JsonValue) => Promise<JsonValue>;
+  readonly call: (
+    operation: Operation,
+    args: JsonValue,
+    options?: ConnectorCallOptions
+  ) => Promise<JsonValue>;
 }
 
 /** An operation binding (an approved App export), as an action calls it. */

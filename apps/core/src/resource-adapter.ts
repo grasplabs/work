@@ -8,10 +8,7 @@ import type { Provenance } from "@grasp-os/shared/knowledge";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
-import type {
-  BindingTarget,
-  ModelBindingBudget,
-} from "@grasp-os/shared/resource-bindings";
+import type { BindingTarget } from "@grasp-os/shared/resource-bindings";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
@@ -48,8 +45,8 @@ export const provenanceMaxResources = 1000;
 
 /**
  * What an invocation has read so far, from every source it read through
- * its resources. It feeds the model gateway's data rules on the
- * invocation's next model request, and goes back to the caller with the
+ * its resources. It is the provenance of the invocation's next model
+ * request, and goes back to the caller with the
  * answer.
  */
 export interface InvocationSources {
@@ -57,8 +54,6 @@ export interface InvocationSources {
   readonly snapshot: () => InvocationProvenance;
   /** Notes that data of connection `id`, from `resources`, reached it. */
   readonly noteConnection: (id: string, resources: readonly string[]) => void;
-  /** The connections whose data reached it, for the model gateway's rules. */
-  readonly connections: () => readonly string[];
 }
 
 /** A new invocation's sources: nothing read yet. */
@@ -106,7 +101,6 @@ export const invocationSources = (): InvocationSources => {
         }
       }
     },
-    connections: () => [...connections.keys()].toSorted(),
   };
 };
 
@@ -138,11 +132,10 @@ export interface BindingCaller {
   readonly context: WorkContext;
   readonly sources: InvocationSources;
   /**
-   * Who the audit log names as making each request, and whose budgets a
-   * model request counts against besides the binding's own: the App, for
-   * a screen's or an agent's call (`delegateActorOf`); the workflow run,
-   * for a run's (`runActorOf`), so its workflow and run lineage budgets
-   * apply too.
+   * Who the audit log names as making each request, and whose spend a
+   * model request counts in besides the binding's own: the App, for a
+   * screen's or an agent's call (`delegateActorOf`); the workflow run, for
+   * a run's (`runActorOf`), so its workflow and run lineage count it too.
    */
   readonly actor: AuditActor;
   /**
@@ -234,9 +227,9 @@ export interface BindingCaller {
    * For an invocation called, through other Apps, from a workflow run's
    * (resource-apps.ts): the run, as the audit log names it, and whose
    * person share of the model requests in flight it takes. A model
-   * request down the chain is the run's (resource-model.ts): it counts
-   * against the run's workflow and lineage budgets, and meets the rules
-   * for its workflow, besides the called App's own binding caps.
+   * request down the chain is the run's (resource-model.ts): it counts in
+   * the run's workflow and lineage spend, and meets the rules for its
+   * workflow, besides the called App's own binding.
    */
   readonly runOrigin?: RunOrigin;
   /**
@@ -276,16 +269,9 @@ export type AppFunctionCall = (
     /** The calling invocation's cancellation (`BindingCaller.cancelled`). */
     readonly cancelled?: AbortSignal;
     /**
-     * That the calling work is a Grasp staff member's (its authority's
-     * server-set mark, GRA-1088): the called App's authority carries it
-     * too, so its events say "(Grasp staff)". Core sets it, never a call.
-     */
-    readonly byStaff?: boolean;
-    /**
      * The calling invocation's sources (`BindingCaller.sources`), which
      * the called function reads into and its model and connector requests
-     * are judged by: what the caller read, an EU-only or sensitive
-     * connection's data included, is in what it may pass on.
+     * carry: what the caller read is in what it may pass on.
      */
     readonly sources: InvocationSources;
   }
@@ -315,11 +301,10 @@ export interface ServedContract {
 
 /**
  * What the binding's row says beyond its pin, as read for this request:
- * the alias it binds and, for a model, its own caps (model-budgets.ts).
+ * the alias it binds.
  */
 export interface BindingRecord {
   readonly alias: string;
-  readonly budget: ModelBindingBudget | null;
 }
 
 /** A target bound for a request: what it serves now, and how to call it. */

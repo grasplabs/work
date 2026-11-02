@@ -28,7 +28,6 @@ const structureRules: ReadonlySet<string> = new Set([
   "server",
   "tests",
   "file-names",
-  "bindings",
 ]);
 
 /** A TypeScript diagnostic's rule: `TS` and its code. */

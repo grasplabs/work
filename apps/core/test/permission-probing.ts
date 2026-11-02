@@ -6,13 +6,11 @@
  * `watched()`), which register its hooks, and its own company with
  * `companyOnce`.
  */
-import { env } from "cloudflare:workers";
 import { beforeEach, vi } from "vite-plus/test";
 
 import { doorClock } from "../src/channels/door.ts";
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { configureObject, model } from "./agent-chat.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
+import { model } from "./agent-chat.ts";
 import {
   grantCollection,
   setUpBrainCompany,
@@ -246,14 +244,6 @@ export const companyOnce = (idp: Idp): (() => Promise<Company>) => {
             key
           );
         }
-      }
-      for (const persona of ["ana", "bram"] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one object at a time
-        await configureObject(places[persona].stub);
-        // oxlint-disable-next-line no-await-in-loop -- one object at a time
-        await configureObject(
-          workspace(env, personalWorkspaceId(brain.people[persona].userId))
-        );
       }
       const removed = await signedInApi(idp, "user");
       await brain.admin.api.members.remove(removed.userId);
