@@ -30,7 +30,7 @@ const ReachRow = ({ reach }: { reach: ChannelReach }) => {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{app}</span>
-        <span className="text-muted-foreground truncate">{find}</span>
+        <span className="text-muted-foreground">{find}</span>
       </div>
       {reach.href === null ? null : (
         <Button
