@@ -16,10 +16,7 @@
  *
  * A channel's history is its `channel.promote` events in the audit log.
  */
-import {
-  compareReleaseIds,
-  releaseIdSchema,
-} from "@grasp-os/shared/release-id";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
   desc,
@@ -252,22 +249,6 @@ export const toEdge = (
       setWhere: sql`${releaseOrderSql(channels.releaseId)} < ${releaseOrderSql(releaseId)}`,
     });
   return [event, move];
-};
-
-/**
- * Takes Edge to the newest of `imported`, releases the admin has: what
- * the import does in its own batch (`toEdge`).
- */
-export const releaseToEdge = async (
-  env: Env,
-  imported: readonly string[]
-): Promise<void> => {
-  const [newest] = imported.toSorted((a, b) => compareReleaseIds(b, a));
-  if (newest === undefined) {
-    return;
-  }
-  const db = adminDatabase(env.DB);
-  await db.batch(toEdge(db, newest));
 };
 
 /** Retrying a channel's failed deploys. */

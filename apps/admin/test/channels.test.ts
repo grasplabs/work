@@ -15,7 +15,6 @@ import type { Channel } from "../src/db/schema.ts";
 import {
   pinClient,
   promoteRelease,
-  releaseToEdge,
   retryChannel,
   setClientChannel,
 } from "../src/rollout/channels.ts";
@@ -25,6 +24,7 @@ import { reconcile } from "../src/rollout/reconciler.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { releaseToEdge } from "./edge.ts";
 import { db, staff } from "./hosting.ts";
 import {
   livePlacedClient,

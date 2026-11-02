@@ -9,11 +9,12 @@ import {
   clients,
   clientWorkers,
 } from "../src/db/schema.ts";
-import { releaseToEdge, retryChannel } from "../src/rollout/channels.ts";
+import { retryChannel } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { releaseToEdge } from "./edge.ts";
 import { db, staff } from "./hosting.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
