@@ -1,4 +1,5 @@
 import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -30,8 +31,8 @@ import { sha256Hex } from "./encoding.ts";
 // rewrites not yet done) counts as after the mark: the mark stops below
 // its records, so a copy read from what it hasn't rewritten yet is found
 // too. One that stopped without saying it was done counts as running for
-// `runningPurgeMs` at most. The mark is the records' own sequence (their
-// rowid), not a time: two isolates' clocks may differ, the database's
+// `runningPurgeMs` at most. The mark is the records' own sequence (`seq`,
+// AUTOINCREMENT, never used twice), not a time: two isolates' clocks may differ, the database's
 // order doesn't. Nothing of what was erased is kept: IDs and hashes of
 // places alone.
 
@@ -52,7 +53,7 @@ const placeHash = async ({
 const erasedRowsPerStatement = 25;
 
 /** The statements that record `documents` as erased by purge `purgeId`. */
-export const erasedDocumentsWrite = async (
+const erasedDocumentsWrite = async (
   db: DrizzleD1Database,
   purgeId: string,
   documents: readonly (DocumentPlace & { id: string })[],
@@ -80,13 +81,36 @@ export const erasedDocumentsWrite = async (
 };
 
 /**
+ * The statements that record `documents` as erased by purge `purgeId`
+ * anew, for an attempt at it (purge-ledger.ts): written again, they come
+ * after any mark taken since (their sequence is never one used before)
+ * and count as running again. Its records from an attempt before go in
+ * the same batch, so a purge keeps one record a document, however often
+ * it is run.
+ */
+export const erasedDocumentsRecord = async (
+  db: DrizzleD1Database,
+  purgeId: string,
+  documents: readonly (DocumentPlace & { id: string })[],
+  now: Date
+): Promise<[BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]> => [
+  db
+    .delete(brainErasedDocuments)
+    .where(eq(brainErasedDocuments.purgeId, purgeId)),
+  ...(await erasedDocumentsWrite(db, purgeId, documents, now)),
+];
+
+/**
  * The statement that marks purge `purgeId`'s records done: its forget and
- * rewrites have run, or it stopped trying (`erasureMark`).
+ * rewrites have run, or it stopped trying (`erasureMark`). Only while
+ * `holds`: an attempt that lost its purge never marks the records of the
+ * one that took it over done.
  */
 export const erasedDocumentsDone = (
   db: DrizzleD1Database,
   purgeId: string,
-  now: Date
+  now: Date,
+  holds: SQL = sql`1`
 ) =>
   db
     .update(brainErasedDocuments)
@@ -94,7 +118,8 @@ export const erasedDocumentsDone = (
     .where(
       and(
         eq(brainErasedDocuments.purgeId, purgeId),
-        isNull(brainErasedDocuments.doneAt)
+        isNull(brainErasedDocuments.doneAt),
+        holds
       )
     );
 
@@ -104,8 +129,12 @@ export const erasedDocumentsDone = (
  */
 export const runningPurgeMs = 60 * 60 * 1000;
 
-/** The rowid of an erasure record: its place in the order they were written. */
-const sequence = sql<number>`${brainErasedDocuments}.rowid`;
+/**
+ * An erasure record's place in the order they were written: AUTOINCREMENT,
+ * so one written after a mark is always above it, also when the records
+ * of an attempt before were deleted (`erasedDocumentsRecord`).
+ */
+const sequence = brainErasedDocuments.seq;
 
 /**
  * How far the erasure records reach as a copy starts reading its
