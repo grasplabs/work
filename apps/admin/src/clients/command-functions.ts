@@ -7,11 +7,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 
 import { commandInputSchema, giveCommand } from "./commands.ts";
-import type { CommandAnswer } from "./commands.ts";
+import type { GivenAnswer } from "./commands.ts";
 
 export const commandFn = createServerFn({ method: "POST" })
   .validator(commandInputSchema)
   .handler(
-    async ({ data, context }): Promise<CommandAnswer> =>
+    async ({ data, context }): Promise<GivenAnswer> =>
       await giveCommand(env, context.staff, data)
   );

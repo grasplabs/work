@@ -41,14 +41,18 @@ export const commandTimeoutMs = 30_000;
 export const commandInputSchema = z.object({
   clientId: z.string().min(1).max(63),
   /**
-   * The command's id and when it was issued, chosen by the page: a retry
-   * of one left unanswered keeps both, so core applies it once even if it
-   * took the first delivery, and refuses it once it is no longer fresh
-   * (core's src/admin-command.ts counts on a command never being issued
-   * again).
+   * The command's id, chosen by the page: a retry of one left unanswered
+   * keeps it, so core applies it once even if it took the first delivery.
    */
   id: z.uuid(),
-  issuedAt: z.iso.datetime(),
+  /**
+   * A retry's issue time, as the admin issued it the first time
+   * (`GivenAnswer.issuedAt`); none for a new command, which the admin
+   * issues now. Core counts on a command never being issued again
+   * (src/admin-command.ts), and the admin's clock, not the browser's,
+   * is the one core's holds it to.
+   */
+  issuedAt: z.iso.datetime().optional(),
   command: adminCommandSchema,
 });
 
@@ -199,16 +203,23 @@ export const envelopeOf = (
   issuedAt,
 });
 
+/** A command's answer, with when it was issued, for the page to give again if it went unanswered. */
+export interface GivenAnswer extends CommandAnswer {
+  issuedAt: string;
+}
+
 /** What `staff` asked of client `clientId`'s onboarding, delivered: applied, or why not. */
 export const giveCommand = async (
   env: Env,
   staff: Pick<Staff, "email">,
   input: z.input<typeof commandInputSchema>
-): Promise<CommandAnswer> => {
-  const { clientId, id, issuedAt, command } = commandInputSchema.parse(input);
-  return await deliverCommand(
+): Promise<GivenAnswer> => {
+  const { clientId, id, command, ...retry } = commandInputSchema.parse(input);
+  const issuedAt = retry.issuedAt ?? new Date().toISOString();
+  const answer = await deliverCommand(
     env,
     clientId,
     envelopeOf(staff, { id, issuedAt }, command)
   );
+  return { ...answer, issuedAt };
 };

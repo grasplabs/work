@@ -45,13 +45,13 @@ const liveClient = async () => {
 
 const pause: AdminCommand = { type: "onboarding.pause", payload: {} };
 
-/** Gives `command` to `clientId`'s onboarding under `id`, issued at `issuedAt`, as staff (or as nobody, for null). */
+/** Gives `command` to `clientId`'s onboarding under `id` (a retry's issued at `issuedAt`), as staff (or as nobody, for null). */
 const give = async (
   clientId: string,
   command: AdminCommand,
   email: string | null = staff.email,
   id: string = crypto.randomUUID(),
-  issuedAt: string = new Date().toISOString()
+  issuedAt?: string
 ) =>
   await callServerFn(commandFn, { clientId, id, issuedAt, command }, { email });
 
@@ -93,8 +93,8 @@ describe("commands from an organization's pages", () => {
         () => "answered",
         () => "refused"
       ),
-      give(offboarded.clientId, pause),
-      give("no-such-client", pause),
+      give(offboarded.clientId, pause).then(({ refused }) => ({ refused })),
+      give("no-such-client", pause).then(({ refused }) => ({ refused })),
     ]);
     expect({
       outcomes,
@@ -121,36 +121,42 @@ describe("commands from an organization's pages", () => {
     };
     const remindId = crypto.randomUUID();
     const pauseId = crypto.randomUUID();
-    const issuedAt = new Date().toISOString();
 
-    const answers = [
-      await give(asked.clientId, remind, staff.email, remindId),
-      await give(asked.clientId, pause, staff.email, pauseId, issuedAt),
-      // Given again after an answer that didn't come: the same id, issued
-      // when it was, so core applies it once (core's src/admin-command.ts).
-      await give(asked.clientId, pause, staff.email, pauseId, issuedAt),
-    ];
+    const before = Date.now();
+    const reminded = await give(asked.clientId, remind, staff.email, remindId);
+    const paused = await give(asked.clientId, pause, staff.email, pauseId);
+    // Given again after an answer that didn't come: the same id, issued
+    // when the admin first issued it, so core applies it once (core's
+    // src/admin-command.ts).
+    const again = await give(
+      asked.clientId,
+      pause,
+      staff.email,
+      pauseId,
+      paused.issuedAt
+    );
     expect({
-      answers,
+      answers: [reminded, paused, again].map(({ refused }) => refused),
       commands: asked.account.commands.map(({ type, payload, staff: by }) => ({
         type,
         payload,
         by: by.email,
       })),
       ids: asked.account.commands.map(({ id }) => id),
-      issued: asked.account.commands
-        .slice(1)
-        .map((each) => each.issuedAt === issuedAt),
+      // Issued by the admin as it delivered them, the retry when its first was.
+      issued: asked.account.commands.map(({ issuedAt }) => issuedAt),
+      byAdmin: Date.parse(paused.issuedAt) >= before,
       other: other.account.commands.length,
     }).toStrictEqual({
-      answers: [{ refused: null }, { refused: null }, { refused: null }],
+      answers: [null, null, null],
       commands: [
         { ...remind, by: staff.email },
         { ...pause, by: staff.email },
         { ...pause, by: staff.email },
       ],
       ids: [remindId, pauseId, pauseId],
-      issued: [true, true],
+      issued: [reminded.issuedAt, paused.issuedAt, paused.issuedAt],
+      byAdmin: true,
       other: 0,
     });
   });
@@ -164,7 +170,8 @@ describe("commands from an organization's pages", () => {
     /** What the page is told when core refuses with `refusal`. */
     const toldFor = async (refusal: { status: number; code: string }) => {
       account.commandRefusal = refusal;
-      return await give(clientId, askIn);
+      const { refused } = await give(clientId, askIn);
+      return { refused };
     };
     const answers = [
       await toldFor({ status: 403, code: "onboarding.staff_only" }),
