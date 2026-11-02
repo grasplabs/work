@@ -15,9 +15,8 @@ import { z } from "zod";
 
 // The keys a chat platform signs its requests to Grasp with, for core's
 // channel door (core's src/channels), which checks every request against
-// them and never fetches them itself: Microsoft's Bot Framework for Teams,
-// and Google's for the Pub/Sub pushes that tell Gmail's door of new mail.
-// Each platform's OpenID metadata names where its key set is.
+// them and never fetches them itself: Microsoft's Bot Framework for Teams.
+// The platform's OpenID metadata names where its key set is.
 //
 // Threat model, and how each is closed:
 //
@@ -49,12 +48,6 @@ const sources = {
       "https://login.botframework.com/v1/.well-known/openidconfiguration"
     ),
     keysHost: "login.botframework.com",
-  },
-  gmail: {
-    metadata: new URL(
-      "https://accounts.google.com/.well-known/openid-configuration"
-    ),
-    keysHost: "www.googleapis.com",
   },
 } as const satisfies Record<
   ChannelKeyPlatform,
