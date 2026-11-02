@@ -137,7 +137,7 @@ export type CallOutcome =
 /** One call, as far as connect got with it. */
 export interface CallRecord {
   /** The call as core stated it, once it parsed. */
-  call?: Omit<ConnectCall, "capability" | "input">;
+  call?: Omit<ConnectCall, "capability" | "input" | "attachments">;
   /** What its capability says, once verified: who called, for whom. */
   claims?: CapabilityClaims;
   /** Known once the action is found, or from a stored result. */

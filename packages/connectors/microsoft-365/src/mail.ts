@@ -1,4 +1,6 @@
 import {
+  attachedFiles,
+  attachmentsInput,
   defineTool,
   invalidCode,
   ToolError,
@@ -9,6 +11,7 @@ import {
   contentAs,
   fromBase64,
   readAsSchema,
+  toBase64,
 } from "@grasp-os/connector-kit/content";
 import { stampHeader } from "@grasp-os/connector-kit/manifest";
 import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
@@ -630,6 +633,9 @@ const draftInput = z.strictObject({
   cc: recipientsSchema.optional(),
   bcc: recipientsSchema.optional(),
   replyTo: recipientsSchema.optional(),
+  // Run files a workflow attaches (GRA-887), each by digest; their bytes
+  // come beside the input, checked by the kit before the tool runs.
+  attachments: attachmentsInput,
 });
 
 /**
@@ -645,6 +651,7 @@ const draftFields = [
   { label: "Subject", input: "subject" },
   { label: "Body", input: "body" },
   { label: "Body format", input: "bodyType" },
+  { label: "Attachments", input: "attachments" },
 ] as const;
 
 /** Addresses as Graph takes them. */
@@ -667,8 +674,9 @@ const graphDraft = (
     cc,
     bcc,
     replyTo,
+    attachments,
   }: z.output<typeof draftInput>,
-  { key: effectKey, stamp }: Effect
+  effect: Effect
 ) => ({
   subject,
   body: { contentType: bodyType ?? "text", content: body },
@@ -676,14 +684,31 @@ const graphDraft = (
   ccRecipients: recipients(cc),
   bccRecipients: recipients(bcc),
   replyTo: recipients(replyTo),
-  ...(stamp === null
+  // Inline file attachments, as Graph's JSON takes them: the name and type
+  // are the run file's own (a name no folder or control character is in,
+  // a type from a closed list) in JSON strings, the content base64.
+  ...(attachments === undefined || attachments.length === 0
     ? {}
-    : { internetMessageHeaders: [{ name: stampHeader, value: stamp }] }),
-  ...(effectKey === null
+    : {
+        attachments: attachedFiles(attachments, effect).map(
+          ({ name, type, bytes }) => ({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name,
+            contentType: type,
+            contentBytes: toBase64(bytes),
+          })
+        ),
+      }),
+  ...(effect.stamp === null
+    ? {}
+    : {
+        internetMessageHeaders: [{ name: stampHeader, value: effect.stamp }],
+      }),
+  ...(effect.key === null
     ? {}
     : {
         singleValueExtendedProperties: [
-          { id: effectPropertyId, value: effectKey },
+          { id: effectPropertyId, value: effect.key },
         ],
       }),
 });
@@ -725,6 +750,7 @@ const sendMail = defineTool({
   readOnly: false,
   reach: "others",
   destructive: false,
+  takesFiles: true,
   resource: "mailbox",
   // Recovery `none`: a sent email of unknown outcome stays unknown. Not
   // finding its Sent Items copy doesn't prove it wasn't sent: a shared
@@ -764,6 +790,7 @@ const createDraft = defineTool({
   readOnly: false,
   reach: "company",
   destructive: false,
+  takesFiles: true,
   resource: "mailbox",
   routes: [get("/messages"), post("/messages")],
   describe: { title: "Create a draft email", fields: draftFields },
