@@ -36,6 +36,13 @@ const manifestSchema = z.object({
 
 const idSchema = z.object({ id: z.string() });
 
+/** A piece of a document in an export's documents file: its first, or one continuing it. */
+const pieceSchema = z.object({
+  id: z.string().optional(),
+  continues: z.string().optional(),
+  versions: z.array(z.object({ number: z.number() })),
+});
+
 /** A line of an export's documents file, as far as these tests read it. */
 const documentRowSchema = z.object({
   id: z.string(),
@@ -459,5 +466,61 @@ describe("exporting the company's Brain", () => {
         row?.transcript === null ||
         numbers.includes(row?.transcript.version ?? -1),
     }).toStrictEqual({ ended: "ok", saved: true, transcriptVersionHeld: true });
+  });
+
+  it("splits a document's history across files once it outgrows one, losing and repeating no version", async () => {
+    const { brain } = testHost();
+    const archive = await newCollection(brain, "Archive");
+    // Each version near the most a version holds: together more than one
+    // file of the export holds.
+    const versionCount = 9;
+    const versionChars = 1_000_000;
+    let id = "";
+    for (let number = 1; number <= versionCount; number += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one version after another
+      const saved = await writeVersion(brain, admin, {
+        collection: archive,
+        path: "ledger.md",
+        text: `# Ledger ${String(number)}\n${"x".repeat(versionChars)}`,
+        ifVersion: number - 1,
+        message: null,
+        restoredFrom: null,
+      });
+      ({ id } = saved);
+    }
+    const onExport = hostWith();
+    const exportId = await begun(brain, onExport);
+    const ended = await ranToEnd(brain, exportId, onExport);
+    const manifest = manifestSchema.parse(
+      JSON.parse(await fileText(brain, exportId, manifestName))
+    );
+    const pieces: { file: string; numbers: number[] }[] = [];
+    for (const { name } of manifest.files) {
+      if (name.startsWith("documents-")) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time, as each is large
+        const text = await fileText(brain, exportId, name);
+        for (const line of text.split("\n")) {
+          if (line !== "") {
+            const row = pieceSchema.parse(JSON.parse(line));
+            if (row.id === id || row.continues === id) {
+              pieces.push({
+                file: name,
+                numbers: row.versions.map(({ number }) => number),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    expect({
+      ended,
+      files: new Set(pieces.map(({ file }) => file)).size > 1,
+      numbers: pieces.flatMap(({ numbers }) => numbers),
+    }).toStrictEqual({
+      ended: "ok",
+      files: true,
+      numbers: Array.from({ length: versionCount }, (_, index) => index + 1),
+    });
   });
 });
