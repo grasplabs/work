@@ -40,6 +40,11 @@ export const commandTimeoutMs = 30_000;
 /** What staff ask, for one organization. */
 export const commandInputSchema = z.object({
   clientId: z.string().min(1).max(63),
+  /**
+   * The command's id, chosen by the page: a retry of one left unanswered
+   * keeps it, so core applies it once even if it took the first delivery.
+   */
+  id: z.uuid(),
   command: adminCommandSchema,
 });
 
@@ -176,12 +181,13 @@ export const deliverCommand = async (
   }
 };
 
-/** `command` from `staff`, in its envelope: a new id, issued now. */
+/** `command` from `staff`, in its envelope under `id`, issued now. */
 export const envelopeOf = (
   staff: Pick<Staff, "email">,
+  id: string,
   command: AdminCommand
 ): AdminCommandEnvelopeInput => ({
-  id: crypto.randomUUID(),
+  id,
   ...command,
   staff: { email: staff.email },
   issuedAt: new Date().toISOString(),
@@ -193,6 +199,6 @@ export const giveCommand = async (
   staff: Pick<Staff, "email">,
   input: z.input<typeof commandInputSchema>
 ): Promise<CommandAnswer> => {
-  const { clientId, command } = commandInputSchema.parse(input);
-  return await deliverCommand(env, clientId, envelopeOf(staff, command));
+  const { clientId, id, command } = commandInputSchema.parse(input);
+  return await deliverCommand(env, clientId, envelopeOf(staff, id, command));
 };

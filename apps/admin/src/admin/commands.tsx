@@ -25,7 +25,7 @@ import {
 } from "@grasp-os/ui/components/native-select";
 import { useRouter } from "@tanstack/react-router";
 import type { ComponentProps, ReactNode } from "react";
-import { useId } from "react";
+import { useId, useRef } from "react";
 
 import { commandFn } from "../clients/command-functions.ts";
 import type { CommandRefusal } from "../clients/commands.ts";
@@ -57,16 +57,29 @@ const refusals: Readonly<Record<CommandRefusal, string>> = {
 export const useCommand = (clientId: string) => {
   const router = useRouter();
   const action = useAction(refusals);
+  // The last command given until its answer comes, and its id: core may
+  // have applied one whose answer never came, so giving it again keeps the
+  // id, and core applies it once.
+  const unanswered = useRef<{ key: string; id: string } | null>(null);
   /** Gives `command`: whether it applied. */
   const give = async (command: AdminCommand): Promise<boolean> => {
+    const key = JSON.stringify(command);
+    const id =
+      unanswered.current?.key === key
+        ? unanswered.current.id
+        : crypto.randomUUID();
+    unanswered.current = { key, id };
     let applied = false;
     await action.run(async () => {
       const answer = await thenRefresh(
-        async () => await commandFn({ data: { clientId, command } }),
+        async () => await commandFn({ data: { clientId, id, command } }),
         async () => {
           await router.invalidate();
         }
       );
+      if (answer.refused !== "not_answered" && answer.refused !== "pending") {
+        unanswered.current = null;
+      }
       applied = answer.refused === null;
       return answer;
     });

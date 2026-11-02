@@ -2,7 +2,6 @@ import type { AdminCommand } from "@grasp-os/shared/admin-command";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { commandFn } from "../src/clients/command-functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
@@ -46,12 +45,13 @@ const liveClient = async () => {
 
 const pause: AdminCommand = { type: "onboarding.pause", payload: {} };
 
-/** Gives `command` to `clientId`'s onboarding, as staff (or as nobody, for null). */
+/** Gives `command` to `clientId`'s onboarding under `id`, as staff (or as nobody, for null). */
 const give = async (
   clientId: string,
   command: AdminCommand,
-  email: string | null = staff.email
-) => await callServerFn(commandFn, { clientId, command }, { email });
+  email: string | null = staff.email,
+  id: string = crypto.randomUUID()
+) => await callServerFn(commandFn, { clientId, id, command }, { email });
 
 describe("commands from an organization's pages", () => {
   useStoreSecrets({ deployer: token });
@@ -63,7 +63,7 @@ describe("commands from an organization's pages", () => {
       .where(eq(clients.status, "active"));
   });
 
-  it("go to no core for a caller Access doesn't vouch for, a command the admin can't make, or an organization not deployed", async () => {
+  it("go to no core for a caller Access doesn't vouch for, a command the admin can't make, an id that isn't one, or an organization not deployed", async () => {
     const { clientId, account } = await liveClient();
     const offboarded = await liveClient();
     await db
@@ -87,6 +87,10 @@ describe("commands from an organization's pages", () => {
         () => "answered",
         () => "refused"
       ),
+      give(clientId, pause, staff.email, "again").then(
+        () => "answered",
+        () => "refused"
+      ),
       give(offboarded.clientId, pause),
       give("no-such-client", pause),
     ]);
@@ -98,6 +102,7 @@ describe("commands from an organization's pages", () => {
         "refused",
         "refused",
         "refused",
+        "refused",
         { refused: "not_deployed" },
         { refused: "not_deployed" },
       ],
@@ -105,19 +110,23 @@ describe("commands from an organization's pages", () => {
     });
   });
 
-  it("go to the organization asked for alone, signed with its own key, each with its own id, naming the staff member", async () => {
+  it("go to the organization asked for alone, signed with its own key, under the id the page gave, naming the staff member", async () => {
     const asked = await liveClient();
     const other = await liveClient();
     const remind: AdminCommand = {
       type: "onboarding.remind",
       payload: { people: ["lisa", "tom"] },
     };
+    const remindId = crypto.randomUUID();
+    const pauseId = crypto.randomUUID();
 
     const answers = [
-      await give(asked.clientId, remind),
-      await give(asked.clientId, pause),
+      await give(asked.clientId, remind, staff.email, remindId),
+      await give(asked.clientId, pause, staff.email, pauseId),
+      // Given again after an answer that didn't come: the same id, so core
+      // applies it once (core's src/admin-command.ts).
+      await give(asked.clientId, pause, staff.email, pauseId),
     ];
-    const ids = asked.account.commands.map(({ id }) => id);
     expect({
       answers,
       commands: asked.account.commands.map(({ type, payload, staff: by }) => ({
@@ -125,17 +134,16 @@ describe("commands from an organization's pages", () => {
         payload,
         by: by.email,
       })),
-      ids: ids.every((id) => z.uuid().safeParse(id).success),
-      distinct: new Set(ids).size,
+      ids: asked.account.commands.map(({ id }) => id),
       other: other.account.commands.length,
     }).toStrictEqual({
-      answers: [{ refused: null }, { refused: null }],
+      answers: [{ refused: null }, { refused: null }, { refused: null }],
       commands: [
         { ...remind, by: staff.email },
         { ...pause, by: staff.email },
+        { ...pause, by: staff.email },
       ],
-      ids: true,
-      distinct: 2,
+      ids: [remindId, pauseId, pauseId],
       other: 0,
     });
   });

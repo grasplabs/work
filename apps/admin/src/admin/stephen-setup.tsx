@@ -9,8 +9,10 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
+  stephenLimitMaxLength,
   stephenLimitsMax,
   stephenSetupSchema,
+  stephenTermMaxLength,
   stephenTermsMax,
 } from "@grasp-os/shared/onboarding-staff";
 import { Button } from "@grasp-os/ui/components/button";
@@ -65,6 +67,12 @@ const problemOf = (languages: string[], limits: string[], terms: string[]) => {
   }
   if (terms.length > stephenTermsMax) {
     return `At most ${stephenTermsMax} words.`;
+  }
+  if (limits.some((line) => line.length > stephenLimitMaxLength)) {
+    return `Each thing to leave alone at most ${stephenLimitMaxLength} characters.`;
+  }
+  if (terms.some((line) => line.length > stephenTermMaxLength)) {
+    return `Each word at most ${stephenTermMaxLength} characters.`;
   }
   return null;
 };
