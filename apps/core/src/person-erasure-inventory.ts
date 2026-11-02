@@ -372,6 +372,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "brain.brain_payloads": { company: "uploads; their Personal ones go" },
   "brain.brain_erased_evidence": { kept: "IDs of evidence erased" },
+  "brain.brain_purges": {
+    kept: "each purge's own record: the admin who ran it, by ID",
+  },
+  "brain.brain_purge_steps": noPerson,
   "brain.brain_erased_documents": {
     kept: "the purge's own record: document IDs and hashes of their places",
   },
