@@ -145,7 +145,7 @@ export interface WorkflowRunTrace {
   tasks: { task: string; state: TraceState; attempts: number }[];
   /**
    * Its tasks' steps on this page, in the order the run reached them;
-   * `tasks` are of this page's steps and every page's before it.
+   * `tasks` are of this page's steps.
    */
   steps: TraceStep[];
   /** False when more steps follow on a page after this one. */

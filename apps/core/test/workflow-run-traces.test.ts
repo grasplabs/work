@@ -1,8 +1,14 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
-import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import type {
+  TraceStep,
+  WorkflowRunTrace,
+} from "@grasp-os/shared/workflow-diagrams";
+import {
+  workflowNamespace,
+  workflowRunTraceMaxPageSize,
+} from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -431,6 +437,28 @@ const toldOf = ({ steps }: Pick<WorkflowRunTrace, "steps">) =>
       `${task} ${state} ${attempts} ${errorCode ?? "-"}`
   );
 
+/** Starts version 1 of workflow `id` as `by`: its run's ID. */
+const liveRunOf = async (by: Acting, id: string): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    {
+      version: 1,
+      input: { who: "Ada" },
+      key: unique(),
+    }
+  );
+  if (runId === null) {
+    throw new Error("The start made a run");
+  }
+  return runId;
+};
+
+/** The steps of a loop's `note` task in `trace`. */
+const notesOf = ({ steps }: { steps: TraceStep[] }) =>
+  steps.filter(({ task }) => task === "note");
+
 /** A compute module whose `fail` always fails, as a flaky dependency's. */
 const failingModule = `import { compute, v } from "@grasp-os/sdk/compute";
 
@@ -709,4 +737,103 @@ describe("a run's trace, read over the session API", () => {
       same: whole.steps,
     });
   });
+
+  it(
+    "reads a live run's journal a bounded share per page, its waiting branch beside a long loop, each step once and none left out",
+    { timeout: 240_000 },
+    async () => {
+      const builder = await signedInBuilder();
+      const workflow = await createWorkflowResource(
+        env,
+        builder.acting,
+        `traced-${unique()}`
+      );
+      // More records than a page reads: some four an item's step.
+      const items = 600;
+      await publishWorkflowVersion(env, builder.acting, workflow.id, {
+        definition: definitionOf(workflow.name, "1.0.0", [
+          {
+            pick: {
+              fork: {
+                branches: [
+                  { hold: { wait: "PT1H" } },
+                  {
+                    "each-name": {
+                      for: { in: `\${ [range(0; ${items})] }` },
+                      do: [{ note: { set: "${ . }" } }],
+                    },
+                  },
+                ],
+              },
+              metadata: { grasp: { concurrency: 2 } },
+            },
+          },
+        ]),
+        basedOn: null,
+      });
+      // Room for the loop's steps, past the tests' lowered step limit.
+      const configuredLimits = env.TEST_QUOTA_LIMITS;
+      env.TEST_QUOTA_LIMITS = { workflowSteps: 1000 };
+      try {
+        const runId = await liveRunOf(builder.acting, workflow.id);
+        const pageSize = workflowRunTraceMaxPageSize;
+        // Once the loop is done, while its other branch still waits.
+        const paged = await vi.waitFor(
+          async () => {
+            const read = await pagedTrace(
+              builder,
+              workflow.id,
+              runId,
+              pageSize
+            );
+            if (notesOf(read).length < items) {
+              throw new Error("The loop hasn't run every item yet");
+            }
+            return read;
+          },
+          { timeout: 200_000, interval: 2000 }
+        );
+        const run = await resourceRunFor(
+          env,
+          builder.acting,
+          workflow.id,
+          runId
+        );
+        await builder.api.workflowResources.terminateRun(workflow.id, runId);
+        const ordinals = paged.steps.map(({ ordinal }) => ordinal);
+
+        expect({
+          status: run.status,
+          // Each item's step once, every one of them.
+          notes: notesOf(paged)
+            .map(({ item }) => Number(item?.split(".").at(-1)))
+            .toSorted((a, b) => a - b),
+          hold: paged.steps
+            .filter(({ task }) => task === "hold")
+            .map(({ state }) => state),
+          // In the order the run reached them: none told twice.
+          ordered: ordinals.every(
+            (ordinal, index) =>
+              index === 0 || (ordinals[index - 1] ?? 0) < ordinal
+          ),
+          // A page stopped at its share of the journal, short of a full
+          // page, and the next went on from it.
+          bounded: paged.pages.some(
+            ({ steps, nextCursor }) =>
+              nextCursor !== null && steps.length < pageSize
+          ),
+          last: paged.pages.at(-1)?.complete,
+        }).toStrictEqual({
+          status: "running",
+          notes: Array.from({ length: items }, (_, index) => index),
+          hold: ["waiting"],
+          ordered: true,
+          bounded: true,
+          last: true,
+        });
+      } finally {
+        env.TEST_QUOTA_LIMITS = configuredLimits;
+      }
+    }
+  );
 });

@@ -1267,6 +1267,83 @@ describe("grasp.model calls of JSON workflows", () => {
     }
   });
 
+  it("shows a call waiting for its AI provider in its run's trace as its task's step waiting, then each run again an attempt more: reached, or failed", async () => {
+    const admin = await person("admin");
+    const signedIn = await signedInApi(idp, "builder");
+    const ada = identityOf(signedIn.userId, "builder");
+    const before = env.WORKFLOW_OFF_WAIT_MS;
+    env.WORKFLOW_OFF_WAIT_MS = "59000";
+    try {
+      const provider: { answers: "refused" | "greets" | "off-schema" } = {
+        answers: "refused",
+      };
+      const fake = await answeringProvider(
+        () => {
+          if (provider.answers === "greets") {
+            return answer('{"line":"Hello Ada"}');
+          }
+          return provider.answers === "off-schema"
+            ? answer("Hello, Ada!")
+            : { status: 401, errorType: "authentication_error" };
+        },
+        { models: [allowedModel] }
+      );
+      /** The greeting's steps in the run's trace, as the builder reads it. */
+      const greetOf = async (id: string, runId: string) => {
+        const { steps } = await signedIn.api.workflowResources.runTrace(
+          id,
+          runId,
+          { doors: false }
+        );
+        return steps
+          .filter(({ task }) => task === "greet")
+          .map(
+            ({ state, attempts, endedAt }) =>
+              `${state} ${attempts} ${endedAt === null ? "open" : "ended"}`
+          );
+      };
+      /** A run of a greeting that waits for its provider, then goes on once `answers`. */
+      const waitedThen = async (answers: "greets" | "off-schema") => {
+        const { workflow } = await greetingWorkflow(ada, admin);
+        provider.answers = "refused";
+        const runId = await started(ada, workflow.id);
+        await providerWaitOf(ada, workflow.id, runId);
+        const waiting = await greetOf(workflow.id, runId);
+        provider.answers = answers;
+        // The admin replaces the key (the provider's fake knows it by its
+        // value, so it stays the same).
+        const { api } = await signedInApi(idp, "admin");
+        await api.aiProviders.add({ provider: "mistral", key: fake.key });
+        const run = await ended(ada, workflow.id, runId);
+        return {
+          status: run.status,
+          waiting,
+          after: await greetOf(workflow.id, runId),
+        };
+      };
+
+      expect({
+        greets: await waitedThen("greets"),
+        offSchema: await waitedThen("off-schema"),
+      }).toStrictEqual({
+        greets: {
+          status: "completed",
+          // One step: its first attempt refused, then waiting.
+          waiting: ["waiting 1 open"],
+          // Run again once the key works: an attempt more.
+          after: ["reached 2 ended"],
+        },
+        offSchema: {
+          status: "failed",
+          waiting: ["waiting 1 open"],
+          after: ["failed 2 ended"],
+        },
+      });
+    } finally {
+      env.WORKFLOW_OFF_WAIT_MS = before;
+    }
+  });
+
   it("waits while the provider fails its call with a 5xx and no answer, and goes on by itself once calls work again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

@@ -950,7 +950,7 @@ export const workflowRunTraceOptionsSchema = z
       .default(workflowRunTraceMaxPageSize),
     cursor: z
       .string()
-      .regex(/^(?:0|[1-9]\d{0,15})$/u)
+      .regex(/^(?:0|[1-9]\d{0,15})\.(?:0|[1-9]\d{0,15})$/u)
       .nullable()
       .default(null),
   })
