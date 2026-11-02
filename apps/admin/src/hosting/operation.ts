@@ -103,12 +103,7 @@ import {
 import type { ScriptTarget } from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import {
-  clientProvisions,
-  clients,
-  clientWorkers,
-  releases,
-} from "../db/schema.ts";
+import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
@@ -540,28 +535,16 @@ const assertCanGo = async (
   }
 };
 
-/** When release `id` was built; null when it isn't imported. */
-const builtAtOf = async (
-  db: AdminDatabase,
-  id: string
-): Promise<Date | null> => {
-  const row = await db
-    .select({ builtAt: releases.builtAt })
-    .from(releases)
-    .where(eq(releases.id, id))
-    .get();
-  return row?.builtAt ?? null;
-};
-
 /**
- * Switches client `held.clientId`'s provisioning `operation` to the newer
- * release `releaseId`, as `actor`, audited (`provision.switch_release`):
- * only while the client is still being provisioned and its operation
- * isn't done, so nothing of it is live, and only to a release that has
- * every Durable Object migration its scripts ran (`assertCanGo`). Its
- * next run starts again from its first step on the new release: every
- * step finds what an earlier one did. An older release, or a client
- * that's live, is refused (`operation_release_changed`).
+ * Switches client `held.clientId`'s provisioning `operation` to release
+ * `releaseId`, newer or older, as `actor`, audited
+ * (`provision.switch_release`): only while the client is still being
+ * provisioned and its operation isn't done, so nothing of it is live, and
+ * only to a release that has every Durable Object migration its scripts
+ * ran (`assertCanGo`, the rule a rollback goes by), so a channel set back
+ * mid-setup is followed. Its next run starts again from its first step on
+ * the new release: every step finds what an earlier one did. A client
+ * that's live is refused (`operation_release_changed`).
  */
 const switchProvisionRelease = async (
   db: AdminDatabase,
@@ -581,24 +564,6 @@ const switchProvisionRelease = async (
     .where(eq(clients.id, clientId))
     .get();
   if (client?.status !== "provisioning" || operation.status === "done") {
-    throw changed;
-  }
-  const [from, to] = await Promise.all([
-    builtAtOf(db, operation.releaseId),
-    builtAtOf(db, releaseId),
-  ]);
-  if (to === null) {
-    throw new ProvisionOperationError(
-      "release_not_imported",
-      `Release ${releaseId} isn't imported`
-    );
-  }
-  // Newer as the releases list them: by when built, then by id.
-  const newer =
-    from === null ||
-    to > from ||
-    (to.getTime() === from.getTime() && releaseId > operation.releaseId);
-  if (!newer) {
     throw changed;
   }
   await assertCanGo(db, operation, releaseId, false);
@@ -639,9 +604,10 @@ const switchProvisionRelease = async (
  * Records the operation that provisions client `held.clientId` with
  * release `releaseId`, as `actor`, and returns its id: the one it has
  * already when it has one, so starting again resumes it (spec 40.1). One
- * of an older release is switched to `releaseId` while nothing of the
+ * of another release is switched to `releaseId` while nothing of the
  * client is live (`switchProvisionRelease`), so a client started on a
- * release that can't finish takes a fixed one; anything else is refused
+ * release that can't finish takes a fixed one, and one whose channel was
+ * set back follows it; a live client's is refused
  * (`operation_release_changed`). Only while runner `held` holds the
  * client, in the same statement: a start that lost the client writes
  * nothing.

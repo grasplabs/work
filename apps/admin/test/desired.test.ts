@@ -147,10 +147,33 @@ describe("a channel's plan", () => {
 });
 
 describe("shared secrets behind", () => {
-  it("is a held secret whose fingerprint isn't the rolled-out one, and never before a rollout", () => {
-    const delivered = { connect: { A: "1", B: "2" } };
-    expect(isSecretsBehind(delivered, null)).toBeFalsy();
-    expect(isSecretsBehind(delivered, { A: "1", B: "2", C: "3" })).toBeFalsy();
-    expect(isSecretsBehind(delivered, { A: "1", B: "9" })).toBeTruthy();
+  const before = new Date("2026-11-01T10:00:00Z");
+  const at = new Date("2026-11-01T11:00:00Z");
+  const after = new Date("2026-11-01T12:00:00Z");
+
+  it("is a rolled-out secret delivered with another fingerprint, or not at all, and never before a rollout", () => {
+    const delivered = { connect: { A: "1", B: "2" }, core: { A: "1" } };
+    expect(isSecretsBehind(delivered, before, null)).toBeFalsy();
+    expect(
+      isSecretsBehind(delivered, before, { prints: { A: "1", B: "2" }, at })
+    ).toBeFalsy();
+    expect(
+      isSecretsBehind(delivered, before, { prints: { A: "1", B: "9" }, at })
+    ).toBeTruthy();
+    expect(
+      isSecretsBehind(delivered, before, {
+        prints: { A: "1", B: "2", C: "3" },
+        at,
+      })
+    ).toBeTruthy();
+  });
+
+  it("is never an operation started since the rollout, whatever it delivered", () => {
+    expect(
+      isSecretsBehind({ connect: { A: "2" } }, after, {
+        prints: { A: "1", C: "3" },
+        at,
+      })
+    ).toBeFalsy();
   });
 });

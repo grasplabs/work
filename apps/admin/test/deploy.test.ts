@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  auditEvents,
   channels,
   clientDeploys,
   clientProvisions,
@@ -18,6 +19,7 @@ import {
   checkRevocation,
   rollOutSecrets,
 } from "../src/rollout/shared-secrets.ts";
+import { deliveredShared } from "../src/rollout/targets.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -47,7 +49,11 @@ import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 //   counted failed;
 // - a deploy whose run was terminated left deploying for good;
 // - shared secrets rolled out never reaching a client, or an old one
-//   called revocable while a client still runs it.
+//   called revocable while a client still runs it;
+// - a client deployed again and again once Secrets Store moved on from
+//   what staff rolled out;
+// - a provider key added to the store and rolled out never reaching a
+//   client that didn't have it.
 
 const token = "test-deployer-token-deploy-8c4e1b";
 const cloudflare = mockCloudflareApi(token);
@@ -97,6 +103,31 @@ const releasesOf = async (clientId: string) => {
 
 /** Both Workers on `releaseId`. */
 const on = (releaseId: string) => ({ connect: releaseId, core: releaseId });
+
+/** How many deploys of client `clientId` started, as the audit log keeps them. */
+const startedOf = async (clientId: string): Promise<number> =>
+  await db.$count(
+    auditEvents,
+    and(
+      eq(auditEvents.clientId, clientId),
+      eq(auditEvents.action, "deploy.start")
+    )
+  );
+
+/** The shared secrets client `clientId`'s operation last delivered, by name, whatever Worker holds them. */
+const deliveredNames = async (clientId: string): Promise<string[]> => {
+  const row = await db
+    .select({ progress: clientProvisions.progress })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  const delivered = deliveredShared(row?.progress ?? null);
+  return [
+    ...new Set(
+      Object.values(delivered).flatMap((prints) => Object.keys(prints))
+    ),
+  ].toSorted();
+};
 
 /** Client `clientId`'s last deploy: its release, status and error. */
 const deployOf = async (clientId: string) =>
@@ -465,6 +496,62 @@ describe("rolling shared secrets out", () => {
         storeChanged: [],
         behind: { COMPOSIO_API_KEY: [] },
       },
+    });
+  });
+
+  it("deploys a client once when Secrets Store moved on from what was rolled out, never again for it", async () => {
+    const before = await placedRelease("feat(core): before");
+    await releaseToEdge(env, [before]);
+    const client = await live(before);
+    await rollOutSecrets(env, staff);
+    // Deploy platform copied a new Composio key in; staff haven't rolled
+    // it out, but a deploy delivers what the store holds.
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-moved"
+    );
+    await using runs = followRuns();
+    const release = await placedRelease("feat(core): after the store moved");
+
+    await releaseToEdge(env, [release]);
+    await runs.converge();
+    await runs.converge();
+
+    expect({
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      started: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it("delivers a provider key added to the store and rolled out to a client that didn't have it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    await runs.converge();
+    const before = await deliveredNames(client.clientId);
+    await setStoreSecret(
+      env.ANTHROPIC_API_KEY,
+      "ANTHROPIC_API_KEY",
+      "anthropic-key"
+    );
+
+    await rollOutSecrets(env, staff);
+    await runs.converge();
+    const after = await deliveredNames(client.clientId);
+
+    expect({
+      before: before.includes("ANTHROPIC_API_KEY"),
+      after: after.includes("ANTHROPIC_API_KEY"),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      before: false,
+      after: true,
+      deploy: { releaseId: release, status: "done", error: null },
     });
   });
 

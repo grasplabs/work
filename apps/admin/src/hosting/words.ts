@@ -51,7 +51,7 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
   operation_release_changed:
-    "Its provisioning is on a newer release already, or it's live: pick that release or a later one.",
+    "It's live already, or its provisioning changed release as this started: provisioning never changes what a live client runs.",
   unknown_worker: "The release has a Worker other than core and connect.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",

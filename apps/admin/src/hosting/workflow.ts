@@ -178,7 +178,8 @@ const startAttempt = async (
 /**
  * Starts provisioning placed client `clientId` with release `releaseId`,
  * as `staff`, or resumes its operation: records the operation (or finds
- * it: one of another release is refused, `operation_release_changed`),
+ * it, switched to `releaseId` while nothing of it is live: a live
+ * client's is refused, `operation_release_changed`),
  * claims the client for a new attempt in place of its current runner once
  * that has ended, and starts the attempt. Refused (`already_running`)
  * while another runner is still going, and when another claim got there

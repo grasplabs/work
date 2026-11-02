@@ -952,7 +952,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("starting it again resumes the client's one operation, switched to a newer release while nothing is live, and refuses an older one", async () => {
+  it("starting it again resumes the client's one operation, switched to a newer or an older release while nothing is live", async () => {
     const older = await importRelease();
     const manifest = await importRelease();
     const { clientId, operationId, held } = await setUp(manifest);
@@ -961,7 +961,7 @@ describe("provisioning a placed client", () => {
     ).resolves.toBe(operationId);
     await expect(
       startClientProvision(db, staff, held, older.releaseId)
-    ).rejects.toMatchObject({ code: "operation_release_changed" });
+    ).resolves.toBe(operationId);
     const newer = await importRelease();
     await expect(
       startClientProvision(db, staff, held, newer.releaseId)

@@ -384,6 +384,30 @@ describe("provisioning that heals itself", () => {
     await terminated(runs.started.at(-1) ?? "");
   });
 
+  it("resumes onto an older release once its channel is set back to one, when no migration stands in the way", async () => {
+    const older = await importedRelease();
+    const newer = await importedRelease();
+    await onChannel(newer);
+    const clientId = await added();
+    await stopped(clientId, await startedByStaff(clientId), "probe_unanswered");
+    // Staff set the channel back while the client's setup was stopped.
+    await onChannel(older);
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
+
+    const resumed = await reconcileClient(env, clientId, later());
+    const [after] = await db
+      .select({ releaseId: clientProvisions.releaseId })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, clientId));
+
+    expect({
+      resumed,
+      to: after?.releaseId,
+      starts: runs.started.length,
+    }).toStrictEqual({ resumed: "resumed", to: older, starts: 1 });
+    await terminated(runs.started.at(-1) ?? "");
+  });
+
   it("asks a person to look when resuming is refused for something lasting, and only waits on another run", async () => {
     const clientId = await added();
     await stopped(clientId, await startedByStaff(clientId), "probe_unanswered");

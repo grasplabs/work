@@ -52,6 +52,7 @@ import { sharedSecretPrints } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
+import type { RolledOut } from "./desired.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
 import { RolloutError } from "./errors.ts";
@@ -236,19 +237,22 @@ export const sharedSecretsStatus = async (
   return [...matches.values()].every(Boolean);
 };
 
-/** The fingerprints staff last rolled out, by name; null before any rollout. */
+/** The shared secrets staff last rolled out, and when; null before any rollout. */
 export const rolledOutPrints = async (
   db: AdminDatabase
-): Promise<SharedPrints | null> => {
+): Promise<RolledOut | null> => {
   const row = await db
-    .select({ prints: rolledOutSecrets.prints })
+    .select({
+      prints: rolledOutSecrets.prints,
+      at: rolledOutSecrets.rolledOutAt,
+    })
     .from(rolledOutSecrets)
     .get();
   if (row === undefined) {
     return null;
   }
   const parsed = sharedPrintsSchema.safeParse(JSON.parse(row.prints));
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? { prints: parsed.data, at: row.at } : null;
 };
 
 /**

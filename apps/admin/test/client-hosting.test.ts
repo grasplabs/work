@@ -331,7 +331,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: own, switched: [] });
   });
 
-  it("resumes the client's one operation where it stopped, keeps it where it's placed, and refuses another release", async () => {
+  it("resumes the client's one operation where it stopped, keeps it where it's placed, and takes an older release back", async () => {
     const clientId = await client();
     const releaseId = await importedRelease();
     using attempts = followAttempts();
@@ -372,7 +372,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
 
     // Stopped with nothing live: resuming offers the release it should
     // run, a newer one only once staff pin it, which then takes its
-    // operation over; an older one is refused.
+    // operation over, as an older one pinned again does.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);
     const switched = await place(clientId, newer);
@@ -397,9 +397,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         error: "wfp_schedule_unqualified",
       },
       switchedBy: [caller],
-      older: { refused: "operation_release_changed" },
-      after: { releaseId: newer },
+      older: { refused: null },
+      after: { releaseId },
     });
+    await latestStopped(attempts);
   });
 
   it("says an operation left running with no attempt at all is gone, for staff to resume", async () => {

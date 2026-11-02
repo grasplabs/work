@@ -59,7 +59,7 @@ import {
   stateOf,
   targetOf,
 } from "./desired.ts";
-import type { ChannelReleases, ClientFacts } from "./desired.ts";
+import type { ChannelReleases, ClientFacts, RolledOut } from "./desired.ts";
 import { rolledOutPrints } from "./shared-secrets.ts";
 import { channelReleases, deliveredShared } from "./targets.ts";
 
@@ -88,6 +88,7 @@ const factColumns = {
   pinnedReleaseId: clients.pinnedReleaseId,
   running: runningSql,
   progress: clientProvisions.progress,
+  operationStartedAt: clientProvisions.createdAt,
   deployRelease: clientDeploys.releaseId,
   deployStatus: clientDeploys.status,
   deployError: clientDeploys.error,
@@ -108,7 +109,7 @@ const clientPage = async (
   db: AdminDatabase,
   channel: Channel,
   after: string | null,
-  rolledOut: Record<string, string> | null,
+  rolledOut: RolledOut | null,
   limit: number = pageSize
 ): Promise<ClientRow[]> => {
   const rows = await db
@@ -131,7 +132,11 @@ const clientPage = async (
     channel: row.channel,
     pinnedReleaseId: row.pinnedReleaseId,
     running: row.running,
-    secretsBehind: isSecretsBehind(deliveredShared(row.progress), rolledOut),
+    secretsBehind: isSecretsBehind(
+      deliveredShared(row.progress),
+      row.operationStartedAt,
+      rolledOut
+    ),
     deploy:
       row.deployRelease === null ||
       row.deployStatus === null ||
@@ -157,7 +162,7 @@ const clientPage = async (
 export const eachPage = async (
   db: AdminDatabase,
   channel: Channel,
-  rolledOut: Record<string, string> | null,
+  rolledOut: RolledOut | null,
   visit: (page: ClientRow[]) => Promise<"stop" | "next"> | "stop" | "next"
 ): Promise<void> => {
   let after: string | null = null;
@@ -409,7 +414,7 @@ const reconcileChannel = async (
   env: Env,
   channel: Channel,
   releases: ChannelReleases,
-  rolledOut: Record<string, string> | null
+  rolledOut: RolledOut | null
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   let deploying = 0;

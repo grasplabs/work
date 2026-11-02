@@ -192,23 +192,38 @@ export const failsChannel = (
 ): boolean =>
   client.pinnedReleaseId === null && stateOf(client, releases) === "failed";
 
+/** The shared secrets staff last rolled out: each one's fingerprint, by name, and when. */
+export interface RolledOut {
+  prints: Readonly<Record<string, string>>;
+  at: Date;
+}
+
 /**
- * Whether shared secrets as last delivered (`delivered`, by Worker then
- * name, each a keyed fingerprint) differ from the ones staff rolled out
- * (`rolledOut`, by name): any secret a Worker holds whose fingerprint
- * isn't the rolled-out one. Nothing rolled out yet: never behind.
+ * Whether a client's shared secrets are behind the ones staff rolled out
+ * (`rolledOut`): its operation, started at `startedAt`, delivered
+ * (`delivered`, by Worker then name, each a keyed fingerprint) another
+ * fingerprint of a rolled-out secret, or none at all, such as a provider
+ * key added since. An operation started since the rollout is never
+ * behind: it delivered what Secrets Store held then or later, the most a
+ * deploy can, so a deploy after the store moved on settles the client.
+ * Nothing rolled out yet: never behind.
  */
 export const isSecretsBehind = (
   delivered: Readonly<Record<string, Readonly<Record<string, string>>>>,
-  rolledOut: Readonly<Record<string, string>> | null
+  startedAt: Date | null,
+  rolledOut: RolledOut | null
 ): boolean => {
   if (rolledOut === null) {
     return false;
   }
-  return Object.values(delivered).some((prints) =>
-    Object.entries(prints).some(
-      ([name, print]) =>
-        Object.hasOwn(rolledOut, name) && rolledOut[name] !== print
-    )
-  );
+  if (startedAt !== null && startedAt >= rolledOut.at) {
+    return false;
+  }
+  const workers = Object.values(delivered);
+  return Object.entries(rolledOut.prints).some(([name, print]) => {
+    const holding = workers.filter((prints) => Object.hasOwn(prints, name));
+    return (
+      holding.length === 0 || holding.some((prints) => prints[name] !== print)
+    );
+  });
 };
