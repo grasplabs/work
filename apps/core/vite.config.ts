@@ -110,6 +110,7 @@ export const screenTests = [
   "test/email-attachments.test.ts",
   "test/mail-ingress.test.ts",
   "test/event-sources.test.ts",
+  "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
   "test/run-controls.test.ts",
   "test/run-summary.test.ts",
