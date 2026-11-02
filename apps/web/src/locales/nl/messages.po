@@ -2273,6 +2273,10 @@ msgstr "Notitie toevoegen"
 msgid "Add one so invoices are paid when they come."
 msgstr "Voeg er een toe, zodat facturen meteen worden betaald."
 
+#: src/activity/pending.tsx
+msgid "add records to {tables}"
+msgstr "records aan {tables} toevoegen"
+
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Iets toevoegen"
@@ -11258,6 +11262,14 @@ msgstr "Opnieuw lezen"
 msgid "Read an email attachment"
 msgstr "Een e-mailbijlage gelezen"
 
+#: src/activity/pending.tsx
+msgid "read and change every record of {tables}"
+msgstr "elk record van {tables} lezen en wijzigen"
+
+#: src/activity/pending.tsx
+msgid "read every record of {tables}"
+msgstr "elk record van {tables} lezen"
+
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
@@ -13504,6 +13516,18 @@ msgstr "Opslag"
 #: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Opslag {store}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can {what}"
+msgstr "Opslag {store} van een workflow. Dit kan: {what}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Opslag {store} van een workflow. Wat deze bewerkingen bereiken, kan nu niet worden getoond"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
+msgstr "Opslag {store} van een workflow. Van wie de records ook zijn, dit kan: {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"

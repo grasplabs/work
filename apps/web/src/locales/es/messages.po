@@ -2273,6 +2273,10 @@ msgstr "Añadir nota"
 msgid "Add one so invoices are paid when they come."
 msgstr "Añade una para que las facturas se paguen al llegar."
 
+#: src/activity/pending.tsx
+msgid "add records to {tables}"
+msgstr "añadir registros a {tables}"
+
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Añadir algo"
@@ -11258,6 +11262,14 @@ msgstr "Leer de nuevo"
 msgid "Read an email attachment"
 msgstr "Leyó un adjunto de correo"
 
+#: src/activity/pending.tsx
+msgid "read and change every record of {tables}"
+msgstr "leer y cambiar todos los registros de {tables}"
+
+#: src/activity/pending.tsx
+msgid "read every record of {tables}"
+msgstr "leer todos los registros de {tables}"
+
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Leyó las llamadas de resultado desconocido de todos"
@@ -13504,6 +13516,18 @@ msgstr "Almacén"
 #: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Almacén {store}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can {what}"
+msgstr "Almacén {store} de un flujo de trabajo. Puede {what}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Almacén {store} de un flujo de trabajo. Ahora no se puede mostrar a qué acceden estas operaciones"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
+msgstr "Almacén {store} de un flujo de trabajo. Sea quien sea el propietario de los registros, puede {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"

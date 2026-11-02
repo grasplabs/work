@@ -2273,6 +2273,10 @@ msgstr "Add note"
 msgid "Add one so invoices are paid when they come."
 msgstr "Add one so invoices are paid when they come."
 
+#: src/activity/pending.tsx
+msgid "add records to {tables}"
+msgstr "add records to {tables}"
+
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Add something"
@@ -11258,6 +11262,14 @@ msgstr "Read again"
 msgid "Read an email attachment"
 msgstr "Read an email attachment"
 
+#: src/activity/pending.tsx
+msgid "read and change every record of {tables}"
+msgstr "read and change every record of {tables}"
+
+#: src/activity/pending.tsx
+msgid "read every record of {tables}"
+msgstr "read every record of {tables}"
+
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
@@ -13504,6 +13516,18 @@ msgstr "Store"
 #: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Store {store}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can {what}"
+msgstr "Store {store}, a workflow's. This can {what}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Store {store}, a workflow's. What these operations reach can't be shown now"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
+msgstr "Store {store}, a workflow's. Whoever owns the records, this can {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
