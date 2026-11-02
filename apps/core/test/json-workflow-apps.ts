@@ -559,3 +559,59 @@ export const liveLineage = async (by: Person) => {
     },
   };
 };
+
+/**
+ * The model the asking workflows here go through: Mistral Large, as a
+ * test's fake provider makes it one the organization chose
+ * (model-provider.ts).
+ */
+export const askedModel = "mistral/mistral-large-latest";
+
+/** A task that asks the model binding `reader` for a line to greet `who` with. */
+export const askTask = {
+  ask: {
+    call: "grasp.model",
+    with: {
+      binding: "reader",
+      instructions: "Greet them.",
+      input: { who: "${ $workflow.input.who }" },
+      outputSchema: objectSchema({ line: { type: "string" } }),
+    },
+    export: { as: "${ {line: .line} }" },
+  },
+};
+
+/** The tasks of a workflow that asks its model for a line, then ends with it. */
+export const askingTasks = (): unknown[] => [
+  askTask,
+  { greet: { set: { status: "${ $context.line }" } } },
+];
+
+/**
+ * A workflow of `builder`'s, published as version 1, running `tasks`
+ * (`askingTasks` unless said) with a model binding `reader`, which
+ * `admin` approves to `askedModel`: catalog contract, definition and
+ * approval each through their session.
+ */
+export const askingWorkflow = async (
+  admin: Person,
+  builder: Person,
+  tasks: unknown[] = askingTasks()
+): Promise<{ id: string; name: string; contract: string }> => {
+  const contract = `reader-${unique()}`;
+  await admin.api.workflowResources.publishContract({
+    key: contract,
+    kind: "model",
+  });
+  const workflow = await publishedWorkflow(builder, (name) =>
+    definitionOf(name, tasks, {
+      bindings: { reader: { kind: "model", contract } },
+    })
+  );
+  await admin.api.workflowResources.approveBinding(workflow.id, {
+    alias: "reader",
+    target: { kind: "model", model: askedModel },
+    reviewed: { version: 1 },
+  });
+  return { ...workflow, contract };
+};
