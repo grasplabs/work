@@ -25,7 +25,7 @@ import {
   relayedClientOf,
 } from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -56,11 +56,11 @@ import {
   connectionTokens,
   oauthFlows,
   pendingActions,
-  tokenRevocations,
 } from "./db/schema.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { exchangeCode } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, providerFor } from "./providers.ts";
@@ -71,7 +71,7 @@ import type {
   ProviderAccount,
   ProviderConfig,
 } from "./providers.ts";
-import { firstRevokeRetryMs, revokeAtProvider } from "./revocations.ts";
+import { revokeAtProvider } from "./revocations.ts";
 import { apiKeyExpiresAt, discardMint, firstTokens } from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
@@ -318,16 +318,39 @@ export const startConnection = async (
 };
 
 /**
- * Takes the flow `state` names: deleted before anything is checked, so it
- * is spent whatever happens next, even when it isn't this person's.
+ * How long a taken flow holds its row at most: its code exchanged, its
+ * account checked and read, what it got kept. Should its finish never end
+ * (the Worker stopped), an owed revoke waits no longer for it.
+ */
+const finishingForMs = 5 * 60 * 1000;
+
+/**
+ * Takes the flow `state` names: marked finishing before anything is
+ * checked, so it is spent whatever happens next, even when it isn't this
+ * person's. Its row is kept until `doneWith`, so an owed revoke of the
+ * grant it may come back with waits for it (revocations.ts): the tokens a
+ * consent just handed back are never revoked before they are kept.
  */
 const takeFlow = async (env: Env, state: string) => {
   const stateHash = await sha256Hex(state);
   const [flow] = await drizzle(env.DB)
-    .delete(oauthFlows)
-    .where(eq(oauthFlows.stateHash, stateHash))
+    .update(oauthFlows)
+    .set({ finishingUntil: new Date(Date.now() + finishingForMs) })
+    .where(
+      and(
+        eq(oauthFlows.stateHash, stateHash),
+        isNull(oauthFlows.finishingUntil)
+      )
+    )
     .returning();
   return flow;
+};
+
+/** Deletes `flow`, taken, once its finish is done, however it went. */
+const doneWith = async (env: Env, flow: FlowRow): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(oauthFlows)
+    .where(eq(oauthFlows.stateHash, flow.stateHash));
 };
 
 /**
@@ -342,6 +365,7 @@ export const abandonFlow = async (env: Env, state: unknown): Promise<void> => {
   }
   const flow = await takeFlow(env, parsed.data);
   if (flow !== undefined) {
+    await doneWith(env, flow);
     return;
   }
   const toolkitFlow = await takeToolkitFlow(env, await sha256Hex(parsed.data));
@@ -701,28 +725,14 @@ const keepTokens = async (
   );
 };
 
-/**
- * Finishes a flow with the provider's answer, for the person who started
- * it: exchanges the code, checks the account is in the organization's
- * tenant, and stores the connection with its tokens, sealed. A connection
- * that holds the account and needs connecting again gets the tokens
- * instead, if the person may reconnect it (`keepTokens`).
- */
-export const finishConnection = async (
+/** Finishes `flow`, taken, as `finishConnection` says. */
+const finishFlow = async (
   env: Env,
-  request: unknown
+  person: ConnectionPerson,
+  flow: FlowRow | undefined,
+  code: string | undefined,
+  error: string | undefined
 ): Promise<{ connectionId: string; returnTo: string }> => {
-  const parsed = finishConnectionSchema.safeParse(request);
-  if (!parsed.success) {
-    const given: unknown =
-      typeof request === "object" && request !== null
-        ? Reflect.get(request, "state")
-        : undefined;
-    await abandonFlow(env, given);
-    throw connectionErrors.create("connection.invalid");
-  }
-  const { person, state, code, error } = parsed.data;
-  const flow = await takeFlow(env, state);
   const refuse: Refuse = async (
     reason,
     { outcome = "refused", connectionId } = {}
@@ -789,6 +799,37 @@ export const finishConnection = async (
     refuse
   );
   return { connectionId, returnTo: flow.returnTo };
+};
+
+/**
+ * Finishes a flow with the provider's answer, for the person who started
+ * it: exchanges the code, checks the account is in the organization's
+ * tenant, and stores the connection with its tokens, sealed. A connection
+ * that holds the account and needs connecting again gets the tokens
+ * instead, if the person may reconnect it (`keepTokens`).
+ */
+export const finishConnection = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string; returnTo: string }> => {
+  const parsed = finishConnectionSchema.safeParse(request);
+  if (!parsed.success) {
+    const given: unknown =
+      typeof request === "object" && request !== null
+        ? Reflect.get(request, "state")
+        : undefined;
+    await abandonFlow(env, given);
+    throw connectionErrors.create("connection.invalid");
+  }
+  const { person, state, code, error } = parsed.data;
+  const flow = await takeFlow(env, state);
+  try {
+    return await finishFlow(env, person, flow, code, error);
+  } finally {
+    if (flow !== undefined) {
+      await doneWith(env, flow);
+    }
+  }
 };
 
 /**
@@ -1034,8 +1075,8 @@ export const organizationConnections = async (
  * Stops `connection`: revokes the grant where the provider can, then
  * marks it disconnected and deletes the tokens, in one write with its
  * event, then drops the actions held for it, which can no longer run. A
- * revoke the provider wouldn't take is owed instead: the tokens stay,
- * sealed, for the cron trigger to revoke with (src/revocations.ts).
+ * revoke the provider wouldn't take is owed: a sealed copy of the tokens
+ * stays with it, for the cron trigger to revoke with (src/revocations.ts).
  * Returns whether the provider revoked the grant, and whether this call
  * stopped it (a concurrent one may have first).
  *
@@ -1086,23 +1127,22 @@ const stop = async (
         .set({ status: "disconnected", updatedAt: new Date() })
         .where(stillConnected),
       // After the status, by the call that stopped it: the revoke it owes,
-      // while it holds tokens to revoke with.
+      // with a copy of the tokens to revoke with, before they go.
       ...(owed
         ? [
-            db.insert(tokenRevocations).select(
-              sql`SELECT ${connection.id}, 0, ${Date.now() + firstRevokeRetryMs}, ${Date.now()}
-                WHERE EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')
-                  AND EXISTS (SELECT 1 FROM ${connectionTokens} WHERE ${connectionTokens.connectionId} = ${connection.id})
-                  AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
+            oweRevoke(
+              db,
+              connection.id,
+              "disconnected",
+              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
             ),
           ]
         : []),
-      // Only a stopped connection's tokens go, and not while a revoke is
-      // owed with them.
+      // After the status: only a stopped connection's tokens go.
       db
         .delete(connectionTokens)
         .where(
-          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected') AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
         ),
     ]
   );
@@ -1307,7 +1347,16 @@ export const resealFlows = async (env: Env): Promise<void> => {
 
 /** Deletes OAuth flows nobody finished in time. The clock calls it. */
 export const purgeExpiredFlows = async (env: Env): Promise<void> => {
+  const now = new Date();
   await drizzle(env.DB)
     .delete(oauthFlows)
-    .where(lte(oauthFlows.expiresAt, new Date()));
+    .where(
+      and(
+        lte(oauthFlows.expiresAt, now),
+        or(
+          isNull(oauthFlows.finishingUntil),
+          lte(oauthFlows.finishingUntil, now)
+        )
+      )
+    );
 };

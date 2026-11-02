@@ -103,7 +103,12 @@ export const fakeApps = () => {
     lookup: Answer | undefined;
     /** An ID token the token endpoint adds: no app's is trusted. */
     idToken: string | undefined;
-  } = { lookup: undefined, idToken: undefined };
+    /**
+     * Whether a consent gives the account the refresh token it had already,
+     * as many OpenID providers do, rather than a new one.
+     */
+    sameRefreshToken: boolean;
+  } = { lookup: undefined, idToken: undefined, sameRefreshToken: false };
 
   const issue = (prefix: string, account: AppAccount): string => {
     const token = `${prefix}-${crypto.randomUUID()}`;
@@ -112,8 +117,14 @@ export const fakeApps = () => {
     return token;
   };
 
-  const tokens = (account: AppAccount): Response => {
-    const refreshToken = issue("app-refresh", account);
+  const tokens = (account: AppAccount, consent = false): Response => {
+    const had = [...refreshTokens].find(
+      ([, holder]) => holder.id === account.id
+    )?.[0];
+    const refreshToken =
+      consent && options.sameRefreshToken && had !== undefined
+        ? had
+        : issue("app-refresh", account);
     refreshTokens.set(refreshToken, account);
     return Response.json({
       token_type: "bearer",
@@ -146,7 +157,7 @@ export const fakeApps = () => {
       ) {
         return oauthError("invalid_grant");
       }
-      return tokens(issuedFor.account);
+      return tokens(issuedFor.account, true);
     }
     if (form.get("grant_type") === "refresh_token") {
       const token = form.get("refresh_token") ?? "";
@@ -222,6 +233,7 @@ export const fakeApps = () => {
     refreshTokens.clear();
     options.lookup = undefined;
     options.idToken = undefined;
+    options.sameRefreshToken = false;
     // The fake suites' spy (registered first) takes the rest.
     const passThrough =
       vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
