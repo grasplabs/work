@@ -47,8 +47,13 @@ const councils = [
   { value: "none", label: "No works council" },
 ] as const;
 
-/** Today, as core keeps the day something was signed. */
-const today = (): string => new Date().toISOString().slice(0, 10);
+/** Today on the staff member's own calendar, as core keeps the day something was signed. */
+const today = (): string => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+};
 
 /** `agreements` with the data agreement in or not, signed today when it comes in, until staff say the day. */
 const withProcessing = (agreements: Agreements, on: boolean): Agreements => {
