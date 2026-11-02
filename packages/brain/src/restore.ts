@@ -1,4 +1,4 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -23,6 +23,7 @@ import { sha256Hex } from "./encoding.ts";
 import {
   exportFormat,
   exportFormatVersion,
+  isPartOf,
   manifestName,
   manifestSigned,
 } from "./exports.ts";
@@ -36,8 +37,11 @@ import { citedCollectionsOf, citesWrite } from "./memories.ts";
 // may come back with it.
 //
 // - Every file is checked against the manifest's SHA-256 before anything
-//   is written: a bundle that doesn't match is refused whole.
-// - Only into an empty Brain: never over another company's.
+//   is written: a bundle that doesn't match is refused whole. Each part's
+//   files are read in name order, one at a time, twice (checked, then
+//   written, checked again as read): never the whole bundle at once.
+// - Only into an empty Brain, holding no collection nor memory record:
+//   never over another company's.
 // - The erasure records are replayed before anything is readable: the
 //   people a purge forgot are forgotten again (their records go, and
 //   captures of them stay out), erased evidence stays erased, and the
@@ -179,51 +183,6 @@ const jsonOf = (text: string): unknown => {
   }
 };
 
-/** The rows of a JSON Lines file, each checked by `schema`. */
-const rowsOf = <T>(text: string, schema: z.ZodType<T>): T[] =>
-  text
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const parsed = schema.safeParse(jsonOf(line));
-      if (!parsed.success) {
-        throw refused();
-      }
-      return parsed.data;
-    });
-
-/** Every file of the bundle, each checked against the manifest's SHA-256. */
-const readBundle = async <C>(
-  brain: Brain<C>,
-  read: (name: string) => Promise<string | null>
-): Promise<{ exportId: string; files: Map<string, string> }> => {
-  const manifestText = await read(manifestName);
-  if (manifestText === null) {
-    throw refused();
-  }
-  const manifest = manifestSchema.safeParse(jsonOf(manifestText));
-  if (!manifest.success) {
-    throw refused();
-  }
-  // Signed by a Brain holding the same secret, as written: one edited
-  // since is refused (`manifestSigned`).
-  const { signature, ...body } = manifest.data;
-  if (!(await manifestSigned(brain, body, signature))) {
-    throw refused();
-  }
-  const files = new Map<string, string>();
-  for (const file of manifest.data.files) {
-    // oxlint-disable-next-line no-await-in-loop -- one file at a time, in order
-    const text = await read(file.name);
-    // oxlint-disable-next-line no-await-in-loop -- each checked as read
-    if (text === null || (await sha256Hex(text)) !== file.sha256) {
-      throw refused();
-    }
-    files.set(file.name, text);
-  }
-  return { exportId: manifest.data.exportId, files };
-};
-
 type ErasureRow = z.infer<typeof erasureRowSchema>;
 
 /** The statement that replays one erasure record. */
@@ -261,59 +220,247 @@ const replayed = (
     .onConflictDoNothing();
 };
 
-type DocumentRow = z.infer<typeof documentRowSchema>;
 type CollectionRow = z.infer<typeof collectionRowSchema>;
+type VersionRow = z.infer<typeof versionRowSchema>;
 
-/**
- * The documents of the bundle's documents files, in order, each with the
- * versions of every line that continues it, in this file or a later one.
- * A line that continues no document before it is refused; versions lost
- * or repeated on the way are refused after (`restoreExport`).
- */
-const documentsOf = (files: ReadonlyMap<string, string>): DocumentRow[] => {
-  const lines = [...files]
-    .filter(([name]) => name.startsWith("documents-"))
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .flatMap(([, text]) => rowsOf(text, documentsLineSchema));
-  const byId = new Map<string, DocumentRow>();
-  for (const line of lines) {
-    if ("continues" in line) {
-      const document = byId.get(line.continues);
-      if (document === undefined) {
-        throw refused();
-      }
-      document.versions.push(...line.versions);
-    } else if (byId.has(line.id)) {
-      throw refused();
-    } else {
-      byId.set(line.id, { ...line, versions: [...line.versions] });
-    }
+/** A row of a JSON Lines file, checked by `schema`, or a refused bundle. */
+const rowOf = <T>(line: string, schema: z.ZodType<T>): T => {
+  const parsed = schema.safeParse(jsonOf(line));
+  if (!parsed.success) {
+    throw refused();
   }
-  return [...byId.values()];
+  return parsed.data;
+};
+
+/** The bundle's manifest, signed by this Brain's secret, as written. */
+type Manifest = z.infer<typeof manifestSchema>;
+type BundleFile = Manifest["files"][number];
+
+/** The manifest of the bundle `read` reads: refused unless signed so. */
+const manifestOf = async <C>(
+  brain: Brain<C>,
+  read: (name: string) => Promise<string | null>
+): Promise<Manifest> => {
+  const manifestText = await read(manifestName);
+  if (manifestText === null) {
+    throw refused();
+  }
+  const manifest = manifestSchema.safeParse(jsonOf(manifestText));
+  if (!manifest.success) {
+    throw refused();
+  }
+  // Signed by a Brain holding the same secret, as written: one edited
+  // since is refused (`manifestSigned`).
+  const { signature, ...body } = manifest.data;
+  if (!(await manifestSigned(brain, body, signature))) {
+    throw refused();
+  }
+  return manifest.data;
 };
 
 /**
- * Restores `document`'s versions in order, each with its author and
- * time, and its transcript: its new ID, and how many versions.
+ * File `file` of the bundle, as its manifest names it: refused when it is
+ * missing or doesn't match its SHA-256. Read again for the writes, it is
+ * checked again: a reader that hands over other bytes the second time
+ * stops the restore there.
  */
-const restoreDocument = async <C>(
+const fileText = async (
+  read: (name: string) => Promise<string | null>,
+  file: BundleFile
+): Promise<string> => {
+  const text = await read(file.name);
+  if (text === null || (await sha256Hex(text)) !== file.sha256) {
+    throw refused();
+  }
+  return text;
+};
+
+/** The parts a restore reads, in the order it reads them. */
+const restoredParts = [
+  "collections",
+  "documents",
+  "memories",
+  "erasures",
+] as const;
+type RestoredPart = (typeof restoredParts)[number];
+
+/** The files of part `prefix` the manifest names, in name order. */
+const filesOfPart = (manifest: Manifest, prefix: RestoredPart): BundleFile[] =>
+  manifest.files
+    .filter(({ name }) => isPartOf(prefix, name))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+
+/**
+ * Each row of part `prefix`, checked by `schema`, one file at a time, in
+ * name order: never more than one file read at once.
+ */
+const eachRow = async <T>(
+  read: (name: string) => Promise<string | null>,
+  manifest: Manifest,
+  prefix: RestoredPart,
+  schema: z.ZodType<T>,
+  each: (row: T) => Promise<void> | void
+): Promise<void> => {
+  for (const file of filesOfPart(manifest, prefix)) {
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time, to bound memory
+    const text = await fileText(read, file);
+    for (const line of text.split("\n")) {
+      if (line !== "") {
+        // oxlint-disable-next-line no-await-in-loop -- one row after another, in order
+        await each(rowOf(line, schema));
+      }
+    }
+  }
+};
+
+/**
+ * A line of a documents file: a document's first, or one that continues
+ * it with the versions that follow (exports.ts `documentsFile`).
+ */
+type DocumentsLine = z.infer<typeof documentsLineSchema>;
+
+/**
+ * Checks the documents' lines as they come, a document at a time: each in
+ * a collection the bundle holds, in ID order (so none twice), at a place
+ * no other has, its lines continuing it alone, its versions numbered 1, 2,
+ * 3 and on with none lost or repeated.
+ */
+const documentsCheck = (known: ReadonlySet<string>) => {
+  const places = new Set<string>();
+  let current: { id: string; next: number } | undefined;
+  const ended = () => {
+    // A document with no version at all is no document.
+    if (current !== undefined && current.next === 1) {
+      throw refused();
+    }
+  };
+  const versionsFrom = (rows: readonly VersionRow[]) => {
+    for (const { number } of rows) {
+      if (current === undefined || number !== current.next) {
+        throw refused();
+      }
+      current.next += 1;
+    }
+  };
+  return {
+    line: (line: DocumentsLine) => {
+      if ("continues" in line) {
+        if (line.continues !== current?.id) {
+          throw refused();
+        }
+        versionsFrom(line.versions);
+        return;
+      }
+      ended();
+      const place = `${line.collectionId}\n${line.path}`;
+      if (
+        !known.has(line.collectionId) ||
+        places.has(place) ||
+        (current !== undefined && line.id <= current.id)
+      ) {
+        throw refused();
+      }
+      places.add(place);
+      current = { id: line.id, next: 1 };
+      versionsFrom(line.versions);
+    },
+    ended,
+  };
+};
+
+/**
+ * Checks the whole bundle before anything is written: every file against
+ * its SHA-256, a file at a time, and every row of the parts it restores.
+ */
+const checkBundle = async (
+  read: (name: string) => Promise<string | null>,
+  manifest: Manifest
+): Promise<void> => {
+  const known = new Set<string>();
+  await eachRow(read, manifest, "collections", collectionRowSchema, (row) => {
+    known.add(row.id);
+  });
+  const documents = documentsCheck(known);
+  await eachRow(read, manifest, "documents", documentsLineSchema, (line) => {
+    documents.line(line);
+  });
+  documents.ended();
+  await eachRow(read, manifest, "memories", memoryRowSchema, () => {
+    // Checked as read.
+  });
+  await eachRow(read, manifest, "erasures", erasureRowSchema, () => {
+    // Checked as read.
+  });
+  // The host's files, and any other the manifest names: their checksums.
+  const restored = new Set(
+    restoredParts.flatMap((prefix) =>
+      filesOfPart(manifest, prefix).map(({ name }) => name)
+    )
+  );
+  for (const file of manifest.files) {
+    if (!restored.has(file.name)) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time, to bound memory
+      await fileText(read, file);
+    }
+  }
+};
+
+/** Statements one batch of erasure records replays. */
+const erasuresPerBatch = 50;
+
+/**
+ * Replays the erasure records, a batch at a time: how many people they
+ * forgot.
+ */
+const replayErasures = async <C>(
+  brain: Brain<C>,
+  read: (name: string) => Promise<string | null>,
+  manifest: Manifest,
+  now: Date
+): Promise<number> => {
+  const { db } = brain;
+  let forgotten = 0;
+  let pending: BatchItem<"sqlite">[] = [];
+  const flush = async () => {
+    const [first, ...rest] = pending;
+    pending = [];
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
+  };
+  await eachRow(read, manifest, "erasures", erasureRowSchema, async (row) => {
+    forgotten += row.type === "forgotten_person" ? 1 : 0;
+    pending.push(replayed(db, row, now));
+    if (pending.length >= erasuresPerBatch) {
+      await flush();
+    }
+  });
+  await flush();
+  return forgotten;
+};
+
+/**
+ * Writes `rows`, versions of the document at `path` in `collection`, in
+ * order, each with its author and time: the document's ID.
+ */
+const restoreVersions = async <C>(
   brain: Brain<C>,
   by: Writer,
   collection: CollectionRow,
-  document: DocumentRow,
-  now: Date
-): Promise<{ id: string | undefined; versions: number }> => {
+  path: string,
+  rows: readonly VersionRow[]
+): Promise<string | undefined> => {
   const { db } = brain;
   const row = { ...collection, createdAt: new Date(collection.createdAt) };
   let id: string | undefined;
-  for (const version of document.versions) {
+  for (const version of rows) {
     // oxlint-disable-next-line no-await-in-loop -- one version after another, in order
     const saved = await writeVersion(
       brain,
       { actor: by.actor, userId: version.author },
       {
         collection: row,
-        path: document.path,
+        path,
         text: version.text ?? "",
         ifVersion: version.number - 1,
         message: version.message,
@@ -333,127 +480,191 @@ const restoreDocument = async <C>(
         )
       );
   }
-  if (id !== undefined && document.transcript !== null) {
-    await db.insert(transcripts).values({
-      documentId: id,
-      version: document.transcript.version,
-      turns: document.transcript.turns,
-      chapters: document.transcript.chapters,
-      createdAt: now,
-    });
-  }
-  return { id, versions: document.versions.length };
+  return id;
 };
 
-type MemoryRow = z.infer<typeof memoryRowSchema>;
-
 /**
- * `record`'s references pointed at what is restored, or undefined when
- * it rests on anything that isn't, or is a forgotten person's.
+ * Restores the documents a line at a time, each document's versions in
+ * order across the lines and files that hold them, then its transcript:
+ * each document's new ID by its old one, and how many versions.
  */
-const restoredRefs = (
-  record: MemoryRow,
-  newIds: ReadonlyMap<string, string>,
-  restored: ReadonlySet<string>,
-  forgotten: ReadonlySet<string>
-): BrainSourceRef[] | undefined => {
-  if (forgotten.has(record.ownerId)) {
-    return undefined;
-  }
-  const refs: BrainSourceRef[] = [];
-  for (const ref of record.sourceRefs) {
-    if (ref.kind === "document") {
-      const id = newIds.get(ref.documentId);
-      if (id === undefined) {
-        return undefined;
+const restoreDocuments = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  read: (name: string) => Promise<string | null>,
+  manifest: Manifest,
+  collectionsById: ReadonlyMap<string, CollectionRow>,
+  now: Date
+): Promise<{ newIds: Map<string, string>; versions: number }> => {
+  const { db } = brain;
+  const newIds = new Map<string, string>();
+  let versionCount = 0;
+  // The document being restored: its lines come one after another.
+  let current:
+    | {
+        line: Extract<DocumentsLine, { id: string }>;
+        collection: CollectionRow;
+        id: string | undefined;
       }
-      refs.push({ ...ref, documentId: documentIdSchema.parse(id) });
-    } else if (restored.has(ref.memoryId)) {
-      refs.push(ref);
-    } else {
-      return undefined;
+    | undefined;
+  const finish = async () => {
+    if (current === undefined) {
+      return;
     }
-  }
-  return refs;
+    const { line, id } = current;
+    if (id !== undefined) {
+      newIds.set(line.id, id);
+      if (line.transcript !== null) {
+        await db.insert(transcripts).values({
+          documentId: id,
+          version: line.transcript.version,
+          turns: line.transcript.turns,
+          chapters: line.transcript.chapters,
+          createdAt: now,
+        });
+      }
+    }
+    current = undefined;
+  };
+  await eachRow(
+    read,
+    manifest,
+    "documents",
+    documentsLineSchema,
+    async (line) => {
+      if (!("continues" in line)) {
+        await finish();
+        const collection = collectionsById.get(line.collectionId);
+        if (collection === undefined) {
+          throw refused();
+        }
+        current = { line, collection, id: undefined };
+      }
+      if (current === undefined) {
+        throw refused();
+      }
+      const id = await restoreVersions(
+        brain,
+        by,
+        current.collection,
+        current.line.path,
+        line.versions
+      );
+      current.id = id ?? current.id;
+      versionCount += line.versions.length;
+    }
+  );
+  await finish();
+  return { newIds, versions: versionCount };
 };
 
-/** Of `candidates`, the records whose every reference is still among them. */
-const keptAmong = (
-  rows: readonly MemoryRow[],
-  candidates: ReadonlySet<string>,
-  newIds: ReadonlyMap<string, string>,
-  forgotten: ReadonlySet<string>
-): Set<string> =>
-  new Set(
-    rows
-      .filter(
-        (record) =>
-          candidates.has(record.id) &&
-          restoredRefs(record, newIds, candidates, forgotten) !== undefined
-      )
-      .map(({ id }) => id)
-  );
+/** Memory records whose citations one page writes. */
+const citesPerPage = 100;
 
 /**
- * Restores the shared memory records whole, each with what it rests on;
- * how many it restored and left out.
+ * Restores the shared memory records, a row at a time, each pointed at
+ * the documents restored: then drops, until none is left to drop, those
+ * a forgotten person owns and those resting on a record not restored, so
+ * a record resting on one left out goes too; then what each rests on.
+ * How many it restored and left out. The Brain held no memory record
+ * before (`restoreExport`): every one it holds now is restored.
  */
 const restoreMemories = async <C>(
   brain: Brain<C>,
-  rows: readonly MemoryRow[],
-  newIds: ReadonlyMap<string, string>,
-  forgotten: ReadonlySet<string>
+  read: (name: string) => Promise<string | null>,
+  manifest: Manifest,
+  newIds: ReadonlyMap<string, string>
 ): Promise<{ restored: number; leftOut: number }> => {
   const { db } = brain;
-  // Kept only while everything it rests on is kept: until nothing more is
-  // left out, so a record resting on one left out goes too.
-  let candidates = new Set(rows.map(({ id }) => id));
+  let seen = 0;
+  await eachRow(read, manifest, "memories", memoryRowSchema, async (record) => {
+    seen += 1;
+    const refs: BrainSourceRef[] = [];
+    for (const ref of record.sourceRefs) {
+      if (ref.kind === "document") {
+        const id = newIds.get(ref.documentId);
+        // Resting on a document not restored: left out.
+        if (id === undefined) {
+          return;
+        }
+        refs.push({ ...ref, documentId: documentIdSchema.parse(id) });
+      } else {
+        refs.push(ref);
+      }
+    }
+    const at = new Date(record.recordedAt);
+    await db.insert(brainMemories).values({
+      id: record.id,
+      revision: record.revision,
+      scope: record.scope,
+      scopeId: record.scopeId,
+      ownerId: record.ownerId,
+      kind: record.kind,
+      statement: record.statement,
+      sourceRefs: JSON.stringify(refs),
+      state: "accepted",
+      indexingState: "pending",
+      recordedAt: at,
+      updatedAt: at,
+    });
+  });
+  await db
+    .delete(brainMemories)
+    .where(
+      inArray(
+        brainMemories.ownerId,
+        db
+          .select({ id: brainForgottenPeople.userId })
+          .from(brainForgottenPeople)
+      )
+    );
   for (;;) {
-    const next = keptAmong(rows, candidates, newIds, forgotten);
-    if (next.size === candidates.size) {
+    // oxlint-disable-next-line no-await-in-loop -- until nothing more is left out
+    const dropped = await db
+      .delete(brainMemories)
+      .where(
+        sql`EXISTS (SELECT 1 FROM json_each(${brainMemories.sourceRefs}) AS ref WHERE json_extract(ref.value, '$.kind') = 'memory' AND json_extract(ref.value, '$.memoryId') NOT IN (SELECT ${brainMemories.id} FROM ${brainMemories}))`
+      )
+      .returning({ id: brainMemories.id });
+    if (dropped.length === 0) {
       break;
     }
-    candidates = next;
   }
-  const kept: MemoryRow[] = [];
-  for (const record of rows) {
-    const refs = candidates.has(record.id)
-      ? restoredRefs(record, newIds, candidates, forgotten)
-      : undefined;
-    if (refs !== undefined) {
-      const at = new Date(record.recordedAt);
-      // oxlint-disable-next-line no-await-in-loop -- one record after another
-      await db.insert(brainMemories).values({
-        id: record.id,
-        revision: record.revision,
-        scope: record.scope,
-        scopeId: record.scopeId,
-        ownerId: record.ownerId,
-        kind: record.kind,
-        statement: record.statement,
-        sourceRefs: JSON.stringify(refs),
-        state: "accepted",
-        indexingState: "pending",
-        recordedAt: at,
-        updatedAt: at,
-      });
-      kept.push({ ...record, sourceRefs: refs });
+  // What each rests on, once all of them are there, a page at a time.
+  let restored = 0;
+  let after = "";
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const page = await db
+      .select({ id: brainMemories.id, sourceRefs: brainMemories.sourceRefs })
+      .from(brainMemories)
+      .where(gt(brainMemories.id, after))
+      .orderBy(asc(brainMemories.id))
+      .limit(citesPerPage);
+    for (const record of page) {
+      const refs = z
+        .array(brainSourceRefSchema)
+        .parse(JSON.parse(record.sourceRefs));
+      // oxlint-disable-next-line no-await-in-loop -- one record at a time
+      const cited = await citedCollectionsOf(db, refs);
+      // oxlint-disable-next-line no-await-in-loop -- one record at a time
+      await citesWrite(db, record.id, cited);
     }
+    restored += page.length;
+    const last = page.at(-1);
+    if (last === undefined) {
+      break;
+    }
+    after = last.id;
   }
-  // What each rests on, once all of them are there.
-  for (const record of kept) {
-    // oxlint-disable-next-line no-await-in-loop -- one record at a time
-    const cited = await citedCollectionsOf(db, record.sourceRefs);
-    // oxlint-disable-next-line no-await-in-loop -- one record at a time
-    await citesWrite(db, record.id, cited);
-  }
-  return { restored: kept.length, leftOut: rows.length - kept.length };
+  return { restored, leftOut: seen - restored };
 };
 
 /**
  * Restores the export `read` reads files of into `brain`, empty, as `by`:
- * every file checked against its manifest first, the erasure records
- * replayed before anything is read.
+ * every file checked against its manifest first, a file at a time, then
+ * the erasure records replayed before anything is read, then the rest, a
+ * file at a time again (each checked again as it is read).
  */
 export const restoreExport = async <C>(
   brain: Brain<C>,
@@ -461,87 +672,60 @@ export const restoreExport = async <C>(
   read: (name: string) => Promise<string | null>
 ): Promise<RestoreResult> => {
   const { db } = brain;
-  const { exportId, files } = await readBundle(brain, read);
-  const [held] = await db.select({ n: count() }).from(collections);
-  if ((held?.n ?? 0) > 0) {
+  const manifest = await manifestOf(brain, read);
+  await checkBundle(read, manifest);
+  const [heldCollections] = await db.select({ n: count() }).from(collections);
+  const [heldMemories] = await db.select({ n: count() }).from(brainMemories);
+  if ((heldCollections?.n ?? 0) > 0 || (heldMemories?.n ?? 0) > 0) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
-  const restoredCollections = rowsOf(
-    files.get("collections.jsonl") ?? "",
-    collectionRowSchema
-  );
-  const known = new Map(restoredCollections.map((row) => [row.id, row]));
-  const documentRows = documentsOf(files);
-  if (documentRows.some(({ collectionId }) => !known.has(collectionId))) {
-    throw refused();
-  }
-  // Everything a write could refuse, refused before the first write: a
-  // path twice in a collection, or versions not numbered 1, 2, 3 and on.
-  const places = new Set<string>();
-  for (const document of documentRows) {
-    const place = `${document.collectionId}\n${document.path}`;
-    const numbered = document.versions.every(
-      ({ number }, index) => number === index + 1
-    );
-    if (places.has(place) || !numbered || document.versions.length === 0) {
-      throw refused();
-    }
-    places.add(place);
-  }
-  const erasures = rowsOf(files.get("erasures.jsonl") ?? "", erasureRowSchema);
-  const forgotten = new Set(
-    erasures.flatMap((row) =>
-      row.type === "forgotten_person" ? [row.userId] : []
-    )
-  );
   const now = brain.ports.clock();
   // The erasure records first: whatever is restored after is held to them.
-  const [first, ...rest] = erasures.map((row) => replayed(db, row, now));
-  if (first !== undefined) {
-    await db.batch([first, ...rest]);
-  }
-  for (const row of restoredCollections) {
-    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    await ensureCollection(
-      brain,
-      { ...row, createdAt: new Date(row.createdAt) },
-      by.actor
-    );
-  }
-  // Documents get new IDs: the records citing them are pointed at them.
-  const newIds = new Map<string, string>();
-  let versionCount = 0;
-  for (const document of documentRows) {
-    const collection = known.get(document.collectionId);
-    if (collection !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one document at a time
-      const done = await restoreDocument(brain, by, collection, document, now);
-      if (done.id !== undefined) {
-        newIds.set(document.id, done.id);
-      }
-      versionCount += done.versions;
+  const forgottenPeople = await replayErasures(brain, read, manifest, now);
+  const collectionsById = new Map<string, CollectionRow>();
+  await eachRow(
+    read,
+    manifest,
+    "collections",
+    collectionRowSchema,
+    async (row) => {
+      await ensureCollection(
+        brain,
+        { ...row, createdAt: new Date(row.createdAt) },
+        by.actor
+      );
+      collectionsById.set(row.id, row);
     }
-  }
+  );
+  // Documents get new IDs: the records citing them are pointed at them.
+  const documents = await restoreDocuments(
+    brain,
+    by,
+    read,
+    manifest,
+    collectionsById,
+    now
+  );
   const memories = await restoreMemories(
     brain,
-    rowsOf(files.get("memories.jsonl") ?? "", memoryRowSchema),
-    newIds,
-    forgotten
+    read,
+    manifest,
+    documents.newIds
   );
   const result: RestoreResult = {
-    exportId,
-    collections: restoredCollections.length,
-    documents: newIds.size,
-    versions: versionCount,
+    exportId: manifest.exportId,
+    collections: collectionsById.size,
+    documents: documents.newIds.size,
+    versions: documents.versions,
     memories: memories.restored,
     memoriesLeftOut: memories.leftOut,
-    forgottenPeople: forgotten.size,
+    forgottenPeople,
   };
   await auditedBatch(brain.ports, db, [
     outboxed(brain, {
       actor: by.actor,
       action: "knowledge.export.restored",
-      target: { type: "export", id: exportId },
+      target: { type: "export", id: manifest.exportId },
       detail: { ...result },
     }),
   ]);

@@ -224,7 +224,7 @@ const partName = (prefix: string, index: number): string =>
   `${prefix}-${String(index).padStart(4, "0")}.jsonl`;
 
 /** Whether `name` is a file of the part named `prefix`. */
-const isPartOf = (prefix: string, name: string): boolean =>
+export const isPartOf = (prefix: string, name: string): boolean =>
   name.startsWith(`${prefix}-`) &&
   /^\d{4,}\.jsonl$/u.test(name.slice(prefix.length + 1));
 

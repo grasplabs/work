@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
@@ -38,7 +38,7 @@ const admin = writerOf("admin");
 /** Nothing of the host's own. */
 const noHost = {
   excluded: [],
-  files: async () => await Promise.resolve([]),
+  files: [],
 };
 
 /** An export of `brain`, written whole; its ID. */
@@ -274,9 +274,9 @@ describe("restoring an export of the company's Brain", () => {
     // Renamed, as a row still reads, and the manifest's checksum made to
     // match: only the manifest's signature tells.
     const bundle = await bundleOf(source, exportId);
-    const text = bundle.get("collections.jsonl") ?? "";
+    const text = bundle.get("collections-0001.jsonl") ?? "";
     const tampered = text.replace('"Handbook"', '"Tampered"');
-    bundle.set("collections.jsonl", tampered);
+    bundle.set("collections-0001.jsonl", tampered);
     bundle.set(
       manifestName,
       (bundle.get(manifestName) ?? "").replace(
@@ -353,13 +353,13 @@ describe("restoring an export of the company's Brain", () => {
       transcript: null,
     });
     const files = new Map([
-      ["collections.jsonl", `${JSON.stringify(collection)}\n`],
+      ["collections-0001.jsonl", `${JSON.stringify(collection)}\n`],
       [
         "documents-0001.jsonl",
         `${JSON.stringify(documentOf("a"))}\n${JSON.stringify(documentOf("b"))}\n`,
       ],
-      ["memories.jsonl", ""],
-      ["erasures.jsonl", ""],
+      ["memories-0001.jsonl", ""],
+      ["erasures-0001.jsonl", ""],
     ]);
     const body = {
       format: "grasp-brain-export",
@@ -484,6 +484,107 @@ describe("restoring an export of the company's Brain", () => {
         currentVersion: versionCount,
         whole: true,
         transcript: { version: versionCount, holds: true },
+      });
+    }
+  );
+
+  // Runs last: what it writes is large.
+  it(
+    "restores every part the export split across files whole",
+    { timeout: 120_000 },
+    async () => {
+      const source = testHost().brain;
+      const big = "x".repeat(1_000_000);
+      const many = 9;
+      const collectionIds = Array.from({ length: many }, () =>
+        crypto.randomUUID()
+      );
+      for (const id of collectionIds) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another
+        await ensureCollection(
+          source,
+          {
+            id,
+            name: `Shelf ${id}`,
+            description: big,
+            owner: "owner",
+            access: "everyone",
+            sensitive: false,
+            source: "here",
+            createdAt: new Date(),
+          },
+          admin.actor
+        );
+      }
+      const now = new Date();
+      const memoryIds = Array.from({ length: many }, () => crypto.randomUUID());
+      for (const id of memoryIds) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another
+        await source.db.insert(brainMemories).values({
+          id,
+          revision: 1,
+          scope: "company",
+          scopeId: null,
+          ownerId: "owner",
+          kind: "fact",
+          statement: big,
+          sourceRefs: "[]",
+          state: "accepted",
+          indexingState: "pending",
+          recordedAt: now,
+          updatedAt: now,
+        });
+      }
+      const evidence = 90_000;
+      await env.BRAIN.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${String(evidence)})
+         INSERT INTO brain_erased_evidence (evidence_id, erased_at)
+         SELECT 'split-evidence-' || printf('%08d', i), ? FROM n`
+      )
+        .bind(now.getTime())
+        .run();
+      const exportId = await exported(source);
+      const bundle = await bundleOf(source, exportId);
+      const filesOf = (prefix: string) =>
+        [...bundle.keys()].filter((name) => name.startsWith(`${prefix}-`))
+          .length;
+
+      const target = testHost(undefined, {}, env.RESTORED).brain;
+      await target.db.delete(brainMemoryCites);
+      await target.db.delete(brainMemories);
+      await target.db.delete(collections);
+      await restoreExport(target, admin, readerOf(bundle));
+      const restoredCollections = await target.db
+        .select({ id: collections.id, description: collections.description })
+        .from(collections)
+        .where(inArray(collections.id, collectionIds));
+      const restoredMemories = await target.db
+        .select({ id: brainMemories.id, statement: brainMemories.statement })
+        .from(brainMemories)
+        .where(inArray(brainMemories.id, memoryIds));
+      const restoredEvidence = await env.RESTORED.prepare(
+        "SELECT count(*) AS n FROM brain_erased_evidence WHERE evidence_id LIKE 'split-evidence-%'"
+      ).first<{ n: number }>();
+      expect({
+        split: {
+          collections: filesOf("collections") > 1,
+          memories: filesOf("memories") > 1,
+          erasures: filesOf("erasures") > 1,
+        },
+        collections: restoredCollections.every(
+          ({ description }) => description === big
+        )
+          ? restoredCollections.length
+          : -1,
+        memories: restoredMemories.every(({ statement }) => statement === big)
+          ? restoredMemories.length
+          : -1,
+        evidence: restoredEvidence?.n,
+      }).toStrictEqual({
+        split: { collections: true, memories: true, erasures: true },
+        collections: many,
+        memories: many,
+        evidence,
       });
     }
   );
