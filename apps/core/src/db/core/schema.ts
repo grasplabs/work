@@ -4007,8 +4007,9 @@ export const connectorTriggerHolds = sqliteTable(
  * trigger started or refused for good, taken in one conditional insert
  * before either, so no more than `triggeredRunsPerHour` are taken an hour
  * however many arrive at once, and an event held back for want of one
- * writes no audit row. An event keeps its place: delivered again, it takes
- * no other. The clock sweeps places past their hour.
+ * writes no audit row. A place counts only within its hour: delivered
+ * again within it, an event takes no other; after it, it takes its place
+ * anew under the limit. The clock sweeps places past their hour.
  */
 export const triggerHourSlots = sqliteTable(
   "trigger_hour_slots",
@@ -4023,6 +4024,8 @@ export const triggerHourSlots = sqliteTable(
     primaryKey({ columns: [table.triggerId, table.eventKey] }),
     // A trigger's places this hour.
     index("trigger_hour_slots_taken").on(table.triggerId, table.takenAt),
+    // The places past their hour, for the sweep.
+    index("trigger_hour_slots_taken_at").on(table.takenAt),
   ]
 );
 

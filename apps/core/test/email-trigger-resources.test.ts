@@ -1,5 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -867,5 +867,42 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       held: responses.filter(({ status }) => status >= 500).length,
       runs: await runCount(trigger.id),
     }).toStrictEqual({ held: 1, runs: 1 });
+  });
+
+  it("count a message's place only within its hour, so one delivered again later waits for room like any other", async () => {
+    const { trigger, address } = await emailTrigger();
+    const messageId = `late-${unique()}@acme.test`;
+    const late = invoiceMail({ to: address, messageId });
+    // Its place from two hours ago, as a delivery whose start failed then
+    // left it, and a full hour since.
+    await env.DB.prepare(
+      "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+    )
+      .bind(
+        trigger.id,
+        await sha256Hex(`<${messageId}>`),
+        Date.now() - 2 * 60 * 60 * 1000
+      )
+      .run();
+    await fillHour(trigger.id);
+    const warned = vi.spyOn(console, "warn").mockReturnValue();
+
+    const full = await post(address, late);
+    const runsWhileFull = await runCount(trigger.id);
+    // A place frees up: it takes it, anew.
+    await env.DB.prepare(
+      "DELETE FROM trigger_hour_slots WHERE rowid = (SELECT rowid FROM trigger_hour_slots WHERE trigger_id = ? AND event_key LIKE 'filler-%' LIMIT 1)"
+    )
+      .bind(trigger.id)
+      .run();
+    const freed = await post(address, late);
+    warned.mockRestore();
+
+    expect({
+      full: full.status >= 500,
+      runsWhileFull,
+      freed: freed.status,
+      runs: await runCount(trigger.id),
+    }).toStrictEqual({ full: true, runsWhileFull: 0, freed: 202, runs: 1 });
   });
 });

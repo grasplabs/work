@@ -40,6 +40,7 @@ import {
   holdsKeptMs,
   maxHeldMs,
   sweepConnectorTriggerHolds,
+  sweptPerStatement,
 } from "../src/workflows/connector-triggers.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import {
@@ -1017,5 +1018,43 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       after: true,
       unusable: false,
     });
+  });
+
+  it("sweep a backlog of places past their hour larger than one statement deletes, in one clock run", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const trigger = await connectorTrigger(
+      admin,
+      workflow.id,
+      await connection()
+    );
+    const backlog = 2 * sweptPerStatement + 7;
+    const past = Date.now() - 2 * 60 * 60 * 1000;
+    const inserts = Array.from({ length: backlog }, () =>
+      env.DB.prepare(
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(trigger.id, `old-${unique()}`, past)
+    );
+    // In batches D1 takes.
+    for (let at = 0; at < inserts.length; at += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch after another
+      await env.DB.batch(inserts.slice(at, at + 100));
+    }
+    await fillHour(trigger.id, triggeredRunsPerHour - 1);
+    const left = async (when: "past" | "current") => {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM trigger_hour_slots WHERE trigger_id = ? AND taken_at ${when === "past" ? "<=" : ">"} ?`
+      )
+        .bind(trigger.id, Date.now() - 60 * 60 * 1000)
+        .first<{ n: number }>();
+      return row?.n;
+    };
+
+    await sweepConnectorTriggerHolds(env, new Date());
+
+    expect({
+      past: await left("past"),
+      current: await left("current"),
+    }).toStrictEqual({ past: 0, current: 1 });
   });
 });

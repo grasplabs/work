@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "89564ca5-d4ff-4496-b1cc-1fea92a4a360",
+  "id": "b16e3598-f923-45aa-8e3d-64052fc8c141",
   "prevId": "330c32b1-9c50-482f-863f-26fdfd603558",
   "tables": {
     "access_revocations": {
@@ -8898,6 +8898,13 @@
           "name": "trigger_hour_slots_taken",
           "columns": [
             "trigger_id",
+            "taken_at"
+          ],
+          "isUnique": false
+        },
+        "trigger_hour_slots_taken_at": {
+          "name": "trigger_hour_slots_taken_at",
+          "columns": [
             "taken_at"
           ],
           "isUnique": false

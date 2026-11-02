@@ -12,7 +12,7 @@ import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -115,8 +115,9 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   hourly room (`tookPlace`, `trigger_hour_slots`), in one conditional
 //   insert: at most `triggeredRunsPerHour` an hour, however many arrive
 //   together. One without a place is held back, audited by nothing, and
-//   dropped after a day, audited once; delivered again with its place, it
-//   takes no other.
+//   dropped after a day, audited once. A place counts only within its
+//   hour: delivered again within it, an event takes no other; after it,
+//   it takes a place anew under the limit, so retries never run past it.
 //
 // Email triggers' messages (inbound-email.ts) go through the same steps
 // (`startOnce`), each message an event of its own.
@@ -163,10 +164,13 @@ const hearsSql = (id: string, event: ConnectorEvent): SQL =>
 
 /**
  * Takes a place in `taker`'s hourly room for the event of key `same`, if
- * it has none yet: in one conditional insert, only while fewer than
- * `triggeredRunsPerHour` were taken in the last hour, so of events
- * arriving at once no more than the room take one. Whether the event has
- * a place now, taken by this delivery or an earlier one.
+ * it has none in the last hour: in one conditional insert, only while
+ * fewer than `triggeredRunsPerHour` were taken in the last hour, so of
+ * events arriving at once no more than the room take one. A place counts
+ * only within its hour: an event delivered again after its place left the
+ * hour takes a new one, under the same limit, never alongside a full
+ * hour. Whether the event has a place in the last hour now, taken by this
+ * delivery or an earlier one.
  */
 const tookPlace = async (
   env: Env,
@@ -175,22 +179,29 @@ const tookPlace = async (
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
   const now = Date.now();
+  const hourStart = new Date(now - hourMs);
   await db
     .insert(triggerHourSlots)
     .select(
       sql`SELECT ${taker.id}, ${same}, ${now}
         WHERE (SELECT COUNT(*) FROM ${triggerHourSlots}
           WHERE ${triggerHourSlots.triggerId} = ${taker.id}
-            AND ${triggerHourSlots.takenAt} > ${now - hourMs}) < ${triggeredRunsPerHour}`
+            AND ${triggerHourSlots.takenAt} > ${hourStart.getTime()}) < ${triggeredRunsPerHour}`
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [triggerHourSlots.triggerId, triggerHourSlots.eventKey],
+      set: { takenAt: new Date(now) },
+      // Only a place that left the hour is taken anew.
+      setWhere: lte(triggerHourSlots.takenAt, hourStart),
+    });
   const place = await db
     .select({ takenAt: triggerHourSlots.takenAt })
     .from(triggerHourSlots)
     .where(
       and(
         eq(triggerHourSlots.triggerId, taker.id),
-        eq(triggerHourSlots.eventKey, same)
+        eq(triggerHourSlots.eventKey, same),
+        gt(triggerHourSlots.takenAt, hourStart)
       )
     )
     .get();
@@ -652,28 +663,44 @@ export const triggerListeners = async (
  */
 export const holdsKeptMs = 7 * 24 * 60 * 60 * 1000;
 
-/** Most holds and tombstones one sweep removes. */
-const holdsPerSweep = 500;
+/** Most rows one statement of a sweep removes. */
+export const sweptPerStatement = 500;
+
+/** How long one sweep goes on deleting before it leaves the rest to the next. */
+const sweepBudgetMs = 5000;
 
 /**
- * Removes the holds and tombstones of connector triggers past
- * {@link holdsKeptMs} before `now`: events that stopped arriving (the
- * trigger disabled or its grant revoked, connect giving up), and events
- * settled long ago. The clock runs it.
+ * Removes the holds and tombstones of triggers past {@link holdsKeptMs}
+ * before `now` (events that stopped arriving, the trigger disabled or its
+ * grant revoked, connect giving up; events settled long ago), and the
+ * places in their hourly rooms past their hour, which count for nothing
+ * more. {@link sweptPerStatement} rows of each at a time, until none are
+ * left or `budgetMs` has passed: what a clock run leaves, the next
+ * deletes.
  */
 export const sweepConnectorTriggerHolds = async (
   env: Env,
-  now: Date
+  now: Date,
+  budgetMs = sweepBudgetMs
 ): Promise<void> => {
-  const before = now.getTime() - holdsKeptMs;
-  // Places in the hourly room with them: kept as long, so every delivery
-  // of an event finds the place it took.
-  await env.DB.batch([
-    env.DB.prepare(
-      "DELETE FROM connector_trigger_holds WHERE rowid IN (SELECT rowid FROM connector_trigger_holds WHERE coalesce(settled_at, held_since) < ? LIMIT ?)"
-    ).bind(before, holdsPerSweep),
-    env.DB.prepare(
-      "DELETE FROM trigger_hour_slots WHERE rowid IN (SELECT rowid FROM trigger_hour_slots WHERE taken_at < ? LIMIT ?)"
-    ).bind(before, holdsPerSweep),
-  ]);
+  const holdsBefore = now.getTime() - holdsKeptMs;
+  const placesBefore = now.getTime() - hourMs;
+  const ends = Date.now() + budgetMs;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+    const [holds, places] = await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM connector_trigger_holds WHERE rowid IN (SELECT rowid FROM connector_trigger_holds WHERE coalesce(settled_at, held_since) < ? LIMIT ?)"
+      ).bind(holdsBefore, sweptPerStatement),
+      env.DB.prepare(
+        "DELETE FROM trigger_hour_slots WHERE rowid IN (SELECT rowid FROM trigger_hour_slots WHERE taken_at <= ? LIMIT ?)"
+      ).bind(placesBefore, sweptPerStatement),
+    ]);
+    const full =
+      (holds?.meta.changes ?? 0) === sweptPerStatement ||
+      (places?.meta.changes ?? 0) === sweptPerStatement;
+    if (!full || Date.now() >= ends) {
+      return;
+    }
+  }
 };

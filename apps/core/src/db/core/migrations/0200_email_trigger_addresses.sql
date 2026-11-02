@@ -7,5 +7,6 @@ CREATE TABLE `trigger_hour_slots` (
 );
 --> statement-breakpoint
 CREATE INDEX `trigger_hour_slots_taken` ON `trigger_hour_slots` (`trigger_id`,`taken_at`);--> statement-breakpoint
+CREATE INDEX `trigger_hour_slots_taken_at` ON `trigger_hour_slots` (`taken_at`);--> statement-breakpoint
 ALTER TABLE `trigger_resources` ADD `email_address` text;--> statement-breakpoint
 CREATE UNIQUE INDEX `trigger_resources_email_address_unique` ON `trigger_resources` (`email_address`);
