@@ -18,17 +18,10 @@ import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { cloudflareApi } from "../cloudflare/api.ts";
-import type { CloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
-import {
-  clientDomain,
-  deployerToken,
-  deploySecrets,
-  ifStored,
-} from "../deploy/context.ts";
+import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { answeringVersion, mappedRoute } from "../deploy/router.ts";
@@ -38,7 +31,12 @@ import type { DeploySecrets } from "../deploy/secrets.ts";
 import { needsAttentionOf } from "../hosting/attention.ts";
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
-import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
+import {
+  defaultLiveReadLimits,
+  eachLimited,
+  stoppedBy,
+  within,
+} from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
 import { notStartedOf } from "../provision/queries.ts";
 import { driftOf } from "../rollout/drift.ts";
@@ -245,17 +243,8 @@ const reachOf = async (
   if (typeof route === "string") {
     return route;
   }
-  // Its own deadline starts as it's sent; the row's stops it too.
-  const fetchCore: typeof fetch = async (input, init) =>
-    await route.core.fetch(input, {
-      ...init,
-      signal:
-        init?.signal === undefined || init.signal === null
-          ? signal
-          : AbortSignal.any([init.signal, signal]),
-    });
   const version = await answeringVersion(
-    fetchCore,
+    stoppedBy(signal, route.core.fetch),
     route.core.origin,
     route.secret,
     healthTimeoutMs
@@ -288,11 +277,6 @@ const onboardingOf = async (
 interface LiveSources {
   env: Env;
   db: AdminDatabase;
-  /**
-   * The deployer's API, its calls stopped by `signal`; null when its token
-   * can't be read.
-   */
-  apiFor: ((signal: AbortSignal) => CloudflareApi) | null;
   /** The router key; null when Secrets Store doesn't have it. */
   routerKey: string | null;
   /** The keys clients' secrets derive from; null when Secrets Store doesn't have them. */
@@ -323,25 +307,23 @@ const orElse = async <T>(
  * Its requests stop when `signal` aborts.
  */
 const liveOf = async (
-  { env, db, apiFor, routerKey, secrets, store }: LiveSources,
+  { env, db, routerKey, secrets, store }: LiveSources,
   row: { id: string; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
-  const drift =
-    apiFor === null
-      ? null
-      : await orElse(
-          async () =>
-            await driftOf(
-              apiFor(signal),
-              db,
-              row.id,
-              secrets === null ? undefined : { fetch, secrets }
-            ),
-          null,
-          "grid.drift_unread",
-          row.id
-        );
+  const drift = await orElse(
+    async () =>
+      await driftOf(
+        db,
+        row.id,
+        secrets === null
+          ? undefined
+          : { fetch: stoppedBy(signal, fetch), secrets }
+      ),
+    null,
+    "grid.drift_unread",
+    row.id
+  );
   const route = await orElse(
     async () =>
       await routeOf(
@@ -425,20 +407,6 @@ const keep = async (clientId: string, live: LiveStatus): Promise<void> => {
   }
 };
 
-/**
- * The deployer's API, its calls stopped by the signal each is made with,
- * from its token read once; null when the token can't be read.
- */
-const deployerApiFor = async (
-  env: Env,
-  waitBudgetMs: number
-): Promise<((signal: AbortSignal) => CloudflareApi) | null> => {
-  const token = await ifStored(async () => await deployerToken(env));
-  return token === null
-    ? null
-    : (signal) => cloudflareApi({ token, waitBudgetMs, signal });
-};
-
 /** How long the grid waits for one provisioning client's run to be read. */
 const runReadMs = 2000;
 
@@ -456,7 +424,7 @@ const setupOf = async (
     return null;
   }
   if (row.lastDeploy === null) {
-    return { state: "not_started", why: await notStartedOf(db, row.id) };
+    return { state: "not_started", why: await notStartedOf(env, db, row.id) };
   }
   if (row.lastDeploy.status === "done") {
     return null;
@@ -529,9 +497,6 @@ export const gridLive = async (
   }
   const toRead = active.filter(({ id }) => !answers.has(id));
   if (toRead.length > 0) {
-    // The token is read once, here: every client's reads make their API
-    // from it, each stopped by its own deadline.
-    const apiFor = await deployerApiFor(env, options.waitBudgetMs);
     const secrets = await ifStored(
       async (): Promise<DeploySecrets> => await deploySecrets(env)
     );
@@ -539,7 +504,6 @@ export const gridLive = async (
     const sources: LiveSources = {
       env,
       db,
-      apiFor,
       routerKey: secrets?.routerKey ?? null,
       secrets,
       store: secrets === null ? null : await storeCheck(secrets),

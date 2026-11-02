@@ -47,9 +47,6 @@ export interface WorkerUpload {
   assets?: readonly AssetFile[];
 }
 
-const scriptPath = (accountId: string, scriptName: string) =>
-  `/accounts/${accountId}/workers/scripts/${scriptName}`;
-
 const uploadSessionSchema = z.object({
   jwt: z.string(),
   /** The hashes it lacks, in groups to upload together. */
@@ -155,6 +152,7 @@ const uploadAssetsAt = async (
   return completion.jwt;
 };
 
+/** One of a Worker's deployments, as Cloudflare names its versions. */
 const deploymentSchema = z.object({
   id: z.string(),
   created_on: z.string(),
@@ -163,38 +161,6 @@ const deploymentSchema = z.object({
   ),
 });
 export type WorkerDeployment = z.infer<typeof deploymentSchema>;
-
-/** `scriptName`'s deployments, the current one first. */
-export const listDeployments = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string
-): Promise<WorkerDeployment[]> => {
-  const { deployments } = await api.call(
-    {
-      method: "GET",
-      path: `${scriptPath(accountId, scriptName)}/deployments`,
-    },
-    z.object({ deployments: z.array(deploymentSchema) })
-  );
-  return deployments;
-};
-
-/**
- * The version all of `scriptName`'s traffic goes to, if one does: none
- * while its deployment splits traffic, or before its first.
- */
-export const liveVersion = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string
-): Promise<string | undefined> => {
-  const [current] = await listDeployments(api, accountId, scriptName);
-  const [only, ...others] = current?.versions ?? [];
-  return others.length === 0 && only?.percentage === 100
-    ? only.version_id
-    : undefined;
-};
 
 /** A Worker secret. */
 export interface Secret {
@@ -289,47 +255,6 @@ export const scriptMigrationState = async (
     }
     throw error;
   }
-};
-
-/**
- * Makes `scriptName` reachable on the account's workers.dev subdomain, or
- * not; its preview URLs stay off (each would serve an older version).
- */
-export const setScriptSubdomain = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false },
-  { signal }: { signal?: AbortSignal } = {}
-): Promise<void> => {
-  await api.call(
-    {
-      method: "POST",
-      path: `${scriptPath(accountId, scriptName)}/subdomain`,
-      json: { enabled, previews_enabled: previewsEnabled },
-      ...(signal === undefined ? {} : { signal }),
-    },
-    z.unknown()
-  );
-};
-
-/** Replaces `scriptName`'s cron triggers with `crons`. */
-export const putSchedules = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string,
-  crons: readonly string[],
-  { signal }: { signal?: AbortSignal } = {}
-): Promise<void> => {
-  await api.call(
-    {
-      method: "PUT",
-      path: `${scriptPath(accountId, scriptName)}/schedules`,
-      json: crons.map((cron) => ({ cron })),
-      ...(signal === undefined ? {} : { signal }),
-    },
-    z.unknown()
-  );
 };
 
 const queryResultSchema = z.array(
@@ -444,9 +369,8 @@ export const applyD1Migrations = async (
 };
 
 /*
- * A placed client's scripts (src/hosting/operation.ts): in a hosting
- * destination's account, as its own Workers (`dedicated`), or in its
- * Workers for Platforms dispatch namespace. The namespace calls are the
+ * A placed client's scripts (src/hosting/operation.ts): in its hosting
+ * destination's Workers for Platforms dispatch namespace. The calls are the
  * ones Cloudflare documents for user Workers, under
  * `/accounts/{account_id}/workers/dispatch/namespaces/{namespace}/scripts/{script_name}`:
  * the upload (`PUT`, multipart, as an account's own script upload, with
@@ -457,19 +381,17 @@ export const applyD1Migrations = async (
  * on a real account is GRA-430's.
  */
 
-/** Where a placed client's script is: an account's own Workers, or a dispatch namespace in it. */
+/** Where a placed client's script is: a dispatch namespace in an account. */
 export interface ScriptTarget {
   accountId: string;
   scriptName: string;
-  /** The Workers for Platforms dispatch namespace; null for the account's own Workers. */
-  namespace: string | null;
+  /** The Workers for Platforms dispatch namespace. */
+  namespace: string;
 }
 
 /** The API path of the script `target` names. */
 const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
-  namespace === null
-    ? scriptPath(accountId, scriptName)
-    : `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
+  `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
 
 /**
  * Deletes the script `target` names with what it binds of its own (its
