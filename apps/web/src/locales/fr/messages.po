@@ -3283,6 +3283,14 @@ msgstr "À l’œuvre"
 msgid "Athens"
 msgstr "Athènes"
 
+#: src/chat/chat-files.tsx
+msgid "Attach files"
+msgstr "Joindre des fichiers"
+
+#: src/activity/audit-words.ts
+msgid "Attached a file to a chat"
+msgstr "A joint un fichier à une discussion"
+
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
 msgstr "Tentative {n}"
@@ -5942,6 +5950,10 @@ msgstr "Fichiers et documents"
 msgid "Files its runs wrote"
 msgstr "Fichiers écrits par ses exécutions"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Fichiers vers les workflows"
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Remplissez ce champ."
@@ -7461,6 +7473,10 @@ msgstr "Ses apps et workflows tournent dessus dès maintenant. Grasp la vérifie
 msgid "Its bindings"
 msgstr "Ses liaisons"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Son code ne peut pas être lu : ses écrans et son code serveur peuvent transmettre des fichiers que les personnes peuvent lire aux workflows qu'il lie"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7577,6 +7593,10 @@ msgstr "Ses exécutions n'arrivaient pas à démarrer, il n'en démarre donc plu
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Sa planification s’est arrêtée : son exécution n’a pas pu démarrer {maxFailedStarts} fois de suite. Elle reprend quand la planification est définie sous Paramètres, ou quand une nouvelle version du domaine devient actuelle."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Ses écrans et son code serveur peuvent transmettre des fichiers que les personnes peuvent lire aux workflows qu'il lie"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -11235,6 +11255,11 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Lecture"
 
+#. Grasp reads a file the person attached; {file} is its name.
+#: src/chat/thread.tsx
+msgid "Reading {file}"
+msgstr "Lecture de {file}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Lecture de {name}"
@@ -11433,6 +11458,7 @@ msgstr "Retirer {label}"
 msgid "Remove {label}?"
 msgstr "Retirer {label} ?"
 
+#: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 msgid "Remove {name}"
 msgstr "Retirer {name}"
@@ -11484,6 +11510,10 @@ msgstr "Retirer : {item}"
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Supprimé"
+
+#: src/activity/audit-words.ts
+msgid "Removed a file from a chat before sending it"
+msgstr "A retiré un fichier d’une discussion avant de l’envoyer"
 
 #: src/activity/audit-words.ts
 msgid "Removed a member"
