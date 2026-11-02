@@ -168,6 +168,19 @@ describe("shared secrets behind", () => {
     ).toBeTruthy();
   });
 
+  it("is a secret delivered that the rollout no longer has", () => {
+    expect(
+      isSecretsBehind(
+        { connect: { A: "1", B: "2" }, core: { A: "1" } },
+        before,
+        {
+          prints: { A: "1" },
+          at,
+        }
+      )
+    ).toBeTruthy();
+  });
+
   it("is never a change done since the rollout, whatever it delivered", () => {
     expect(
       isSecretsBehind({ connect: { A: "2" } }, after, {

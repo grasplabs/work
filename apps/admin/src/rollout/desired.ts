@@ -202,7 +202,8 @@ export interface RolledOut {
  * Whether a client's shared secrets are behind the ones staff rolled out
  * (`rolledOut`): its operation delivered (`delivered`, by Worker then
  * name, each a keyed fingerprint) another fingerprint of a rolled-out
- * secret, or none at all, such as a provider key added since. A change
+ * secret, or none at all, such as a provider key added since, or a
+ * secret the rollout no longer has, such as a provider key removed. A change
  * that finished (`doneSince`: when its last change started, if it ended
  * done) since the rollout is never behind: it delivered what Secrets
  * Store held then or later, the most a deploy can, so a deploy after the
@@ -221,10 +222,16 @@ export const isSecretsBehind = (
     return false;
   }
   const workers = Object.values(delivered);
-  return Object.entries(rolledOut.prints).some(([name, print]) => {
-    const holding = workers.filter((prints) => Object.hasOwn(prints, name));
-    return (
-      holding.length === 0 || holding.some((prints) => prints[name] !== print)
-    );
-  });
+  const missingOrOther = Object.entries(rolledOut.prints).some(
+    ([name, print]) => {
+      const holding = workers.filter((prints) => Object.hasOwn(prints, name));
+      return (
+        holding.length === 0 || holding.some((prints) => prints[name] !== print)
+      );
+    }
+  );
+  const removed = workers.some((prints) =>
+    Object.keys(prints).some((name) => !Object.hasOwn(rolledOut.prints, name))
+  );
+  return missingOrOther || removed;
 };

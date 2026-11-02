@@ -38,7 +38,11 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { LostWrite } from "./runs.ts";
-import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
+import {
+  emptyStoreSecret,
+  setStoreSecret,
+  useStoreSecrets,
+} from "./secrets-store.ts";
 
 // One client's deploy, as the reconciler starts it (src/rollout/deploy.ts,
 // src/rollout/reconciler.ts), broken where it can break. How it can fail,
@@ -522,6 +526,39 @@ describe("rolling shared secrets out", () => {
       started: await startedOf(client.clientId),
       deploy: await deployOf(client.clientId),
     }).toStrictEqual({
+      started: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it("takes a provider key removed from the store and rolled out off a client that had it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    await setStoreSecret(
+      env.ANTHROPIC_API_KEY,
+      "ANTHROPIC_API_KEY",
+      "anthropic-key"
+    );
+    const client = await live(release);
+    await rollOutSecrets(env, staff);
+    await using runs = followRuns();
+    await runs.converge();
+    const before = await deliveredNames(client.clientId);
+    // Staff take the key out of the store, and roll that out.
+    await emptyStoreSecret(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
+
+    await rollOutSecrets(env, staff);
+    await runs.converge();
+    const after = await deliveredNames(client.clientId);
+
+    expect({
+      before: before.includes("ANTHROPIC_API_KEY"),
+      after: after.includes("ANTHROPIC_API_KEY"),
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      before: true,
+      after: false,
       started: 1,
       deploy: { releaseId: release, status: "done", error: null },
     });
