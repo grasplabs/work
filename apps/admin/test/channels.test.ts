@@ -2,10 +2,12 @@ import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
   channels,
   clientDeploys,
+  clientRuns,
   clients,
   clientWorkers,
 } from "../src/db/schema.ts";
@@ -17,13 +19,19 @@ import {
   retryChannel,
   setClientChannel,
 } from "../src/rollout/channels.ts";
+import { parallelDeploys } from "../src/rollout/desired.ts";
 import { RolloutError } from "../src/rollout/errors.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
+import {
+  livePlacedClient,
+  placedClientRecord,
+  placedRelease,
+} from "./placed.ts";
+import { racingDb } from "./racing-db.ts";
 import { ended, followAdminRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -38,7 +46,10 @@ import { useStoreSecrets } from "./secrets-store.ts";
 //   staff retry;
 // - a release that reaches Edge while Edge deploys, dropped;
 // - a client moved to another channel left on its old channel's release;
-// - two ticks at once deploying one client twice.
+// - two ticks at once deploying one client twice, or more than
+//   `parallelDeploys` clients between them;
+// - a failure that lands mid-tick, missed by the rest of the tick;
+// - clients another runner has taking the channel's slots for good.
 
 const token = "test-deployer-token-channels-3b7f2c";
 const cloudflare = mockCloudflareApi(token);
@@ -78,6 +89,43 @@ const deployOf = async (clientId: string) =>
     .from(clientDeploys)
     .where(eq(clientDeploys.clientId, clientId))
     .get()) ?? null;
+
+/**
+ * `count` active clients following `channel` that run nothing yet, so
+ * each waits for its target; their ids start with `prefix` and sort in
+ * the order made.
+ */
+const waitingClients = async (
+  channel: Channel,
+  prefix: string,
+  count: number
+): Promise<string[]> => {
+  const run = crypto.randomUUID().slice(0, 8);
+  const ids = Array.from(
+    { length: count },
+    (_, index) => `${prefix}-${run}-${String(index).padStart(2, "0")}`
+  );
+  await Promise.all(
+    ids.map(
+      async (id) => await placedClientRecord(cloudflare, 1, { id, channel })
+    )
+  );
+  await db
+    .update(clients)
+    .set({ status: "active" })
+    .where(inArray(clients.id, ids));
+  return ids;
+};
+
+/** How many deploys of clients `clientIds` started, as the audit log keeps them. */
+const startedOf = async (clientIds: readonly string[]): Promise<number> =>
+  await db.$count(
+    auditEvents,
+    and(
+      inArray(auditEvents.clientId, [...clientIds]),
+      eq(auditEvents.action, "deploy.start")
+    )
+  );
 
 /** How many deploys of client `clientId` started, as the audit log keeps them. */
 const deploysStarted = async (clientId: string): Promise<number> =>
@@ -368,5 +416,92 @@ describe("release channels", () => {
       started: await deploysStarted(edge.clientId),
       edge: await releasesOf(edge.clientId),
     }).toStrictEqual({ started: 1, edge: on(release) });
+  });
+
+  it("starts at most parallelDeploys on a channel when two ticks overlap, the second acting not at all", async () => {
+    const release = await placedRelease("feat(core): two ticks, many clients");
+    const waiting = await waitingClients("edge", "a-many", parallelDeploys + 5);
+    await releaseToEdge(env, [release]);
+    // The first tick is held right before its first claim lands.
+    let held = false;
+    const released = Promise.withResolvers<unknown>();
+    const holding = racingDb(async () => {
+      held = true;
+      await released.promise;
+    });
+
+    const first = reconcile({ ...env, DB: holding });
+    try {
+      await vi.waitFor(() => {
+        if (!held) {
+          throw new Error("The first tick hasn't reached a claim yet");
+        }
+      });
+      await reconcile(env);
+    } finally {
+      released.resolve(true);
+    }
+    const whileHeld = await startedOf(waiting);
+    await first;
+
+    expect({ whileHeld, started: await startedOf(waiting) }).toStrictEqual({
+      whileHeld: 0,
+      started: parallelDeploys,
+    });
+  });
+
+  it("starts nothing more once a deploy fails mid-tick", async () => {
+    const release = await placedRelease("feat(core): fails mid-tick");
+    const [failing = "", ...rest] = await waitingClients("edge", "b-fails", 4);
+    await releaseToEdge(env, [release]);
+    // A deploy of the channel's release fails right before the tick's
+    // first claim lands.
+    let failure: Promise<void> | undefined;
+    const fail = async (database: D1Database): Promise<void> => {
+      await adminDatabase(database).insert(clientDeploys).values({
+        clientId: failing,
+        releaseId: release,
+        runId: "deploy-failed-elsewhere",
+        status: "failed",
+        error: "release_rolled_back",
+        startedAt: new Date(),
+        endedAt: new Date(),
+      });
+    };
+    const failingDb = racingDb(async (database) => {
+      failure ??= fail(database);
+      await failure;
+    });
+
+    await reconcile({ ...env, DB: failingDb });
+    await reconcile(env);
+
+    await expect(startedOf(rest)).resolves.toBe(0);
+  });
+
+  it("starts later clients when the first ones are held by another runner", async () => {
+    const release = await placedRelease("feat(core): past busy clients");
+    const busy = await waitingClients("edge", "c-busy", parallelDeploys);
+    const free = await waitingClients("edge", "d-free", 5);
+    // Each busy client has a provisioning attempt starting a moment ago.
+    await Promise.all(
+      busy.map(
+        async (clientId) =>
+          await db.insert(clientRuns).values({
+            clientId,
+            runId: `${clientId}-pbusy`,
+            kind: "provision_placed",
+            claimedAt: new Date(),
+          })
+      )
+    );
+    await releaseToEdge(env, [release]);
+
+    await reconcile(env);
+
+    expect({
+      busy: await startedOf(busy),
+      free: await startedOf(free),
+    }).toStrictEqual({ busy: 0, free: free.length });
   });
 });

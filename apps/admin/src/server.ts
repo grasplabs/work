@@ -9,8 +9,8 @@
  * The admin can have a hostname of its own (src/admin-host.ts). Its pages
  * are served from the root.
  *
- * The cron imports newly published releases (src/releases/import.ts) and
- * takes Edge to the newest (src/rollout/channels.ts), deploys each client
+ * The cron imports newly published releases (src/releases/import.ts),
+ * each taken to Edge as it's saved (src/rollout/channels.ts), deploys each client
  * whose Workers run something other than its target
  * (src/rollout/reconciler.ts), then resumes provisioning that isn't
  * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
@@ -39,7 +39,6 @@ import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
-import { releaseToEdge } from "./rollout/channels.ts";
 import { reconcile } from "./rollout/reconciler.ts";
 
 export { AdminRuns } from "./run-object.ts";
@@ -69,11 +68,7 @@ export default {
     // An import that fails never keeps stuck provisioning from resuming:
     // logged by its code, and reconciling runs all the same.
     try {
-      const { imported } = await importReleases(
-        env.RELEASES,
-        adminDatabase(env.DB)
-      );
-      await releaseToEdge(env, imported);
+      await importReleases(env.RELEASES, adminDatabase(env.DB));
     } catch (error) {
       log.error("releases.import_failed", { error: errorCode(error) });
     }

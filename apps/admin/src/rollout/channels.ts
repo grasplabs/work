@@ -4,8 +4,8 @@
  * pinned to a release of its own. These actions only change that desired
  * state, each audited; the reconciler deploys it (src/rollout/reconciler.ts).
  *
- * - A new release goes to Edge by itself, as the admin imports it, on
- *   every stage alike (`releaseToEdge`).
+ * - A new release goes to Edge by itself, in the batch the admin imports
+ *   it in, on every stage alike (`toEdge`).
  * - Staff promote a release from Edge to Beta, and from Beta to Stable
  *   (`promoteRelease`); rolling a channel back is setting it to a release
  *   it had before (src/rollout/desired.ts).
@@ -31,6 +31,8 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -214,10 +216,47 @@ export const promoteRelease = async (
 };
 
 /**
- * Takes Edge to the newest of `imported`, the releases the admin just
- * imported, as the admin itself: only when it's newer than Edge's release.
- * A release imported late stays where it is, and so does an Edge staff
- * set back, until a newer release comes.
+ * Release id `id`'s place in `compareReleaseIds`' order, as SQL text that
+ * sorts so: every local build (`dev-`, by its text) before every
+ * published `YY.MM.N`, those by year, month and N, N padded to its nine
+ * digits (@grasp-os/shared/release-id).
+ */
+const releaseOrderSql = (id: SQLWrapper | string): SQL =>
+  sql`CASE WHEN ${id} LIKE 'dev-%' THEN '0' || ${id} ELSE '1' || substr(${id}, 1, 6) || printf('%09d', CAST(substr(${id}, 7) AS INTEGER)) END`;
+
+/**
+ * Takes Edge to release `releaseId`, as the admin itself, audited: only
+ * when it's newer than Edge's release, or Edge has none. As statements,
+ * for the batch that saves the release (src/releases/import.ts), so a
+ * saved release never misses Edge. A release imported late stays where
+ * it is, and so does an Edge staff set back, until a newer release comes.
+ */
+export const toEdge = (
+  db: AdminDatabase,
+  releaseId: string
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] => {
+  const now = new Date();
+  const edge = sql`${channels.id} = 'edge'`;
+  // The event first, while Edge still has the release it had.
+  const event = db
+    .insert(auditEvents)
+    .select(
+      sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, 'system', ${promoteAction}, NULL, ${releaseId}, json_object('channel', 'edge', 'from', (SELECT ${channels.releaseId} FROM ${channels} WHERE ${edge}), 'back', json('false')) WHERE NOT EXISTS (SELECT 1 FROM ${channels} WHERE ${edge} AND ${releaseOrderSql(channels.releaseId)} >= ${releaseOrderSql(releaseId)})`
+    );
+  const move = db
+    .insert(channels)
+    .values({ id: "edge", releaseId, updatedAt: now })
+    .onConflictDoUpdate({
+      target: channels.id,
+      set: { releaseId, updatedAt: now },
+      setWhere: sql`${releaseOrderSql(channels.releaseId)} < ${releaseOrderSql(releaseId)}`,
+    });
+  return [event, move];
+};
+
+/**
+ * Takes Edge to the newest of `imported`, releases the admin has: what
+ * the import does in its own batch (`toEdge`).
  */
 export const releaseToEdge = async (
   env: Env,
@@ -228,21 +267,7 @@ export const releaseToEdge = async (
     return;
   }
   const db = adminDatabase(env.DB);
-  const { edge } = await channelReleases(db);
-  if (edge !== null && compareReleaseIds(newest, edge) <= 0) {
-    return;
-  }
-  const changed = await pointChannel(db, "system", {
-    channel: "edge",
-    releaseId: newest,
-    from: edge,
-    back: false,
-  });
-  // Another import moved Edge between the read and the write, so the
-  // compare-and-set missed: read Edge again, as it may hold an older release.
-  if (!changed) {
-    await releaseToEdge(env, [newest]);
-  }
+  await db.batch(toEdge(db, newest));
 };
 
 /** Retrying a channel's failed deploys. */

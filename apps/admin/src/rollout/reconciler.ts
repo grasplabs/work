@@ -9,30 +9,38 @@
  * starts on the channel: the ones out finish, and staff retry, or promote
  * another release (src/rollout/channels.ts).
  *
- * Idempotent and safe to run beside itself: a deploy starts only with a
- * compare-and-set claim on the client (`claim`), so two ticks reading the
- * same state start one deploy, and a tick that read the client before a
- * deploy came and went starts none. A deploy whose run ended without
- * recording how (terminated, or never created) is settled as failed
- * (`run_ended`): its claim is the run's life, the lease.
+ * One tick at a time: a tick acts only while it holds the reconciler's
+ * lease (`takeLease`), so the count of deploys out and the check for a
+ * failure are one runner's, and ticks that overlap never start more than
+ * `parallelDeploys` between them. Deploys only end while a tick runs, so
+ * its count can only be high; a failure can land mid-tick, so each claim
+ * checks for one in its own statement (`channelFailedSql`).
+ *
+ * Idempotent: a deploy starts only with a compare-and-set claim on the
+ * client (`claim`), so a tick that read the client before a deploy came
+ * and went starts none. A deploy whose run ended without recording how
+ * (terminated, or never created) is settled as failed (`run_ended`): its
+ * claim is the run's life.
  *
  * Clients are read a page at a time, and each page's deploys start before
  * the next is read; no tick holds more than a page in memory or in a
  * statement.
  */
 import { log } from "@grasp-os/shared/log";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   channelIds,
+  channels,
   clientDeploys,
   clientPlacements,
   clientProvisions,
   clientRuns,
   clients,
   clientWorkers,
+  reconcilerLease,
 } from "../db/schema.ts";
 import type { Channel } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
@@ -54,6 +62,13 @@ import { channelReleases, deliveredShared } from "./targets.ts";
 
 /** How many clients a tick reads at once. */
 const pageSize = 200;
+
+/**
+ * How long a tick's lease lasts: the longest a cron invocation runs, so a
+ * tick never outlives it. A tick that dies without giving it back holds
+ * the reconciler up until then.
+ */
+const leaseMs = 15 * 60 * 1000;
 
 /**
  * The one release every Worker of the client runs, as SQL: null when it
@@ -196,6 +211,15 @@ const settled = async (
   };
 };
 
+/**
+ * Whether a client following `channel` (active, placed, not pinned)
+ * failed its deploy of the channel's release, as SQL: what stops the
+ * channel (`failsChannel`). Read by the statement that claims a client,
+ * so a failure that lands mid-tick stops every claim after it.
+ */
+const channelFailedSql = (channel: Channel) =>
+  sql`EXISTS (SELECT 1 FROM ${clientDeploys} JOIN ${clients} ON ${clients.id} = ${clientDeploys.clientId} JOIN ${clientPlacements} ON ${clientPlacements.clientId} = ${clients.id} JOIN ${channels} ON ${channels.id} = ${clients.channel} WHERE ${clients.channel} = ${channel} AND ${clients.status} = 'active' AND ${clients.pinnedReleaseId} IS NULL AND ${clientDeploys.status} = 'failed' AND ${clientDeploys.releaseId} = ${channels.releaseId})`;
+
 /** A new deploy run's id. */
 const newDeployId = (): string =>
   `deploy-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
@@ -205,8 +229,9 @@ const newDeployId = (): string =>
  * returns whether it won. One batch, compare-and-set on both claims as
  * read: the client's runner (`client_runs`, replacing `replacing`, a run
  * that ended, or none) and its deploy (`client_deploys`, replacing the
- * row as read, by its run). Either changed since, and nothing is claimed:
- * the runner claim is undone in the same batch when the deploy's lost.
+ * row as read, by its run). Either changed since, or the client's channel
+ * has failed by now, and nothing is claimed: the runner claim is undone
+ * in the same batch when the deploy's lost.
  */
 const claim = async (
   db: AdminDatabase,
@@ -243,7 +268,7 @@ const claim = async (
               eq(clientRuns.runId, replacing)
             )
           );
-  const holds = sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${row.id} AND ${clientRuns.runId} = ${runId})`;
+  const claimable = sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${row.id} AND ${clientRuns.runId} = ${runId}) AND NOT ${channelFailedSql(row.channel)}`;
   const values = {
     clientId: row.id,
     releaseId,
@@ -259,7 +284,7 @@ const claim = async (
       ? db
           .insert(clientDeploys)
           .select(
-            sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL WHERE ${holds} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
+            sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL WHERE ${claimable} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
           )
       : db
           .update(clientDeploys)
@@ -268,7 +293,7 @@ const claim = async (
             and(
               eq(clientDeploys.clientId, row.id),
               eq(clientDeploys.runId, asRead),
-              sql`${holds}`
+              sql`${claimable}`
             )
           );
   const event = auditIfChanged(db, "system", {
@@ -292,19 +317,19 @@ const claim = async (
 
 /**
  * Starts client `row`'s deploy to `releaseId`: claimed, then its run
- * created. Nothing while another runner (an apply, provisioning) still
- * has the client, or another tick claimed it first. A run that can't be
- * created is recorded failed (`run_not_created`).
+ * created. Returns whether it's out: not while another runner (an apply,
+ * provisioning) still has the client, when the claim lost, or when the
+ * run can't be created, which is recorded failed (`run_not_created`).
  */
 const startDeploy = async (
   env: Env,
   db: AdminDatabase,
   row: ClientRow,
   releaseId: string
-): Promise<void> => {
+): Promise<boolean> => {
   const current = await currentRun(env, row.id);
   if (current !== null && !hasEnded(current.status)) {
-    return;
+    return false;
   }
   const runId = newDeployId();
   const won = await claim(db, row, current?.runId ?? null, {
@@ -312,13 +337,14 @@ const startDeploy = async (
     releaseId,
   });
   if (!won) {
-    return;
+    return false;
   }
   try {
     await deploys(env).create({
       id: runId,
       params: { clientId: row.id, releaseId },
     });
+    return true;
   } catch (error) {
     log.error("deploy.run_not_created", {
       clientId: row.id,
@@ -329,6 +355,42 @@ const startDeploy = async (
       { clientId: row.id, runId, releaseId },
       "run_not_created"
     );
+    return false;
+  }
+};
+
+/**
+ * Starts deploying `page`'s waiting clients, in order, until `deploying`
+ * and those started fill the channel's room or none are left: a client
+ * that didn't start (another runner has it) leaves its slot to the next.
+ * Returns how many are out now.
+ */
+const startWaiting = async (
+  env: Env,
+  db: AdminDatabase,
+  page: readonly ClientRow[],
+  releases: ChannelReleases,
+  deploying: number
+): Promise<number> => {
+  let out = deploying;
+  let left = page;
+  for (;;) {
+    const { start } = planChannel(left, releases, out, false);
+    if (start.length === 0) {
+      return out;
+    }
+    const tried = new Set(start);
+    // oxlint-disable-next-line no-await-in-loop -- each round fills the slots the last left
+    const started = await Promise.all(
+      left
+        .filter((row) => tried.has(row.id))
+        .map(async (row) => {
+          const target = targetOf(row, releases);
+          return target !== null && (await startDeploy(env, db, row, target));
+        })
+    );
+    out += started.filter(Boolean).length;
+    left = left.filter((row) => !tried.has(row.id));
   }
 };
 
@@ -337,7 +399,8 @@ const startDeploy = async (
  * deploys whose runs ended, counts those still out, and finds whether a
  * client following it failed on its release; a second, while none did,
  * starts deploying the clients waiting, page by page, as many as fit
- * beside those out.
+ * beside those out. One that fails mid-tick stops the claims after it
+ * (`claim`).
  */
 const reconcileChannel = async (
   env: Env,
@@ -362,41 +425,78 @@ const reconcileChannel = async (
     return;
   }
   await eachPage(db, channel, rolledOut, async (page) => {
-    const { start } = planChannel(page, releases, deploying, false);
-    const starting = page.filter((row) => start.includes(row.id));
-    await Promise.all(
-      starting.map(async (row) => {
-        const target = targetOf(row, releases);
-        if (target !== null) {
-          await startDeploy(env, db, row, target);
-        }
-      })
-    );
-    deploying += starting.length;
+    deploying = await startWaiting(env, db, page, releases, deploying);
     return deploying >= parallelDeploys ? "stop" : "next";
   });
 };
 
+/** The one lease's id. */
+const leaseId = "reconciler";
+
+/**
+ * Takes the reconciler's lease for tick `holder`, and returns whether it
+ * did: one statement, so of ticks at once one gets it, and only from no
+ * one or a holder whose lease expired.
+ */
+const takeLease = async (
+  db: AdminDatabase,
+  holder: string
+): Promise<boolean> => {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + leaseMs);
+  const taken = await db
+    .insert(reconcilerLease)
+    .values({ id: leaseId, holder, expiresAt })
+    .onConflictDoUpdate({
+      target: reconcilerLease.id,
+      set: { holder, expiresAt },
+      setWhere: lte(reconcilerLease.expiresAt, now),
+    })
+    .returning({ holder: reconcilerLease.holder });
+  return taken.length > 0;
+};
+
+/** Gives tick `holder`'s lease back: only while it's still its own. */
+const giveLeaseBack = async (
+  db: AdminDatabase,
+  holder: string
+): Promise<void> => {
+  await db
+    .delete(reconcilerLease)
+    .where(
+      and(eq(reconcilerLease.id, leaseId), eq(reconcilerLease.holder, holder))
+    );
+};
+
 /**
  * The reconciler's tick: every channel in turn, each logged and left on
- * its own failure. Nothing while the admin has no CLIENT_DOMAIN, so no
- * client can be deployed.
+ * its own failure, while it holds the lease. Nothing while another tick
+ * holds it, or while the admin has no CLIENT_DOMAIN, so no client can be
+ * deployed.
  */
 export const reconcile = async (env: Env): Promise<void> => {
   if (clientDomain(env) === null) {
     return;
   }
   const db = adminDatabase(env.DB);
-  const releases = await channelReleases(db);
-  for (const channel of channelIds) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one channel at a time
-      await reconcileChannel(env, channel, releases, null);
-    } catch (error) {
-      log.error("reconcile.channel_failed", {
-        channel,
-        error: errorCode(error),
-      });
+  const holder = crypto.randomUUID();
+  if (!(await takeLease(db, holder))) {
+    return;
+  }
+  try {
+    const releases = await channelReleases(db);
+    for (const channel of channelIds) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one channel at a time
+        await reconcileChannel(env, channel, releases, null);
+      } catch (error) {
+        log.error("reconcile.channel_failed", {
+          channel,
+          error: errorCode(error),
+        });
+      }
     }
+  } finally {
+    await giveLeaseBack(db, holder);
   }
 };

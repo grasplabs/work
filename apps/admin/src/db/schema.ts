@@ -84,6 +84,20 @@ export const channels = sqliteTable("channels", {
 });
 
 /**
+ * Who runs the reconciler's tick now (src/rollout/reconciler.ts): one
+ * row while a tick runs, taken with a compare-and-set, so ticks that
+ * overlap never act side by side. Taken over only once it expired, from
+ * a tick that died before giving it back.
+ */
+export const reconcilerLease = sqliteTable("reconciler_lease", {
+  /** Always `reconciler`: the one lease. */
+  id: text().primaryKey(),
+  /** The tick holding it: a random id of its own. */
+  holder: text().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+/**
  * A client: one deployment of Grasp OS, placed in a hosting destination
  * (src/hosting/), where its operation provisions and releases it.
  */
