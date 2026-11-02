@@ -1453,7 +1453,7 @@ describe("entity linking", () => {
     const [proposal] = await entityMatchProposals(host.brain, admin);
     const ids = proposal?.entities.map(({ id }) => id) ?? [];
     const pair: [string, string] = [ids[0] ?? "", ids[1] ?? ""];
-    return { host, admin, pair, sales, proof: saved[2]?.id ?? "" };
+    return { host, admin, pair, sales, support, proof: saved[2]?.id ?? "" };
   };
 
   it("refuses a replacement made from a decision replaced meanwhile, by the same person too", async () => {
@@ -1674,6 +1674,61 @@ describe("entity linking", () => {
       // An open question again.
       proposals: proposals.length,
     }).toStrictEqual({ before: [pair[1]], after: [], proposals: 1 });
+  });
+
+  it("forgets a `same` whose evidence a personal purge deletes, so another member decides the pair again", async () => {
+    const { host, pair, sales, support, proof } = await adaTwice();
+    const leaver = `leaver-${word()}`;
+    const personal = await ensureCollection(
+      host.brain,
+      {
+        id: `personal-${leaver}`,
+        name: "Personal",
+        description: "",
+        owner: leaver,
+        access: "me",
+        sensitive: false,
+        source: "here",
+        createdAt: new Date(),
+      },
+      { type: "person", userId: leaver }
+    );
+    const note = await save(host, personal, "note.md", "They are one person.");
+    await link(host, note.id, 1);
+    const both = [sales.id, support.id];
+    const leaverCaller: Caller = {
+      userId: leaver,
+      reads: [...both, personal.id],
+    };
+    await decideEntityMatch(host.brain, leaverCaller, {
+      entities: pair,
+      decision: "same",
+      evidence: { documentId: note.id, version: 1 },
+    });
+    const before = await sameAsFor(host.brain, leaverCaller, pair[0]);
+    const writer = writerOf("admin");
+    const input = { type: "personal", userId: leaver, reason: "offboarding" };
+    const prepared = await preparePurge(host.brain, writer, input, noCopies);
+    await purge(host.brain, writer, input, prepared.token, noCopies);
+    // Another member, who never read the purged note, decides it afresh.
+    const member: Caller = { userId: "member", reads: both };
+    const decided = await outcome(
+      decideEntityMatch(host.brain, member, {
+        entities: pair,
+        decision: "same",
+        evidence: { documentId: proof, version: 1 },
+      })
+    );
+
+    expect({
+      before,
+      decided,
+      after: await sameAsFor(host.brain, member, pair[0]),
+    }).toStrictEqual({
+      before: [pair[1]],
+      decided: "ok",
+      after: [pair[1]],
+    });
   });
 
   it("refuses a `same` whose evidence a purge rewrote as it was decided", async () => {

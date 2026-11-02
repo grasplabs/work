@@ -499,6 +499,11 @@ const purgePersonal = async <C>(
       // The entities only its documents name, with their keys, before the
       // documents take their mentions with them.
       forgetCollectionEntities(db, collectionId),
+      // The matches its documents were evidence for, as a content purge
+      // forgets them (`forgetMatchesOn`): entities named elsewhere stay.
+      db
+        .delete(brainEntityMatches)
+        .where(inArray(brainEntityMatches.evidenceDocumentId, inCollection)),
       db.delete(sections).where(inArray(sections.documentId, inCollection)),
       db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
       db
