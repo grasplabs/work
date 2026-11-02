@@ -24,7 +24,7 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { defineSchemaOnStore } from "./store-backfill.ts";
-import { liveStoreSql } from "./store-deletion.ts";
+import { inventoriedDeleted, liveStoreSql } from "./store-deletion.ts";
 
 // The stores a standalone workflow declares (GRA-682): created and handed
 // their schema when a version declaring them is published, the workflow's
@@ -96,7 +96,9 @@ const storeNamed = async (
  * The store workflow `workflowId` declares as `name`: the one it made
  * before, or a new one, created in one audited batch with its name and
  * its owner claim. A creation that loses a race to another for the same
- * name answers the winner's.
+ * name answers the winner's. One it made before that is deleted (an
+ * admin may delete a store no version binds, such as one a publication
+ * made before it stopped) is replaced by a new one.
  */
 const storeFor = async (
   env: Env,
@@ -106,7 +108,20 @@ const storeFor = async (
 ): Promise<StoreId> => {
   const found = await storeNamed(env, workflowId, name);
   if (found !== undefined) {
-    return found;
+    if (!(await inventoriedDeleted(env, found))) {
+      return found;
+    }
+    // Only this name's row for the deleted store goes: a publication racing
+    // to replace it still ends on one store (the unique violation below).
+    await drizzle(env.DB)
+      .delete(workflowStores)
+      .where(
+        and(
+          eq(workflowStores.workflowId, workflowId),
+          eq(workflowStores.name, name),
+          eq(workflowStores.storeId, found)
+        )
+      );
   }
   const id = storeIdSchema.parse(crypto.randomUUID());
   const createdAt = new Date();

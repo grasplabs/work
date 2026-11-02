@@ -321,6 +321,57 @@ describe("stores a workflow declares", () => {
     });
   });
 
+  it("get a fresh store for a name whose store an admin deleted after a publication that stopped before its version", async () => {
+    const ada = await person("builder");
+    const admin = await person("admin");
+    const { id, name } = await newWorkflow(ada);
+    const first = await publishWorkflowVersion(env, ada, id, {
+      definition: definitionOf(name, "1.0.0", intake(orders())),
+      basedOn: null,
+    });
+    const { intake: kept } = intake(orders());
+    const extra = { extra: kept };
+    // `extra` is created first, then `intake`'s narrowed schema stops the
+    // publication: no version binds `extra`.
+    const stopped = await outcome(
+      publishWorkflowVersion(env, ada, id, {
+        definition: definitionOf(name, "2.0.0", {
+          ...extra,
+          ...intake(orders({}, { type: "string" })),
+        }),
+        basedOn: first.version,
+      })
+    );
+    const made = await storesOf(id);
+    const unbound = made.find((store) => store.name === "extra")?.storeId ?? "";
+    const deleted = await outcome(deleteStore(env, admin, unbound));
+    const again = await outcome(
+      publishWorkflowVersion(env, ada, id, {
+        definition: definitionOf(name, "1.1.0", {
+          ...extra,
+          ...intake(orders()),
+        }),
+        basedOn: first.version,
+      })
+    );
+    const after = await storesOf(id);
+    const fresh = after.find((store) => store.name === "extra");
+
+    expect({
+      stopped,
+      deleted,
+      again,
+      fresh: fresh !== undefined && fresh.storeId !== unbound,
+      live: fresh?.deletedAt ?? null,
+    }).toStrictEqual({
+      stopped: "migration.required",
+      deleted: "ok",
+      again: "ok",
+      fresh: true,
+      live: null,
+    });
+  });
+
   it("can't be managed as a store around the workflow: not by its creator, never shared, and not deleted while a version binds it", async () => {
     const ada = await person("builder");
     const admin = await person("admin");
