@@ -1176,7 +1176,7 @@ export const handMoments: readonly Moment[] = [
   moment("inkoop-flood", "flood", INKOOP, "steps", 5, [
     ...OPENED_INKOOP,
     "S: Wat deed je als eerste met die bestelling?",
-    "P: nou eerst de aanvraag van de uitvoerder, die komt via whatsapp of mail, soms belt hij, dan zoek ik de offerte erbij maar die klopte niet met de prijslijst, dus de leverancier gebeld, ondertussen moest het akkoord nog komen, en de tegels waren niet op voorraad dus toen een andere leverancier, en het moest ook nog in het systeem",
+    "P: nou eerst de aanvraag van de uitvoerder, die komt via sms of mail, soms belt hij, dan zoek ik de offerte erbij maar die klopte niet met de prijslijst, dus de leverancier gebeld, ondertussen moest het akkoord nog komen, en de tegels waren niet op voorraad dus toen een andere leverancier, en het moest ook nog in het systeem",
   ]),
   moment("orders-where-to-start", "where to start", ORDERS, "story", 2, [
     ...OPENED_ORDERS,
