@@ -284,7 +284,6 @@ const permanentCodes: ReadonlySet<string> = new Set([
   "workflow.lineage_limit",
   "workflow.between_steps_limit",
   "workflow.queue_timeout",
-  "workflow.queue_full",
   "workflow.candidate_time_limit",
   "workflow.candidate_wait_limit",
 ]);

@@ -24,6 +24,7 @@ import {
   staffPerson,
   withSignIn,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Connecting an account, through core: the person starts over `/rpc`, the
 // provider (a stand-in for Entra behind the real connect) sends the browser
@@ -44,6 +45,7 @@ const person = async (role: "admin" | "user" = "user") => {
     oid: String(claims.oid),
     name: String(claims.name),
     connections: core.authenticate().connections,
+    members: core.authenticate().members,
   };
 };
 
@@ -759,5 +761,63 @@ describe("offering catalog entries", () => {
     ]);
     const { entries } = await admin.connections.catalog();
     expect(entries.every(({ offered }) => offered)).toBeTruthy();
+  });
+});
+
+describe("the revokes to make by hand", () => {
+  it("shows the company's admins a stuck revoke of a personal connection by its owner's name, and nobody else", async () => {
+    const admin = await person("admin");
+    const owner = await person();
+    const connectionId = `connection-${crypto.randomUUID()}`;
+    const now = Date.now();
+    // As connect leaves a revoke its provider kept refusing for a day.
+    await connectDb().batch([
+      connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at) VALUES (?, 'sample-oauth', 'personal', ?, 'disconnected', 'native', 'sample-oauth', ?, ?, ?, ?)"
+        )
+        .bind(
+          connectionId,
+          owner.userId,
+          `acct-${connectionId}`,
+          "their@app.test",
+          now,
+          now
+        ),
+      connectDb()
+        .prepare(
+          "INSERT INTO token_revocations (id, connection_id, sealed, reason, attempts, retry_at, created_at) VALUES (?, ?, 'sealed', 'disconnected', 9, ?, ?)"
+        )
+        .bind(crypto.randomUUID(), connectionId, now + 3_600_000, now),
+    ]);
+
+    const toDo = await admin.connections.revocationsByHand();
+    const theirs = toDo.filter((each) => each.connectionId === connectionId);
+    const user = await outcome(owner.connections.revocationsByHand());
+    // Removed, they keep their name, but are no longer here to remove it.
+    await admin.members.remove(owner.userId);
+    const later = await admin.connections.revocationsByHand();
+
+    expect({
+      theirs,
+      address: JSON.stringify(theirs).includes("their@app.test"),
+      user,
+      removed: later
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ ownerName, ownerIsMember }) => ({ ownerName, ownerIsMember })),
+    }).toMatchObject({
+      theirs: [
+        {
+          state: "stuck",
+          ownerUserId: owner.userId,
+          ownerName: owner.name,
+          ownerIsMember: true,
+          accountName: null,
+        },
+      ],
+      address: false,
+      user: "role.forbidden",
+      removed: [{ ownerName: owner.name, ownerIsMember: false }],
+    });
   });
 });
