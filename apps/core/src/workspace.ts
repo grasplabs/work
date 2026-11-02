@@ -120,7 +120,7 @@ import type { ThinkingBrain } from "./agent-thinking.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
-import { memberOf } from "./auth/identity.ts";
+import { memberOf, memberRole } from "./auth/identity.ts";
 import {
   drainCaptures,
   eraseCaptured,
@@ -212,7 +212,6 @@ import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { modelSettings, models } from "./models.ts";
-import { personRole } from "./permissions.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
@@ -1379,15 +1378,9 @@ export class Workspace extends DurableObject<Env> {
       });
     }
     if (restricted) {
-      // As restricted.ts records a chat entering restricted mode, its
-      // agent for a Grasp staff member when staff asked for the fix
-      // (GRA-1088): `by` is core's, made from the caller's own session.
-      const staff = by?.type === "staff";
+      // As restricted.ts records a chat entering restricted mode.
       this.#outboxEntry({
-        actor: delegateActorOf(
-          chatAuthority({ agentId, personId, staff }),
-          via
-        ),
+        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
         action: "context.restricted",
         target: { type: "chat", id },
         provenance: carried.slice(0, auditProvenanceMaxItems),
@@ -1880,14 +1873,7 @@ export class Workspace extends DurableObject<Env> {
     const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(
-        chat,
-        { text, model },
-        undefined,
-        onText,
-        false,
-        calls
-      ),
+      answer: await this.#turn(chat, { text, model }, undefined, onText, calls),
       calls,
     };
   }
@@ -1906,16 +1892,13 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Refuses a turn its person may no longer take, or one for a chat that
-   * holds all it may. A Grasp staff member's turn (`send`'s `staff`) asks
-   * for staff whose staff session is still valid, in place of a member
-   * (GRA-1088).
+   * holds all it may.
    */
   async #mayTakeTurn(
     chatId: Chat["id"],
-    personId: Chat["personId"],
-    staff: boolean
+    personId: Chat["personId"]
   ): Promise<void> {
-    if ((await personRole(this.env, personId, staff)) === undefined) {
+    if ((await memberRole(this.env.DB, personId)) === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
     if (this.#storedChars(chatId) > maxChatChars) {
@@ -1925,16 +1908,14 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * One turn of `chat`'s agent (`ask`). `started` is called once the turn
-   * is under way: the model admitted, and nothing kept yet. `staff` when
-   * a Grasp staff member asks; `calls` gets each call its code makes, as
-   * it ends.
+   * is under way: the model admitted, and nothing kept yet. `calls` gets
+   * each call its code makes, as it ends.
    */
   async #turn(
     chat: Chat,
     question: Question,
     started?: () => void,
     onText?: (text: string) => unknown,
-    staff = false,
     calls?: ToolCall[]
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -1969,7 +1950,7 @@ export class Workspace extends DurableObject<Env> {
       this.#lastMessageId(chat.id)
     );
     try {
-      await this.#mayTakeTurn(chat.id, personId, staff);
+      await this.#mayTakeTurn(chat.id, personId);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
@@ -1977,14 +1958,7 @@ export class Workspace extends DurableObject<Env> {
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-      const scope = {
-        workspaceId,
-        agentId,
-        chatId: chat.id,
-        personId,
-        via,
-        staff,
-      };
+      const scope = { workspaceId, agentId, chatId: chat.id, personId, via };
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -2035,7 +2009,7 @@ export class Workspace extends DurableObject<Env> {
         context,
         scope,
         whyStop: async () =>
-          (await personRole(this.env, personId, staff)) === undefined
+          (await memberRole(this.env.DB, personId)) === undefined
             ? permissionErrors.create("permission.person_inactive")
             : undefined,
         runs: {
@@ -2121,8 +2095,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `personId`'s own chat's agent a question (`ask`), and resolves
-   * once the turn is under way; `staff` when they are a Grasp staff member,
-   * as core's caller read it from their own session (GRA-1088); refused as `ask` refuses one that can't
+   * once the turn is under way; refused as `ask` refuses one that can't
    * start. The turn goes on with nobody waiting: its messages go to the
    * chat's watchers as they come, and why it stopped, if it stopped short
    * of an answer, with the chat's state (`ChatUpdate.stopped`).
@@ -2130,12 +2103,11 @@ export class Workspace extends DurableObject<Env> {
   async send(
     chatId: unknown,
     personId: string,
-    question: Question,
-    staff = false
+    question: Question
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
-    const ended = this.#sentTurn(chat, question, started, staff);
+    const ended = this.#sentTurn(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
     await started.promise;
@@ -2151,21 +2123,14 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>,
-    staff: boolean
+    started: PromiseWithResolvers<boolean>
   ): Promise<void> {
     let underWay = false;
     try {
-      await this.#turn(
-        chat,
-        question,
-        () => {
-          underWay = true;
-          started.resolve(true);
-        },
-        undefined,
-        staff
-      );
+      await this.#turn(chat, question, () => {
+        underWay = true;
+        started.resolve(true);
+      });
     } catch (error) {
       if (!underWay) {
         started.reject(error);
