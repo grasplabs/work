@@ -193,11 +193,11 @@ describe("a client's deploy", () => {
       call.path.endsWith("-connect");
     // The release's core answers the probe as another client; the
     // rollback's connect upload finds it answering as it should again.
-    client.account.coreProbe = { asClient: "someone-else" };
+    client.core.coreProbe = { asClient: "someone-else" };
     // oxlint-disable require-await -- the fake waits on these; nothing to wait for
     cloudflare.beforeAnswering(isConnectUpload, async () => {
       cloudflare.beforeAnswering(isConnectUpload, async () => {
-        delete client.account.coreProbe;
+        delete client.core.coreProbe;
       });
     });
     // oxlint-enable require-await

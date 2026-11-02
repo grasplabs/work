@@ -1,4 +1,7 @@
-import type { CompanyToolClass } from "@grasp-os/shared/connect";
+import type {
+  CompanyToolClass,
+  ConnectionPerson,
+} from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -561,6 +564,38 @@ const owedDue = async (connectionId: string): Promise<void> => {
     .run();
 };
 
+/**
+ * Comes back from Google as `account` consenting at `url`, as `person`, and
+ * holds there: the code exchanged, the account's addresses being read with
+ * the new token, nothing kept yet. `finish` lets it go on.
+ */
+const comingBack = async (
+  person: ConnectionPerson,
+  url: URL,
+  account: Parameters<typeof providers.authorize>[1]
+) => {
+  const lookup = Promise.withResolvers<Response>();
+  const lookingUp = Promise.withResolvers<boolean>();
+  providers.state.profile = async () => {
+    providers.state.profile = undefined;
+    lookingUp.resolve(true);
+    return await lookup.promise;
+  };
+  // In connect itself: the request finishing it is under way.
+  const finishing = finishConnection(env, {
+    person,
+    state: stateOf(url),
+    code: providers.authorize(url.href, account),
+  });
+  await lookingUp.promise;
+  return {
+    finish: async () => {
+      lookup.resolve(new Response(null, { status: 503 }));
+      return await finishing;
+    },
+  };
+};
+
 // A connection asked to connect again gives its tokens up while its grant
 // is still valid (GRA-1196). From the ways it can fail: the grant stays
 // live with nothing left to revoke it, should the person never connect
@@ -673,31 +708,15 @@ describe("a grant asked to connect again", () => {
       provider: "google",
       classes: ["read-own", "change-own", "read-company"],
     });
-    // Back from Google: the code exchanged, the account's addresses being
-    // read with the new token, nothing kept yet.
-    const lookup = Promise.withResolvers<Response>();
-    const lookingUp = Promise.withResolvers<boolean>();
-    providers.state.profile = async () => {
-      providers.state.profile = undefined;
-      lookingUp.resolve(true);
-      return await lookup.promise;
-    };
-    // In connect itself: the request finishing it is under way.
-    const finishing = finishConnection(env, {
-      person: anna.person,
-      state: stateOf(url),
-      code: providers.authorize(url.href, {
-        ...account,
-        granted: `${googleDefaultGrant} ${googleScope("drive.readonly")}`,
-      }),
+    const { finish } = await comingBack(anna.person, url, {
+      ...account,
+      granted: `${googleDefaultGrant} ${googleScope("drive.readonly")}`,
     });
-    await lookingUp.promise;
     const asked = providers.revocations().length;
 
     await owedDue(anna.connectionId);
     await runMaintenance();
-    lookup.resolve(new Response(null, { status: 503 }));
-    const { connectionId } = await finishing;
+    const { connectionId } = await finish();
     await owedDue(anna.connectionId);
     await runMaintenance();
 
@@ -715,6 +734,50 @@ describe("a grant asked to connect again", () => {
       left: [],
     });
   });
+
+  it.for([
+    { by: "her", other: false },
+    { by: "another admin", other: true },
+  ])(
+    "waits for a shared sign-in of the same account coming back too, by $by, the grant at Google being the account's whatever the scope",
+    async ({ other }) => {
+      const anna = someone("admin");
+      // An admin connects any account as shared, not only their own.
+      const admin = other ? someone("admin") : anna;
+      const account = ownAccount(anna, "google");
+      const personal = await connectAccount(providers, anna, {
+        ...account,
+        granted: googleDefaultGrant,
+      });
+      // Google is down as she disconnects: the revoke is owed.
+      providers.state.revoke = async () =>
+        await Promise.resolve(new Response(null, { status: 503 }));
+      await exports.default.disconnect({
+        person: anna,
+        connectionId: personal,
+      });
+      providers.state.revoke = undefined;
+      const url = await startAs(admin, { provider: "google", scope: "shared" });
+      const { finish } = await comingBack(admin, url, {
+        ...account,
+        granted: googleDefaultGrant,
+      });
+      const asked = providers.revocations().length;
+
+      await owedDue(personal);
+      await runMaintenance();
+      const { connectionId: shared } = await finish();
+      await owedDue(personal);
+      await runMaintenance();
+
+      expect({
+        stored: await stored(shared),
+        grant: providers.grantHolds(account),
+        revokes: providers.revocations().length - asked,
+        left: await owedFor(personal),
+      }).toStrictEqual({ stored: active, grant: true, revokes: 0, left: [] });
+    }
+  );
 
   it("owes nothing at Microsoft, which can't revoke a grant", async () => {
     const anna = someone();
