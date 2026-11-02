@@ -44,6 +44,12 @@ import { runOf } from "./resource-runs.ts";
 //   refused (`workflow.lineage_limit`). It is no child of the emitting
 //   run, so goes on after that run ends. A restricted run's event starts
 //   it restricted.
+// - One workflow's triggered runs using up the lineage's allowances, and
+//   so the emitting run's and every other triggered workflow's. Its run
+//   is charged to its workflow's own account in the lineage, which all
+//   its runs there share (quotas.ts, `triggeredAccountClaimed`): its
+//   attempts' active time, its host calls and its model requests count
+//   there, while its place stays the lineage's.
 // - A trigger acting on authority it lost. Each delivery is a start as any
 //   trigger's (workflow-starts.ts): the trigger live, enabled and pinning
 //   that version, its person still with a role, and its own `start` grant

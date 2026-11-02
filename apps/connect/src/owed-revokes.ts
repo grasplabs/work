@@ -1,18 +1,55 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
-import {
-  connections,
-  connectionTokens,
-  tokenRevocations,
-} from "./db/schema.ts";
+import { connectionTokens, tokenRevocations } from "./db/schema.ts";
+import { providerFor } from "./providers.ts";
 
-// How a revoke owed at a provider ends (src/revocations.ts, GRA-1191):
-// its row and the tokens kept for it go together, with the event that
-// says how, only while the connection is still disconnected and the
-// revoke still owed. Apart from revocations.ts so the vault's resealing
-// (tokens.ts) can end one whose tokens no longer open.
+// Revokes owed at a provider (src/revocations.ts; GRA-1191, GRA-1196): how
+// one is owed, in the same write as what gives the tokens up, and how one
+// ends, with the event that says how. Apart from revocations.ts so the
+// paths that give tokens up (oauth.ts, tokens.ts, class-rights.ts) and the
+// vault's resealing can use them without importing the retrying.
+
+/**
+ * The first wait before trying an owed revoke: long enough for a person
+ * asked to connect again to finish its consent screen first, so a grant
+ * shared by the account isn't revoked under a reconnect still on its way
+ * (src/revocations.ts also waits while a sign-in flow is open).
+ */
+export const firstRevokeRetryMs = 10 * 60 * 1000;
+
+/** Why a revoke is owed. */
+export type OwedReason = "disconnected" | "needs_reauth";
+
+/** Whether `provider`'s grants can be revoked at all: an RFC 7009 endpoint. */
+export const revocable = (provider: string): boolean => {
+  const config = providerFor(provider);
+  return config?.kind === "oauth" && config.revocationEndpoint !== undefined;
+};
+
+/**
+ * The statement that owes the revoke of connection `connectionId`'s
+ * tokens, as `connection_tokens` holds them now, when `when` holds: a copy
+ * of them sealed as they are, for the cron trigger to revoke with once the
+ * connection's own row is gone. Goes in the batch that gives them up,
+ * before the statement that deletes them.
+ */
+export const oweRevoke = (
+  db: DrizzleD1Database,
+  connectionId: string,
+  reason: OwedReason,
+  when: SQL
+) => {
+  const now = Date.now();
+  return db.insert(tokenRevocations).select(
+    sql`SELECT ${crypto.randomUUID()}, ${connectionTokens.connectionId}, ${connectionTokens.sealed}, ${reason}, 0, ${now + firstRevokeRetryMs}, ${now}
+      FROM ${connectionTokens}
+      WHERE ${connectionTokens.connectionId} = ${connectionId} AND ${when}`
+  );
+};
 
 /** How an owed revoke ended. */
 export type OwedEnd =
@@ -21,36 +58,27 @@ export type OwedEnd =
   | "connection.revoke_abandoned";
 
 /**
- * Ends connection `connectionId`'s owed revoke as `action`, with `detail`:
- * its row and its tokens go, in one write with the event.
+ * Ends the owed revoke `id` of connection `connectionId` as `action`, with
+ * `detail`: the row, and the tokens it held, go in one write with the
+ * event, once.
  */
 export const endOwedRevoke = async (
   env: Env,
-  connectionId: string,
+  owed: { id: string; connectionId: string },
   action: OwedEnd,
   detail: Record<string, string | number>
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const owed = sql`${tokenRevocations.connectionId} = ${connectionId} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connectionId} AND ${connections.status} = 'disconnected')`;
+  const still = eq(tokenRevocations.id, owed.id);
   await recordEventIf(
     env,
     {
       actor: { type: "system" },
       action,
-      target: { type: "connection", id: connectionId },
+      target: { type: "connection", id: owed.connectionId },
       detail,
     },
-    { from: tokenRevocations, where: owed },
-    [
-      db
-        .delete(connectionTokens)
-        .where(
-          and(
-            eq(connectionTokens.connectionId, connectionId),
-            sql`EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${owed})`
-          )
-        ),
-      db.delete(tokenRevocations).where(owed),
-    ]
+    { from: tokenRevocations, where: still },
+    [db.delete(tokenRevocations).where(still)]
   );
 };
