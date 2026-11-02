@@ -735,38 +735,49 @@ describe("a grant asked to connect again", () => {
     });
   });
 
-  it("waits for a shared sign-in of the same account coming back too, the grant at Google being the account's whatever the scope", async () => {
-    const anna = someone("admin");
-    const account = ownAccount(anna, "google");
-    const personal = await connectAccount(providers, anna, {
-      ...account,
-      granted: googleDefaultGrant,
-    });
-    // Google is down as she disconnects: the revoke is owed.
-    providers.state.revoke = async () =>
-      await Promise.resolve(new Response(null, { status: 503 }));
-    await exports.default.disconnect({ person: anna, connectionId: personal });
-    providers.state.revoke = undefined;
-    const url = await startAs(anna, { provider: "google", scope: "shared" });
-    const { finish } = await comingBack(anna, url, {
-      ...account,
-      granted: googleDefaultGrant,
-    });
-    const asked = providers.revocations().length;
+  it.for([
+    { by: "her", other: false },
+    { by: "another admin", other: true },
+  ])(
+    "waits for a shared sign-in of the same account coming back too, by $by, the grant at Google being the account's whatever the scope",
+    async ({ other }) => {
+      const anna = someone("admin");
+      // An admin connects any account as shared, not only their own.
+      const admin = other ? someone("admin") : anna;
+      const account = ownAccount(anna, "google");
+      const personal = await connectAccount(providers, anna, {
+        ...account,
+        granted: googleDefaultGrant,
+      });
+      // Google is down as she disconnects: the revoke is owed.
+      providers.state.revoke = async () =>
+        await Promise.resolve(new Response(null, { status: 503 }));
+      await exports.default.disconnect({
+        person: anna,
+        connectionId: personal,
+      });
+      providers.state.revoke = undefined;
+      const url = await startAs(admin, { provider: "google", scope: "shared" });
+      const { finish } = await comingBack(admin, url, {
+        ...account,
+        granted: googleDefaultGrant,
+      });
+      const asked = providers.revocations().length;
 
-    await owedDue(personal);
-    await runMaintenance();
-    const { connectionId: shared } = await finish();
-    await owedDue(personal);
-    await runMaintenance();
+      await owedDue(personal);
+      await runMaintenance();
+      const { connectionId: shared } = await finish();
+      await owedDue(personal);
+      await runMaintenance();
 
-    expect({
-      stored: await stored(shared),
-      grant: providers.grantHolds(account),
-      revokes: providers.revocations().length - asked,
-      left: await owedFor(personal),
-    }).toStrictEqual({ stored: active, grant: true, revokes: 0, left: [] });
-  });
+      expect({
+        stored: await stored(shared),
+        grant: providers.grantHolds(account),
+        revokes: providers.revocations().length - asked,
+        left: await owedFor(personal),
+      }).toStrictEqual({ stored: active, grant: true, revokes: 0, left: [] });
+    }
+  );
 
   it("owes nothing at Microsoft, which can't revoke a grant", async () => {
     const anna = someone();
