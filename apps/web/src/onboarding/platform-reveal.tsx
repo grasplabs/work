@@ -1,12 +1,12 @@
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
 
 import { brainDots } from "../brain/dot-ink.ts";
-import type { BrainDots } from "../brain/dot-ink.ts";
 import { DotsBuild } from "../brain/dots-build.tsx";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { hold } from "../voice/voice.ts";
+import { currentReveal, setReveal, useReveal } from "./reveal-state.ts";
 import { readingSeconds } from "./setup.ts";
 
 // The way into the platform at the end of the onboarding, told as one
@@ -18,14 +18,6 @@ import { readingSeconds } from "./setup.ts";
 // build the platform's first page while it opens underneath, then
 // dissolves into it. The pages only look at which phase it is.
 
-export type RevealPhase = "idle" | "filling" | "clearing" | "building";
-
-export interface Reveal {
-  phase: RevealPhase;
-  /** The brain's dots as they were handed over. */
-  from: BrainDots | null;
-}
-
 /** However quick his line, the brain takes this long to fill; and this long for the rest to fade. */
 const fillMs = 1800;
 const clearMs = 550;
@@ -36,30 +28,6 @@ const goCheckMs = 15_000;
 /** A breath after the last step is explained before the way in begins. */
 const wayInAfterMs = 700;
 
-let state: Reveal = { phase: "idle", from: null };
-const listeners = new Set<() => void>();
-
-const set = (next: Reveal): void => {
-  state = next;
-  for (const listener of listeners) {
-    listener();
-  }
-};
-
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-};
-
-export const useReveal = (): Reveal =>
-  useSyncExternalStore(
-    subscribe,
-    () => state,
-    () => state
-  );
-
 /**
  * Plays the way in: the brain fills while Stephen says `line` (the step
  * says it), and `enter` goes into the platform once the brain's dots are
@@ -69,15 +37,15 @@ const revealPlatform = async (
   line: string,
   enter: () => void
 ): Promise<void> => {
-  if (state.phase !== "idle") {
+  if (currentReveal().phase !== "idle") {
     return;
   }
-  set({ phase: "filling", from: null });
+  setReveal({ phase: "filling", from: null });
   await hold(Math.max(fillMs, Math.min(readingSeconds(line) * 1000, lineMs)));
-  set({ phase: "clearing", from: null });
+  setReveal({ phase: "clearing", from: null });
   await hold(clearMs);
   // Taken before the page changes, while the brain is still on screen.
-  set({ phase: "building", from: brainDots() });
+  setReveal({ phase: "building", from: brainDots() });
   enter();
 };
 
@@ -126,7 +94,7 @@ export const useWayIn = ({
 
 /** The platform has dissolved into view. */
 const endReveal = (): void => {
-  set({ phase: "idle", from: null });
+  setReveal({ phase: "idle", from: null });
 };
 
 /** The platform shows underneath once its frame has something in it. */

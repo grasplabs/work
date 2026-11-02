@@ -19,7 +19,7 @@ test("follows the browser's language, then the one the person picks", async ({
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 
   // The language is in the person menu, at the sidebar's foot.
-  await page.getByRole("button", { name: /Nutzer$/u }).click();
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: /^Sprache/u }).click();
   await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
   await expect(
@@ -34,7 +34,7 @@ test("follows the browser's language, then the one the person picks", async ({
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
   // And in Settings → Profile, which the person menu opens.
-  await page.getByRole("button", { name: /Gebruiker$/u }).click();
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: "Instellingen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await page.getByRole("combobox", { name: "Taal" }).click();

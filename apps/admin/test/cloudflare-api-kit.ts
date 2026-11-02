@@ -2,10 +2,7 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
-import type {
-  AdminAskAnswer,
-  AdminAskRequest,
-} from "@grasp-os/shared/admin-ask";
+import type { AdminCommandEnvelope } from "@grasp-os/shared/admin-command";
 import type {
   AdminKickoffRequest,
   AdminKickoffView,
@@ -81,7 +78,6 @@ export interface AccountState {
   r2Reports?: string;
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
-  gateways: Json[];
   /** Its zones, each with the domains Email Sending sends from in it. */
   zones: ZoneState[];
   scripts: Map<string, ScriptState>;
@@ -90,7 +86,6 @@ export interface AccountState {
    * Workers by script name. A test adds a namespace; uploads fill it.
    */
   namespaces: Map<string, Map<string, ScriptState>>;
-  workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */
   assets: Set<string>;
   /** Assets upload sessions: each token, and the hashes still to upload. */
@@ -171,14 +166,15 @@ export interface AccountState {
    * something that isn't a snapshot.
    */
   admin?: AdminSnapshot | "absent" | "ended" | "garbled";
+  /** True for a core that answers the AI status request with a redirect elsewhere. */
+  aiRedirect?: boolean;
   /**
-   * `absent` for a core from before the quota policy report, which answers
-   * it 404. Otherwise its core answers the policy it applies, as core does:
-   * the highest generation any of its versions went live with, with the
-   * limits it first went live with. `redirect` for one that answers
-   * with a redirect elsewhere.
+   * What its core answers the admin's signed AI status request with
+   * (@grasp-os/shared/ai-status-report): no provider connected unless set.
+   * As JSON, so a core on an earlier release, which answers an older shape
+   * (`AiStatusReport` as it was then), can be played too.
    */
-  quotaPolicy?: "absent" | "redirect";
+  ai?: unknown;
   /**
    * What its core does once a snapshot request arrives, before answering
    * it: waits, as a slow or hanging one does, or throws, as a dropped
@@ -188,15 +184,6 @@ export interface AccountState {
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
   /**
-   * What its core answers Ask Grasp's signed question with
-   * (@grasp-os/shared/admin-ask), as Grasp's own core: an answer, or
-   * `no_model` for a core with no model it may send the document to (503).
-   * Unset, it answers "An answer.".
-   */
-  ask?: AdminAskAnswer | "no_model";
-  /** The questions its core took, as each signed request sent them. */
-  asked: AdminAskRequest[];
-  /**
    * What its core answers the admin's signed kickoff request with
    * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
    * or `shut_out` for a company that keeps Grasp's staff out (403). Unset,
@@ -205,6 +192,14 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
+  /**
+   * What its core answers a signed command with, when it doesn't apply it
+   * (@grasp-os/shared/admin-command): core's status and code. Unset, it
+   * applies every command.
+   */
+  commandRefusal?: { status: number; code: string };
+  /** The commands its core took, as each signed envelope sent them. */
+  commands: AdminCommandEnvelope[];
 }
 
 /** A call the fake got. */

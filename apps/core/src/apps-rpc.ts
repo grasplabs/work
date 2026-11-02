@@ -1,10 +1,12 @@
 import type { AppVisitorEntry } from "@grasp-os/shared/app-visitors";
 import type {
   App,
+  AppAnswerer,
   AppChanges,
   AppContents,
+  AppOverview,
   AppsApi,
-  CurrentExports,
+  ListedScreen,
   NewApp,
   ViewedApp,
 } from "@grasp-os/shared/apps";
@@ -17,17 +19,18 @@ import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { removeApp } from "./app-removal.ts";
-import { updateApp } from "./app-settings.ts";
+import { appAnswerers, updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
 import { appVisitors, setAppVisitors } from "./app-visitors.ts";
 import {
   appContents,
-  appExports,
   createApp,
   getApp,
+  listAppOverviews,
   listApps,
+  listScreens,
 } from "./apps.ts";
 import { exportAppDefinition } from "./definition-export.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -108,10 +111,17 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     );
   }
 
-  async exports(app: string): Promise<CurrentExports> {
+  async overview(): Promise<AppOverview[]> {
     return await withPerson(
       this.#check,
-      async (by) => await appExports(this.#env, by, app)
+      async (by) => await listAppOverviews(this.#env, by)
+    );
+  }
+
+  async screens(): Promise<ListedScreen[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listScreens(this.#env, by)
     );
   }
 
@@ -180,6 +190,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     await withPerson(this.#check, async (by) => {
       await removeApp(this.#env, by, app);
     });
+  }
+
+  async answerers(app: string): Promise<AppAnswerer[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appAnswerers(this.#env, by, app)
+    );
   }
 
   async definition(app: string): Promise<DefinitionPackage> {

@@ -1,17 +1,16 @@
-import { examples } from "@grasp-os/ui/catalog";
-import type { ExampleName } from "@grasp-os/ui/catalog";
 import { loadExample } from "@grasp-os/ui/catalog/examples";
+import type { ExampleName } from "@grasp-os/ui/catalog/examples";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
-// Local gallery of the UI kit's examples for agents, one per page, each
-// loaded by name through the catalog as agents load it; the accessibility
+// Local gallery of the UI kit's examples, one per page, each loaded by
+// name only when its page renders it; the accessibility
 // checks in e2e/catalog.e2e.ts go through them. Not product UI: like /kit,
 // builds in production mode answer not found.
 
 const isExample = (name: string): name is ExampleName =>
-  Object.hasOwn(examples, name);
+  Object.hasOwn(loadExample, name);
 
 // One lazy component per example, made once: an example's module loads
 // when its page renders it, not before.

@@ -3,10 +3,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 
 // What model requests cost, in whole millionths of a US dollar (micros):
 // the prices a request is pinned to when it is admitted, the most it can
-// cost, which the model ledger reserves (model-ledger.ts), and what its
-// usage cost, which the ledger charges. Integers only, rounded up, so no
-// sum of many small requests rounds away to nothing, and a reservation is
-// never below what its request can cost at those prices.
+// cost, which the model ledger charges when its usage is lost
+// (model-ledger.ts), and what its usage cost, which the ledger charges.
+// Integers only, rounded up, so no sum of many small requests rounds away
+// to nothing, and the most a request can cost is never below what it can
+// cost at those prices.
 //
 // Some models are priced in tiers: past a number of prompt tokens, all of
 // the request is charged at the tier's prices (OpenAI's GPT-5.4 and later
@@ -112,36 +113,6 @@ export const listPricesOf = (
 };
 
 /**
- * What Amazon Bedrock charges for Claude on a regional endpoint (the EU's
- * inference profile among them) over its global one, which charges
- * Anthropic's list prices: 10 percent.
- *
- * Source: Anthropic's "Claude in Amazon Bedrock" page, "Regions"
- * (https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock),
- * read on 2026-10-24: "Regional endpoints carry a 10 percent pricing
- * premium over global endpoints." To be checked against AWS's own pricing
- * page before a client is charged at it.
- */
-const regionalPremium = 1.1;
-
-/** `prices` with Bedrock's regional premium, every kind and tier alike. */
-export const regionalPricesOf = <Prices extends ListPrices>(
-  prices: Prices
-): Prices => {
-  const scaled = <Each extends Rates>(rates: Each): Each => ({
-    ...rates,
-    input: rates.input * regionalPremium,
-    output: rates.output * regionalPremium,
-    cacheRead: rates.cacheRead * regionalPremium,
-    cacheWrite: rates.cacheWrite * regionalPremium,
-  });
-  return {
-    ...scaled(prices),
-    ...(prices.tiers === undefined ? {} : { tiers: prices.tiers.map(scaled) }),
-  };
-};
-
-/**
  * Dollars per million tokens as whole micros, rounded up. The catalog's
  * prices are decimals such as 0.293, which are a hair off in binary: they
  * are rounded to a thousandth of a micro first, so 0.293 is 293000.
@@ -169,8 +140,8 @@ const ratesOf = ({ input, output, cacheRead, cacheWrite }: Rates): Rates => ({
  * The prices a model's requests are pinned to, or `undefined` for a model
  * with no safe price: a price that isn't a number, below nothing, or none
  * at all for its input or its output, which a catalog gives a model it
- * doesn't know the price of, in its base prices or any tier. Such a model
- * can't be admitted against a budget: what it costs can't be bounded.
+ * doesn't know the price of, in its base prices or any tier. What such a
+ * model costs can't be told: its requests are counted at no cost.
  */
 export const pinnedPrice = async (
   prices: ListPrices

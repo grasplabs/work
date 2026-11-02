@@ -7,7 +7,7 @@ import { clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { needsAttentionOf } from "../hosting/attention.ts";
 import type { NeedsAttention } from "../hosting/attention.ts";
-import { newestFittingRelease, provisionOf } from "../hosting/operation.ts";
+import { newestRelease, provisionOf } from "../hosting/operation.ts";
 import { clientHostingOf } from "../hosting/organization.ts";
 import { startDestination } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
@@ -67,7 +67,7 @@ export interface ProvisioningView {
 /**
  * Why client `clientId`'s provisioning hasn't started: it runs on its own
  * premises, no shared destination the admin picks by itself, or no
- * imported release that fits it; null when nothing keeps it.
+ * imported release; null when nothing keeps it.
  */
 export const notStartedOf = async (
   db: AdminDatabase,
@@ -81,9 +81,7 @@ export const notStartedOf = async (
   if (destination.destinationId === null) {
     return "no_destination";
   }
-  return (await newestFittingRelease(db, clientId)) === null
-    ? "no_release"
-    : null;
+  return (await newestRelease(db)) === null ? "no_release" : null;
 };
 
 /** Client `clientId`'s provisioning, or null when the admin has no record of it. */

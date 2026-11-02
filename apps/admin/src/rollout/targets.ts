@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import type { AdminDatabase } from "../db/act.ts";
 import {
+  channels,
   clientPlacements,
   clientProvisions,
   clients,
@@ -22,6 +23,9 @@ import {
   releases,
   rolloutTargets,
 } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
+import { targetOf } from "./desired.ts";
+import type { ChannelReleases } from "./desired.ts";
 
 /** The ring every rollout reaches first: Grasp's own deployments. */
 export const firstRing = 0;
@@ -169,8 +173,7 @@ const configuredAtOf = sql<
 
 /**
  * Whether config changed at `configChangedAt` waits for a run, given the
- * client's `operation` (`isConfigPending`): one read singly and one read
- * with every client (`targetClients`) decided alike.
+ * client's `operation` (`isConfigPending`).
  */
 const configPendingOf = (
   configChangedAt: Date | null,
@@ -280,80 +283,6 @@ export const targetClient = async (
   };
 };
 
-/**
- * Every client, as a rollout reads it (`targetClient`), by id: three
- * reads, whatever their number, so a rollout of hundreds checks each
- * within the reads one request may make.
- */
-export const targetClients = async (
-  db: AdminDatabase
-): Promise<Map<string, TargetClient>> => {
-  const [rows, workers, operations] = await Promise.all([
-    db
-      .select({
-        id: clients.id,
-        status: clients.status,
-        generation: clients.generation,
-        pinnedReleaseId: clients.pinnedReleaseId,
-        rotatedAt: clients.rotatedAt,
-        rotationLiveAt: clients.rotationLiveAt,
-        configChangedAt: clients.configChangedAt,
-      })
-      .from(clients),
-    db
-      .select({
-        clientId: clientWorkers.clientId,
-        worker: clientWorkers.worker,
-        scriptName: clientWorkers.scriptName,
-        releaseId: clientWorkers.releaseId,
-        releaseBuiltAt: releases.builtAt,
-      })
-      .from(clientWorkers)
-      .leftJoin(releases, eq(releases.id, clientWorkers.releaseId)),
-    db
-      .select({
-        clientId: clientProvisions.clientId,
-        releaseId: clientProvisions.releaseId,
-        status: clientProvisions.status,
-        previousReleaseId: clientProvisions.previousReleaseId,
-        change: clientProvisions.change,
-        progress: clientProvisions.progress,
-        configuredAt: configuredAtOf,
-      })
-      .from(clientProvisions),
-  ]);
-  const workersOf = new Map<string, TargetClient["workers"]>();
-  for (const { clientId, ...worker } of workers) {
-    workersOf.set(clientId, [...(workersOf.get(clientId) ?? []), worker]);
-  }
-  const operationOf = new Map(operations.map((row) => [row.clientId, row]));
-  return new Map(
-    rows.map(({ rotatedAt, rotationLiveAt, configChangedAt, ...rest }) => {
-      const row = operationOf.get(rest.id);
-      let operation: TargetClient["operation"] = null;
-      if (row !== undefined) {
-        const {
-          clientId: _clientId,
-          progress,
-          configuredAt: _at,
-          ...fields
-        } = row;
-        operation = { ...fields, shared: deliveredShared(progress) };
-      }
-      return [
-        rest.id,
-        {
-          ...rest,
-          operation,
-          rotationPending: rotatedAt !== null && rotationLiveAt === null,
-          configPending: configPendingOf(configChangedAt, row),
-          workers: workersOf.get(rest.id) ?? [],
-        },
-      ];
-    })
-  );
-};
-
 /** A release, and when it was built: what orders releases. */
 export interface ReleaseAt {
   id: string;
@@ -430,4 +359,41 @@ export const parsePrevious = (previous: string | null): PreviousRun | null => {
   }
   const parsed = previousRunSchema.safeParse(JSON.parse(previous));
   return parsed.success ? parsed.data : null;
+};
+
+/** The release each channel points at now. */
+export const channelReleases = async (
+  db: AdminDatabase
+): Promise<ChannelReleases> => {
+  const rows = await db
+    .select({ id: channels.id, releaseId: channels.releaseId })
+    .from(channels);
+  const of = (channel: Channel) =>
+    rows.find(({ id }) => id === channel)?.releaseId ?? null;
+  return { edge: of("edge"), beta: of("beta"), stable: of("stable") };
+};
+
+/**
+ * The release client `clientId` should run (`targetOf`), with its channel;
+ * undefined when there's no such client.
+ */
+export const targetReleaseOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<{ channel: Channel; releaseId: string | null } | undefined> => {
+  const client = await db
+    .select({
+      channel: clients.channel,
+      pinnedReleaseId: clients.pinnedReleaseId,
+    })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client === undefined) {
+    return undefined;
+  }
+  return {
+    channel: client.channel,
+    releaseId: targetOf(client, await channelReleases(db)),
+  };
 };

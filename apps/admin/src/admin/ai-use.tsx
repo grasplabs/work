@@ -61,10 +61,12 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useOrganization } from "./organization.tsx";
-import { Figure, Panel } from "./parts.tsx";
+import { Figure } from "./parts.tsx";
+import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import {
   euro,
+  euroRate,
   euros,
   formatDay,
   formatMonth,
@@ -635,7 +637,7 @@ const UseRow = ({
 const priceLine = (model: Model): string => {
   const price = PRICES[model];
   if (price.minute > 0) {
-    return `${euro(price.minute)} a minute`;
+    return `${euroRate(price.minute)} a minute`;
   }
   if (price.tokensIn + price.tokensOut > 0) {
     return `${euros(price.tokensIn)} a million tokens read, ${euros(price.tokensOut)} written`;
@@ -688,7 +690,7 @@ const coveredLineOf = (
 const NothingUsed = () => {
   const { admin } = useOrganization();
   return (
-    <Panel
+    <Section
       description="It starts when Stephen reads the first conversation, and grows with every interview."
       title="Nothing used yet"
     >
@@ -701,7 +703,7 @@ const NothingUsed = () => {
           To the first conversation
         </Link>
       </div>
-    </Panel>
+    </Section>
   );
 };
 
@@ -789,7 +791,7 @@ export const AiUse = () => {
         </div>
       </section>
 
-      <Panel
+      <Section
         action={
           <SplitToggle
             label="What the bars are split by"
@@ -807,16 +809,16 @@ export const AiUse = () => {
         <div className="border-t px-3 pt-4 pb-3">
           <OverTime covered={covered} month={month} split={stack} />
         </div>
-      </Panel>
+      </Section>
 
-      <Panel
+      <Section
         description="Each use of AI, split by what did it. The careful model is the dearest, so it only does what needs care."
         title="Which model does what"
       >
         {now.total.spend > 0 ? <WhichModel period={now} /> : null}
-      </Panel>
+      </Section>
 
-      <Panel
+      <Section
         action={
           <SplitToggle
             label="What the rows are"
@@ -843,14 +845,14 @@ export const AiUse = () => {
           <span>In all</span>
           <span className="tabular-nums">{euro(now.total.spend)}</span>
         </div>
-      </Panel>
+      </Section>
 
-      <Panel
+      <Section
         description="What Grasp pays for AI, in euros. These are sample prices, the same for every organization."
         title="What it is counted at"
       >
         <Prices />
-      </Panel>
+      </Section>
     </>
   );
 };

@@ -11,16 +11,25 @@
  * (workerd), so it only holds data.
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
-import { googleGmailFake } from "../../connect/test/google-gmail-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
+
+/**
+ * Grasp's own keys at OpenAI, Anthropic and ElevenLabs, for platform
+ * features, as set on connect in the tests; none for the other providers,
+ * which aren't offered for them.
+ */
+export const platformOpenAiKey = "test-platform-openai-key-0001";
+export const platformAnthropicKey = "test-platform-anthropic-key-0001";
+export const platformElevenLabsKey = "test-platform-elevenlabs-key-0001";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {
@@ -34,20 +43,6 @@ export const connectClient = clients.microsoft;
 
 /** Grasp's Google client for connections, as set on connect in the tests. */
 export const googleConnectClient = clients.google;
-
-/** Grasp's Entra app for the application landscape, as set on connect. */
-export const landscapeClient = clients.microsoftLandscape;
-
-/**
- * Where tests set what Graph holds of the tenant's grants, for the
- * landscape's reads: POST `{ grants, apps, people }` as Graph has them
- * (`oauth2PermissionGrants`, `servicePrincipals`, `users`), or
- * `{ throttle: seconds }` to have every grants read throttled until
- * `{ throttle: null }`, or
- * `{ failing: "all" }` to have every grants read fail, or `"later"` every
- * page but the first, until `false`.
- */
-export const landscapeControlUrl = "https://graph-control.test/landscape";
 
 /** Grasp's Entra app for the directory's connection, as set on connect. */
 export const directoryClient = clients.microsoftDirectory;
@@ -84,10 +79,6 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
 
-/** What the landscape's Entra app is granted, as Entra's token answer says. */
-export const landscapeGranted =
-  "openid profile email Application.Read.All DelegatedPermissionGrant.Read.All User.Read User.ReadBasic.All";
-
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
  * it carries the authorization's PKCE challenge, so only the flow's own
@@ -116,8 +107,9 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to, replyTo, headers }` each (`headers` its
- * `internetMessageHeaders`), and the drafts it made (`draft: true`).
+ * order: `{ mailbox, subject, to, replyTo, headers, attachments }` each
+ * (`headers` its `internetMessageHeaders`, `attachments` the file
+ * attachments it was given), and the drafts it made (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -151,6 +143,14 @@ export const graphDraftsUrl = "https://graph-control.test/drafts";
  * bytes as base64.
  */
 export const graphAttachmentUrl = "https://graph-control.test/attachment";
+
+/**
+ * Where tests read how often Graph handed out an attachment's content
+ * (not its fields alone): GET `?mailbox=…&message=…&id=…`, answered
+ * `{ reads }`.
+ */
+export const graphAttachmentReadsUrl =
+  "https://graph-control.test/attachment-reads";
 
 /**
  * Where tests publish a package on the fake npm registry: POST one
@@ -255,75 +255,6 @@ export const slackPostedUrl = "https://slack-control.test/posted";
 export const botConnectorUninstallUrl =
   "https://bot-connector-control.test/uninstall";
 
-/**
- * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
- * `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) and connect
- * (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) are set up with it.
- */
-export const whatsAppNumber = {
-  appSecret: "acme-whatsapp-app-secret-for-tests",
-  phoneNumberId: "106540352242922",
-  verifyToken: "acme-whatsapp-verify-token-for-tests",
-  accessToken: "acme-whatsapp-access-token-for-tests",
-} as const;
-
-/**
- * The client's Telegram bot, as core (`TELEGRAM_WEBHOOK_SECRET`) and
- * connect (`TELEGRAM_BOT_TOKEN`) are set up with it in the tests.
- */
-export const telegramBot = {
-  webhookSecret: "acme-telegram-webhook-secret-for-tests",
-  token: "7140326550:AAH-acme-telegram-token-for-tests",
-  id: 7_140_326_550,
-} as const;
-
-/**
- * Where tests read what reached Telegram's Bot API, in order: each call's
- * method, its JSON, and whether its address carried the bot's token.
- */
-export const telegramSentUrl = "https://telegram-control.test/sent";
-
-/**
- * Where tests read what reached WhatsApp's Cloud API, in order: each
- * message's recipient, its JSON, and whether it carried the client's token.
- */
-export const whatsAppSentUrl = "https://whatsapp-control.test/sent";
-
-/**
- * Stephen's own Gmail mailbox, as connect holds it (`GMAIL_*`) in the
- * tests, and the fake Gmail behind it knows it.
- */
-export const gmailAccount = {
-  mailbox: "stephen@acme.test",
-  clientId: "acme-gmail-client-for-tests",
-  clientSecret: "acme-gmail-client-secret-for-tests",
-  refreshToken: "acme-gmail-refresh-token-for-tests",
-  accessToken: "acme-gmail-access-token-for-tests",
-} as const;
-
-/** The Pub/Sub push that tells Gmail's door of new mail, as core has it. */
-export const gmailPush = {
-  audience: "https://acme.grasp.test/api/channels/gmail",
-  serviceAccount: "gmail-push@acme-grasp.iam.gserviceaccount.com",
-  subscription: "projects/acme-grasp/subscriptions/stephen-gmail",
-  topic: "projects/acme-grasp/topics/stephen-gmail",
-} as const;
-
-/**
- * Where tests publish Google's signing keys: POST `{ keys }`, public JWKs,
- * added to those other test files published.
- */
-export const googleKeysUrl = "https://google-control.test/keys";
-
-/**
- * Where tests put mail in Stephen's inbox: POST `{ from, replyTo?, subject?,
- * text }`, answered with the mail's `{ id, threadId }`.
- */
-export const gmailDeliverUrl = "https://google-control.test/deliver";
-
-/** Where tests read the mail Gmail sent from Stephen's mailbox, in order. */
-export const gmailSentUrl = "https://google-control.test/sent";
-
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -388,6 +319,7 @@ const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
+const graphAttachmentReads = new Map();
 /** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
 const losesAnswer = (mailbox) => {
   const losing = graphLosing.get(mailbox) ?? 0;
@@ -402,42 +334,6 @@ const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
 let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
-const telegramSent = [];
-/** Telegram's Bot API, as far as the door's adapter calls it. */
-const telegramAnswer = async (request, url) => {
-  const [, bot, method] = url.pathname.split("/");
-  const fields = await request.json();
-  telegramSent.push({
-    method,
-    fields,
-    authorized: bot === ${JSON.stringify(`bot${telegramBot.token}`)},
-  });
-  if (method === "getMe") {
-    return Response.json({ ok: true, result: { id: ${String(telegramBot.id)}, is_bot: true, first_name: "Stephen", username: "acme_stephen_bot" } });
-  }
-  if (method === "sendMessage") {
-    return Response.json({ ok: true, result: { message_id: telegramSent.length, date: Math.floor(Date.now() / 1000), chat: { id: fields.chat_id, type: "private" }, text: fields.text } });
-  }
-  return Response.json({ ok: true, result: true });
-};
-const whatsAppSent = [];
-/** WhatsApp's Cloud API, as far as the door's adapter calls it. */
-const whatsAppAnswer = async (request, url) => {
-  const fields = await request.json();
-  whatsAppSent.push({
-    path: url.pathname,
-    to: fields.to,
-    fields,
-    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${whatsAppNumber.accessToken}`)},
-  });
-  return Response.json({
-    messaging_product: "whatsapp",
-    contacts: [{ input: fields.to, wa_id: fields.to }],
-    messages: [{ id: "wamid." + crypto.randomUUID() }],
-  });
-};
-const google = (${googleGmailFake.toString()})(${JSON.stringify(gmailAccount)});
-let googleKeys = [];
 const slackCalls = [];
 /** Slack's Web API, as far as the door's adapter calls it. */
 const slackAnswer = async (request, url) => {
@@ -460,7 +356,6 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
@@ -506,43 +401,15 @@ const documentsGraph = (url) => {
   }
   return undefined;
 };
-const landscapeIds = (url) =>
-  [...(url.searchParams.get("$filter") ?? "").matchAll(/'([^']*)'/gu)].map((match) => match[1]);
-/** Graph's grants of the tenant, a page at a time, with their apps and people. */
-const landscapeGraph = (url) => {
-  if (url.pathname === "/v1.0/oauth2PermissionGrants") {
-    if (landscape.failing === "all" || (landscape.failing === "later" && url.searchParams.has("$skiptoken"))) {
-      return new Response("Unavailable", { status: 500 });
-    }
-    if (landscape.throttle !== null) {
-      const seconds = landscape.throttle;
-      return new Response("Slow down", { status: 429, headers: { "retry-after": String(seconds) } });
-    }
-    const top = Number(url.searchParams.get("$top") ?? "100");
-    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
-    const next = from + top;
-    return Response.json({
-      value: landscape.grants.slice(from, next),
-      ...(next < landscape.grants.length
-        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$top=" + top + "&$skiptoken=" + next }
-        : {}),
-    });
-  }
-  if (url.pathname === "/v1.0/servicePrincipals") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.apps.filter(({ id }) => ids.includes(id)) });
-  }
-  if (url.pathname === "/v1.0/users") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.people.filter(({ id }) => ids.includes(id)) });
-  }
-  return undefined;
-};
 const osv = (${osvFake.toString()})();
+const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (aiProviders.handles(url)) {
+      return await aiProviders.answer(request, url);
+    }
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
     }
@@ -551,10 +418,6 @@ export default {
     }
     if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
       return await mailServer(request, url);
-    }
-    if (request.method === "POST" && url.href === ${JSON.stringify(landscapeControlUrl)}) {
-      Object.assign(landscape, await request.json());
-      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
       Object.assign(directory, await request.json());
@@ -600,12 +463,6 @@ export default {
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
       return directoryGraph(url);
     }
-    if (url.hostname === "graph.microsoft.com" && request.method === "GET") {
-      const answered = landscapeGraph(url);
-      if (answered !== undefined) {
-        return answered;
-      }
-    }
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending
       // records the message; a mailbox's messages are none.
@@ -628,6 +485,8 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          // The files attached (\`attachments\`), as Graph was given them.
+          attachments: message.attachments ?? [],
           // The tag a native connector puts on what it sends: its effect key.
           effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
         });
@@ -650,6 +509,9 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          attachments: message.attachments ?? [],
+          // Tagged as a sent message is: every record has its effect key.
+          effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
           draft: true,
         });
         return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
@@ -666,9 +528,18 @@ export default {
         }
         const size = atob(found.contentBytes).length;
         const fields = { "@odata.type": "#microsoft.graph.fileAttachment", id: found.id, name: found.name, contentType: found.contentType, size, isInline: false };
-        return Response.json(url.searchParams.has("$select") ? fields : { ...fields, contentBytes: found.contentBytes });
+        if (url.searchParams.has("$select")) {
+          return Response.json(fields);
+        }
+        const read = [mailbox, rest[1], rest[3]].join("/");
+        graphAttachmentReads.set(read, (graphAttachmentReads.get(read) ?? 0) + 1);
+        return Response.json({ ...fields, contentBytes: found.contentBytes });
       }
       return graphEvents.answer(request, url);
+    }
+    if (request.method === "GET" && url.origin + url.pathname === ${JSON.stringify(graphAttachmentReadsUrl)}) {
+      const read = [url.searchParams.get("mailbox"), url.searchParams.get("message"), url.searchParams.get("id")].join("/");
+      return Response.json({ reads: graphAttachmentReads.get(read) ?? 0 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphAttachmentUrl)}) {
       const attachment = await request.json();
@@ -702,18 +573,6 @@ export default {
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
     }
-    if (url.hostname === "api.telegram.org") {
-      return await telegramAnswer(request, url);
-    }
-    if (url.href === ${JSON.stringify(telegramSentUrl)}) {
-      return Response.json(telegramSent);
-    }
-    if (url.hostname === "graph.facebook.com") {
-      return await whatsAppAnswer(request, url);
-    }
-    if (url.href === ${JSON.stringify(whatsAppSentUrl)}) {
-      return Response.json(whatsAppSent);
-    }
     if (url.hostname === "slack.com") {
       return await slackAnswer(request, url);
     }
@@ -745,19 +604,6 @@ export default {
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);
     }
-    if (request.method === "POST" && url.href === ${JSON.stringify(googleKeysUrl)}) {
-      const { keys } = await request.json();
-      const kids = new Set(keys.map(({ kid }) => kid));
-      googleKeys = [...googleKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
-      google.setKeys(googleKeys);
-      return new Response(null, { status: 204 });
-    }
-    if (request.method === "POST" && url.href === ${JSON.stringify(gmailDeliverUrl)}) {
-      return Response.json(google.deliver(await request.json()));
-    }
-    if (url.href === ${JSON.stringify(gmailSentUrl)}) {
-      return Response.json(google.sent);
-    }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
     }
@@ -770,10 +616,6 @@ export default {
       if (answered !== undefined) {
         return answered;
       }
-    }
-    const fromGoogle = await google.answer(request);
-    if (fromGoogle !== undefined) {
-      return fromGoogle;
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       // Added to the keys other test files published: files run at once,
@@ -834,17 +676,14 @@ export default {
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
     );
-    // The landscape's, the directory's or the documents' own app, or the one for every other connection.
-    const forLandscape = form.get("client_id") === ${JSON.stringify(landscapeClient.id)};
+    // The directory's or the documents' own app, or the one for every other connection.
     const forDirectory = form.get("client_id") === ${JSON.stringify(directoryClient.id)};
     const forDocuments = form.get("client_id") === ${JSON.stringify(documentsClient.id)};
-    const client = forLandscape
-      ? ${JSON.stringify(landscapeClient)}
-      : forDirectory
-        ? ${JSON.stringify(directoryClient)}
-        : forDocuments
-          ? ${JSON.stringify(documentsClient)}
-          : ${JSON.stringify(connectClient)};
+    const client = forDirectory
+      ? ${JSON.stringify(directoryClient)}
+      : forDocuments
+        ? ${JSON.stringify(documentsClient)}
+        : ${JSON.stringify(connectClient)};
     if (form.get("client_secret") !== client.secret || digest !== challenge) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }
@@ -865,7 +704,6 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),

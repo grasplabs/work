@@ -1,3 +1,8 @@
+import { aiGrantHeader } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderKey,
+  AiProviderRoutes,
+} from "@grasp-os/shared/ai-providers";
 import type { OutboxedAuditEvent } from "@grasp-os/shared/audit";
 import {
   capabilityErrors,
@@ -39,6 +44,7 @@ import type {
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ChangeToolkitTools,
   UnknownOutcome,
   UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
@@ -56,10 +62,6 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
-import type {
-  LandscapeConnection,
-  LandscapeRead,
-} from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   NpmAdvisories,
@@ -69,9 +71,22 @@ import type {
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import {
+  aiProviderRoutes,
+  listAiProviderKeys,
+  modelFetch,
+  modelSocket,
+  removeAiProviderKey,
+  saveAiProviderKey,
+} from "./ai-providers.ts";
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
 import type { CallOutcome, CallRecord } from "./audit.ts";
-import { carryOut, connectionFor, heldOutcome } from "./call.ts";
+import {
+  carryOut,
+  connectionFor,
+  heldOutcome,
+  requireHeldFiles,
+} from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
@@ -81,6 +96,7 @@ import { requireClassRights } from "./class-rights.ts";
 import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
+  changeToolkitTools,
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
@@ -107,7 +123,6 @@ import {
   takeConnectorEvents,
 } from "./events.ts";
 import { hrConnections, readHr } from "./hr.ts";
-import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   npmAdvisories,
@@ -222,11 +237,12 @@ const callOutcome = ({
   return failed ? "failed" : "ok";
 };
 
-type StatedCall = Omit<ConnectCall, "capability" | "input">;
+type StatedCall = Omit<ConnectCall, "capability" | "input" | "attachments">;
 
-/** The call as the audit log states it: never its input. */
+/** The call as the audit log states it: never its input or its files. */
 const statedOf = ({
   input: _input,
+  attachments: _attachments,
   ...stated
 }: Omit<ConnectCall, "capability">): StatedCall => stated;
 
@@ -267,8 +283,15 @@ export default class Connect
   extends WorkerEntrypoint<Env>
   implements ConnectApi
 {
-  // oxlint-disable-next-line class-methods-use-this -- the Worker's fetch handler
-  override fetch(request: Request): Response {
+  /**
+   * Connect's health, and the one model request that can't go over RPC: a
+   * realtime WebSocket core's gateway decided, to the provider's own URL
+   * with its grant (`modelSocket`, src/ai-providers.ts).
+   */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.has(aiGrantHeader)) {
+      return await modelSocket(this.env, signingKeys(this.env), request);
+    }
     const { pathname } = new URL(request.url);
     if (pathname === "/health") {
       return Response.json({ ok: true });
@@ -406,6 +429,12 @@ export default class Connect
     return await startToolkitConnection(this.env, request);
   }
 
+  async changeToolkitTools(
+    request: ChangeToolkitTools
+  ): Promise<{ tools: string[] }> {
+    return await changeToolkitTools(this.env, request);
+  }
+
   // The npm registry (src/npm.ts): a package's metadata, and one
   // version's tarball by its integrity hash, for core to resolve and
   // unpack. Public data; nothing here is a client's.
@@ -447,6 +476,43 @@ export default class Connect
     return await channelFetch(this.env, platform, request);
   }
 
+  // AI providers (src/ai-providers.ts): the organization's own keys,
+  // sealed here and never answered back, and every model request core's
+  // gateway decided, sent on with the credential its grant names.
+
+  async saveAiProviderKey(
+    request: unknown,
+    by: unknown
+  ): Promise<AiProviderKey> {
+    return await saveAiProviderKey(this.env, request, by);
+  }
+
+  async removeAiProviderKey(provider: unknown, by: unknown): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider, by);
+  }
+
+  async aiProviderKeys(): Promise<AiProviderKey[]> {
+    return await listAiProviderKeys(this.env);
+  }
+
+  async aiProviderRoutes(): Promise<AiProviderRoutes> {
+    return await aiProviderRoutes(this.env);
+  }
+
+  async modelFetch(
+    request: unknown,
+    grant: unknown,
+    stop?: unknown
+  ): Promise<Response> {
+    return await modelFetch(
+      this.env,
+      signingKeys(this.env),
+      request,
+      grant,
+      stop
+    );
+  }
+
   // The catalog (src/catalog.ts): what can be connected.
 
   async catalog(): Promise<Catalog> {
@@ -459,16 +525,6 @@ export default class Connect
 
   async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
     return await catalogLogo(this.env, request);
-  }
-
-  // The application landscape (src/landscape.ts): for core's sync only.
-
-  async landscapeConnections(): Promise<LandscapeConnection[]> {
-    return await landscapeConnections(this.env);
-  }
-
-  async readLandscape(request: unknown): Promise<LandscapeRead> {
-    return await readLandscape(this.env, request);
   }
 
   // The directory (src/directory.ts): for the onboarding, and to know the
@@ -716,7 +772,7 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { capability, person, id, inputHash, via } = parsed.data;
+    const { capability, person, id, inputHash, via, attachments } = parsed.data;
     const held = await heldFor(this.env, person, id, "confirm", via);
     // Its day over: declined as expired, whatever the press carries.
     await refuseEnded(this.env, person, held);
@@ -732,7 +788,16 @@ export default class Connect
       if (inputHash !== held.inputHash) {
         throw connectErrors.create("connect.pending_changed");
       }
-      await connectionFor(this.env, claims, call.connectionId, held);
+      const connection = await connectionFor(
+        this.env,
+        claims,
+        call.connectionId,
+        held
+      );
+      // The files it attaches (GRA-887): only the bytes of the digests the
+      // person was shown, checked before the action is taken, so bytes
+      // that differ leave it waiting. None are kept with it.
+      await requireHeldFiles(connection, call, attachments);
     } catch (error) {
       await auditRefusedDecision(
         this.env,
@@ -748,7 +813,11 @@ export default class Connect
     }
     await take(this.env, person, held, "confirm", claims.restricted, via);
     try {
-      return await this.#carryOutAudited(call, claims, held);
+      return await this.#carryOutAudited(
+        attachments === undefined ? call : { ...call, attachments },
+        claims,
+        held
+      );
     } catch (error) {
       // Taken, and failed: said so, so core tells the action's chat. What
       // went unexpectedly wrong is logged here, and goes as a failure.

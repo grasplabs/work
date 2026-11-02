@@ -28,7 +28,7 @@ import type { TeamsPerson } from "./teams-door.ts";
 // only a message that @mentions him is taken, and its answer reads only
 // what everyone in the conversation may read, as Teams' roster names them
 // (src/knowledge/access.ts). The turn runs in the asker's own Workspace
-// object, with the model gateway faked behind it, and the roster and the
+// object, with the model provider faked behind connect, and the roster and the
 // answer go through connect to the fake Bot Connector.
 
 const idp = mockIdp();
@@ -163,10 +163,10 @@ const readsBoth = (lunchId: string, bonusId: string) =>
 
 /** What the model was told after the code at `index` of its requests ran. */
 const toldAfter = (
-  gateway: { requests: readonly { body: unknown }[] },
+  provider: { requests: readonly { body: unknown }[] },
   index: number
 ) => {
-  const told = JSON.stringify(gateway.requests[index]?.body ?? null);
+  const told = JSON.stringify(provider.requests[index]?.body ?? null);
   return {
     lunch: told.includes("Lunch is served at noon"),
     bonus: told.includes("The bonus pool is forty thousand"),
@@ -198,7 +198,7 @@ describe("in a group chat", setUpTime, () => {
       readsBoth(lunchId, bonusId),
       says("In the group.")
     );
-    const bo = await memberAnsweredBy(idp, ann.gateway);
+    const bo = await memberAnsweredBy(idp, ann.provider);
     await addToTeam(admin, teamId, ann.userId);
     const group = newGroup();
     await onGroupRoster(group, [{ person: ann.teams }, { person: bo.teams }]);
@@ -210,8 +210,8 @@ describe("in a group chat", setUpTime, () => {
     expect({
       // Ann alone reads her team's note; with Bo in the chat, her answer
       // doesn't, and the handbook is still read.
-      alone: toldAfter(ann.gateway, 1),
-      together: toldAfter(ann.gateway, 3),
+      alone: toldAfter(ann.provider, 1),
+      together: toldAfter(ann.provider, 3),
       answered: JSON.stringify(activities).includes("In the group."),
       rosterRead: asked.includes(`${group} *`),
       // The group isn't anyone's private conversation.
@@ -237,7 +237,7 @@ describe("in a group chat", setUpTime, () => {
       readsBoth(lunchId, bonusId),
       says("All of us.")
     );
-    const bo = await memberAnsweredBy(idp, ann.gateway);
+    const bo = await memberAnsweredBy(idp, ann.provider);
     await addToTeam(admin, teamId, ann.userId);
     await addToTeam(admin, teamId, bo.userId);
     const group = newGroup();
@@ -245,7 +245,7 @@ describe("in a group chat", setUpTime, () => {
 
     await post(mentionIn(ann.teams, group, "What's the bonus pool?"));
 
-    expect(toldAfter(ann.gateway, 1)).toStrictEqual({
+    expect(toldAfter(ann.provider, 1)).toStrictEqual({
       lunch: true,
       bonus: true,
     });
@@ -274,11 +274,11 @@ describe("in a group chat", setUpTime, () => {
     await post(mentionIn(ann.teams, withGuest, "When is lunch?"));
     await post(mentionIn(ann.teams, withStranger, "When is lunch?", "channel"));
 
-    expect(toldAfter(ann.gateway, 1)).toStrictEqual({
+    expect(toldAfter(ann.provider, 1)).toStrictEqual({
       lunch: false,
       bonus: false,
     });
-    expect(toldAfter(ann.gateway, 3)).toStrictEqual({
+    expect(toldAfter(ann.provider, 3)).toStrictEqual({
       lunch: false,
       bonus: false,
     });
@@ -304,7 +304,7 @@ describe("in a group chat", setUpTime, () => {
     await post(mentionIn(ann.teams, group, "What can you do?"));
 
     const told = (index: number) =>
-      JSON.stringify(ann.gateway.requests[index]?.body ?? null);
+      JSON.stringify(ann.provider.requests[index]?.body ?? null);
     expect(told(1)).toContain("connections,apps,build,workflows,memory");
     expect(told(3)).toContain('\\"knowledge\\"');
     expect(told(3)).not.toContain("connections,");
@@ -331,7 +331,7 @@ describe("in a group chat", setUpTime, () => {
       lines: [],
       asked: [],
     });
-    expect(ann.gateway.requests).toHaveLength(0);
+    expect(ann.provider.requests).toHaveLength(0);
   });
 
   it("answers someone from another company with their line, and reads nothing", async () => {

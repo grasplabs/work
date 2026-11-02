@@ -392,17 +392,17 @@ describe("a test of a draft over recent real items", () => {
     });
   });
 
-  it("takes no run whose retention, as the deployment has it now, is over", async () => {
+  it("takes no run whose retention is over", async () => {
     const by = await person("builder");
     const { workflow, revision } = await workflowOf(by, { tasks: echo });
     await ranFor(by, workflow.id, "Ada");
-    // Two days on, with the deployment's retention cut to one day.
+    // Past the 30 days its details are kept.
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    vi.setSystemTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
     let refused: unknown;
     try {
       refused = await outcome(
-        startItemTest({ ...env, RUN_RETENTION_DAYS: "1" }, by, workflow.id, {
+        startItemTest(env, by, workflow.id, {
           revision,
           fixtures: {},
         })

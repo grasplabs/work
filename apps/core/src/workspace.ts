@@ -17,6 +17,9 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatFilesMax,
+  chatFilesPerQuestionMax,
+  chatPlatformName,
   chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
@@ -28,6 +31,8 @@ import type {
   ChatCitedDocument,
   ChatDraft,
   ChatDraftVersion,
+  ChatFile,
+  ChatFileType,
   ChatMessage,
   ChatProject,
   ChatOutput,
@@ -51,11 +56,6 @@ import type {
   DashboardWidgetId,
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
-import { defaultEmailPreferences } from "@grasp-os/shared/email-preferences";
-import type {
-  EmailPreferenceChanges,
-  EmailPreferences,
-} from "@grasp-os/shared/email-preferences";
 import {
   internalErrors,
   isExpectedError,
@@ -85,12 +85,24 @@ import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, count, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  max,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { agentApis } from "./agent-apis.ts";
+import { isMessage } from "./agent-messages.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -104,13 +116,11 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
-import { showThinking } from "./agent-thinking.ts";
 import type { ThinkingBrain } from "./agent-thinking.ts";
-import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
-import { memberOf } from "./auth/identity.ts";
+import { memberOf, memberRole } from "./auth/identity.ts";
 import {
   drainCaptures,
   eraseCaptured,
@@ -174,6 +184,7 @@ import {
   maxToolCallIdChars,
   chatDocuments,
   chatDrafts,
+  chatFiles,
   chatMessages,
   chatProjectDocuments,
   chatProjects,
@@ -185,10 +196,10 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
-  emailPreferences,
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
+import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
   audienceMaxMembers,
@@ -201,8 +212,7 @@ import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
-import { gatewaySettings, models } from "./models.ts";
-import { personRole } from "./permissions.ts";
+import { modelSettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
@@ -408,12 +418,6 @@ const throttled = (tell: (text: string) => unknown) => {
   };
 };
 
-/** A chat platform's chat's title, as people know the platform. */
-const platformTitles: Readonly<Record<string, string>> = {
-  teams: "Microsoft Teams",
-  slack: "Slack",
-};
-
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
@@ -434,7 +438,7 @@ export type SharedChat = z.infer<typeof sharedChatSchema>;
 
 /** The title of a chat others share on `platform`. */
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
-  `${platformTitles[platform] ?? platform} ${kind === "group" ? "group chat" : "channel"}`;
+  `${chatPlatformName(platform)} ${kind === "group" ? "group chat" : "channel"}`;
 
 /**
  * What a chat others share gets of the agent's APIs: its chat, and
@@ -451,6 +455,12 @@ export const questionSchema = z.strictObject({
   /** `<provider>/<model>`, one the deployment allows. */
   model: z.string().min(1),
   effort: z.enum(modelEfforts).optional(),
+  /** The chat's files it carries (`attachFile`), each once. */
+  files: z
+    .array(z.uuid())
+    .max(chatFilesPerQuestionMax)
+    .refine((files) => new Set(files).size === files.length)
+    .optional(),
 });
 export type Question = z.input<typeof questionSchema>;
 
@@ -490,6 +500,51 @@ export type Answer = TurnResult & {
 const storedMessageSchema = z.custom<Message>(
   (value) => typeof value === "object" && value !== null && isMessage(value)
 );
+
+/**
+ * `shown` with the files its question carried, by its ID in `carried`;
+ * as it is for any other message, or a question that carried none.
+ */
+const withFiles = (
+  shown: ChatMessage | undefined,
+  carried: ReadonlyMap<number, ChatFile[]> | undefined
+): ChatMessage | undefined => {
+  if (shown?.role !== "user") {
+    return shown;
+  }
+  const files = carried?.get(shown.id);
+  return files === undefined ? shown : { ...shown, files };
+};
+
+/**
+ * A chat file's card columns: what its person and its agent see of it,
+ * never its text, which only reading the file loads (`chatFile`).
+ */
+const chatFileCard = {
+  id: chatFiles.id,
+  name: chatFiles.name,
+  type: chatFiles.type,
+  bytes: chatFiles.bytes,
+  createdAt: chatFiles.createdAt,
+};
+
+/** A chat file, as its person sees it, from its card's columns. */
+const chatFileOf = ({
+  id,
+  name,
+  type,
+  bytes,
+  createdAt,
+}: Pick<
+  typeof chatFiles.$inferSelect,
+  "id" | "name" | "type" | "bytes" | "createdAt"
+>): ChatFile => ({
+  id,
+  name,
+  type,
+  bytes,
+  createdAt: createdAt.toISOString(),
+});
 
 /**
  * A failure report attached to a chat (`attachments`), as this object
@@ -1096,6 +1151,7 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         projectId: chats.projectId,
         appId: chats.appId,
+        via: chats.via,
         projectName: chatProjects.name,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1126,6 +1182,7 @@ export class Workspace extends DurableObject<Env> {
         running: this.#turns.has(row.id),
         projectId: row.projectId,
         appId: row.appId,
+        via: row.via,
       },
       said: hasEvery(query, row.title, row.projectName ?? "")
         ? null
@@ -1137,14 +1194,44 @@ export class Workspace extends DurableObject<Env> {
    * Stores `message` as the chat's next (`#store`), and shows it to its
    * watchers; its ID.
    */
-  #keep(chatId: ChatId, message: Message, thinkingMs?: number): number {
-    const { id, createdAt } = this.#store(chatId, message, thinkingMs ?? null);
-    const shown = chatMessageOf(
-      id,
-      message,
-      createdAt,
-      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
-      thinkingMs ?? null
+  #keep(
+    chatId: ChatId,
+    message: Message,
+    {
+      thinkingMs,
+      files = [],
+    }: { thinkingMs?: number; files?: readonly string[] } = {}
+  ): number {
+    // A question and the files it carries are kept together: each file is
+    // its, and no other's.
+    const { id, createdAt } =
+      files.length === 0
+        ? this.#store(chatId, message, thinkingMs ?? null)
+        : this.ctx.storage.transactionSync(() => {
+            const stored = this.#store(chatId, message, thinkingMs ?? null);
+            this.#db
+              .update(chatFiles)
+              .set({ messageId: stored.id })
+              .where(
+                and(
+                  eq(chatFiles.chatId, chatId),
+                  inArray(chatFiles.id, [...files]),
+                  isNull(chatFiles.messageId)
+                )
+              )
+              .run();
+            return stored;
+          });
+    const shown = withFiles(
+      chatMessageOf(
+        id,
+        message,
+        createdAt,
+        message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
+        thinkingMs ?? null,
+        message.role === "assistant" && this.#asksIn(chatId)
+      ),
+      files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
@@ -1243,15 +1330,16 @@ export class Workspace extends DurableObject<Env> {
    * `fix`), made only if the deployment allows `model`, which its question
    * will name: a refused model leaves no chat without a question.
    */
-  createFixChat(
+  async createFixChat(
     title: string,
     personId: string,
     agentId: string,
     by: AuditActor,
     fix: RunToFix,
     model: string
-  ): Chat {
-    if (!gatewaySettings(this.env).models.includes(model)) {
+  ): Promise<Chat> {
+    const { models: allowed } = await modelSettings(this.env);
+    if (!allowed.includes(model)) {
       throw modelErrors.create("model.not_allowed");
     }
     return this.createChat(title, personId, agentId, by, fix);
@@ -1291,15 +1379,9 @@ export class Workspace extends DurableObject<Env> {
       });
     }
     if (restricted) {
-      // As restricted.ts records a chat entering restricted mode, its
-      // agent for a Grasp staff member when staff asked for the fix
-      // (GRA-1088): `by` is core's, made from the caller's own session.
-      const staff = by?.type === "staff";
+      // As restricted.ts records a chat entering restricted mode.
       this.#outboxEntry({
-        actor: delegateActorOf(
-          chatAuthority({ agentId, personId, staff }),
-          via
-        ),
+        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
         action: "context.restricted",
         target: { type: "chat", id },
         provenance: carried.slice(0, auditProvenanceMaxItems),
@@ -1325,6 +1407,186 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Attaches a file to `personId`'s own chat, as the text core read from
+   * it (chats-rpc.ts), for its next question to carry: refused past
+   * {@link chatFilesMax}. Audited with its ID, type and size, never its
+   * name or text.
+   */
+  attachFile(
+    chatId: unknown,
+    personId: string,
+    file: { name: string; type: ChatFileType; bytes: number; text: string },
+    by: AuditActor
+  ): ChatFile {
+    const { id } = this.#ownChat(chatId, personId);
+    if (this.#deleting.has(id)) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    const attached = this.ctx.storage.transactionSync(() => {
+      const [kept] = this.#db
+        .select({ files: count() })
+        .from(chatFiles)
+        .where(eq(chatFiles.chatId, id))
+        .all();
+      if ((kept?.files ?? 0) >= chatFilesMax) {
+        throw agentErrors.create("agent.too_many_files");
+      }
+      const row = this.#db
+        .insert(chatFiles)
+        .values({
+          id: crypto.randomUUID(),
+          chatId: id,
+          messageId: null,
+          ...file,
+          createdAt: new Date(),
+        })
+        .returning(chatFileCard)
+        .get();
+      this.#outboxed(by, "chat.file_attached", id, {
+        file: row.id,
+        type: file.type,
+        bytes: file.bytes,
+      });
+      return row;
+    });
+    this.#deliverAudit();
+    return chatFileOf(attached);
+  }
+
+  /**
+   * Removes a file `personId` attached to their own chat that no question
+   * carries yet (one taken out of the box after a send that failed), so
+   * it holds none of the chat's {@link chatFilesMax}. A file a question
+   * carried stays with it: refused as `agent.file_not_found`, as one the
+   * chat never had; and none is removed while the chat has a turn
+   * (`agent.busy`). Audited with its ID.
+   */
+  removeFile(
+    chatId: unknown,
+    personId: string,
+    fileId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    // A question starting in the chat may have chosen it already, and
+    // binds it only once it is kept, after awaits (`#turn`): no file of
+    // the chat is removed while it has a turn, which is taken before its
+    // first await.
+    if (this.#turns.has(id)) {
+      throw agentErrors.create("agent.busy");
+    }
+    this.ctx.storage.transactionSync(() => {
+      const removed = this.#db
+        .delete(chatFiles)
+        .where(
+          and(
+            eq(chatFiles.chatId, id),
+            eq(chatFiles.id, fileId),
+            isNull(chatFiles.messageId)
+          )
+        )
+        .returning({ id: chatFiles.id })
+        .get();
+      if (removed === undefined) {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      this.#outboxed(by, "chat.file_removed", id, { file: removed.id });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * The chat's files, in the order they were attached, with the question
+   * that carried each (`null` while none has), for its agent
+   * (`env.chat.files()` in agent-apis.ts): never their text.
+   */
+  chatFiles(chatId: ChatId): (ChatFile & { question: number | null })[] {
+    return this.#db
+      .select({ ...chatFileCard, messageId: chatFiles.messageId })
+      .from(chatFiles)
+      .where(eq(chatFiles.chatId, chatId))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all()
+      .map((row) => ({ ...chatFileOf(row), question: row.messageId }));
+  }
+
+  /**
+   * One of the chat's files with its text, for its agent
+   * (`env.chat.readFile`); `undefined` for none the chat has.
+   */
+  chatFile(
+    chatId: ChatId,
+    fileId: string
+  ): (ChatFile & { text: string }) | undefined {
+    const row = this.#db
+      .select({ ...chatFileCard, text: chatFiles.text })
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, fileId)))
+      .get();
+    return row === undefined
+      ? undefined
+      : { ...chatFileOf(row), text: row.text };
+  }
+
+  /**
+   * The files `fileIds` names, in that order, each attached to the chat
+   * and carried by no question yet: what a question may carry. Refused
+   * with `agent.file_not_found` for any other.
+   */
+  #unsentFiles(
+    chatId: ChatId,
+    fileIds: readonly string[]
+  ): { id: string; name: string; type: ChatFileType }[] {
+    if (fileIds.length === 0) {
+      return [];
+    }
+    const rows = this.#db
+      .select({
+        id: chatFiles.id,
+        name: chatFiles.name,
+        type: chatFiles.type,
+      })
+      .from(chatFiles)
+      .where(
+        and(
+          eq(chatFiles.chatId, chatId),
+          inArray(chatFiles.id, [...fileIds]),
+          isNull(chatFiles.messageId)
+        )
+      )
+      .all();
+    return fileIds.map((fileId) => {
+      const row = rows.find(({ id }) => id === fileId);
+      if (row === undefined) {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      return row;
+    });
+  }
+
+  /**
+   * The files each of the chat's questions after message `after` carried,
+   * by the question's ID, in the order they were attached.
+   */
+  #filesAfter(chatId: ChatId, after: number): Map<number, ChatFile[]> {
+    const carried = new Map<number, ChatFile[]>();
+    const rows = this.#db
+      .select({ ...chatFileCard, messageId: chatFiles.messageId })
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chatId), gt(chatFiles.messageId, after)))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all();
+    for (const row of rows) {
+      if (row.messageId !== null) {
+        const files = carried.get(row.messageId) ?? [];
+        files.push(chatFileOf(row));
+        carried.set(row.messageId, files);
+      }
+    }
+    return carried;
+  }
+
+  /**
    * Stores the audit event of a change to chat `chatId` in this object's
    * outbox: call it in the change's transaction, so both are kept or
    * neither, then `#deliverAudit`. Names the chat and this object, never
@@ -1337,7 +1599,10 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.deleted"
       | "chat.moved"
-      | "chat.draft_restored",
+      | "chat.draft_restored"
+      | "chat.file_attached"
+      | "chat.file_removed"
+      | "chat.draft_discarded",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -1579,7 +1844,7 @@ export class Workspace extends DurableObject<Env> {
       found ??
       this.createChat(
         where === undefined
-          ? (platformTitles[platform] ?? platform)
+          ? chatPlatformName(platform)
           : sharedTitle(platform, where.kind),
         personId,
         agentId,
@@ -1589,9 +1854,11 @@ export class Workspace extends DurableObject<Env> {
         platform,
         where?.thread
       );
-    const [model] = gatewaySettings(this.env).models;
+    const {
+      models: [model],
+    } = await modelSettings(this.env);
     if (model === undefined) {
-      throw modelErrors.create("model.unconfigured");
+      throw modelErrors.create("model.no_provider");
     }
     if (where !== undefined) {
       await keepAudience(
@@ -1607,14 +1874,7 @@ export class Workspace extends DurableObject<Env> {
     const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(
-        chat,
-        { text, model },
-        undefined,
-        onText,
-        false,
-        calls
-      ),
+      answer: await this.#turn(chat, { text, model }, undefined, onText, calls),
       calls,
     };
   }
@@ -1632,17 +1892,31 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Refuses a turn its person may no longer take, or one for a chat that
+   * holds all it may.
+   */
+  async #mayTakeTurn(
+    chatId: Chat["id"],
+    personId: Chat["personId"]
+  ): Promise<void> {
+    if ((await memberRole(this.env.DB, personId)) === undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    if (this.#storedChars(chatId) > maxChatChars) {
+      throw agentErrors.create("agent.chat_full");
+    }
+  }
+
+  /**
    * One turn of `chat`'s agent (`ask`). `started` is called once the turn
-   * is under way: the model admitted, and nothing kept yet. `staff` when
-   * a Grasp staff member asks; `calls` gets each call its code makes, as
-   * it ends.
+   * is under way: the model admitted, and nothing kept yet. `calls` gets
+   * each call its code makes, as it ends.
    */
   async #turn(
     chat: Chat,
     question: Question,
     started?: () => void,
     onText?: (text: string) => unknown,
-    staff = false,
     calls?: ToolCall[]
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -1677,26 +1951,15 @@ export class Workspace extends DurableObject<Env> {
       this.#lastMessageId(chat.id)
     );
     try {
-      // A Grasp staff member's turn (`send`'s `staff`) asks for staff whose
-      // staff session is still valid, in place of a member (GRA-1088).
-      if ((await personRole(this.env, personId, staff)) === undefined) {
-        throw permissionErrors.create("permission.person_inactive");
-      }
-      if (this.#storedChars(chat.id) > maxChatChars) {
-        throw agentErrors.create("agent.chat_full");
-      }
+      await this.#mayTakeTurn(chat.id, personId);
+      // Before anything is kept: a file it names that the chat hasn't, or
+      // that another question carried, refuses the question.
+      const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
       // Where the chat is (this object, by the name core gave it:
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-      const scope = {
-        workspaceId,
-        agentId,
-        chatId: chat.id,
-        personId,
-        via,
-        staff,
-      };
+      const scope = { workspaceId, agentId, chatId: chat.id, personId, via };
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -1735,15 +1998,19 @@ export class Workspace extends DurableObject<Env> {
       let answer: number | undefined;
       const textSoFar = onText === undefined ? undefined : throttled(onText);
       const readsBrain = await hasBrainGrant(this.env, authority);
+      // Loaded at the first turn, not as core starts: the loop brings Pi
+      // and TypeBox (GRA-1349).
+      const { runTurn } = await import("./agent.ts");
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
+        files,
         model,
         apis: shared ? sharedApis : agentApis,
         context,
         scope,
         whyStop: async () =>
-          (await personRole(this.env, personId, staff)) === undefined
+          (await memberRole(this.env.DB, personId)) === undefined
             ? permissionErrors.create("permission.person_inactive")
             : undefined,
         runs: {
@@ -1760,7 +2027,7 @@ export class Workspace extends DurableObject<Env> {
         // The Brain's recall before the first request, under the agent's
         // own grant, as its code would recall (GRA-1029).
         recallFirst: readsBrain,
-        ...this.#thinking(readsBrain, shared, personId),
+        ...(await this.#thinking(readsBrain, shared, personId)),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
@@ -1776,7 +2043,12 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          const id = this.#keep(chat.id, message, thinkingMs);
+          // The turn's one question carries its files.
+          const id = this.#keep(chat.id, message, {
+            thinkingMs,
+            files:
+              message.role === "user" ? files.map(({ id: file }) => file) : [],
+          });
           if (message.role === "assistant") {
             answer = id;
           }
@@ -1824,8 +2096,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `personId`'s own chat's agent a question (`ask`), and resolves
-   * once the turn is under way; `staff` when they are a Grasp staff member,
-   * as core's caller read it from their own session (GRA-1088); refused as `ask` refuses one that can't
+   * once the turn is under way; refused as `ask` refuses one that can't
    * start. The turn goes on with nobody waiting: its messages go to the
    * chat's watchers as they come, and why it stopped, if it stopped short
    * of an answer, with the chat's state (`ChatUpdate.stopped`).
@@ -1833,12 +2104,11 @@ export class Workspace extends DurableObject<Env> {
   async send(
     chatId: unknown,
     personId: string,
-    question: Question,
-    staff = false
+    question: Question
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
-    const ended = this.#sentTurn(chat, question, started, staff);
+    const ended = this.#sentTurn(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
     await started.promise;
@@ -1854,21 +2124,14 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>,
-    staff: boolean
+    started: PromiseWithResolvers<boolean>
   ): Promise<void> {
     let underWay = false;
     try {
-      await this.#turn(
-        chat,
-        question,
-        () => {
-          underWay = true;
-          started.resolve(true);
-        },
-        undefined,
-        staff
-      );
+      await this.#turn(chat, question, () => {
+        underWay = true;
+        started.resolve(true);
+      });
     } catch (error) {
       if (!underWay) {
         started.reject(error);
@@ -2747,6 +3010,19 @@ export class Workspace extends DurableObject<Env> {
    * to the chat's code before it was stored (after an earlier message),
    * that the chat still keeps.
    */
+  /**
+   * Whether the chat's agent is offered `askQuestions`: in Grasp's own
+   * app, never in a chat app's chat (agent.ts), which can't show them.
+   */
+  #asksIn(chatId: ChatId): boolean {
+    const chat = this.#db
+      .select({ via: chats.via })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get();
+    return chat?.via === "web";
+  }
+
   #givenBy(
     chatId: ChatId
   ): (messageId: number) => (documentId: string) => boolean {
@@ -3049,21 +3325,33 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         projectId: chats.projectId,
         appId: chats.appId,
+        via: chats.via,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, lastAt, projectId, appId }) => ({
-        id,
-        title,
-        createdAt: createdAt.toISOString(),
-        lastAt: lastAt.toISOString(),
-        running: this.#turns.has(id),
-        projectId,
-        appId,
-      }));
+      .map((chat) => this.#summaryOf(chat));
+  }
+
+  /** A chat as its person's list shows it. */
+  #summaryOf(
+    chat: Pick<
+      typeof chats.$inferSelect,
+      "id" | "title" | "createdAt" | "lastAt" | "projectId" | "appId" | "via"
+    >
+  ): ChatSummary {
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: this.#turns.has(chat.id),
+      projectId: chat.projectId,
+      appId: chat.appId,
+      via: chat.via,
+    };
   }
 
   /**
@@ -3084,31 +3372,12 @@ export class Workspace extends DurableObject<Env> {
       )
       .orderBy(desc(chats.lastAt))
       .get();
-    return chat === undefined
-      ? null
-      : {
-          id: chat.id,
-          title: chat.title,
-          createdAt: chat.createdAt.toISOString(),
-          lastAt: chat.lastAt.toISOString(),
-          running: this.#turns.has(chat.id),
-          projectId: chat.projectId,
-          appId: chat.appId,
-        };
+    return chat === undefined ? null : this.#summaryOf(chat);
   }
 
   /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
   chatSummary(chatId: unknown, personId: string): ChatSummary {
-    const chat = this.#ownChat(chatId, personId);
-    return {
-      id: chat.id,
-      title: chat.title,
-      createdAt: chat.createdAt.toISOString(),
-      lastAt: chat.lastAt.toISOString(),
-      running: this.#turns.has(chat.id),
-      projectId: chat.projectId,
-      appId: chat.appId,
-    };
+    return this.#summaryOf(this.#ownChat(chatId, personId));
   }
 
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
@@ -3380,47 +3649,6 @@ export class Workspace extends DurableObject<Env> {
       this.#deliverAudit();
     }
     return removed;
-  }
-
-  /**
-   * `personId`'s email preferences as they last saved them, or the
-   * defaults when they never did.
-   */
-  emailPreferences(personId: string): EmailPreferences {
-    const saved = this.#db
-      .select({
-        needsYou: emailPreferences.needsYou,
-        weeklySummary: emailPreferences.weeklySummary,
-        billingProblems: emailPreferences.billingProblems,
-      })
-      .from(emailPreferences)
-      .where(eq(emailPreferences.personId, personId))
-      .get();
-    return saved ?? defaultEmailPreferences;
-  }
-
-  /**
-   * Saves the email preferences `changes` names (checked by the caller,
-   * `emailPreferenceChangesSchema`) over what `personId` saved before, or
-   * the defaults: read and written with no await between, so a save
-   * running at the same time can't put back what this one changed.
-   */
-  saveEmailPreferences(
-    personId: string,
-    changes: EmailPreferenceChanges
-  ): void {
-    const before = this.emailPreferences(personId);
-    const row = {
-      needsYou: changes.needsYou ?? before.needsYou,
-      weeklySummary: changes.weeklySummary ?? before.weeklySummary,
-      billingProblems: changes.billingProblems ?? before.billingProblems,
-      updatedAt: new Date(),
-    };
-    this.#db
-      .insert(emailPreferences)
-      .values({ personId, ...row })
-      .onConflictDoUpdate({ target: emailPreferences.personId, set: row })
-      .run();
   }
 
   /** Renames `personId`'s own chat, audited as `by`'s. */
@@ -3814,6 +4042,8 @@ export class Workspace extends DurableObject<Env> {
         { userId: personId, actor: by },
         "chat_deleted"
       );
+      // Nor any workflow start its agent asked its person to confirm.
+      await dropHeldStarts(this.env, { chatId: id });
       // Every App it has a draft of, even one with no changes left: its
       // preview may still run.
       const drafted = this.#db
@@ -3831,6 +4061,8 @@ export class Workspace extends DurableObject<Env> {
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
+        // Before its messages: a file names the question that carried it.
+        this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db
           .delete(chatSearchText)
           .where(eq(chatSearchText.chatId, id))
@@ -4106,6 +4338,20 @@ export class Workspace extends DurableObject<Env> {
   // A chat's drafts of Apps (agent-builds.ts). Only core calls these, for
   // the chat's agent, having checked the person's role in the App and the
   // agent's permission first.
+
+  /**
+   * When the chat's draft of App `appId` was last written, in ms; null
+   * when it has none: whether its authoring goes on, as the reaping of
+   * Apps a chat created and nobody accepted asks (app-removal.ts).
+   */
+  draftWrittenAt(chatId: ChatId, appId: string): number | null {
+    const row = this.#db
+      .select({ at: chatDrafts.updatedAt })
+      .from(chatDrafts)
+      .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
+      .get();
+    return row?.at.getTime() ?? null;
+  }
 
   /** The chat's draft of App `appId`; revision 0 while it has none. */
   draft(chatId: ChatId, appId: string): Draft {
@@ -4476,6 +4722,34 @@ export class Workspace extends DurableObject<Env> {
     this.#dropPreview(id, appId);
     this.#draftsChanged(id);
     return restored;
+  }
+
+  /**
+   * Discards `personId`'s own chat's draft of App `appId`, audited as
+   * `by`'s: its changes go, its versions stay (to restore one), and its
+   * revision goes on, so a write of the agent's that read the draft
+   * before lands on nothing (`saveDraft`). Whatever the draft is now, as
+   * the person chose it; a draft that changes nothing is discarded all the
+   * same, and audited once each time.
+   */
+  discardDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    // No await from here to the outbox: the drop and its event are
+    // written together, as one of the object's turns.
+    const { revision } = this.draft(id, appId);
+    if (!this.dropDraft(id, appId, { revision })) {
+      throw appErrors.create("app.conflict");
+    }
+    this.#outboxed(by, "chat.draft_discarded", id, {
+      app: appId,
+      revision: revision + 1,
+    });
+    this.#deliverAudit();
   }
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
@@ -4964,6 +5238,8 @@ export class Workspace extends DurableObject<Env> {
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
     const givenBy = this.#givenBy(chatId);
+    const asking = this.#asksIn(chatId);
+    const carried = this.#filesAfter(chatId, after);
     return this.#db
       .select()
       .from(chatMessages)
@@ -4971,12 +5247,16 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap(({ id, message, createdAt, thinkingMs }) => {
-        const shown = chatMessageOf(
-          id,
-          storedMessageSchema.parse(JSON.parse(message)),
-          createdAt,
-          givenBy(id),
-          thinkingMs
+        const shown = withFiles(
+          chatMessageOf(
+            id,
+            storedMessageSchema.parse(JSON.parse(message)),
+            createdAt,
+            givenBy(id),
+            thinkingMs,
+            asking
+          ),
+          carried
         );
         return shown === undefined ? [] : [shown];
       });
@@ -5031,14 +5311,19 @@ export class Workspace extends DurableObject<Env> {
    * The tool that shows the turn's thinking in the brain, as the person
    * reads the brain: only in their own chat, by an agent that may read it.
    */
-  #thinking(
+  async #thinking(
     readsBrain: boolean,
     shared: boolean,
     personId: string
-  ): { thinking?: AgentTool } {
-    return readsBrain && !shared
-      ? { thinking: showThinking(async () => await this.#brainOf(personId)) }
-      : {};
+  ): Promise<{ thinking?: AgentTool }> {
+    if (!readsBrain || shared) {
+      return {};
+    }
+    // Loaded with the turn, as the agent loop is: it brings TypeBox.
+    const { showThinking } = await import("./agent-thinking.ts");
+    return {
+      thinking: showThinking(async () => await this.#brainOf(personId)),
+    };
   }
 
   /**

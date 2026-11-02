@@ -1,8 +1,6 @@
 import { workflowPaths } from "@grasp-os/compiler";
 import { describeWorkflow } from "@grasp-os/sdk/describe";
 import type { AppFiles } from "@grasp-os/shared/apps";
-import { deploymentConfig } from "@grasp-os/shared/config";
-import { inboundMailDomainSchema } from "@grasp-os/shared/deployment-config";
 import { messageOf } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
@@ -301,7 +299,7 @@ const latestRuns = async (
         {
           id: runIdSchema.parse(row.id),
           ...(status === "running" && queue !== undefined
-            ? { status: "queued", queued: queue }
+            ? { status: "queued" as const, ...queue }
             : { status }),
           createdAt: new Date(row.createdAt).toISOString(),
         },
@@ -769,25 +767,6 @@ const stepsOf = (
 };
 
 /**
- * The domain the deployment receives mail at (`INBOUND_MAIL_DOMAIN`), set
- * up outside core with Email Routing; undefined while it is unset, or set
- * to something that isn't a domain (logged as `config.invalid`).
- */
-const inboundMailDomain = (
-  env: Pick<Env, "INBOUND_MAIL_DOMAIN">
-): string | undefined => {
-  const raw = env.INBOUND_MAIL_DOMAIN;
-  // A string var: the admin sets it as JSON, which arrives parsed (a
-  // bare string), and `wrangler dev --var` as text, which may or may not be
-  // JSON. Either way a bare domain is read as the JSON string it is.
-  return deploymentConfig(
-    inboundMailDomainSchema,
-    "INBOUND_MAIL_DOMAIN",
-    typeof raw === "string" && !raw.startsWith('"') ? JSON.stringify(raw) : raw
-  );
-};
-
-/**
  * The triggers workflow `workflow` of App `app` has at `version`, in the
  * order its code declares them: the rows the version registered as it
  * was made current (trigger-registry.ts), from declarations checked then,
@@ -810,7 +789,6 @@ const registeredTriggers = async (
       )
     )
     .orderBy(asc(workflowTriggers.position));
-  const domain = inboundMailDomain(env);
   return rows.flatMap((row): WorkflowTrigger[] => {
     switch (row.type) {
       case "schedule": {
@@ -835,8 +813,6 @@ const registeredTriggers = async (
                 type: "email",
                 position: row.position,
                 localPart: row.address,
-                address:
-                  domain === undefined ? null : `${row.address}@${domain}`,
               },
             ];
       }

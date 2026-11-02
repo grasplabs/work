@@ -1,3 +1,11 @@
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -23,15 +31,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 
 // Grasp's onboarding area (GRA-319), as in the prototype's admin
@@ -137,22 +137,22 @@ const AreaSidebar = ({ current }: { current: AreaSection }) => {
   if (folded) {
     return (
       <PageSidebar folded label={label}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the sections`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
+        <PageSidebarRailDivider />
         {sections.map(({ to, label: name, icon: Icon }) => (
-          <RailButton
+          <PageSidebarRailButton
             active={to === current.to}
             key={to}
             label={i18n._(name)}
             render={<Link to={to} />}
           >
             <Icon />
-          </RailButton>
+          </PageSidebarRailButton>
         ))}
       </PageSidebar>
     );

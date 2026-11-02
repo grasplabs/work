@@ -1,5 +1,13 @@
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
   ActivityIcon,
   BrainIcon,
@@ -14,15 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { LOBES, TEAM_FOLDER } from "./brain-atlas.ts";
 import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { dotClass } from "./brain-colors.ts";
@@ -334,6 +334,12 @@ export const BrainNav = ({
   const [revealed, setRevealed] = useState<string | undefined>();
   const company = brain.notes.find((candidate) => candidate.kind === "company");
   const activityLabel = t({ message: "Activity", context: "the brain's log" });
+  // Which of the brain's own pages is open, for the folded rail: the open
+  // panel's links mark themselves, a rail button is told.
+  const matchRoute = useMatchRoute();
+  const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
+  const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
+  const onBrain = Boolean(matchRoute({ to: "/brain" }));
   let here = new Set<string>();
   if (note) {
     here = new Set(wayTo(note, atlas));
@@ -375,15 +381,15 @@ export const BrainNav = ({
   if (collapsed) {
     return (
       <PageSidebar folded label={t`The brain`}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the navigation`}
           onExpand={() => {
             setCollapsed(false);
           }}
         />
-        <RailDivider />
+        <PageSidebarRailDivider />
         {company ? (
-          <RailButton
+          <PageSidebarRailButton
             active={note?.id === company.id}
             label={company.title}
             render={
@@ -391,33 +397,38 @@ export const BrainNav = ({
             }
           >
             <Building2Icon />
-          </RailButton>
+          </PageSidebarRailButton>
         ) : null}
-        <RailButton
-          active={!note && shownRegion === undefined}
+        <PageSidebarRailButton
+          active={onBrain && shownRegion === undefined}
           label={t`Brain`}
           render={<Link activeOptions={{ exact: true }} to="/brain" />}
         >
           <BrainIcon />
-        </RailButton>
-        <RailButton
+        </PageSidebarRailButton>
+        <PageSidebarRailButton
+          active={onActivity}
           label={activityLabel}
           render={<Link to="/brain/activity" />}
         >
           <ActivityIcon />
-        </RailButton>
-        <RailButton label={t`Memory`} render={<Link to="/brain/memory" />}>
+        </PageSidebarRailButton>
+        <PageSidebarRailButton
+          active={onMemory}
+          label={t`Memory`}
+          render={<Link to="/brain/memory" />}
+        >
           <NotebookPenIcon />
-        </RailButton>
+        </PageSidebarRailButton>
         {regions.map(({ region, Icon }) => (
-          <RailButton
+          <PageSidebarRailButton
             active={here.has(regionKey(region.id))}
             key={region.id}
             label={region.name}
             render={<Link search={{ region: region.id }} to="/brain" />}
           >
             <Icon />
-          </RailButton>
+          </PageSidebarRailButton>
         ))}
       </PageSidebar>
     );

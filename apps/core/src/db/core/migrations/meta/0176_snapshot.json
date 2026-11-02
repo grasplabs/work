@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ed566cc5-2317-425c-93c9-bd6faebdb587",
+  "id": "5e3d9f0d-feaa-4242-a258-69d2e3e1ad99",
   "prevId": "d196fe40-31cd-4d10-82af-6d408453751f",
   "tables": {
     "access_revocations": {
@@ -1986,13 +1986,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "link": {
-          "name": "link",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "removed_at": {
           "name": "removed_at",
           "type": "integer",
@@ -2008,15 +2001,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "apps_link": {
-          "name": "apps_link",
-          "columns": [
-            "link"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -12514,6 +12499,13 @@
             "principal_id",
             "created_at",
             "id"
+          ],
+          "isUnique": false
+        },
+        "workflow_resource_runs_created_idx": {
+          "name": "workflow_resource_runs_created_idx",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         }

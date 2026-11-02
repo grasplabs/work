@@ -7,23 +7,12 @@
  * nothing but the open-source app's code.
  *
  * The admin can have a hostname of its own (src/admin-host.ts). Its pages
- * are served from the root; old addresses (everything once under `/admin`,
- * the old Releases, Rollouts and client pages) redirect to where their
- * page is now (src/moved-pages.ts).
- *
- * `POST /discord/interactions` is the one route outside Access: Discord
- * posts Grasp's bot's interactions there (src/admin/discord.ts), so it
- * can't carry an Access JWT. It answers only what Discord's signature
- * vouches for, and only Grasp's staff; Access's application has a bypass
- * policy for this path alone.
+ * are served from the root.
  *
  * The cron imports newly published releases (src/releases/import.ts),
  * then resumes provisioning that isn't getting anywhere
- * (src/hosting/reconcile.ts);
- * the digest's own cron posts the admin's morning digest to Discord
- * (src/admin/discord-digest.ts), and the watch's reads how Stephen fares
- * at every client every hour
- * (src/clients/watch.ts).
+ * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
+ * fares at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
@@ -36,25 +25,18 @@
  */
 import { log } from "@grasp-os/shared/log";
 import handler from "@tanstack/react-start/server-entry";
-import { env as workerEnv, waitUntil } from "cloudflare:workers";
+import { env as workerEnv } from "cloudflare:workers";
 
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
 import { adminHostRedirect } from "./admin-host.ts";
-import { digestCron, sendMorningDigest } from "./admin/discord-digest.ts";
-import {
-  discordInteraction,
-  discordInteractionsPath,
-} from "./admin/discord.ts";
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
-import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
-export { ChatState } from "@grasp-os/chat/state";
 export { AdminRuns } from "./run-object.ts";
 
 declare module "@tanstack/react-start" {
@@ -70,24 +52,11 @@ const withStaff = withAccess(async (request, staff) =>
 );
 
 export default {
-  // Past the Access check, a page may move from where it was to where it
-  // is now (src/moved-pages.ts), or to the admin's own hostname
+  // Past the Access check, a page may move to the admin's own hostname
   // (src/admin-host.ts), so nothing about it shows to anyone else.
-  fetch: async (request: Request, env: Env) => {
-    if (new URL(request.url).pathname === discordInteractionsPath) {
-      return await discordInteraction(request, env, waitUntil);
-    }
-    return await withStaff(
-      request,
-      env,
-      () => movedPageRedirect(request) ?? adminHostRedirect(request, env)
-    );
-  },
+  fetch: async (request: Request, env: Env) =>
+    await withStaff(request, env, () => adminHostRedirect(request, env)),
   scheduled: async (controller, env) => {
-    if (controller.cron === digestCron) {
-      await sendMorningDigest(env, new Date(controller.scheduledTime));
-      return;
-    }
     if (controller.cron === watchCron) {
       await watchStephen(env, new Date(controller.scheduledTime));
       return;

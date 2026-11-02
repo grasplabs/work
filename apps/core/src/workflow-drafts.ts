@@ -368,24 +368,11 @@ const withCheckpointDoors = async (
   };
 };
 
-/** The draft of `workflow` as `workflowDraft` answers it, its doors resolved for `by`. */
-const draftOf = async (
-  env: Env,
-  by: Acting,
-  workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
-  saved?: Parameters<typeof draftReadOf>[3]
-): Promise<WorkflowDraft> =>
-  await withCheckpointDoors(
-    env,
-    by,
-    await draftReadOf(env, by, workflow, saved)
-  );
-
 /**
- * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`).
- * Before anyone edits it, it is the current version's definition, which
- * passed when it was published, or a starting definition for this
- * workflow.
+ * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`),
+ * its doors resolved for them. Before anyone edits it, it is the current
+ * version's definition, which passed when it was published, or a
+ * starting definition for this workflow.
  */
 export const workflowDraft = async (
   env: Env,
@@ -393,7 +380,11 @@ export const workflowDraft = async (
   id: unknown
 ): Promise<WorkflowDraft> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  return await draftOf(env, by, workflow);
+  return await withCheckpointDoors(
+    env,
+    by,
+    await draftReadOf(env, by, workflow)
+  );
 };
 
 /** What a build of a draft's modules reported, as it refuses them. */
@@ -636,7 +627,10 @@ export const editWorkflowDraft = async (
     }
     throw error;
   }
-  return await draftOf(env, by, workflow, {
+  // Its doors are resolved again only for a new checkpoint: an edit that
+  // didn't pass leaves the checkpoint the editor was at, whose doors it
+  // holds (`WorkflowDraft`), as `expectedRevision` was its latest.
+  const answer = await draftReadOf(env, by, workflow, {
     latest: {
       workflowResourceId: workflow.id,
       revision,
@@ -649,6 +643,11 @@ export const editWorkflowDraft = async (
     modules,
     ...(checkpoint === undefined ? {} : { checkpoint }),
   });
+  // With no checkpoint of its own the draft's is the current version's,
+  // which may have moved since: resolved again too.
+  return checkpoint !== undefined && checkpoint.revision !== revision
+    ? answer
+    : await withCheckpointDoors(env, by, answer);
 };
 
 /**
@@ -672,7 +671,8 @@ export const editWorkflowStep = async (
     workflowStepEditSchema,
     input
   );
-  const draft = await draftOf(env, by, workflow);
+  // Its text and modules only: no doors to resolve.
+  const draft = await draftReadOf(env, by, workflow);
   if (draft.revision !== expectedRevision) {
     throw workflowResourceErrors.create("workflow.draft_conflict");
   }

@@ -1,25 +1,23 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { runActorOf } from "@grasp-os/shared/audit";
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import type { ModelShares } from "../src/model-admission.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import type { Admission } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
 import { queuedRuns } from "../src/workflows/admission.ts";
 import { modelWaitRecorded } from "../src/workflows/model-waits.ts";
 import { startRun } from "../src/workflows/runs.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
@@ -31,67 +29,68 @@ import {
 
 // Fair admission of model requests (model-admission.ts): the client's
 // provider requests in flight at once, in all, for one person and of one
-// App, each held to its share in the deployment's quota policy, in the
-// model ledger's one transaction with every budget; the calls waiting for
+// App, each held to its share in the quota limits, in the
+// model ledger's one transaction; the calls waiting for
 // a share keep places in its queue, served by turn and first come, first
-// served, never behind a share that is full. AI Gateway is the outside
-// system: a fake behind the AI binding. The ledger, the policy and the
-// audit log are real. Where a test needs a request in flight that nobody
+// served, never behind a share that is full. The model provider behind
+// connect is the outside system (test/model-provider.ts). The ledger and
+// the audit log are real. Where a test needs a request in flight that nobody
 // will settle (its isolate died), it admits one in the ledger as the
 // gateway would and walks away.
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const sonnet = "anthropic/claude-sonnet-4-5";
-const gateway = "grasp-os-test";
+const mistral = "mistral/mistral-large-latest";
 
 /**
- * The tests' policy: three requests in flight for the whole client, and
+ * The tests' quota limits: three requests in flight for the whole client, and
  * three asked for each person and each App, which the gateway holds to two
  * each, one less than the client's, so one person or one App always leaves
  * room (`modelSharesOf`); and two places in the queue for each person.
  */
 const policy = {
-  generation: 2,
-  limits: {
-    ...quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits,
-    modelClientRequests: 3,
-    modelPersonRequests: 3,
-    modelAppRequests: 3,
-    modelQueuedPerPerson: 2,
-  },
+  ...configuredLimits,
+  modelClientRequests: 3,
+  modelPersonRequests: 3,
+  modelAppRequests: 3,
+  modelQueuedPerPerson: 2,
 };
 
 /** An answer that streams its first characters, then waits for `until`. */
-const paused = (until: Promise<unknown>): GatewayReply => ({
+const paused = (until: Promise<unknown>): ProviderReply => ({
   text: "Hello there.",
   inputTokens: 10,
   outputTokens: 5,
   pause: { at: 3, until },
 });
 
-const answered: GatewayReply = {
+const answered: ProviderReply = {
   text: "Hi.",
   inputTokens: 10,
   outputTokens: 5,
 };
 
-/** Core's env with the fake gateway answering with `replies`, under the tests' policy. */
-const gatewayWith = (
-  replies: GatewayReply[],
-  more: Partial<ModelsEnv> = {}
-) => {
-  const fake = fakeGateway(...replies);
-  const coreEnv: ModelsEnv = {
+/** Core's env under the tests' quota limits, with `more` over it. */
+const coreWith = (more: Partial<Env> = {}) => {
+  const coreEnv: Env = {
     ...env,
-    AI: fake.binding,
-    MODEL_GATEWAY: { gateway, models: [workersAi] },
-    QUOTA_LIMITS: policy,
+    TEST_QUOTA_LIMITS: policy,
     ...more,
   };
-  return { fake, call: models(coreEnv).call, agent: models(coreEnv).agent };
+  return { call: models(coreEnv).call, agent: models(coreEnv).agent };
 };
+
+/**
+ * Core's env as `coreWith` makes it, with a provider answering with
+ * `replies` for the organization's one model, Mistral Large.
+ */
+const gatewayWith = async (
+  replies: ProviderReply[],
+  more: Partial<Env> = {}
+) => ({
+  fake: await fakeProviderFor([mistral], ...replies),
+  ...coreWith(more),
+});
 
 /** Apps the tests' calls are made in, each by its own builder. */
 const apps: { appId: string; userId: string }[] = [];
@@ -112,7 +111,7 @@ const callBy = (
   }
   const appId = appIdSchema.parse(made.appId);
   return {
-    model: workersAi,
+    model: mistral,
     maxTokens: 100,
     input: "Hello.",
     purpose: "chat.turn",
@@ -213,16 +212,8 @@ const request = (
   return {
     id: crypto.randomUUID(),
     period: "2400-01",
-    scopes: [
-      {
-        scope: "deployment",
-        key: "deployment",
-        limitMicros: null,
-        alertMicros: null,
-        names: {},
-      },
-    ],
-    model: workersAi,
+    scopes: [{ scope: "deployment", key: "deployment" }],
+    model: mistral,
     price: {
       version: "test",
       input: 1,
@@ -319,7 +310,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("leaves room for another App and another person while one App's burst waits its turn", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -360,23 +351,18 @@ describe("fair model admission", { timeout: 60_000 }, () => {
   });
 
   it("holds no share while a transcription is open, so calls go on beside it", async () => {
-    const { fake } = gatewayWith([answered]);
-    const coreEnv: ModelsEnv = {
+    await fakeProviderFor([mistral], answered);
+    const coreEnv: Env = {
       ...env,
-      AI: fake.binding,
-      MODEL_GATEWAY: {
-        gateway,
-        models: [workersAi, "elevenlabs/scribe_v2_realtime"],
-      },
-      QUOTA_LIMITS: policy,
+      TEST_QUOTA_LIMITS: policy,
     };
     // As many sockets open as the client has shares in all.
     const open = await Promise.all(
       Array.from(
-        { length: policy.limits.modelClientRequests },
+        { length: policy.modelClientRequests },
         async () =>
           await models(coreEnv).listen({
-            model: "elevenlabs/scribe_v2_realtime",
+            model: "openai/gpt-4o-transcribe",
             seconds: 900,
             openMs: 30 * 60_000,
             purpose: "onboarding.transcription",
@@ -400,7 +386,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("holds one person to their share across Apps, and leaves room for someone else", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -430,18 +416,18 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
-  it("tells queued, rate-limited and budget-exhausted apart, each with a wait core computed", async () => {
+  it("tells queued and rate-limited apart, each with a wait core computed", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
-      // Refused for its rate, retries and all, the provider asking for two
-      // hours: core holds it to its own bound.
-      ...Array.from({ length: 3 }, () => ({
+      // Refused for its rate, the provider asking for two hours: core
+      // holds it to its own bound.
+      {
         status: 429,
         errorType: "rate_limit_error",
         headers: { "retry-after": "7200" },
-      })),
+      },
     ]);
     const ada = newPerson().userId;
     const busy = [outcome(call(callBy(ada, 0))), outcome(call(callBy(ada, 0)))];
@@ -449,30 +435,19 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     // The Inbox's share is full: a call with two seconds waits one, then
     // is told so.
     const queued = await toldBy(call(callBy(ada, 0, { timeoutMs: 2000 })));
-    // Ben's call reaches the provider, which turns it away for its rate.
-    const rateLimited = await toldBy(call(callBy(newPerson().userId, 1)));
-    // A budget used up for good is told so even while Ada's share is
-    // full: no wait for a share helps it, so it takes no place.
-    // Sonnet 4.5 reserves some $0.56: past a cent, for good this month.
-    const exhausted = gatewayWith([], {
-      MODEL_GATEWAY: {
-        gateway,
-        models: [workersAi, sonnet],
-        budgets: { user: { limit: 0.01 } },
-      },
-      MODEL_BUDGET_MONTH: "2310-01",
-    });
-    const usedUp = await toldBy(
-      exhausted.call(callBy(ada, 0, { model: sonnet, maxTokens: undefined }))
+    // Ben's call reaches the provider, which turns it away for its rate,
+    // with less time left than the wait it is told: not retried.
+    const rateLimited = await toldBy(
+      call(callBy(newPerson().userId, 1, { timeoutMs: 30_000 }))
     );
     release.resolve(true);
     await Promise.all(busy);
 
-    expect({ queued, rateLimited, usedUp }).toStrictEqual({
+    expect({ queued, rateLimited }).toStrictEqual({
       queued: {
         code: "model.queued",
         details: {
-          model: workersAi,
+          model: mistral,
           because: "app",
           waitingFor: "app",
           retryAfterSeconds: queued.details.retryAfterSeconds,
@@ -480,24 +455,22 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       },
       rateLimited: {
         code: "model.rate_limited",
-        details: { model: workersAi, retryAfterSeconds: 60 },
-      },
-      usedUp: {
-        code: "model.over_budget",
         details: {
-          model: sonnet,
-          because: "user",
-          retryAfterSeconds: usedUp.details.retryAfterSeconds,
+          model: mistral,
+          provider: "mistral",
+          trouble: "limiting",
+          retryAfterSeconds: 60,
+          // Refused each time, retries and all: nothing was taken on.
+          unbilled: true,
         },
       },
     });
     expect(Number(queued.details.retryAfterSeconds)).toBeLessThanOrEqual(5);
-    expect(Number(usedUp.details.retryAfterSeconds)).toBeGreaterThan(0);
   });
 
   it("gives a cancelled request's share back at once, not at its deadline", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call, agent } = gatewayWith([
+    const { fake, call, agent } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -542,7 +515,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
   });
 
   it("gives a request's share back once its lease ends, when nobody settles it", async () => {
-    const { call } = gatewayWith([answered]);
+    const { call } = await gatewayWith([answered]);
     const ada = newPerson().userId;
     const appId = apps[0]?.appId ?? "";
     // Two requests in flight whose isolate died: nobody settles them, and
@@ -551,16 +524,8 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     const leaked = (): Admission => ({
       id: crypto.randomUUID(),
       period: "2311-01",
-      scopes: [
-        {
-          scope: "deployment",
-          key: "deployment",
-          limitMicros: null,
-          alertMicros: null,
-          names: {},
-        },
-      ],
-      model: workersAi,
+      scopes: [{ scope: "deployment", key: "deployment" }],
+      model: mistral,
       price: {
         version: "test",
         input: 1,
@@ -603,7 +568,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("tells a call given no place that it is queued at once, without waiting", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       ...Array.from({ length: 2 }, () => answered),
@@ -640,7 +605,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("stops a cancelled call's wait at once, asking for a share no more", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
     ]);
@@ -669,7 +634,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("gives a guest a share and places of its own, never the member's who invited them", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       ...Array.from({ length: 4 }, () => answered),
@@ -719,118 +684,9 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
-  it("tells a guest the same whether the member's budget is held or used up, while its App's share is full", async () => {
-    const release = Promise.withResolvers<boolean>();
-    const budgeted = (limit: number, month: string, replies: GatewayReply[]) =>
-      gatewayWith(replies, {
-        MODEL_GATEWAY: {
-          gateway,
-          models: [workersAi, sonnet],
-          budgets: { user: { limit } },
-        },
-        MODEL_BUDGET_MONTH: month,
-      });
-    // Sonnet 4.5 reserves some $0.56: with $1, Ada's call under way leaves
-    // no room for a second; with a cent, there is none at all.
-    const held = budgeted(1, "2312-01", [
-      paused(release.promise),
-      paused(release.promise),
-    ]);
-    const usedUp = budgeted(0.01, "2312-02", []);
-    const ada = newPerson().userId;
-    const asSonnet = { model: sonnet, maxTokens: undefined };
-    // Ada's call, and Ben's beside it, fill the App's share too.
-    const running = [
-      outcome(held.call(callBy(ada, 0, asSonnet))),
-      outcome(held.call(callBy(newPerson().userId, 0))),
-    ];
-    await until(() => held.fake.requests.length === 2);
-    const asGuest = callBy(ada, 0, {
-      ...asSonnet,
-      timeoutMs: 2000,
-      trigger: {
-        type: "guest",
-        chatId: `chat-${crypto.randomUUID()}`,
-        appId: appIdSchema.parse(apps[0]?.appId),
-        invitedBy: ada,
-      },
-    });
-    const whenHeld = await toldBy(held.call(asGuest));
-    const whenUsedUp = await toldBy(usedUp.call(asGuest));
-    release.resolve(true);
-    await Promise.all(running);
-
-    const usedUpAnswer = {
-      code: "model.over_budget",
-      details: { model: sonnet, because: "user" },
-    };
-    expect({ whenHeld, whenUsedUp }).toStrictEqual({
-      whenHeld: usedUpAnswer,
-      whenUsedUp: usedUpAnswer,
-    });
-  });
-
-  it("gives a waiting call's place up when the policy can't be read as it asks again", async () => {
-    const release = Promise.withResolvers<boolean>();
-    let failing = false;
-    // Core's database, failing once told to, as an unreachable one would.
-    const db = new Proxy(env.DB, {
-      get: (target, name): unknown => {
-        const member: unknown = Reflect.get(target, name, target);
-        if (typeof member !== "function") {
-          return member;
-        }
-        return (...args: unknown[]): unknown => {
-          if (failing) {
-            throw new Error("D1_ERROR: the database is unavailable");
-          }
-          return Reflect.apply(member, target, args);
-        };
-      },
-    });
-    const { fake, call } = gatewayWith(
-      [paused(release.promise), paused(release.promise)],
-      { DB: db }
-    );
-    const ada = newPerson().userId;
-    const running = [
-      outcome(call(callBy(newPerson().userId, 0))),
-      outcome(call(callBy(newPerson().userId, 0))),
-    ];
-    await until(() => fake.requests.length === 2);
-    // A run's step, whose call needs its lineage's policy for every ask.
-    const queue = queueOf();
-    const step = outcome(
-      call(
-        callBy(ada, 0, {
-          purpose: "workflow.step",
-          trigger: runActorOf({
-            runId: `run-${crypto.randomUUID()}`,
-            app: apps[0]?.appId ?? "",
-            workflow: "reader",
-          }),
-          onQueued: async (queued) => {
-            failing = true;
-            await queue.onQueued(queued);
-          },
-        })
-      )
-    );
-    await step;
-    failing = false;
-    const places = await placesOf(ada);
-    release.resolve(true);
-    await Promise.all(running);
-
-    expect({ waited: queue.seen, places }).toStrictEqual({
-      waited: ["app", null],
-      places: 0,
-    });
-  });
-
   it("gives up a place the ledger kept though its answer was lost", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
     ]);
@@ -854,7 +710,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         };
       },
     });
-    const lost = gatewayWith([], { MODEL_LEDGER: lossy });
+    const lost = coreWith({ MODEL_LEDGER: lossy });
     const ada = newPerson().userId;
     const running = [
       outcome(call(callBy(newPerson().userId, 0))),
@@ -874,7 +730,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("goes on without a caller's note of its wait that never answers", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -908,7 +764,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("lands a caller's notes of its wait in order, a slow one before the last", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -949,7 +805,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("sends nothing, and holds nothing back, for a call cancelled as its wait ends", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
       answered,
@@ -993,7 +849,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
   it("asks nothing more for a call cancelled while it waits", async () => {
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = gatewayWith([
+    const { fake, call } = await gatewayWith([
       paused(release.promise),
       paused(release.promise),
     ]);
@@ -1023,7 +879,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
   });
 
   it("tells a guest neither whose share is full nor a wait from its leases", async () => {
-    const { call } = gatewayWith([]);
+    const { call } = coreWith();
     const ada = newPerson().userId;
     const chatId = `chat-${crypto.randomUUID()}`;
     // Two requests of the guest's chat in flight elsewhere, ending in
@@ -1061,7 +917,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     expect(told).toStrictEqual({
       code: "model.queued",
       details: {
-        model: workersAi,
+        model: mistral,
         because: "client",
         waitingFor: "client",
         retryAfterSeconds: 5,
@@ -1069,50 +925,13 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
-  it("holds back a call whose policy can't be read once the ledger knows a newer one", async () => {
-    // A ledger of this test's own, which a newer policy reached already.
-    const own = `ledger-${crypto.randomUUID()}`;
-    const ledgerNamespace = new Proxy(env.MODEL_LEDGER, {
-      get: (namespace, name): unknown =>
-        name === "getByName"
-          ? () => namespace.getByName(own)
-          : Reflect.get(namespace, name, namespace),
-    });
-    await env.MODEL_LEDGER.getByName(own).admit({
-      ...request("someone", null),
-      policyGeneration: policy.generation + 1,
-    });
-    // Core's database, failing only to read the quota policy.
-    const db = new Proxy(env.DB, {
-      get: (target, name): unknown =>
-        name === "prepare"
-          ? (query: string) => {
-              if (query.includes("quota_policies")) {
-                throw new Error("D1_ERROR: the database is unavailable");
-              }
-              return target.prepare(query);
-            }
-          : Reflect.get(target, name, target),
-    });
-    const { fake, call } = gatewayWith([answered], {
-      DB: db,
-      MODEL_LEDGER: ledgerNamespace,
-    });
-
-    // Its shares, from the last policy read or the platform's own, would
-    // be above the newer policy's: it is held back, not admitted.
-    expect({
-      told: await outcome(call(callBy(newPerson().userId, 0))),
-      sent: fake.requests.length,
-    }).toStrictEqual({ told: "model.quota_policy_behind", sent: 0 });
-  });
-
   it("keeps a step's newer call's wait whatever an older call's late notes say", async () => {
     const db = drizzle(env.DB);
     const runId = `run-${crypto.randomUUID()}`;
     const shown = async () => {
-      const queued = await queuedRuns(db, [runId], Date.now());
-      return queued.get(runId);
+      const waits = await queuedRuns(db, [runId], Date.now());
+      const wait = waits.get(runId);
+      return wait !== undefined && "queued" in wait ? wait.queued : undefined;
     };
     const now = Date.now();
     // The newer call of the step waits, asking again in five seconds.
@@ -1159,20 +978,16 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         { extract: { total: 1234 } }
       ),
     });
-    await bindModel(app, "reader", workersAi);
+    await bindModel(app, "reader", mistral);
     const release = Promise.withResolvers<boolean>();
-    const fake = fakeGateway(paused(release.promise), paused(release.promise), {
-      text: '{ "total": 1234 }',
-      inputTokens: 10,
-      outputTokens: 5,
-    });
-    const ai: AiBinding = env.AI;
-    const sending = vi
-      .spyOn(ai, "fetch")
-      .mockImplementation(fake.binding.fetch);
-    const before = { gateway: env.MODEL_GATEWAY, quotas: env.QUOTA_LIMITS };
-    env.MODEL_GATEWAY = { gateway, models: [workersAi] };
-    env.QUOTA_LIMITS = policy;
+    const fake = await fakeProviderFor(
+      [mistral],
+      paused(release.promise),
+      paused(release.promise),
+      { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 }
+    );
+    const before = { quotas: env.TEST_QUOTA_LIMITS };
+    env.TEST_QUOTA_LIMITS = policy;
     try {
       // The owner's own two calls, elsewhere, fill the owner's share.
       const holding = [
@@ -1201,9 +1016,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       });
     } finally {
       release.resolve(true);
-      env.MODEL_GATEWAY = before.gateway;
-      env.QUOTA_LIMITS = before.quotas;
-      sending.mockRestore();
+      env.TEST_QUOTA_LIMITS = before.quotas;
     }
   });
 
@@ -1223,21 +1036,17 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         { extract: { total: 1234 } }
       ),
     });
-    await bindModel(app, "reader", workersAi);
+    await bindModel(app, "reader", mistral);
     const release = Promise.withResolvers<boolean>();
-    const fake = fakeGateway(paused(release.promise), paused(release.promise), {
-      text: '{ "total": 1234 }',
-      inputTokens: 10,
-      outputTokens: 5,
-    });
+    const fake = await fakeProviderFor(
+      [mistral],
+      paused(release.promise),
+      paused(release.promise),
+      { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 }
+    );
     // The runs the dispatcher runs use core's own env.
-    const ai: AiBinding = env.AI;
-    const sending = vi
-      .spyOn(ai, "fetch")
-      .mockImplementation(fake.binding.fetch);
-    const before = { gateway: env.MODEL_GATEWAY, quotas: env.QUOTA_LIMITS };
-    env.MODEL_GATEWAY = { gateway, models: [workersAi] };
-    env.QUOTA_LIMITS = policy;
+    const before = { quotas: env.TEST_QUOTA_LIMITS };
+    env.TEST_QUOTA_LIMITS = policy;
     try {
       // Two calls of the App, for others, fill its share.
       const appId = appIdSchema.parse(app);
@@ -1245,7 +1054,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         async (trigger) =>
           await outcome(
             models(env).call({
-              model: workersAi,
+              model: mistral,
               maxTokens: 100,
               input: "Hello.",
               purpose: "chat.turn",
@@ -1293,9 +1102,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       });
     } finally {
       release.resolve(true);
-      env.MODEL_GATEWAY = before.gateway;
-      env.QUOTA_LIMITS = before.quotas;
-      sending.mockRestore();
+      env.TEST_QUOTA_LIMITS = before.quotas;
     }
   });
 });
@@ -1519,36 +1326,5 @@ describe("the model ledger's queue", () => {
       "queued:client:placed",
       "queued:client:unplaced",
     ]);
-  });
-
-  it("refuses a used-up budget as that, holding no place, whatever the shares", async () => {
-    const ledger = newLedger();
-    for (const subject of ["ada", "ben", "cid"]) {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await answer(ledger, request(subject, `app-${subject}`));
-    }
-    const broke = request("dan", "app-dan");
-    const refused = await ledger.admit({
-      ...broke,
-      scopes: [
-        {
-          scope: "user",
-          key: "dan",
-          limitMicros: 0,
-          alertMicros: null,
-          names: { user: "dan" },
-        },
-      ],
-    });
-    const places = await runInDurableObject(
-      ledger,
-      (_instance, state) =>
-        state.storage.sql.exec("SELECT place FROM queue").toArray().length
-    );
-
-    expect({ refused, places }).toStrictEqual({
-      refused: { ok: false, scope: "user" },
-      places: 0,
-    });
   });
 });

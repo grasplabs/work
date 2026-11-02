@@ -10,7 +10,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { tellingText } from "./interviewer-text.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
@@ -78,11 +78,14 @@ export const interviewStoryResponse = async (
     return linkRefusal(found.code, requestId);
   }
   // The model that says his lines tells it: someone is waiting for it.
-  const model = modelForRole(gatewaySettings(env), "quick", {
-    sensitive: true,
-  });
+  const settings = await modelSettings(env);
+  const connected = settings.models.length > 0;
+  const model = connected ? modelForRole(settings, "quick") : undefined;
   if (model === undefined) {
-    log.error("interview.no_model", { requestId });
+    log.error("interview.no_model", {
+      requestId,
+      ...(connected ? {} : { code: "model.no_provider" }),
+    });
     return asTheyStand(503);
   }
   const { text: system } = await tellingText(asked.interviewer, asked.locale);
@@ -119,7 +122,7 @@ export const interviewStoryResponse = async (
       log.error("interview.story_failed", { requestId });
     }
     return asTheyStand(
-      code === "model.budget_busy" || code === "model.rate_limited" ? 429 : 502
+      code === "model.queued" || code === "model.rate_limited" ? 429 : 502
     );
   }
 };

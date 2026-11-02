@@ -10,32 +10,32 @@ import {
 import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
+import { reapAbandonedApps } from "./app-removal.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { auditLog } from "./audit-log.ts";
-import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
-import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
+import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
+import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
-import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
+import { checkReadings } from "./onboarding/documents.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
@@ -68,7 +68,9 @@ import { repairWakes } from "./workflows/wakes.ts";
  * with the rest of its slot; its own failure is its own.
  */
 export const clockTasks: readonly ClockTask<Env>[] = [
-  { name: "audit.drain", period: "minute", run: drainAuditOutboxes },
+  // Connect's events also tell people of the mailboxes and drives it
+  // stopped hearing (src/connector-source-notices.ts).
+  { name: "audit.drain", period: "minute", run: drainAuditOutboxesNoticing },
   // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
   { name: "brain.capture", period: "minute", run: reconcileRunCaptures },
   // Scopes whose few new episodes waited long enough to be consolidated
@@ -86,6 +88,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Shared documents' readings their writer never checked against the
+  // purges since (src/onboarding/documents.ts `checkReading`).
+  {
+    name: "onboarding.readings",
+    period: "minute",
+    run: checkReadings,
+  },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
   {
     name: "knowledge.payloads",
@@ -196,6 +205,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await indexApps(env);
     },
   },
+  // Apps a chat created that nobody accepted or works on (app-removal.ts).
+  {
+    name: "apps.reap_abandoned",
+    period: "quarterHour",
+    run: reapAbandonedApps,
+  },
   { name: "statistics.sweep", period: "quarterHour", run: sweepStatistics },
   // Brain command receipts past their retention (src/knowledge/memories.ts).
   {
@@ -240,12 +255,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sendStephenSummaries,
   },
-  // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
-  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
   {
     name: "workflows.run_details",
     period: "quarterHour",
     run: sweepRunDetails,
+  },
+  // What a lapsed held start was asked to run with (held-starts.ts).
+  {
+    name: "workflows.held_start_inputs",
+    period: "quarterHour",
+    run: sweepHeldStartInputs,
   },
   {
     name: "workflows.candidate_runs",
@@ -294,19 +313,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepTestFixtures,
   },
-  {
-    name: "screens.submissions",
-    period: "quarterHour",
-    run: sweepScreenSubmissions,
-  },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
-  // The application landscape: each connection read once a day, a bounded
-  // number of pages a run (src/landscape.ts).
-  {
-    name: "landscape.sync",
-    period: "quarterHour",
-    run: syncLandscapes,
-  },
   // The audit log's retention alarm armed, if it isn't yet: retention
   // itself runs on that alarm (src/audit-log.ts), and a deployment that
   // appends nothing after a release still gets it.

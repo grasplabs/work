@@ -73,6 +73,10 @@ const codeOf = (error: unknown): string | undefined => {
 export const mailFrom = (env: Pick<Env, "MAIL_FROM">): MailFrom | undefined =>
   deploymentConfig(mailFromSchema, "MAIL_FROM", env.MAIL_FROM);
 
+/** The domain the deployment's mail is from (`MAIL_FROM`'s address); null while unset. */
+export const mailDomain = (env: Pick<Env, "MAIL_FROM">): string | null =>
+  mailFrom(env)?.address.split("@").at(-1)?.toLowerCase() ?? null;
+
 /** The deployment's mail sender, or undefined where nothing is bound. */
 const transportOf = (
   env: Partial<Pick<Env, "EMAIL">>

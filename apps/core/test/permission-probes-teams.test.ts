@@ -3,8 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { mockIdp } from "./idp.ts";
 import {
   askedThroughDoor,
-  clockRunsAhead,
   companyOnce,
+  doorClockRunsAhead,
   memberProbes,
   probeTime,
 } from "./permission-probing.ts";
@@ -31,7 +31,7 @@ watched();
 const setUp = companyOnce(idp);
 
 describe("the permission probes", probeTime, () => {
-  clockRunsAhead();
+  doorClockRunsAhead();
 
   it("show a member nothing they may not read through the Teams door either", async () => {
     const place = await setUp();

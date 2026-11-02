@@ -35,7 +35,6 @@ import {
   dependencySubjectsInForce,
   endDependency,
   waitingDependencies,
-  waitingDependencyCount,
 } from "./requests.ts";
 
 /**
@@ -79,13 +78,6 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await waitingDependencies(this.#env, by)
-    );
-  }
-
-  async waitingCount(): Promise<number> {
-    return await withPerson(
-      this.#check,
-      async (by) => await waitingDependencyCount(this.#env, by)
     );
   }
 

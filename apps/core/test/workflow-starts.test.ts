@@ -8,7 +8,6 @@ import type {
   Authority,
   PermissionRequest,
 } from "@grasp-os/shared/permissions";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -47,6 +46,7 @@ import type {
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Starting an independent workflow (workflow-starts.ts), and the
@@ -1174,20 +1174,16 @@ describe("a trigger starting a workflow", () => {
       role: "user",
     });
     const byReader = await outcome(systemTrigger(reader, workflow.id));
-    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
-    env.QUOTA_LIMITS = {
-      generation: configured.generation + 100,
-      limits: { ...configured.limits, triggerResourcesPerPerson: 1 },
+    env.TEST_QUOTA_LIMITS = {
+      ...configuredLimits,
+      triggerResourcesPerPerson: 1,
     };
     let limited: string;
     try {
       await systemTrigger(ada, workflow.id);
       limited = await outcome(systemTrigger(ada, workflow.id));
     } finally {
-      env.QUOTA_LIMITS = {
-        generation: configured.generation + 101,
-        limits: configured.limits,
-      };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     // A creation racing the workflow's deletion lands nothing.
     const other = await workflowOf(ada);

@@ -47,22 +47,19 @@ const Line = ({
   heading?: boolean;
 }) => {
   const said = useSaidOf(text);
-  const className =
-    "type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500";
   return (
     <div
       aria-live="polite"
       className="flex min-h-16 w-full items-start justify-center"
     >
-      {heading ? (
-        <h1 className={className} key={text}>
+      <div
+        className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
+        key={text}
+      >
+        <PageHeaderTitle render={heading ? undefined : <p />}>
           <SpokenText said={said} text={text} />
-        </h1>
-      ) : (
-        <p className={className} key={text}>
-          <SpokenText said={said} text={text} />
-        </p>
-      )}
+        </PageHeaderTitle>
+      </div>
     </div>
   );
 };
@@ -207,7 +204,8 @@ const Who = ({
     line = also;
   }
   return (
-    <div className="flex w-full flex-col items-center gap-6 text-center">
+    // As wide as the two figures, so each name stands under its own figure, as the prototype has them.
+    <div className="flex w-fit max-w-full flex-col items-center gap-6 text-center">
       <div className="flex justify-center gap-4">
         {interviewers.map((each) => {
           const who = interviewerNames[each];
@@ -230,7 +228,7 @@ const Who = ({
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line text={line} />
-        <fieldset className="grid w-full max-w-md grid-cols-2 gap-4">
+        <fieldset className="grid w-full grid-cols-2 gap-4">
           <legend className="sr-only">{t`Who would you like to talk with?`}</legend>
           {interviewers.map((each) => (
             <Button

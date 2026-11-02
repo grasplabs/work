@@ -14,7 +14,7 @@ import {
   storedEventSchema,
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import { callingRunOf, requireCallAuthority } from "./resource-authority.ts";
 import { runOf } from "./resource-runs.ts";
 
@@ -249,8 +249,7 @@ export const admitRunEvent = async (
   // A run its lineage's age has passed can take no more steps: an event
   // it would never take isn't accepted. An independent run is its
   // lineage's root.
-  const policy = await quotaPolicy(env);
-  if (Date.now() - row.createdAt.getTime() >= policy.limits.workflowAgeMs) {
+  if (Date.now() - row.createdAt.getTime() >= quotaLimits(env).workflowAgeMs) {
     throw workflowResourceErrors.create("workflow.event_refused");
   }
   const id = await eventIdOf(event);

@@ -7,7 +7,10 @@ import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowResourceErrors,
+  workflowRunsListed,
+} from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
@@ -42,6 +45,7 @@ import {
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
   storedEvent,
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
@@ -58,11 +62,12 @@ import { requireNotStaff } from "../sharing.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { runDequeued } from "./admission.ts";
+import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
 import { loadRunIsolate } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
-import { runEngine } from "./engine.ts";
+import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { childEndType } from "./event-envelopes.ts";
 import type { ChildEnd } from "./event-envelopes.ts";
@@ -91,6 +96,7 @@ import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
+import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import { wakingOnSettle } from "./share-wakes.ts";
 
@@ -119,8 +125,8 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   it: the status says nothing of when, and the end's own notification
 //   follows. A terminate asks the engine, and takes the end the engine
 //   confirms in answer, at once, as a cancel of an App run does.
-// - Readers go by the row and the deployment's retention as it is now
-//   (`detailsRemoved`), never by what the engine still holds.
+// - Readers go by the row and the run retention (`detailsRemoved`),
+//   never by what the engine still holds.
 //
 // Threat model, and how each is closed:
 //
@@ -249,6 +255,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
         controlGeneration: sql<number>`0`.as("control_generation"),
         summaryRevision: sql<number>`0`.as("summary_revision"),
+        compensation: sql<null>`NULL`.as("compensation"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -325,7 +332,9 @@ export const settleControl = async (
   env: Env,
   run: RunRow,
   control: Pick<ResourceControlRow, "id" | "kind" | "principalId">,
-  state: "applied" | "superseded"
+  state: "applied" | "superseded",
+  /** What else settling it records, once, with its own event. */
+  also?: AuditEntry
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const entry = runEntry(run, `workflow.run.control_${state}`);
@@ -353,6 +362,10 @@ export const settleControl = async (
       ),
     // Stored only if the update just before it changed the row.
     outboxedEventWhere(db, event, sql`changes() > 0`),
+    // And what else it records, with it, once.
+    ...(also === undefined
+      ? []
+      : [outboxedWhere(db, also, storedEvent(event.id))]),
     db
       .update(workflowResourceRuns)
       .set({
@@ -375,8 +388,9 @@ export const settleControl = async (
  * receipt asked its stop, `superseded` when it ended otherwise first (on
  * its own, or by a builder's terminate before the receipt's stop went
  * out); a pause or resume still admitted, overtaken by the end. A run
- * that hasn't ended settles none. What a cancel asked of the engine was
- * audited as it asked (`applyCancel`).
+ * that hasn't ended settles none. A cancel applied is audited as the
+ * screen's termination now, once, with its receipt: only a stop the engine
+ * took and that ended the run is recorded as one (`applyCancel`).
  */
 const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   if (unended.includes(row.status)) {
@@ -394,12 +408,32 @@ const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   for (const control of admitted) {
     // Applied only when it was cancelled and this receipt's stop was
     // asked: one a builder's terminate, say, ended first is superseded.
+    // A stop core asks never rolls back (engine.ts terminates with
+    // `rollback: false`), so one it took ends the run cancelled; a run
+    // that failed in a compensation was rolled back by something else.
     const applied =
       control.kind === "cancel" &&
       row.status === "cancelled" &&
       control.stopRequestedAt !== null;
+    const entry = runEntry(row, "workflow.run.terminated");
     // oxlint-disable-next-line no-await-in-loop -- one run's, a few
-    await settleControl(env, row, control, applied ? "applied" : "superseded");
+    await settleControl(
+      env,
+      row,
+      control,
+      applied ? "applied" : "superseded",
+      applied
+        ? {
+            ...entry,
+            actor: {
+              type: "app",
+              appId: appIdSchema.parse(control.appId),
+              part: "screen",
+            },
+            detail: { ...entry.detail, onBehalfOf: control.principalId },
+          }
+        : undefined
+    );
   }
 };
 
@@ -543,6 +577,13 @@ const startAbandoned = async (
     }),
     owedTermination(db, row.id, "failed", now),
   ]);
+  // A screen's pause, resume or cancel of it, superseded by the failed end
+  // now, as any end settles them (`settleCancels`): none stays admitted
+  // behind a run that never started until the next repair.
+  const ended = await runOf(env, row.id);
+  if (ended !== undefined) {
+    await settleCancels(env, ended);
+  }
   await tellQueryFollowers(env, row.id);
 };
 
@@ -711,6 +752,8 @@ export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
   /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
   triedOnce?: ResourceHostHooks["triedOnce"];
+  /** The run's settled scopes of items and branches (`ScopeFences`). */
+  fences?: ResourceHostHooks["fences"];
   /** The model calls its actions made (`ActionModelCalls`). */
   modelCalls?: ResourceHostHooks["modelCalls"];
   /** Aborts once the activation running the run is over. */
@@ -809,9 +852,7 @@ const loadedRun = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  // Never an end of the run when the policy can't be read for a moment
-  // (`modelCallLimitOf`): its last read, else the platform's limit.
-  const modelCalls = await modelCallLimitOf(env);
+  const modelCalls = modelCallLimitOf(env);
   const calling = await callingRunOf(env, pin.workflow, runId);
   if (calling === undefined) {
     throw new Error(`Run ${runId} has ended`);
@@ -938,7 +979,7 @@ export const runActivation = async (
   const { run, output, owner, admission } = activation;
   const { runId } = run;
   // The workflow's own step limit only ever lowers the host's.
-  const ceiling = await stepLimitOf(env);
+  const ceiling = stepLimitOf(env);
   const step = countedStep(
     engineStep,
     Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)
@@ -956,6 +997,7 @@ export const runActivation = async (
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
+    ...(memory.fences === undefined ? {} : { fences: memory.fences }),
     ...(memory.modelCalls === undefined
       ? {}
       : { modelCalls: memory.modelCalls }),
@@ -1011,7 +1053,11 @@ export const runActivation = async (
     try {
       return await code.run(host, { input: run.input });
     } catch (error) {
+      host.isolateDone();
       return await afterCpuKill(error, calls);
+    } finally {
+      // Nothing more comes from it (resource-host.ts, `#account`).
+      host.isolateDone();
     }
   });
   waking.open = false;
@@ -1119,7 +1165,7 @@ export const resultOf = async (
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, row.id))
     .get();
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: row.endedAt,
     detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
   });
@@ -1138,7 +1184,7 @@ export const resultOf = async (
   // any: the engine, which may be unreachable, or no longer hold it, isn't
   // asked.
   if (removed) {
-    return { error: { code: row.failureCode, message: removedText(env) } };
+    return { error: { code: row.failureCode, message: removedText } };
   }
   let engine: Pick<WorkflowResourceRun, "output" | "error">;
   try {
@@ -1311,6 +1357,32 @@ const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
 };
 
 /**
+ * What run projection `engine` makes of a run's row: its status, its
+ * failure code (`failureCode`, the engine's), and, while it rolls back,
+ * why (`compensating`, kept as JSON), which its snapshot shows as
+ * compensating. A run whose compensation failed is failed, as that,
+ * however it ended (spec 10.7.3), a cancelled run's included.
+ */
+const projectedOf = (
+  engine: EngineStatus,
+  failureCode: string | null
+): {
+  status: (typeof projected)[keyof typeof projected];
+  failure: string | null;
+  compensating: string | undefined;
+} => {
+  const compensationFailed = engine.rollback === "errored";
+  return {
+    status: compensationFailed ? "failed" : projected[engine.status],
+    failure: compensationFailed ? compensationFailedError.code : failureCode,
+    compensating:
+      engine.status === "rollingBack" && engine.compensation !== undefined
+        ? JSON.stringify(engine.compensation)
+        : undefined,
+  };
+};
+
+/**
  * Makes run `id`'s row say where the engine says it is: a notification no
  * newer than the last the row took changes nothing, and an ended run never
  * changes again. Its end is audited with the change, once. A failed end
@@ -1333,7 +1405,7 @@ export const projectResourceRun = async (
     await afterEnd(env, row);
     return;
   }
-  const status = projected[engine.status];
+  const { status, failure, compensating } = projectedOf(engine, failureCode);
   const ended = !unended.includes(status);
   const action = endActions[status];
   const db = drizzle(env.DB);
@@ -1349,7 +1421,10 @@ export const projectResourceRun = async (
           ? {}
           : { engineSequence: engine.sequence }),
         ...(ended ? { endedAt: new Date(engine.at) } : {}),
-        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
+        ...(status === "failed" && failure !== null
+          ? { failureCode: failure }
+          : {}),
+        ...(compensating === undefined ? {} : { compensation: compensating }),
       })
       .where(
         and(
@@ -1367,7 +1442,7 @@ export const projectResourceRun = async (
       : [
           outboxedIfChanged(
             db,
-            withFailure(runEntry(row, action), status, failureCode)
+            withFailure(runEntry(row, action), status, failure)
           ),
         ]),
     // Ended or paused, it waits in the admission queue for nothing more:
@@ -1398,7 +1473,7 @@ export const projectResourceRun = async (
 };
 
 /** The most runs `listResourceRuns` answers: the newest. */
-const runsListed = 50;
+const runsListed = workflowRunsListed;
 
 /**
  * Workflow `id`'s runs, newest first, the latest {@link runsListed}, for
@@ -1427,17 +1502,26 @@ export const listResourceRuns = async (
     )
     .orderBy(desc(runs.createdAt), desc(runs.id))
     .limit(runsListed);
-  return rows.map((row) => ({
-    id: row.id,
-    workflowId: row.workflowResourceId,
-    version: row.version,
-    manifestHash: row.manifestHash,
-    buildHash: row.buildHash,
-    principal: row.principalId,
-    status: row.status,
-    createdAt: row.createdAt.toISOString(),
-    endedAt: row.endedAt?.toISOString() ?? null,
-  }));
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    rows.flatMap(({ id: run, status }) => (status === "running" ? [run] : []))
+  );
+  return rows.map((row) => {
+    const aiProvider = waits.get(row.id);
+    return {
+      id: row.id,
+      workflowId: row.workflowResourceId,
+      version: row.version,
+      manifestHash: row.manifestHash,
+      buildHash: row.buildHash,
+      principal: row.principalId,
+      status: row.status,
+      ...(aiProvider === undefined ? {} : { aiProvider }),
+      createdAt: row.createdAt.toISOString(),
+      endedAt: row.endedAt?.toISOString() ?? null,
+    };
+  });
 };
 
 /**
@@ -1468,6 +1552,12 @@ export const resourceRunFor = async (
       throw workflowResourceErrors.create("workflow.run_unavailable");
     }
   }
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    row.status === "running" ? [row.id] : []
+  );
+  const aiProvider = waits.get(row.id);
   const run: WorkflowResourceRun = {
     id: row.id,
     workflowId: row.workflowResourceId,
@@ -1476,6 +1566,7 @@ export const resourceRunFor = async (
     buildHash: row.buildHash,
     principal: row.principalId,
     status: row.status,
+    ...(aiProvider === undefined ? {} : { aiProvider }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };
@@ -1569,7 +1660,7 @@ const stopResourceRun = async (
    * its receipt settles (`settleCancels`), however often it is applied.
    */
   audited = true
-): Promise<void> => {
+): Promise<"taken" | "rolling_back"> => {
   if (
     row.status === "starting" &&
     (await cancelStarting(env, actor, row, audited))
@@ -1583,9 +1674,48 @@ const stopResourceRun = async (
         ...errorFields(error),
       });
     }
-    return;
+    return "taken";
   }
-  await runEngine(env).terminate(row.id);
+  // First, in the run's object, the stop's record, as an App run's cancel
+  // is (controls.ts): from then on no attempt of the run holds, so none of
+  // its calls is taken, and should the engine refuse the terminate below,
+  // or this request die, the object terminates the run itself on its next
+  // alarm, seconds on, with no repair to wait for. A run rolling back
+  // isn't cut short (spec 10.7.3): nothing is marked or terminated, so
+  // nothing is audited as terminated.
+  const marked = await markResourceRunStopped(env, row.id, actor);
+  if (marked === "rolling_back") {
+    return "rolling_back";
+  }
+  try {
+    if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+      return "rolling_back";
+    }
+  } catch (error) {
+    // Unmarked (the engine has no journal of it), nothing will stop it:
+    // the caller hears so.
+    if (marked !== "marked") {
+      throw error;
+    }
+    log.error("workflow.resource_run_terminate_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    // Nothing terminated yet: the stop is audited as asked, under whoever
+    // asked, and the termination as it happens, when the object ends the
+    // run and its end is told (`workflow.run.cancelled`). A screen's
+    // cancel is audited as its receipt settles.
+    if (audited) {
+      const db = drizzle(env.DB);
+      await auditedBatch(env, db, [
+        outboxed(db, {
+          ...runEntry(row, "workflow.run.stop_requested"),
+          actor,
+        }),
+      ]);
+    }
+    return "taken";
+  }
   // The engine took the terminate: audited below whatever this lookup
   // does, the row left to the end's notification if it can't be read.
   let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
@@ -1603,22 +1733,45 @@ const stopResourceRun = async (
     // notification can be newer. A run that ended on its own first is
     // left to its end's notification, which carries when it ended: the
     // status doesn't, and taken now its row would say this call's time.
+    // With how its rollback went, if it rolled back: a cancellation whose
+    // compensation failed ends failed (spec 10.7.3), and the late end's
+    // notification can't change an ended row.
     await projectResourceRun(env, row.id, {
       status: live.status,
       at: Date.now(),
+      ...(live.rollback === undefined
+        ? {}
+        : { rollback: live.rollback.status }),
     });
   }
   if (!audited) {
-    return;
+    return "taken";
   }
   const now = await runOf(env, row.id);
-  // Whoever asked, whatever the row took: the engine tells the run's
-  // projection of the termination as it happens, so the row may say
-  // cancelled before the statement above does.
+  // The engine took it: audited under whoever asked, with the status the
+  // row has now. The engine tells the run's projection of the termination
+  // as it happens, so the row may say cancelled before the statement above
+  // does.
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
   ]);
+  return "taken";
+};
+
+/**
+ * Stops run `row` as `stopResourceRun` does, refusing
+ * (`workflow.control_refused`) a run the engine is rolling back: a
+ * builder's stop or an archive's, which aren't left for a repair.
+ */
+const stopOrRefuse = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow
+): Promise<void> => {
+  if ((await stopResourceRun(env, actor, row)) === "rolling_back") {
+    throw workflowErrors.create("workflow.control_refused");
+  }
 };
 
 /**
@@ -1687,7 +1840,7 @@ export const stopRunsStartedBy = async (
         return false;
       }
       try {
-        await stopResourceRun(env, actor, run);
+        await stopOrRefuse(env, actor, run);
         return false;
       } catch (error) {
         log.error("workflow.archive_stop_failed", {
@@ -1766,34 +1919,30 @@ export const applyCancel = async (
 ): Promise<void> => {
   const before = await runOf(env, runId);
   if (before !== undefined && unended.includes(before.status)) {
-    // The stop it asks for audited once, as it is first asked, whichever
-    // request or repair asks it: under the App's screen, naming the person
-    // who asked (`onBehalfOf`). A run that ended on its own first, before
-    // any stop went out, is audited as nothing of the screen's.
-    const db = drizzle(env.DB);
-    const entry = runEntry(before, "workflow.run.terminated");
     const actor: AuditActor = {
       type: "app",
       appId: appIdSchema.parse(receipt.appId),
       part: "screen",
     };
-    await auditedBatch(env, db, [
-      db
-        .update(workflowResourceRunControls)
-        .set({ stopRequestedAt: new Date() })
-        .where(
-          and(
-            eq(workflowResourceRunControls.id, receipt.id),
-            eq(workflowResourceRunControls.state, "admitted"),
-            isNull(workflowResourceRunControls.stopRequestedAt)
-          )
-        ),
-      outboxedIfChanged(db, {
-        ...entry,
-        actor,
-        detail: { ...entry.detail, onBehalfOf: receipt.principalId },
-      }),
-    ]);
+    // Noted as asked before the engine is, so the run's end, which the
+    // engine may tell before this call goes on, finds the receipt asked
+    // and settles it applied (`settleCancels`), audited then, once.
+    const asked = new Date();
+    const db = drizzle(env.DB);
+    await db
+      .update(workflowResourceRunControls)
+      .set({ stopRequestedAt: asked })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, receipt.id),
+          eq(workflowResourceRunControls.state, "admitted"),
+          isNull(workflowResourceRunControls.stopRequestedAt)
+        )
+      );
+    // A run the engine rolls back isn't cut short (spec 10.7.3), though the
+    // cancel was admitted on what the engine said before its rollback
+    // began: nothing is recorded as terminated now, and the run's end
+    // settles the receipt, superseded unless it ended cancelled.
     await stopResourceRun(env, actor, before, false);
   }
   const after = await runOf(env, runId);
@@ -2043,7 +2192,10 @@ export const repairResourceTerminations = async (
  * sending it again (`repairResourceTerminations`), so an instance made
  * before the cancel never keeps its lease or alarm. A run the engine has
  * is the engine's to end: it terminates it, and the row takes the end the
- * engine confirms.
+ * engine confirms. Its stop is marked in its object first
+ * (`stopResourceRun`): its calls are refused from then on, and should the
+ * engine refuse the terminate, the object terminates it within seconds,
+ * so the stop is answered and never lost.
  */
 export const terminateResourceRun = async (
   env: Env,
@@ -2060,6 +2212,6 @@ export const terminateResourceRun = async (
   if (!unended.includes(row.status)) {
     throw workflowResourceErrors.create("workflow.run_ended");
   }
-  await stopResourceRun(env, actorOf(by), row);
+  await stopOrRefuse(env, actorOf(by), row);
   return await resourceRunFor(env, by, workflow.id, row.id);
 };

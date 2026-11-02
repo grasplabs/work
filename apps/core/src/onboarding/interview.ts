@@ -31,8 +31,8 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
-import type { ModelCall, ModelsEnv } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
+import type { ModelCall } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewerText } from "./interviewer-text.ts";
@@ -183,7 +183,7 @@ const gatewayRefusal = /^The model call was refused \((?<code>[a-z_.]+)\)/u;
 
 /** What a gateway refusal tells the page: busy is worth a retry, the rest isn't. */
 const refusalOf = (code: string | undefined): TurnFailedError =>
-  code === "model.budget_busy" || code === "model.rate_limited"
+  code === "model.queued" || code === "model.rate_limited"
     ? new TurnFailedError("Stephen is busy. Try again in a minute.", 429)
     : new TurnFailedError("Stephen could not be reached. Try again.", 502);
 
@@ -226,7 +226,7 @@ const tookOf = (
       };
 
 interface Turn {
-  env: ModelsEnv & Env;
+  env: Env;
   turn: TurnAsked;
   context: TurnContext;
   system: string;
@@ -442,11 +442,17 @@ export const turnStream = async ({
   meter,
   ran,
 }: TurnInput): Promise<Response> => {
-  const settings = gatewaySettings(env);
-  const quick = modelForRole(settings, "quick", { sensitive: true });
-  const careful = modelForRole(settings, "careful", { sensitive: true });
+  const settings = await modelSettings(env);
+  // No provider connected yet: the interview isn't set up, as the person
+  // with the link is told; the log says why (`model.no_provider`).
+  const connected = settings.models.length > 0;
+  const quick = connected ? modelForRole(settings, "quick") : undefined;
+  const careful = connected ? modelForRole(settings, "careful") : undefined;
   if (quick === undefined || careful === undefined) {
-    log.error("interview.no_model", { requestId });
+    log.error("interview.no_model", {
+      requestId,
+      ...(connected ? {} : { code: "model.no_provider" }),
+    });
     return Response.json(
       { error: "The interview is not set up yet.", status: 503 },
       { status: 503, headers: linkHeaders }

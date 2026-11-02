@@ -31,6 +31,8 @@ import { channelCredentialPlaceholder } from "@grasp-os/shared/connect";
 import { log } from "@grasp-os/shared/log";
 import type { Logger } from "chat";
 
+import { throughConnect } from "./through-connect.ts";
+
 /** How far a request's timestamp may be from core's clock. */
 const toleranceSeconds = 5 * 60;
 
@@ -129,9 +131,9 @@ const viaConnect =
 /**
  * Slack's adapter for this client's app, every request it is handed checked
  * by {@link verifiedSlackRequest}. Slack's Web API client sends through
- * axios, which takes the fetch it sends with from each request's config:
- * every request is handed to connect, which sends it on with the bot's
- * token in place of the placeholder, or refuses it. Connect waits out
+ * axios, and every request it makes is handed to connect
+ * ({@link throughConnect}), which sends it on with the bot's token in
+ * place of the placeholder, or refuses it. Connect waits out
  * Slack's rate limits itself, so the client tries nothing again; nor does
  * the adapter stream, which Slack's streaming methods would need.
  */
@@ -147,11 +149,7 @@ export const slackAdapter = (env: Env): SlackAdapter => {
     logger: slackLogger,
     webClientOptions: {
       retryConfig: { retries: 0 },
-      requestInterceptor: (config) => {
-        config.adapter = "fetch";
-        config.env = { ...config.env, fetch: send };
-        return config;
-      },
+      requestInterceptor: (config) => throughConnect(config, send),
     },
   });
 };

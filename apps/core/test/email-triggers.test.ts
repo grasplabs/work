@@ -3,7 +3,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
-import { workflowDetail } from "../src/workflows/overview.ts";
 import { racingDb as racingAppsDb, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -66,45 +65,15 @@ describe("email triggers", () => {
     ]);
   });
 
-  it("show with their workflow, by the address they receive at, whole once the deployment's mail domain is set", async () => {
+  it("show with their workflow, by the part of the address they receive at before the @", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("shown"));
 
     const { triggers } = await builder.api.workflows.get(app, "intake");
 
-    // The deployment's inbound mail domain, set by the admin, makes the
-    // whole address; unset, or not a domain, the local part stands alone.
-    const by = await builder.api.whoami();
-    const detail = async (domain: unknown) =>
-      await workflowDetail(
-        { ...env, INBOUND_MAIL_DOMAIN: domain },
-        by,
-        app,
-        "intake"
-      );
-    const set = await detail("mail.acme.test");
-    const invalid = await detail("Not a domain");
-
-    expect({
-      unset: triggers,
-      set: set.triggers,
-      invalid: invalid.triggers,
-    }).toStrictEqual({
-      unset: [
-        { type: "email", position: 0, localPart: "shown", address: null },
-      ],
-      set: [
-        {
-          type: "email",
-          position: 0,
-          localPart: "shown",
-          address: "shown@mail.acme.test",
-        },
-      ],
-      invalid: [
-        { type: "email", position: 0, localPart: "shown", address: null },
-      ],
-    });
+    expect(triggers).toStrictEqual([
+      { type: "email", position: 0, localPart: "shown" },
+    ]);
   });
 
   it("start nothing for mail sent automatically or from the deployment's own domain, and audit each refusal, so a run's mail can't loop back into runs", async () => {

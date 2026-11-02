@@ -14,7 +14,9 @@ import type {
   Coverage,
   MemoryItem,
   MemoryPack,
+  NetworkPath,
   RecallBudget,
+  RecallNetwork,
 } from "./contract.ts";
 import { toHex } from "./encoding.ts";
 import { exactTermsOf } from "./exact.ts";
@@ -26,6 +28,8 @@ import type { Provenance } from "./knowledge.ts";
 import { log } from "./log.ts";
 import { searchMemories } from "./memories.ts";
 import type { MemoryAudience } from "./memories.ts";
+import { networkOf, networkPolicyVersion } from "./network.ts";
+import type { NetworkCut, NetworkFound } from "./network.ts";
 import {
   recallCacheKey,
   recallCacheOf,
@@ -298,12 +302,16 @@ const sourcesOf = (items: readonly MemoryItem[]): BrainSourceRef[] => {
  * How far the read got: a lane that timed out or failed (`degraded`, which
  * proves nothing missing), a budget cut it (`bounded`), or every lane it
  * asked finished its bounded read (`complete`, never exhaustive). The
- * vector lane is reported as not enabled where the store has none.
+ * vector lane is reported as not enabled where the store has none. A
+ * network route asked for is queried once the full-text lane read, or
+ * omitted for its deadline; each of its cuts is an omission with its
+ * reason, which bounds the read.
  */
 const coverageOf = (
   read: LanesRead,
   truncated: boolean,
-  rerank: RerankOutcome
+  rerank: RerankOutcome,
+  network?: { ran: boolean; cuts: readonly NetworkCut[] }
 ): Coverage => {
   const routes: [Lane, LaneRead][] = [
     ["exact", read.exact],
@@ -318,7 +326,14 @@ const coverageOf = (
   const failed = omitted.some(
     ({ reason }) => reason === "deadline" || reason === "failed"
   );
-  let state: Coverage["state"] = truncated ? "bounded" : "complete";
+  let networkOmitted: { route: string; reason: string }[] = [];
+  if (network !== undefined) {
+    networkOmitted = network.ran
+      ? network.cuts.map((reason) => ({ route: "network", reason }))
+      : [{ route: "network", reason: "deadline" }];
+  }
+  let state: Coverage["state"] =
+    truncated || networkOmitted.length > 0 ? "bounded" : "complete";
   if (failed) {
     state = "degraded";
   }
@@ -330,16 +345,147 @@ const coverageOf = (
       ...routes.flatMap(([route, lane]) =>
         lane.state === "read" ? [route] : []
       ),
+      ...(network?.ran === true ? ["network"] : []),
       ...(rerank === "reranked" ? ["rerank"] : []),
     ],
     omittedRoutes: [
       ...omitted,
+      ...networkOmitted,
       ...(rerank === "reranked" ||
       rerank === "not_asked" ||
       rerank === "unneeded"
         ? []
         : [{ route: "rerank", reason: rerank }]),
     ],
+  };
+};
+
+/**
+ * As many of the network route's items as the budget left after `items`
+ * holds, in the order it reached them: with their paths, the tokens
+ * they take, and whether the budget left any out.
+ */
+const networkPacked = (
+  network: NetworkFound,
+  { maxItems, maxTokens }: ClampedBudget,
+  items: readonly MemoryItem[],
+  tokenCount: number
+): {
+  added: MemoryItem[];
+  paths: NetworkPath[];
+  tokens: number;
+  cut: boolean;
+} => {
+  const added: MemoryItem[] = [];
+  const paths: NetworkPath[] = [];
+  let tokens = 0;
+  for (const { item, path } of network.items) {
+    const cost = tokensOf(item.statement);
+    if (
+      items.length + added.length === maxItems ||
+      tokenCount + tokens + cost > maxTokens
+    ) {
+      return { added, paths, tokens, cut: true };
+    }
+    added.push(item);
+    paths.push(path);
+    tokens += cost;
+  }
+  return { added, paths, tokens, cut: false };
+};
+
+/** The documents `items` cite, each at its version, once. */
+const foundDocuments = (
+  items: readonly MemoryItem[]
+): { documentId: string; version: number }[] => {
+  const found = new Map<string, { documentId: string; version: number }>();
+  for (const { sourceRefs } of items) {
+    for (const ref of sourceRefs) {
+      if (ref.kind === "document") {
+        found.set(`${ref.documentId}@${ref.version}`, {
+          documentId: ref.documentId,
+          version: ref.version,
+        });
+      }
+    }
+  }
+  return [...found.values()];
+};
+
+/**
+ * The network route of a recall whose full-text route `packed` its pack
+ * (network.ts), as far as the budget left after that: the items it adds,
+ * their paths and tokens, what it read, and every cut.
+ */
+interface NetworkRouted {
+  /** Whether the recall asked for the route. */
+  asked: boolean;
+  /** Whether it ran: asked, and the full-text lane read before its deadline. */
+  ran: boolean;
+  added: MemoryItem[];
+  paths: NetworkPath[];
+  tokens: number;
+  cuts: NetworkCut[];
+  provenance: Provenance;
+}
+
+const networkRouted = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  {
+    network,
+    read,
+    within,
+    deadline,
+    limits,
+    packed: { items, tokenCount },
+  }: {
+    network: RecallNetwork | undefined;
+    /** Whether the full-text route read before its deadline. */
+    read: boolean;
+    within: readonly CollectionId[] | undefined;
+    deadline: number;
+    limits: ClampedBudget;
+    packed: { items: readonly MemoryItem[]; tokenCount: number };
+  }
+): Promise<NetworkRouted> => {
+  if (network === undefined || !read) {
+    return {
+      asked: network !== undefined,
+      ran: false,
+      added: [],
+      paths: [],
+      tokens: 0,
+      cuts: [],
+      provenance: noProvenance,
+    };
+  }
+  const hops = network.hops === 1 ? 1 : 2;
+  const found = await networkOf(brain, reader, {
+    hops,
+    found: foundDocuments(items),
+    within,
+    deadline,
+    maxItems: limits.maxItems - items.length,
+  });
+  const { added, paths, tokens, cut } = networkPacked(
+    found,
+    limits,
+    items,
+    tokenCount
+  );
+  const cuts = new Set<NetworkCut>(found.cuts);
+  if (cut) {
+    cuts.add("items");
+  }
+  return {
+    asked: true,
+    ran: true,
+    added,
+    paths,
+    tokens,
+    cuts: [...cuts],
+    provenance: found.provenance,
   };
 };
 
@@ -424,6 +570,36 @@ const memoriesFound = async <C>(
 
 /** The reranking policy, its version added to the pack's policy when it reranked. */
 export const rerankPolicyVersion = "rerank@1";
+
+/**
+ * What a pack says of the routes it read: the retrieval policy, how far
+ * the read got, and the network route's paths when it was asked for.
+ */
+const routesOf = (
+  read: LanesRead,
+  truncated: boolean,
+  rerank: RerankOutcome,
+  routed: NetworkRouted
+): Pick<MemoryPack, "retrievalPolicyVersion" | "coverage" | "network"> => {
+  const policy = [
+    recallPolicyVersion,
+    ...(rerank === "reranked" ? [rerankPolicyVersion] : []),
+    ...(routed.asked ? [networkPolicyVersion] : []),
+  ].join("+");
+  return routed.asked
+    ? {
+        retrievalPolicyVersion: policy,
+        coverage: coverageOf(read, truncated, rerank, {
+          ran: routed.ran,
+          cuts: routed.cuts,
+        }),
+        network: { policyVersion: networkPolicyVersion, paths: routed.paths },
+      }
+    : {
+        retrievalPolicyVersion: policy,
+        coverage: coverageOf(read, truncated, rerank),
+      };
+};
 
 /** Most candidates one rerank reads: the best of the fused ones. */
 const rerankCandidatesMax = 20;
@@ -990,7 +1166,7 @@ export const recallWithSources = async <C>(
   provenance: Provenance;
 }> => {
   try {
-    const { query, filters, budget } = brainErrors.parse(
+    const { query, filters, budget, network } = brainErrors.parse(
       "brain.invalid",
       recallInputSchema,
       input
@@ -1033,15 +1209,20 @@ export const recallWithSources = async <C>(
       collectionIds?.toSorted() ?? null,
       limits,
     ]);
-    const hit = await answeredFromCache(
-      brain,
-      store,
-      reader,
-      readers,
-      query,
-      collectionIds ?? [],
-      { cacheKey, accessRevision, startedAt }
-    );
+    // A recall asking for the network route always reads: the cache keeps
+    // no paths, and checks again only what the lanes read.
+    const hit =
+      network === undefined
+        ? await answeredFromCache(
+            brain,
+            store,
+            reader,
+            readers,
+            query,
+            collectionIds ?? [],
+            { cacheKey, accessRevision, startedAt }
+          )
+        : undefined;
     if (hit !== undefined) {
       return hit;
     }
@@ -1067,21 +1248,39 @@ export const recallWithSources = async <C>(
           limits.deadlineMs - (brain.ports.clock().getTime() - startedAt),
       }
     );
-    const { items, memories, tokenCount } = packed(found, limits);
-    const truncated = items.length < found.length || readFull(read, limit);
+    const packedFound = packed(found, limits);
+    const { memories } = packedFound;
+    // The network route, asked for, from the documents the pack holds:
+    // after the other lanes, within what their deadline and budget left.
+    const routed = await networkRouted(brain, reader, {
+      network,
+      read: read.fulltext.state === "read",
+      within: collectionIds,
+      deadline: startedAt + limits.deadlineMs,
+      limits,
+      packed: packedFound,
+    });
+    const items = [...packedFound.items, ...routed.added];
+    const tokenCount = packedFound.tokenCount + routed.tokens;
+    const truncated =
+      packedFound.items.length < found.length ||
+      readFull(read, limit) ||
+      routed.cuts.length > 0;
     const provenance = joined(
-      lanesProvenance(read),
-      await memoriesRead(brain, reader, memories),
-      collectionIds ?? []
+      joined(
+        lanesProvenance(read),
+        await memoriesRead(brain, reader, memories),
+        collectionIds ?? []
+      ),
+      routed.provenance,
+      []
     );
-    const coverage = coverageOf(read, truncated, outcome);
+    const routes = routesOf(read, truncated, outcome, routed);
+    const { coverage } = routes;
     const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
-      retrievalPolicyVersion:
-        outcome === "reranked"
-          ? `${recallPolicyVersion}+${rerankPolicyVersion}`
-          : recallPolicyVersion,
+      ...routes,
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
@@ -1092,7 +1291,6 @@ export const recallWithSources = async <C>(
         found.length === 0 && coverage.state !== "degraded"
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
-      coverage,
       truncated,
       warnings: [],
       tokenCount,
@@ -1100,7 +1298,9 @@ export const recallWithSources = async <C>(
       indexGeneration,
       createdAt: brain.ports.clock().toISOString(),
     };
-    keepAnswer(cacheKey, pack, read, memories, outcome, brain.ports.clock());
+    if (network === undefined) {
+      keepAnswer(cacheKey, pack, read, memories, outcome, brain.ports.clock());
+    }
     log.info("brain.recall", {
       cache: "miss",
       policy: pack.retrievalPolicyVersion,

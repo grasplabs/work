@@ -185,7 +185,7 @@ test("an admin binds an engine's declared template and revokes it; its builder o
   ).toContainText(unbound);
 });
 
-test("an admin binds an engine's model with a daily cap, and replacing it keeps the cap", async ({
+test("an admin binds an engine's model, with no budget of its own, and it stays bound", async ({
   pageOf,
 }) => {
   const { builder, admin } = peopleIn("resourceBindings");
@@ -194,68 +194,19 @@ test("an admin binds an engine's model with a daily cap, and replacing it keeps 
   const writer = await resourceOn(page, app, "writer");
   await expect(writer).toContainText(unbound);
   const form = writer.getByRole("form", { name: "Bind writer" });
-  const perDay = form.getByLabel("Per day (UTC), in US dollars");
-  const alertAt = form.getByLabel(
-    "Alert admins at, in percent of a day's or month's cap"
-  );
-  // The alert means something only with a day's or a month's cap.
-  await expect(alertAt).toBeDisabled();
+  // A model binding is the model alone: no cap or alert to set.
+  await expect(form.getByLabel(/US dollars|percent/u)).toHaveCount(0);
 
-  // Under a cent is refused before anything is sent, as core would.
-  await perDay.fill("0.001");
-  await form.getByRole("button", { name: "Bind writer" }).click();
-  await expect(form.getByRole("alert")).toHaveText(
-    "Enter an amount in US dollars from $0.01 to $1,000,000,000.00, such as 2.50."
-  );
-  await expect(perDay).toHaveAttribute("aria-invalid", "true");
-  await expect(writer).toContainText(unbound);
-
-  await perDay.fill("5");
-  await alertAt.fill("90");
   await form.getByRole("button", { name: "Bind writer" }).click();
   await expect(writer).toContainText("Bound to");
-  await expect(writer).toContainText("Per day$5.00");
-  await expect(writer).toContainText("Alert at90% of a cap");
-  await expect(writer).not.toContainText("Per month$");
-
-  // The replace form starts on the binding's caps, so replacing it keeps
-  // them unless the admin changes them.
-  await expect(perDay).toHaveValue("5");
-  await expect(alertAt).toHaveValue("90");
-
-  // A refused alert stops being refused once no cap it applies to is left.
-  await alertAt.fill("100");
-  await form
-    .getByRole("button", { name: "Replace the binding of writer" })
-    .click();
-  await expect(form.getByRole("alert")).toHaveText(
-    "Enter a whole percent from 1 to 99."
-  );
-  await perDay.fill("");
-  await expect(alertAt).toBeDisabled();
-  await expect(form.getByRole("alert")).toHaveCount(0);
-
-  // Replaced with a cap per request added: the day's cap and its alert
-  // are saved with it, as a reload shows.
-  await perDay.fill("5");
-  await alertAt.fill("90");
-  await form.getByLabel("Per request, in US dollars").fill("0.5");
-  await form
-    .getByRole("button", { name: "Replace the binding of writer" })
-    .click();
-  await expect(writer).toContainText("Per request$0.50");
+  await expect(
+    form.getByRole("button", { name: "Replace the binding of writer" })
+  ).toBeVisible();
   await page.reload();
   await page.getByRole("tab", { name: "Resources" }).click();
-  const saved = page
-    .getByRole("region", { name: "Resources" })
-    .getByRole("article", { name: "writer" });
-  await expect(saved).toContainText("Per request$0.50");
-  await expect(saved).toContainText("Per day$5.00");
-  await expect(saved).toContainText("Alert at90% of a cap");
-  await expect(saved.getByLabel("Per day (UTC), in US dollars")).toHaveValue(
-    "5"
-  );
   await expect(
-    saved.getByLabel("Alert admins at, in percent of a day's or month's cap")
-  ).toHaveValue("90");
+    page
+      .getByRole("region", { name: "Resources" })
+      .getByRole("article", { name: "writer" })
+  ).toContainText("Bound to");
 });

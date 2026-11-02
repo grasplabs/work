@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { SignInSettings } from "@grasp-os/shared/org-settings";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -162,12 +163,10 @@ describe("Settings › Workspace › Sign-in", () => {
   });
 
   it("says why core refused to say", async () => {
-    const { session } = fakeOrgSettings(
-      new Error("Only an admin of the organization can do this.")
-    );
+    const { session } = fakeOrgSettings(roleErrors.create("role.forbidden"));
     await shown(session);
 
-    expect(text()).toContain("Only an admin of the organization can do this.");
+    expect(text()).toContain("Your role doesn't allow that.");
   });
 
   it("shows nothing to someone who isn't an admin, and doesn't ask core", async () => {

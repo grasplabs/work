@@ -1,14 +1,13 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { setCurrentVersion } from "../src/apps.ts";
-import { fakeGateway, loggedRunStep } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { endLiveRuns, finished, runObject } from "./runs.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
 import {
@@ -23,7 +22,7 @@ import {
 // tested when their version is made current, and run on the engine
 // (Workerflow) by the dispatcher, each in an isolate of its own. Time is
 // moved on where a run sleeps (`woken`); the outside systems faked
-// here are the model provider behind AI Gateway, and a mail provider's MCP
+// here are the model provider behind connect, and a mail provider's MCP
 // server behind the real connect (test/mail-server.ts).
 //
 // A run's audit events are in an outbox by the time the run has ended: the
@@ -41,7 +40,8 @@ const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
-const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, which a binding names. */
+const extractionModel = "mistral/mistral-large-latest";
 
 /**
  * The sample invoice workflow, as an App ships it: it matches the purchase
@@ -150,18 +150,14 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
-    // An admin binds the model its AI step goes through.
-    await bindModel(app, "extractor", extractionModel);
     // The model reads the invoice's total.
-    const gateway = fakeGateway({
+    const provider = await fakeProviderFor([extractionModel], {
       text: JSON.stringify({ total: 800_000, currency: "EUR" }),
       inputTokens: 10,
       outputTokens: 5,
     });
-    const ai: AiBinding = env.AI;
-    const answering = vi
-      .spyOn(ai, "fetch")
-      .mockImplementation(gateway.binding.fetch);
+    // An admin binds the model its AI step goes through.
+    await bindModel(app, "extractor", extractionModel);
     const invoice = {
       number: "INV-7",
       purchaseOrder: "PO-1",
@@ -187,7 +183,6 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       },
       { timeout: 10_000 }
     );
-    answering.mockRestore();
     await confirmedAnswer(reviewer, decision, { approved: true });
     await finished(run.id);
     const logged = await allEvents();
@@ -206,7 +201,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       auditedFor: new Set(
         audited.map(({ detail }) => `${detail.app}/${detail.version}`)
       ),
-      asked: gateway.requests.map(({ body }) => body),
+      asked: provider.requests.map(({ body }) => body),
     }).toMatchObject({
       matched: { kind: "value", value: { amount: 800_000 } },
       status: {
@@ -232,7 +227,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       ],
       auditedFor: new Set([`${app}/1`]),
       // Half the binding's 6,000 tokens, as the step may ask again. The
-      // binding holds the whole bound to what Llama 3.3 can answer, a
+      // binding holds the whole bound to what the model can answer, a
       // quarter of its window, as an action would ask for all of it.
       asked: [{ max_completion_tokens: 3000 }],
     });
@@ -241,15 +236,17 @@ describe("workflow runs", { timeout: 60_000 }, () => {
   it("refuse binding a model that can't give the declared bound, though only an AI step uses it", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, {
-      ...modelRegistration({ extractor: 6001 }),
+      // A token more than a quarter of Mistral Large's 262,144 window.
+      ...modelRegistration({ extractor: 65_537 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
+    await fakeProviderFor([extractionModel]);
     await expect(
       bindModel(app, "extractor", extractionModel)
     ).rejects.toMatchObject({
       code: "resource.model_too_small",
-      details: { maxTokens: 6001, usableTokens: 6000 },
+      details: { maxTokens: 65_537, usableTokens: 65_536 },
     });
   });
 
@@ -482,40 +479,28 @@ describe("workflow runs", { timeout: 60_000 }, () => {
         { extract: { total: 1234, from: "anna@example.com", on: "2026-09-26" } }
       ),
     });
+    await fakeProviderFor([extractionModel]);
     await bindModel(app, "extractor", extractionModel);
     const runWithAnswers = async (...texts: string[]) => {
-      const gateway = fakeGateway(
+      const provider = await fakeProviderFor(
+        [extractionModel],
         ...texts.map((text) => ({ text, inputTokens: 10, outputTokens: 5 }))
       );
-      // The binding the gateway sends through; the provider answers fake.
-      const ai: AiBinding = env.AI;
-      const answering = vi
-        .spyOn(ai, "fetch")
-        .mockImplementation(gateway.binding.fetch);
-      try {
-        const run = await builder.api.workflows.start(app, "reader");
-        await finished(run.id);
-        return {
-          ...(await builder.api.workflows.status(run.id)),
-          // Each request names its run and step in the gateway's log.
-          logged: gateway.requests.map(loggedRunStep),
-          expected: `${run.id}/extract`,
-        };
-      } finally {
-        answering.mockRestore();
-      }
+      const run = await builder.api.workflows.start(app, "reader");
+      await finished(run.id);
+      return {
+        ...(await builder.api.workflows.status(run.id)),
+        asked: provider.requests.length,
+      };
     };
     // The gateway asks once more when an answer doesn't fit.
     const unfit = await runWithAnswers('{"total": "lots"}', '{"total": 12.34}');
     const fit = await runWithAnswers(
       '{"total": 1234, "from": "anna@example.com", "on": "2026-09-26"}'
     );
-    expect({
-      unfit: unfit.logged.map((logged) => logged === unfit.expected),
-      fit: fit.logged.map((logged) => logged === fit.expected),
-    }).toStrictEqual({ unfit: [true, true], fit: [true] });
     expect({ unfit, fit }).toMatchObject({
       unfit: {
+        asked: 2,
         status: "failed",
         error: {
           message:
@@ -523,6 +508,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
         },
       },
       fit: {
+        asked: 1,
         status: "completed",
         output: { total: 1234, from: "anna@example.com", on: "2026-09-26" },
       },

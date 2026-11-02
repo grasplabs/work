@@ -20,12 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
-import {
-  commitKey,
-  limitEvidenceFile,
-  limitEvidenceKey,
-  moduleKey,
-} from "@grasp-os/shared/release";
+import { commitKey, moduleKey } from "@grasp-os/shared/release";
 import {
   compareReleaseIds,
   releaseMonthPrefix,
@@ -33,7 +28,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { limitEvidenceFor } from "./evidence-lib.ts";
 import { builds, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
@@ -73,12 +67,8 @@ const published = `releases/${manifest.releaseId}/manifest.json`;
 
 const HTTP_BAD_REQUEST = 400;
 
-/** What the tests read of a published manifest and its evidence. */
+/** What the tests read of a published manifest. */
 const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
-const storedEvidence = z.object({
-  releaseId: z.string(),
-  limitEvidence: z.array(z.object({ releaseId: z.string() })),
-});
 
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
@@ -215,10 +205,6 @@ describe("publishing a release", () => {
   beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
     writeRelease(dir, manifest, fixture);
-    writeFileSync(
-      path.join(dir, limitEvidenceFile),
-      `${JSON.stringify(limitEvidenceFor(manifest, null))}\n`
-    );
     bucket = emptyBucket();
     const current = bucket;
     server = createServer((request, response) => {
@@ -252,7 +238,7 @@ describe("publishing a release", () => {
       R2_SECRET_ACCESS_KEY: "test-secret",
     });
 
-  it("uploads every blob, then the limit evidence with its SHA-256, then the manifest last", async () => {
+  it("uploads every blob, then the manifest last", async () => {
     await upload();
     const referenced = [
       ...Object.values(manifest.workers).flatMap((worker) => [
@@ -263,54 +249,10 @@ describe("publishing a release", () => {
       ]),
       ...Object.values(manifest.assets).map((asset) => asset.r2Key),
     ];
-    const evidence = limitEvidenceKey(manifest.releaseId);
-    expect(bucket.puts.slice(-2)).toStrictEqual([evidence, published]);
-    expect(bucket.checksums.get(evidence)).toBe(
-      sha256Base64(readFileSync(path.join(dir, limitEvidenceFile)))
-    );
-    expect(bucket.puts.slice(0, -2).toSorted()).toStrictEqual(
+    expect(bucket.puts.at(-1)).toBe(published);
+    expect(bucket.puts.slice(0, -1).toSorted()).toStrictEqual(
       [...new Set(referenced)].toSorted()
     );
-  });
-
-  it("publishes nothing without the release's own limit evidence, or with evidence for a raise it lacks", async () => {
-    const evidenceFile = path.join(dir, limitEvidenceFile);
-    rmSync(evidenceFile);
-    const missing = await outcomeOf(upload());
-    writeFileSync(
-      evidenceFile,
-      JSON.stringify({
-        ...limitEvidenceFor(manifest, null),
-        releaseId: "26.01.999999",
-      })
-    );
-    const another = await outcomeOf(upload());
-    // The release before had fewer workflow steps: a raise, with no evidence.
-    writeFileSync(
-      evidenceFile,
-      JSON.stringify({
-        ...limitEvidenceFor(manifest, null),
-        previousRelease: {
-          releaseId: "25.12.1",
-          platformLimits: { ...info.platformLimits, workflowSteps: 10 },
-        },
-      })
-    );
-    const unevidenced = await outcomeOf(upload());
-
-    expect({
-      missing: missing.includes("has no limit-evidence.json"),
-      another: another.includes("is for 26.01.999999"),
-      unevidenced: unevidenced.includes(
-        "raises workflowSteps to 1000 without capacity and security evidence"
-      ),
-      published: bucket.objects.has(published),
-    }).toStrictEqual({
-      missing: true,
-      another: true,
-      unevidenced: true,
-      published: false,
-    });
   });
 
   it("skips blobs R2 has, and never replaces a published manifest", async () => {
@@ -386,10 +328,6 @@ describe("publishing a release", () => {
       fixture
     );
     writeRelease(built, local, fixture);
-    writeFileSync(
-      path.join(built, limitEvidenceFile),
-      `${JSON.stringify(limitEvidenceFor(local, null))}\n`
-    );
     builtDirs.push(built);
     return built;
   };
@@ -403,11 +341,10 @@ describe("publishing a release", () => {
       R2_SECRET_ACCESS_KEY: "test-secret",
     });
 
-  /** The ids published, oldest first, each with its manifest's and evidence's ids and commit. */
+  /** The ids published, oldest first, each with its manifest's id and commit. */
   const publishedReleases = (): {
     id: string;
     manifestId: unknown;
-    evidenceIds: unknown[];
     commit: unknown;
   }[] =>
     [...bucket.objects.keys()]
@@ -420,18 +357,7 @@ describe("publishing a release", () => {
             bucket.objects.get(`releases/${id}/manifest.json`)?.toString() ?? ""
           )
         );
-        const evidence = storedEvidence.parse(
-          JSON.parse(bucket.objects.get(limitEvidenceKey(id))?.toString() ?? "")
-        );
-        return {
-          id,
-          manifestId: stored.releaseId,
-          evidenceIds: [
-            evidence.releaseId,
-            ...evidence.limitEvidence.map((entry) => entry.releaseId),
-          ],
-          commit: stored.commit,
-        };
+        return { id, manifestId: stored.releaseId, commit: stored.commit };
       });
 
   it("publishes under the month's next id, YY.MM.N, the next commit under the one after", async () => {
@@ -443,13 +369,11 @@ describe("publishing a release", () => {
       {
         id: `${month}1`,
         manifestId: `${month}1`,
-        evidenceIds: [`${month}1`],
         commit: "1".repeat(40),
       },
       {
         id: `${month}2`,
         manifestId: `${month}2`,
-        evidenceIds: [`${month}2`],
         commit: "2".repeat(40),
       },
     ]);
@@ -461,17 +385,17 @@ describe("publishing a release", () => {
   it("takes the next id when another publish claims one between its listing and its write", async () => {
     const month = releaseMonthPrefix(new Date());
     bucket.writtenAfterList.set(
-      limitEvidenceKey(`${month}1`),
+      `releases/${month}1/manifest.json`,
       Buffer.from("another publish's")
     );
     await publish(buildOf("1".repeat(40)));
 
-    expect(bucket.objects.get(limitEvidenceKey(`${month}1`))?.toString()).toBe(
-      "another publish's"
+    expect(
+      bucket.objects.get(`releases/${month}1/manifest.json`)?.toString()
+    ).toBe("another publish's");
+    expect(bucket.objects.get(commitKey("1".repeat(40)))?.toString()).toBe(
+      `${month}2\n`
     );
-    expect(publishedReleases().map(({ id }) => id)).toStrictEqual([
-      `${month}2`,
-    ]);
   });
 
   it("never gives publishes running at once the same id", async () => {
@@ -487,10 +411,7 @@ describe("publishing a release", () => {
         .toSorted((a, b) => a.localeCompare(b))
     ).toStrictEqual(commits);
     expect(
-      releases.every(
-        ({ id, manifestId, evidenceIds }) =>
-          manifestId === id && evidenceIds.every((other) => other === id)
-      )
+      releases.every(({ id, manifestId }) => manifestId === id)
     ).toBeTruthy();
   });
 

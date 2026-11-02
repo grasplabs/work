@@ -15,8 +15,13 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-/** Every client's model spend ceiling until staff set another, in euros a month (GRA-141). */
-export const defaultModelSpendCeiling = 250;
+/**
+ * The release channels (src/rollout/channels.ts): every client follows
+ * one, and each points at one release. Every new release goes to Edge on
+ * its own; staff promote one to Beta or Stable.
+ */
+export const channelIds = ["edge", "beta", "stable"] as const;
+export type Channel = (typeof channelIds)[number];
 
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
@@ -27,15 +32,6 @@ export const releases = sqliteTable("releases", {
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
-  /**
-   * Its limit evidence file, as CI's publish wrote it next to the manifest
-   * (@grasp-os/shared/release `limitEvidenceFileSchema`): JSON, checked on
-   * import against the manifest and R2's SHA-256. Null for a release that
-   * records no platform limits (built before they were).
-   */
-  limitEvidence: text("limit_evidence"),
-  /** That file's sha256, hex; null with it. */
-  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**
@@ -74,6 +70,20 @@ export const releaseImportProgress = sqliteTable("release_import_progress", {
 });
 
 /**
+ * The release each channel points at (src/rollout/channels.ts): the
+ * desired state the reconciler deploys (src/rollout/reconciler.ts). No
+ * row yet: no release promoted to it. How it got there is in the audit
+ * log (`channel.promote`).
+ */
+export const channels = sqliteTable("channels", {
+  id: text({ enum: channelIds }).primaryKey(),
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * A client: one deployment of Grasp OS, placed in a hosting destination
  * (src/hosting/), where its operation provisions and releases it.
  */
@@ -100,6 +110,11 @@ export const clients = sqliteTable(
     rotationLiveAt: timestamp("rotation_live_at"),
     /** The rollout ring it's in: 0 first. */
     ring: integer().notNull().default(1),
+    /**
+     * The release channel it follows (src/rollout/channels.ts): a release
+     * promoted to it is deployed to it, unless it's pinned.
+     */
+    channel: text({ enum: channelIds }).notNull().default("stable"),
     status: text({ enum: ["provisioning", "active", "offboarded"] })
       .notNull()
       .default("provisioning"),
@@ -134,16 +149,6 @@ export const clients = sqliteTable(
      */
     configChangedAt: timestamp("config_changed_at"),
     /**
-     * The most its model calls may cost in a calendar month, in whole
-     * euros (GRA-141): `defaultModelSpendCeiling` unless staff set another
-     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
-     * it to its core's model gateway as its deployment budget, which the
-     * gateway enforces before each provider request.
-     */
-    modelSpendCeiling: integer("model_spend_ceiling")
-      .notNull()
-      .default(defaultModelSpendCeiling),
-    /**
      * Where it runs: Grasp's cloud, or its own premises
      * (src/hosting/organization.ts). Fixed once it is provisioned.
      */
@@ -167,13 +172,6 @@ export const clients = sqliteTable(
      */
     stripeCustomerId: text("stripe_customer_id"),
     /**
-     * The client's proposal in Grasp's Rooms: its room's id, as someone at
-     * Grasp linked it by hand (src/proposal/link.ts), never matched by
-     * name. Only the id is kept; the room and what was signed in it are
-     * read each time (src/proposal/rooms.ts). Null until it is linked.
-     */
-    roomsProjectId: text("rooms_project_id"),
-    /**
      * The client's company in Grasp's Attio: its record's id, as someone at
      * Grasp linked it by hand (src/crm/link.ts), never matched by name or
      * domain. Only the id is kept; the company, its people and its deals
@@ -187,7 +185,12 @@ export const clients = sqliteTable(
   },
   // What a rollout reaches: the active clients of a ring or two
   // (src/rollout/targets.ts).
-  (table) => [index("clients_status_ring_idx").on(table.status, table.ring)]
+  (table) => [
+    index("clients_status_ring_idx").on(table.status, table.ring),
+    // What the reconciler reads: the active clients of a channel
+    // (src/rollout/reconciler.ts).
+    index("clients_status_channel_idx").on(table.status, table.channel),
+  ]
 );
 
 /**
@@ -349,23 +352,30 @@ export const rolloutTargets = sqliteTable(
 );
 
 /**
- * A client's deployment config (sign-in, model gateway), one row
- * per setting. Never a secret: those go straight to the client's Worker.
+ * Each client's last deploy by the reconciler (src/rollout/reconciler.ts),
+ * and its claim while it runs: a deploy starts only by replacing the row
+ * as it was read (its `runId`), in the same batch as the client's runner
+ * claim (src/runners.ts), so two ticks never deploy one client twice.
+ * The lease is the run's own life: a `deploying` row whose run ended
+ * without saying so is settled as failed on the next tick.
  */
-export const settings = sqliteTable(
-  "settings",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    key: text().notNull(),
-    /** JSON. */
-    value: text().notNull(),
-    updatedBy: text("updated_by").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.key] })]
-);
+export const clientDeploys = sqliteTable("client_deploys", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id),
+  /** The release it deploys or deployed: the client's target then. */
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  /** The deploy's run (src/rollout/deploy.ts). */
+  runId: text("run_id").notNull(),
+  status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
+  /** Why it failed: a code, never a message or a response body. */
+  error: text(),
+  startedAt: timestamp("started_at").notNull(),
+  /** When it ended; null while it runs. */
+  endedAt: timestamp("ended_at"),
+});
 
 /**
  * A secret of a client's own that can't be derived, such as its Teams
@@ -449,6 +459,9 @@ export const auditEvents = sqliteTable(
   (table) => [
     index("audit_events_at_idx").on(table.at),
     index("audit_events_client_idx").on(table.clientId, table.at),
+    // A channel's history, and which channels a release was on
+    // (src/rollout/channels.ts).
+    index("audit_events_action_idx").on(table.action, table.target),
   ]
 );
 
@@ -630,20 +643,13 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
- * The platform's own settings that staff choose (src/platform-settings.ts):
- * one row, `id` 1. Which organization is Grasp's own is chosen on
- * Platform, audited; Grasp's own public settings live in wrangler.jsonc
- * per stage, and secrets in the stage's 1Password Environment.
+ * Unused: Ask Grasp calls Grasp's own AI directly, so nothing reads or
+ * writes this table any more. It stays for one release because "Deploy
+ * platform" applies migrations before the new admin is live, and the admin
+ * still running needs it (expand, then contract). A later release drops it.
  */
 export const platformSettings = sqliteTable("platform_settings", {
-  /** Always 1: there is one platform. */
   id: integer().primaryKey(),
-  /**
-   * Grasp's own organization: the client whose core answers Ask Grasp
-   * (src/admin/ask.ts). Null until staff choose one. Not a reference: a
-   * client discarded later leaves it naming one the admin no longer has,
-   * which Ask Grasp says.
-   */
   graspClientId: text("grasp_client_id"),
   updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at").notNull(),

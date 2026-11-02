@@ -33,16 +33,10 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { workspace } from "../src/durable-objects.ts";
-import {
-  gatewayConfig,
-  model,
-  pointAtGateway,
-  setObjectEnv,
-} from "./agent-chat.ts";
-import { answeringGateway } from "./ai-gateway.ts";
+import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
-import { brainBudgetDay, brainBudgetMonth, charged } from "./brain-harness.ts";
+import { brainBudgetMonth, charged } from "./brain-harness.ts";
 import type { BrainModelSetup } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
 import { transcriptOf } from "./brain-stub-model.ts";
@@ -96,6 +90,7 @@ import type {
 import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
+import { answeringProvider } from "./model-provider.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
 import { brokenRules, stephenRuleNames } from "./stephen-rules.ts";
@@ -729,29 +724,25 @@ export interface StephenReport {
 }
 
 /** The run's one model provider, behind every object of the run. */
-const providerOf = (respond: StephenProvider, setup: BrainModelSetup) => {
+const providerOf = async (respond: StephenProvider, setup: BrainModelSetup) => {
   let turn: StephenTurn = { phase: "idle" };
   const answer = respond(() => turn);
-  const gateway = answeringGateway(async (requests) => await answer(requests));
+  const { requests } = await answeringProvider(
+    async (sent) => await answer(sent),
+    { models: [setup.model] }
+  );
   return {
-    gateway: { ...gateway, config: setup.config },
+    sent: { requests },
     setTurn: (next: StephenTurn) => {
       turn = next;
     },
   };
 };
-type Provider = ReturnType<typeof providerOf>;
+type Provider = Awaited<ReturnType<typeof providerOf>>;
 
-/** Points `stub` at the provider, its calls counted in the run's month. */
-const pointAt = async (
-  stub: ReturnType<typeof workspace>,
-  gateway: Provider["gateway"]
-) => {
-  await pointAtGateway(stub, gateway, { config: gateway.config });
-  await setObjectEnv(stub, {
-    MODEL_BUDGET_MONTH: brainBudgetMonth,
-    MODEL_BUDGET_DAY: brainBudgetDay,
-  });
+/** Has `stub`'s calls counted in the run's month. */
+const pointAt = async (stub: ReturnType<typeof workspace>) => {
+  await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
 };
 
 const callDetail = z
@@ -816,14 +807,14 @@ const observeCase = async (
 }> => {
   const person = company.people[item.persona];
   const place = company.places[item.persona];
-  const { gateway, setTurn } = provider;
+  const { sent, setTurn } = provider;
   const { suite } = company;
   const context: StephenContext = {
     clock: company.clock,
     mailbox: company.mailbox,
     suite,
   };
-  await pointAt(place.stub, gateway);
+  await pointAt(place.stub);
   if (breaker?.mistake !== undefined) {
     await makeMistake(company, item.persona, breaker.mistake);
   }
@@ -839,7 +830,7 @@ const observeCase = async (
   }
   const head = await logHead();
   const appBefore = await appSeen(suite);
-  const firstRequest = gateway.requests.length;
+  const firstRequest = sent.requests.length;
   const spentBefore = await charged();
   setTurn({
     phase: "case",
@@ -888,7 +879,7 @@ const observeCase = async (
             where?.type === "chat" && where.chatId === chat.id
         )
         .map(({ action, input }) => ({ action, input: inputOf(input) })),
-      modelRead: modelReadOf(gateway.requests.slice(firstRequest)),
+      modelRead: modelReadOf(sent.requests.slice(firstRequest)),
       cited,
     },
     context,
@@ -911,7 +902,7 @@ export const judgePrompt = (
     "Reply with one line: PASS or FAIL, a colon, and why in one sentence. Don't run code.",
   ].join("\n\n");
 
-/** The judge's verdict on a turn, through the run's own gateway and ledger. */
+/** The judge's verdict on a turn, through the run's own model gateway and ledger. */
 const judgeCase = async (
   company: StephenCompany,
   provider: Provider,
@@ -923,7 +914,7 @@ const judgeCase = async (
   // The judge asks in its own object, the admin's, with no grants at all.
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
-  await pointAt(stub, provider.gateway);
+  await pointAt(stub);
   const chat = await stub.createChat(
     `Judge ${item.id}`,
     company.admin.userId,
@@ -1017,7 +1008,7 @@ export interface StephenRunOptions {
   judge?: boolean;
 }
 
-const testModelSetup: BrainModelSetup = { model, config: gatewayConfig };
+const testModelSetup: BrainModelSetup = { model };
 
 /** Digest of the cases as run: what a comparison of two runs depends on. */
 const casesDigest = async (cases: readonly StephenCase[]): Promise<string> =>
@@ -1047,7 +1038,7 @@ export const runStephenEval = async (
     judge = true,
   }: StephenRunOptions = {}
 ): Promise<StephenReport> => {
-  const provider = providerOf(respond, modelSetup);
+  const provider = await providerOf(respond, modelSetup);
   const byId = new Map(
     stephenCasesOn(company.suite).map((item) => [item.id, item])
   );

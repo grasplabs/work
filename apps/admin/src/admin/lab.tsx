@@ -21,7 +21,8 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Link } from "@tanstack/react-router";
 
-import { Figure, Panel } from "./interview-parts.tsx";
+import { Figure } from "./interview-parts.tsx";
+import { EmptySection, Section } from "./section.tsx";
 import { unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 import { formatList } from "./words.ts";
@@ -129,7 +130,7 @@ const InAll = ({ totals }: { totals: Totals }) => (
 
 /** Each organization's figures, side by side, opening its interviewers. */
 const EveryOrganization = ({ measured }: { measured: readonly Measured[] }) => (
-  <Panel
+  <Section
     description="Each company’s interviews as its own Grasp counts them. A company opens its interviewers."
     title="Every organization"
   >
@@ -200,7 +201,7 @@ const EveryOrganization = ({ measured }: { measured: readonly Measured[] }) => (
         </TableBody>
       </Table>
     </div>
-  </Panel>
+  </Section>
 );
 
 /** Stephen and Claire across every organization, and what isn't read. */
@@ -235,10 +236,10 @@ export const StephenLab = ({
   return (
     <div className="flex flex-col gap-6 text-sm">
       {measured.length === 0 ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-5 py-4">
+        <EmptySection>
           No organization has started its interviews yet, so there is nothing of
           Stephen to measure.
-        </p>
+        </EmptySection>
       ) : (
         <>
           <InAll totals={totalsOf(measured)} />
@@ -246,12 +247,8 @@ export const StephenLab = ({
         </>
       )}
       {notCounted === "" ? null : (
-        <Panel description={notCounted} title="Not counted" />
+        <Section description={notCounted} title="Not counted" />
       )}
-      <Panel
-        description="The benches on practice companies (vp run lab) run on a developer’s machine against the local stack, and keep their runs there. Nothing publishes them where the admin can read them yet, so they aren’t shown here."
-        title="Measured on practice companies"
-      />
     </div>
   );
 };

@@ -1,4 +1,3 @@
-import "./zod-jitless.ts";
 import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
 import { Button } from "@grasp-os/ui/components/button";
@@ -91,38 +90,47 @@ const NoWords = () => (
   </main>
 );
 
-// The language first: every message on the page is looked up in it.
-let worded = true;
-try {
-  await startI18n();
-} catch {
-  worded = false;
-}
+/**
+ * The language first, then the page: every message on it is looked up in
+ * the language. A function, not a top-level `await`: a module that awaits
+ * at its top level keeps the bundler from merging the modules it imports,
+ * and the build split into hundreds of tiny files.
+ */
+const start = async (): Promise<void> => {
+  let worded = true;
+  try {
+    await startI18n();
+  } catch {
+    worded = false;
+  }
 
-// Switching language re-runs the loaders, so what they put into words
-// (such as a source's name) is said in the new one.
-i18n.on("change", () => {
-  void router.invalidate();
-});
+  // Switching language re-runs the loaders, so what they put into words
+  // (such as a source's name) is said in the new one.
+  i18n.on("change", () => {
+    void router.invalidate();
+  });
 
-// What no route's boundary caught, such as a fault in the router itself.
-createRoot(root, {
-  onUncaughtError: (error) => {
-    void reportError("render", error);
-  },
-}).render(
-  <StrictMode>
-    {/* The CSP allows no inline <style>, so Base UI renders none of its
-        own; styles.css carries the rule they held. */}
-    <CSPProvider disableStyleElements>
-      {/* Lingui draws nothing until a language is active. */}
-      {worded ? (
-        <I18nProvider i18n={i18n}>
-          <Routes />
-        </I18nProvider>
-      ) : (
-        <NoWords />
-      )}
-    </CSPProvider>
-  </StrictMode>
-);
+  // What no route's boundary caught, such as a fault in the router itself.
+  createRoot(root, {
+    onUncaughtError: (error) => {
+      void reportError("render", error);
+    },
+  }).render(
+    <StrictMode>
+      {/* The CSP allows no inline <style>, so Base UI renders none of its
+          own; styles.css carries the rule they held. */}
+      <CSPProvider disableStyleElements>
+        {/* Lingui draws nothing until a language is active. */}
+        {worded ? (
+          <I18nProvider i18n={i18n}>
+            <Routes />
+          </I18nProvider>
+        ) : (
+          <NoWords />
+        )}
+      </CSPProvider>
+    </StrictMode>
+  );
+};
+
+void start();

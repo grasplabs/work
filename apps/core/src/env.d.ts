@@ -20,45 +20,7 @@ interface __BaseEnv_Env {
    * Slack's door answers 404.
    */
   SLACK_SIGNING_SECRET?: string;
-  /**
-   * The client's WhatsApp Business number (src/channels/whatsapp.ts): the
-   * Meta app's secret every webhook is signed with, a Worker secret; the
-   * Cloud API's id of the number; and the token Meta's subscription check
-   * must name. Until all three are set, WhatsApp's door answers 404.
-   */
-  WHATSAPP_APP_SECRET?: string;
-  WHATSAPP_PHONE_NUMBER_ID?: string;
-  WHATSAPP_VERIFY_TOKEN?: string;
-  /**
-   * The secret the client's Telegram bot's webhook was registered with, a
-   * Worker secret: Telegram sends it with every update
-   * (src/channels/telegram.ts). Unset, Telegram's door answers 404.
-   */
-  TELEGRAM_WEBHOOK_SECRET?: string;
-  /**
-   * Stephen's own Gmail mailbox, which people email, and the Pub/Sub push
-   * that tells its door of new mail (src/channels/gmail.ts): the push's
-   * audience, the service account it pushes as, its subscription and the
-   * topic the mailbox's watch publishes to. Until the first four are set,
-   * Gmail's door answers 404. The mailbox's token is connect's.
-   */
-  GMAIL_MAILBOX?: string;
-  GMAIL_PUBSUB_AUDIENCE?: string;
-  GMAIL_PUBSUB_SERVICE_ACCOUNT?: string;
-  GMAIL_PUBSUB_SUBSCRIPTION?: string;
-  GMAIL_PUBSUB_TOPIC?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  /** The model gateway (src/models.ts): JSON. */
-  MODEL_GATEWAY?: unknown;
-  /**
-   * The deployment's AI Gateway token, a Worker secret: the
-   * `cf-aig-authorization` an authenticated gateway asks for, which voice
-   * requests carry (src/models.ts). Never logged, never sent to the
-   * browser. Without it they carry the AI binding's placeholder.
-   */
-  AI_GATEWAY_TOKEN?: string;
-  /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
-  MEMORY_LIMITS?: unknown;
   /**
    * Lower limits on an App's npm packages than the defaults
    * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
@@ -70,22 +32,8 @@ interface __BaseEnv_Env {
    * deploys.
    */
   PLATFORM_CHANGE?: unknown;
-  /** Days the audit log keeps events before archiving (src/audit-log.ts, `retainAuditLog`). */
-  AUDIT_RETENTION_DAYS?: unknown;
-  /** Days archived audit events are kept before they're purged (src/audit-log.ts). */
-  AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
-  /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
-  RUN_RETENTION_DAYS?: unknown;
-  /** The domain the deployment receives mail at (src/workflows/overview.ts). */
-  INBOUND_MAIL_DOMAIN?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
-  /**
-   * The limits the operator lowered, with the policy's generation
-   * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
-   * src/workflows/quotas.ts).
-   */
-  QUOTA_LIMITS?: unknown;
   /**
    * `cloudflare` where core runs on Cloudflare's runtime, which enforces
    * Code Mode's CPU limit; anything else, unset included, is taken as a
@@ -135,15 +83,32 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_BUILD_READ_MS?: string;
   /**
+   * Tests only: a random delay of up to this many ms where a JSON
+   * workflow's host does I/O of its own before a step reaches the engine
+   * (src/workflows/host-latency.ts). Honoured only with
+   * `SANDBOX_IN_PROCESS` set to `unbounded`.
+   */
+  WORKFLOW_HOST_LATENCY_MS?: string;
+  /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).
    */
   WORKFLOW_OFF_WAIT_MS?: string;
   /**
+   * Tests only: lower quota limits than the platform's, so a test reaches
+   * one cheaply (src/workflows/quotas.ts, `quotaLimits`): JSON, partial.
+   */
+  TEST_QUOTA_LIMITS?: unknown;
+  /**
    * Tests only: a shorter deadline for a run waiting on an unknown outcome
    * its person hasn't resolved (src/workflows/host.ts).
    */
   WORKFLOW_UNKNOWN_HOLD_MS?: string;
+  /**
+   * Tests only: a shorter hold for a run waiting for a working AI provider
+   * key (src/workflows/host.ts).
+   */
+  WORKFLOW_AI_KEY_HOLD_MS?: string;
   /**
    * Tests only: a shorter budget for the time one activation of a run
    * spends outside its steps (src/workflows/between-steps.ts).
@@ -155,15 +120,10 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_RETRY_DELAY_MS?: string;
   /**
-   * Tests only: the UTC month model budgets count in, such as `2031-01`
-   * (src/model-budgets.ts).
+   * Tests only: the UTC month model spend counts in, such as `2031-01`
+   * (src/model-spend.ts).
    */
   MODEL_BUDGET_MONTH?: string;
-  /**
-   * Tests only: the UTC day a model binding's daily cap counts in, such as
-   * `2031-01-02` (src/model-budgets.ts).
-   */
-  MODEL_BUDGET_DAY?: string;
   /**
    * Tests only: fewer connector events one clock run delivers
    * (src/workflows/connector-events.ts).
@@ -195,12 +155,12 @@ interface __BaseEnv_Env {
   DEFINITION_EXPORT_MAX_BYTES?: string;
   /**
    * Tests only: lower bounds on an App's statistics points, `perCall/
-   * perMinute` (src/app.ts, `claimStatistic`).
+   * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_POINT_LIMITS?: string;
   /**
    * Tests only: lower bounds on an App's statistics reads, `perCall/
-   * perMinute` (src/app.ts, `claimStatistic`).
+   * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_READ_LIMITS?: string;
   /** The router secret before the current one, while rotating (src/router-secret.ts). */

@@ -17,6 +17,10 @@ const idp = mockIdp();
 
 const hour = 60 * 60 * 1000;
 
+/** Today's midnight, UTC, in milliseconds: the organization's day here. */
+const startOfToday = (): number =>
+  Math.floor(Date.now() / (24 * hour)) * 24 * hour;
+
 interface SeededRun {
   workflow: string;
   status: "running" | "completed" | "failed";
@@ -105,35 +109,37 @@ describe("today's runs", () => {
     await env.DB.prepare(
       "UPDATE organizations SET time_zone = 'UTC' WHERE id = 'organization'"
     ).run();
-    const midnight = Math.floor(Date.now() / (24 * hour)) * 24 * hour;
-    const now = Date.now();
-    const soon = (minutes: number) =>
-      Math.max(midnight, now - minutes * 60_000);
+    // Each run at its own moment of today, counted from its midnight, so
+    // the day holds them in this order whatever time it is: never pressed
+    // together at midnight, nor on yesterday. Today's read takes the runs
+    // started since its midnight, whether or not that moment has come.
+    const midnight = startOfToday();
+    const minutesIn = (minutes: number) => midnight + minutes * 60_000;
     const app = await appOf(owner);
     const hidden = await appOf(other);
 
     const alone = await seedRun(app.id, {
       workflow: "approve",
       status: "completed",
-      at: soon(50),
+      at: minutesIn(10),
     });
     const askedOwner = await seedRun(app.id, {
       workflow: "approve",
       status: "running",
-      at: soon(40),
+      at: minutesIn(20),
       asks: { deciders: `person:${owner.userId}`, open: true },
       root: alone.id,
     });
     const askedAdmins = await seedRun(app.id, {
       workflow: "approve",
       status: "running",
-      at: soon(30),
+      at: minutesIn(30),
       asks: { deciders: "role:admin", open: true },
     });
     const answered = await seedRun(app.id, {
       workflow: "approve",
       status: "completed",
-      at: soon(20),
+      at: minutesIn(40),
       asks: { deciders: "role:admin", open: false },
       // From a run the owner may not see.
       root: `run-${unique()}`,
@@ -148,17 +154,19 @@ describe("today's runs", () => {
     await seedRun(hidden.id, {
       workflow: "approve",
       status: "completed",
-      at: soon(10),
+      at: minutesIn(50),
     });
 
     const today = await owner.api.workflows.today();
     expect({
       from: today.from,
       timeZone: today.timeZone,
+      cutOff: today.cutOff,
       lanes: lanesOf(today),
     }).toStrictEqual({
       from: new Date(midnight).toISOString(),
       timeZone: "UTC",
+      cutOff: 0,
       lanes: [
         {
           lane: app.id,
@@ -176,7 +184,7 @@ describe("today's runs", () => {
               waits: {
                 decision: askedOwner.decision,
                 on: { kind: "you" },
-                since: new Date(soon(40) + 500).toISOString(),
+                since: new Date(minutesIn(20) + 500).toISOString(),
                 asks: "Approve the invoice?",
               },
               waitsOnOthers: false,
@@ -227,8 +235,62 @@ describe("today's runs", () => {
     ).toStrictEqual({
       decision: askedAdmins.decision,
       on: { kind: "role", role: "admin" },
-      since: new Date(soon(30) + 500).toISOString(),
+      since: new Date(minutesIn(30) + 500).toISOString(),
       asks: "Approve the invoice?",
+    });
+  });
+
+  it("keeps the newest runs of a busy day, and every run waiting on the reader however early, and counts the rest apart", async () => {
+    const owner = await signedInApi(idp, "builder");
+    await env.DB.prepare(
+      "UPDATE organizations SET time_zone = 'UTC' WHERE id = 'organization'"
+    ).run();
+    const app = await appOf(owner);
+    // A millisecond apart from a minute past today's midnight, never two
+    // at once, whatever time it is: a run asking the owner first, then
+    // more runs than one read takes, then another asking the owner.
+    const first = startOfToday() + 60_000;
+    const asksFirst = await seedRun(app.id, {
+      workflow: "approve",
+      status: "running",
+      at: first,
+      asks: { deciders: `person:${owner.userId}`, open: true },
+    });
+    const earlier = 1001;
+    const runs = Array.from({ length: earlier }, (_, index) =>
+      env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, root_run_id) VALUES (?, ?, 'approve', 1, NULL, 'completed', ?, ?, NULL)"
+      ).bind(`run-${unique()}`, app.id, first + 1 + index, first + 2 + index)
+    );
+    await env.DB.batch(runs);
+    const asksLast = await seedRun(app.id, {
+      workflow: "approve",
+      status: "running",
+      at: first + 1 + earlier,
+      asks: { deciders: `person:${owner.userId}`, open: true },
+    });
+
+    const today = await owner.api.workflows.today();
+    const shown = today.lanes.flatMap(({ runs: laneRuns }) => laneRuns);
+    const waitsOf = (id: string) =>
+      shown.find((run) => run.id === id)?.waits?.on;
+    expect({
+      shown: shown.length,
+      cutOff: today.cutOff,
+      oldest: shown.at(0)?.id,
+      newest: shown.at(-1)?.id,
+      waitsFirst: waitsOf(asksFirst.id),
+      waitsLast: waitsOf(asksLast.id),
+    }).toStrictEqual({
+      // The newest 1,000, and the early wait beside them.
+      shown: 1001,
+      // The two earliest of the others, which the owner may see: not
+      // counted as unseen.
+      cutOff: 2,
+      oldest: asksFirst.id,
+      newest: asksLast.id,
+      waitsFirst: { kind: "you" },
+      waitsLast: { kind: "you" },
     });
   });
 });

@@ -15,9 +15,11 @@ import {
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
 import {
+  PromptInputAttachmentsContext,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -28,6 +30,9 @@ import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
+import { AttachFiles, FileCards } from "./chat-files.tsx";
+import type { CardFile } from "./chat-files.tsx";
 import { isEffort } from "./model-choice.ts";
 
 // Where a question is written, in the prototype's look
@@ -38,9 +43,11 @@ import { isEffort } from "./model-choice.ts";
 // providers are set here. One control picks the model and, for a model
 // that thinks, how hard (grasplabs/prototype `model-picker.tsx`). It is
 // laid out on the kit's prompt input parts, the prototype's AI Elements
-// prompt input; the prototype's attachments, screenshot and dictation
-// aren't here: core takes no files with a question, and dictation waits
-// on a decision about where its audio goes.
+// prompt input. Files are attached with the button beside the model, or
+// by pasting them, and shown as cards over the text until the question
+// carries them (chat-files.tsx); the compact box takes none. The
+// prototype's screenshot and dictation aren't here: dictation waits on a
+// decision about where its audio goes.
 
 /** How a model is named in the box: the last part of its ID. */
 
@@ -228,7 +235,7 @@ const SendOrStop = ({
   );
 };
 
-/** The model a question names, where there are models to pick from. */
+/** The model a question names, where there are models to pick from, and the button that attaches files. */
 const ModelChoice = ({
   models,
   model,
@@ -236,6 +243,7 @@ const ModelChoice = ({
   efforts,
   effort,
   onEffort,
+  attach,
 }: {
   models: readonly string[];
   model: string | undefined;
@@ -243,8 +251,10 @@ const ModelChoice = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
+  attach: ReactNode;
 }) => (
   <PromptInputTools>
+    {attach}
     {models.length === 0 ||
     model === undefined ||
     onModel === undefined ? null : (
@@ -325,10 +335,36 @@ const QuestionField = ({
 };
 
 /** Where nobody picks a model. */
-const noModels: readonly string[] = [];
+export const noModels: readonly string[] = [];
+
+/**
+ * Whether a question has no model it may name (`model` empty): the
+ * organization has no AI provider to call yet, or none of its models is
+ * chosen. Nothing is sent then.
+ */
+export const lacksModel = (model: string | undefined): boolean => model === "";
+
+/**
+ * Where a question names a model (`model` given) but there are none to
+ * name: the way to connect an AI provider, under the box to ask in or the
+ * questions asked in its place.
+ */
+export const NoModelNotice = ({
+  model,
+  models,
+}: {
+  model: string | undefined;
+  models: readonly string[];
+}) =>
+  model === undefined || models.length > 0 ? null : (
+    <ConnectAiProvider size="xs" />
+  );
 
 /** Where the model doesn't think, or nobody picks how hard. */
 const noLevels: readonly ModelEffort[] = [];
+
+/** Where no file waits for the question. */
+const noFiles: readonly CardFile[] = [];
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
@@ -352,6 +388,9 @@ export const Composer = ({
   children,
   maxLength,
   disabled = false,
+  files = noFiles,
+  onAttach,
+  onRemoveFile,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -395,11 +434,21 @@ export const Composer = ({
   maxLength?: number;
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
+  /** The files the question will carry, each shown as a card. */
+  files?: readonly CardFile[];
+  /** Adds files to the question; without it, the box takes none. */
+  onAttach?: (files: readonly File[]) => void;
+  onRemoveFile?: (id: string) => void;
 }) => {
-  const { t } = useLingui();
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
-  const canSend = !running && !busy && !disabled && !empty && model !== "";
+  const canSend =
+    !running && !busy && !disabled && !empty && !lacksModel(model);
+  // Pasting files adds them, and Backspace in an empty box takes the last off.
+  const attachments =
+    onAttach === undefined || onRemoveFile === undefined
+      ? undefined
+      : { files, add: onAttach, remove: onRemoveFile };
   return (
     <form
       className="flex flex-col gap-1.5"
@@ -437,19 +486,38 @@ export const Composer = ({
         </InputGroup>
       ) : (
         <InputGroup size="prompt">
-          <PromptInputBody>
-            <QuestionField
-              compact={compact}
-              describedBy={undefined}
-              label={label}
-              maxLength={maxLength}
-              onText={onText}
-              placeholder={placeholder}
-              text={text}
-            />
-          </PromptInputBody>
+          {files.length === 0 ? null : (
+            <PromptInputHeader>
+              {/* Not removable while the question is on its way with them. */}
+              <FileCards
+                files={files}
+                onRemove={busy ? undefined : onRemoveFile}
+              />
+            </PromptInputHeader>
+          )}
+          <PromptInputAttachmentsContext value={attachments}>
+            <PromptInputBody>
+              <QuestionField
+                compact={compact}
+                describedBy={undefined}
+                label={label}
+                maxLength={maxLength}
+                onText={onText}
+                placeholder={placeholder}
+                text={text}
+              />
+            </PromptInputBody>
+          </PromptInputAttachmentsContext>
           <PromptInputFooter>
             <ModelChoice
+              attach={
+                onAttach === undefined ? null : (
+                  <AttachFiles
+                    disabled={busy || disabled}
+                    onAttach={onAttach}
+                  />
+                )
+              }
               effort={effort}
               efforts={efforts}
               model={model}
@@ -467,11 +535,7 @@ export const Composer = ({
           </PromptInputFooter>
         </InputGroup>
       )}
-      {compact || model === undefined || models.length > 0 ? null : (
-        <p className="text-muted-foreground px-1 text-xs">
-          {t`No model is set up for this deployment yet.`}
-        </p>
-      )}
+      {compact ? null : <NoModelNotice model={model} models={models} />}
       <ErrorText>{failure}</ErrorText>
     </form>
   );

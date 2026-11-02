@@ -56,6 +56,7 @@ import type {
 } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
+import { runFileErrors } from "@grasp-os/shared/run-files";
 import { statisticMaxGroups } from "@grasp-os/shared/statistics";
 import {
   readRequestSchema,
@@ -277,13 +278,6 @@ export interface Invocation {
    * it read, which a live query watches (query-subscriptions.ts).
    */
   readonly observeReads?: (readSet: Record<string, number>) => void;
-  /**
-   * Told the fence of the receipt the call's mutation claimed (its own
-   * attempt's, `StoreHost.claim`), before its handler runs: a screen's
-   * recovery index ties core's failure answer to it
-   * (screen-submissions.ts). The top-level call's only.
-   */
-  readonly observeClaim?: (fence: number) => void;
   /**
    * How core starts the workflows the App binds, for this call; none
    * started without it. A workflow run's call (app-functions.ts,
@@ -785,10 +779,9 @@ const checkedProgress = (
 /**
  * The contract ID a mutation's receipt is scoped by: its path and a hash
  * of its argument and return descriptors, so a retry across an upgrade
- * that kept them gets the outcome it had. What screen-submissions.ts
- * looks a receipt up by, too.
+ * that kept them gets the outcome it had.
  */
-export const operationContractId = async (
+const operationContractId = async (
   operation: Pick<OperationManifest, "path" | "args" | "returns">
 ): Promise<string> => {
   const hash = await sha256Hex(
@@ -2135,7 +2128,8 @@ const workflowStart = (
  * workflow or its binding unavailable to the App, however (no binding,
  * no grant, a person who can't use the App now, a version gone) as
  * `resource.unavailable`, never saying which; input the bound version
- * doesn't take as `resource.invalid_args`; the person's live runs at
+ * doesn't take, or a file in it the start can't hand its run, as
+ * `resource.invalid_args`; the person's live runs at
  * their limit as the retryable `resource.budget_busy`; anything else
  * `internal.unexpected`, its cause logged.
  */
@@ -2158,6 +2152,15 @@ const startFailure = (error: unknown, requestId: string): Error => {
   }
   if (code === "workflow.start_conflict") {
     return hostError(operationErrors.create("resource.idempotency_conflict"));
+  }
+  // A file of the input it can't hand its run (GRA-976): one the person
+  // can't read now, or past a run's limits. Never which, nor whether the
+  // file exists.
+  if (
+    fileErrors.codeOf(error) !== undefined ||
+    runFileErrors.codeOf(error) !== undefined
+  ) {
+    return hostError(operationErrors.create("resource.invalid_args"));
   }
   if (code !== undefined) {
     return hostError(operationErrors.create("resource.unavailable"));
@@ -3184,9 +3187,6 @@ const runMutation = async (
   );
   if ("outcome" in claimed) {
     return claimed.outcome.result;
-  }
-  if (run.depth === 0) {
-    invocation.observeClaim?.(claimed.held.fence);
   }
   if (run.depth === 0) {
     await run.filesAdmitted?.();

@@ -47,9 +47,7 @@ import { workflowRoleSql } from "../workflow-roles.ts";
 // All in one statement, read as the call is made (`requireCallAuthority`),
 // so revoking any of them stops the next call of a run already running;
 // the call is refused with `workflow.call_denied`, and its run fails with
-// it, while the start that was admitted stands. An App's export called by
-// a run asks it again before each stub call the App's code makes in that
-// call (`requireRunCallAllowed`, app-bindings.ts).
+// it, while the start that was admitted stands.
 
 /** A catalog binding as a start froze it: its declaration, approval and target. */
 const catalogBindingSchema = z.strictObject({
@@ -185,11 +183,18 @@ export const runAuthority = (run: CallingRun): Authority => ({
   mode: "workflow",
 });
 
-/** Where a run's calls work: the run itself. */
-export const runContext = (run: CallingRun): WorkContext => ({
+/**
+ * Where a run's calls work: the run itself; for a write that attaches
+ * files, with the files use they come from (`filesFrom`, GRA-887).
+ */
+export const runContext = (
+  run: CallingRun,
+  filesFrom?: string
+): WorkContext => ({
   type: "workflowRun",
   workflowId: workflowResourceIdSchema.parse(run.workflowId),
   runId: runIdSchema.parse(run.runId),
+  ...(filesFrom === undefined ? {} : { filesFrom }),
 });
 
 /**
@@ -410,22 +415,4 @@ export const heldRunOf = async (
   return row === undefined || row.detailsRemovedAt !== null
     ? undefined
     : callingRunFrom(runId, row);
-};
-
-/**
- * What an App's export, called by a run, asks again before each stub call
- * its code makes in that call (app-bindings.ts): that the run's call
- * through `alias` is still allowed (`requireCallAuthority`), the run still
- * going. `workflow.call_denied` otherwise.
- */
-export const requireRunCallAllowed = async (
-  env: Env,
-  admitted: { workflow: string; run: string; alias: string }
-): Promise<void> => {
-  const run = await callingRunOf(env, admitted.workflow, admitted.run);
-  const binding = run?.bindings.get(admitted.alias);
-  if (run === undefined || binding === undefined) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  await requireCallAuthority(env, run, binding);
 };

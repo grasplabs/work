@@ -63,7 +63,7 @@ const notesApp = async (
  * machine takes longer than the default 5 seconds.
  */
 const openNotes = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
@@ -539,7 +539,7 @@ test("a screen's frame speaks the page's language", async ({ pageOf }) => {
   const { builder } = peopleIn("notesLanguage");
   const app = await notesApp(builder);
   const page = await pageOf(builder, { locale: "de-DE" });
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator("iframe");
   await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
@@ -634,7 +634,7 @@ test("a screen can't download a file nobody clicked for", async ({
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, unaskedDownloadFiles());
   const page = await pageOf(builder);
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   // Nothing touches the page while the screen waits to download: Playwright
   // runs its checks with a user gesture, which would count as a click.
@@ -652,7 +652,7 @@ test("a screen can't download a file nobody clicked for", async ({
 
 /** Opens the file view screen of `app`, its heading shown. */
 const openFiles = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible({
     timeout: 20_000,
@@ -836,7 +836,7 @@ const laterOpenWaitMs = 9000;
 
 /** Opens the links screen of `app`, its heading shown. */
 const openLinks = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Links" })).toBeVisible({
     timeout: 20_000,

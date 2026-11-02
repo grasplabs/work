@@ -1,0 +1,1 @@
+ALTER TABLE `documents` ADD `check_mark` integer;

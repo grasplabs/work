@@ -14,9 +14,8 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { GraspOrganization } from "../../admin/grasp-organization.tsx";
+import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
-import { Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
 import {
@@ -42,10 +41,10 @@ import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
 import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
+import { Section } from "../../admin/section.tsx";
 import { formatDate, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
-import { fetchPlatformSettings } from "../../platform-settings.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
 import { approveRolloutFn } from "../../rollout/functions.ts";
 import type { RolloutView } from "../../rollout/queries.ts";
@@ -130,12 +129,12 @@ const GoingOut = ({
 }) => {
   if (rollout === null) {
     return (
-      <Panel
+      <Section
         description="No release has been rolled out yet."
         title="Going out now"
       >
         {null}
-      </Panel>
+      </Section>
     );
   }
   const rings = ringsOf(rollout, rollout.targets);
@@ -146,11 +145,11 @@ const GoingOut = ({
   // A paused run takes no approval until staff resume it (its own page).
   const approvable = next !== null && rollout.run !== "paused";
   return (
-    <Panel
+    <Section
       action={
         <div className="flex flex-none items-start gap-2">
           <Link
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
+            className={buttonVariants({ size: "sm", variant: "ghost" })}
             params={{ rolloutId: rollout.id }}
             to="/platform/rollouts/$rolloutId"
           >
@@ -208,7 +207,7 @@ const GoingOut = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 };
 
@@ -227,7 +226,7 @@ const WhoRunsWhat = ({
     ({ clientIds }) => clientIds.length > 0
   );
   return (
-    <Panel
+    <Section
       description={`${whole(active)} ${active === 1 ? "company runs its" : "companies run their"} own Grasp. The newest release first.`}
       title="Who runs what"
     >
@@ -265,7 +264,7 @@ const WhoRunsWhat = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 };
 
@@ -344,7 +343,7 @@ const EveryCompany = ({
 }) => {
   const read = live === null || live === "failed" ? {} : live;
   return (
-    <Panel description={everyCompanyLine(live)} title="Every company">
+    <Section description={everyCompanyLine(live)} title="Every company">
       <div className="@container border-t">
         <Table className="table-fixed">
           <TableHeader>
@@ -375,7 +374,7 @@ const EveryCompany = ({
           </TableBody>
         </Table>
       </div>
-    </Panel>
+    </Section>
   );
 };
 
@@ -388,7 +387,7 @@ const DoneHere = ({
   names: ReadonlyMap<string, string>;
 }) =>
   events.length === 0 ? null : (
-    <Panel
+    <Section
       description="What someone at Grasp did, as the admin keeps it."
       title="Done here"
     >
@@ -407,7 +406,7 @@ const DoneHere = ({
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 
 /** The live figures of every active company, read once the page shows. */
@@ -428,7 +427,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * ring is the one thing done here.
  */
 const PlatformPage = () => {
-  const { rows, platform, readiness, settings } = Route.useLoaderData();
+  const { rows, platform, readiness } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -448,14 +447,14 @@ const PlatformPage = () => {
     <AdminPage
       action={
         <Link
-          className={buttonVariants({ size: "sm" })}
+          className={buttonVariants()}
           hash={startRolloutId}
           to="/platform/rollouts"
         >
           Start a rollout
         </Link>
       }
-      description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
+      description="Every company runs its own Grasp, in the EU, apart from every other company’s. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
       {/* The panels' type, as the prototype's sections set it. */}
@@ -465,7 +464,6 @@ const PlatformPage = () => {
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
         <EveryCompany live={live} releases={platform.releases} rows={rows} />
-        <GraspOrganization settings={settings} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
@@ -475,13 +473,13 @@ const PlatformPage = () => {
 /** Every company's own deployment, and the rollout going out. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform, readiness, settings] = await Promise.all([
+    const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
-      fetchPlatformSettings(),
     ]);
-    return { rows, platform, readiness, settings };
+    return { rows, platform, readiness };
   },
   component: PlatformPage,
+  pendingComponent: PageLoading,
 });

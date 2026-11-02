@@ -34,7 +34,7 @@ import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../../core-connection.ts";
 import { ErrorText } from "../../error-text.tsx";
-import { formatDay, formatMonth, formatNumber } from "../../format.ts";
+import { formatIsoDayMonth, formatMonth, formatNumber } from "../../format.ts";
 import { LoadingLines } from "../../frame/page-states.tsx";
 import { useCore } from "../../use-core.ts";
 import { NeedActions, NeedPart, useAskGrasp } from "./request-needs.tsx";
@@ -72,30 +72,63 @@ type Narrowed =
   | { state: "ready"; page: RequestsPage }
   | { state: "failed"; reason: string };
 
-/** What a panel narrows the report to: a filter's name, and what it is narrowed to. */
-type Narrowing = ["team" | "topic" | "person" | "question", string];
+/** What a panel narrows the report to. */
+interface Narrowing {
+  place: string | null;
+  team: string | null;
+  topic: string | null;
+  person: string | null;
+  question: string | null;
+}
 
-const narrowingOf = (subject: RequestSubject): Narrowing => {
+/** What one subject narrows to. */
+const narrowingOf = (subject: RequestSubject): Partial<Narrowing> => {
   if (subject.kind !== "need") {
-    return [subject.kind, subject.id];
+    return { [subject.kind]: subject.id };
   }
   const { need } = subject;
   return need.teamId === null
-    ? ["question", need.question ?? ""]
-    : ["team", need.teamId];
+    ? { question: need.question ?? "" }
+    : { team: need.teamId };
+};
+
+/**
+ * What the panel on top of `trail` narrows to: the page's place and team,
+ * then what each panel opened on the way to it narrowed to, so it explains
+ * the row that was opened. Needs you follows no filter of the page, so a
+ * trail from it doesn't either; and a person's panel is never narrowed to
+ * what they asked.
+ */
+const narrowingFor = (
+  trail: readonly RequestSubject[],
+  page: Pick<Narrowing, "place" | "team">
+): Narrowing => {
+  const fromNeeds = trail[0]?.kind === "need";
+  const narrowing: Narrowing = {
+    place: fromNeeds ? null : page.place,
+    team: fromNeeds ? null : page.team,
+    topic: null,
+    person: null,
+    question: null,
+  };
+  for (const subject of trail) {
+    Object.assign(narrowing, narrowingOf(subject));
+  }
+  return narrowing.person === null
+    ? narrowing
+    : { ...narrowing, topic: null, question: null };
 };
 
 /** Reads the report narrowed so. Outside components, as the React Compiler can't compile `try`. */
 const readNarrowed = async (
   core: CoreConnection,
   range: RequestRange,
-  place: string | null,
-  [by, id]: Narrowing
+  narrowing: Narrowing
 ): Promise<Narrowed> => {
   try {
     const page = await core.withSession(
       async (session) =>
-        await session.stephenRequests.report({ range, place, [by]: id })
+        await session.stephenRequests.report({ range, ...narrowing })
     );
     return { state: "ready", page };
   } catch (error) {
@@ -105,9 +138,7 @@ const readNarrowed = async (
 
 const useNarrowed = (
   range: RequestRange,
-  place: string | null,
-  by: Narrowing[0],
-  id: string
+  { place, team, topic, person, question }: Narrowing
 ): Narrowed => {
   const core = useCore();
   const [narrowed, setNarrowed] = useState<Narrowed>({ state: "loading" });
@@ -115,7 +146,13 @@ const useNarrowed = (
     let current = true;
     const read = async (): Promise<void> => {
       setNarrowed({ state: "loading" });
-      const got = await readNarrowed(core, range, place, [by, id]);
+      const got = await readNarrowed(core, range, {
+        place,
+        team,
+        topic,
+        person,
+        question,
+      });
       if (current) {
         setNarrowed(got);
       }
@@ -124,7 +161,7 @@ const useNarrowed = (
     return () => {
       current = false;
     };
-  }, [core, range, place, by, id]);
+  }, [core, range, place, team, topic, person, question]);
   return narrowed;
 };
 
@@ -161,7 +198,7 @@ const Over = ({
     count: { label: asked ? t`Asked` : t`Billed`, color: "chart-1" },
   };
   const format = (at: string) =>
-    report.by === "day" ? formatDay(at) : formatMonth(at);
+    report.by === "day" ? formatIsoDayMonth(at) : formatMonth(at);
   return (
     <div className="px-4">
       <ChartContainer
@@ -174,8 +211,10 @@ const Over = ({
           barCategoryGap="20%"
           data={report.bars.map((bar) => ({
             at: bar.at,
+            // Billed by place, which a person's panel keeps too (it has
+            // no kinds: counts only).
             count:
-              Object.values(bar.kinds).reduce((sum, each) => sum + each, 0) +
+              Object.values(bar.places).reduce((sum, each) => sum + each, 0) +
               (asked ? bar.notBilled : 0),
           }))}
           margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
@@ -583,8 +622,8 @@ const Panel = ({
 /** The panel, while it reads what it is about. */
 const Loaded = (props: {
   subject: RequestSubject;
+  narrowing: Narrowing;
   range: RequestRange;
-  place: string | null;
   canBack: boolean;
   canManage: boolean;
   onBack: () => void;
@@ -592,8 +631,7 @@ const Loaded = (props: {
   onOnlyTeam: ((teamId: string) => void) | null;
   onChanged: () => Promise<void>;
 }) => {
-  const [by, id] = narrowingOf(props.subject);
-  const narrowed = useNarrowed(props.range, props.place, by, id);
+  const narrowed = useNarrowed(props.range, props.narrowing);
   if (narrowed.state === "loading") {
     return (
       <div className="p-4">
@@ -616,6 +654,7 @@ export const RequestDetail = ({
   trail,
   range,
   place,
+  team,
   canManage,
   onTrail,
   onOnlyTeam,
@@ -623,7 +662,9 @@ export const RequestDetail = ({
 }: {
   trail: RequestSubject[];
   range: RequestRange;
+  /** The page's filters, which a panel opened from the page keeps. */
   place: string | null;
+  team: string | null;
   canManage: boolean;
   onTrail: (trail: RequestSubject[]) => void;
   onOnlyTeam: ((teamId: string) => void) | null;
@@ -631,6 +672,7 @@ export const RequestDetail = ({
 }) => {
   const { t } = useLingui();
   const subject = trail.at(-1);
+  const narrowing = narrowingFor(trail, { place, team });
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -649,7 +691,8 @@ export const RequestDetail = ({
           <Loaded
             canBack={trail.length > 1}
             canManage={canManage}
-            key={narrowingOf(subject).join(":")}
+            key={JSON.stringify(narrowing)}
+            narrowing={narrowing}
             onBack={() => {
               onTrail(trail.slice(0, -1));
             }}
@@ -658,7 +701,6 @@ export const RequestDetail = ({
             onOpen={(next) => {
               onTrail([...trail, next]);
             }}
-            place={place}
             range={range}
             subject={subject}
           />

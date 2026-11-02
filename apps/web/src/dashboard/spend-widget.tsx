@@ -14,7 +14,7 @@ import { useFull, WidgetBlock } from "./widget-block.tsx";
 // The AI spend widget of the dashboard's board, for admins: what the
 // models cost this month, budget or not, and the workflows that spent
 // most, each with what one run of it cost. Settings → AI spend has the
-// rest: budgets, each binding and the reservations held for review.
+// rest: budgets and each binding.
 
 /** A workflow that spent this month, by its name, which opens it while core still has it. */
 const WorkflowName = ({ workflow }: { workflow: WorkflowMonthSpend }) => {

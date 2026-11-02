@@ -32,7 +32,6 @@ export type {
   InspectTarget,
   OpenWorkflowBuild,
   ScreenBuild,
-  ServerBuild,
   TargetBuilds,
   TargetInspections,
   WorkflowBuild,
@@ -58,10 +57,10 @@ export {
   limitErrors,
   openWorkflowEntry,
   openWorkflowErrors,
-  serverFiles,
   workflowFiles,
   workflowIdOf,
   workflowPaths,
+  workflowsFolder,
 } from "./inputs.ts";
 export {
   appModuleName,

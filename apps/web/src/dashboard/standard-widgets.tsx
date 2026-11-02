@@ -302,7 +302,7 @@ export const ReturnChartView = ({
           }
         >
           <Ring pieces={pieces}>
-            <Stat>{whole}</Stat>
+            <Stat size={full ? "default" : "compact"}>{whole}</Stat>
             <span
               className={
                 full
@@ -490,7 +490,9 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                     label: i18n._(stageLabel[row.stage]),
                   }))}
                 >
-                  <Stat>{t`${live} of ${count}`}</Stat>
+                  <Stat size={full ? "default" : "compact"}>
+                    {t`${live} of ${count}`}
+                  </Stat>
                   <span
                     className={
                       full

@@ -16,7 +16,7 @@ import {
   readableByEveryoneOf,
   recallMemoryAudience,
 } from "./memory-audience.ts";
-import { mayPublish, mayRetire } from "./memory-publish.ts";
+import { mayPublish, mayReplaceMatch, mayRetire } from "./memory-publish.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
 import { rerankCandidates } from "./rerank.ts";
 import { skillAuthorities, skillCapabilities } from "./skill-capabilities.ts";
@@ -55,6 +55,9 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   mayRetire: async (reader, record) => {
     await mayRetire(reader, record);
   },
+  mayReplaceMatch: async (reader, decision) => {
+    await mayReplaceMatch(reader, decision);
+  },
   wordLesson: async (facts) => await wordLesson(env, facts),
   memories: {
     audienceOf: async (reader) => await recallMemoryAudience(env, reader),
@@ -71,7 +74,7 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
     isRefusal: (error) => permissionErrors.codeOf(error) !== undefined,
   },
   onWrite: async (write) => {
-    await checkWrite(env, write);
+    await checkWrite(write);
   },
   blobs: env.BRAIN_OBJECTS,
   audit: {

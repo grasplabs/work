@@ -14,7 +14,6 @@ import onboardingMigrations from "../src/db/onboarding/migrations/migrations.js"
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -22,6 +21,8 @@ import {
   holdAlarm,
   onLink,
 } from "./interview-link.ts";
+import { keyChanger } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   agree,
   claimsReply,
@@ -51,8 +52,8 @@ import {
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
 // team, one source for its interviews, the facts its people agreed to and
 // the drawing reach the brain's records, which every member reads.
-// AI Gateway is the outside system, faked behind the AI binding. The ways
-// it can fail, tried here:
+// The model provider is the outside system, faked behind connect. The
+// ways it can fail, tried here:
 //
 // - A record pointing at a person: their id, their name, their own words
 //   or quote, a source of their own, or the lead's facts, whose role alone
@@ -64,7 +65,8 @@ import {
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
 // - What someone said, approved or not, on their team's interviews'
-//   source: it has no transcript, for members, admins and staff alike.
+//   source: it has no transcript, for members and admins alike, and
+//   Grasp's staff read no brain at all.
 
 const idp = mockIdp();
 
@@ -447,7 +449,7 @@ describe(
       });
     });
 
-    it("gives its interviews' source no transcript and no statement, for members, admins and staff alike, and nothing to anyone outside", async () => {
+    it("gives its interviews' source no transcript and no statement, for members and admins alike, and nothing to staff or anyone outside", async () => {
       const store = onboardingStore(env);
       const ids = await team();
       await mapped(ids);
@@ -516,7 +518,8 @@ describe(
       };
       expect({
         said: said.length > 2,
-        staff: await shownTo(staff),
+        // Staff read no brain at all (staff-scope.test.ts).
+        staff: await outcome(staff.brain.read()),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
         nobody: {
@@ -529,7 +532,7 @@ describe(
         },
       }).toStrictEqual({
         said: true,
-        staff: safe,
+        staff: "role.forbidden",
         admin: safe,
         member: safe,
         nobody: {
@@ -826,7 +829,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes nothing when a check fails at the gateway", async () => {
+  it("writes nothing when a check fails at the provider", async () => {
     const ids = await drawnTeam();
     await intake(ids, [{ ...zendeskClaim, fails: true }]);
     const records = await kept(ids);
@@ -928,7 +931,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     ).not.toContain(orphan);
   });
 
-  it("shows members, admins and Grasp's staff the team's claims", async () => {
+  it("shows members and admins the team's claims, and Grasp's staff none", async () => {
     const ids = await drawnTeam();
     await intake(ids);
     const member = await signedInApi(idp, "user");
@@ -937,12 +940,12 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     expect({
       member: await statementsFor(member.api, ids),
       admin: await statementsFor(admin.api, ids),
-      staff: await statementsFor(staff, ids),
+      staff: await outcome(statementsFor(staff, ids)),
     }).toStrictEqual({
       member: ["Tickets come in through Zendesk."],
       admin: ["Tickets come in through Zendesk."],
-      // Staff read what admins read (Nick, 2026-10-25).
-      staff: ["Tickets come in through Zendesk."],
+      // Staff manage, and read no brain (Nick, 2026-11-01).
+      staff: "role.forbidden",
     });
   });
 
@@ -1366,8 +1369,9 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("writes nothing while no model can put the claims together, never a person's fact on its own", async () => {
     const ids = await drawnTeam();
-    // No gateway: no model the deployment allows. A team an earlier test
-    // left due fails first, as this one does.
+    // No provider connected: no model at all. A team an earlier test left
+    // due fails first, as this one does.
+    await env.CONNECT.removeAiProviderKey("anthropic", keyChanger);
     let gave: string | null = null;
     for (let round = 0; round < 5 && gave !== `brain:${ids.team}`; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
@@ -1432,7 +1436,7 @@ const keptDrawing = z.looseObject({
 });
 
 /** A drawing the model answers with. */
-const drawingReply = (value: unknown): GatewayReply => ({
+const drawingReply = (value: unknown): ProviderReply => ({
   text: JSON.stringify(value),
   inputTokens: 100,
   outputTokens: 10,
@@ -1440,7 +1444,7 @@ const drawingReply = (value: unknown): GatewayReply => ({
 
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
 const givenWith = async (
-  reply: (ids: Ids) => GatewayReply,
+  reply: (ids: Ids) => ProviderReply,
   part?: PartJudge
 ) => {
   const ids = await team();
@@ -1456,7 +1460,7 @@ const givenWith = async (
 
 // A drawing reaches the brain only as far as five or more of the people it
 // was drawn from told it, each part apart (GRA-1084, brain-intake.ts
-// `versionOf`), and Grasp's staff read only its numbers. The lead is never
+// `versionOf`), and Grasp's staff read none of it. The lead is never
 // one of a drawing's tellers while others do the work (store.ts
 // `#briefOf`), and `versionOf` leaves them out of every count besides. The
 // ways it can fail, tried here:
@@ -1467,6 +1471,10 @@ const givenWith = async (
 // - A question for the next interviews, written from what few said.
 // - Staff reading what the company's people told.
 describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
+  // The test draws and gives the brain each team itself, with a model
+  // faked: the store's own alarm would try first, and take its replies.
+  beforeEach(holdAlarm);
+
   it("counts a number only for the work it is about: one a person gave for other work never backs this one", async () => {
     // Each of the six gave numbers, but for the rota, not for tickets.
     const ids = await team();
@@ -1978,23 +1986,11 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("gives Grasp's staff the drawing as admins read it", async () => {
+  it("gives Grasp's staff no drawing, as they read no brain", async () => {
     const ids = await givenWith(fiveToldReply);
-    const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
-    await expect(ticketsDrawingFor(staff, ids)).resolves.toStrictEqual(
-      await ticketsDrawingFor(admin.api, ids)
-    );
-  });
-});
-
-describe("the brain as Grasp's staff read it", { timeout: 120_000 }, () => {
-  it("is the brain as an admin reads it: staff are admins, and read what admins read", async () => {
-    await givenWith(fiveToldReply);
-    const admin = await signedInApi(idp, "admin");
-    const staff = await asStaff();
-    await expect(staff.brain.read()).resolves.toStrictEqual(
-      await admin.api.brain.read()
+    await expect(outcome(ticketsDrawingFor(staff, ids))).resolves.toBe(
+      "role.forbidden"
     );
   });
 });

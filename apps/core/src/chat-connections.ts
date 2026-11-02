@@ -29,7 +29,7 @@ import {
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { actingPerson } from "./auth/identity.ts";
+import { memberOf } from "./auth/identity.ts";
 import {
   offeredConnections,
   personOf,
@@ -166,13 +166,12 @@ const actionsOf = async (
     )
   );
   return new Map(
-    // A Composio connection's tools Grasp classed: a connect that predates
-    // classes says only which the admin allowed, and runs them all.
-    offered.map(({ id, source, provider, tools, offeredTools }) => [
+    // A Composio connection's tools Grasp classed.
+    offered.map(({ id, source, provider, offeredTools }) => [
       id,
       source === "native"
         ? (manifests.get(provider) ?? [])
-        : (offeredTools ?? tools ?? []),
+        : (offeredTools ?? []),
     ])
   );
 };
@@ -186,7 +185,7 @@ const scopePerson = async (
   scope: AgentScope
 ): Promise<ConnectionPerson> => {
   const [member, user] = await Promise.all([
-    actingPerson(env, scope.personId, scope.staff),
+    memberOf(env.DB, scope.personId),
     drizzle(env.DB)
       .select({ email: users.email })
       .from(users)

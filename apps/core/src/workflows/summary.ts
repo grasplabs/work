@@ -1,4 +1,6 @@
+import { providerTroubles } from "@grasp-os/shared/ai-providers";
 import { appErrors } from "@grasp-os/shared/apps";
+import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { reviewedTaskOf, workflowErrors } from "@grasp-os/shared/workflows";
@@ -35,7 +37,9 @@ import { detailsRemoved, removedText } from "./retention.ts";
 // lapses, a minute and a half on, before anything writes its row: the next
 // admission that drops the place moves its revision on. A run whose step's
 // model call waits for a share of the model requests in flight shows the
-// same way (model-waits.ts).
+// same way (model-waits.ts), and so does one whose step's model call
+// failed on the organization's own AI provider key
+// (`aiProvider`: the provider, what it showed and since when, ai-waits.ts).
 
 /** What the one read of a run's summary returns. */
 const rowSchema = z.object({
@@ -51,6 +55,7 @@ const rowSchema = z.object({
     "cancelled",
   ]),
   engine_status: z.string().nullable(),
+  compensation: z.string().nullable(),
   created_at: z.number(),
   started_at: z.number().nullable(),
   ended_at: z.number().nullable(),
@@ -63,6 +68,7 @@ const rowSchema = z.object({
   workflow_calls: z.string().nullable(),
   pending: z.enum(["pause", "resume", "cancel"]).nullable(),
   queued: z.string().nullable(),
+  ai_wait: z.string().nullable(),
 });
 
 /** A step of the run waiting in the client's queue (admission.ts). */
@@ -70,6 +76,31 @@ const queuedSchema = z.object({
   waitingFor: z.enum(["client", "person", "app"]),
   retryAt: z.number(),
 });
+
+/** What a `queued` run waits for: its AI provider since, or a share. */
+const queuedFor = (
+  queued: RunSummary["queued"],
+  aiWait: RunSummary["aiProvider"]
+): Pick<RunSummary, "queued" | "aiProvider"> => {
+  if (aiWait !== undefined) {
+    return { aiProvider: aiWait };
+  }
+  return queued === undefined ? {} : { queued };
+};
+
+/** What a held step of the run waits for, from the row's text; none for none. */
+const aiWaitSchema = z.object({
+  since: z.number(),
+  provider: z.string(),
+  trouble: z.enum(providerTroubles),
+});
+
+const aiWaitOf = (text: string | null): RunSummary["aiProvider"] =>
+  text === null ? undefined : aiWaitSchema.safeParse(JSON.parse(text)).data;
+
+/** The share a step of the run waits for, from the row's text; none for none. */
+const sharedQueueOf = (text: string | null): RunSummary["queued"] =>
+  text === null ? undefined : queuedSchema.safeParse(JSON.parse(text)).data;
 
 const waitsSchema = z.array(
   z.object({ name: z.string(), expiresAt: z.number() })
@@ -203,6 +234,61 @@ const engineStatusSchema = z.enum([
   "terminated",
 ]);
 
+/** The words of a step's failure no platform code names. */
+const stepFailedMessage = workflowErrors.create("workflow.step_failed").message;
+
+/**
+ * A compensating run's compensation (spec 10.7.3): its cause, its
+ * cleanup's activity (the engine reports it running) and, after a
+ * failure, what it failed with (the report its run kept as it failed), to
+ * those who `sees` why a run failed, its message gone once its details
+ * are `removed`.
+ */
+const compensationOf = (
+  row: z.infer<typeof rowSchema>,
+  sees: boolean,
+  /** The words of a run whose details are removed: its message's, if so. */
+  removed: string | undefined
+): NonNullable<RunSummary["compensation"]> => {
+  // As the engine began to roll it back; a cancel asked of it otherwise.
+  const kept = z
+    .object({
+      cause: z.enum(["failure", "cancellation"]),
+      code: z.string().nullable(),
+    })
+    .safeParse(
+      row.compensation === null ? undefined : JSON.parse(row.compensation)
+    ).data;
+  const cause =
+    kept?.cause ??
+    (row.cancel_requested_at === null ? "failure" : "cancellation");
+  // Its report, as its run kept it failing; or the code the engine has it
+  // failing with, in the platform's own words for it.
+  // Only a code the platform defines: any other could be made of what
+  // the run read, as a screen's snapshot says (screen-workflows.ts).
+  const keptCode = kept?.code ?? null;
+  const code =
+    keptCode === null || isExpectedCode(keptCode)
+      ? keptCode
+      : "workflow.step_failed";
+  const reported =
+    errorOf(row.failure) ??
+    (code === null
+      ? undefined
+      : { code, message: expectedMessageOf(code) ?? stepFailedMessage });
+  const failed = cause === "failure" && sees ? reported : undefined;
+  return {
+    cause,
+    activity: "running",
+    ...(failed === undefined
+      ? {}
+      : {
+          originalError:
+            removed === undefined ? failed : { ...failed, message: removed },
+        }),
+  };
+};
+
 /**
  * The summary of `app`'s run `run`, as `by` (anyone with a role in the
  * App) may see it: a failed run's error only for its person and admins;
@@ -224,7 +310,7 @@ export const runSummary = async (
     throw workflowErrors.create("workflow.invalid");
   }
   const read = await env.DB.prepare(
-    `SELECT r.id, r.workflow_id, r.version, r.status, r.engine_status,
+    `SELECT r.id, r.workflow_id, r.version, r.status, r.engine_status, r.compensation,
        r.created_at, r.started_at, r.ended_at, r.cancel_requested_at,
        r.failure, r.started_by, r.details_removed_at, r.summary_revision,
        (SELECT json_group_array(json_object('name', d.step, 'expiresAt', d.expires_at))
@@ -246,7 +332,10 @@ export const runSummary = async (
                 AND m.waiting_for IS NOT NULL
           ) q
           ORDER BY q.retry_at
-          LIMIT 1) AS queued
+          LIMIT 1) AS queued,
+       (SELECT json_object('since', w.since, 'provider', w.provider, 'trouble', w.trouble)
+          FROM workflow_ai_waits w WHERE w.run_id = r.id
+          ORDER BY w.since LIMIT 1) AS ai_wait
      FROM workflow_runs r
      WHERE r.id = ?2 AND r.app_id = ?3`
   )
@@ -259,14 +348,14 @@ export const runSummary = async (
     throw workflowErrors.create("workflow.run_not_found");
   }
   const row = rowSchema.parse(read);
-  const queued =
-    row.queued === null
-      ? undefined
-      : queuedSchema.safeParse(JSON.parse(row.queued)).data;
+  // Held for its AI provider key first: that waits for someone, a share
+  // only for its turn.
+  const aiWait = aiWaitOf(row.ai_wait);
+  const queued = sharedQueueOf(aiWait === undefined ? row.queued : null);
   const status = statusOf(
     row.status,
     engineStatusSchema.safeParse(row.engine_status).data,
-    queued !== undefined
+    queued !== undefined || aiWait !== undefined
   );
   const live = !ended.has(status);
   // What it failed with can hold what the run read for its person: only
@@ -278,7 +367,7 @@ export const runSummary = async (
     status === "failed" && sees ? errorOf(row.failure) : undefined;
   // Removed once the run's retention is up, whether or not the sweep has
   // been by yet, as every reader of a run says (`detailsRemoved`).
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: row.ended_at === null ? null : new Date(row.ended_at),
     detailsRemovedAt:
       row.details_removed_at === null ? null : new Date(row.details_removed_at),
@@ -286,7 +375,7 @@ export const runSummary = async (
   const error =
     reported === undefined || !removed
       ? reported
-      : { ...reported, message: removedText(env) };
+      : { ...reported, message: removedText };
   return {
     revision: row.summary_revision,
     runId: row.id,
@@ -298,11 +387,11 @@ export const runSummary = async (
     finishedAt: live ? null : row.ended_at,
     ...(status === "compensating"
       ? {
-          compensation: {
-            cause:
-              row.cancel_requested_at === null ? "failure" : "cancellation",
-            activity: "running",
-          },
+          compensation: compensationOf(
+            row,
+            sees,
+            removed ? removedText : undefined
+          ),
         }
       : {}),
     ...(error === undefined ? {} : { error }),
@@ -319,7 +408,7 @@ export const runSummary = async (
           expiresAt,
         }))
       : [],
-    ...(status === "queued" && queued !== undefined ? { queued } : {}),
+    ...(status === "queued" ? queuedFor(queued, aiWait) : {}),
     control: controlOf(role, status, row),
   };
 };

@@ -3,6 +3,10 @@ import type { D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { signInApps } from "../src/deploy/context.ts";
+import { derivedCoreConfig } from "../src/deploy/core-config.ts";
+import { configuredCoreVars } from "../src/deploy/core-vars.ts";
+
 // The admin's migrations on a database with rows in it, as staging's and
 // production's have, rather than the empty one every other test starts
 // from: each brought up to the migration before, seeded, then migrated.
@@ -102,6 +106,82 @@ describe("the admin's migrations, on rows", () => {
       workers: [{ client_id: "acme", script_name: "grasp-os-core" }],
       runs: [{ client_id: "beta", kind: "rollout" }],
       dangling: [],
+    });
+  });
+
+  it("drop every client's saved settings with their table, so a client that had them still deploys with only what the admin derives", async () => {
+    const db = migrationDb();
+    const { before, it: dropSettings } = upTo("0044_drop_client_settings.sql");
+    await applyD1Migrations(db, before);
+    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+    const signIn = JSON.stringify({
+      domains: ["acme.test"],
+      admins: ["ada@acme.test"],
+      googleHostedDomain: "acme.test",
+    });
+    const now = Date.now();
+    // A row for each var no deploy sets any more, and one that would have
+    // replaced the derived sign-in.
+    const saved = {
+      QUOTA_LIMITS: { generation: 1, limits: { workflowSteps: 10 } },
+      MODEL_GATEWAY: { eu: { models: ["openai/gpt-5"], deployment: true } },
+      MEMORY_LIMITS: { "USER.md": 10 },
+      AUDIT_RETENTION_DAYS: 90,
+      AUDIT_ARCHIVE_RETENTION_DAYS: 400,
+      RUN_RETENTION_DAYS: 7,
+      INBOUND_MAIL_DOMAIN: "mail.acme.test",
+      SIGN_IN: { domains: ["elsewhere.test"] },
+    };
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO clients (id, name, ring, sign_in, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?)"
+        )
+        .bind(clientId, clientId, signIn, now, now),
+      ...Object.entries(saved).map(([key, value]) =>
+        db
+          .prepare(
+            "INSERT INTO settings (client_id, key, value, updated_by, updated_at) VALUES (?, ?, ?, 'staff@grasp.test', ?)"
+          )
+          .bind(clientId, key, JSON.stringify(value), now)
+      ),
+    ]);
+
+    await applyD1Migrations(db, [dropSettings]);
+    const domain = "grasp.test";
+    const derived = derivedCoreConfig({
+      clientId,
+      signIn,
+      domain,
+      apps: signInApps(env),
+    });
+    const change = {
+      by: "staff@grasp.test",
+      what: "release",
+      release: "26.01.100000001",
+      at: new Date(now).toISOString(),
+    } as const;
+    const vars = configuredCoreVars(clientId, derived, change);
+    const tables = await db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+      )
+      .all();
+
+    expect({
+      names: Object.keys(vars).toSorted(),
+      signIn: vars.SIGN_IN,
+      table: tables.results,
+    }).toStrictEqual({
+      names: [
+        "CLIENT_ID",
+        "MAIL_FROM",
+        "PLATFORM_CHANGE",
+        "RUNTIME_PROFILE",
+        "SIGN_IN",
+      ],
+      signIn: derived.SIGN_IN,
+      table: [],
     });
   });
 });

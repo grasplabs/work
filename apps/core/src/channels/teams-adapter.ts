@@ -3,29 +3,28 @@ import type { TeamsAdapterConfig } from "@chat-adapter/teams";
 import type { InternalAxiosRequestConfig } from "axios";
 import { z } from "zod";
 
+import { throughConnect } from "./through-connect.ts";
+
 // Teams' adapter as core builds it (teams.ts): the Chat SDK's, with every
 // request Microsoft's SDK under it sends handed to connect.
 
 /**
  * Hands every request a Teams SDK client sends to connect, which sends it
- * on as the client's own bot (connect's src/channels.ts), or refuses it:
- * axios, under the SDK, takes the fetch it sends through from each
- * request's config. Nothing the adapter sends leaves core any other way.
+ * on as the client's own bot (connect's src/channels.ts), or refuses it
+ * ({@link throughConnect}). Nothing the adapter sends leaves core any other
+ * way.
  */
 const viaConnect = (env: Env) => ({
   request: ({
     config,
   }: {
     config: InternalAxiosRequestConfig;
-  }): InternalAxiosRequestConfig => {
-    config.adapter = "fetch";
-    config.env = {
-      ...config.env,
-      fetch: async (input: RequestInfo | URL, init?: RequestInit) =>
-        await env.CONNECT.channelFetch("teams", new Request(input, init)),
-    };
-    return config;
-  },
+  }): InternalAxiosRequestConfig =>
+    throughConnect(
+      config,
+      async (input, init) =>
+        await env.CONNECT.channelFetch("teams", new Request(input, init))
+    ),
 });
 
 /** A member of a conversation, as far as the door reads one. */

@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { createBrain } from "@grasp-os/brain/brain";
 import { delegateCitesMax } from "@grasp-os/brain/contract";
 import { runLinking } from "@grasp-os/brain/entities";
@@ -8,15 +7,15 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { appVersions } from "../src/db/core/schema.ts";
 import { portsOf } from "../src/knowledge/ports.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection } from "./knowledge.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { finished, sleeping, stopped, woken } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { bindModel, sampleApp, workflowFiles } from "./workflow-apps.ts";
@@ -420,12 +419,9 @@ describe("a workflow's recall through the Brain binding", () => {
         )
       ),
     });
-    await bindModel(
-      app,
-      "extractor",
-      "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-    );
-    const gateway = fakeGateway(
+    const model = "mistral/mistral-large-latest";
+    const provider = await fakeProviderFor(
+      [model],
       {
         text: JSON.stringify({ total: 1234 }),
         inputTokens: 5,
@@ -433,10 +429,7 @@ describe("a workflow's recall through the Brain binding", () => {
       },
       { text: JSON.stringify({ total: 1234 }), inputTokens: 5, outputTokens: 2 }
     );
-    const ai: AiBinding = env.AI;
-    const answering = vi
-      .spyOn(ai, "fetch")
-      .mockImplementation(gateway.binding.fetch);
+    await bindModel(app, "extractor", model);
     /** A run killed while asleep after its recall, then resumed. */
     const crashed = async (between?: () => Promise<void>) => {
       const { id } = await admin.api.workflows.start(app, "asker");
@@ -455,40 +448,36 @@ describe("a workflow's recall through the Brain binding", () => {
             "can no longer be read"
           ),
         recalls: await recallsOf(id),
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
       };
     };
 
-    try {
-      const kept = await crashed();
-      const revoked = await crashed(async () => {
-        await admin.api.permissions.revoke(collectionGrant);
-      });
+    const kept = await crashed();
+    const revoked = await crashed(async () => {
+      await admin.api.permissions.revoke(collectionGrant);
+    });
 
-      expect({ kept, revoked }).toStrictEqual({
-        // Replayed from its record after the crash: one recall, its pack,
-        // and the model asked once, as it may still read what it cites.
-        kept: {
-          status: "completed",
-          output: { recalled: 1, asked: 1234 },
-          revoked: false,
-          recalls: 1,
-          asked: 1,
-        },
-        // The revoke while it was down: the resumed run's replayed recall
-        // stands as recorded, its model call is refused before the gateway
-        // is asked, and so is its output: the run fails as revoked.
-        revoked: {
-          status: "failed",
-          output: null,
-          revoked: true,
-          recalls: 1,
-          asked: 1,
-        },
-      });
-    } finally {
-      answering.mockRestore();
-    }
+    expect({ kept, revoked }).toStrictEqual({
+      // Replayed from its record after the crash: one recall, its pack,
+      // and the model asked once, as it may still read what it cites.
+      kept: {
+        status: "completed",
+        output: { recalled: 1, asked: 1234 },
+        revoked: false,
+        recalls: 1,
+        asked: 1,
+      },
+      // The revoke while it was down: the resumed run's replayed recall
+      // stands as recorded, its model call is refused before the gateway
+      // is asked, and so is its output: the run fails as revoked.
+      revoked: {
+        status: "failed",
+        output: null,
+        revoked: true,
+        recalls: 1,
+        asked: 1,
+      },
+    });
   });
 
   it("fails as revoked, never with its own message, a run that throws what it recalled once it may no longer read it, or once it was purged", async () => {

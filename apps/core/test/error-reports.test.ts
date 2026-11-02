@@ -18,7 +18,7 @@ const report: ErrorReport = {
   kind: "render",
   message: "Cannot read properties of undefined (reading 'name')",
   stack: "TypeError: Cannot read properties of undefined\n    at Members",
-  route: "/members",
+  route: "/settings/members",
   build: "abc123",
 };
 
@@ -119,7 +119,10 @@ describe("error reports", () => {
     const refusals = [
       await codeOf(
         await send(
-          JSON.stringify({ ...report, url: "/members?email=ann@acme.test" }),
+          JSON.stringify({
+            ...report,
+            url: "/settings/members?email=ann@acme.test",
+          }),
           { cookie }
         )
       ),

@@ -11,10 +11,10 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { resolverOf, showThinking } from "../src/agent-thinking.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { personalChatsOf, says, transcript } from "./agent-chat.ts";
-import type { Answer } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import type { Answer } from "./model-provider.ts";
 import {
   intake,
   mapped,

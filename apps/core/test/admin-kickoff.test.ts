@@ -1,5 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { adminAskPurpose } from "@grasp-os/shared/admin-ask";
 import {
   adminKickoffMaxBytes,
   adminKickoffPath,
@@ -13,13 +11,13 @@ import { toBase64, toHex } from "@grasp-os/shared/encoding";
 import { transcriptFileMaxBytes } from "@grasp-os/shared/kickoff";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import { auditedDuring, routed, signedInApi, withSignIn } from "./sign-in.ts";
 
@@ -37,8 +35,8 @@ import { auditedDuring, routed, signedInApi, withSignIn } from "./sign-in.ts";
 // - What was said leaving the company's Grasp in the answer.
 //
 // Then that it seeds Stephen's context as the staff page did, on record by
-// the staff member the admin names. AI Gateway is the outside system: a
-// fake behind the AI binding.
+// the staff member the admin names. The model provider behind connect is
+// the outside system (test/model-provider.ts).
 
 const idp = mockIdp();
 
@@ -83,7 +81,7 @@ const reading = {
   ],
 };
 
-const answer: GatewayReply = {
+const answer: ProviderReply = {
   text: JSON.stringify(reading),
   inputTokens: 900,
   outputTokens: 300,
@@ -149,27 +147,20 @@ const asAdmin = async (
   return await send(body, { signature: await signatureOf(body), coreEnv });
 };
 
-/** What `run` returns while the gateway answers with `replies`, and what was sent to it. */
+/**
+ * What `run` returns while the provider answers with `replies`, once
+ * `meanwhile` is done for each request, and what was sent to it.
+ */
 const answering = async <T>(
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   run: () => Promise<T>,
   meanwhile?: () => Promise<void>
 ) => {
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi
-    .spyOn(ai, "fetch")
-    .mockImplementation(
-      async (input: Request | string | URL, init?: RequestInit) => {
-        await meanwhile?.();
-        return await fake.binding.fetch(input, init);
-      }
-    );
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    spy.mockRestore();
-  }
+  const provider = await answeringProvider(async () => {
+    await meanwhile?.();
+    return replies.shift();
+  });
+  return { requests: provider.requests, result: await run() };
 };
 
 /** The error code of a refusal's body, if it has one. */
@@ -192,6 +183,19 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
     ).run();
   });
 
+  it("can't be read while the company has connected no AI provider, and keeps nothing", async () => {
+    // First in the file: no test before it connected a provider.
+    const before = await keptAt();
+
+    const response = await asAdmin(pasted(dutch));
+
+    expect({
+      status: response.status,
+      code: await codeOf(response),
+      kept: (await keptAt()) === before,
+    }).toStrictEqual({ status: 503, code: "model.no_provider", kept: true });
+  });
+
   it("is refused to anyone but the admin signing for this company and this purpose, a stale or malformed request, and reads nothing", async () => {
     const fresh = bodyOf(pasted(dutch));
     const stale = bodyOf(
@@ -206,19 +210,12 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
         const responses = await Promise.all([
           send(fresh),
           send(fresh, { signature: "0".repeat(64) }),
-          // The admin's keys for the snapshot and the chat open nothing here.
+          // The admin's key for the snapshot opens nothing here.
           send(fresh, {
             signature: await signatureOf(
               fresh,
               env.BETTER_AUTH_SECRET,
               adminSnapshotPurpose
-            ),
-          }),
-          send(fresh, {
-            signature: await signatureOf(
-              fresh,
-              env.BETTER_AUTH_SECRET,
-              adminAskPurpose
             ),
           }),
           // Signed for another company: its own auth secret.
@@ -239,7 +236,7 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
       read: requests.length,
       kept: (await keptAt()) === before,
     }).toStrictEqual({
-      statuses: [401, 401, 401, 401, 401, 403, 403, 404],
+      statuses: [401, 401, 401, 401, 403, 403, 404],
       events: 0,
       read: 0,
       kept: true,

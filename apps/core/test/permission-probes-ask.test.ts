@@ -7,7 +7,6 @@ import {
 import { mockIdp } from "./idp.ts";
 import {
   askedInWorkspace,
-  clockRunsAhead,
   companyOnce,
   memberProbes,
   probeTime,
@@ -35,8 +34,6 @@ watched();
 const setUp = companyOnce(idp);
 
 describe("the permission probes", probeTime, () => {
-  clockRunsAhead();
-
   it("are 150, guests and removed people among them, each asking as one person about what another may see", () => {
     expect({
       probes: permissionProbes.length,

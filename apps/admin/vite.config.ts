@@ -7,21 +7,12 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
 
-/** What the admin has in discord.js's place. */
-const discordGateway = `${import.meta.dirname}/src/admin/discord-gateway.ts`;
-
 /**
  * The admin's plugins, its Worker as cloudflare.config.ts builds it from
  * wrangler.jsonc, with `worker` on top: what the browser journeys change
  * (vite.e2e.config.ts).
  */
 export const adminPlugins = (worker: PluginConfig = {}) => [
-  // The Discord adapter's Gateway client stays out of the Worker
-  // (src/admin/discord-gateway.ts).
-  {
-    name: "grasp:discord-without-gateway",
-    config: () => ({ resolve: { alias: { "discord.js": discordGateway } } }),
-  },
   cloudflare({ viteEnvironment: { name: "ssr" }, ...worker }),
   tanstackStart(),
   react(),
@@ -36,15 +27,12 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
  * server) runs its Worker with beyond wrangler.jsonc: workerd implements
  * no Durable Object jurisdictions (src/env.d.ts, src/workflow-runs.ts),
  * as core's and connect's local runs pass too; a local run answers on
- * localhost, never moving to production's own hostname (src/admin-host.ts);
- * and no relay mode, as its clients aren't under a stage's client domain
- * (src/deploy/context.ts). Never in a build: a deployment keeps its
- * objects in the EU, and its hosted clients on the relay.
+ * localhost, never moving to production's own hostname (src/admin-host.ts).
+ * Never in a build: a deployment keeps its objects in the EU.
  */
 export const localVars = {
   DURABLE_OBJECT_JURISDICTION: "none",
   ADMIN_HOST: "",
-  OAUTH_RELAY: "off",
 } as const;
 
 /** `localVars` as the Worker's text bindings (cf's config). */

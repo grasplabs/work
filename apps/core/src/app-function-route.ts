@@ -37,24 +37,15 @@ import {
   callScreenFunction,
   readFunctionRequest,
   refusalOf,
-  pinnedReference,
-  publicOperationOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
-import { loadRelease } from "./app-releases.ts";
-import type { Release } from "./app-releases.ts";
-import { appFor } from "./apps.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
-import { identify } from "./auth/identity.ts";
+import { identify, identifyFull } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import {
-  noteScreenAnswer,
-  noteScreenSubmission,
-} from "./screen-submissions.ts";
 import {
   delivering,
   leasedBuild,
@@ -64,7 +55,7 @@ import {
 import type { LeasedBuild } from "./screen-trust.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -432,36 +423,6 @@ const withheld = (
   details: { idempotencyKey: key, refusal: refusal.code },
 });
 
-/**
- * Notes `call`, a keyed action of App `id`, as `person`'s submission
- * (screen-submissions.ts), once it resolves to one of the current
- * release's public actions; one that doesn't is refused by its invocation,
- * and noted nothing.
- */
-const noteKeyedAction = async (
-  env: Env,
-  person: Identity,
-  { id, build }: KeyedTarget,
-  call: FunctionRequest
-): Promise<void> => {
-  let release: Release;
-  let path: string;
-  try {
-    const found = await appFor(env, person, id, "user");
-    if (found.currentVersion === null) {
-      return;
-    }
-    release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(
-      release,
-      await pinnedReference(env, release, call.reference, build?.version)
-    );
-  } catch {
-    return;
-  }
-  await noteScreenSubmission(env, person, release, call, path);
-};
-
 /** What a keyed action answers: what it ran, as far as its invocation keeps. */
 interface KeyedAnswer {
   readonly result: unknown;
@@ -497,20 +458,11 @@ const keyedAnswer = async (
     operation,
     stage: "admission",
   });
-  if (caller.portableSession === undefined) {
-    await noteKeyedAction(env, person, target, call);
-  }
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
   const frames = await invocation.open({
-    by: {
-      userId: person.userId,
-      role: person.role,
-      teams: person.teams,
-      // A Grasp staff session's mark goes on with the run (GRA-1088).
-      ...(person.staff ? { staff: true } : {}),
-    },
+    by: { userId: person.userId, role: person.role, teams: person.teams },
     access,
     app: id,
     name,
@@ -645,47 +597,21 @@ const boundedCall = async (
       id,
       build,
       operation,
-      async () => {
-        // Which attempt under its key this call is, once noted, and the
-        // fence of the receipt its mutation claimed.
-        const noted: { attempt?: number; fence?: number } = {};
-        const called = await callScreenFunction(
-          env,
-          person,
-          id,
-          text,
-          Date.now() + screenCallMs,
-          windowCharger(env, person, id),
-          // A portable host has no trusted shell to recover them in, and
-          // no lease: nothing pins its calls.
-          portableSession === undefined
-            ? {
-                ...(build === undefined
-                  ? {}
-                  : { pinnedVersion: build.version }),
-                onAdmitted: async (release, call, path) => {
-                  noted.attempt = await noteScreenSubmission(
-                    env,
-                    person,
-                    release,
-                    call,
-                    path
-                  );
-                },
-                observeClaim: (fence) => {
-                  noted.fence = fence;
-                },
-              }
-            : {}
-        );
-        if (noted.attempt !== undefined) {
-          await noteScreenAnswer(env, person, id, text, called.result, {
-            attempt: noted.attempt,
-            fence: noted.fence ?? null,
-          });
-        }
-        return withinFrame(called);
-      }
+      async () =>
+        withinFrame(
+          await callScreenFunction(
+            env,
+            person,
+            id,
+            text,
+            Date.now() + screenCallMs,
+            windowCharger(env, person, id),
+            // A portable host has no lease: nothing pins its calls.
+            portableSession === undefined && build !== undefined
+              ? { pinnedVersion: build.version }
+              : {}
+          )
+        )
     );
     return Response.json(answer);
   } catch (error) {
@@ -744,7 +670,14 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "app.functions",
+    { app }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -752,8 +685,6 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -767,7 +698,7 @@ export const appFunctionResponse = async (
       // A missing lease is no build: unreviewed.
       lease: request.headers.get(screenLeaseHeader),
       operation: "call",
-      current: async () => await identify(env, request.headers),
+      current: async () => await identifyFull(env, request.headers),
     },
     requestId
   );
@@ -859,6 +790,12 @@ export const portableFunctionResponse = async (
     return refused(503, authErrors.create("auth.token_unavailable"), requestId);
   }
   if (!checked.ok) {
+    // A staff member's refused call is in the client's audit log too.
+    if ("staff" in checked && checked.staff !== undefined) {
+      await auditStaffRoute(env, checked.staff, "app.functions.portable", {
+        app,
+      });
+    }
     if (checked.reason !== "invalid") {
       logRefusedToken({
         requestId,
@@ -927,7 +864,14 @@ const admitCall = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "app.functions.stream",
+    { app }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -935,8 +879,6 @@ const admitCall = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions.stream", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -996,7 +938,7 @@ const stillDelivering = async (
   },
   stage: "push" | "delivery"
 ): Promise<void> => {
-  const now = await identify(env, headers);
+  const now = await identifyFull(env, headers);
   if (now?.userId !== call.person.userId) {
     throw authErrors.create("auth.unauthenticated");
   }
@@ -1235,13 +1177,7 @@ const appStreamResponse = async (
     // invocation compares with the access it started under.
     const access = await accessOf(env, person, id);
     const frames = await invocation.open({
-      by: {
-        userId: person.userId,
-        role: person.role,
-        teams: person.teams,
-        // A Grasp staff session's mark goes on with the run (GRA-1088).
-        ...(person.staff ? { staff: true } : {}),
-      },
+      by: { userId: person.userId, role: person.role, teams: person.teams },
       access,
       app: id,
       name,

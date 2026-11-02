@@ -7,6 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -368,12 +369,14 @@ export const SoundCheck = ({
           aria-live="polite"
           className="flex min-h-16 w-full items-start justify-center"
         >
-          <h1
-            className="type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500"
+          <div
+            className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
             key={check}
           >
-            <SpokenText said={said} text={line} />
-          </h1>
+            <PageHeaderTitle>
+              <SpokenText said={said} text={line} />
+            </PageHeaderTitle>
+          </div>
         </div>
         {check === "sound" ? (
           <div className="flex w-full max-w-sm flex-col items-center gap-3">

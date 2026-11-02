@@ -1,6 +1,10 @@
 # Copy to .dev.vars for local development. Never commit real values.
 # Wrangler loads only core's required secrets from it; deployment config
-# (SIGN_IN, MODEL_GATEWAY) goes in with `wrangler dev --var`.
+# (SIGN_IN) goes in with `wrangler dev --var`.
+# No AI provider key goes here: model calls fail as "Connect an AI provider"
+# until an admin (admin@acme.test locally) adds one in Settings, with a key
+# of their own, which local connect seals with its TOKEN_ENCRYPTION_KEY
+# (apps/connect/.dev.vars).
 # Shared with the router. `vp run dev` skips the router-secret check for
 # requests to localhost, so it may stay empty locally.
 ROUTER_SECRET=
@@ -12,13 +16,3 @@ BETTER_AUTH_SECRET=
 # Signs the capability each call to connect carries. The same value as in
 # apps/connect/.dev.vars; at least 32 characters, e.g. `openssl rand -base64 32`.
 CAPABILITY_SIGNING_KEY=
-# Optional: Stephen's own Gmail mailbox, as a chat platform
-# (src/channels/gmail.ts). Its door stays closed (404) until the first four
-# are set. The audience, service account and subscription are the Pub/Sub
-# push subscription's; the topic is the one the mailbox's watch publishes
-# to. The mailbox's OAuth client and refresh token are connect's.
-GMAIL_MAILBOX=
-GMAIL_PUBSUB_AUDIENCE=
-GMAIL_PUBSUB_SERVICE_ACCOUNT=
-GMAIL_PUBSUB_SUBSCRIPTION=
-GMAIL_PUBSUB_TOPIC=

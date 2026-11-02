@@ -11,6 +11,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
+  BindingApprovalItem,
   GoLiveItem,
   SignInAgainItem,
   WorkflowGoLiveItem,
@@ -157,6 +158,33 @@ const workflowGoLive: WorkflowGoLiveItem = {
   selfApproval: false,
 };
 
+const bindingApproval: BindingApprovalItem = {
+  kind: "bindingApproval",
+  id: "bindingApproval:workflow-quotes:2",
+  at: null,
+  urgent: true,
+  waitsOn: { type: "admin" },
+  verdicts: [],
+  pending: {
+    workflow: { id: "workflow-quotes", name: "Quotes" },
+    version: 2,
+    live: true,
+    bindings: [
+      {
+        alias: "summary",
+        kind: "model",
+        contractId: "summary-v1",
+        offered: [
+          {
+            target: { kind: "model", model: "openai/gpt-5" },
+            label: "openai/gpt-5",
+          },
+        ],
+      },
+    ],
+  },
+};
+
 /** What waits, every part read. */
 const waiting = (ranOut = true) =>
   ({
@@ -206,10 +234,39 @@ const waiting = (ranOut = true) =>
               at: "2026-10-12T09:00:00.000Z",
               read: false,
             },
+            {
+              id: "revoked-1",
+              type: "package_revoked",
+              subject: {
+                type: "app",
+                app: "app-invoices",
+                appName: "Invoices",
+              },
+              package: { name: "left-pad", version: "1.3.0" },
+              advisory: "MAL-2026-1",
+              at: "2026-10-12T10:00:00.000Z",
+              read: false,
+            },
+            {
+              id: "deaf-1",
+              type: "events_stopped",
+              connection: "connection-1",
+              event: "m365.mail.received",
+              resource: "invoices@acme.test",
+              reason: "refused",
+              at: "2026-10-12T10:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 3,
+          unread: 4,
           more: false,
         },
+        accounts: new Map([
+          [
+            "connection-1",
+            { name: "Acme mail", source: "native", provider: "microsoft" },
+          ],
+        ]),
       },
     },
     reconnect: { state: "ready", data: ranOut ? [signInAgain] : [] },
@@ -219,7 +276,6 @@ const waiting = (ranOut = true) =>
       data: {
         requests: [request],
         directory: { people: new Map(), apps: new Map() },
-        exports: new Map(),
       },
     },
     dependencies: {
@@ -232,6 +288,22 @@ const waiting = (ranOut = true) =>
     screens: {
       state: "ready",
       data: [{ app, name: "Invoices", version: 3, screens: ["Overview"] }],
+    },
+    heldStarts: {
+      state: "ready",
+      data: [
+        {
+          id: "held-start-1",
+          workflow: "greet",
+          workflowName: "Greet",
+          version: 1,
+          input: { who: "Ada" },
+          inputHash: "hash-1",
+          chatId: "chat-1",
+          requestedAt: "2026-10-12T07:00:00.000Z",
+          expiresAt: "2026-10-13T07:00:00.000Z",
+        },
+      ],
     },
     decisions: {
       state: "ready",
@@ -253,6 +325,7 @@ const waiting = (ranOut = true) =>
       ],
     },
     workflowGoLives: { state: "ready", data: [workflowGoLive] },
+    bindings: { state: "ready", data: [bindingApproval] },
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
@@ -264,20 +337,63 @@ describe(inboxItems, () => {
     expect(ids.toSorted()).toStrictEqual(
       [
         "asked:asked-1",
+        "bindingApproval:workflow-quotes:2",
         "decision:decision-1",
         "failed:failure-1",
         "goLive:app-invoices:4",
+        "heldStart:held-start-1",
         "held:held-new",
         "held:held-old",
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
         "packages:packages-1",
         "request:request-1",
+        "revoked:revoked-1",
         "screens:app-invoices",
         "signIn:connection-1",
         "stopped:stopped-1",
+        "stoppedEvents:deaf-1",
         "workflowGoLive:workflow-quotes:2",
       ].toSorted()
     );
+  });
+
+  it("tells of packages revoked as malware as urgent, with the package, its advisory and where to replace it", () => {
+    const revoked = inboxItems(waiting(), member, readAt).find(
+      ({ id }) => id === "revoked:revoked-1"
+    );
+    expect({
+      kind: revoked?.kind,
+      title: revoked?.title,
+      facts: revoked?.facts.slice(0, 2),
+      about: revoked?.about,
+      urgent: revoked?.urgent,
+    }).toStrictEqual({
+      kind: "revokedPackage",
+      title: "Packages of Invoices were revoked as malware",
+      facts: [
+        { label: "Package", value: "left-pad@1.3.0" },
+        { label: "Advisory", value: "MAL-2026-1" },
+      ],
+      about: { kind: "engine", engine: "app-invoices" },
+      urgent: true,
+    });
+  });
+
+  it("tells of a mailbox connect stopped hearing as urgent, by its account, with a way to the connection", () => {
+    const deaf = inboxItems(waiting(), member, readAt).find(
+      ({ id }) => id === "stoppedEvents:deaf-1"
+    );
+    expect({
+      title: deaf?.title,
+      facts: deaf?.facts.slice(0, 1),
+      about: deaf?.about,
+      urgent: deaf?.urgent,
+    }).toStrictEqual({
+      title: "Your triggers stopped hearing new mail at Acme mail",
+      facts: [{ label: "Mailbox", value: "invoices@acme.test" }],
+      about: { kind: "integration", integration: "native:microsoft" },
+      urgent: true,
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {
@@ -291,9 +407,10 @@ describe(inboxItems, () => {
     }
   });
 
-  it("leaves the permission requests to admins, who decide them", () => {
+  it("leaves the permission requests and the bindings to approve to admins, who decide them", () => {
     const kinds = inboxItems(waiting(), member, readAt).map(({ kind }) => kind);
     expect(kinds).not.toContain("permissionRequest");
+    expect(kinds).not.toContain("bindingApproval");
     expect(kinds).toContain("packages");
   });
 
@@ -365,9 +482,13 @@ describe(inInbox, () => {
     ).toStrictEqual(elsewhere.map(({ id }) => id).toSorted());
     expect(elsewhere.map(({ id }) => id).toSorted()).toStrictEqual([
       "asked:asked-1",
+      "bindingApproval:workflow-quotes:2",
       "decision:decision-1",
       "goLive:app-invoices:4",
+      "heldStart:held-start-1",
+      "revoked:revoked-1",
       "stopped:stopped-1",
+      "stoppedEvents:deaf-1",
       "workflowGoLive:workflow-quotes:2",
     ]);
   });
@@ -389,6 +510,9 @@ describe(listed, () => {
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
     ).toStrictEqual([
       "decision",
+      "bindingApproval",
+      "stoppedEvents",
+      "heldStart",
       "goLive",
       "failedRun",
       "goLive",
@@ -418,9 +542,16 @@ describe(listed, () => {
         about: { kind: "brain" },
       },
     ]);
-    expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
-      "The schedule of Nightly report stopped"
-    );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
+    const stopped = items.find(({ kind }) => kind === "stoppedSchedule");
+    expect({ title: stopped?.title, about: stopped?.about }).toStrictEqual({
+      title: "The schedule of Nightly report stopped",
+      // Its workflow's Triggers tab, where it is turned on again.
+      about: {
+        kind: "independentWorkflow",
+        workflow: "workflow-1",
+        tab: "triggers",
+      },
+    });
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 9);
   });
 });

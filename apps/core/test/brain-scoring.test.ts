@@ -765,7 +765,7 @@ describe("summarising and comparing arms", () => {
 
 /** A request carrying `calls`' results, as Anthropic's API takes them. */
 const request = (...calls: string[]) => ({
-  url: "https://gateway.test/v1/messages",
+  url: "https://api.anthropic.com/v1/messages?beta=true",
   headers: new Headers(),
   signal: new AbortController().signal,
   body: {
@@ -780,12 +780,12 @@ const request = (...calls: string[]) => ({
 });
 
 /**
- * A chat completions request (Workers AI's models): the system prompt is
+ * A chat completions request (Mistral's models): the system prompt is
  * a message, each call rides on the model's message, and each result is a
  * message of its own naming its call.
  */
 const completionsRequest = (...calls: string[]) => ({
-  url: "https://gateway.test/workers-ai/v1/chat/completions",
+  url: "https://api.mistral.ai/v1/chat/completions",
   headers: new Headers(),
   signal: new AbortController().signal,
   body: {

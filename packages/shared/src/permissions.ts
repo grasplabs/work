@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { isExportName } from "./apps.ts";
 import type { AgentProposer } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
@@ -151,8 +150,8 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * resource in it, such as one mailbox), a Knowledge collection, an
  * independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
- * implies), another App's exports: the methods of its server
- * code it lets other Apps call (`appExportsPath`), a business store's
+ * implies), an App's sealed functions, for an agent (reading with
+ * `read`, writing with `write`: core's agent-apps.ts), a business store's
  * public operations (the public queries and mutations of the App that owns
  * it, each action one of them by its path: core's store-operations.ts), or
  * the platform's own statistics.
@@ -211,10 +210,9 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   if (type === "connection") {
     return connectionActionPattern.test(action);
   }
-  // Another App's exports: all those it marks `read`, all those it marks
-  // `write`, or one by its name, whichever it is marked.
+  // An App's functions, for an agent: those that read, or all of them.
   if (type === "app") {
-    return action === "read" || action === "write" || isExportName(action);
+    return action === "read" || action === "write";
   }
   // A store's public operations, each by its path, e.g. `notes.list`.
   if (type === "store") {
@@ -235,7 +233,6 @@ export const permissionMaxActions = 16;
 const platformBindingNames: ReadonlySet<string> = new Set([
   // One foreground action's invocation (core's src/action-invocation.ts).
   "ACTION_INVOCATIONS",
-  "AI",
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",
   "APP_CALL_TIMEOUT_MS",
@@ -244,9 +241,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "APPS",
   "ASSETS",
   "AUDIT_ARCHIVE",
-  "AUDIT_ARCHIVE_RETENTION_DAYS",
   "AUDIT_LOG",
-  "AUDIT_RETENTION_DAYS",
   "BETTER_AUTH_SECRET",
   // The Chat SDK's state for Stephen's door (core's @grasp-os/chat/state).
   "CHAT_STATE",
@@ -269,17 +264,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "EMAIL",
   "ENTRA_CLIENT_SECRET",
   "FILES",
-  // Stephen's own Gmail mailbox and the Pub/Sub push that tells core of
-  // new mail (core's src/channels/gmail.ts), its tokens connect's
-  // (connect's src/channels.ts).
-  "GMAIL_CLIENT_ID",
-  "GMAIL_CLIENT_SECRET",
-  "GMAIL_MAILBOX",
-  "GMAIL_PUBSUB_AUDIENCE",
-  "GMAIL_PUBSUB_SERVICE_ACCOUNT",
-  "GMAIL_PUBSUB_SUBSCRIPTION",
-  "GMAIL_PUBSUB_TOPIC",
-  "GMAIL_REFRESH_TOKEN",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   // The directory's Google client (connect's providers.ts).
@@ -288,13 +272,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Google client (connect's providers.ts).
   "GOOGLE_DOCUMENTS_CLIENT_ID",
   "GOOGLE_DOCUMENTS_CLIENT_SECRET",
-  // Where the deployment receives mail (core's src/workflows/overview.ts).
-  "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
   "LOADER",
   // Who core's mail is from (core's src/mail.ts).
   "MAIL_FROM",
-  "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
   // The directory's Entra app (connect's providers.ts).
@@ -303,24 +284,16 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Entra app (connect's providers.ts).
   "MICROSOFT_DOCUMENTS_CLIENT_ID",
   "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
-  // The landscape's Entra app (connect's providers.ts).
-  "MICROSOFT_LANDSCAPE_CLIENT_ID",
-  "MICROSOFT_LANDSCAPE_CLIENT_SECRET",
-  // The periods model budgets count in, which tests set (core's
-  // src/model-budgets.ts).
-  "MODEL_BUDGET_DAY",
+  // The month model spend counts in, which tests set (core's
+  // src/model-spend.ts).
   "MODEL_BUDGET_MONTH",
-  "MODEL_GATEWAY",
   "MODEL_LEDGER",
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
-  // The deployment's quota policy (core's src/workflows/quotas.ts).
-  "QUOTA_LIMITS",
   "RELEASE_READ_MS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
-  "RUN_RETENTION_DAYS",
   // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
   "RUNTIME_PROFILE",
   // The on-prem sandbox for untrusted isolates (core's src/sandboxed.ts).
@@ -340,20 +313,14 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
-  // The client's own Telegram bot (core's src/channels/telegram.ts,
-  // connect's src/channels.ts).
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_WEBHOOK_SECRET",
+  // Tests' lowered quota limits (core's src/workflows/quotas.ts).
+  "TEST_QUOTA_LIMITS",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
-  // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
-  // connect's src/channels.ts).
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_APP_SECRET",
-  "WHATSAPP_PHONE_NUMBER_ID",
-  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
+  // Tests only: the run host's own I/O slowed (core's workflows/host-latency.ts).
+  "WORKFLOW_HOST_LATENCY_MS",
   "WORKFLOW_OFF_WAIT_MS",
   "WORKFLOW_RETRY_DELAY_MS",
   "WORKFLOW_RUNS",
@@ -481,9 +448,8 @@ export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its
  * actions. Revoked: allows nothing, for good (ask again for a new one).
- * An App's active permission on a connection, to start a workflow, or to
- * call another App's exports other than all those
- * marked `read`, goes back to requested when someone who couldn't grant
+ * An App's active permission on a connection or to start a workflow goes
+ * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
  * (`AppVersionsApi.setCurrent`), until an admin grants it again.
  */
@@ -601,15 +567,6 @@ export const authoritySchema = z
      * SB9). An agent has none.
      */
     appVersion: z.int().positive().optional(),
-    /**
-     * Work a Grasp staff member started (GRA-1088): set only by core's
-     * hosts, from the mark core wrote when staff started it (a run's
-     * `started_by_staff`, a turn's own), never from what a caller sends.
-     * Its person passes the active-member gate only while they are staff
-     * now (core's `requireActivePerson`), and its audit events say
-     * "(Grasp staff)". Never copied to work it starts.
-     */
-    staff: z.literal(true).optional(),
   })
   .refine(
     ({ subject, appVersion }) =>
@@ -650,6 +607,12 @@ export const workContextSchema = z.discriminatedUnion("type", [
     type: z.literal("workflowRun"),
     workflowId: workflowResourceIdSchema,
     runId: runIdSchema,
+    /**
+     * The files use a write's attachments are read through (GRA-887),
+     * set by core for that call only: kept with a held write, so its
+     * release decides that use's authority again.
+     */
+    filesFrom: z.string().min(1).max(128).optional(),
   }),
 ]);
 export type WorkContext = z.infer<typeof workContextSchema>;

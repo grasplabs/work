@@ -1,11 +1,9 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { consentCode, documentsControlUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -23,7 +21,7 @@ import { wordFile } from "./word-file.ts";
 // SharePoint and OneDrive from the onboarding's documents step and comes
 // back to it, browses a place, and picks a file, which core fetches
 // through connect and reads as it reads a dropped one. Graph, SharePoint
-// and the model gateway are fakes. The ways it could go wrong come first:
+// and the model provider behind connect are fakes. The ways it could go wrong come first:
 // a picked file read otherwise than a dropped one, someone other than the
 // client's admin browsing or fetching the client's files, a fetch without
 // a trace. Connect's own threat model (a token that writes or reads mail,
@@ -72,22 +70,19 @@ const reading = {
   options: ["Yes, still current", "No, it changed"],
 };
 
-const answer: GatewayReply = {
+const answer: ProviderReply = {
   text: JSON.stringify(reading),
   inputTokens: 1200,
   outputTokens: 150,
 };
 
-/** What `run` returns while the gateway answers with `replies`, and what it was sent. */
-const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    spy.mockRestore();
-  }
+/** What `run` returns while the provider answers with `replies`, and what it was sent. */
+const answering = async <T>(
+  replies: ProviderReply[],
+  run: () => Promise<T>
+) => {
+  const provider = await fakeProvider(...replies);
+  return { requests: provider.requests, result: await run() };
 };
 
 /** Where the documents step sends the browser back to. */

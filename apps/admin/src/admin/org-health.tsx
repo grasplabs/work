@@ -56,6 +56,7 @@ const levelWords: Record<HealthLevel, string> = {
 /** What core holds of what the signals count: the contract, the drawn work and the connections are unknown until it does. */
 interface Held {
   contract: boolean;
+  /** Any work found to count: none found yet is said so, never counted as none known or live. */
   works: boolean;
   integrations: Connections | null;
 }
@@ -238,7 +239,7 @@ export const OrgHealth = ({
 }) => {
   const held: Held = {
     contract: !view.unknown.contract,
-    works: !view.unknown.works,
+    works: !view.unknown.works && view.works.length > 0,
     integrations:
       snapshot.integrations === null
         ? null
@@ -249,13 +250,17 @@ export const OrgHealth = ({
       aria-label="How the company is doing"
       className="overflow-hidden rounded-xl border"
     >
-      <ul className="bg-border grid grid-cols-2 gap-px sm:grid-cols-3 lg:grid-cols-5">
+      {/* Two abreast until all five fit in a row, the last of an odd count as wide as two: no cell left empty. */}
+      <ul className="bg-border grid grid-cols-2 gap-px lg:grid-cols-5">
         {healthOf(view).map((signal) => {
           const name = areaWords[signal.area];
           const level = levelOf(signal, held);
           const line = lineOf(signal, view, held);
           return (
-            <li className="bg-card min-w-0" key={signal.area}>
+            <li
+              className="bg-card min-w-0 max-lg:last:odd:col-span-2"
+              key={signal.area}
+            >
               <Link
                 aria-label={`${name}: ${levelWords[level]}. ${line}`}
                 className="hover:bg-muted/60 focus-visible:ring-ring/50 flex h-full w-full flex-col gap-1 px-4 py-3 outline-none focus-visible:ring-3"

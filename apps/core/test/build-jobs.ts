@@ -1,5 +1,4 @@
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
@@ -7,9 +6,10 @@ import { z } from "zod";
 
 import { chatOf, openTestRun, transcript } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import type { Idp } from "./idp.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The chat, the App and the ways the build jobs tests (build-job-*.test.ts)
@@ -30,24 +30,6 @@ export default function Desk() {
 }
 `;
 
-/** A workflow of the draft, with its tests: what a check keeps. */
-export const intake = {
-  "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("intake", { params: {}, input: z.unknown() }, async (step, { input }) => {
-  return await step.do("read", { description: "Read the invoice" }, async () => input as Json);
-});
-`,
-  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./intake.ts";
-
-export default workflowTests(definition, [
-  { name: "runs", mocks: { read: 1 }, expect: {} },
-]);
-`,
-};
-
 /** The screen with its button restyled, which @shadcn/lint refuses. */
 export const restyled = desk.replace(
   '<Button variant="outline">',
@@ -67,7 +49,7 @@ export const returned = (text: string | undefined): unknown =>
 /** Creates the App, writes a draft that passes, and submits its proposal. */
 export const submitProposal = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk, ...intake })});
+  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
   return await env.build.submit(app.id, { kind: "propose", message: "An invoice desk" });
 };`;
 
@@ -271,19 +253,9 @@ export const jobEvents = async (
 export const queuedForClient =
   /"status":\s*"queued",\s*"waitingFor":\s*"client"/u;
 
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/** The generation of the next policy a test sets: each higher than before. */
-let generations = 500;
-
-/** Sets the operator's policy to the deployment's, with `limits` lowered. */
+/** Sets the quota limits to the deployment's, with `limits` lowered. */
 export const policyWith = (limits: Record<string, number>): void => {
-  generations += 1;
-  env.QUOTA_LIMITS = {
-    generation: generations,
-    limits: { ...configuredLimits, ...limits },
-  };
+  env.TEST_QUOTA_LIMITS = { ...configuredLimits, ...limits };
 };
 
 /** What the tests do as people of `idp`'s organization. */
@@ -292,7 +264,7 @@ export const buildJobsOf = (idp: Idp) => {
    * A builder's chat answered by `replies`, with an App released so the
    * Apps collection is there, and the agent allowed to build Apps.
    */
-  const setUp = async (replies: GatewayReply[]) => {
+  const setUp = async (replies: ProviderReply[]) => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const { id: existing } = await builder.api.apps.create({ name: "Ledger" });

@@ -278,6 +278,7 @@ const Topics = ({
 export const RequestTable = ({
   page,
   place,
+  team,
   needs,
   busy,
   onPerPerson,
@@ -285,7 +286,9 @@ export const RequestTable = ({
   onChanged,
 }: {
   page: RequestsPage;
+  /** The page's filters, which the panels its rows open keep. */
   place: string | null;
+  team: string | null;
   /** Undefined while they are read: they are read apart from the report. */
   needs: Need[] | null | undefined;
   busy: boolean;
@@ -360,8 +363,8 @@ export const RequestTable = ({
         </TabsContent>
         <TabsContent value="teams">
           <RequestTeams
-            onOpen={(team) => {
-              open({ kind: "team", id: team });
+            onOpen={(teamId) => {
+              open({ kind: "team", id: teamId });
             }}
             page={page}
           />
@@ -387,14 +390,15 @@ export const RequestTable = ({
         onOnlyTeam={
           onOnlyTeam === null
             ? null
-            : (team) => {
+            : (teamId) => {
                 setTrail([]);
-                onOnlyTeam(team);
+                onOnlyTeam(teamId);
               }
         }
         onTrail={setTrail}
         place={place}
         range={page.range}
+        team={team}
         trail={trail}
       />
     </Card>

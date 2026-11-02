@@ -23,8 +23,20 @@ import {
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
-import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import type { Release } from "./app-releases.ts";
 import {
@@ -224,6 +236,11 @@ const publicStatus = {
   cancelled: "cancelled",
 } as const;
 
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationCauseSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+});
+
 /** The row statuses each public status is, for a status filter. */
 const rowStatuses: Readonly<Record<string, readonly string[]>> = {
   queued: ["starting"],
@@ -233,7 +250,7 @@ const rowStatuses: Readonly<Record<string, readonly string[]>> = {
   cancelled: ["cancelled"],
   waiting: [],
   paused: ["paused"],
-  compensating: [],
+  compensating: ["running"],
 };
 
 /** The most runs one page holds, and its size unless a page says. */
@@ -344,7 +361,7 @@ const followable = async (
           row.originAppVersion !== null &&
           origins.has(row.originAppVersion) &&
           (appRestricted || !returnedRestricted(row)) &&
-          !(row.status === "completed" && detailsRemoved(env, row))
+          !(row.status === "completed" && detailsRemoved(row))
       )
       .map((row) => row.id)
   );
@@ -357,6 +374,8 @@ interface RunsRow {
   readonly version: number;
   readonly manifestHash: string;
   readonly status: keyof typeof publicStatus;
+  /** Why it compensates while the engine rolls it back (resource-runs.ts). */
+  readonly compensation: string | null;
   readonly createdAt: Date;
   readonly endedAt: Date | null;
   readonly restricted: boolean;
@@ -391,6 +410,7 @@ const runsPage = async (
       version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
       status: workflowResourceRuns.status,
+      compensation: workflowResourceRuns.compensation,
       createdAt: workflowResourceRuns.createdAt,
       endedAt: workflowResourceRuns.endedAt,
       restricted: workflowResourceRuns.restricted,
@@ -409,6 +429,14 @@ const runsPage = async (
         eq(workflowStartReceipts.invokerId, caller.app),
         eq(workflowStartReceipts.principalId, caller.userId),
         eq(workflowResourceRuns.principalId, caller.userId),
+        // Running and compensating apart: a running row compensates once
+        // the engine rolls it back (resource-runs.ts).
+        ...(options.status === "running"
+          ? [isNull(workflowResourceRuns.compensation)]
+          : []),
+        ...(options.status === "compensating"
+          ? [isNotNull(workflowResourceRuns.compensation)]
+          : []),
         ...(statuses === undefined
           ? []
           : [
@@ -445,6 +473,10 @@ const runsPage = async (
   const watchable = await followable(env, caller, from, shown);
   const items: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
+    const compensation =
+      row.status === "running" && row.compensation !== null
+        ? compensationCauseSchema.safeParse(JSON.parse(row.compensation)).data
+        : undefined;
     return {
       run: {
         runId: row.id,
@@ -452,7 +484,14 @@ const runsPage = async (
         workflowVersion: row.version,
         manifestHash: row.manifestHash,
       },
-      status,
+      ...(compensation === undefined
+        ? { status }
+        : {
+            // Its cause and its cleanup's activity (spec 10.7.2, 10.7.3).
+            status: "compensating",
+            cause: compensation.cause,
+            activity: "running",
+          }),
       // Admitted is when it was started; a queued run hasn't begun.
       startedAt: status === "queued" ? null : row.createdAt.getTime(),
       finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
@@ -680,7 +719,7 @@ const historyPage = async (
   // Read only once the run is the caller's: a cursor tells nothing of a
   // run they can't read.
   const after = sequenceOf(cursor);
-  if (detailsRemoved(env, run) || query.pinned === undefined) {
+  if (detailsRemoved(run) || query.pinned === undefined) {
     return nothing;
   }
   const declared = await declaredTasks(env, query.pinned, run.manifestHash);

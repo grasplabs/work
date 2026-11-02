@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { organizations } from "../db/core/schema.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { Took } from "./store.ts";
 
 // A team's map, drawn from what its lead agreed to (GRA-365): what the team
@@ -190,11 +190,6 @@ export const companyName = async (env: Env): Promise<string> => {
   return row?.name ?? "";
 };
 
-/** Thrown when there is no model the deployment allows to draw with. */
-export class NoDrawingModelError extends Error {
-  override name = "NoDrawingModelError";
-}
-
 /**
  * Draws a team's map through the model gateway: the deployment's careful
  * model, by the system, for `onboarding.drawing`. `count` is told what it
@@ -205,12 +200,7 @@ export const drawTeamMap = async (
   brief: TeamBrief,
   count: (took: Took) => void
 ): Promise<TeamMap> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw new NoDrawingModelError("No model may draw the team's map.");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.drawing",

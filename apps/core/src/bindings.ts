@@ -5,8 +5,9 @@ import type {
 } from "@grasp-os/shared/capability";
 import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
-import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import type { PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { bindingNameSchema } from "@grasp-os/shared/permissions";
 import type {
@@ -324,7 +325,8 @@ export const runStubCall = async (
   env: Env,
   authority: StubAuthority,
   grant: ConnectionGrant,
-  call: unknown[]
+  call: unknown[],
+  files?: AttachmentBytes
 ): Promise<ConnectResult> => {
   const { request, stillAllowed, stamping } = await signedStub(
     env,
@@ -342,7 +344,12 @@ export const runStubCall = async (
         ? request
         : { ...request, ...(await stampedMail(env, stamping, request)) };
     await stillAllowed?.();
-    return await env.CONNECT.call(sent);
+    // The bytes of the files the call attaches (GRA-887) come from core's
+    // workflow host alone, as a parameter here: no stub's `call` options
+    // can carry them, so App and agent code attach nothing of its own.
+    return await env.CONNECT.call(
+      files === undefined ? sent : { ...sent, attachments: files }
+    );
   } catch (error) {
     throw forSandbox(error);
   }
@@ -416,25 +423,6 @@ export const connectionGrantOf =
     object.type === "connection"
       ? { context, permissionId: id, connection: object }
       : undefined;
-
-/**
- * A permission on another App's exports, as a stub holds it (app-calls.ts).
- * An App's calls of another App keep the calling App's restricted mode,
- * so it needs no context of its own.
- */
-export interface ExportGrant {
-  /** The permission the stub was built from: only it counts on each call. */
-  permissionId: PermissionId;
-  /** The App whose exports it calls. */
-  app: AppId;
-}
-
-/** A permission on another App's exports as its grant; nothing for any other. */
-export const exportGrantOf = ({
-  id,
-  object,
-}: Permission): ExportGrant | undefined =>
-  object.type === "app" ? { permissionId: id, app: object.appId } : undefined;
 
 /** A collection permission as its grant in `context`; nothing for any other. */
 export const collectionGrantOf =

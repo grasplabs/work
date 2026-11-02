@@ -12,9 +12,9 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { intake } from "./onboarding-team.ts";
 import type { PartJudge } from "./onboarding-team.ts";
 import {
@@ -31,8 +31,8 @@ import {
 // What needs the company's admin at the end of the onboarding
 // (src/onboarding/store.ts, `review` and `settle`, over `/rpc`): a step of
 // a piece of work its people told two ways, when nobody could say why. The
-// admin keeps both ways or says which holds. AI Gateway, which draws the
-// work, is the outside system, faked behind the AI binding. The ways it
+// admin keeps both ways or says which holds. The model provider, which
+// draws the work, is the outside system, faked behind connect. The ways it
 // can fail, tried here:
 //
 // - The admin told who said which way, or anyone's name.
@@ -164,7 +164,7 @@ const agree = async (
   return savedVersion;
 };
 
-const reply = (value: unknown): GatewayReply => ({
+const reply = (value: unknown): ProviderReply => ({
   text: JSON.stringify(value),
   inputTokens: 100,
   outputTokens: 10,
@@ -175,7 +175,7 @@ const sheetWay = "I look the customer up in the client sheet.";
 const salesforceWay = "I look the customer up in Salesforce.";
 
 /** Tickets as drawn: the first five look the customer up one way, the other five another, as Max says, and nobody could say why. */
-const ticketsReply = (ids: Ids): GatewayReply => {
+const ticketsReply = (ids: Ids): ProviderReply => {
   const [p0, p1, p2, p3, p4, p5, p6, p7, p8, p9] = ids.doers;
   return reply({
     steps: [

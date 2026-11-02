@@ -185,6 +185,31 @@ describe("waits raced or awaited together", () => {
     expect(effectsOf(id, "slow")).toHaveLength(1);
   });
 
+  it("wake for a matching event accepted while the activation still ran a step, not at the wait's deadline", async () => {
+    const id = newId();
+    const slow = hold(id, "slow");
+    await workflow("listens-for-match").create({ id });
+    await slow.held;
+    // The wait for a match is parked; the activation is still out at "slow".
+    await until("the wait to be journaled", async () => {
+      const { steps } = await journalOf("listens-for-match", id);
+      return steps.some(({ name }) => name === "go") ? true : undefined;
+    });
+    await send("listens-for-match", id, {
+      type: "go",
+      payload: "now",
+      attributes: { subject: "now" },
+    });
+    slow.release();
+
+    const status = await ended("listens-for-match", id);
+
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { payload: "now" },
+    });
+  });
+
   it("resume each of several parked waits from its own deadline after the object is killed", async () => {
     const id = newId();
     await workflow("naps").create({

@@ -4,10 +4,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import {
+  readWorkflowReference,
+  workflowChannel,
+} from "../src/client-workflow.ts";
 import { bindForm } from "../src/form.ts";
 import type { FormApiOf, FormBinding, FormOptionsInput } from "../src/form.ts";
+import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
-import { api } from "./notes/.grasp/references.ts";
+import { api, workflows } from "./notes/.grasp/references.ts";
 
 // A form's submission state through the real session client, against the
 // network it reaches the host through: an outcome it can't tell, given up
@@ -659,6 +664,170 @@ describe("leaving a screen with a form", () => {
       afterSave: [true, false],
       afterEdit: [true, false, true],
       afterReset: [true, false, true, false, true, false],
+    });
+  });
+});
+
+/** The code of the structured error `promise` rejected with, or that it didn't. */
+const refusedWith = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "resolved";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : "not structured";
+  }
+};
+
+/**
+ * A decision form (spec 10.7.2) as an App composes one: a local form of an
+ * explicit approval and the decision's own value schema, whose submit
+ * answers the exact wait through the workflow channel; and what the
+ * page's trusted decision UI was asked, each answer in order.
+ */
+const decisionForm = (
+  page: (answer: unknown) => Promise<unknown>,
+  onSubmitted: () => void = () => {
+    // Counted where a test asks.
+  }
+) => {
+  const asked: unknown[] = [];
+  const client = new GraspClient({
+    call: async () => await Promise.reject(new Error("Nothing is called.")),
+    watch: async () => await Promise.reject(new Error("Nothing is followed.")),
+    decisions: {
+      respond: async (run, decision, answer) => {
+        asked.push({ run, decision, answer });
+        return await page(answer);
+      },
+    },
+  });
+  const read = readWorkflowReference(workflows.summarizeNote);
+  const wait = {
+    kind: "decision",
+    id: "decision-1",
+    taskId: "review",
+    key: "approveSummary",
+    title: "review",
+    openedAt: 1000,
+    deadline: null,
+    canRespond: true,
+  };
+  const responseSchema = v.object({
+    approved: v.boolean(),
+    value: workflows.summarizeNote.decisions.approveSummary.valueSchema,
+  });
+  const { binding, form } = formOf(client, responseSchema, {
+    defaultValues: { approved: false, value: { comment: "" } },
+    onSubmit: async (response: unknown) => {
+      onSubmitted();
+      await workflowChannel(client).respond(read, "run-1", wait, response);
+    },
+  });
+  return { binding, form, asked };
+};
+
+describe("a decision form", () => {
+  it("keeps an answer whose outcome is lost, locked, and sends exactly it again, never asking its callback again", async () => {
+    let calls = 0;
+    let pages = 0;
+    const { binding, form, asked } = decisionForm(
+      async () => {
+        pages += 1;
+        if (pages === 1) {
+          throw new Error("The connection was reset.");
+        }
+        return await Promise.resolve({ status: "approved" });
+      },
+      () => {
+        calls += 1;
+      }
+    );
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    const lost = await refusedWith(binding.submit());
+    const whileUnknown = binding.status();
+    await binding.submit();
+
+    expect({
+      lost,
+      whileUnknown: {
+        phase: whileUnknown.phase,
+        locked: whileUnknown.locked,
+      },
+      after: binding.status().phase,
+      // The callback ran once: the second answer is the first, as it went.
+      calls,
+      asked,
+    }).toStrictEqual({
+      lost: "decision.outcome_unknown",
+      whileUnknown: { phase: "uncertain", locked: true },
+      after: "idle",
+      calls: 1,
+      asked: Array.from({ length: 2 }, () => ({
+        run: "run-1",
+        decision: "decision-1",
+        answer: { approved: true, payload: { comment: "Fine" } },
+      })),
+    });
+  });
+
+  it("unlocks once an answer sent again finds its decision closed, which it shows, sending nothing more", async () => {
+    let pages = 0;
+    const { binding, form, asked } = decisionForm(async () => {
+      pages += 1;
+      await Promise.resolve();
+      if (pages === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // Answered by someone else, or past its deadline, meanwhile.
+      throw Object.assign(new Error("Closed."), { code: "decision.closed" });
+    });
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    await refusedWith(binding.submit());
+    const closed = await refusedWith(binding.submit());
+    const status = binding.status();
+
+    expect({
+      closed,
+      status: {
+        phase: status.phase,
+        locked: status.locked,
+        failure: status.failure?.code,
+      },
+      asked: asked.length,
+    }).toStrictEqual({
+      closed: "decision.closed",
+      // A definite end: no answer left to send again.
+      status: { phase: "idle", locked: false, failure: "decision.closed" },
+      asked: 2,
+    });
+  });
+
+  it("keeps the draft when the person cancels the page's confirmation, recording nothing", async () => {
+    const { binding, form, asked } = decisionForm(async () => {
+      await Promise.resolve();
+      throw Object.assign(new Error("Cancelled."), {
+        code: "decision.cancelled",
+      });
+    });
+    form.setFieldValue("approved", true);
+    form.setFieldValue("value", { comment: "Fine" });
+    const cancelled = await refusedWith(binding.submit());
+
+    expect({
+      cancelled,
+      status: {
+        phase: binding.status().phase,
+        locked: binding.status().locked,
+      },
+      draft: form.state.values,
+      asked: asked.length,
+    }).toStrictEqual({
+      cancelled: "decision.cancelled",
+      status: { phase: "idle", locked: false },
+      draft: { approved: true, value: { comment: "Fine" } },
+      asked: 1,
     });
   });
 });

@@ -1,5 +1,10 @@
 import { jsonSchemaOf } from "@grasp-os/sdk/host";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  attachmentRefsSchema,
+  attachmentsProperty,
+} from "@grasp-os/shared/connector-attachments";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -7,12 +12,19 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { runFileIdSchema } from "@grasp-os/shared/run-files";
+import {
+  runFileErrors,
+  runFileIdSchema,
+  runFileLimits,
+  runFileNameSchema,
+  runFileTypeOf,
+  isZip,
+} from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -26,6 +38,7 @@ import {
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
+import { officeTypeOf } from "./office-files.ts";
 import {
   requireCallAuthority,
   runAuthority,
@@ -43,8 +56,13 @@ import {
   requireResourceRunEvidenceReadable,
 } from "./resource-reads.ts";
 import type { KnowledgeCall } from "./resource-reads.ts";
-import { callFiles, requireFilesArguments } from "./run-files.ts";
-import type { FilesCallOperation } from "./run-files.ts";
+import {
+  attachRunFiles,
+  callFiles,
+  keepFile,
+  requireFilesArguments,
+} from "./run-files.ts";
+import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -90,10 +108,24 @@ import type { FilesCallOperation } from "./run-files.ts";
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
-//   decision, resource-host.ts); its model calls are judged as restricted
-//   by the gateway's data rules; and the App owning a store it calls an
+//   decision, resource-host.ts); and the App owning a store it calls an
 //   operation of is restricted before the input reaches it, audited with
 //   the run as provenance (`callApprovedStoreOperation`).
+// - A run's files leaving through a connector write (GRA-887). A write
+//   attaches files only where the operation's sealed contract records it
+//   takes them (`takesFiles`, which its approval compared with what the
+//   connection serves), only from a files use the action declared to read
+//   (`from`, through that binding's own authority), and only files of the
+//   calling run, looked up by their ID and the run's (`attachRunFiles`):
+//   another run's, or one deleted or unfinished, is refused. At most ten
+//   files and 2.75 MiB of them, each named once, checked from core's
+//   records before a byte is read. The action gives IDs and nothing else:
+//   the name, type, size and SHA-256 connect is sent come from core's own
+//   record, the bytes go beside the input and are checked against its
+//   digests by connect and again by the connector, and none is kept
+//   (a held write keeps the digests only; its release reads the files
+//   again, pending-actions.ts). The call's receipts list each file's ID,
+//   type, size and digest, never its name or content.
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -133,6 +165,17 @@ export type BuiltCall =
       readonly arguments: Json;
       /** The values of the binding arguments the host put in. */
       readonly sensitive: readonly Json[];
+      /**
+       * The files binding a read that answers a file keeps it in, as a
+       * file of the run (GRA-886): asked by an action that declared that
+       * files use, to write.
+       */
+      readonly into?: string;
+      /**
+       * The files binding a write's attachments are run files of (GRA-887):
+       * asked by an action that declared that files use, to read.
+       */
+      readonly from?: string;
     }
   | {
       readonly name: "grasp.model";
@@ -298,6 +341,206 @@ const workflowPermission = async (env: Env, run: CallingRun, id: string) => {
   return row;
 };
 
+/** A read that answers a file's own fields, as connector-kit's `contentAs` makes them. */
+const fileAnswerSchema = z
+  .object({
+    name: z.string().nullable(),
+    contentType: z.string().nullable(),
+    encoding: z.literal("base64"),
+    content: z.string(),
+  })
+  .catchall(z.json());
+
+/** The most base64 text a run file's bytes take. */
+const fileContentMaxChars = Math.ceil(runFileLimits.fileBytes / 3) * 4;
+
+/**
+ * A file read's answer as its base64 content, at most a run file's worth,
+ * and the rest of it: the content is checked against the contract's shape
+ * as an empty string, so the step's bound applies to the rest alone.
+ */
+const fileContentOf = (
+  output: unknown
+): { content: string; rest: Record<string, unknown> } => {
+  const read = z
+    .object({ content: z.string().max(fileContentMaxChars) })
+    .catchall(z.unknown())
+    .safeParse(output);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, ...rest } = read.data;
+  return { content, rest };
+};
+
+/**
+ * `input` of a read an action asked to have as a file: refused unless the
+ * operation answers one as its sealed contract records it (`answersFile`,
+ * which only a native connector's confirmed operation may, and which its
+ * approval compared with what the connection serves), and asked for as
+ * base64.
+ */
+const asFileRead = (operation: { answersFile?: true }, input: Json): Json => {
+  const fields = z.record(z.string(), z.json()).safeParse(input);
+  if (operation.answersFile !== true || !fields.success) {
+    throw callInvalid("into: This operation doesn't answer a file.");
+  }
+  if (fields.data.as !== undefined && fields.data.as !== "base64") {
+    throw callInvalid("arguments.as: A file is read as base64.");
+  }
+  return { ...fields.data, as: "base64" };
+};
+
+/** How a kept file is named when the name it came with can't be a run file's. */
+const unnamedFile = "attachment";
+
+/**
+ * `answer`, a read that answers a file, with its bytes kept as a file of
+ * the calling run (`keepFile`) and named in place of its content: its
+ * type shown by its bytes (`runFileTypeOf`, or for a ZIP its package's
+ * content types, `officeTypeOf`), never the label it came
+ * with; its name only if a run file's may be it. What the call's receipt
+ * says of the file: its ID, type, size and SHA-256, never its name.
+ */
+const keptAsFile = async (
+  env: Env,
+  run: CallingRun,
+  effect: Effect,
+  answer: Json
+): Promise<FilesAnswer> => {
+  const read = fileAnswerSchema.safeParse(answer);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, contentType } = read.data;
+  // Its other fields as they are; its content and encoding become the file.
+  const rest = Object.fromEntries(
+    Object.entries(read.data).filter(
+      ([key]) => key !== "content" && key !== "encoding"
+    )
+  );
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(content), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    throw callInvalid("output: Its content isn't base64.");
+  }
+  // A ZIP is a Word or Excel document only by what its package declares.
+  const type = isZip(bytes)
+    ? await officeTypeOf(bytes)
+    : runFileTypeOf(bytes, contentType);
+  if (type === undefined) {
+    throw runFileErrors.create("file.run_type_unsupported");
+  }
+  const named = runFileNameSchema.safeParse(read.data.name);
+  const kept = await keepFile(
+    env,
+    {
+      runId: run.runId,
+      workflowId: run.workflowId,
+      effectKey: effect.key,
+      requireHolds: effect.requireHolds,
+    },
+    { name: named.success ? named.data : unnamedFile, type, bytes }
+  );
+  return {
+    output: { ...rest, file: kept.output },
+    detail: kept.detail,
+  };
+};
+
+/** What a write's attachments become on their way to connect. */
+interface Attached {
+  /** The call's input, its `attachments` as digests (`AttachmentEntry`). */
+  readonly input: Json;
+  /** The files' bytes beside it, by SHA-256; none if it attaches nothing. */
+  readonly files: AttachmentBytes | undefined;
+  /** What the call's receipt says of them: IDs, types, sizes, digests. */
+  readonly detail: Readonly<Record<string, string | number>>;
+}
+
+/**
+ * `input` of a write as connect is sent it (GRA-887): refused unless it
+ * attaches files only where its sealed contract records the operation
+ * takes them (`takesFiles`, which only a native connector's confirmed
+ * operation may, and which its approval compared with what the connection
+ * serves) and from a files use the action named (`from`); then its run
+ * files named by ID become digests and bytes (`attachRunFiles`).
+ */
+const attachedTo = async (
+  env: Env,
+  run: CallingRun,
+  operation: { takesFiles?: true },
+  call: Extract<BuiltCall, { name: "grasp.connector" }>,
+  input: Json
+): Promise<Attached> => {
+  const takes = operation.takesFiles === true;
+  if (call.from !== undefined && !takes) {
+    throw callInvalid("from: This operation attaches no files.");
+  }
+  const fields = z.record(z.string(), z.json()).safeParse(input);
+  // Never passed on to an operation that takes no files, whatever its own
+  // schema allows: run files leave only where the contract says they may.
+  if (
+    !takes &&
+    fields.success &&
+    Object.hasOwn(fields.data, attachmentsProperty)
+  ) {
+    throw callInvalid(
+      "arguments.attachments: This operation attaches no files."
+    );
+  }
+  const named =
+    takes && fields.success && Object.hasOwn(fields.data, attachmentsProperty)
+      ? attachmentRefsSchema.safeParse(fields.data[attachmentsProperty])
+      : undefined;
+  if (named === undefined || !fields.success) {
+    return { input, files: undefined, detail: {} };
+  }
+  if (!named.success) {
+    throw callInvalid("arguments.attachments: Name run files by ID.");
+  }
+  if (named.data.length > 0 && call.from === undefined) {
+    throw callInvalid(
+      "arguments.attachments: Name the files use they come from."
+    );
+  }
+  const attached = await attachRunFiles(
+    env,
+    { runId: run.runId },
+    named.data.map(({ file }) => file)
+  );
+  return {
+    input: { ...fields.data, [attachmentsProperty]: attached.entries },
+    files: attached.bytes,
+    detail: attached.detail,
+  };
+};
+
+/**
+ * Refuses (`workflow.call_denied`) a connector call that names a files
+ * binding (`aliases`: where a read is kept, where a write's attachments
+ * are read from) unless the run's start froze that alias as a files
+ * binding and its authority holds now, as the files call it stands for
+ * would (GRA-886, GRA-887).
+ */
+const requireFilesBindings = async (
+  env: Env,
+  run: CallingRun,
+  aliases: readonly (string | undefined)[]
+): Promise<void> => {
+  for (const alias of aliases) {
+    if (alias !== undefined) {
+      const files = run.bindings.get(alias);
+      if (files?.kind !== "files") {
+        throw workflowResourceErrors.create("workflow.call_denied");
+      }
+      // oxlint-disable-next-line no-await-in-loop -- at most two, each decided in turn
+      await requireCallAuthority(env, run, files);
+    }
+  }
+};
+
 /**
  * Calls connector action `operation` through `binding`'s connection
  * permission, with `args` (binding arguments in), under the effect's key,
@@ -308,8 +551,9 @@ const callConnector = async (
   run: CallingRun,
   binding: FrozenCatalogBinding,
   call: Extract<BuiltCall, { name: "grasp.connector" }>,
-  effect: Effect
-): Promise<Json> => {
+  effect: Effect,
+  onFiles: (detail: Readonly<Record<string, string | number>>) => void
+): Promise<FilesAnswer> => {
   const { target } = binding;
   if (target.kind !== "connector") {
     throw workflowResourceErrors.create("workflow.call_denied");
@@ -321,11 +565,21 @@ const callConnector = async (
   if (shape === undefined) {
     throw callInvalid("operation: The contract has no such operation.");
   }
-  const input = requireShape(shape.input, call.arguments, "arguments");
+  const asked = requireShape(shape.input, call.arguments, "arguments");
   const row = await workflowPermission(env, run, target.permissionId);
   if (row.objectType !== "connection") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
+  // Kept as a file of the run: only of a read its connector declares
+  // answers a file, which it is asked for as base64, the bytes as they are.
+  const read = call.into === undefined ? asked : asFileRead(shape, asked);
+  // Files attached: only to a write its connector declares takes them, as
+  // its sealed contract records it, from a files use the action declared;
+  // each a finished file of this run, named by ID, whose name, type, size
+  // and digest are core's own and whose bytes go beside the input.
+  const attached = await attachedTo(env, run, shape, call, read);
+  onFiles(attached.detail);
+  const { input } = attached;
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -342,6 +596,8 @@ const callConnector = async (
         // authority again, then its attempt, nothing awaited after.
         stillAllowed: async () => {
           await requireCallAuthority(env, run, binding);
+          // And the files uses it keeps a read in or attaches files from.
+          await requireFilesBindings(env, run, [call.into, call.from]);
           effect.requireHolds();
         },
         // Its mail is stamped with the run (mail-stamps.ts), so a copy
@@ -351,7 +607,10 @@ const callConnector = async (
       };
     },
     {
-      context: runContext(run),
+      // A write that attaches files names the files use they come from,
+      // so a held one's release decides that use's authority again
+      // (pending-actions.ts).
+      context: runContext(run, call.from),
       permissionId: permissionIdSchema.parse(target.permissionId),
       connection: {
         type: "connection",
@@ -359,7 +618,8 @@ const callConnector = async (
         ...(row.resource === null ? {} : { resource: row.resource }),
       },
     },
-    [call.operation, input, { idempotencyKey: effect.key }]
+    [call.operation, input, { idempotencyKey: effect.key }],
+    attached.files
   );
   if (result.pending !== undefined) {
     // Connect answers a workflow's held side effect (a restricted run's)
@@ -373,14 +633,29 @@ const callConnector = async (
   } catch {
     throw callInvalid("output: Not JSON.");
   }
-  const answer = requireShape(shape.output, output, "output");
+  // A file's content becomes the run's file, never the step's record: it
+  // is bound by a run file's size, the rest of the answer by a step's.
+  const content = call.into === undefined ? undefined : fileContentOf(output);
+  const answer = requireShape(
+    shape.output,
+    content === undefined ? output : { ...content.rest, content: "" },
+    "output"
+  );
   // An answer that echoes a binding argument would put its sensitive
   // value in the step's record, and on into the run: refused, never
   // redacted, so nothing of it is recorded.
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
-  return answer;
+  if (content === undefined) {
+    return { output: answer, detail: {} };
+  }
+  // The shape took the rest as it is: its content back in its place.
+  const fields = z.record(z.string(), z.json()).parse(answer);
+  return await keptAsFile(env, run, effect, {
+    ...fields,
+    content: content.content,
+  });
 };
 
 /**
@@ -458,26 +733,6 @@ const callOperation = async (
   return await callStoreOperation(env, run, binding, call, effect);
 };
 
-/** The connections the run's connector bindings reach, for the model rules. */
-const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
-  const ids = [...run.bindings.values()].flatMap(({ target }) =>
-    target.kind === "connector" ? [target.permissionId] : []
-  );
-  if (ids.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB)
-    .select({ objectId: permissions.objectId })
-    .from(permissions)
-    .where(
-      and(
-        inArray(permissions.id, ids),
-        eq(permissions.objectType, "connection")
-      )
-    );
-  return [...new Set(rows.map(({ objectId }) => objectId))];
-};
-
 /**
  * What model call `call` asks for, checked as every model call is, a test
  * run's included: its instructions as text, and a whole number above 0 of
@@ -549,8 +804,6 @@ const callModel = async (
       // `maxModelCalls` allows (run-children.ts). Its spend counts against
       // its workflow's budget too.
       lineage: { rootRunId: run.rootRunId, workflowId: run.workflowId },
-      runStep: { runId: run.runId, step: task },
-      connections: await connectionsOf(env, run),
       work: { authority: runAuthority(run), context: runContext(run) },
       // Once the ledger admitted each provider request, the run's authority
       // decided again (it may have gone while the request waited), then its
@@ -757,6 +1010,47 @@ const candidateAnswer = async (
 };
 
 /**
+ * Refuses `call` of `run` through `binding` unless it may go now, before
+ * anything is sent: a connector call from an action of a restricted run
+ * (connect would hold it for a decision no action waits for), and any
+ * call whose authority isn't decided again (`requireCallAuthority`) or
+ * that hands out what the run may no longer read (`handsOut`), a
+ * connector call's files bindings too (`requireFilesBindings`).
+ */
+const requireCallAllowed = async (
+  env: Env,
+  run: CallingRun,
+  binding: FrozenCatalogBinding,
+  call: BuiltCall,
+  effect: Effect
+): Promise<void> => {
+  if (
+    effect.fromAction === true &&
+    run.restricted &&
+    call.name === "grasp.connector"
+  ) {
+    throw workflowResourceErrors.create("workflow.action_restricted");
+  }
+  await requireCallAuthority(env, run, binding);
+  // What the run recalled leaves with a connector call, a store operation
+  // or a model call, and with a file it writes: a file's name and its
+  // bytes are shown outside the run once it's finished (run-files.ts), so
+  // opening, appending to and finishing one are gated too. Not once the
+  // run may no longer read it (resource-reads.ts), refused with its
+  // receipt kept as `brain.revoked`. Reading, listing or deleting its own
+  // files hands nothing out.
+  if (handsOut(call)) {
+    await requireResourceRunEvidenceReadable(env, run);
+  }
+  // A read kept as a file needs the files binding it goes into, and a
+  // write that attaches files the one they come from (GRA-887), each with
+  // its authority now, as the files call it stands for would (GRA-886).
+  if (call.name === "grasp.connector") {
+    await requireFilesBindings(env, run, [call.into, call.from]);
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again
@@ -825,36 +1119,29 @@ export const makeCall = async (
   };
   let output: Json;
   try {
-    // Refused before anything is decided or sent, and kept as the call's
-    // receipt: connect would hold it for a decision no action waits for.
-    if (
-      effect.fromAction === true &&
-      run.restricted &&
-      call.name === "grasp.connector"
-    ) {
-      throw workflowResourceErrors.create("workflow.action_restricted");
-    }
     if (call.name === "grasp.files") {
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
-    await requireCallAuthority(env, run, binding);
-    // What the run recalled leaves with a connector call, a store
-    // operation or a model call, and with a file it writes: a file's name
-    // and its bytes are shown outside the run once it's finished
-    // (run-files.ts), so opening, appending to and finishing one are
-    // gated too. Not once the run may no longer read it
-    // (resource-reads.ts), refused with its receipt kept as
-    // `brain.revoked`. Reading, listing or deleting its own files hands
-    // nothing out.
-    if (handsOut(call)) {
-      await requireResourceRunEvidenceReadable(env, run);
-    }
+    await requireCallAllowed(env, run, binding, call, effect);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
     switch (call.name) {
       case "grasp.connector": {
-        output = await callConnector(env, run, binding, call, effect);
+        const answer = await callConnector(
+          env,
+          run,
+          binding,
+          call,
+          effect,
+          // Said of the files a write attaches as soon as they are chosen,
+          // so even a call that fails after leaves them in its receipt.
+          (detail) => {
+            fileDetail = { ...fileDetail, ...detail };
+          }
+        );
+        fileDetail = { ...fileDetail, ...answer.detail };
+        ({ output } = answer);
         break;
       }
       case "grasp.operation": {

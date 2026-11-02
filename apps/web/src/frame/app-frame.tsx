@@ -5,10 +5,12 @@ import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
 import { TourLayer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
+import { AiKeyBanner } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 
@@ -58,6 +60,15 @@ export const AppFrame = ({
         >
           <AppSidebar core={core} identity={identity} />
           <SidebarInset className="min-h-0 min-w-0 overflow-x-clip overflow-y-auto">
+            <AiKeyBanner
+              identity={identity}
+              providers={async () =>
+                await readWithin(
+                  core,
+                  async (session) => await session.aiProviders.list()
+                )
+              }
+            />
             <InFrame value>{children}</InFrame>
           </SidebarInset>
           {aside}

@@ -6,14 +6,11 @@
  * `watched()`), which register its hooks, and its own company with
  * `companyOnce`.
  */
-import { env } from "cloudflare:workers";
-import { afterEach, beforeEach, vi } from "vite-plus/test";
+import { beforeEach, vi } from "vite-plus/test";
 
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { model, pointAtGateway } from "./agent-chat.ts";
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayRequest } from "./ai-gateway.ts";
+import { doorClock } from "../src/channels/door.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
+import { model } from "./agent-chat.ts";
 import {
   grantCollection,
   setUpBrainCompany,
@@ -44,6 +41,8 @@ import type {
   ProbeTarget,
 } from "./fixtures/permission-probes.ts";
 import type { Idp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { SentRequest } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 import {
@@ -127,9 +126,9 @@ interface Probing {
  * The model behind every Workspace in a file's company: for the probing
  * under way, it runs the probing code once, then refuses.
  */
-const prober = () => {
+const prober = async () => {
   let current: Probing = { queries: [], ids: [] };
-  const gateway = answeringGateway((requests) => {
+  const provider = await answeringProvider((requests) => {
     const body = requests.at(-1)?.body;
     const input = modelStrings(body).join("\n");
     return resultsSinceQuestion(body).length === 0
@@ -137,7 +136,7 @@ const prober = () => {
       : says(refusal, input);
   });
   return {
-    gateway,
+    provider,
     probing: (next: Probing) => {
       current = next;
     },
@@ -149,7 +148,7 @@ const prober = () => {
  * prompt, what the person said and what tools returned, never the
  * model's own code or words.
  */
-export const sentSince = (requests: readonly GatewayRequest[], from: number) =>
+export const sentSince = (requests: readonly SentRequest[], from: number) =>
   requests
     .slice(from)
     .flatMap(({ body }) => transcriptOf(body))
@@ -162,36 +161,33 @@ export const leaksIn = (text: string, forbidden: readonly string[]): string[] =>
   forbidden.filter((secret) => text.includes(secret));
 
 /**
- * The door's limit is per sender: each message a little later than the
- * last, so a person's sixty probes in a row are each taken. The whole
- * clock moves (`Date` and `Date.now`), so what Teams signs and what the
- * door checks agree. The files that share a worker share this module
- * (and so `clockAhead`), which only ever moves on: each file's clock is
- * as far ahead as the files before it left it, never back.
+ * The door's limit is per sender (src/channels/door.ts): one message
+ * every three seconds once ten went at once. Each message comes a little
+ * later than the last by the door's own clock (`doorClock`), so a
+ * person's sixty probes in a row are each taken, without waiting for
+ * them. Only the door's clock moves: the real one also dates the grant
+ * core signs for each model call, which connect checks by its own. The
+ * files that share a worker share this module (and so `doorAhead`),
+ * which only ever moves on, as the door's buckets remember the last.
  */
-let clockAhead = 0;
+let doorAhead = 0;
 export const later = () => {
-  clockAhead += 3100;
-  vi.setSystemTime(Date.now() + 3100);
+  doorAhead += 3100;
 };
 
 /**
- * Runs the clock `clockAhead` ahead in each of a describe's tests, still
- * running: the mock IdP restores every mock after each test.
+ * Runs the door's clock `doorAhead` ahead in each of a describe's tests:
+ * the mock IdP restores every mock after each test.
  */
-export const clockRunsAhead = () => {
+export const doorClockRunsAhead = () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
-    vi.setSystemTime(Date.now() + clockAhead);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
+    vi.spyOn(doorClock, "now").mockImplementation(() => Date.now() + doorAhead);
   });
 };
 
 export interface Company {
   brain: BrainCompany;
-  model: ReturnType<typeof prober>;
+  model: Awaited<ReturnType<typeof prober>>;
   /** Each persona's own Workspace and agent, granted the shared collections. */
   places: Record<BrainPersona, Awaited<ReturnType<typeof workspaceOf>>>;
   /** Each persona on Teams. */
@@ -232,7 +228,7 @@ export const companyOnce = (idp: Idp): (() => Promise<Company>) => {
   return async () => {
     company ??= (async () => {
       const brain = await setUpBrainCompany(idp);
-      const stand = prober();
+      const stand = await prober();
       const places = {
         ana: await workspaceOf(brain, "ana"),
         bram: await workspaceOf(brain, "bram"),
@@ -248,15 +244,6 @@ export const companyOnce = (idp: Idp): (() => Promise<Company>) => {
             key
           );
         }
-      }
-      for (const persona of ["ana", "bram"] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one object at a time
-        await pointAtGateway(places[persona].stub, stand.gateway);
-        // oxlint-disable-next-line no-await-in-loop -- one object at a time
-        await pointAtGateway(
-          workspace(env, personalWorkspaceId(brain.people[persona].userId)),
-          stand.gateway
-        );
       }
       const removed = await signedInApi(idp, "user");
       await brain.admin.api.members.remove(removed.userId);
@@ -332,7 +319,7 @@ export const askedInWorkspace = async (
 ): Promise<ProbeOutcome> => {
   const { model: stand, brain } = place;
   stand.probing(probingFor(probe.target, place));
-  const from = stand.gateway.requests.length;
+  const from = stand.provider.requests.length;
   if (probe.asker === "removed" || probe.asker === "guest") {
     const { stub } = place.places.ana;
     let refusedWith = "";
@@ -352,7 +339,7 @@ export const askedInWorkspace = async (
       id: probe.id,
       leaked: [],
       read:
-        stand.gateway.requests.length > from ||
+        stand.provider.requests.length > from ||
         events.some(({ action }) => action.startsWith("knowledge.")),
       refusedWith,
     };
@@ -364,12 +351,12 @@ export const askedInWorkspace = async (
     agent.agentId
   );
   const answer = await stub.ask(chat.id, { text: probe.question, model });
-  const text = `${sentSince(stand.gateway.requests, from)}\n${answer.outcome === "answered" ? answer.answer : ""}`;
+  const text = `${sentSince(stand.provider.requests, from)}\n${answer.outcome === "answered" ? answer.answer : ""}`;
   return {
     id: probe.id,
     leaked: leaksIn(text, forbiddenFor(probe.asker)),
     answered:
-      stand.gateway.requests.length > from && answer.outcome === "answered",
+      stand.provider.requests.length > from && answer.outcome === "answered",
   };
 };
 
@@ -389,7 +376,7 @@ export const askedThroughDoor = async (
 ): Promise<ProbeOutcome> => {
   const { model: stand } = place;
   stand.probing(probingFor(probe.target, place));
-  const from = stand.gateway.requests.length;
+  const from = stand.provider.requests.length;
   const person = onTeams(probe.asker, place);
   const before = await sentCount(person);
   later();
@@ -411,16 +398,16 @@ export const askedThroughDoor = async (
       id: probe.id,
       leaked: [],
       read:
-        stand.gateway.requests.length > from ||
+        stand.provider.requests.length > from ||
         events.some(({ action }) => action.startsWith("knowledge.")),
       refusedWith: `${lines.length} line${lines.length === 1 ? "" : "s"}`,
     };
   }
-  const text = `${sentSince(stand.gateway.requests, from)}\n${posted}`;
+  const text = `${sentSince(stand.provider.requests, from)}\n${posted}`;
   return {
     id: probe.id,
     leaked: leaksIn(text, forbiddenFor(probe.asker)),
-    answered: stand.gateway.requests.length > from && posted.includes(refusal),
+    answered: stand.provider.requests.length > from && posted.includes(refusal),
   };
 };
 

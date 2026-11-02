@@ -1,0 +1,1 @@
+ALTER TABLE `app_versions` ADD `screens` text DEFAULT '[]' NOT NULL;

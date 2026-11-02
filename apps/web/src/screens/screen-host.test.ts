@@ -217,9 +217,6 @@ const linkAsAda = (
   whileResolving: () => void = () => {
     // Nothing happens meanwhile.
   },
-  received: (request: string) => Promise<void> = async () => {
-    await Promise.resolve();
-  },
   /** Core following the App's version for the page (`watchVersion`). */
   watchVersion: (
     app: string,
@@ -244,7 +241,6 @@ const linkAsAda = (
       frame: async (app: string, lease: string) =>
         await Promise.resolve({
           delivery: present,
-          received,
           watchQuery: async (
             request: string,
             onSnapshot: (push: unknown) => Promise<unknown>
@@ -282,7 +278,7 @@ const linkAsAda = (
     },
   };
   // SAFETY: the page reaches only `authenticate`, `whoami`, the frame's
-  // `delivery`, `received`, `watchQuery` and `close`, `watchVersion`,
+  // `delivery`, `watchQuery` and `close`, `watchVersion`,
   // `onRpcBroken` and disposal, which this stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const connection = core as unknown as ReturnType<
@@ -330,7 +326,6 @@ const runningWithDraft = async (
     undefined,
     undefined,
     undefined,
-    undefined,
     async (_app, onVersion) => {
       following.resolve(onVersion);
       return await Promise.resolve({
@@ -362,44 +357,6 @@ const runningWithDraft = async (
   };
   return { target, cleanups, events, pushed };
 };
-
-describe("a running screen's submissions core keeps for recovery", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("are forgotten through the frame's own way to its App once its client has their answer", async () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    const told: string[] = [];
-    const link = linkAsAda(
-      async () => await Promise.resolve("open"),
-      undefined,
-      undefined,
-      undefined,
-      async (request) => {
-        told.push(request);
-        await Promise.resolve();
-      }
-    );
-    const { target } = appScreen(
-      bundle.app,
-      bundle.screen,
-      confirmNothing,
-      confirmNoLink,
-      noNavigation
-    ).connect(
-      link,
-      bundle,
-      () => {
-        // Core never refuses the build here.
-      },
-      []
-    );
-    await target.submissionReceived("request");
-    expect(told).toStrictEqual(["request"]);
-  });
-});
 
 describe("a running screen's drafts once core refuses the person", () => {
   afterEach(() => {
@@ -602,7 +559,6 @@ describe("a running screen as its App's version changes", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       async (_app, onVersion) => {
         pushVersion = onVersion;
         return await Promise.resolve({
@@ -657,7 +613,6 @@ describe("a running screen as its App's version changes", () => {
         undefined,
         undefined,
         undefined,
-        undefined,
         async () => {
           asked += 1;
           if (asked === 1) {
@@ -696,7 +651,6 @@ describe("a running screen as its App's version changes", () => {
     let released = 0;
     const link = linkAsAda(
       async () => await Promise.resolve("open"),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -1017,7 +971,6 @@ describe("a running screen's drafts once core stops its build", () => {
     const link = linkAsAda(
       async () => await Promise.resolve("revoked"),
       async () => await person.promise,
-      undefined,
       undefined,
       undefined,
       async (_app, onVersion) => {

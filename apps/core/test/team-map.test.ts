@@ -12,22 +12,22 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { assignWork, mapOf } from "../src/onboarding/team-map.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
   approveAgreed,
-  careful,
   holdAlarm,
   modelOf,
   participate,
+  quick,
 } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team's map (src/onboarding/team-map.ts and the store's drawing): once
-// a lead agrees to their interview, the careful model draws the team's
-// pieces of work and who does which, and everyone in the team is asked
-// about one. AI Gateway is the outside system, faked behind the AI
-// binding. The ways it can fail, tried here:
+// a lead agrees to their interview, the organization's model draws the
+// team's pieces of work and who does which, and everyone in the team is
+// asked about one. The model provider is the outside system, faked behind
+// connect. The ways it can fail, tried here:
 //
 // - The team's links staying shut after the lead agreed, or opening before.
 // - Something the lead agreed to while the map was drawn going undrawn.
@@ -130,11 +130,11 @@ const agree = async (
   return saved.version;
 };
 
-/** What the careful model answers: a map with tickets (Max and Mia) and the rota (Lea). */
+/** What the model answers: a map with tickets (Max and Mia) and the rota (Lea). */
 const mapReply = (
   ids: { lea: string; max: string; mia: string },
-  more: Partial<Extract<GatewayReply, { text: string }>> = {}
-): GatewayReply => ({
+  more: Partial<Extract<ProviderReply, { text: string }>> = {}
+): ProviderReply => ({
   text: JSON.stringify({
     does: "Answers customers' questions",
     works: [
@@ -174,13 +174,13 @@ const stateOf = async (ids: { team: string; lea: string }) => {
   };
 };
 
-const refused: GatewayReply = {
+const refused: ProviderReply = {
   status: 400,
   errorType: "invalid_request_error",
 };
 
 describe("a team's map", { timeout: 60_000 }, () => {
-  it("is drawn once the lead agrees, by the careful model, and opens the team's links with their work", async () => {
+  it("is drawn once the lead agrees, by the organization's model, and opens the team's links with their work", async () => {
     const store = onboardingStore(env);
     const ids = await team(isoDay(Date.now() - dayMs));
     const first = await store.releaseDue();
@@ -221,12 +221,12 @@ describe("a team's map", { timeout: 60_000 }, () => {
       work: context.ok ? context.value.work : null,
       due: due.includes(ids.lea),
       drawing: usage.some(
-        ({ purpose, model }) => purpose === "drawing" && model === careful
+        ({ purpose, model }) => purpose === "drawing" && model === quick
       ),
     }).toStrictEqual({
       first: [ids.lea],
       drew: `team:${ids.team}`,
-      models: ["claude-opus-4-8"],
+      models: ["claude-sonnet-4-5"],
       opened: [ids.max, ids.mia],
       works: [
         {

@@ -3,7 +3,8 @@ import type {
   DocumentSummary,
   SearchHit,
 } from "@grasp-os/shared/knowledge";
-import { pageMaxLimit, searchQueryMaxLength } from "@grasp-os/shared/knowledge";
+import { pageMaxLimit } from "@grasp-os/shared/knowledge";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import {
   Empty,
   EmptyDescription,
@@ -11,11 +12,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
 
+import { PageHeading } from "../frame/page.tsx";
 import {
   CollectionDrawing,
   MemoryDrawing,
@@ -283,19 +284,17 @@ const Knowledge = () => {
     >
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 md:px-12">
-          <header className="flex flex-col gap-2.5">
-            <PageHeaderTitle>
-              <Trans>Knowledge</Trans>
-            </PageHeaderTitle>
-            <p className="text-muted-foreground text-sm leading-relaxed">
+          <PageHeading
+            description={
               <Trans>
                 Everything Grasp and its agents may read, in collections: your
                 own, your teams&apos; and your organization&apos;s. Agents read
                 a document when they need it, and always have the memory files
                 in mind.
               </Trans>
-            </p>
-          </header>
+            }
+            title={<Trans>Knowledge</Trans>}
+          />
           {results === undefined ? null : (
             <section aria-labelledby="results" className="flex flex-col gap-3">
               <h2 className="text-sm font-medium" id="results">
@@ -343,7 +342,7 @@ const Knowledge = () => {
 export const Route = createFileRoute("/_shell/knowledge/")({
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === "string" && search.q.trim() !== ""
-      ? { q: search.q.slice(0, searchQueryMaxLength) }
+      ? { q: search.q.slice(0, knowledgeSearchMaxLength) }
       : {},
   loaderDeps: ({ search: { q } }) => ({ q }),
   // Each part says on its own why it failed; search runs beside the rest.
