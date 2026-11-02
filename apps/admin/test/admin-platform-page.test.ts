@@ -35,12 +35,12 @@ const panelOf = (text: string, title: string, next: string): string =>
 /** An active client in ring `ring` running `releaseId`, as a deploy made it live. */
 const liveClient = async (name: string, ring: number, releaseId: string) => {
   const clientId = `${name.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, ring, releaseId, {
+  const { core } = await livePlacedClient(cloudflare, ring, releaseId, {
     id: clientId,
     name,
     signIn: null,
   });
-  account.admin = emptyAdminSnapshot(name);
+  core.admin = emptyAdminSnapshot(name);
   return clientId;
 };
 
