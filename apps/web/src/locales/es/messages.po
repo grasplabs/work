@@ -564,6 +564,10 @@ msgstr "{each, plural, one {# hora a la semana} other {# horas a la semana}}"
 msgid "{each} a run"
 msgstr "{each} por ejecución"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "{event}, at {account}"
+msgstr "{event}, en {account}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{expected} a month expected return"
 msgstr "{expected} al mes de rendimiento esperado"
@@ -888,14 +892,6 @@ msgstr "{name} {range}, cubierto por {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, sin cubrir"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} cambió"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} cambió: {does}"
-
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "No se ha podido eliminar {name}. Inténtalo de nuevo."
@@ -955,14 +951,6 @@ msgstr "Logotipo de {name}"
 #: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} puede escribir. Cambiar a Lectura"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
 
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
@@ -1220,6 +1208,10 @@ msgstr "{rests} · {team} · semana {week}"
 #: src/brain/work-knowledge.tsx
 msgid "{rests} · week {week}"
 msgstr "{rests} · semana {week}"
+
+#: src/inbox/items.ts
+msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+msgstr "{revoked} se ha notificado como malware, así que Grasp ha revocado los paquetes aprobados con él: nada de {name} que los use se compila, se sirve ni se inicia. Elimina el paquete y después pide que se aprueben paquetes nuevos."
 
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
@@ -1867,6 +1859,14 @@ msgstr "al mes"
 msgid "A name has no [, ], # or |, and no empty folders."
 msgstr "Un nombre no lleva [, ], # ni |, ni carpetas vacías."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A new file in Google Drive"
+msgstr "Un archivo nuevo en Google Drive"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A new file in Microsoft 365"
+msgstr "Un archivo nuevo en Microsoft 365"
+
 #: src/engines/resource-bindings.tsx
 msgid "A new template"
 msgstr "Una plantilla nueva"
@@ -1968,6 +1968,10 @@ msgstr "Empezó una ejecución de la versión {version} para otra persona"
 msgid "A run of version {version} started for you"
 msgstr "Empezó una ejecución de la versión {version} para ti"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A schedule"
+msgstr "Una programación"
+
 #: src/knowledge/purge.tsx
 msgid "A search for part of a word still finds those. Go back and add each such form as a term of its own."
 msgstr "Una búsqueda de parte de una palabra aún los encuentra. Vuelve atrás y añade cada forma como término propio."
@@ -2017,6 +2021,10 @@ msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo
 #: src/workflows/requests/request-parts.tsx
 msgid "A topic"
 msgstr "Un tema"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
+msgstr "Un disparador inicia una ejecución por sí solo, en nombre de quien lo creó. No inicia nada hasta que un administrador le permite iniciar este flujo de trabajo."
 
 #: src/workflows/version-source.tsx
 msgid "A version's definition and source"
@@ -2232,6 +2240,10 @@ msgstr "Añadir un proveedor"
 msgid "Add a team"
 msgstr "Añadir un equipo"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Add a trigger"
+msgstr "Añadir un disparador"
+
 #: src/dashboard/widget-board.tsx
 msgid "Add a widget"
 msgstr "Añadir un widget"
@@ -2280,6 +2292,10 @@ msgstr "Añadir la persona"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Add the team"
 msgstr "Añadir el equipo"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Add the trigger"
+msgstr "Añadir el disparador"
 
 #: src/chat/builds.tsx
 #: src/settings/package-approvers.tsx
@@ -2353,6 +2369,10 @@ msgstr "Administradores"
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Los administradores pueden cambiar el rol de cualquiera, cerrar sus sesiones y quitarlo, incluidos otros administradores."
+
+#: src/inbox/items.ts
+msgid "Advisory"
+msgstr "Aviso de seguridad"
 
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
@@ -2661,6 +2681,10 @@ msgstr "Falta una entrada."
 #: src/settings/audit-chain.tsx
 msgid "An entry was changed after it was written."
 msgstr "Una entrada se modificó después de escribirse."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An event at a connection"
+msgstr "Un evento en una conexión"
 
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
@@ -3665,6 +3689,7 @@ msgstr "No se puede leer"
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Cancel"
 msgstr "Cancelar"
 
@@ -3910,14 +3935,6 @@ msgstr "Cambios desde {when}"
 msgid "Changes something"
 msgstr "Cambia algo"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "cambia los datos del dominio"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Cambia los datos del dominio"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Cambios en los almacenes del dominio"
@@ -4017,6 +4034,10 @@ msgstr "Comprobando…"
 msgid "Choose a collection"
 msgstr "Elige una colección"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Choose a connection."
+msgstr "Elige una conexión."
+
 #: src/settings/ai-providers.tsx
 msgid "Choose a model"
 msgstr "Elige un modelo"
@@ -4063,6 +4084,7 @@ msgstr "Elige tu lista de personal"
 
 #: src/workflows/share-workflow.tsx
 #: src/workflows/start-run.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Choose…"
 msgstr "Elige…"
 
@@ -4470,6 +4492,7 @@ msgstr "Conectando tu Microsoft 365"
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Connection"
 msgstr "Conexión"
 
@@ -4628,10 +4651,6 @@ msgstr "Corregido por"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Podría ir mejor"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "no se pudo leer"
 
 #: src/workflows/team-picker.tsx
 msgid "Couldn't change the team of {named}"
@@ -4864,6 +4883,11 @@ msgctxt "button: delete an interview for good"
 msgid "Delete"
 msgstr "Eliminar"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "delete a trigger"
+msgid "Delete"
+msgstr "Eliminar"
+
 #: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
@@ -4903,9 +4927,17 @@ msgstr "Eliminar proyecto"
 msgid "Delete the project “{name}”?"
 msgstr "¿Eliminar el proyecto «{name}»?"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Delete the trigger"
+msgstr "Eliminar el disparador"
+
 #: src/workflows/delete-workflow.tsx
 msgid "Delete the workflow"
 msgstr "Eliminar el flujo de trabajo"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Delete this trigger?"
+msgstr "¿Eliminar este disparador?"
 
 #: src/workflows/delete-workflow.tsx
 msgid "Delete this workflow"
@@ -5538,6 +5570,10 @@ msgstr "Error"
 msgid "European Union"
 msgstr "Unión Europea"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Event"
+msgstr "Evento"
+
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 msgstr "Eventos más antiguos de lo que conserva el registro de auditoría, trasladados al archivo. La búsqueda y la exportación usan los filtros de arriba."
@@ -5766,14 +5802,6 @@ msgstr "Exportar con el archivo"
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Exportó el registro de auditoría"
-
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exportaciones"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exportaciones de {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -7332,6 +7360,10 @@ msgstr "Se basa en turnos en los que no participaste."
 msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
 msgstr "Empieza como propuesto: Grasp lo usa, y puedes corregirlo o retirarlo aquí."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It starts no more runs. Runs it already started go on. This can't be undone."
+msgstr "No inicia más ejecuciones. Las que ya inició continúan. Esto no se puede deshacer."
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Empieza cuando Stephen lee el kickoff, y crece con cada entrevista."
@@ -7529,9 +7561,13 @@ msgstr "sus reintentos"
 msgid "Its runs have written no file you may see."
 msgstr "Sus ejecuciones no han escrito ningún archivo que puedas ver."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Its runs kept failing to start, so it starts no more until whoever made it turns it on again."
+msgstr "Sus ejecuciones no lograban iniciarse, así que no inicia nada más hasta que quien lo creó lo vuelva a activar."
+
 #: src/inbox/items.ts
-msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time."
-msgstr "Sus ejecuciones no lograban iniciarse, así que ya no inicia ninguna. Corrige lo que las detuvo y vuelve a activar el disparador: seguirá desde su próxima hora."
+msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time."
+msgstr "Sus ejecuciones no lograban iniciarse, así que ya no inicia ninguna. Corrige lo que las detuvo y vuelve a activar el disparador en la pestaña Disparadores del flujo de trabajo: seguirá desde su próxima hora."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
@@ -8110,6 +8146,10 @@ msgstr "Correos y mensajes a otras personas, después de pulsar una tarjeta con 
 msgid "Mail isn’t available on this hosting yet"
 msgstr "El correo aún no está disponible en este alojamiento"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Mailbox or drive, if not the account's own"
+msgstr "Buzón o unidad, si no es la propia de la cuenta"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Principal"
@@ -8149,6 +8189,11 @@ msgstr "¿Hacer actual la versión {version}?"
 #: src/inbox/items.ts
 msgid "Make version {version} of {name} live?"
 msgstr "¿Poner en marcha la versión {version} de {name}?"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: packages revoked as malware"
+msgid "Malware"
+msgstr "Malware"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -8438,6 +8483,10 @@ msgstr "Mover a un proyecto"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutaciones y acciones de {domain}"
+
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
@@ -8643,6 +8692,14 @@ msgstr "Nuevo grupo"
 msgid "New key for {label}"
 msgstr "Nueva clave para {label}"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "New mail in Google"
+msgstr "Correo nuevo en Google"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "New mail in Microsoft 365"
+msgstr "Correo nuevo en Microsoft 365"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "Nota nueva"
@@ -8708,6 +8765,7 @@ msgid "Next person"
 msgstr "Siguiente persona"
 
 #: src/workflows/triggers.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Next run: {next}"
 msgstr "Próxima ejecución: {next}"
 
@@ -9279,10 +9337,6 @@ msgstr "Ninguna actual"
 msgid "None drawn yet. They show up here as the interviews come in."
 msgstr "Aún no hay ninguno dibujado. Aparecen aquí a medida que llegan las entrevistas."
 
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "ninguna ahora"
-
 #: src/engines/resource-bindings.tsx
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "Ninguno de los permisos de integración del dominio sirve {contract} con todas las acciones que declara. Concede uno primero."
@@ -9689,6 +9743,10 @@ msgstr "Aún no se ejecuta nada: esta sería la primera versión actual del domi
 msgid "Nothing said yet."
 msgstr "Aún no se ha dicho nada."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Nothing starts it on its own yet."
+msgstr "Todavía nada lo inicia por sí solo."
+
 #: src/workflows/triggers.tsx
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Nada lo inicia por sí solo: se ejecuta cuando alguien lo inicia."
@@ -9779,6 +9837,11 @@ msgstr "de lo que se anotó"
 msgid "Off"
 msgstr "Desactivado"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "a trigger that is turned off"
+msgid "Off"
+msgstr "Desactivado"
+
 #: src/workflows/requests/request-summary.tsx
 msgctxt "weekly summary not sent"
 msgid "Off"
@@ -9830,6 +9893,11 @@ msgstr "Más antiguos primero"
 msgid "On"
 msgstr "Activado"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "a trigger that is turned on"
+msgid "On"
+msgstr "Activado"
+
 #: src/settings/stephen-settings.tsx
 msgid "On · for everyone with Grasp"
 msgstr "Activado · para todos con Grasp"
@@ -9874,6 +9942,10 @@ msgstr "con correo a {address}@"
 #: src/chat/builds-state.ts
 msgid "on the event {event}, filtered"
 msgstr "con el evento {event}, filtrado"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "On the schedule <0>{cron}</0>, in {zone}"
+msgstr "Según la programación <0>{cron}</0>, en {zone}"
 
 #: src/workflows/triggers.tsx
 msgid "On the schedule set by {param} ({timeZone})"
@@ -10283,18 +10355,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Otros"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Otros dominios ya no pueden llamar a {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Otros dominios ahora pueden llamar a {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Otros dominios ahora pueden llamar a {name}, que {does}"
-
 #: src/workflows/requests/request-parts.tsx
 msgid "Other teams"
 msgstr "Otros equipos"
@@ -10406,6 +10466,7 @@ msgid "Owners see people one by one."
 msgstr "Los propietarios ven a las personas una a una."
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Package"
 msgstr "Paquete"
 
@@ -10435,6 +10496,10 @@ msgstr "Paquetes para {domain}"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Packages for {workflow}"
 msgstr "Paquetes para {workflow}"
+
+#: src/inbox/items.ts
+msgid "Packages of {name} were revoked as malware"
+msgstr "Se han revocado paquetes de {name} por malware"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -10973,6 +11038,14 @@ msgstr "Poniéndolo en tu panel…"
 msgid "Putting it right, try {attempt} of {attempts}…"
 msgstr "Corrigiéndolo, intento {attempt} de {attempts}…"
 
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Consultas de {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Consultas, mutaciones y acciones de {domain}"
+
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
 msgstr "Preguntas para empezar"
@@ -11188,10 +11261,6 @@ msgstr "Leyendo tu lista de personal"
 msgid "Reads"
 msgstr "Lee"
 
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "lee los datos del dominio"
-
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
@@ -11374,6 +11443,10 @@ msgstr "Eliminar del cerebro"
 #: src/brain/forget.tsx
 msgid "Remove it"
 msgstr "Eliminar"
+
+#: src/inbox/item-detail.tsx
+msgid "Remove the package"
+msgstr "Eliminar el paquete"
 
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
@@ -11704,6 +11777,7 @@ msgid "Revoke version {version}?"
 msgstr "¿Revocar la versión {version}?"
 
 #: src/engines/release-controls.tsx
+#: src/inbox/items.ts
 msgid "Revoked"
 msgstr "Revocada"
 
@@ -12996,6 +13070,10 @@ msgstr "Empieza el día en que la empresa informa a su equipo."
 msgid "Starts version {version} as you, with the input you give it."
 msgstr "Inicia la versión {version} en tu nombre, con la entrada que le des."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Starts version {workflowVersion}"
+msgstr "Inicia la versión {workflowVersion}"
+
 #: src/onboarding/work-canvas.tsx
 msgid "Starts when: {starts}"
 msgstr "Empieza cuando: {starts}"
@@ -13202,6 +13280,7 @@ msgstr "Dejar de compartir con {shown}"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Stopped"
 msgstr "Detenido"
 
@@ -14038,8 +14117,17 @@ msgstr "El visto bueno"
 msgid "The hour the other teams get their links"
 msgstr "La hora a la que los demás equipos reciben sus enlaces"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The input each run starts with, as JSON"
+msgstr "La entrada con la que empieza cada ejecución, en JSON"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The input fields aren't JSON."
+msgstr "Los campos de entrada no son JSON."
+
 #: src/workflows/start-run.tsx
 #: src/workflows/test-run.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "The input isn't JSON."
 msgstr "La entrada no es JSON."
 
@@ -14364,6 +14452,10 @@ msgstr "La ejecución ha empezado. Ábrela."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "La ejecución se ha detenido."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The run's input fields, each from the event as a JSON Pointer, as JSON"
+msgstr "Los campos de entrada de la ejecución, cada uno del evento como JSON Pointer, en JSON"
 
 #: src/inbox/item-detail.tsx
 msgid "The run's own files"
@@ -15010,6 +15102,7 @@ msgid "Time wasters"
 msgstr "Pérdidas de tiempo"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Time zone"
 msgstr "Zona horaria"
 
@@ -15204,6 +15297,7 @@ msgid "Triggers"
 msgstr "Disparadores"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgctxt "tab of a workflow"
 msgid "Triggers"
 msgstr "Disparadores"
@@ -15227,6 +15321,19 @@ msgstr "Reintentar"
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "turn a trigger off"
+msgid "Turn off"
+msgstr "Desactivar"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Turn on"
+msgstr "Activar"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Turn on again"
+msgstr "Volver a activar"
 
 #: src/voice/sound-controls.tsx
 msgid "Turn sound off"
@@ -15578,6 +15685,7 @@ msgstr "Versión {number}, actual"
 #: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/version-source.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versión {version}"
@@ -15605,6 +15713,10 @@ msgstr "Versión {version}: vista previa de solo lectura"
 #: src/workflows/workflow-status.tsx
 msgid "Version {waiting} waits to go live"
 msgstr "La versión {waiting} espera pasar a estar activa"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Version it starts"
+msgstr "Versión que inicia"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
@@ -16170,10 +16282,6 @@ msgstr "Lo que te espera"
 msgid "What needs you can't be read right now."
 msgstr "Ahora no se puede leer lo que te necesita."
 
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Lo que otros dominios pueden llamar"
-
 #: src/workflows/requests/request-table.tsx
 msgid "What people ask"
 msgstr "Lo que la gente pregunta"
@@ -16212,6 +16320,7 @@ msgid "What should we look at today?"
 msgstr "¿Qué miramos hoy?"
 
 #: src/onboarding/work-record.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "What starts it"
 msgstr "Qué lo inicia"
 
@@ -16379,6 +16488,10 @@ msgctxt "column: when an interview was held"
 msgid "When"
 msgstr "Cuándo"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When {account} reports an event"
+msgstr "Cuando {account} informa de un evento"
+
 #: src/onboarding/work-canvas.tsx
 msgid "When {when}"
 msgstr "Cuando {when}"
@@ -16412,6 +16525,10 @@ msgstr "Cuando va de otra manera"
 msgid "When it stops"
 msgstr "Cuándo se detiene"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When its webhook is called"
+msgstr "Cuando se llama a su webhook"
+
 #: src/onboarding/work-list.tsx
 msgid "When one counts as known"
 msgstr "Cuándo cuenta como conocido"
@@ -16428,6 +16545,10 @@ msgstr "cuando alguien lo inicia"
 msgid "When the event {event} happens"
 msgstr "Cuando ocurre el evento {event}"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When the event {type} is sent"
+msgstr "Cuando se envía el evento {type}"
+
 #: src/onboarding/interview-actions.tsx
 msgid "When they lost the device their interview was on. Only on their request."
 msgstr "Cuando ha perdido el dispositivo en el que estaba su entrevista. Solo si lo pide."
@@ -16440,6 +16561,10 @@ msgstr "Cuándo parar"
 #: src/knowledge/new-collection.tsx
 msgid "When to use it"
 msgstr "Cuándo usarla"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When, as a cron expression"
+msgstr "Cuándo, como expresión cron"
 
 #: src/interview/words.ts
 #: src/onboarding/work-record.tsx

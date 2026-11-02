@@ -77,6 +77,7 @@ import {
 import { workflowShareCandidates } from "./workflow-share-candidates.ts";
 import { workflowStartForm } from "./workflow-start-form.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import { WorkflowTriggersRpc } from "./workflow-triggers-rpc.ts";
 import {
   candidateRunFor,
   candidateRunTrace,
@@ -103,16 +104,22 @@ export class WorkflowResourcesRpc
   readonly #env: Env;
   readonly #check: SessionCheck;
   readonly #lifecycle: WorkflowLifecycleRpc;
+  readonly #triggers: WorkflowTriggersRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
     this.#lifecycle = new WorkflowLifecycleRpc(env, check);
+    this.#triggers = new WorkflowTriggersRpc(env, check);
   }
 
   get lifecycle(): WorkflowLifecycleRpc {
     return this.#lifecycle;
+  }
+
+  get triggers(): WorkflowTriggersRpc {
+    return this.#triggers;
   }
 
   async create(name: string): Promise<WorkflowResource> {
