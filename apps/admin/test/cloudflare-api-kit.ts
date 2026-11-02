@@ -183,6 +183,8 @@ export interface AccountState {
   adminHeld?: () => Promise<void>;
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
+  /** Every path its core was asked for, in order, whatever it answered. */
+  coreAsked: string[];
   /**
    * What its core answers the admin's signed kickoff request with
    * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,

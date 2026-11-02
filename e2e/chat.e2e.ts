@@ -3,6 +3,7 @@ import type { Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
+import { modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 
@@ -11,9 +12,11 @@ import type { Person } from "./people.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off. The stack's provider refuses its key, so the answer is the
-// gateway's failure; streaming, resuming and the person check themselves
-// are core's tests (apps/core/test/chats.test.ts).
+// off, and reads the agent's answer to a chat a script opens. The stack's
+// provider answers only a scripted chat (e2e/model-scripts.ts) and refuses
+// the key of any other, so that answer is the gateway's failure;
+// streaming, resuming and the person check themselves are core's tests
+// (apps/core/test/chats.test.ts).
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
@@ -163,8 +166,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // The local stack's provider refuses every key (e2e/model-fake.ts): the
-  // answer says so once the turn ends, and who can put it right.
+  // The local stack's provider refuses unscripted requests' keys
+  // (e2e/model-fake.ts): the answer says so once the turn ends, and who can
+  // put it right.
   await expect(messages.getByRole("alert")).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
@@ -309,6 +313,33 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(waiting).not.toContainText("dan@acme.test");
   await waiting.getByRole("button", { name: /^Reject mail\.send/u }).click();
   await expect(waiting).toHaveCount(0);
+});
+
+test("a person asks, and reads the agent's answer once its turn ends", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.answers;
+  const [answer] = replies;
+  // Unique to the attempt; the scripted model answers what it opens with.
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Not now" }).click();
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  const messages = page.getByRole("list", { name: "Messages" });
+  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(messages.getByText(answer.text)).toBeVisible({
+    timeout: 30_000,
+  });
+  // The turn ended: what only a finished answer offers, and no failure.
+  await expect(
+    messages.getByRole("button", { name: "Ask again" })
+  ).toBeVisible();
+  await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
 test("a person attaches files to a question, takes one off, and sees the question carry the other", async ({
@@ -514,8 +545,8 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
-  // The turn has ended (the local stack's provider refuses every key), so
-  // nothing else is on its way when the connection drops.
+  // The turn has ended (the local stack's provider refuses unscripted
+  // requests' keys), so nothing else is on its way when the connection drops.
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`

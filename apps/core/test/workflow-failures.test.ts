@@ -831,6 +831,7 @@ const hostOf = async (
         bindings: new Map(),
         restricted: false,
         rootRunId: runId,
+        accountRunId: runId,
       },
       maxModelCalls: 1,
     },

@@ -1,10 +1,14 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import {
+  appIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type {
+  Authority,
+  PermissionRequest,
+} from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -12,6 +16,9 @@ import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appFor } from "../src/apps.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
@@ -24,11 +31,13 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { drainEmittedEvents } from "../src/workflows/event-delivery.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
+import { withQuotas } from "./quota-limits.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // Delivering the events JSON workflows emit to the system triggers that
@@ -160,10 +169,32 @@ const consuming = async (admin: Identity) => {
   return workflow;
 };
 
-/** `start` on workflow `id` for trigger `trigger`, asked and granted by `admin`. */
-const grantStart = async (admin: Identity, trigger: string, id: string) => {
+/**
+ * A workflow of `admin`'s that takes a job, reads the clock `reads` times,
+ * one host call each, and hands the job back.
+ */
+const reading = async (admin: Identity, reads: number) => {
+  const workflow = await createWorkflowResource(env, admin, `read-${unique()}`);
+  await publishWorkflowVersion(env, admin, workflow.id, {
+    definition: definitionOf(workflow.name, [
+      ...Array.from({ length: reads }, (_, index) => ({
+        [`read-${index}`]: { call: "grasp.now" },
+      })),
+      { finish: { set: { jobId: "${ $workflow.input.jobId }" } } },
+    ]),
+    basedOn: null,
+  });
+  return workflow;
+};
+
+/** `start` on workflow `id` for `subject`, asked and granted by `admin`. */
+const grantStartTo = async (
+  admin: Identity,
+  subject: PermissionRequest["subject"],
+  id: string
+) => {
   const request: PermissionRequest = {
-    subject: { type: "trigger", triggerId: triggerIdSchema.parse(trigger) },
+    subject,
     object: {
       type: "workflow",
       workflowId: workflowResourceIdSchema.parse(id),
@@ -172,14 +203,70 @@ const grantStart = async (admin: Identity, trigger: string, id: string) => {
     binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
   };
   const { id: permission } = await requestPermission(env, admin, request, {
-    app: () => {
-      throw new Error("No App here");
-    },
+    app: async (named: string, role: "user" | "builder") =>
+      await appFor(env, admin, named, role),
     resource: async (ref, needed) => {
       await requireResourceRole(env, admin, ref, needed);
     },
   });
   await grantPermission(env, admin, permission, { version: null });
+};
+
+/** `start` on workflow `id` for trigger `trigger`, asked and granted by `admin`. */
+const grantStart = async (admin: Identity, trigger: string, id: string) => {
+  await grantStartTo(
+    admin,
+    { type: "trigger", triggerId: triggerIdSchema.parse(trigger) },
+    id
+  );
+};
+
+/**
+ * A workflow of `admin`'s that takes a job and runs version 1 of `child`
+ * on it, through its binding `child`, granted to start it: the job back.
+ */
+const childRunning = async (
+  admin: Identity,
+  child: { id: string; name: string }
+) => {
+  const workflow = await createWorkflowResource(env, admin, `run-${unique()}`);
+  await grantStartTo(
+    admin,
+    {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse(workflow.id),
+    },
+    child.id
+  );
+  await publishWorkflowVersion(env, admin, workflow.id, {
+    definition: definitionOf(
+      workflow.name,
+      [
+        {
+          "run-child": {
+            run: {
+              workflow: {
+                namespace: workflowNamespace,
+                name: child.name,
+                version: "1.0.0",
+                input: { jobId: "${ $workflow.input.jobId }" },
+              },
+            },
+            metadata: { grasp: { binding: "child" } },
+          },
+        },
+        { finish: { set: { jobId: "${ $workflow.input.jobId }" } } },
+      ],
+      {
+        child: {
+          kind: "workflow",
+          contract: `${workflowNamespace}/${child.name}/1.0.0`,
+        },
+      }
+    ),
+    basedOn: null,
+  });
+  return workflow;
 };
 
 /**
@@ -218,6 +305,10 @@ const endOf = async (
     { timeout: 30_000, interval: 100 }
   );
 
+/** How run `run` ended: its output, or the code it failed with. */
+const howEnded = (run: WorkflowResourceRun) =>
+  run.status === "completed" ? run.output : run.error?.code;
+
 /** Run `admin`'s of workflow `id` for job `jobId`, once it has ended: its ID. */
 const emitted = async (admin: Identity, id: string, jobId = "job-1") => {
   const { runId } = await startWorkflow(
@@ -246,10 +337,13 @@ const eventOf = async (runId: string) =>
       attempts: number;
     }>();
 
-/** The runs trigger `trigger` started, with where each sits in a lineage. */
+/**
+ * The runs trigger `trigger` started, with where each sits in a lineage
+ * and the account each is charged to.
+ */
 const runsOf = async (trigger: string) => {
   const rows = await env.DB.prepare(
-    "SELECT run.id, run.parent_run_id AS parent, run.root_run_id AS root, run.depth, run.restricted FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ?"
+    "SELECT run.id, run.parent_run_id AS parent, run.root_run_id AS root, run.depth, run.restricted, run.account_run_id AS account FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ?"
   )
     .bind(trigger)
     .all<{
@@ -258,8 +352,103 @@ const runsOf = async (trigger: string) => {
       root: string | null;
       depth: number;
       restricted: number;
+      account: string | null;
     }>();
   return rows.results;
+};
+
+/**
+ * An App of `admin`'s in restricted mode, binding version 1 of workflow
+ * `workflowId` with a `start` grant of its own: `start` starts it for job
+ * `jobId` as the App's code does, its run restricted for good.
+ */
+const restrictedApp = async (admin: Identity, workflowId: string) => {
+  const app = appIdSchema.parse(crypto.randomUUID());
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Starter', '', ?, ?)"
+    ).bind(app, admin.userId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
+    ).bind(app, admin.userId, Date.now()),
+  ]);
+  await bindWorkflowToApp(env, admin, workflowId, {
+    app,
+    alias: "flow",
+    version: 1,
+  });
+  await grantStartTo(admin, { type: "app", appId: app }, workflowId);
+  await appHost(env, app).restrict();
+  const authority: Authority = {
+    subject: { type: "app", appId: app },
+    onBehalfOf: admin.userId,
+    mode: "interactive",
+    appVersion: 1,
+  };
+  const start = async (jobId: string): Promise<string> => {
+    const { runId } = await appWorkflowStarts(env, authority).start(
+      "flow",
+      { jobId },
+      unique()
+    );
+    if (runId === null) {
+      throw new Error("The start admitted no run");
+    }
+    return runId;
+  };
+  return { start };
+};
+
+/** Whether run `runId`'s start receipt pins restricted mode. */
+const receiptRestricted = async (runId: string) => {
+  const row = await env.DB.prepare(
+    "SELECT restricted FROM workflow_start_receipts WHERE id = ?"
+  )
+    .bind(runId)
+    .first<{ restricted: number }>();
+  return row?.restricted;
+};
+
+/**
+ * The child run `parent` started, with where it sits, the account it is
+ * charged to, and what its attempts counted on.
+ */
+const childOf = async (parent: string) => {
+  const row = await env.DB.prepare(
+    "SELECT id, parent_run_id AS parent, root_run_id AS root, depth, account_run_id AS account FROM workflow_resource_runs WHERE parent_run_id = ?"
+  )
+    .bind(parent)
+    .first<{
+      id: string;
+      parent: string | null;
+      root: string | null;
+      depth: number;
+      account: string | null;
+    }>();
+  if (row === null) {
+    throw new Error(`Run ${parent} started no child`);
+  }
+  const counted = await env.DB.prepare(
+    "SELECT DISTINCT root_run_id AS counted FROM run_lineage_attempts WHERE run_id = ?"
+  )
+    .bind(row.id)
+    .all<{ counted: string }>();
+  return { ...row, countedOn: counted.results.map(({ counted: on }) => on) };
+};
+
+/** What core counts of each lineage or account of `ids`, by its run. */
+const lineagesOf = async (ids: readonly string[]) => {
+  const rows = await env.DB.prepare(
+    `SELECT root_run_id AS id, created_at AS createdAt, descendants, host_calls AS hostCalls FROM run_lineages WHERE root_run_id IN (${ids.map(() => "?").join(", ")})`
+  )
+    .bind(...ids)
+    .all<{
+      id: string;
+      createdAt: number;
+      descendants: number;
+      hostCalls: number;
+    }>();
+  return new Map(rows.results.map((row) => [row.id, row]));
 };
 
 /**
@@ -327,6 +516,9 @@ describe("emitted events", { timeout: 120_000 }, () => {
       })
     );
     const settled = await eventOf(runId);
+    const accounts = new Set(started.map(({ account }) => account));
+    const [account] = accounts;
+    const lineages = await lineagesOf([runId, account ?? ""]);
 
     expect({
       lost: { delivered: lost?.delivered, attempts: lost?.attempts },
@@ -338,6 +530,17 @@ describe("emitted events", { timeout: 120_000 }, () => {
         restricted,
       })),
       ends,
+      // Both runs of the workflow are charged to one account of its own in
+      // the lineage, its first run there, aged as the lineage is; their
+      // places are the lineage's.
+      accounts: {
+        count: accounts.size,
+        ownRun: started.some(({ id }) => id === account),
+        sameAge:
+          lineages.get(account ?? "")?.createdAt ===
+          lineages.get(runId)?.createdAt,
+        places: lineages.get(runId)?.descendants,
+      },
     }).toStrictEqual({
       lost: { delivered: null, attempts: 1 },
       delivered: true,
@@ -348,6 +551,7 @@ describe("emitted events", { timeout: 120_000 }, () => {
         restricted: 0,
       })),
       ends: [{ jobId: "job-1" }, { jobId: "job-1" }],
+      accounts: { count: 1, ownRun: true, sameAge: true, places: 2 },
     });
   });
 
@@ -399,6 +603,172 @@ describe("emitted events", { timeout: 120_000 }, () => {
           code: "workflow.start_denied",
         },
       ],
+    });
+  });
+
+  it("charge each workflow's runs to an account of its own in the emitting run's lineage, so one triggered hard leaves the emitting run and another workflow theirs", async () => {
+    const admin = await person("admin");
+    const contract = await jobEvents(admin);
+    const source = await emitting(admin, contract);
+    const busy = await reading(admin, 3);
+    const other = await reading(admin, 3);
+    // The busy workflow is triggered twice by each event, the other once.
+    const busyTriggers = [
+      await systemTrigger(admin, busy.id, contract),
+      await systemTrigger(admin, busy.id, contract),
+    ];
+    const otherTrigger = await systemTrigger(admin, other.id, contract);
+
+    // Five host calls an account: a run of either workflow fits (its
+    // reads and its output's evaluation, four), the busy workflow's two
+    // runs together don't, nor all the lineage's runs on one account.
+    const result = await withQuotas({ lineageHostCalls: 5 }, async () => {
+      const runId = await emitted(admin, source.id);
+      await drainEmittedEvents(env);
+      const byTrigger = await Promise.all(
+        busyTriggers.map(async ({ id }) => await runsOf(id))
+      );
+      const busyRuns = byTrigger.flat();
+      const [otherRun] = await runsOf(otherTrigger.id);
+      const busyEnds = await Promise.all(
+        busyRuns.map(async ({ id }) =>
+          howEnded(await endOf(admin, busy.id, id))
+        )
+      );
+      const otherEnd = howEnded(
+        await endOf(admin, other.id, otherRun?.id ?? "")
+      );
+      const [busyAccount] = new Set(busyRuns.map(({ account }) => account));
+      const lineages = await lineagesOf([
+        runId,
+        busyAccount ?? "",
+        otherRun?.account ?? "",
+      ]);
+      return {
+        root: lineages.get(runId)?.hostCalls,
+        busy: {
+          accounts: new Set(busyRuns.map(({ account }) => account)).size,
+          ends: busyEnds,
+          hostCalls: lineages.get(busyAccount ?? "")?.hostCalls,
+        },
+        other: {
+          ownAccount:
+            otherRun?.account === otherRun?.id &&
+            otherRun?.account !== busyAccount,
+          end: otherEnd,
+          hostCalls: lineages.get(otherRun?.account ?? "")?.hostCalls,
+        },
+      };
+    });
+
+    expect({
+      ...result,
+      busy: {
+        ...result.busy,
+        // However its two runs took turns, they ran out together.
+        refused: result.busy.ends.includes("workflow.lineage_limit"),
+        ends: undefined,
+      },
+    }).toStrictEqual({
+      // The emitting run's own calls, none of its triggered runs'.
+      root: 3,
+      busy: { accounts: 1, hostCalls: 5, refused: true, ends: undefined },
+      other: { ownAccount: true, end: { jobId: "job-1" }, hostCalls: 4 },
+    });
+  });
+
+  it("charge the children a triggered run starts to its workflow's account, in the emitting run's lineage", async () => {
+    const admin = await person("admin");
+    const contract = await jobEvents(admin);
+    const source = await emitting(admin, contract);
+    const child = await reading(admin, 3);
+    const parent = await childRunning(admin, child);
+    const trigger = await systemTrigger(admin, parent.id, contract);
+
+    const root = await emitted(admin, source.id);
+    const before = await lineagesOf([root]);
+    await drainEmittedEvents(env);
+    const [triggered] = await runsOf(trigger.id);
+    const parentRun = triggered?.id ?? "";
+    const parentEnd = await endOf(admin, parent.id, parentRun);
+    const childRun = await childOf(parentRun);
+    const childEnd = await endOf(admin, child.id, childRun.id);
+    const after = await lineagesOf([root, parentRun]);
+    const named = (id: string | null) =>
+      [
+        ["root", root],
+        ["parent", parentRun],
+      ].find(([, value]) => value === id)?.[0] ?? id;
+    const rootCalls = (lineages: typeof after) =>
+      lineages.get(root)?.hostCalls ?? 0;
+
+    expect({
+      ends: [howEnded(parentEnd), howEnded(childEnd)],
+      child: {
+        parent: named(childRun.parent),
+        // Its place is the emitting run's lineage, one deeper than its parent.
+        root: named(childRun.root),
+        depth: childRun.depth,
+        // Its work is its parent's workflow's account's.
+        account: named(childRun.account),
+        // Every attempt of it counted there.
+        countedOn: childRun.countedOn.map(named),
+      },
+      // The emitting run's allowance spent nothing more after it ended.
+      rootSpent: rootCalls(after) - rootCalls(before),
+      // The account spent the child's four calls, besides its own.
+      accountSpentChild: (after.get(parentRun)?.hostCalls ?? 0) >= 4,
+      // The emitting run's lineage counts the triggered run and its child.
+      places: after.get(root)?.descendants,
+    }).toStrictEqual({
+      ends: [{ jobId: "job-1" }, { jobId: "job-1" }],
+      child: {
+        parent: "parent",
+        root: "root",
+        depth: 2,
+        account: "parent",
+        countedOn: ["parent"],
+      },
+      rootSpent: 0,
+      accountSpentChild: true,
+      places: 2,
+    });
+  });
+
+  it("start a restricted run's triggered runs restricted, on their workflow's own account", async () => {
+    const admin = await person("admin");
+    const contract = await jobEvents(admin);
+    const source = await emitting(admin, contract);
+    const target = await consuming(admin);
+    const trigger = await systemTrigger(admin, target.id, contract);
+    const { start } = await restrictedApp(admin, source.id);
+
+    const runId = await start("job-2");
+    await endOf(admin, source.id, runId);
+    await drainEmittedEvents(env);
+    const [run] = await runsOf(trigger.id);
+    const end = await endOf(admin, target.id, run?.id ?? "");
+    const emittingRun = await env.DB.prepare(
+      "SELECT restricted FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(runId)
+      .first<{ restricted: number }>();
+
+    expect({
+      emitting: emittingRun?.restricted,
+      run: {
+        root: run?.root,
+        depth: run?.depth,
+        restricted: run?.restricted,
+        ownAccount: run?.account === run?.id,
+      },
+      receipt: await receiptRestricted(run?.id ?? ""),
+      end: howEnded(end),
+    }).toStrictEqual({
+      emitting: 1,
+      run: { root: runId, depth: 1, restricted: 1, ownAccount: true },
+      receipt: 1,
+      end: { jobId: "job-2" },
     });
   });
 
