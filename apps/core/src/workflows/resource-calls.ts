@@ -24,7 +24,7 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -108,8 +108,7 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
-//   decision, resource-host.ts); its model calls are judged as restricted
-//   by the gateway's data rules; and the App owning a store it calls an
+//   decision, resource-host.ts); and the App owning a store it calls an
 //   operation of is restricted before the input reaches it, audited with
 //   the run as provenance (`callApprovedStoreOperation`).
 // - A run's files leaving through a connector write (GRA-887). A write
@@ -734,26 +733,6 @@ const callOperation = async (
   return await callStoreOperation(env, run, binding, call, effect);
 };
 
-/** The connections the run's connector bindings reach, for the model rules. */
-const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
-  const ids = [...run.bindings.values()].flatMap(({ target }) =>
-    target.kind === "connector" ? [target.permissionId] : []
-  );
-  if (ids.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB)
-    .select({ objectId: permissions.objectId })
-    .from(permissions)
-    .where(
-      and(
-        inArray(permissions.id, ids),
-        eq(permissions.objectType, "connection")
-      )
-    );
-  return [...new Set(rows.map(({ objectId }) => objectId))];
-};
-
 /**
  * What model call `call` asks for, checked as every model call is, a test
  * run's included: its instructions as text, and a whole number above 0 of
@@ -825,7 +804,6 @@ const callModel = async (
       // `maxModelCalls` allows (run-children.ts). Its spend counts against
       // its workflow's budget too.
       lineage: { rootRunId: run.rootRunId, workflowId: run.workflowId },
-      connections: await connectionsOf(env, run),
       work: { authority: runAuthority(run), context: runContext(run) },
       // Once the ledger admitted each provider request, the run's authority
       // decided again (it may have gone while the request waited), then its

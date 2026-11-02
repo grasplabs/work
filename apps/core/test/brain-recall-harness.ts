@@ -36,7 +36,6 @@ import { z } from "zod";
 
 import {
   applyWindow,
-  brainBudgetDay,
   brainBudgetMonth,
   charged,
   minimumMeaningfulGain,
@@ -402,12 +401,8 @@ export const runBrainRecallComparison = async (
     identity,
   }: BrainRecallOptions
 ): Promise<BrainRecallReport> => {
-  const before = {
-    month: env.MODEL_BUDGET_MONTH,
-    day: env.MODEL_BUDGET_DAY,
-  };
+  const before = { month: env.MODEL_BUDGET_MONTH };
   env.MODEL_BUDGET_MONTH = brainBudgetMonth;
-  env.MODEL_BUDGET_DAY = brainBudgetDay;
   try {
     const random = seededRandom(seed);
     const { policy, queried, omitted } = await policyOf(company);
@@ -488,6 +483,5 @@ export const runBrainRecallComparison = async (
     };
   } finally {
     env.MODEL_BUDGET_MONTH = before.month;
-    env.MODEL_BUDGET_DAY = before.day;
   }
 };

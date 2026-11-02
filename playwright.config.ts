@@ -9,8 +9,6 @@ import {
 } from "./e2e/people.ts";
 import {
   corePort,
-  e2eModel,
-  e2eThinkingModel,
   connectConfig,
   idpOrigin,
   idpPort,
@@ -230,14 +228,6 @@ export default defineConfig({
           JSON.stringify({
             name: "Stephen at Grasp",
             address: "onboarding@mail.localhost",
-          })
-        ),
-        // The Models page shows the rules and budgets.
-        devVar(
-          "MODEL_GATEWAY",
-          JSON.stringify({
-            eu: { models: [e2eModel, e2eThinkingModel], deployment: true },
-            budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
           })
         ),
       ].join(" "),

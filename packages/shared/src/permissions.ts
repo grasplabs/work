@@ -264,17 +264,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "EMAIL",
   "ENTRA_CLIENT_SECRET",
   "FILES",
-  // Stephen's own Gmail mailbox and the Pub/Sub push that tells core of
-  // new mail (core's src/channels/gmail.ts), its tokens connect's
-  // (connect's src/channels.ts).
-  "GMAIL_CLIENT_ID",
-  "GMAIL_CLIENT_SECRET",
-  "GMAIL_MAILBOX",
-  "GMAIL_PUBSUB_AUDIENCE",
-  "GMAIL_PUBSUB_SERVICE_ACCOUNT",
-  "GMAIL_PUBSUB_SUBSCRIPTION",
-  "GMAIL_PUBSUB_TOPIC",
-  "GMAIL_REFRESH_TOKEN",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   // The directory's Google client (connect's providers.ts).
@@ -295,11 +284,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Entra app (connect's providers.ts).
   "MICROSOFT_DOCUMENTS_CLIENT_ID",
   "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
-  // The periods model budgets count in, which tests set (core's
-  // src/model-budgets.ts).
-  "MODEL_BUDGET_DAY",
+  // The month model spend counts in, which tests set (core's
+  // src/model-spend.ts).
   "MODEL_BUDGET_MONTH",
-  "MODEL_GATEWAY",
   "MODEL_LEDGER",
   "ONBOARDING",
   "PACKAGE_LIMITS",
@@ -326,20 +313,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
-  // The client's own Telegram bot (core's src/channels/telegram.ts,
-  // connect's src/channels.ts).
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_WEBHOOK_SECRET",
   // Tests' lowered quota limits (core's src/workflows/quotas.ts).
   "TEST_QUOTA_LIMITS",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
-  // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
-  // connect's src/channels.ts).
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_APP_SECRET",
-  "WHATSAPP_PHONE_NUMBER_ID",
-  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
   // Tests only: the run host's own I/O slowed (core's workflows/host-latency.ts).
@@ -590,15 +567,6 @@ export const authoritySchema = z
      * SB9). An agent has none.
      */
     appVersion: z.int().positive().optional(),
-    /**
-     * Work a Grasp staff member started (GRA-1088): set only by core's
-     * hosts, from the mark core wrote when staff started it (a run's
-     * `started_by_staff`, a turn's own), never from what a caller sends.
-     * Its person passes the active-member gate only while they are staff
-     * now (core's `requireActivePerson`), and its audit events say
-     * "(Grasp staff)". Never copied to work it starts.
-     */
-    staff: z.literal(true).optional(),
   })
   .refine(
     ({ subject, appVersion }) =>

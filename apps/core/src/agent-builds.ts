@@ -1,8 +1,3 @@
-import { workflowFiles, workflowIdOf } from "@grasp-os/compiler";
-import {
-  checkWorkflowBindings,
-  checkWorkflowModule,
-} from "@grasp-os/sdk/describe";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors, commitMessageSchema } from "@grasp-os/shared/apps";
 import type {
@@ -15,9 +10,6 @@ import type {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
-import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
-import { messageOf } from "@grasp-os/shared/errors";
-import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -31,6 +23,7 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { ProvisionalOrigin } from "./apps.ts";
 import {
   appFor,
@@ -60,12 +53,7 @@ import { isRestricted } from "./restricted.ts";
 import { buildOnSave, draftServerBuild } from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
-import {
-  dryRunTests,
-  hasWorkflow,
-  workflowTestFailures,
-} from "./workflows/code.ts";
-import type { DryRuns } from "./workflows/code.ts";
+import { workflowTestFailures } from "./workflows/code.ts";
 import { runEngine } from "./workflows/engine.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -76,24 +64,29 @@ import type { Draft } from "./workspace.ts";
 // chat in its Workspace object (workspace.ts), over the App's latest
 // version when it began. A draft reaches the App only as a version, and
 // never over a version that changed the same files since it began, so
-// the agent's edits and a builder's can't overwrite each other. It checks
-// a draft as a save does (screens and
+// the agent's edits and a builder's can't overwrite each other.
+//
+// The agent writes no workflow into an App: `write` refuses a file under
+// `workflows/`, whether a workflow or code one may import. What runs on
+// its own is an independent JSON workflow, built with `env.workflowBuild`
+// (agent-workflow-build.ts) and bound to the App under an alias; each call
+// it makes outside itself is a binding of its validated definition, which
+// an admin approves for that exact version. So nothing the agent writes
+// reaches a binding that no review lists. A workflow a builder wrote stays
+// in the draft as it is: the agent may delete it, never change it.
+//
+// It checks a draft as a save does (screens and
 // workflows: type errors, @shadcn/lint and build errors), and its server
-// code as its seal type-checks it, none of it run (`draftServerBuild`);
-// what fails only once it runs, its preview reports
-// and runs its workflows' tests, and dry-runs them with the values it
-// gives. A workflow must call the App's bindings where its step list can
-// name each call (`checkWorkflowBindings`): the review of what the agent
-// proposes says what each step calls, so a call it couldn't name fails the
-// check like a build error, and so does workflow code that reaches for a
-// built-in a run is made with (`checkWorkflowModule`). A check also reads
+// code as its seal type-checks it, none of it run (`draftServerBuild`),
+// and runs its workflows' tests; what fails only once it runs, the preview
+// reports as it seals it. A check also reads
 // what the preview of the draft in the person's side panel ran into so far
 // (preview-reports.ts): runtime errors fail it as build errors do, so the
 // repair loop fixes them within the same limits. The agent can also call
 // the draft's server code itself (`call`), in that same preview: the draft
 // sealed into a draft release, with its own empty store, never the App's
-// live data (sealed-previews.ts). Tests and dry runs run in isolates with
-// an empty env: nothing they do leaves them. Once a draft passes, the
+// live data (sealed-previews.ts). Tests run in isolates with an empty
+// env: nothing they do leaves them. Once a draft passes, the
 // agent proposes it: it becomes the App's next version, pending review,
 // with a review of what
 // it changes worked out by core (version-review.ts). Nothing here makes a
@@ -108,8 +101,7 @@ import type { Draft } from "./workspace.ts";
 // Workspace object, so checks started at once can't pass it). A turn
 // creates at most `maxCreatesPerTurn` Apps. Nothing else of a turn's
 // building has a limit of its own: its code runs, and the calls one run may
-// make (code-mode.ts), bound the rest, dry runs included, which run in an
-// isolate with an empty env and leave nothing behind.
+// make (code-mode.ts), bound the rest.
 //
 // A check or a proposal that takes longer than a code run may live goes to
 // a durable job instead (`submit`, build-jobs.ts): a workflow of core's
@@ -307,16 +299,6 @@ export const buildsApps = (permissions: Permission[]): boolean =>
       actions.includes("write")
   );
 
-/** The values a dry run sets, by parameter name, over each test's own. */
-const dryRunParamsSchema = z
-  .record(
-    z.string().regex(/^[A-Za-z]\w{0,63}$/u),
-    z.union([z.string().max(10_000), z.number()])
-  )
-  .refine((params) => Object.keys(params).length <= 50, {
-    message: "At most 50 parameters",
-  });
-
 /** A chat's draft of an App, as the agent reads it. */
 export interface DraftFiles {
   /** The version it is over; null for an App with none yet. */
@@ -390,48 +372,6 @@ const reported = (build: SavedBuild): SavedBuild => ({
   ...build,
   diagnostics: build.diagnostics.slice(0, maxReported),
 });
-
-/**
- * A draft's workflows build, failed when one of them could call the App's
- * bindings by a way its step list can't name (`checkWorkflowBindings`),
- * or a file it may import (any other under `workflows/`) could change
- * what a run is built from as it loads (`checkWorkflowModule`), with how
- * to write each instead.
- */
-const withBindingsRead = (
-  workflows: SavedBuild,
-  files: Record<string, string>
-): SavedBuild => {
-  if (workflows.status !== "ok") {
-    return workflows;
-  }
-  const diagnostics = Object.entries(workflowFiles(files)).flatMap(
-    ([file, source]) => {
-      try {
-        if (workflowIdOf(file) === undefined) {
-          checkWorkflowModule(source);
-        } else {
-          checkWorkflowBindings(source);
-        }
-        return [];
-      } catch (error) {
-        return [
-          {
-            file,
-            line: null,
-            rule: "bindings",
-            category: diagnosticCategory("bindings"),
-            severity: "error" as const,
-            message: messageOf(error),
-          },
-        ];
-      }
-    }
-  );
-  return diagnostics.length === 0
-    ? workflows
-    : { status: "failed", diagnostics };
-};
 
 /** The tests of a draft's workflows, once they build. */
 const testsOf = async (
@@ -545,23 +485,18 @@ export const checkFiles = async (
     draftServerBuild(env, { app, version, files }, signal),
   ]);
   signal?.throwIfAborted();
-  const builds = {
-    ...saved,
-    server,
-    workflows: withBindingsRead(saved.workflows, files),
-  };
-  const tests = await testsOf(env, app, base, files, builds.workflows, signal);
+  const tests = await testsOf(env, app, base, files, saved.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
+    [saved.screens, server, saved.workflows].every(buildPassed) &&
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
-    screens: reported(builds.screens),
-    server: reported(builds.server),
-    workflows: reported(builds.workflows),
+    screens: reported(saved.screens),
+    server: reported(server),
+    workflows: reported(saved.workflows),
     tests,
     preview,
   };
@@ -727,7 +662,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * The App `app` names, which the person builds, to read: its draft's
-   * files, its checks and dry runs, an archived App's included.
+   * files and its checks, an archived App's included.
    */
   async #readable(by: Acting, app: unknown): Promise<AppId> {
     const { id } = await appFor(this.env, by, app, "builder");
@@ -881,7 +816,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * Writes `changes` (new content by path, or null to delete a file) into
    * the chat's draft of `app`, refused as a whole as the changes of a
-   * commit would be. The version it is over, and what it changed.
+   * commit would be, or when it writes a file under `workflows/`, which
+   * the agent never does (it may delete one). The version it is over, and
+   * what it changed.
    */
   async write(
     app: unknown,
@@ -900,6 +837,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           this.env,
           await draftFiles(this.env, id, draft),
           changes
+        );
+        refuseAppWorkflows(
+          written.flatMap(([path, content]) => (content === null ? [] : [path]))
         );
         // Only what differs from the base is kept: a path written back as
         // the base has it (a deleted file that isn't there, too) is a
@@ -1140,51 +1080,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Dry-runs each test of workflow `workflow` in the chat's draft of
-   * `app`, with `params` over each test's own values: what it would do,
-   * with every step's side effect recorded, never made.
-   */
-  async dryRun(
-    app: unknown,
-    workflow: unknown,
-    params: unknown = {}
-  ): Promise<DryRuns> {
-    return await this.#build(
-      "build.dryRun",
-      async (by) => {
-        const id = await this.#readable(by, app);
-        const values = appErrors.parse(
-          "app.invalid",
-          dryRunParamsSchema,
-          params
-        );
-        const draft = await draftOf(this.env, this.ctx.props, id);
-        const files = Object.fromEntries(await draftFiles(this.env, id, draft));
-        const workflowId = workflowIdSchema.safeParse(workflow);
-        if (!workflowId.success || !hasWorkflow(files, workflowId.data)) {
-          throw appErrors.create("app.invalid", {
-            issues: ["workflow: The draft has no such workflow."],
-          });
-        }
-        return await dryRunTests(
-          this.env,
-          id,
-          draft.base ?? 0,
-          workflowId.data,
-          files,
-          values,
-          { draft: true }
-        );
-      },
-      (runs) => ({
-        app: typeof app === "string" ? app : null,
-        workflow: typeof workflow === "string" ? workflow : null,
-        runs: runs.length,
-      })
-    );
-  }
-
-  /**
    * Hands a check (`kind: "check"`) or a proposal (`kind: "propose"`, with
    * its `message`) of the chat's draft of `app` to a durable job, which
    * may take longer than this run may live (build-jobs.ts): bound to the
@@ -1201,7 +1096,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           jobRequestSchema,
           request
         );
-        const { workspaceId, chatId, runId, staff } = this.ctx.props;
+        const { workspaceId, chatId, runId } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
         if (kind === "propose") {
           const draft = await draftOf(this.env, this.ctx.props, id);
@@ -1227,13 +1122,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           await runEngine(this.env).createInternal({
             id: opened.id,
             workflow: "build",
-            // The run's own staff mark goes with the job, as core set it.
-            input: {
-              workspaceId,
-              chatId,
-              jobId: opened.id,
-              ...(staff === true ? { staff: true } : {}),
-            },
+            input: { workspaceId, chatId, jobId: opened.id },
           });
         } catch (error) {
           // No instance runs it: it ends here, failed, with the engine's
@@ -1385,24 +1274,13 @@ const buildDeclaration = `/**
  * values or restyled components (the lint names what to use instead).
  * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
  * its public functions (\`query\`, \`mutation\`, \`action\`) in
- * operations files, \`operations/<group>.ts\`. A workflow is
- * \`workflows/<id>.ts\` with its tests in \`workflows/<id>.workflow-tests.ts\`:
- * \`export default workflow(id, config, async (step, { input, params, env }) => …)\`,
- * calling the App's bindings only in a step's own function (\`step.do\`'s,
- * or an option such as a decision's \`ask\`; not between steps, nor in a
- * function inside it: loop with \`for...of\`), each call
- * written out as \`env.NAME.method(…)\` or
- * \`appFunctions<Tree>(env).query("notes.list", …)\` (or \`mutation\`,
- * \`action\`: the App's public functions, by \`group.name\`), so its
- * review names what each step calls. Type those calls by the operations they reach:
- * \`import type * as notes from "../operations/notes.ts"\`, then
- * \`interface Tree { notes: typeof notes }\`. Workflows are type-checked:
- * what a binding answers is \`unknown\`, so narrow it (with \`z\`) before
- * using it; \`@ts-ignore\` and the other suppressions, \`declare module\`,
- * \`declare global\` and triple-slash directives are refused. A check
- * refuses any other use of \`env\`, and \`globalThis\`, \`self\`,
- * \`Proxy\`, \`Reflect\`, \`Function\`, \`eval\` or a change to a global or
- * an import anywhere under \`workflows/\`.
+ * operations files, \`operations/<group>.ts\`. An App holds no workflows,
+ * and a write under \`workflows/\` is refused: for something that runs on
+ * its own or takes steps, build an independent workflow with
+ * \`env.workflowBuild\`, declare it in app.ts
+ * (\`resource.workflow("alias", { input, output })\`) and bind it to the App
+ * under that alias. A workflow already in the App, which a builder wrote,
+ * you may delete but not change.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */
@@ -1474,15 +1352,6 @@ build: {
     failedInARow: number;
     maxFailedChecks: number;
   }>;
-  /**
-   * Dry-runs a workflow's tests in the draft with \`params\` over each
-   * test's values: what it would do, its side effects recorded, never made.
-   */
-  dryRun(app: string, workflow: string, params?: Record<string, string | number>): Promise<{
-    name: string;
-    status: "completed" | "failed";
-    report: string;
-  }[]>;
   /**
    * Calls the draft as a screen would, to see it run, in a preview that
    * never touches the App's live data: \`method\` is a public function's

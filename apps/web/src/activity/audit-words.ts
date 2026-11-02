@@ -105,12 +105,13 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.history_withheld",
     text: msg`Kept something the chat can no longer read from the model`,
   },
+  { action: "chat.file_attached", text: msg`Attached a file to a chat` },
+  {
+    action: "chat.file_removed",
+    text: msg`Removed a file from a chat before sending it`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   { action: "agent.call", text: msg`The agent looked something up` },
-  {
-    action: "model.budget",
-    text: msg`A model budget reached its alert or ran out`,
-  },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
   { action: "permission.requested", text: msg`Asked for a permission` },

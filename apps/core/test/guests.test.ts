@@ -22,7 +22,7 @@ import { mockIdp } from "./idp.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, finished as runFinished, leave } from "./runs.ts";
+import { leave } from "./runs.ts";
 import { failure } from "./sealed-apps.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
@@ -46,10 +46,18 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 //   member, through the gateway.
 // - A guest spending without bound: two messages at once, more than 20
 //   turns, messages over 1,000 characters, a failed call taking a turn.
-// - An App inviting without bound or for someone else: from a workflow
-//   run, with a skill the release doesn't have, more than 50 open.
+// - An App inviting without bound or for someone else: with a skill the
+//   release doesn't have, more than 50 open.
 // - Nothing on record: every step audited, as whom.
 // - Kept forever: chats deleted 30 days after they end.
+//
+// A workflow never reaches guest chats: an independent workflow calls an
+// App only through a business store's public queries and mutations
+// (store-operations.ts), never an action, and the guests resource is an
+// action's (store-operations.test.ts, "approved only for a public query or
+// mutation of the contract's exact shape, through its own permission").
+// The test of a run listing, reading and revoking chats through
+// `env.APP.callFunction` went with App-owned TypeScript workflows.
 
 const idp = mockIdp();
 
@@ -878,28 +886,8 @@ describe("guest chats", { timeout: 60_000 }, () => {
   });
 });
 
-/** A function of the Guests App, as a step names it. */
-const reference = (name: string) =>
-  JSON.stringify({ contractId: `guests.${name}`, kind: "action" });
-
-/** What a function's answer, as a step got it, holds: the action's own. */
-const answerOf = (answer: unknown): unknown => {
-  const parsed = z
-    .object({ ok: z.literal(true), value: z.string() })
-    .safeParse(answer);
-  if (!parsed.success) {
-    return answer;
-  }
-  const value: unknown = JSON.parse(parsed.data.value);
-  return value;
-};
-
 describe("guest chats through a binding", { timeout: 90_000 }, () => {
   beforeEach(connected);
-
-  afterEach(async () => {
-    await endLiveRuns();
-  });
 
   it("reach nothing until an admin binds them to the App's own permission, nothing more than was approved, and no link past the binding", async () => {
     const builder = await signedInApi(idp, "builder");
@@ -977,86 +965,6 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
       },
       rebound: 200,
       otherPermission: { status: 404, code: "guest.link_invalid" },
-    });
-  });
-
-  it("are never invited by a workflow run, which may still list, read back and revoke them, audited as the run", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const inviteInput = JSON.stringify({
-      json: JSON.stringify({ name: "Anna", skill: "interview-a-stakeholder" }),
-    });
-    const { app } = await guestApp(builder, {
-      ...guestFiles(),
-      "workflows/inviter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("inviter", { params: {}, input: z.object({ chat: z.string() }) }, async (step, { env, input }) =>
-  await step.do("ask", { description: "Invite", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    invited: (await env.APP.callFunction(${reference("invite")}, ${inviteInput})) as Json,
-    listed: (await env.APP.callFunction(${reference("list")}, {})) as Json,
-    read: (await env.APP.callFunction(${reference("read")}, { id: input.chat })) as Json,
-    revoked: (await env.APP.callFunction(${reference("revoke")}, { id: input.chat })) as Json,
-  }))
-);
-`,
-      "workflows/inviter.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./inviter.ts";
-
-export default workflowTests(definition, [{ name: "runs", input: { chat: "chat" }, mocks: { ask: null }, expect: {} }]);
-`,
-    });
-    const chat = await invite(app, builder.userId);
-    const run = await builder.api.workflows.start(app, "inviter", {
-      chat: chat.id,
-    });
-    await runFinished(run.id);
-    const ended = await builder.api.workflows.status(run.id);
-    const logged = await allEvents();
-    const output = z
-      .object({
-        invited: z.unknown(),
-        listed: z.unknown(),
-        revoked: z.unknown(),
-      })
-      .parse(ended.output);
-    const chats = z
-      .object({ ok: z.array(z.object({ id: z.string(), status: z.string() })) })
-      .safeParse(answerOf(output.listed));
-    const revoked = z
-      .object({ ok: z.object({ status: z.string() }) })
-      .safeParse(answerOf(output.revoked));
-    expect({
-      status: ended.status,
-      invited: answerOf(output.invited),
-      listed: chats.data?.ok.map(({ id }) => id),
-      revoked: revoked.data?.ok.status,
-      audited: logged
-        .filter(
-          ({ action, target }) =>
-            (action === "guest.read" || action === "guest.revoked") &&
-            target?.id === chat.id
-        )
-        .map(({ action, actor, detail }) => ({
-          action,
-          actor,
-          onBehalfOf: detail.onBehalfOf,
-        })),
-    }).toStrictEqual({
-      status: "completed",
-      invited: { error: "resource.not_allowed" },
-      // Only the chat its person invited: the run made none.
-      listed: [chat.id],
-      revoked: "revoked",
-      audited: ["guest.read", "guest.revoked"].map((action) => ({
-        action,
-        actor: {
-          type: "workflow",
-          appId: app,
-          workflowId: "inviter",
-          runId: run.id,
-        },
-        onBehalfOf: builder.userId,
-      })),
     });
   });
 });

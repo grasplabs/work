@@ -274,10 +274,10 @@ export const personErasureAreas = sqliteTable(
 
 /**
  * A person's account on a chat platform that carries no Entra object id
- * (Slack, WhatsApp, Telegram...), linked to them (`channels/accounts.ts`):
+ * (Slack), linked to them (`channels/accounts.ts`):
  * one person per platform account, by the platform's own verified sender
  * id. Its id names it to the person and in the audit log, which never
- * holds the platform id itself (a WhatsApp id is a phone number).
+ * holds the platform id itself.
  */
 export const channelAccounts = sqliteTable(
   "channel_accounts",
@@ -1354,6 +1354,26 @@ export const sdkStoreOwners = sqliteTable(
 );
 
 /**
+ * The stores a standalone workflow declares (GRA-682,
+ * workflow-stores.ts), by the name its definition gives each: created
+ * when a version declaring it is published, in one batch with its
+ * `business_stores` row and its `sdk_store_owners` claim, so a
+ * publication run again finds the store it made, never a second one.
+ * Kept for good, as the claim is: deleting the workflow never deletes its
+ * stores (spec 40.8).
+ */
+export const workflowStores = sqliteTable(
+  "workflow_stores",
+  {
+    workflowId: text("workflow_id").notNull(),
+    name: text().notNull(),
+    storeId: text("store_id").notNull().unique(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workflowId, table.name] })]
+);
+
+/**
  * The store an App of spec 8's layout runs on, one per App: created by the
  * host when it first seals a version of the App whose schema has tables
  * (app-activation.ts), and bound to every later version, so the App's data
@@ -1597,11 +1617,6 @@ export const appResourceBindings = sqliteTable(
     approvedAt: timestamp("approved_at").notNull(),
     revokedBy: text("revoked_by"),
     revokedAt: timestamp("revoked_at"),
-    /**
-     * A model binding's own caps, as JSON (`modelBindingBudgetSchema`):
-     * set at approval, null for none (model-budgets.ts).
-     */
-    budget: text(),
   },
   (table) => [
     uniqueIndex("app_resource_bindings_active_idx")
@@ -1639,13 +1654,11 @@ export const workflowRuns = sqliteTable(
     version: integer().notNull(),
     startedBy: text("started_by"),
     /**
-     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
-     * then their user ID, not a member's. Written once, by `startRun`,
-     * from the starter's own session, never from what it was asked; never
-     * for a run another run, a trigger or an agent started. The run's
-     * authority carries it, so its person passes the active-member gate
-     * only while they are still staff, and what it does is audited as
-     * started by "(Grasp staff)".
+     * Unused: nothing reads or writes it any more, and every new row takes
+     * the default. Grasp staff start no work in a client's workspace (a
+     * staff session reaches the onboarding alone), so no run is marked as
+     * staff-started. Kept because the release before this one still reads
+     * and writes it (expand, then contract); drop it in a later release.
      */
     startedByStaff: integer("started_by_staff", { mode: "boolean" })
       .notNull()
@@ -1680,7 +1693,7 @@ export const workflowRuns = sqliteTable(
      * is its own root. Written once, with the row, and never from what the
      * run is given: the model gateway counts the lineage's model calls and
      * spend by it, unless the run is charged to an account
-     * (`accountRunId`, src/model-budgets.ts).
+     * (`accountRunId`, src/model-spend.ts).
      */
     rootRunId: text("root_run_id"),
     /**
@@ -2827,6 +2840,21 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
 });
 
 /**
+ * Every command from Grasp's admin this core took, by its id
+ * (`@grasp-os/shared/admin-command`): a command delivered again applies
+ * once. Claimed before it applies and marked once it did; one that failed
+ * is let go, so delivering it again applies it, and one claimed by a run
+ * that died can be claimed again after a while.
+ */
+export const adminCommands = sqliteTable("admin_commands", {
+  id: text().primaryKey(),
+  type: text().notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+  /** When it applied; null while it is being applied. */
+  appliedAt: timestamp("applied_at"),
+});
+
+/**
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
  * each time who holds `dependencies.approve` changes. A decision lands
@@ -3387,8 +3415,10 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that a
  * workflow failed while acting for them (`run_failed`), or that an admin
  * asked them one of the brain's open questions (`gap_asked`,
- * src/brain-gaps.ts), or that packages of an App or workflow they build
- * or approved were revoked as malware (`package_revoked`). A `run_failed` row has its App, workflow, run and
+ * src/brain-gaps.ts), that connect stopped hearing a source their
+ * triggers listen to (`events_stopped`), or that packages of an App or
+ * workflow they build or approved were revoked as malware
+ * (`package_revoked`). A `run_failed` row has its App, workflow, run and
  * failures, and no gap; a `gap_asked` row its gap alone, once per person
  * and gap. One unread `run_failed` row per person, App and workflow:
  * another failure while it is unread counts on it (`failures`) and names
@@ -3403,7 +3433,13 @@ export const notifications = sqliteTable(
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
     type: text({
-      enum: ["run_failed", "gap_asked", "trigger_stopped", "package_revoked"],
+      enum: [
+        "run_failed",
+        "gap_asked",
+        "trigger_stopped",
+        "package_revoked",
+        "events_stopped",
+      ],
     }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
@@ -3430,6 +3466,17 @@ export const notifications = sqliteTable(
     packageName: text("package_name"),
     packageVersion: text("package_version"),
     advisory: text(),
+    /**
+     * Where an `events_stopped` row says connect stopped hearing events
+     * (notifications.ts): the connection, the event type, the part of it
+     * (a mailbox, a drive; null for the account's own), and why
+     * (`refused`: the provider refused access; `failed`: its reads kept
+     * failing).
+     */
+    connectionId: text("connection_id"),
+    eventType: text("event_type"),
+    eventResource: text("event_resource"),
+    stopReason: text("stop_reason", { enum: ["refused", "failed"] }),
   },
   (table) => [
     // A person's list, latest first.
@@ -4004,9 +4051,10 @@ export const workflowStartReceipts = sqliteTable(
       table.workflowResourceId,
       table.createdAt
     ),
-    // The receipts retention has yet to reach, oldest first.
-    index("workflow_start_receipts_due")
-      .on(table.createdAt)
+    // The receipts retention has yet to reach, oldest first, by ID within
+    // a time: the order the sweep pages them in (workflows/retention.ts).
+    index("workflow_start_receipts_due_idx")
+      .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
   ]
 );
@@ -4520,6 +4568,11 @@ export const workflowResourceParams = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+    // The revisions whose values retention has yet to reach, oldest first
+    // (workflows/retention.ts).
+    index("workflow_resource_params_values_kept_idx")
+      .on(table.setAt)
+      .where(sql`${table.valuesRemovedAt} IS NULL`),
   ]
 );
 

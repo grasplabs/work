@@ -15,8 +15,6 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
-  # Its install script, under the Gmail adapter, only prints a banner.
-  core-js-pure: false
 
 catalog:
   # Tooling
@@ -35,18 +33,18 @@ catalog:
   vite-plus: 0.3.3
   vitest: 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
-  workerd: 1.20261012.1
-  wrangler: 4.151.0
+  workerd: 1.20261023.1
+  wrangler: 4.154.0
 
   # Workers runtime and data
-  "@cloudflare/vite-plugin": 1.64.0
+  "@cloudflare/vite-plugin": 1.66.0
   "@cloudflare/vitest-pool-workers": 0.22.0
-  "@cloudflare/workers-types": 5.20261012.1
+  "@cloudflare/workers-types": 5.20261023.1
   capnweb: 0.12.0
   # Schedule triggers: cron expressions, in a time zone.
   croner: 10.0.1
   # Inbound email to workflows.
-  postal-mime: 3.0.0
+  postal-mime: 4.2.0
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.3
   # Knowledge frontmatter.
@@ -67,7 +65,7 @@ catalog:
   # (core's src/dependencies/peers.ts): npm's own range rules.
   semver: 7.8.5
   "@types/semver": 7.8.0
-  zod: 4.6.5
+  zod: 4.6.7
   # The types of Standard Schema, which the SDK's value schemas implement.
   "@standard-schema/spec": 1.1.0
   # JSON Schema 2020-12 in workerd (MIT): only the Open Workflow profile's
@@ -78,22 +76,19 @@ catalog:
   # Identity, agents, connections
   # Better Auth's core, for its IP normalisation in the router; same release
   # as better-auth.
-  "@better-auth/core": 1.7.5
-  "@better-auth/sso": 1.7.5
+  "@better-auth/core": 1.7.14
+  "@better-auth/sso": 1.7.14
   "@earendil-works/pi-agent-core": 1.4.0
   "@earendil-works/pi-ai": 1.4.0
-  "@modelcontextprotocol/sdk": 1.30.0
-  better-auth: 1.7.5
+  "@modelcontextprotocol/sdk": 1.32.2
+  better-auth: 1.7.14
   # The admin's Cloudflare Access check.
   jose: 6.2.12
-  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, WhatsApp and
-  # the rest, its state in Durable Objects (packages/chat). Its adapters
+  # Vercel's Chat SDK (MIT): one bot on Teams and Slack, its
+  # state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
-  "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
-  "@chat-adapter/telegram": 4.43.0
-  "@chat-adapter/whatsapp": 4.43.0
   chat: 4.43.0
   # What the Teams and Slack adapters send through, on the version they
   # resolve; core types its hook on their requests with it
@@ -127,13 +122,13 @@ catalog:
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
   # @grasp-os/sdk/react) and their fields (@grasp-os/ui/form).
   "@tanstack/react-form": 1.33.5
-  "@tanstack/react-router": 1.170.38
-  "@tanstack/react-start": 1.168.56
-  "@tanstack/router-plugin": 1.168.40
+  "@tanstack/react-router": 1.170.46
+  "@tanstack/react-start": 1.169.4
+  "@tanstack/router-plugin": 1.168.48
   # TanStack Start's wire format for server functions: the admin's tests
   # call them through the Worker's entry as its pages do. Keep it on the
   # version @tanstack/react-start uses.
-  seroval: 1.6.7
+  seroval: 1.7.5
   "@types/react": 19.3.0
   "@types/react-dom": 19.3.0
   # The screen compiler lints screens with ESLint's Linter (see catalogs).
@@ -148,7 +143,7 @@ catalog:
   embla-carousel-react: 8.6.0
   eslint: 10.11.0
   # A DOM for the web app's component tests that click and type.
-  happy-dom: 21.0.3
+  happy-dom: 21.0.4
   # The kit's one-time-code input.
   input-otp: 1.5.0
   # The CSS parser the motion lint (scripts/lint) works a duration out with,
@@ -176,7 +171,7 @@ catalog:
   # tokens colour them and the CSP needs no inline style.
   rehype-highlight: 7.0.2
   remark-gfm: 4.0.1
-  shadcn: 4.21.0
+  shadcn: 4.23.0
   tailwind-merge: 3.7.0
   tailwindcss: 4.3.3
   tw-animate-css: 1.4.0
@@ -191,8 +186,8 @@ catalogs:
   # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
   # Core, connect and the web stay on the catalog's v1 until v2 is stable.
   cf:
-    "@cloudflare/vite-plugin": 2.0.0-beta.v.4
-    cf: 1.0.0-beta.21
+    "@cloudflare/vite-plugin": 2.0.0-beta.v.8
+    cf: 1.0.0-beta.26
 
 # Vite+ replaces Vite and pins Vitest for every package in the workspace.
 overrides:
@@ -200,7 +195,16 @@ overrides:
   vitest: "catalog:"
   # The test pool bundles an older workerd; align it with Wrangler's so tests
   # run on the same compatibility date as production.
-  "@cloudflare/vitest-pool-workers>miniflare": 5.20261012.0-beta
+  "@cloudflare/vitest-pool-workers>miniflare": 5.20261023.1-beta
+  # The test pool also pins zod 4.4.3 and Wrangler 4.124.0, whose miniflare
+  # pins undici 7.29.0 and sharp 0.35.2: all below their security fixes
+  # (zod GHSA-mrhx-c7xc-m3w5; undici GHSA-4w7w-5xrc-9h26 and others; sharp
+  # GHSA-wq5f-xc86-pv6w, GHSA-rgj7-g3m4-5g8c). No pool release moves off
+  # them (0.23.0 pins the same), so they are lifted here to patch releases
+  # of the same lines. Drop these once the pool moves on.
+  "@cloudflare/vitest-pool-workers>zod": "catalog:"
+  "miniflare@5.20260815.0-alpha>undici": 7.30.1
+  "miniflare@5.20260815.0-alpha>sharp": 0.35.5
 
 peerDependencyRules:
   allowedVersions:
@@ -225,4 +229,4 @@ peerDependencyRules:
 patchedDependencies:
   "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch
-  miniflare@5.20261012.0-beta: patches/miniflare@5.20261012.0-beta.patch
+  miniflare@5.20261023.1-beta: patches/miniflare@5.20261023.1-beta.patch

@@ -16,6 +16,7 @@ import { liveStatus } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   openRpc,
+  outcome,
   routed,
   signedIn,
   signedInWithRole,
@@ -263,13 +264,14 @@ export const unknownOutcomesOf = (idp: Idp) => {
   const personApi = async (role: Role) => await personApiOf(idp, role);
 
   /**
-   * The open obligations a JSON export holds for Grasp staff, signed in from
-   * Grasp's tenant, who read the log as admins.
+   * How a JSON export answers Grasp staff, signed in from Grasp's tenant:
+   * the client's audit log is the company's admins' to read, never a
+   * staff session's.
    */
   const staffExport = async () => {
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(session);
-    return await exportedObligations(core.authenticate());
+    return await outcome(exportedObligations(core.authenticate()));
   };
 
   /**

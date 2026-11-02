@@ -20,14 +20,10 @@ import {
   platformElevenLabsKey,
   directoryClient,
   documentsClient,
-  gmailAccount,
-  gmailPush,
   googleConnectClient,
   platformOpenAiKey,
   slackApp,
   teamsBot,
-  telegramBot,
-  whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { testAssets } from "./test/test-run.ts";
@@ -98,10 +94,7 @@ export const screenTests = [
   "test/build-job-queue.test.ts",
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
-  "test/workflows.test.ts",
   "test/workflow-ai-steps.test.ts",
-  "test/workflow-run-permissions.test.ts",
-  "test/workflow-chaos.test.ts",
   "test/reviewed-calls.test.ts",
   "test/held-runs.test.ts",
   "test/held-wakes.test.ts",
@@ -113,18 +106,17 @@ export const screenTests = [
   "test/workflow-params.test.ts",
   "test/build-on-save.test.ts",
   "test/workflow-overview.test.ts",
-  "test/triggers.test.ts",
   "test/email-triggers.test.ts",
   "test/email-trigger-messages.test.ts",
   "test/email-attachments.test.ts",
   "test/mail-ingress.test.ts",
-  "test/event-triggers.test.ts",
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
   "test/run-controls.test.ts",
   "test/run-summary.test.ts",
   "test/run-history.test.ts",
+  "test/run-object.test.ts",
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
   "test/guests.test.ts",
@@ -231,18 +223,6 @@ export const coreProject = (
             TEAMS_BOT_ID: teamsBot.id,
             // The client's Slack app, so its door is open too.
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
-            // The client's WhatsApp number (src/channels/whatsapp.ts).
-            WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
-            WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
-            WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
-            // The client's Telegram bot (src/channels/telegram.ts).
-            TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
-            // Stephen's Gmail mailbox and its push, so its door is open too.
-            GMAIL_MAILBOX: gmailAccount.mailbox,
-            GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,
-            GMAIL_PUBSUB_SERVICE_ACCOUNT: gmailPush.serviceAccount,
-            GMAIL_PUBSUB_SUBSCRIPTION: gmailPush.subscription,
-            GMAIL_PUBSUB_TOPIC: gmailPush.topic,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -347,9 +327,6 @@ export const coreProject = (
                 TEAMS_BOT_SECRET: teamsBot.secret,
                 // Its Slack app, which the fake Slack there knows.
                 SLACK_BOT_TOKEN: slackApp.botToken,
-                WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
-                WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
-                TELEGRAM_BOT_TOKEN: telegramBot.token,
                 // Grasp's own keys at OpenAI, Anthropic and ElevenLabs for
                 // platform features, which the fakes there take once a test
                 // plans for them (OpenAI's transcription and ElevenLabs'
@@ -357,11 +334,6 @@ export const coreProject = (
                 OPENAI_API_KEY: platformOpenAiKey,
                 ANTHROPIC_API_KEY: platformAnthropicKey,
                 ELEVENLABS_API_KEY: platformElevenLabsKey,
-                // Stephen's Gmail mailbox, which the fake Google there knows.
-                GMAIL_MAILBOX: gmailAccount.mailbox,
-                GMAIL_CLIENT_ID: gmailAccount.clientId,
-                GMAIL_CLIENT_SECRET: gmailAccount.clientSecret,
-                GMAIL_REFRESH_TOKEN: gmailAccount.refreshToken,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).

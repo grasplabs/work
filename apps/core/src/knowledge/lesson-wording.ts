@@ -1,6 +1,4 @@
 import type { LessonFacts } from "@grasp-os/brain/brain";
-import { brainErrors } from "@grasp-os/brain/contract";
-import { modelErrors } from "@grasp-os/shared/models";
 import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
@@ -27,53 +25,34 @@ Answer only with JSON: {"wording": "..."}`;
 
 const answerSchema = z.object({ wording: z.string().max(2000) });
 
-/** Whether the gateway refused a call for its budget. */
-const isBudgetRefusal = (error: unknown): boolean => {
-  const code = modelErrors.codeOf(error);
-  return code === "model.over_budget" || code === "model.budget_busy";
-};
-
 /**
  * A model's wording of the lesson `facts` describe, as the deployment's
  * careful model writes it, charged to the Brain's upkeep. Refused as
- * `brain.unavailable` when no model may write it, and as
- * `brain.budget_exceeded` when the upkeep budget is spent.
+ * `brain.unavailable` when no model may write it.
  */
 export const wordLesson = async (
   env: Env,
   facts: LessonFacts
 ): Promise<string> => {
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
+  const model = modelForRole(await modelSettings(env), "careful");
+  const { output } = await models(env).call({
+    model,
+    system: instructions,
+    input: JSON.stringify({
+      task: facts.taskType,
+      versions: facts.versions,
+      failed: facts.failures,
+      completed: facts.completions,
+      evidence: facts.evidenceStatus,
+      lesson: facts.instruction,
+    }),
+    schema: answerSchema,
+    maxTokens: answerTokens,
+    timeoutMs: wordTimeoutMs,
+    purpose: "brain.lessons",
+    trigger: { type: "system" },
+    // Core's own upkeep, apart from people's chats in spend and audit.
+    work: { platform: "brain_upkeep" },
   });
-  if (model === undefined) {
-    throw brainErrors.create("brain.unavailable");
-  }
-  try {
-    const { output } = await models(env).call({
-      model,
-      system: instructions,
-      input: JSON.stringify({
-        task: facts.taskType,
-        versions: facts.versions,
-        failed: facts.failures,
-        completed: facts.completions,
-        evidence: facts.evidenceStatus,
-        lesson: facts.instruction,
-      }),
-      schema: answerSchema,
-      maxTokens: answerTokens,
-      timeoutMs: wordTimeoutMs,
-      purpose: "brain.lessons",
-      trigger: { type: "system" },
-      // Core's own upkeep, apart from people's chats in spend and audit.
-      work: { platform: "brain_upkeep" },
-    });
-    return output.wording;
-  } catch (error) {
-    if (isBudgetRefusal(error)) {
-      throw brainErrors.create("brain.budget_exceeded");
-    }
-    throw error;
-  }
+  return output.wording;
 };

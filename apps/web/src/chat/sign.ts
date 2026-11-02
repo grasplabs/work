@@ -1,4 +1,9 @@
-import type { ChatCode, ChatPartial } from "@grasp-os/shared/chat";
+import type {
+  ChatCode,
+  ChatMessage,
+  ChatPartial,
+  ChatToolEvent,
+} from "@grasp-os/shared/chat";
 
 import type { SignFigure } from "./sign-figures.ts";
 
@@ -46,6 +51,51 @@ export const signOf = ({
   return partial === null || partial.text.trim() === ""
     ? "thinking"
     : "writing";
+};
+
+/**
+ * The name of the file Grasp reads now: while it works on a code step
+ * (`working`), the last of the chat's files that step's code read
+ * (`env.chat.readFile`, a call the chat shows), by its name as the question
+ * that carried it shows it. None while it does anything else, or while
+ * the step read no file.
+ */
+export const readingFileOf = ({
+  doing,
+  step,
+  tools,
+  messages,
+}: {
+  doing: WorkState | undefined;
+  /** The code step being written or run: the newest answer's last. */
+  step: ChatCode | undefined;
+  tools: readonly ChatToolEvent[];
+  messages: readonly ChatMessage[];
+}): string | undefined => {
+  if (doing !== "working" || step === undefined) {
+    return undefined;
+  }
+  const read = tools.findLast(
+    ({ callId, method, outcome, target }) =>
+      callId === step.callId &&
+      method === "chat.readFile" &&
+      outcome === "ok" &&
+      target?.type === "chat_file"
+  );
+  if (read?.target === undefined || read.target === null) {
+    return undefined;
+  }
+  const fileId = read.target.id;
+  for (const message of messages) {
+    const file =
+      message.role === "user"
+        ? message.files?.find(({ id }) => id === fileId)
+        : undefined;
+    if (file !== undefined) {
+      return file.name;
+    }
+  }
+  return undefined;
 };
 
 /**

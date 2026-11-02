@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { modelForRole, modelSettings, models } from "../models.ts";
 import type { Took } from "./store.ts";
-import { NoDrawingModelError } from "./team-map.ts";
 
 // When someone says the work they were asked about isn't theirs (GRA-1285):
 // Stephen asks who does it, or who is responsible for it, and goes on
@@ -92,12 +91,7 @@ export const referralOf = async (
   brief: ReferralBrief,
   count: (took: Took) => void
 ): Promise<ReferralFound> => {
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw new NoDrawingModelError("No model may read who does the work.");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.drawing",

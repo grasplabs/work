@@ -357,6 +357,14 @@ export interface VersionReview {
     sideEffect: boolean;
   }[];
   /**
+   * Whether its server code may hand files people can read to the
+   * workflows it binds (GRA-976): it declares a files resource with
+   * `read` and a bound workflow whose input can hold a file. Its
+   * screens' and server code's starts then copy the person's file into
+   * the run, as they may read it. Null when its manifest can't be read.
+   */
+  handsFilesToWorkflows: boolean | null;
+  /**
    * What the App asks for that no admin has granted yet: each waits for
    * an admin, whether the version is made current or not.
    */
@@ -916,6 +924,8 @@ export const appErrors = defineErrorFamily({
     "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may. Stop, and tell the person what still fails.",
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
+  "app.no_workflows":
+    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (resource.workflow).",
   "app.no_draft": "This chat has no draft of that App to preview.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",

@@ -1,4 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import {
   entitiesFor,
   relationsPerSource,
@@ -91,7 +90,6 @@ describe("linking Brain sources in core", () => {
   });
 
   it("reads a piece as dense with relations as the Brain keeps, its whole answer within what the model may give", async () => {
-    const rules = { sensitive: { models: [mistral], connections: [] } };
     // As many relations as a source keeps, each its own sentence, in one
     // piece of text: the answer copies every sentence.
     const team = `Support ${unique()}`;
@@ -143,10 +141,7 @@ describe("linking Brain sources in core", () => {
       { models: [mistral] }
     );
 
-    const read = await extractEntities(
-      { ...env, MODEL_GATEWAY: rules },
-      lines.join("\n")
-    );
+    const read = await extractEntities(env, lines.join("\n"));
 
     expect({
       dense: lines.join("\n").length <= 8000 && tokens > 4000,
@@ -154,34 +149,14 @@ describe("linking Brain sources in core", () => {
     }).toStrictEqual({ dense: true, read: answer });
   });
 
-  it("reads a source only through a model the sensitive-data rule lists, recorded as the Brain's upkeep", async () => {
-    const provider = await fakeProviderFor([mistral, euModel], {
+  it("reads a source through the organization's default model, recorded as the Brain's upkeep", async () => {
+    const provider = await fakeProviderFor([euModel, mistral], {
       text: JSON.stringify({ entities: [] }),
       inputTokens: 100,
       outputTokens: 10,
     });
     const marker = `Upkeep ${unique()}`;
-    const read = await extractEntities(
-      {
-        ...env,
-        MODEL_GATEWAY: { sensitive: { models: [euModel], connections: [] } },
-      },
-      `${marker} is a project.`
-    );
-    // A rule that lists none of the models the organization chose: no
-    // model may read it.
-    const refused = await extractEntities(
-      {
-        ...env,
-        MODEL_GATEWAY: {
-          sensitive: { models: ["anthropic/claude-opus-4-8"], connections: [] },
-        },
-      },
-      "Anything."
-    ).then(
-      () => "ok",
-      (error: unknown) => brainErrors.codeOf(error)
-    );
+    const read = await extractEntities(env, `${marker} is a project.`);
     const events = await allEvents();
     const call = events.findLast(
       ({ action, detail }) =>
@@ -192,22 +167,17 @@ describe("linking Brain sources in core", () => {
 
     expect({
       read,
-      refused,
       sentTo: provider.requests.map(({ url }) => new URL(url).host),
       call: call && {
         actor: call.actor,
         model: call.model?.model,
-        sensitive: call.detail.sensitive,
       },
     }).toStrictEqual({
       read: { entities: [] },
-      refused: "brain.unavailable",
       sentTo: ["api.openai.com"],
       call: {
         actor: { type: "system" },
         model: "gpt-5.4",
-        // Judged as carrying sensitive data, as onboarding's calls are.
-        sensitive: "restricted",
       },
     });
   });

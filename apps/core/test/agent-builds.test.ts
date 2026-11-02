@@ -35,9 +35,10 @@ import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 // These tests start from the ways it can fail: the agent builds without a
 // permission of its own, or past what its person may do (an App they
 // don't build, or any App for someone who doesn't build); a chat that read
-// restricted data writes it into code others read; the agent's draft and
-// a builder's commits overwrite each other; a draft that doesn't
-// pass reaches the App; and a repair loop that never ends.
+// restricted data writes it into code others read; the agent writes a
+// workflow into an App, whose calls no admin approves binding by binding;
+// the agent's draft and a builder's commits overwrite each other; a draft
+// that doesn't pass reaches the App; and a repair loop that never ends.
 
 const idp = mockIdp();
 
@@ -61,7 +62,7 @@ const fixed = restyled.replace(
   '<Button variant="outline">'
 );
 
-/** A workflow of the draft, with its tests. */
+/** A workflow a builder wrote, with its tests. */
 const intake = {
   "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
@@ -82,10 +83,10 @@ export default workflowTests(definition, [
 /** Code that finds the App the agent created, by its name, as `app`. */
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
-/** Creates the App, writes the restyled screen and a workflow, and checks. */
+/** Creates the App, writes the restyled screen, and checks. */
 const firstTry = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled, ...intake })});
+  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
   const check = await env.build.check(app.id);
   return {
     passed: check.passed,
@@ -96,12 +97,11 @@ const firstTry = `export default async (self, env) => {
   };
 };`;
 
-/** Writes the fixed screen, checks again, and dry-runs the workflow. */
+/** Writes the fixed screen, and checks again. */
 const repair = `export default async (self, env) => {
   ${findApp}
   const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
   const check = await env.build.check(app.id);
-  const runs = await env.build.dryRun(app.id, "intake", {});
   const draft = await env.build.files(app.id);
   return {
     changed: written.changed,
@@ -109,7 +109,6 @@ const repair = `export default async (self, env) => {
     screens: check.screens.status,
     tests: check.tests.status,
     failedInARow: check.failedInARow,
-    runs: runs.map(({ name, status }) => ({ name, status })),
     screen: draft.files["screens/desk.tsx"],
   };
 };`;
@@ -276,62 +275,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { sum: 2, mail:
 });
 
 /**
- * A workflow whose tests pass, and whose step calls the App's server by a
- * name the step list can't follow: its function's own `arguments`.
- */
-const tidy = {
-  "workflows/tidy.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("tidy", { params: {}, input: z.unknown() }, async function (step, { input }) {
-  const bindings = arguments[1].env;
-  return await step.do("tidy-up", { description: "Tidy" }, async () => await bindings.APP.call("sendAll", input));
-});
-`,
-  "workflows/tidy.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./tidy.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { "tidy-up": 1 }, expect: { output: 1 } }]);
-`,
-};
-
-/**
- * A workflow whose step calls the App's functions through a stub another
- * step made, and a helper it imports that takes the built-in a run's
- * bindings are wrapped in: neither names the call under the step that
- * makes it.
- */
-const sweep = {
-  "workflows/lib/take.ts": `let taken: unknown;
-const Real = globalThis.Proxy;
-globalThis.Proxy = function (target: object, handler: object) {
-  taken = target;
-  return new Real(target, handler);
-} as unknown as ProxyConstructor;
-export const bindings = (): unknown => taken;
-`,
-  "workflows/sweep.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
-
-import { bindings } from "./lib/take.ts";
-
-export default workflow("sweep", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  let app!: { sendAll: () => Promise<number> };
-  await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appFunctions(env) as unknown as typeof app;
-    return bindings() === undefined;
-  });
-  return await step.do("tidy-up", { description: "Tidy" }, async () => await app.sendAll());
-});
-`,
-  "workflows/sweep.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./sweep.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { prepare: true, "tidy-up": 1 }, expect: { output: 1 } }]);
-`,
-};
-
-/**
  * The weekly workflow, run by `triggers`; with `nested`, its step called
  * from a function of its own, which the step list can't read.
  */
@@ -356,6 +299,16 @@ import definition from "./weekly.ts";
 
 export default workflowTests(definition, [{ name: "runs", mocks: { report: "sent" }, expect: { output: "sent" } }]);
 `,
+});
+
+/** Code that writes `changes` into the draft of `app`. */
+const writing = (changes: Record<string, string>): string =>
+  `await env.build.write(app.id, ${JSON.stringify(changes)})`;
+
+/** A write or a create refused for the workflows it would add, naming them. */
+const noWorkflows = (issues: string[]) => ({
+  message: appErrors.create("app.no_workflows").message,
+  issues,
 });
 
 /** Each workflow's changed steps, by name, as a review lists them. */
@@ -384,20 +337,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       passed: false,
       screens: "failed",
       rules: ["shadcn/no-restyle"],
-      tests: "passed",
+      tests: "none",
       failedInARow: 1,
     });
     expect(returned(second?.text)).toStrictEqual({
-      changed: [
-        "screens/desk.tsx",
-        "workflows/intake.ts",
-        "workflows/intake.workflow-tests.ts",
-      ],
+      changed: ["screens/desk.tsx"],
       passed: true,
       screens: "ok",
-      tests: "passed",
+      tests: "none",
       failedInARow: 0,
-      runs: [{ name: "runs", status: "completed" }],
       screen: fixed,
     });
 
@@ -655,31 +603,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       `${appName}2`,
       appErrors.create("app.creates_exhausted").message,
     ]);
-  });
-
-  it("runs a draft's dry runs without a count of their own, and checks it afterwards", async () => {
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
-        const runs = [];
-        for (let count = 0; count < 12; count += 1) {
-          runs.push((await env.build.dryRun(app.id, "intake")).map(({ status }) => status));
-        }
-        return { runs, check: (await env.build.check(app.id)).passed };
-      };`),
-      says("Done."),
-    ]);
-    await grant();
-
-    await chat.ask("Build an invoice desk");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    // Bounded by the turn's code runs and their calls only.
-    expect(returned(result?.text)).toStrictEqual({
-      runs: Array.from({ length: 12 }, () => ["completed"]),
-      check: true,
-    });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {
@@ -1108,7 +1031,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
         const permission = await env.build.requestPermission(app.id, {
           object: { type: "connection", connectionId: "connection-outlook" },
           actions: ["mail.list"],
@@ -1169,24 +1092,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       // The chat's title, for the person the agent acted for.
       proposedBy: { ...proposer, ownChat: true, chatTitle: "Questions" },
       current: null,
-      files: [
-        { path: "screens/desk.tsx", change: "added" },
-        { path: "workflows/intake.ts", change: "added" },
-        { path: "workflows/intake.workflow-tests.ts", change: "added" },
-      ],
+      files: [{ path: "screens/desk.tsx", change: "added" }],
       server: null,
       serverFiles: [],
-      workflows: [
-        {
-          id: "intake",
-          change: "added",
-          shared: [],
-          steps: [
-            { name: "read", change: "added", sideEffect: false, calls: [] },
-          ],
-          params: [],
-        },
-      ],
+      workflows: [],
       permissions: [
         {
           subject: { type: "app", appId: app.id },
@@ -1197,7 +1106,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         },
       ],
       grants: [],
-      tests: { status: "passed", failures: [] },
+      tests: { status: "none", failures: [] },
     });
     // Pending, not live, until a builder makes it current.
     await expect(createdApp(person.api)).resolves.toMatchObject({
@@ -1226,53 +1135,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
   });
 
-  it("checks a draft's workflows against the permissions its App asked for meanwhile, as the version committed from it would be", async () => {
-    // Reads the connection's answer as what it is: typed only while the
-    // App holds a permission for INVOICES.
-    const reading = {
-      "workflows/reading.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("reading", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("read", { description: "Read the invoices" }, async () =>
-    (await env.INVOICES.call("mail.list", {})).output.length
-  );
-});
-`,
-    };
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify(reading)});
-        const before = await env.build.check(app.id);
-        await env.build.requestPermission(app.id, {
-          object: { type: "connection", connectionId: "connection-outlook" },
-          actions: ["mail.list"],
-          binding: "INVOICES",
-        });
-        const after = await env.build.check(app.id);
-        return {
-          before: before.workflows.status,
-          after: after.workflows.status,
-        };
-      };`),
-      says("Checked."),
-    ]);
-    await grant();
-
-    await chat.ask("Build an invoice reader");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
-      before: "failed",
-      after: "ok",
-    });
-  });
-
   it("stands by a proposal once committed, when what follows it fails", async () => {
-    const { person, chat, grant } = await setUp([
+    const { builder, existing, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
         const proposal = await env.build.propose(app.id, "A desk");
         return {
           version: proposal.version,
@@ -1284,6 +1151,8 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
       says("Proposed; its review comes later."),
     ]);
     await grant();
+    // A workflow its builder wrote, whose tests the check runs.
+    await release(builder, existing, intake);
     // After the commit, keeping the check's tests and reading them for the
     // review fail: the proposal is made all the same.
     const { FILES: files } = env;
@@ -1313,16 +1182,17 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      version: 1,
+      version: 3,
       review: null,
       reviewUnavailable: true,
       left: [],
     });
     // Pending, and its review reads once the test results can be reached.
-    const app = await createdApp(person.api);
-    expect(app).toMatchObject({ currentVersion: null, pendingVersion: 1 });
+    const listed = await builder.api.apps.list();
+    const app = listed.find(({ id }) => id === existing);
+    expect(app).toMatchObject({ currentVersion: 2, pendingVersion: 3 });
     await expect(
-      person.api.apps.versions.review(app.id, 1)
+      builder.api.apps.versions.review(existing, 3)
     ).resolves.toMatchObject({ tests: { status: "passed" } });
   });
 
@@ -1332,19 +1202,11 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
         const proposal = await env.build.propose(app.id, "A desk");
-        // It builds and its tests pass, but what its step calls can't be read.
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...tidy })});
-        const unread = await env.build.propose(app.id, "A desk that tidies up");
-        // Nor one whose call is made by another step than the one it's read under, through code it imports.
-        await env.build.write(app.id, ${JSON.stringify({ "workflows/tidy.ts": null, "workflows/tidy.workflow-tests.ts": null, ...sweep })});
-        const moved = await env.build.propose(app.id, "A desk that sweeps up");
         return {
           version: proposal.version,
           passed: proposal.check.passed,
           review: proposal.review,
           reviewUnavailable: proposal.reviewUnavailable,
-          unread: { version: unread.version, passed: unread.check.passed, workflows: unread.check.workflows, tests: unread.check.tests.status },
-          moved: { version: moved.version, passed: moved.check.passed, workflows: moved.check.workflows, tests: moved.check.tests.status },
         };
       };`),
       says("It doesn't pass yet."),
@@ -1359,52 +1221,6 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
       passed: false,
       review: null,
       reviewUnavailable: false,
-      unread: {
-        version: null,
-        passed: false,
-        workflows: {
-          status: "failed",
-          diagnostics: [
-            {
-              file: "workflows/tidy.ts",
-              line: null,
-              rule: "bindings",
-              category: "structure",
-              severity: "error",
-              message:
-                "Line 3: Write the workflow's function inline, as an arrow function: the third argument of `workflow`",
-            },
-          ],
-        },
-        tests: "not_run",
-      },
-      moved: {
-        version: null,
-        passed: false,
-        workflows: {
-          status: "failed",
-          diagnostics: [
-            {
-              file: "workflows/lib/take.ts",
-              line: null,
-              rule: "bindings",
-              category: "structure",
-              severity: "error",
-              message: "Line 2: Don't use `globalThis` in a workflow's code",
-            },
-            {
-              file: "workflows/sweep.ts",
-              line: null,
-              rule: "bindings",
-              category: "structure",
-              severity: "error",
-              message:
-                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appFunctions(env).query(…)` or `brain(env.NAME).recall(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
-            },
-          ],
-        },
-        tests: "not_run",
-      },
     });
     const app = await createdApp(person.api);
     expect({
@@ -1499,6 +1315,145 @@ export const tally = action({
     await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
       []
     );
+  });
+
+  it("writes no workflow into an App, whatever the path, the company it keeps or the blueprint it comes from, and changes none a builder wrote but to delete it", async () => {
+    // The attack: code the agent writes under workflows/ would run as the
+    // App's own workflow, its calls read from the code rather than from a
+    // definition an admin approves binding by binding. A builder's
+    // workflow is there for the agent to tamper with, and a blueprint
+    // marked from that version for the agent to copy it from.
+    const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
+    const calls = {
+      added: writing(
+        Object.fromEntries(
+          Object.entries(intake).map(([path, source]) => [
+            path.replace("intake", "outtake"),
+            source.replaceAll("intake", "outtake"),
+          ])
+        )
+      ),
+      changed: writing({ "workflows/intake.ts": "export default 1;\n" }),
+      imported: writing({
+        "workflows/lib/take.ts": "export const take = 1;\n",
+      }),
+      alongside: writing({
+        "screens/desk.tsx": fixed,
+        "workflows/intake.workflow-tests.ts": "export default [];\n",
+      }),
+      copied: `await env.build.createFromBlueprint((await env.build.blueprints()).find(({ name }) => name === "Ledger").id, { name: "Ledger copy" })`,
+    };
+    const { builder, person, existing, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${ledger}
+        const refusal = async (call) => {
+          try {
+            await call();
+            return "done";
+          } catch (error) {
+            return { message: error.message, issues: error.details?.issues ?? null };
+          }
+        };
+        const results = {};
+        ${Object.entries(calls)
+          .map(
+            ([name, call]) =>
+              `results[${JSON.stringify(name)}] = await refusal(async () => ${call});`
+          )
+          .join("\n        ")}
+        results.unchanged = (await env.build.files(app.id)).changed;
+        results.deleted = (await env.build.write(app.id, ${JSON.stringify({ "workflows/intake.ts": null, "workflows/intake.workflow-tests.ts": null })})).changed;
+        results.proposed = (await env.build.propose(app.id, "No intake")).version;
+        return results;
+      };`),
+      says("Done."),
+    ]);
+    await grant();
+    await release(builder, existing, intake);
+    await builder.api.apps.blueprints.mark(existing, 2);
+
+    await chat.ask("Add an intake workflow to the ledger");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toStrictEqual({
+      added: noWorkflows([
+        "workflows/outtake.ts",
+        "workflows/outtake.workflow-tests.ts",
+      ]),
+      changed: noWorkflows(["workflows/intake.ts"]),
+      imported: noWorkflows(["workflows/lib/take.ts"]),
+      // Refused as a whole, naming only the workflow's file: the screen
+      // beside it didn't land either.
+      alongside: noWorkflows(["workflows/intake.workflow-tests.ts"]),
+      copied: noWorkflows([
+        "workflows/intake.ts",
+        "workflows/intake.workflow-tests.ts",
+      ]),
+      unchanged: [],
+      deleted: ["workflows/intake.ts", "workflows/intake.workflow-tests.ts"],
+      proposed: 3,
+    });
+    // What the version holds is the builder's code less what was deleted,
+    // and no App was created from the blueprint.
+    const listed = await person.api.apps.list();
+    expect({
+      files: Object.keys(
+        await builder.api.apps.files.read(existing, 3)
+      ).toSorted(),
+      copies: listed.filter(({ name }) => name === "Ledger copy"),
+    }).toStrictEqual({ files: ["AGENTS.md"], copies: [] });
+  });
+
+  it("proposes no draft saved with a workflow change before its writes were refused, committing nothing", async () => {
+    // The same attack through a draft saved before this release refused
+    // the write: proposing commits the saved draft, not a write.
+    const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
+    const { builder, existing, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${ledger}
+        const refusal = async (call) => {
+          try {
+            await call();
+            return "done";
+          } catch (error) {
+            return { message: error.message, issues: error.details?.issues ?? null };
+          }
+        };
+        return await refusal(async () => await env.build.propose(app.id, "Tampered intake"));
+      };`),
+      says("Done."),
+    ]);
+    await grant();
+    await release(builder, existing, intake);
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return instance.saveDraft(
+        chatId,
+        existing,
+        2,
+        {
+          "workflows/intake.ts": "export default 1;\n",
+          "workflows/intake.workflow-tests.ts": null,
+          "notes.md": "the agent's",
+        },
+        [],
+        0,
+        run
+      );
+    });
+
+    await chat.ask("Propose the ledger's draft");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // Named alone: deleting the builder's tests is no workflow change.
+    expect(returned(result?.text)).toStrictEqual(
+      noWorkflows(["workflows/intake.ts"])
+    );
+    const versions = await builder.api.apps.versions.list(existing);
+    expect(
+      versions.map(({ version }) => version).toSorted((a, b) => a - b)
+    ).toStrictEqual([1, 2]);
   });
 
   it("proposes over what builders committed since, and never undoes it", async () => {

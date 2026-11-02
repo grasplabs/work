@@ -1,6 +1,5 @@
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
@@ -15,7 +14,7 @@ import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
-import type { AiCalls, BusyRefusals } from "./host.ts";
+import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
 import type {
   ActionModelCalls,
@@ -28,75 +27,10 @@ import type { EngineStatus } from "./runs.ts";
 import { wakeQueueFronts } from "./share-wakes.ts";
 
 /**
- * Where a run keeps each step's last busy-budget refusal (host.ts): a
- * table of its object's SQLite, beside the engine's journal, as each retry
- * of a step may run in an activation of its own. The engine's removal of
- * a run (a delete, or its purge once retention ends) drops every table of
- * the object but its tombstones (workerflow's `removeJournal`), this one
- * with them: nothing of the run outlives its retention.
- */
-const busyTable = "grasp_busy_refusals";
-
-/** A kept refusal's details, as the gateway gave them. */
-const busyDetailsSchema = errorPayloadSchema.shape.details.unwrap();
-
-/** The run's busy-budget refusals, kept with it (`busyTable`). */
-export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
-  get: (step) => {
-    const exists =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-          busyTable
-        )
-        .toArray().length > 0;
-    const [row] = exists
-      ? sql
-          .exec<{ at: number; details: string | null }>(
-            `SELECT at, details FROM ${busyTable} WHERE step = ?`,
-            step
-          )
-          .toArray()
-      : [];
-    return (
-      row && {
-        at: row.at,
-        details:
-          row.details === null
-            ? undefined
-            : busyDetailsSchema.parse(JSON.parse(row.details)),
-      }
-    );
-  },
-  set: (step, { at, details }) => {
-    // Only while the run is there: a late call of an activation whose run
-    // was removed leaves nothing behind.
-    const live =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'"
-        )
-        .toArray().length > 0;
-    if (!live) {
-      return;
-    }
-    sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${busyTable} (step TEXT PRIMARY KEY, at INTEGER NOT NULL, details TEXT)`
-    );
-    sql.exec(
-      `INSERT INTO ${busyTable} (step, at, details) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET at = excluded.at, details = excluded.details`,
-      step,
-      at,
-      details === undefined ? null : JSON.stringify(details)
-    );
-  },
-});
-
-/**
  * Where a run keeps the attempts of its steps tried once (resource-host.ts,
  * `TriedOnceMarks`): a table of its object's SQLite beside the engine's
- * journal, dropped with it as `busyTable` is. Only the host writes it,
- * never the run's code.
+ * journal, dropped with it by the engine's removal of the run. Only the
+ * host writes it, never the run's code.
  */
 const triedOnceTable = "grasp_tried_once";
 
@@ -313,7 +247,7 @@ export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
 /**
  * Where a run's object keeps that the run was cancelled (`markCancelled`):
  * a table of its SQLite beside the engine's journal, which the engine's
- * removal of the run drops with it, as `busyTable`.
+ * removal of the run drops with it, as `triedOnceTable`.
  */
 const cancelTable = "grasp_run_cancelled";
 
@@ -445,7 +379,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           return null;
         }
         return await runPinned(this.env, pin, event, step, {
-          busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           triedOnce: triedOnceIn(this.ctx.storage.sql),
           fences: fencesIn(this.ctx.storage.sql),
           modelCalls: modelCallsIn(this.ctx.storage.sql),
@@ -513,6 +446,40 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     // the engine's own alarms keep it (`extraAlarm`).
     await this.#armRepair(mark.due ?? Date.now() + cancelRepairMs);
     return mark;
+  }
+
+  /**
+   * Marks an independent workflow's run stopped by `actor` (resource-runs.ts,
+   * `stopResourceRun`), as `markCancelled` marks an App run's cancel: from
+   * then on no attempt of it holds, and should its request not terminate
+   * it, the object does on its next alarm, seconds on. Unless the run is
+   * rolling back, which a stop doesn't cut short (spec 10.7.3): then
+   * nothing is marked. Decided and marked from the run's own journal with
+   * no await between, so no rollback starts in between. `ended` for a run
+   * that has ended, `missing` for one the engine has no journal of: neither
+   * is marked.
+   */
+  async markStopped(
+    runId: string,
+    actor: AuditActor,
+    at: number
+  ): Promise<"marked" | "rolling_back" | "ended" | "missing"> {
+    const live = this.status();
+    if (live === undefined) {
+      return "missing";
+    }
+    if (live.status === "rollingBack") {
+      return "rolling_back";
+    }
+    if (
+      live.status === "complete" ||
+      live.status === "errored" ||
+      live.status === "terminated"
+    ) {
+      return "ended";
+    }
+    await this.markCancelled(runId, actor, at);
+    return "marked";
   }
 
   /**
@@ -634,43 +601,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       version: latest.version,
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
-      // An independent workflow's run, or a test run of its draft: its row
-      // follows the engine's status; a screen's controls of an independent
-      // run settle from the engine's own word on them, below.
-      // Why it failed, from its own journal: kept on its row, so the code
-      // outlives the engine's record of the run.
-      const live = this.status();
-      const project =
-        pin.type === "resource" ? projectResourceRun : projectCandidateRun;
-      await project(
-        this.env,
-        latest.instanceId,
-        {
-          status: latest.status,
-          at: latest.timestamp,
-          sequence: latest.sequence,
-          ...this.#compensationOf(latest.status),
-        },
-        live?.status === "errored" ? (live.error.code ?? null) : null
-      );
-      // A screen's pause or resume of it settles from where the engine has
-      // the run now, and which controls it took, read together here from
-      // its journal, as an App run's do (resource-runs.ts).
-      if (pin.type === "resource") {
-        await settleResourceControls(
-          this.env,
-          latest.instanceId,
-          this.controlState()
-        );
-      }
-      // Then what its fenced attempts still hold of the client's shares
-      // comes back, as an App run's does: after its row, so a run that
-      // ended cancelled has its attempts charged up to their deadlines
-      // (quotas.ts, `sharesReleased`).
-      const run = this.instanceId();
-      if (run !== undefined) {
-        await this.#sharesReleased(run, false);
-      }
+      await this.#independentNotified(pin.type, latest);
       return;
     }
     if (pin?.type !== "app") {
@@ -703,6 +634,67 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     }
     if (record.status === "rejected") {
       throw record.reason;
+    }
+  }
+
+  /**
+   * Takes the status of an independent workflow's run, or a test run of
+   * its draft (`notify`): its row follows the engine's status; a screen's
+   * controls of an independent run settle from the engine's own word on
+   * them, below.
+   */
+  async #independentNotified(
+    type: "resource" | "candidate",
+    latest: RunNotification
+  ): Promise<void> {
+    // Why it failed, from its own journal: kept on its row, so the code
+    // outlives the engine's record of the run.
+    const live = this.status();
+    const project =
+      type === "resource" ? projectResourceRun : projectCandidateRun;
+    // A run marked stopped (`markStopped`) that fails before its
+    // termination lands, its attempts refused from the stop on, ended
+    // by the stop: cancelled, as a marked App run is, not failed. Unless
+    // its journal says it rolled back: then how its compensation went is
+    // what it ended with (spec 10.7.3), a failed one
+    // `workflow.compensation_failed`, never masked as a cancel. No
+    // definition Grasp builds registers a compensation yet (GRA-984), so
+    // no real path reaches that case to test it.
+    const marked = cancelMarkIn(this.ctx.storage.sql) !== undefined;
+    const rolledBack =
+      live !== undefined && "rollback" in live && live.rollback !== undefined;
+    const stoppedEnd = marked && latest.status === "errored" && !rolledBack;
+    const status = stoppedEnd ? "terminated" : latest.status;
+    await project(
+      this.env,
+      latest.instanceId,
+      {
+        status,
+        at: latest.timestamp,
+        sequence: latest.sequence,
+        ...this.#compensationOf(latest.status),
+      },
+      live?.status === "errored" && !stoppedEnd
+        ? (live.error.code ?? null)
+        : null
+    );
+    // A screen's pause or resume of it settles from where the engine has
+    // the run now, and which controls it took, read together here from
+    // its journal, as an App run's do (resource-runs.ts).
+    if (type === "resource") {
+      await settleResourceControls(
+        this.env,
+        latest.instanceId,
+        this.controlState()
+      );
+    }
+    // Then what its fenced attempts still hold of the client's shares
+    // comes back, as an App run's does: after its row, so a run that
+    // ended cancelled has its attempts charged up to their deadlines
+    // (quotas.ts, `sharesReleased`).
+    const run = this.instanceId();
+    if (run !== undefined) {
+      await this.#sharesReleased(run, marked);
     }
   }
 

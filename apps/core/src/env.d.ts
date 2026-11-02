@@ -20,36 +20,7 @@ interface __BaseEnv_Env {
    * Slack's door answers 404.
    */
   SLACK_SIGNING_SECRET?: string;
-  /**
-   * The client's WhatsApp Business number (src/channels/whatsapp.ts): the
-   * Meta app's secret every webhook is signed with, a Worker secret; the
-   * Cloud API's id of the number; and the token Meta's subscription check
-   * must name. Until all three are set, WhatsApp's door answers 404.
-   */
-  WHATSAPP_APP_SECRET?: string;
-  WHATSAPP_PHONE_NUMBER_ID?: string;
-  WHATSAPP_VERIFY_TOKEN?: string;
-  /**
-   * The secret the client's Telegram bot's webhook was registered with, a
-   * Worker secret: Telegram sends it with every update
-   * (src/channels/telegram.ts). Unset, Telegram's door answers 404.
-   */
-  TELEGRAM_WEBHOOK_SECRET?: string;
-  /**
-   * Stephen's own Gmail mailbox, which people email, and the Pub/Sub push
-   * that tells its door of new mail (src/channels/gmail.ts): the push's
-   * audience, the service account it pushes as, its subscription and the
-   * topic the mailbox's watch publishes to. Until the first four are set,
-   * Gmail's door answers 404. The mailbox's token is connect's.
-   */
-  GMAIL_MAILBOX?: string;
-  GMAIL_PUBSUB_AUDIENCE?: string;
-  GMAIL_PUBSUB_SERVICE_ACCOUNT?: string;
-  GMAIL_PUBSUB_SUBSCRIPTION?: string;
-  GMAIL_PUBSUB_TOPIC?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
-  MODEL_GATEWAY?: unknown;
   /**
    * Lower limits on an App's npm packages than the defaults
    * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
@@ -149,15 +120,10 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_RETRY_DELAY_MS?: string;
   /**
-   * Tests only: the UTC month model budgets count in, such as `2031-01`
-   * (src/model-budgets.ts).
+   * Tests only: the UTC month model spend counts in, such as `2031-01`
+   * (src/model-spend.ts).
    */
   MODEL_BUDGET_MONTH?: string;
-  /**
-   * Tests only: the UTC day a model binding's daily cap counts in, such as
-   * `2031-01-02` (src/model-budgets.ts).
-   */
-  MODEL_BUDGET_DAY?: string;
   /**
    * Tests only: fewer connector events one clock run delivers
    * (src/workflows/connector-events.ts).

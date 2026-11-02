@@ -315,8 +315,8 @@ const resourceOf = ({ trigger, work, binding }: FairInput): string | null => {
 
 /**
  * The person a call is made by or for, if any, a guest's aside (a guest is
- * no one's person): the one rule its shares and its budgets both count by
- * (model-budgets.ts adds a guest's member for budgets).
+ * no one's person): the one rule its shares and its spend both count by
+ * (model-spend.ts adds a guest's member for spend).
  */
 export const personOf = ({ trigger, work }: FairInput): string | undefined => {
   if (trigger.type === "person" || trigger.type === "staff") {
@@ -335,8 +335,8 @@ export const personOf = ({ trigger, work }: FairInput): string | undefined => {
  *
  * - `subject`: the person its calls count for (who makes it, or whom an
  *   agent or a run acts for); for a guest's chat, its own
- *   (`guest:<chatId>`), never the member who invited them, whose budgets it
- *   still spends (model-budgets.ts) but whose share and places it never
+ *   (`guest:<chatId>`), never the member who invited them, whose spend it
+ *   still counts in (model-spend.ts) but whose share and places it never
  *   takes; for a call nobody makes for a person, its App's own
  *   (`app:<id>`), held to a person's share, so a trigger's or a mail
  *   sender's calls never take the App owner's; else core's own (`system`).
