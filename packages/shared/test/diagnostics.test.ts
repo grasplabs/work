@@ -12,7 +12,6 @@ describe("a diagnostic's category", () => {
     ["shadcn/no-raw-colors", "design-system"],
     ["@scope/plugin-rule", "design-system"],
     ["lint", "design-system"],
-    ["bindings", "structure"],
     ["file-names", "structure"],
     ["TS", "internal"],
     ["anything-else", "internal"],

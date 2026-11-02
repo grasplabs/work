@@ -23,6 +23,7 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { ProvisionalOrigin } from "./apps.ts";
 import {
   appFor,
@@ -296,12 +297,6 @@ export const buildsApps = (permissions: Permission[]): boolean =>
       object.collectionId === appsCollectionId &&
       actions.includes("write")
   );
-
-/**
- * Where an App's own workflows and the code they import would be: the
- * agent writes nothing there (`write`, `app.no_workflows`).
- */
-const workflowsFolder = "workflows/";
 
 /** A chat's draft of an App, as the agent reads it. */
 export interface DraftFiles {
@@ -659,7 +654,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * The App `app` names, which the person builds, to read: its draft's
-   * files, its checks and dry runs, an archived App's included.
+   * files and its checks, an archived App's included.
    */
   async #readable(by: Acting, app: unknown): Promise<AppId> {
     const { id } = await appFor(this.env, by, app, "builder");
@@ -835,14 +830,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           await draftFiles(this.env, id, draft),
           changes
         );
-        const workflowWrites = written.flatMap(([path, content]) =>
-          content !== null && path.startsWith(workflowsFolder) ? [path] : []
+        refuseAppWorkflows(
+          written.flatMap(([path, content]) => (content === null ? [] : [path]))
         );
-        if (workflowWrites.length > 0) {
-          throw appErrors.create("app.no_workflows", {
-            issues: workflowWrites.toSorted().slice(0, maxReported),
-          });
-        }
         // Only what differs from the base is kept: a path written back as
         // the base has it (a deleted file that isn't there, too) is a
         // change no more. A draft holds at most the base's paths and the

@@ -294,6 +294,16 @@ export default workflowTests(definition, [{ name: "runs", mocks: { report: "sent
 `,
 });
 
+/** Code that writes `changes` into the draft of `app`. */
+const writing = (changes: Record<string, string>): string =>
+  `await env.build.write(app.id, ${JSON.stringify(changes)})`;
+
+/** A write or a create refused for the workflows it would add, naming them. */
+const noWorkflows = (issues: string[]) => ({
+  message: appErrors.create("app.no_workflows").message,
+  issues,
+});
+
 /** Each workflow's changed steps, by name, as a review lists them. */
 const changedSteps = (workflows: VersionReview["workflows"]) =>
   workflows.map(({ steps }) =>
@@ -1212,50 +1222,91 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     }).toMatchObject({ app: { pendingVersion: null }, versions: [] });
   });
 
-  it("writes no workflow into an App, whatever the path or the company it keeps, and changes none a builder wrote but to delete it", async () => {
+  it("writes no workflow into an App, whatever the path, the company it keeps or the blueprint it comes from, and changes none a builder wrote but to delete it", async () => {
     // The attack: code the agent writes under workflows/ would run as the
     // App's own workflow, its calls read from the code rather than from a
     // definition an admin approves binding by binding. A builder's
-    // workflow is there for the agent to tamper with.
+    // workflow is there for the agent to tamper with, and a blueprint
+    // marked from that version for the agent to copy it from.
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
-    const { builder, existing, chat, grant } = await setUp([
-      codeStep(
-        tryEach(
-          {
-            added: `await env.build.write(app.id, ${JSON.stringify(intake).replaceAll("intake", "outtake")})`,
-            changed: `await env.build.write(app.id, ${JSON.stringify({ "workflows/intake.ts": "export default 1;\n" })})`,
-            imported: `await env.build.write(app.id, ${JSON.stringify({ "workflows/lib/take.ts": "export const take = 1;\n" })})`,
-            alongside: `await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, "workflows/intake.workflow-tests.ts": "export default [];\n" })})`,
-            unchanged: "(await env.build.files(app.id)).changed",
-            deleted: `(await env.build.write(app.id, ${JSON.stringify({ "workflows/intake.ts": null, "workflows/intake.workflow-tests.ts": null })})).changed`,
-            proposed: `(await env.build.propose(app.id, "No intake")).version`,
-          },
-          ledger
+    const calls = {
+      added: writing(
+        Object.fromEntries(
+          Object.entries(intake).map(([path, source]) => [
+            path.replace("intake", "outtake"),
+            source.replaceAll("intake", "outtake"),
+          ])
         )
       ),
+      changed: writing({ "workflows/intake.ts": "export default 1;\n" }),
+      imported: writing({
+        "workflows/lib/take.ts": "export const take = 1;\n",
+      }),
+      alongside: writing({
+        "screens/desk.tsx": fixed,
+        "workflows/intake.workflow-tests.ts": "export default [];\n",
+      }),
+      copied: `await env.build.createFromBlueprint((await env.build.blueprints()).find(({ name }) => name === "Ledger").id, { name: "Ledger copy" })`,
+    };
+    const { builder, person, existing, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${ledger}
+        const refusal = async (call) => {
+          try {
+            await call();
+            return "done";
+          } catch (error) {
+            return { message: error.message, issues: error.details?.issues ?? null };
+          }
+        };
+        const results = {};
+        ${Object.entries(calls)
+          .map(
+            ([name, call]) =>
+              `results[${JSON.stringify(name)}] = await refusal(async () => ${call});`
+          )
+          .join("\n        ")}
+        results.unchanged = (await env.build.files(app.id)).changed;
+        results.deleted = (await env.build.write(app.id, ${JSON.stringify({ "workflows/intake.ts": null, "workflows/intake.workflow-tests.ts": null })})).changed;
+        results.proposed = (await env.build.propose(app.id, "No intake")).version;
+        return results;
+      };`),
       says("Done."),
     ]);
     await grant();
     await release(builder, existing, intake);
+    await builder.api.apps.blueprints.mark(existing, 2);
 
     await chat.ask("Add an intake workflow to the ledger");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    const refused = appErrors.create("app.no_workflows").message;
     expect(returned(result?.text)).toStrictEqual({
-      added: refused,
-      changed: refused,
-      imported: refused,
-      // Refused as a whole: the screen beside it didn't land either.
-      alongside: refused,
+      added: noWorkflows([
+        "workflows/outtake.ts",
+        "workflows/outtake.workflow-tests.ts",
+      ]),
+      changed: noWorkflows(["workflows/intake.ts"]),
+      imported: noWorkflows(["workflows/lib/take.ts"]),
+      // Refused as a whole, naming only the workflow's file: the screen
+      // beside it didn't land either.
+      alongside: noWorkflows(["workflows/intake.workflow-tests.ts"]),
+      copied: noWorkflows([
+        "workflows/intake.ts",
+        "workflows/intake.workflow-tests.ts",
+      ]),
       unchanged: [],
       deleted: ["workflows/intake.ts", "workflows/intake.workflow-tests.ts"],
       proposed: 3,
     });
-    // What the version holds is the builder's code less what was deleted.
-    expect(
-      Object.keys(await builder.api.apps.files.read(existing, 3)).toSorted()
-    ).toStrictEqual(["AGENTS.md"]);
+    // What the version holds is the builder's code less what was deleted,
+    // and no App was created from the blueprint.
+    const listed = await person.api.apps.list();
+    expect({
+      files: Object.keys(
+        await builder.api.apps.files.read(existing, 3)
+      ).toSorted(),
+      copies: listed.filter(({ name }) => name === "Ledger copy"),
+    }).toStrictEqual({ files: ["AGENTS.md"], copies: [] });
   });
 
   it("proposes over what builders committed since, and never undoes it", async () => {
