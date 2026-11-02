@@ -7452,6 +7452,10 @@ export class Onboarding extends DurableObject<Env> {
       .run();
     this.#db.delete(approvals).where(eq(approvals.person, person)).run();
     this.#db.delete(readbacks).where(eq(readbacks.person, person)).run();
+    // A roster fix still to make from what they agreed to rests on it, and
+    // goes with it. A referral names nobody else: whom it names is worked
+    // out from the roster only as it is made (`#referOne`).
+    this.#db.delete(referrals).where(eq(referrals.person, person)).run();
     return said;
   }
 

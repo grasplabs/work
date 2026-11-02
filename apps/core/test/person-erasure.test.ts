@@ -984,6 +984,16 @@ describe("erasing a person", () => {
     };
     await queue(theirs);
     await queue(others);
+    // A referral each, still to be made: who does what put right from what
+    // they agreed to. A referral row names only the person who made it.
+    for (const id of [theirs, others]) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await onList(
+        "INSERT INTO referrals (person, at) VALUES (?, ?)",
+        id,
+        new Date(Date.now() + 86_400_000).toISOString()
+      );
+    }
 
     await admin.api.members.erase(person.userId, String(person.person.name));
 
@@ -1005,6 +1015,13 @@ describe("erasing a person", () => {
       );
       return rows.length;
     };
+    const referralsBy = async (id: string) => {
+      const rows = await onList(
+        "SELECT person FROM referrals WHERE person = ?",
+        id
+      );
+      return rows.length;
+    };
     expect({
       before,
       // Their old link opens nothing any more, so nothing new is saved.
@@ -1015,6 +1032,8 @@ describe("erasing a person", () => {
       otherEntry: await listed(others),
       theirMail: await queuedFor(theirs),
       otherMail: await queuedFor(others),
+      theirReferral: await referralsBy(theirs),
+      otherReferral: await referralsBy(others),
     }).toStrictEqual({
       before: "open",
       after: "interview.link_invalid",
@@ -1025,6 +1044,8 @@ describe("erasing a person", () => {
       otherEntry: 1,
       theirMail: 0,
       otherMail: 1,
+      theirReferral: 0,
+      otherReferral: 1,
     });
   });
 

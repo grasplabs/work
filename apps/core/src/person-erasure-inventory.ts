@@ -313,12 +313,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.settled_works": noPerson,
   "onboarding.team_counts": noPerson,
   "onboarding.usage": noPerson,
+  "onboarding.referrals": { erased: "interview" },
   "onboarding.more_voices": {
     none: "work to hear more about; who asked is the audit log's",
   },
-  // A roster fix still to make from what someone agreed to, by their entry's
-  // ID only, gone once made; the entry is the company's (D5).
-  "onboarding.referrals": { company: "the company's roster, put right (D5)" },
   // Each App's store.
   "dataStore.sdk_store": { none: "who deleted the store, a process" },
   "dataStore.sdk_records": { company: "the App's records they own (D1)" },
