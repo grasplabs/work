@@ -25,7 +25,14 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { answering } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import {
+  agree,
+  fact,
+  mapped,
+  team as onboardingTeam,
+} from "./onboarding-team.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -1146,6 +1153,58 @@ describe("erasing a person", () => {
       // Every one of them, from the first.
       saves: ["interview.link_invalid"],
       link: "interview.link_invalid",
+    });
+  });
+
+  it("never names them in a referral someone else makes after their erasure, though their entry stays", async () => {
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+    await mapped(ids);
+    // Pim was them: the list has them by the address that was theirs.
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      String(person.person.email),
+      ids.pim
+    );
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    if (rota === undefined) {
+      throw new Error("Expected the team's map");
+    }
+
+    // Max says the tickets are Pim's, and the model names Pim for them.
+    await agree(ids.max, [
+      fact("x1", "who", "Pim handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+    await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.pim }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+
+    const after = await store.teamWorks(ids.team);
+    const { entries } = await store.staffLog({ what: "interview.referred" });
+    expect({
+      // Max is moved onto the work they do, as any referral moves them.
+      maxOnRota: after
+        .find(({ id }) => id === rota.id)
+        ?.doers.includes(ids.max),
+      // Who named whom: Max named nobody.
+      logged: entries.map(({ person: by, named }) => [
+        by?.id ?? null,
+        named?.id ?? null,
+      ]),
+    }).toStrictEqual({
+      maxOnRota: true,
+      logged: [[ids.max, null]],
     });
   });
 

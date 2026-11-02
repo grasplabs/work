@@ -160,6 +160,7 @@ import {
   works,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
+import { erasedEmailsAmong } from "../erased-people.ts";
 import {
   deliverMail,
   dropMailAbout,
@@ -6708,6 +6709,13 @@ export class Onboarding extends DurableObject<Env> {
       return;
     }
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    // Someone erased stays on the list, the company's entry (D5), but is
+    // never named again: found by the address that was theirs, as their
+    // erasure keeps it (erased-people.ts), until an admin releases it.
+    const erased = await erasedEmailsAmong(
+      this.env,
+      roster.people.map(({ email }) => email)
+    );
     const found = await referralOf(
       this.env,
       {
@@ -6716,7 +6724,10 @@ export class Onboarding extends DurableObject<Env> {
           .filter(({ team, id }) => team === person.team && id !== asked.id)
           .map(({ id, name, local }) => ({ id, name, local })),
         people: roster.people
-          .filter(({ id, away }) => id !== personId && !away)
+          .filter(
+            ({ id, away, email }) =>
+              id !== personId && !away && !erased.has(email)
+          )
           .map(({ id, name, title, team }) => ({
             id,
             name,
