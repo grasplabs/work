@@ -330,6 +330,33 @@ const heldWithToken = async (
 };
 
 /**
+ * Whether a connection holds `connection`'s grant again, so revoking it
+ * would end access in use: an active connection on the same account-wide
+ * grant, of any scope (`liveOnSameGrant`), or, where the owed copy
+ * `sealed` is at hand, one holding its very refresh token
+ * (`heldWithToken`). What `tryOwed` drops an owed revoke for, and what
+ * keeps one from the list to revoke by hand (revocations-by-hand.ts).
+ */
+export const grantHeldAgain = async (
+  env: Env,
+  connection: ConnectionRow,
+  sealed?: string
+): Promise<boolean> => {
+  const live = await liveOnSameGrant(env, connection);
+  if (live.length > 0) {
+    return true;
+  }
+  if (sealed === undefined) {
+    return false;
+  }
+  const copy = await owedRefreshToken(env, connection.id, sealed);
+  return (
+    typeof copy !== "string" &&
+    (await heldWithToken(env, connection, copy.refreshToken))
+  );
+};
+
+/**
  * Tries the owed revoke `owed` once: claims it for a while, then drops it
  * where the account is connected again, gives it up past `owedForMs`,
  * settles it once the provider revoked, or waits longer after a failure.

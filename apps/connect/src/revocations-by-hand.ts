@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type { RevocationByHand } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { mapConcurrently } from "@grasp-os/shared/release";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { asc, eq, gte, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -16,7 +17,7 @@ import {
   givenUpRevocations,
   tokenRevocations,
 } from "./db/schema.ts";
-import { stuckAttempts } from "./revocations.ts";
+import { grantHeldAgain, stuckAttempts } from "./revocations.ts";
 
 // The revokes at a provider connect couldn't make, for the company's
 // admins to make by hand (GRA-1197): one still retried but stuck past
@@ -31,12 +32,28 @@ import { stuckAttempts } from "./revocations.ts";
 // - Someone else reading it: the company's admins, and Grasp's staff
 //   read-only, each staff read on record before it is answered; anyone
 //   else is refused, on record.
+// - Cutting live access: a revoke whose grant a connection holds again
+//   (the account connected again, in any scope, on Google's account-wide
+//   grant, or handed the same refresh token) is left out, as `tryOwed`
+//   drops it: removing it by hand would end access in use.
 // - Alert fatigue: a revoke shows only once it is stuck (about a day of
 //   failures), not on its first failed try, and one given up shows for
 //   `givenUpShownMs`, then goes.
 
 /** How long a given-up revoke stays listed: long enough to act on. */
 export const givenUpShownMs = 90 * 24 * 60 * 60 * 1000;
+
+/** How many listed revokes are checked against live grants at once. */
+const checkedAtOnce = 10;
+
+/** The items of `items` that `keep` keeps, a few asked at once. */
+const filterAsync = async <T>(
+  items: readonly T[],
+  keep: (item: T) => Promise<boolean>
+): Promise<T[]> => {
+  const kept = await mapConcurrently(items, checkedAtOnce, keep);
+  return items.filter((_, index) => kept[index] === true);
+};
 
 /** A connection, as the list names it: never a personal account. */
 const who = (connection: typeof connections.$inferSelect) => ({
@@ -103,8 +120,20 @@ export const revocationsByHand = async (
       .limit(revocationsListed),
   ]);
 
+  const [stillStuck, stillGivenUp] = await Promise.all([
+    filterAsync(
+      stuck,
+      async ({ owed, connection }) =>
+        !(await grantHeldAgain(env, connection, owed.sealed))
+    ),
+    filterAsync(
+      givenUp,
+      async ({ connection }) => !(await grantHeldAgain(env, connection))
+    ),
+  ]);
+
   return [
-    ...stuck.map(({ owed, connection }) => ({
+    ...stillStuck.map(({ owed, connection }) => ({
       id: owed.id,
       ...who(connection),
       state: "stuck" as const,
@@ -114,7 +143,7 @@ export const revocationsByHand = async (
       givenUpAt: null,
       reason: null,
     })),
-    ...givenUp.map(({ ended, connection }) => ({
+    ...stillGivenUp.map(({ ended, connection }) => ({
       id: ended.id,
       ...who(connection),
       state: "given_up" as const,

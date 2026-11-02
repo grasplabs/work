@@ -50,7 +50,12 @@ import {
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
-import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
+import {
+  accounts,
+  hiddenConnectors,
+  members,
+  users,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
 import { startOAuthConnection } from "./oauth-relay.ts";
@@ -501,6 +506,16 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             .from(users)
             .where(inList(users.id, ids));
     const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A removed member keeps their user row and name: only a membership
+    // says they are still here.
+    const current =
+      ids.length === 0
+        ? []
+        : await drizzle(this.#env.DB)
+            .select({ userId: members.userId })
+            .from(members)
+            .where(inList(members.userId, ids));
+    const memberIds = new Set(current.map(({ userId }) => userId));
     // A personal connection's owner by name, as admins see members.
     return listed.map((each) => ({
       ...each,
@@ -508,6 +523,8 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         each.ownerUserId === null
           ? null
           : (names.get(each.ownerUserId) ?? null),
+      ownerIsMember:
+        each.ownerUserId !== null && memberIds.has(each.ownerUserId),
     }));
   }
 

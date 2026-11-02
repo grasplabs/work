@@ -45,6 +45,7 @@ const person = async (role: "admin" | "user" = "user") => {
     oid: String(claims.oid),
     name: String(claims.name),
     connections: core.authenticate().connections,
+    members: core.authenticate().members,
   };
 };
 
@@ -792,22 +793,31 @@ describe("the revokes to make by hand", () => {
 
     const toDo = await admin.connections.revocationsByHand();
     const theirs = toDo.filter((each) => each.connectionId === connectionId);
+    const user = await outcome(owner.connections.revocationsByHand());
+    // Removed, they keep their name, but are no longer here to remove it.
+    await admin.members.remove(owner.userId);
+    const later = await admin.connections.revocationsByHand();
 
     expect({
       theirs,
       address: JSON.stringify(theirs).includes("their@app.test"),
-      user: await outcome(owner.connections.revocationsByHand()),
+      user,
+      removed: later
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ ownerName, ownerIsMember }) => ({ ownerName, ownerIsMember })),
     }).toMatchObject({
       theirs: [
         {
           state: "stuck",
           ownerUserId: owner.userId,
           ownerName: owner.name,
+          ownerIsMember: true,
           accountName: null,
         },
       ],
       address: false,
       user: "role.forbidden",
+      removed: [{ ownerName: owner.name, ownerIsMember: false }],
     });
   });
 });

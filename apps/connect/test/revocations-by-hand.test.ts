@@ -5,7 +5,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { givenUpShownMs } from "../src/revocations-by-hand.ts";
 import { owedForMs, stuckAttempts } from "../src/revocations.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
-import { auditEvents, outcome, runMaintenance, someone } from "./connect.ts";
+import {
+  auditEvents,
+  connectAccount,
+  outcome,
+  ownAccount,
+  runMaintenance,
+  someone,
+} from "./connect.ts";
 import { sampleOAuthAuthHost } from "./fixtures/sample-oauth-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
@@ -15,9 +22,11 @@ import { fakeProviders } from "./oauth-provider.ts";
 //   a token, anything a connection read;
 // - someone else reading it, or Grasp's staff reading it unseen;
 // - alert fatigue: a revoke listed on its first failed try, or one given
-//   up listed for ever.
+//   up listed for ever;
+// - cutting live access: a revoke listed whose grant a connection holds
+//   again, which removing by hand would end.
 
-fakeProviders();
+const providers = fakeProviders();
 const apps = fakeApps();
 const audit = auditEvents();
 
@@ -56,6 +65,18 @@ const failed = async (id: string, attempts: number): Promise<void> => {
   )
     .bind(attempts, Date.now() + 60 * 60 * 1000, id)
     .run();
+};
+
+/** Connection `id`'s owed revoke, owed so long it is given up. */
+const giveUp = async (id: string): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE token_revocations SET created_at = ?, retry_at = 0 WHERE connection_id = ?"
+  )
+    .bind(Date.now() - owedForMs - 1000, id)
+    .run();
+  const logged = vi.spyOn(console, "error").mockReturnValue();
+  await runMaintenance();
+  logged.mockRestore();
 };
 
 /** What an admin is shown for connection `id`. */
@@ -153,6 +174,47 @@ describe("the revokes to make by hand", () => {
       kept: 0,
       later: [],
     });
+  });
+
+  it.for(["stuck", "given_up"] as const)(
+    "leaves out a %s revoke at Google once the account is connected again, whatever its scope, its grant being the account's",
+    async (state) => {
+      const admin = someone("admin");
+      const account = ownAccount(admin, "google");
+      const personal = await connectAccount(providers, admin, account);
+      providers.state.revoke = async () =>
+        await Promise.resolve(new Response(null, { status: 503 }));
+      await exports.default.disconnect({
+        person: admin,
+        connectionId: personal,
+      });
+      await (state === "stuck"
+        ? failed(personal, stuckAttempts)
+        : giveUp(personal));
+      const before = await shownFor(personal);
+
+      await connectAccount(providers, admin, account, { scope: "shared" });
+
+      expect({
+        before: before.map((each) => each.state),
+        after: await shownFor(personal),
+      }).toStrictEqual({ before: [state], after: [] });
+    }
+  );
+
+  it("leaves out a stuck revoke whose token the app handed the account again when it connected again", async () => {
+    const person = someone();
+    apps.options.sameRefreshToken = true;
+    const { account, connectionId } = await owedFor(person);
+    await failed(connectionId, stuckAttempts);
+    const before = await shownFor(connectionId);
+
+    await connectApp(apps, person, account);
+
+    expect({
+      before: before.length,
+      after: await shownFor(connectionId),
+    }).toStrictEqual({ before: 1, after: [] });
   });
 
   it("is for the company's admins, and Grasp's staff read-only on record; anyone else is refused, on record", async () => {

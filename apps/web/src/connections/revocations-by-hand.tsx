@@ -6,6 +6,7 @@ import { Await } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { formatDate } from "../format.ts";
+import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { AppLogo } from "./app-logo.tsx";
 
@@ -51,7 +52,7 @@ const WhereToRemove = ({
       </Trans>
     );
   }
-  if (toDo.ownerName === null) {
+  if (!toDo.ownerIsMember) {
     return (
       <Trans>
         It was a former member&apos;s account: remove Grasp&apos;s access in{" "}
@@ -136,7 +137,7 @@ const ToDoList = ({
   toDos: Loaded<RevocationToDo[]>;
   nameOf: (provider: string) => string;
 }) => {
-  if (toDos.state !== "ready" || toDos.data.length === 0) {
+  if (toDos.state === "ready" && toDos.data.length === 0) {
     return null;
   }
   return (
@@ -151,24 +152,32 @@ const ToDoList = ({
         <TriangleAlertIcon className="text-destructive size-4" />
         <Trans>Access to remove by hand</Trans>
       </h2>
-      <p className="text-muted-foreground">
-        <Trans>
-          Grasp couldn&apos;t remove its own access at these apps. Until someone
-          removes it there, it may still work.
-        </Trans>
-      </p>
-      <ul className="flex flex-col divide-y">
-        {toDos.data.map((toDo) => (
-          <ToDoRow key={toDo.id} nameOf={nameOf} toDo={toDo} />
-        ))}
-      </ul>
+      {toDos.state === "ready" ? (
+        <>
+          <p className="text-muted-foreground">
+            <Trans>
+              Grasp couldn&apos;t remove its own access at these apps. Until
+              someone removes it there, it may still work.
+            </Trans>
+          </p>
+          <ul className="flex flex-col divide-y">
+            {toDos.data.map((toDo) => (
+              <ToDoRow key={toDo.id} nameOf={nameOf} toDo={toDo} />
+            ))}
+          </ul>
+        </>
+      ) : (
+        // A failed read is said, never taken for nothing to remove.
+        <NotLoaded page={toDos} />
+      )}
     </section>
   );
 };
 
 /**
  * The revokes to make by hand, for admins and Grasp's staff: nothing at
- * all while there are none, or while they load.
+ * all while there are none, or while they load; why, if they couldn't be
+ * read.
  */
 export const RevocationsByHand = ({
   toDos,

@@ -356,6 +356,11 @@ export interface RevocationByHand {
 /** As people see it: a personal connection's owner by name too. */
 export interface RevocationToDo extends RevocationByHand {
   ownerName: string | null;
+  /**
+   * Whether a personal connection's owner is a member now: one removed
+   * keeps their name, but is no longer here to remove the access.
+   */
+  ownerIsMember: boolean;
 }
 
 /**
