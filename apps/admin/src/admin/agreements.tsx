@@ -21,6 +21,7 @@ import {
   FieldDescription,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -49,24 +50,75 @@ const councils = [
 /** Today, as core keeps the day something was signed. */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-/** `agreements` with `change` made: each one in keeps its day, or is in from today. */
+/** `agreements` with the data agreement in or not, signed today when it comes in, until staff say the day. */
+const withProcessing = (agreements: Agreements, on: boolean): Agreements => {
+  const { processingOn: _, ...rest } = agreements;
+  return on
+    ? {
+        ...rest,
+        processing: true,
+        processingOn: agreements.processingOn ?? today(),
+      }
+    : { ...rest, processing: false };
+};
+
+/** `agreements` with the look at the risks signed off or not, as with the data agreement. */
+const withAssessment = (agreements: Agreements, on: boolean): Agreements => {
+  const { assessmentOn: _, ...rest } = agreements;
+  return on
+    ? {
+        ...rest,
+        assessment: true,
+        assessmentOn: agreements.assessmentOn ?? today(),
+      }
+    : { ...rest, assessment: false };
+};
+
+/** `agreements` with the works council's answer: a day once it said yes or there is none. */
+const withCouncil = (
+  agreements: Agreements,
+  council: Agreements["council"]
+): Agreements => {
+  const { councilOn: _, ...rest } = agreements;
+  return council === "waiting"
+    ? { ...rest, council }
+    : { ...rest, council, councilOn: agreements.councilOn ?? today() };
+};
+
+type DayKey = "processingOn" | "assessmentOn" | "councilOn";
+
+/** `agreements` with `key`'s day set, or without one when it is emptied. */
 const withDay = (
   agreements: Agreements,
-  change: Partial<Pick<Agreements, "processing" | "assessment" | "council">>
+  key: DayKey,
+  day: string
 ): Agreements => {
-  const next = { ...agreements, ...change };
-  return {
-    ...next,
-    processingOn: next.processing
-      ? (agreements.processingOn ?? today())
-      : undefined,
-    assessmentOn: next.assessment
-      ? (agreements.assessmentOn ?? today())
-      : undefined,
-    councilOn:
-      next.council === "agreed" ? (agreements.councilOn ?? today()) : undefined,
-  };
+  const { [key]: _, ...rest } = agreements;
+  return day === "" ? rest : { ...rest, [key]: day };
 };
+
+/** The day one agreement was made, once it is in. */
+const AgreedDay = ({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  onChange: (day: string) => void;
+}) => (
+  <Input
+    aria-label={label}
+    className="w-40"
+    max={today()}
+    onChange={(event) => {
+      onChange(event.target.value);
+    }}
+    required
+    type="date"
+    value={value ?? ""}
+  />
+);
 
 /** One agreement as a switch, with what it is. */
 const AgreedSwitch = ({
@@ -136,17 +188,35 @@ const AgreementsDialog = ({
             description="The data processing agreement between the company and Grasp."
             label="Agreement on handling data signed"
             onChange={(processing) => {
-              setDraft(withDay(draft, { processing }));
+              setDraft(withProcessing(draft, processing));
             }}
           />
+          {draft.processing ? (
+            <AgreedDay
+              label="Day the agreement on handling data was signed"
+              onChange={(day) => {
+                setDraft(withDay(draft, "processingOn", day));
+              }}
+              value={draft.processingOn}
+            />
+          ) : null}
           <AgreedSwitch
             checked={draft.assessment}
             description="The data protection impact assessment, signed off by the company."
             label="The company’s look at the risks signed off"
             onChange={(assessment) => {
-              setDraft(withDay(draft, { assessment }));
+              setDraft(withAssessment(draft, assessment));
             }}
           />
+          {draft.assessment ? (
+            <AgreedDay
+              label="Day the look at the risks was signed off"
+              onChange={(day) => {
+                setDraft(withDay(draft, "assessmentOn", day));
+              }}
+              value={draft.assessmentOn}
+            />
+          ) : null}
           <Field>
             <FieldLabel htmlFor={councilId}>Works council</FieldLabel>
             <NativeSelect
@@ -157,7 +227,7 @@ const AgreementsDialog = ({
                   (each) => each.value === event.target.value
                 )?.value;
                 if (council !== undefined) {
-                  setDraft(withDay(draft, { council }));
+                  setDraft(withCouncil(draft, council));
                 }
               }}
               value={draft.council}
@@ -172,6 +242,15 @@ const AgreementsDialog = ({
               Only the works council can agree to this, not the sponsor.
             </FieldDescription>
           </Field>
+          {draft.council === "waiting" ? null : (
+            <AgreedDay
+              label="Day the works council said yes, or it was found there is none"
+              onChange={(day) => {
+                setDraft(withDay(draft, "councilOn", day));
+              }}
+              value={draft.councilOn}
+            />
+          )}
           <CommandFailure failure={failure} />
           <DialogFooter>
             <Button disabled={busy} type="submit">

@@ -3560,7 +3560,15 @@ export class Onboarding extends DurableObject<Env> {
       return forgotten;
     });
     this.#deliverAudit();
-    await this.#afterForget([said]);
+    // The new start is made: failing it now would have the same command,
+    // given again, start anew a second time and take what was said since.
+    try {
+      await this.#afterForget([said]);
+    } catch (error) {
+      log.error("onboarding.after_forget_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
     return true;
   }
 
