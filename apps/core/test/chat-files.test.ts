@@ -14,7 +14,6 @@ import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
   codeStep,
-  configureObject,
   model,
   pausedReply,
   says,
@@ -22,7 +21,6 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // Files attached to a chat's questions: the person attaches a file, core
@@ -59,13 +57,6 @@ const fixture = async (name: string): Promise<Uint8Array> => {
 };
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
-
-/** Answers `person`'s chats with `replies`, from a fake model provider. */
-const answering = async (person: Person, ...replies: ProviderReply[]) => {
-  const provider = await fakeProvider(...replies);
-  await configureObject(objectOf(person));
-  return provider;
-};
 
 /** Follows a chat, keeping every update. */
 const follow = async (person: Person, chatId: string) => {
@@ -146,8 +137,7 @@ describe("files attached to a question", slow, () => {
       name: "expense-policy.pdf",
       bytes: await fixture("expense-policy.pdf"),
     });
-    const provider = await answering(
-      ann,
+    const provider = await fakeProvider(
       codeStep(
         `export default async (self, env) => [await env.chat.files(), await env.chat.readFile(${JSON.stringify(notes.id)}), (await env.chat.readFile(${JSON.stringify(policy.id)})).text.length];`
       ),
@@ -313,7 +303,7 @@ describe("files attached to a question", slow, () => {
       });
       files.push(attached);
     }
-    await answering(ann, says("Too many."));
+    await fakeProvider(says("Too many."));
     expect({
       oneMore: await attach("more.txt", utf8("More")),
       tooMany: await outcome(
@@ -356,7 +346,7 @@ describe("files attached to a question", slow, () => {
     if (unsent === undefined || carried === undefined) {
       throw new Error("No files");
     }
-    await answering(ann, says("Read."));
+    await fakeProvider(says("Read."));
     await ann.api.chats.send(chat.id, {
       text: "Read this one.",
       model,
@@ -420,7 +410,7 @@ describe("files attached to a question", slow, () => {
       throw new Error("No files");
     }
     const held = pausedReply(says("Reading it now."), 3);
-    await answering(ann, held.reply);
+    await fakeProvider(held.reply);
     await ann.api.chats.send(chat.id, {
       text: "Read the plan.",
       model,
@@ -456,8 +446,7 @@ describe("files attached to a question", slow, () => {
       name: "plan.md",
       bytes: utf8("# Plan\n\nShip it."),
     });
-    await answering(
-      ann,
+    await fakeProvider(
       says("Read it."),
       codeStep(
         `export default async (self, env) => await env.chat.readFile(${JSON.stringify(file.id)});`
