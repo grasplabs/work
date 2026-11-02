@@ -36,12 +36,7 @@ import {
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
 import { platformRunner } from "../src/platform-sandbox.ts";
-import {
-  buildAppCode,
-  buildAppTests,
-  buildScreens,
-  buildWorkflows,
-} from "../src/screens.ts";
+import { buildAppCode, buildAppTests, buildScreens } from "../src/screens.ts";
 import { claimStore } from "../src/store-owners.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -58,7 +53,8 @@ import {
 // isolates, R2 and D1: what a seal pins, that what it pins can't change
 // under it, and the ways App code and storage could try to make it seal
 // or run something else. Running a sealed release is
-// app-functions.test.ts.
+// app-functions.test.ts. Gone with App workflows: the types an App's own
+// workflow may name, as its build reads them.
 
 /** Notes, laid out as spec 8 has an App: its schema, operations and registration. */
 const notesFiles = (label = "Notes"): Record<string, string> => ({
@@ -2066,14 +2062,6 @@ const screenTypes =
 const codeTypes =
   'import type { Doc } from "@grasp-os/sdk/database";\nexport type Stored = Doc<never>;';
 
-/**
- * Types a workflow may name: only the SDK's modules it imports, as its
- * type check resolves them (it never reaches the App's schema, so a
- * module like `@grasp-os/sdk/database` has nothing to give it).
- */
-const workflowTypes =
-  'import type { WorkflowEnv } from "@grasp-os/sdk/workflow";\nexport type Bound = WorkflowEnv;';
-
 /** Each kind of App file, the build that reads it, and what it holds besides. */
 const targets = {
   "a screen": {
@@ -2136,13 +2124,6 @@ const targets = {
     wrap: (lines: string) => `${lines}\nexport const test = 1;\n`,
     build: async (files: Record<string, string>) =>
       await buildAppTests(env, files, "app-test"),
-  },
-  "a workflow": {
-    types: workflowTypes,
-    file: "workflows/extra.ts",
-    wrap: (lines: string) => `${lines}\nexport const workflow = 1;\n`,
-    build: async (files: Record<string, string>) =>
-      await buildWorkflows(env, files, "app-test", {}),
   },
 } as const;
 

@@ -54,7 +54,13 @@ import { signedInApi } from "./sign-in.ts";
 // runs as the called App's owner, or for someone without a role in it; a
 // contract the called App changed still served; calls between Apps going
 // round or too deep; a withdrawn caller still committing; restricted data
-// crossing unmarked; and calls nobody can trace.
+// crossing unmarked; and calls nobody can trace. Kept as App runs until
+// JSON runs reach parity: an App's own workflow calling another App
+// through `env.APP.callFunction`, its run starting no workflow of the App
+// it calls, directly or two Apps down, and committing nothing once its
+// step lets go of its lease. Gone with App workflows: its run inviting no
+// guest down the chain, changing the other App once across a rerun, and
+// calling as the person the run acts for.
 
 const idp = mockIdp();
 
@@ -1107,6 +1113,76 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       crm2After: true,
     });
   });
+
+  it("never invite a guest through another App from a screen's call", async () => {
+    // The company connected an AI provider: a guest chat needs a model.
+    await fakeProvider();
+    const builder = await signedInApi(idp, "builder");
+    const admin = await person("admin");
+    const inviter = await sealedApp(inviterFiles, "Inviter");
+    // The Inviter's own permission to invite guests, bound to its `guests`.
+    const asked = await requestPermission(
+      env,
+      inviter.owner,
+      {
+        subject: { type: "app", appId: inviter.app },
+        object: { type: "platform" },
+        actions: ["guests"],
+        binding: "GUESTS",
+      },
+      {
+        app: async (named, role) =>
+          await appFor(env, inviter.owner, named, role),
+        resource: async (ref, needed) => {
+          await requireResourceRole(env, inviter.owner, ref, needed);
+        },
+      }
+    );
+    await grantPermission(env, admin, asked.id, { version: 1 });
+    await approveResourceBinding(env, admin, {
+      app: inviter.app,
+      alias: "guests",
+      target: { kind: "guests", permissionId: asked.id },
+      reviewed: { version: 1 },
+    });
+    await addMember(env, inviter.owner, inviter.app, {
+      type: "person",
+      id: builder.userId,
+      role: "user",
+    });
+    // The Asker calls the Inviter's invite, from a screen.
+    const { id } = await builder.api.apps.create({ name: "Asker" });
+    await published(id);
+    await release(builder, id, askerFiles("inviter.invite"));
+    await approveResourceBinding(env, admin, {
+      app: id,
+      alias: "next",
+      target: { kind: "app", appId: inviter.app },
+      reviewed: { version: 1 },
+    });
+    const asker = appIdSchema.parse(id);
+    const askerSealed = {
+      ...inviter,
+      app: asker,
+      release: await loadRelease(env, asker, 1),
+    };
+    const asBuilder = {
+      ...admin,
+      userId: builder.userId,
+      role: "builder" as const,
+      teams: [],
+    };
+    const direct = await call(asBuilder, inviter, "inviter.invite");
+    const fromScreen = await call(asBuilder, askerSealed, "asker.go");
+    expect({
+      // The person's own call invites.
+      direct,
+      fromScreen,
+    }).toStrictEqual({
+      direct: "invited",
+      fromScreen: "error:resource.not_allowed",
+    });
+  });
 });
 
 /** The value of a function's answer, as a step got it, if it answered. */
@@ -1114,6 +1190,8 @@ const valueOf = (answer: unknown): unknown =>
   z.object({ ok: z.literal(true), value: z.string() }).safeParse(answer).data
     ?.value;
 
+// Kept until JSON runs reach parity: an App's own workflow's run, as
+// before.
 describe("a run calling another App's functions", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
@@ -1198,84 +1276,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
       started: 0,
       fromScreen: "started",
       afterScreen: 1,
-    });
-  });
-
-  it("never invite a guest through another App, from a screen's call or a run's", async () => {
-    // The company connected an AI provider: a guest chat needs a model.
-    await fakeProvider();
-    const builder = await signedInApi(idp, "builder");
-    const admin = await person("admin");
-    const inviter = await sealedApp(inviterFiles, "Inviter");
-    // The Inviter's own permission to invite guests, bound to its `guests`.
-    const asked = await requestPermission(
-      env,
-      inviter.owner,
-      {
-        subject: { type: "app", appId: inviter.app },
-        object: { type: "platform" },
-        actions: ["guests"],
-        binding: "GUESTS",
-      },
-      {
-        app: async (named, role) =>
-          await appFor(env, inviter.owner, named, role),
-        resource: async (ref, needed) => {
-          await requireResourceRole(env, inviter.owner, ref, needed);
-        },
-      }
-    );
-    await grantPermission(env, admin, asked.id, { version: 1 });
-    await approveResourceBinding(env, admin, {
-      app: inviter.app,
-      alias: "guests",
-      target: { kind: "guests", permissionId: asked.id },
-      reviewed: { version: 1 },
-    });
-    await addMember(env, inviter.owner, inviter.app, {
-      type: "person",
-      id: builder.userId,
-      role: "user",
-    });
-    // The Asker calls the Inviter's invite, from a screen and from a run.
-    const { id } = await builder.api.apps.create({ name: "Asker" });
-    await published(id);
-    await release(builder, id, {
-      ...askerFiles("inviter.invite"),
-      ...askingWorkflow("asking"),
-    });
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "next",
-      target: { kind: "app", appId: inviter.app },
-      reviewed: { version: 1 },
-    });
-    const asker = appIdSchema.parse(id);
-    const askerSealed = {
-      ...inviter,
-      app: asker,
-      release: await loadRelease(env, asker, 1),
-    };
-    const asBuilder = {
-      ...admin,
-      userId: builder.userId,
-      role: "builder" as const,
-      teams: [],
-    };
-    const direct = await call(asBuilder, inviter, "inviter.invite");
-    const fromScreen = await call(asBuilder, askerSealed, "asker.go");
-    const run = await builder.api.workflows.start(id, "asking");
-    await finished(run.id);
-    const ended = await builder.api.workflows.status(run.id);
-    expect({
-      // The person's own call invites.
-      direct,
-      fromScreen,
-      fromRun: valueOf(ended.output),
-    }).toStrictEqual({
-      direct: "invited",
-      fromScreen: "error:resource.not_allowed",
-      fromRun: "error:resource.not_allowed",
     });
   });
 
@@ -1400,139 +1400,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
     }).toStrictEqual({
       answered: "error:execution.stale_attempt",
       crmSees: [],
-    });
-  });
-
-  it("changes the other App once however often its step runs again", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await person("admin");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    await addMember(env, crm.owner, crm.app, {
-      type: "person",
-      id: builder.userId,
-      role: "user",
-    });
-    const reference = JSON.stringify({
-      contractId: "desk.add",
-      kind: "action",
-    });
-    const { id } = await builder.api.apps.create({ name: "Retrying desk" });
-    await published(id);
-    await release(builder, id, {
-      ...deskFiles(),
-      "workflows/retry.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("retry", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("note", { description: "Note", sideEffect: true, input: null, timeout: "6 seconds", retries: { limit: 1, delay: "1 second" } }, async () => {
-    await env.APP.callFunction(${reference}, { text: "once" });
-    // Every attempt runs out of time after its call: retried once.
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
-    return null;
-  })
-);
-`,
-      "workflows/retry.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./retry.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { note: null }, expect: {} }]);
-`,
-    });
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    const run = await builder.api.workflows.start(id, "retry");
-    // Both attempts run out of their time: a timeout, not a throw, is what
-    // runs a side effect's step again. Each has six seconds, well past
-    // what reaching its call takes (the Apps' sandboxes loaded for it) on a
-    // runner busy with other tests; an attempt cut off before its call
-    // never makes it.
-    await finished(run.id, 60_000);
-    const ended = await builder.api.workflows.status(run.id);
-    expect({
-      status: ended.status,
-      // Two attempts called, under the step's key: one note.
-      notes: await call(
-        { ...admin, userId: builder.userId, role: "builder", teams: [] },
-        crm,
-        "notes.mine"
-      ),
-      calls: callsTo(await allEvents(), crm.app).filter(
-        ({ onBehalfOf }) => onBehalfOf === builder.userId
-      ).length,
-    }).toStrictEqual({ status: "failed", notes: ["once"], calls: 2 });
-  });
-
-  it("calls as the person the run acts for, audited as the run", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await person("admin");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    await addMember(env, crm.owner, crm.app, {
-      type: "person",
-      id: builder.userId,
-      role: "user",
-    });
-    const reference = JSON.stringify({
-      contractId: "desk.add",
-      kind: "action",
-    });
-    const { id } = await builder.api.apps.create({ name: "Run desk" });
-    await published(id);
-    await release(builder, id, {
-      ...deskFiles(),
-      "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("noter", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("note", { description: "Note", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${reference}, { text: "from the run" })) as Json
-  )
-);
-`,
-      "workflows/noter.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./noter.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { note: null }, expect: {} }]);
-`,
-    });
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    const run = await builder.api.workflows.start(id, "noter");
-    await finished(run.id);
-    const ended = await builder.api.workflows.status(run.id);
-    const asBuilder = {
-      userId: builder.userId,
-      role: "builder" as const,
-      teams: [],
-    };
-    expect({
-      status: ended.status,
-      output: ended.output,
-      builderReads: await call({ ...admin, ...asBuilder }, crm, "notes.mine"),
-      audited: callsTo(await allEvents(), crm.app),
-    }).toStrictEqual({
-      status: "completed",
-      output: { ok: true, value: "null" },
-      builderReads: ["from the run"],
-      audited: [
-        {
-          actor: {
-            type: "workflow",
-            appId: id,
-            workflowId: "noter",
-            runId: run.id,
-          },
-          function: "notes.add",
-          onBehalfOf: builder.userId,
-        },
-      ],
     });
   });
 });
