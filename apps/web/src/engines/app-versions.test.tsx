@@ -80,6 +80,7 @@ const fakeApps = ({
     process: null,
     createdAt: "2026-10-01T09:00:00.000Z",
     role,
+    link: null,
   };
   let removed = false;
   const apps = {
