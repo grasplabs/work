@@ -1,5 +1,6 @@
 import { adminSnapshotSchema } from "../../../src/admin-snapshot.ts";
 import type { AdminSnapshot } from "../../../src/admin-snapshot.ts";
+import { STARTING_ORG_RULES } from "../../../src/admin/onboarding-admin.ts";
 import type { Told, WorkRecord } from "../../../src/admin/org-record.ts";
 
 export const client = {
@@ -93,6 +94,7 @@ export const answer = {
       openedAt: "2026-10-05T07:30:00.000Z",
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "completed",
     },
     {
@@ -101,6 +103,7 @@ export const answer = {
       openedAt: "2026-10-14T09:40:00.000Z",
       remindedAt: "2026-10-09T07:00:00.000Z",
       deletedAt: null,
+      failedMail: null,
       state: "progress",
     },
     {
@@ -109,6 +112,7 @@ export const answer = {
       openedAt: null,
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "waiting",
     },
     {
@@ -117,6 +121,7 @@ export const answer = {
       openedAt: "2026-10-06T08:00:00.000Z",
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: "opened",
     },
   ],
@@ -156,7 +161,12 @@ export const answer = {
       interviewer: "claire",
     },
   ],
-  works: null,
+  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
+  setup: {
+    setup: { languages: [], limits: [], terms: [] },
+    changed: false,
+    suggested: { languages: [], limits: [], terms: [] },
+  },
   kickoff: { at: "2026-09-24T10:00:00.000Z", known: 0.6 },
   gate: {
     open: false,
