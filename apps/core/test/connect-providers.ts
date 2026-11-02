@@ -510,6 +510,7 @@ export default {
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
           attachments: message.attachments ?? [],
+          // Tagged as a sent message is: every record has its effect key.
           effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
           draft: true,
         });
