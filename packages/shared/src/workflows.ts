@@ -243,12 +243,18 @@ export const isCronExpression = (cron: string): boolean =>
 /**
  * The part of an address before the `@` that an email trigger receives
  * mail at, e.g. `invoices`: lower case letters, digits, `.`, `_`, `+` and
- * `-`, with no dot first, last or twice in a row.
+ * `-`, with no dot first, last or twice in a row. Never `trigger-…`: the
+ * addresses of independent workflows' email triggers
+ * (`emailTriggerLocalPart` in workflow-triggers.ts), so no App takes one's
+ * mail.
  */
 export const emailLocalPartSchema = z
   .string()
   .regex(/^[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*$/u)
-  .max(64);
+  .max(64)
+  .refine((local) => !local.startsWith("trigger-"), {
+    message: "Addresses starting with trigger- are independent workflows'.",
+  });
 
 /**
  * Where a message an email trigger received is kept while its attachments

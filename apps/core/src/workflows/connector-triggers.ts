@@ -117,7 +117,7 @@ interface Taker {
 }
 
 /** The refusals of a trigger's start taken as for good. */
-const refusedForGood: ReadonlySet<string> = new Set([
+export const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
   "workflow.start_invalid",
   "workflow.packages_revoked",
@@ -146,11 +146,21 @@ const hearsSql = (id: string, event: ConnectorEvent): SQL =>
   })`;
 
 /** That trigger `id` has room for another run this hour, as SQL. */
-const roomSql = (id: string): SQL =>
+const hourRoomSql = (id: string): SQL =>
   sql`((SELECT COUNT(*) FROM ${workflowStartReceipts}
     WHERE ${workflowStartReceipts.invokerType} = 'trigger'
       AND ${workflowStartReceipts.invokerId} = ${id}
       AND ${workflowStartReceipts.createdAt} > ${Date.now() - 60 * 60 * 1000}) < ${triggeredRunsPerHour})`;
+
+/**
+ * That trigger `id` has room for another run this hour, or started the
+ * run of `key` already, as SQL: what admitting a start of it requires.
+ */
+export const roomSql = (id: string, key: string): SQL =>
+  sql`(${hourRoomSql(id)} OR EXISTS (SELECT 1 FROM ${workflowStartReceipts}
+    WHERE ${workflowStartReceipts.invokerType} = 'trigger'
+      AND ${workflowStartReceipts.invokerId} = ${id}
+      AND ${workflowStartReceipts.idempotencyKey} = ${key}))`;
 
 /**
  * The live, enabled connector triggers whose current version takes
@@ -201,11 +211,12 @@ const takersOf = async (env: Env, event: ConnectorEvent): Promise<Taker[]> => {
 };
 
 /**
- * The input `mapping` makes of `event`: its defaults, then each field the
- * event has a value at the field's pointer for. Nothing is evaluated.
+ * The input `mapping` makes of `source` (an event, a message): its
+ * defaults, then each field the source has a value at the field's pointer
+ * for. Nothing is evaluated.
  */
-export const inputOf = (mapping: InputMapping, event: ConnectorEvent): Json => {
-  const document = z.json().parse(event);
+export const inputOf = (mapping: InputMapping, source: unknown): Json => {
+  const document = z.json().parse(source);
   const input: Record<string, Json> = {};
   for (const [field, value] of Object.entries(mapping.defaults)) {
     input[field] = value;
@@ -323,7 +334,7 @@ const refusalOf = async (
     // What the admitting statement required besides: its grant to hear,
     // revoked for good, or its room this hour, back later.
     const now = await drizzle(env.DB).get<{ hears: number; room: number }>(
-      sql`SELECT ${hearsSql(taker.id, event)} AS hears, ${roomSql(taker.id)} AS room`
+      sql`SELECT ${hearsSql(taker.id, event)} AS hears, ${hourRoomSql(taker.id)} AS room`
     );
     if (now.hears === 1 && now.room === 0) {
       return await heldBack(env, taker, same);
@@ -339,17 +350,16 @@ const refusalOf = async (
 };
 
 /**
- * The lineage a stamped event's run joins, for `taker`: the stamping
- * independent run's, one level deeper, admitted once per event and
- * trigger (quotas.ts, `admitChild`, which throws `workflow.lineage_limit`
- * past its limits); none for an event no run stamped; `unjoinable` for an
- * App run's mail, which can't join an independent lineage (their runs are
- * kept apart), or a run no longer kept.
+ * The lineage a trigger's run of a stamped event or message joins: the
+ * stamping independent run's, one level deeper, admitted once per `admission`
+ * (the event or message and the trigger; quotas.ts, `admitChild`, which
+ * throws `workflow.lineage_limit` past its limits); none for one no run
+ * stamped; `unjoinable` for an App run's mail, which can't join an
+ * independent lineage (their runs are kept apart), or a run no longer kept.
  */
-const causeOf = async (
+export const causeOf = async (
   env: Env,
-  taker: Taker,
-  same: string,
+  admission: string,
   stamped: StampedRun | undefined
 ): Promise<TriggerCause | "unjoinable" | undefined> => {
   if (stamped === undefined) {
@@ -363,7 +373,7 @@ const causeOf = async (
   const place = await admitChild(
     env,
     { id: run.id, rootRunId: run.rootRunId, depth: run.depth },
-    `connector:${same}:${taker.id}`
+    admission
   );
   return { runId: run.id, restricted: run.restricted, place };
 };
@@ -440,7 +450,11 @@ export const startConnectorTriggers = async (
       }
       // 4. Tried, admitted only while its grant to hear and its room hold.
       try {
-        const cause = await causeOf(env, taker, same, stamped);
+        const cause = await causeOf(
+          env,
+          `connector:${same}:${taker.id}`,
+          stamped
+        );
         if (cause === "unjoinable") {
           // Never a new root: that is how a loop would go on.
           return await settle(env, taker, event, same, "refused", {
@@ -464,11 +478,7 @@ export const startConnectorTriggers = async (
             key,
           },
           // Read again as it is admitted: its grant to hear, and its room.
-          sql`(${hearsSql(taker.id, event)} AND (${roomSql(taker.id)}
-            OR EXISTS (SELECT 1 FROM ${workflowStartReceipts}
-              WHERE ${workflowStartReceipts.invokerType} = 'trigger'
-                AND ${workflowStartReceipts.invokerId} = ${taker.id}
-                AND ${workflowStartReceipts.idempotencyKey} = ${key})))`,
+          sql`(${hearsSql(taker.id, event)} AND ${roomSql(taker.id, key)})`,
           {
             event: same,
             connection: event.connection,

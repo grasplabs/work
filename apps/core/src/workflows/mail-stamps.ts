@@ -142,8 +142,8 @@ export interface StampingRun {
   /**
    * Whose run it is: an App's (the default), or an independent
    * workflow's, whose mail carries a stamp only (`resource_run_mail_calls`):
-   * no email trigger starts an independent workflow, so its recipients
-   * carry no token.
+   * its recipients carry no token, as its mail to an email trigger is known
+   * by its stamp (`stampedMessageRun`).
    */
   kind?: "app" | "resource";
 }
@@ -650,6 +650,78 @@ const mailboxAddressesOf = async (
 };
 
 /**
+ * The mail call core recorded stamp `stamp` for: an App run's
+ * (`run_mail_calls`) or an independent workflow run's
+ * (`resource_run_mail_calls`), with every recipient it named and its
+ * senders; none for a stamp core didn't record.
+ */
+const stampedCallOf = async (
+  env: Pick<Env, "DB">,
+  stamp: string
+): Promise<
+  (StampedRun & { recipients: string[]; senders: string[] }) | undefined
+> => {
+  const db = drizzle(env.DB);
+  const appCall = await db
+    .select({
+      runId: runMailCalls.runId,
+      recipients: runMailCalls.recipients,
+      senders: runMailCalls.senders,
+    })
+    .from(runMailCalls)
+    .where(eq(runMailCalls.stamp, stamp))
+    .get();
+  const call =
+    appCall ??
+    (await db
+      .select({
+        runId: resourceRunMailCalls.runId,
+        recipients: resourceRunMailCalls.recipients,
+        senders: resourceRunMailCalls.senders,
+      })
+      .from(resourceRunMailCalls)
+      .where(eq(resourceRunMailCalls.stamp, stamp))
+      .get());
+  const recipients = call?.recipients ?? null;
+  const senders = call?.senders ?? null;
+  if (call === undefined || recipients === null || senders === null) {
+    return undefined;
+  }
+  return {
+    kind: appCall === undefined ? "resource" : "app",
+    runId: call.runId,
+    recipients,
+    senders,
+  };
+};
+
+/**
+ * The run whose own mail a message to `address` is, by the stamp it
+ * carries (`stamp`, its `stampHeader`), from the envelope sender `from`:
+ * only when core recorded the stamp for a call that named `address` among
+ * its recipients and `from` among its senders (which SPF vouches for,
+ * unlike its From). None otherwise: mail like any other. So an
+ * independent workflow's mail to an email trigger's address is a run of
+ * its own, as its mail to a watched mailbox is (`stampedEventRun`); a
+ * forged copy of a recorded stamp, from one of its senders, charges that
+ * run's lineage, never escapes it.
+ */
+export const stampedMessageRun = async (
+  env: Pick<Env, "DB">,
+  stamp: string | undefined,
+  address: string,
+  from: string
+): Promise<StampedRun | undefined> => {
+  const call =
+    stamp === undefined ? undefined : await stampedCallOf(env, stamp);
+  return call !== undefined &&
+    call.recipients.includes(address.toLowerCase()) &&
+    call.senders.includes(from.toLowerCase())
+    ? { kind: call.kind, runId: call.runId }
+    : undefined;
+};
+
+/**
  * The run whose own mail a connector event is, if it is: a message that
  * reached a watched mailbox carrying the stamp core recorded for the run's
  * call (`stamp`, read from its header by connect), only when
@@ -672,32 +744,11 @@ export const stampedEventRun = async (
     return undefined;
   }
   const db = drizzle(env.DB);
-  const appCall = await db
-    .select({
-      runId: runMailCalls.runId,
-      recipients: runMailCalls.recipients,
-      senders: runMailCalls.senders,
-    })
-    .from(runMailCalls)
-    .where(eq(runMailCalls.stamp, event.stamp))
-    .get();
-  const call =
-    appCall ??
-    (await db
-      .select({
-        runId: resourceRunMailCalls.runId,
-        recipients: resourceRunMailCalls.recipients,
-        senders: resourceRunMailCalls.senders,
-      })
-      .from(resourceRunMailCalls)
-      .where(eq(resourceRunMailCalls.stamp, event.stamp))
-      .get());
-  const kind = appCall === undefined ? "resource" : "app";
-  const recipients = call?.recipients ?? null;
-  const senders = call?.senders ?? null;
-  if (call === undefined || recipients === null || senders === null) {
+  const call = await stampedCallOf(env, event.stamp);
+  if (call === undefined) {
     return undefined;
   }
+  const { kind, recipients, senders } = call;
   const from = mailEventFrom
     .safeParse(event.payload)
     .data?.from?.address.trim()

@@ -10,6 +10,8 @@ import { isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   connectorTriggerConfigSchema,
+  emailTriggerConfigSchema,
+  emailTriggerLocalPart,
   scheduleTriggerConfigSchema,
   systemTriggerConfigSchema,
   workflowTriggerCreateSchema,
@@ -94,6 +96,10 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
 //   into the event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
+// - An email trigger taking mail meant for another: its address is its
+//   own, from its ID (`emailTriggerLocalPart`), which no App's may take.
+//   Its input is a fixed mapping as a connector trigger's is. Its mail
+//   starts runs as workflows/inbound-email.ts says.
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -207,6 +213,14 @@ const kindFieldsOf = async (
 ): Promise<KindFields> => {
   if (kind === "connector") {
     return await connectorFieldsOf(env, config, principal);
+  }
+  if (kind === "email") {
+    const { input } = workflowResourceErrors.parse(
+      "workflow.resource_invalid",
+      emailTriggerConfigSchema,
+      config
+    );
+    return { ...noKindFields, inputMapping: canonicalJson(input) };
   }
   if (kind === "system") {
     const { event } = workflowResourceErrors.parse(
@@ -789,6 +803,11 @@ const connectorConfigOf = (row: TriggerRow): Json | null => {
  * the fields its version keeps; null when it keeps none (a webhook).
  */
 const configOf = (row: TriggerRow): Json | null => {
+  if (row.kind === "email") {
+    return row.inputMapping === null
+      ? null
+      : { input: keptJson(row.inputMapping) };
+  }
   if (row.kind === "system") {
     return systemConfigOf(row);
   }
@@ -813,6 +832,7 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   createdAt: row.createdAt.toISOString(),
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
+  address: row.kind === "email" ? emailTriggerLocalPart(row.id) : null,
   // Stopped by its own failing starts (workflows/schedule-triggers.ts):
   // no next time, after `maxFailedStarts` in a row.
   stopped:

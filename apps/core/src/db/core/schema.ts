@@ -3777,8 +3777,8 @@ export const workflowResourceMembers = sqliteTable(
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
  * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule), owned by whoever created it,
- * never by the workflow's owner or an App. `current_version` names the
+ * connector event, a webhook, a schedule, mail to its address), owned by
+ * whoever created it, never by the workflow's owner or an App. `current_version` names the
  * version (`trigger_resource_versions`) future starts use; `enabled` false,
  * or `deleted_at`, stops future starts, never runs already started. Its
  * starts need a permission of its own (`start` on the workflow) like any
@@ -3788,7 +3788,7 @@ export const triggerResources = sqliteTable("trigger_resources", {
   id: text().primaryKey(),
   ownerId: text("owner_id").notNull(),
   kind: text({
-    enum: ["system", "connector", "webhook", "schedule"],
+    enum: ["system", "connector", "webhook", "schedule", "email"],
   }).notNull(),
   currentVersion: integer("current_version").notNull(),
   enabled: integer({ mode: "boolean" }).notNull(),
@@ -3842,7 +3842,9 @@ export const triggerResourceVersions = sqliteTable(
      * how each event becomes its run's input (canonical JSON: input fields
      * to JSON Pointers into the event, and literal defaults), checked as
      * the version was written (trigger-resources.ts). Its event type is
-     * `event_type`, with no `event_contract`. Null for any other kind.
+     * `event_type`, with no `event_contract`. An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
      */
     connectionId: text("connection_id"),
     connectionResource: text("connection_resource"),
