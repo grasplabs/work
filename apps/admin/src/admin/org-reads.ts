@@ -11,7 +11,8 @@
  * - an answer stays fresh `freshMs`, moving between an organization's
  *   sections, or coming back to it, asks its core nothing;
  * - when its core doesn't answer, or not in time, the page shows the last
- *   answer it had, marked stale with why and since when.
+ *   answer it had, marked stale with why and since when, until a later
+ *   read answers.
  *
  * Nothing of it outlives the tab, and nothing is shared between staff
  * members: each answer is what core answered the one staff member whose
@@ -46,11 +47,14 @@ export interface OrgReads {
   ) => Promise<ClientAdmin | null>;
   /** Whether a read of client `clientId` is under way. */
   reading: (clientId: string) => boolean;
-  /** Keeps `admin`'s answer, unless a later one is kept. */
+  /** Keeps `admin`'s answer, unless a later one is kept; a later one ends a failed read's mark. */
   remember: (admin: ClientAdmin) => void;
   /** Client `clientId`'s last answer, while it is fresh at `now`. */
   fresh: (clientId: string, now: number) => AnsweredAdmin | undefined;
-  /** What to show of `admin` as read now: its answer, or the last one when it didn't answer. */
+  /**
+   * What to show of `admin` as read now: its answer, or the last one when
+   * it didn't answer; either marked stale while a read since it failed.
+   */
   settle: (admin: ClientAdmin, now: number) => OrgRead;
   /** Forgets everything of `clientId`, as for one offboarded. */
   forget: (clientId: string) => void;
@@ -60,6 +64,8 @@ export interface OrgReads {
 export const orgReads = (): OrgReads => {
   const underWay = new Map<string, Promise<ClientAdmin | null>>();
   const answers = new Map<string, AnsweredAdmin>();
+  /** Why the last read failed and when, for a client with an answer kept, until a later one. */
+  const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
 
   const remember = (admin: ClientAdmin): void => {
     if (admin.state !== "answered") {
@@ -68,6 +74,9 @@ export const orgReads = (): OrgReads => {
     const kept = answers.get(admin.client.id);
     if (kept === undefined || Date.parse(kept.at) <= Date.parse(admin.at)) {
       answers.set(admin.client.id, admin);
+    }
+    if (kept === undefined || Date.parse(kept.at) < Date.parse(admin.at)) {
+      failed.delete(admin.client.id);
     }
   };
 
@@ -100,20 +109,21 @@ export const orgReads = (): OrgReads => {
         : undefined;
     },
     settle: (admin, now) => {
-      if (admin.state === "answered" || admin.error === "not_deployed") {
-        return { admin, stale: null };
+      if (admin.state === "answered") {
+        return { admin, stale: failed.get(admin.client.id) ?? null };
       }
       const kept = answers.get(admin.client.id);
-      return kept === undefined
-        ? { admin, stale: null }
-        : {
-            admin: kept,
-            stale: { error: admin.error, at: new Date(now).toISOString() },
-          };
+      if (admin.error === "not_deployed" || kept === undefined) {
+        return { admin, stale: null };
+      }
+      const stale = { error: admin.error, at: new Date(now).toISOString() };
+      failed.set(admin.client.id, stale);
+      return { admin: kept, stale };
     },
     forget: (clientId) => {
       underWay.delete(clientId);
       answers.delete(clientId);
+      failed.delete(clientId);
     },
   };
 };

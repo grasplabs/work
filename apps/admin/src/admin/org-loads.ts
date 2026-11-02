@@ -173,7 +173,8 @@ export const readOrganization = async ({
     }
     const fresh = reads.fresh(client.id, Date.now());
     if (fresh !== undefined) {
-      return { read: { admin: fresh, stale: null } };
+      // Still marked stale when reading it again failed since.
+      return { read: reads.settle(fresh, Date.now()) };
     }
   }
   // Every read of a core is audited as staff opening the organization:
