@@ -1687,33 +1687,65 @@ describe("entity linking", () => {
     }).toStrictEqual({ before: false, matched: [pair[1]], after: true });
   });
 
-  it("forgets a `same` whose evidence a purge rewrites, though both entities stay", async () => {
+  it("forgets a `same` whose evidence a purge rewrites, though both entities stay, and keeps it through a purge that changes nothing", async () => {
     const { host, admin, pair, proof } = await adaTwice();
-    await decideEntityMatch(host.brain, admin, {
-      entities: pair,
-      decision: "same",
-      evidence: { documentId: proof, version: 1 },
-    });
-    const before = await sameAsFor(host.brain, admin, pair[0]);
-    const writer = writerOf("admin");
-    // Only the evidence's words go: both people stay mentioned elsewhere.
-    const content = {
-      type: "content",
-      documentIds: [proof],
-      terms: ["calls"],
-      reason: "erasure_request",
+    const decide = async (version: number) => {
+      await decideEntityMatch(host.brain, admin, {
+        entities: pair,
+        decision: "same",
+        evidence: { documentId: proof, version },
+      });
     };
-    const prepared = await preparePurge(host.brain, writer, content, noCopies);
-    await purge(host.brain, writer, content, prepared.token, noCopies);
-
+    const writer = writerOf("admin");
+    const purgeOf = async (terms: string[]) => {
+      const content = {
+        type: "content",
+        documentIds: [proof],
+        terms,
+        reason: "erasure_request",
+      };
+      const prepared = await preparePurge(
+        host.brain,
+        writer,
+        content,
+        noCopies
+      );
+      return await purge(host.brain, writer, content, prepared.token, noCopies);
+    };
+    await decide(1);
+    const before = await sameAsFor(host.brain, admin, pair[0]);
+    // A term the evidence doesn't hold: nothing of it changes.
+    const absent = await purgeOf([`Nobody ${word()}`]);
+    const afterAbsent = await sameAsFor(host.brain, admin, pair[0]);
+    // Only the evidence's words go: both people stay mentioned elsewhere.
+    const rewritten = await purgeOf(["calls"]);
     const proposals = await entityMatchProposals(host.brain, admin);
+    const after = await sameAsFor(host.brain, admin, pair[0]);
+    // Decided again on what is left, then the purge run again: the
+    // evidence holds the term no more, so the decision stays.
+    await decide(2);
+    const retried = await purgeOf(["calls"]);
 
     expect({
       before,
-      after: await sameAsFor(host.brain, admin, pair[0]),
+      absent: absent.versions,
+      afterAbsent,
+      rewritten: rewritten.versions,
+      after,
       // An open question again.
       proposals: proposals.length,
-    }).toStrictEqual({ before: [pair[1]], after: [], proposals: 1 });
+      retried: retried.versions,
+      afterRetry: await sameAsFor(host.brain, admin, pair[0]),
+    }).toStrictEqual({
+      before: [pair[1]],
+      absent: 0,
+      afterAbsent: [pair[1]],
+      rewritten: 1,
+      after: [],
+      proposals: 1,
+      retried: 0,
+      afterRetry: [pair[1]],
+    });
   });
 
   it("forgets a `same` whose evidence a personal purge deletes, so another member decides the pair again", async () => {

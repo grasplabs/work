@@ -1487,11 +1487,10 @@ const purgeDocument = async <C>(
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
   await onErase.forgetFiles(by, filesNamed(document));
-  // Before its text is rewritten: an entity match it was the evidence for
-  // rests on text the purge may erase, so it goes, to be decided again on
-  // what is left. Before, so a purge that stops after rewriting leaves
-  // none to be found again.
-  await forgetMatchesOn(db, document.id);
+  // An entity match it was the evidence for goes only with a batch that
+  // rewrites its text (earlier versions, the transcript, the version it
+  // saves), to be decided again on what is left: a purge that changes
+  // nothing of it, or one run again, keeps the decisions on it.
   const at = document.currentVersion;
   const { actor } = by;
   const earlier = await rewriteVersions(
