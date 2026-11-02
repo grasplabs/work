@@ -14,6 +14,7 @@ import {
   called,
   controlCommand,
   endedRun,
+  endLiveResourceRuns,
   jsonWorkflowAppsOf,
   keyOf,
   outcomeOf,
@@ -66,29 +67,6 @@ const pastFirstRepair = (): Date => new Date(Date.now() + 2 * 60_000);
 
 /** Past the longest a run may say `starting` before its start is given up. */
 const pastStarting = (): Date => new Date(Date.now() + 7 * 3_600_000);
-
-/**
- * Ends every JSON workflow run a test left live in the engine: a run held
- * an hour would go on in the background of whatever test file runs next
- * (see `endLiveRuns` in runs.ts, which ends App runs). A run the engine
- * has no record of has nothing to end.
- */
-const endLiveResourceRuns = async (): Promise<void> => {
-  const { results } = await env.DB.prepare(
-    "SELECT id FROM workflow_resource_runs WHERE status IN ('starting', 'running', 'paused')"
-  ).all<{ id: string }>();
-  await Promise.all(
-    results.map(async ({ id }) => {
-      const status = await runObject(id).status();
-      if (
-        status !== undefined &&
-        !["complete", "errored", "terminated"].includes(status.status)
-      ) {
-        await runObject(id).terminate({ rollback: false });
-      }
-    })
-  );
-};
 
 /** A screen of `person`'s on `app`, and what it asks of the workflow. */
 const screenAsking = async (
