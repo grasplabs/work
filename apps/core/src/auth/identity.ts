@@ -15,6 +15,7 @@ import {
   teams,
 } from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
+import { reachesWorkspace } from "../session-check.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
 
@@ -176,6 +177,11 @@ export const actingPerson = async (
  * Who a current session's person is, read now: a staff session's role
  * from the sign-in config, anyone else's from their membership.
  * `undefined` once they have neither.
+ *
+ * A staff session reaches the onboarding alone, whatever the config's
+ * staff scope: Grasp's staff identity is for managing a deployment, never
+ * for acting inside the client's workspace. A staff member who needs to
+ * act there is added as a member and signs in as one, as anyone does.
  */
 export const sessionIdentity = async (
   env: Env,
@@ -203,7 +209,7 @@ export const sessionIdentity = async (
       role: access.role,
       teams: [],
       staff: true,
-      ...(access.scope === "onboarding" ? { onboardingOnly: true } : {}),
+      onboardingOnly: true,
     };
   }
 
@@ -270,7 +276,7 @@ export const identify = async (
 
 /**
  * Who a request comes from, as `identify` says, for a route outside the
- * onboarding: `undefined` for Grasp staff who reach the onboarding alone,
+ * onboarding: `undefined` for Grasp staff, who reach the onboarding alone,
  * as for nobody signed in.
  */
 export const identifyFull = async (
@@ -278,5 +284,5 @@ export const identifyFull = async (
   headers: Headers
 ): Promise<Identity | undefined> => {
   const person = await identify(env, headers);
-  return person?.onboardingOnly === true ? undefined : person;
+  return person !== undefined && reachesWorkspace(person) ? person : undefined;
 };

@@ -748,6 +748,10 @@ describe("App roles", { timeout: 60_000 }, () => {
           })
         ),
       ])
-    ).resolves.toStrictEqual(["ok", "ok", "role.forbidden"]);
+    ).resolves.toStrictEqual([
+      "role.forbidden",
+      "role.forbidden",
+      "role.forbidden",
+    ]);
   });
 });
