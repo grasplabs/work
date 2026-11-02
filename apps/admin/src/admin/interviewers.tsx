@@ -15,9 +15,10 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * how much of what they wrote down people left in, and where people stop.
  * And how they are set up for the company.
  *
- * Not here, as the prototype has it: what a review of each interview
- * found (core runs no such review, so the model says none is `reviewed`),
- * and changing the setup, which only core could keep.
+ * Their setup is changed from here (stephen-setup.tsx), kept in the
+ * company's Grasp. Not here, as the prototype has it: what a review of
+ * each interview found (core runs no such review, so the model says none
+ * is `reviewed`).
  */
 import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -25,6 +26,8 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { BarList, Figure } from "./interview-parts.tsx";
 import { noInterviewsYet } from "./interviews.tsx";
 import { EmptySection, Section } from "./section.tsx";
+import { SetupActions } from "./stephen-setup.tsx";
+import type { SetupRead } from "./stephen-setup.tsx";
 import { interviewerNames, interviewPhaseWords } from "./words.ts";
 
 /**
@@ -281,14 +284,28 @@ const SetupPart = ({
 );
 
 /** How the interviewers are set up for this company: a tab of the interviews. */
-export const InterviewersSetup = ({ view }: { view: OrgView }) => {
+export const InterviewersSetup = ({
+  view,
+  clientId,
+  setupRead,
+}: {
+  view: OrgView;
+  clientId: string;
+  /** The setup as core keeps it, to change it from. */
+  setupRead: SetupRead;
+}) => {
   const { org, state } = view;
   const setup = state.stephen ?? org.stephen;
   const wanted = org.wanted ?? "";
   return (
     <>
       <Section
-        description="From the first conversation with the sponsor. It holds for Stephen and Claire alike."
+        action={<SetupActions clientId={clientId} setup={setupRead} />}
+        description={
+          setupRead.changed
+            ? "As Grasp changed it. It holds for Stephen and Claire alike."
+            : "From the first conversation with the sponsor. It holds for Stephen and Claire alike."
+        }
         title="How Stephen and Claire are set up here"
       >
         <SetupPart

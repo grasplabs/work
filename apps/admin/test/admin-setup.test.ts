@@ -265,6 +265,8 @@ describe("an organization's Setup", () => {
     // Since its first such failure after the call that last worked, not
     // since its latest.
     const failingSince = now - 2 * 60 * 1000;
+    // Its time only: within two minutes of midnight UTC it was yesterday,
+    // and the line names the day too.
     const since = `${new Date(failingSince).toISOString().slice(11, 16)} UTC`;
     const failingAs = async (kind: string, shows: ProviderTrouble) => {
       const client = await liveClient(emptyAdminSnapshot("Acme"));
@@ -298,18 +300,20 @@ describe("an organization's Setup", () => {
     const lines = sections.map(textOf);
     const expected = [
       "AI: OpenAI connected · working · last used 5 min ago",
-      `AI: OpenAI connected · refusing the key since ${since}`,
-      `AI: OpenAI connected · not answering since ${since}`,
-      `AI: OpenAI connected · limiting requests since ${since}`,
+      "AI: OpenAI connected · refusing the key since ",
+      "AI: OpenAI connected · not answering since ",
+      "AI: OpenAI connected · limiting requests since ",
       "AI: not connected yet",
     ];
 
     expect({
       lines: lines.map((line, at) => line?.includes(expected[at] ?? "")),
+      since: lines.slice(1, 4).map((line) => line?.includes(since)),
       // Read only: nothing to press.
       buttons: sections.some((html) => html.includes("<button")),
     }).toStrictEqual({
       lines: [true, true, true, true, true],
+      since: [true, true, true],
       buttons: false,
     });
   });
