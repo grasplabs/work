@@ -5361,12 +5361,14 @@ msgstr "Türen"
 msgid "Download"
 msgstr "Herunterladen"
 
+#: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
 msgid "Download"
 msgstr "Herunterladen"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
 
@@ -5970,6 +5972,10 @@ msgstr "Dateien und Apps"
 msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Dateien und Dokumente"
+
+#: src/workflows/run-files.tsx
+msgid "Files it wrote"
+msgstr "Dateien, die er geschrieben hat"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Files its runs wrote"
@@ -7434,6 +7440,10 @@ msgstr "Es funktioniert immer noch nicht. Sie können jetzt aufhören und späte
 msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
 msgstr "Sie läuft sofort nicht mehr, auch laufende Aufrufe nicht, und kann nie wieder laufen. Sie bleibt erhalten, und ihr Widerruf wird mit Ihrer Begründung festgehalten."
 
+#: src/workflows/stop-run.tsx
+msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
+msgstr "Er hält an, wo er gerade ist, und läuft nie weiter. Was er schon getan hat, bleibt getan. Das lässt sich nicht rückgängig machen."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "Es nimmt von Anfang an teil. Füge als Nächstes die Personen hinzu und wähle die Teamleitung: Sie spricht zuerst."
@@ -7714,6 +7724,7 @@ msgstr "Weiter gedrückt halten"
 msgid "Keep it"
 msgstr "Behalten"
 
+#: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
 msgstr "Weiterlaufen lassen"
@@ -13408,6 +13419,11 @@ msgstr "Wartet noch"
 msgid "Stockholm"
 msgstr "Stockholm"
 
+#: src/workflows/stop-run.tsx
+msgctxt "stop a workflow's run"
+msgid "Stop"
+msgstr "Stoppen"
+
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
 msgid "Stop"
@@ -13424,6 +13440,14 @@ msgstr "Vorerst aufhören"
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
 msgstr "Nicht mehr mit {shown} teilen"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop the run"
+msgstr "Lauf stoppen"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop this run?"
+msgstr "Diesen Lauf stoppen?"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts

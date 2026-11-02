@@ -5361,12 +5361,14 @@ msgstr "Puertas"
 msgid "Download"
 msgstr "Descargar"
 
+#: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
 msgid "Download"
 msgstr "Descargar"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "Descargar {name}"
 
@@ -5970,6 +5972,10 @@ msgstr "Archivos y apps"
 msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Archivos y documentos"
+
+#: src/workflows/run-files.tsx
+msgid "Files it wrote"
+msgstr "Archivos que escribió"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Files its runs wrote"
@@ -7434,6 +7440,10 @@ msgstr "Sigue sin funcionar. Puedes parar por ahora y volver más tarde. Tu siti
 msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
 msgstr "Deja de ejecutarse al instante, también las llamadas en curso, y no podrá volver a ejecutarse. Se conserva, y su revocación queda registrada con su motivo."
 
+#: src/workflows/stop-run.tsx
+msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
+msgstr "Se detiene donde está y no continúa nunca. Lo que ya hizo sigue hecho. Esto no se puede deshacer."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "Participa desde el principio. Añade luego a sus personas y elige a su responsable: el responsable habla primero."
@@ -7714,6 +7724,7 @@ msgstr "Sigue pulsando"
 msgid "Keep it"
 msgstr "Conservarla"
 
+#: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
 msgstr "Mantenerlo en marcha"
@@ -13408,6 +13419,11 @@ msgstr "Aún en espera"
 msgid "Stockholm"
 msgstr "Estocolmo"
 
+#: src/workflows/stop-run.tsx
+msgctxt "stop a workflow's run"
+msgid "Stop"
+msgstr "Detener"
+
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
 msgid "Stop"
@@ -13424,6 +13440,14 @@ msgstr "Parar aquí"
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
 msgstr "Dejar de compartir con {shown}"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop the run"
+msgstr "Detener la ejecución"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop this run?"
+msgstr "¿Detener esta ejecución?"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
