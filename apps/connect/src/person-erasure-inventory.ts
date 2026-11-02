@@ -41,6 +41,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   token_revocations: {
     kept: "revokes still owed at a provider, by connection ID: the erasure waits for them",
   },
+  given_up_revocations: {
+    kept: "revokes given up on, by connection ID, for admins to do by hand",
+  },
   ai_provider_keys: { none: "the organization's own AI provider keys" },
   erased_people: {
     kept: "whose erasure began, by ID: what keeps connect from making anything of theirs again",

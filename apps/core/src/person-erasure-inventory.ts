@@ -87,9 +87,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_resource_bindings": { company: "bindings they approved" },
   "core.workflow_runs": { company: "runs they started (D3)" },
   "core.run_lineage_attempts": { kept: "accounting of a run's attempts" },
-  "core.workflow_admission_queue": { kept: "admission, by ID" },
   "core.build_leases": { kept: "admission, by ID" },
-  "core.build_admission_queue": { kept: "admission, by ID" },
   "core.workflow_model_waits": { kept: "a step's wait, gone once it stops" },
   "core.run_mail_stamps": { company: "mail a run sent (D3)" },
   "core.run_mail_calls": { company: "mail a run sent (D3)" },
@@ -190,7 +188,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_entries": noPerson,
   "core.app_origins": noPerson,
   "core.app_test_fixtures": noPerson,
-  "core.build_commit_fences": noPerson,
   "core.build_receipts": noPerson,
   "core.business_store_versions": noPerson,
   "core.channel_signals": noPerson,
@@ -394,7 +391,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   // The model ledger.
   "modelLedger.requests": { kept: "accounting, by ID" },
-  "modelLedger.queue": { kept: "accounting, by ID" },
   // Spend is accounted by ID: a person's scope is keyed and named by their
   // user ID, never their name or address.
   "modelLedger.spend": { kept: "accounting, by ID" },
