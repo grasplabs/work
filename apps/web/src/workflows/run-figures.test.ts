@@ -29,8 +29,11 @@ const day = (
 /** A workflow of the Invoices App that ran, changed by `change`. */
 const ran = (
   name: string,
-  change: Partial<RunActivityWorkflow> = {}
+  change: Partial<
+    Pick<RunActivityWorkflow, "started" | "completed" | "completedAlone">
+  > = {}
 ): RunActivityWorkflow => ({
+  type: "app",
   app: appIdSchema.parse("invoices"),
   appName: "Invoices",
   workflow: workflowIdSchema.parse(name),

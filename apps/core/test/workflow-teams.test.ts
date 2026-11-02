@@ -54,9 +54,11 @@ const team = async (name: string, organization = "organization") => {
 /** The team of each of `app`'s workflows, as `person` lists them. */
 const teamsFor = async (person: Person, app: string) => {
   const all = await person.api.workflows.overview();
-  return all
-    .filter((summary) => summary.app === app)
-    .map(({ workflow, team: owning }) => [workflow, owning?.name ?? null]);
+  return all.flatMap((summary) =>
+    summary.type === "app" && summary.app === app
+      ? [[summary.workflow, summary.team?.name ?? null]]
+      : []
+  );
 };
 
 describe("the team that owns a workflow", slow, () => {
