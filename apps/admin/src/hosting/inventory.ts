@@ -18,11 +18,9 @@
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
 import {
   clientResourceName,
-  clientsNamespace,
   deploymentIdAlphabet,
   deploymentIdLength,
 } from "@grasp-os/shared/names";
-import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { and, asc, eq, isNull, or } from "drizzle-orm";
@@ -42,8 +40,6 @@ import { clientHostingOf, resourceJurisdictionOf } from "./organization.ts";
 export const inventoryErrorCodes = [
   /** No destination by that id. */
   "destination_unknown",
-  /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
-  "destination_other_stage",
   /**
    * The client is placed elsewhere: moving it is a
    * migration onto new resources, never a relabel.
@@ -69,7 +65,7 @@ export const inventoryErrorCodes = [
   "durable_object_jurisdiction",
   /** A binding names a placeholder rendering doesn't fill. */
   "unknown_placeholder",
-  /** The destination isn't one the admin creates resources in (workerd is set up by its operator). */
+  /** The destination has no Cloudflare account and namespace recorded. */
   "destination_unsupported",
   /** A resource exists under a recorded name, but no run of this client asked for it. */
   "unowned_resource",
@@ -95,63 +91,6 @@ export class InventoryError extends Error {
 export type ResourceKind = (typeof clientResources.kind.enumValues)[number];
 export type ClientResource = typeof clientResources.$inferSelect;
 export type ClientPlacement = typeof clientPlacements.$inferSelect;
-
-type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
-
-/** A destination as staff record it. */
-export interface DestinationInput {
-  id: string;
-  kind: DestinationKind;
-  accountId: string | null;
-  namespace: string | null;
-}
-
-const destinationIdSchema = z
-  .string()
-  .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/u);
-
-/**
- * Records destination `input`, or replaces what it says about one. A
- * Workers for Platforms
- * destination must be in the admin's own `stage`'s clients' namespace
- * (`destination_other_stage`): a staging admin never records one among
- * production's clients, nor production's among staging's.
- */
-export const saveDestination = async (
-  db: AdminDatabase,
-  actor: Actor,
-  input: DestinationInput,
-  stage: Stage
-): Promise<void> => {
-  destinationIdSchema.parse(input.id);
-  if (
-    input.kind === "workers_for_platforms" &&
-    input.namespace !== clientsNamespace(stage)
-  ) {
-    throw new InventoryError(
-      "destination_other_stage",
-      `${input.id}'s namespace ${String(input.namespace)} isn't this admin's own, ${clientsNamespace(stage)}`
-    );
-  }
-  const now = new Date();
-  const values = {
-    kind: input.kind,
-    accountId: input.accountId,
-    namespace: input.namespace,
-    updatedAt: now,
-  };
-  await act(
-    db,
-    actor,
-    [
-      db
-        .insert(hostingDestinations)
-        .values({ id: input.id, ...values, createdAt: now })
-        .onConflictDoUpdate({ target: hostingDestinations.id, set: values }),
-    ],
-    { action: "destination.save", target: input.id }
-  );
-};
 
 export const destinationOf = async (db: AdminDatabase, id: string) => {
   const row = await db

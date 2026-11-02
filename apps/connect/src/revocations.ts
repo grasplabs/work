@@ -50,21 +50,24 @@ import {
 //   longer after every failed try, doubling up to a day, a few a run, and
 //   a try under way holds its row (`underWayMs`) so two runs never ask at
 //   once.
-// - A revoke racing a reconnect: while a sign-in that could connect the
-//   connection again is open, or finishing (its consent's tokens in hand,
-//   not kept yet), the owed revoke waits, so it never ends the grant that
-//   consent may hand back before it is kept. Where the provider's grant is the
-//   account's with one of Grasp's clients (`accountWideGrant`: each Google
-//   client), the account connected again (a new connection, or the same
-//   one connected again in place) holds the grant the owed copy would
+// - A revoke racing a reconnect: while a sign-in that could consent as
+//   the connection's account (of any scope: a personal and a shared
+//   consent of one Google account share its grant) is open, or
+//   finishing (its consent's tokens in hand, not kept yet), the owed
+//   revoke waits, so it never ends the grant that consent may hand back
+//   before it is kept. Where the provider's grant is the account's with
+//   one of Grasp's clients (`accountWideGrant`: each Google client),
+//   the account connected again (a new connection, or the same one
+//   connected again in place) holds the grant the owed copy would
 //   revoke, so while an active connection of that group holds the same
 //   account (by its ID, or its email where an ID is missing) the owed
-//   revoke is dropped instead, on record: the grant is wanted again, and
-//   that connection's own disconnect revokes it. Everywhere else each
-//   token is a grant of its own, and the old one is revoked as owed, the
-//   new one untouched. A reconnect landing while a try is under way is
-//   checked again after the provider revoked: its connection, whose grant
-//   just ended, is marked for signing in again at once, on record.
+//   revoke is dropped instead, on record: the grant is wanted again,
+//   and that connection's own disconnect revokes it. Everywhere else
+//   each token is a grant of its own, and the old one is revoked as
+//   owed, the new one untouched. A reconnect landing while a try is
+//   under way is checked again after the provider revoked: its
+//   connection, whose grant just ended, is marked for signing in again
+//   at once, on record.
 // - An owed revoke nobody can see: the disconnect's event says it is owed
 //   (`revokePending`), the change that asked a connection to connect again
 //   is on record, and every end is too (`connection.revoked`,
@@ -256,11 +259,14 @@ const markGrantRevoked = async (
 };
 
 /**
- * When the latest sign-in flow that could connect `connection` again
- * lapses, if one is open or finishing: its owner's at its provider for a
- * personal one, any at its provider for a shared one. A finishing flow
- * (oauth.ts `takeFlow`) may hold tokens of the grant the revoke would end,
- * from its consent, not yet kept.
+ * When the latest sign-in flow that could come back with `connection`'s
+ * grant lapses, if one is open or finishing: any at its provider that could
+ * consent as its account, whatever scope it connects as, since the grant is
+ * the account's at the provider, not the connection's. For a personal
+ * connection (its owner's own account), its owner's flows and any shared
+ * one (an admin connects any account as shared); for a shared one, any. A
+ * finishing flow (oauth.ts `takeFlow`) may hold tokens of the grant the
+ * revoke would end, from its consent, not yet kept.
  */
 const signInOpen = async (
   env: Env,
@@ -274,10 +280,12 @@ const signInOpen = async (
     .where(
       and(
         eq(oauthFlows.provider, connection.provider),
-        eq(oauthFlows.scope, connection.scope),
         connection.ownerUserId === null
           ? undefined
-          : eq(oauthFlows.userId, connection.ownerUserId),
+          : or(
+              eq(oauthFlows.userId, connection.ownerUserId),
+              eq(oauthFlows.scope, "shared")
+            ),
         sql`${lapses} > ${now}`
       )
     )

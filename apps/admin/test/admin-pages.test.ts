@@ -28,12 +28,12 @@ const daysAgo = (ago: number) =>
   new Date(Date.now() - ago * 86_400_000).toISOString();
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
-/** A client recorded as `status`, on a new account in the fake. */
+/** A client recorded as `status`, its core on the fake. */
 const recordClient = async (
   status: "provisioning" | "offboarded",
   clientId = `client-${crypto.randomUUID().slice(0, 8)}`
 ) => {
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
+  const core = cloudflare.coreOf(clientId);
   const now = new Date();
   await act(
     db,
@@ -49,16 +49,16 @@ const recordClient = async (
     ],
     { action: "client.create", clientId }
   );
-  return { clientId, name: `Acme ${clientId}`, account };
+  return { clientId, name: `Acme ${clientId}`, core };
 };
 
 /** A live placed client running a new release, as its operation made it. */
 const liveClient = async () => {
   const release = await placedRelease("feat(core): the frame");
-  const { clientId, account } = await livePlacedClient(cloudflare, 1, release, {
+  const { clientId, core } = await livePlacedClient(cloudflare, 1, release, {
     signIn: null,
   });
-  return { clientId, name: `Acme ${clientId}`, account };
+  return { clientId, name: `Acme ${clientId}`, core };
 };
 
 /**
@@ -231,9 +231,9 @@ describe("the admin's frame", () => {
 
   it("gives staff the admin's own sidebar with every organization, one not read now marked as such, and no admin bar", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
     const down = await liveClient();
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
 
     const { status, html } = await page("/platform");
@@ -279,7 +279,7 @@ describe("the admin's frame", () => {
       oldBar:
         html.includes('aria-label="Console"') ||
         html.includes("Back to the console"),
-      readers: acme.account.adminReaders,
+      readers: acme.core.adminReaders,
     }).toStrictEqual({
       status: 200,
       placesInOrder: true,
@@ -324,11 +324,11 @@ describe("the admin's frame", () => {
     });
     // Two companies ask for Exact Online, spelled their own way; one asks
     // for Twinfield first.
-    acme.account.admin = {
+    acme.core.admin = {
       ...readySnapshot("Acme"),
       asked: [asked("Twinfield", 9), asked("Exact Online", 4)],
     };
-    globex.account.admin = {
+    globex.core.admin = {
       ...readySnapshot("Globex"),
       asked: [asked("exact  online", 2)],
     };
@@ -381,9 +381,9 @@ describe("the admin's frame", () => {
 
   it("lists every organization on the overview: one that answered with where it stands and what needs Grasp, one that didn't with why and no numbers", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
     const down = await liveClient();
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
 
     const { status, html } = await page("/");
@@ -464,7 +464,7 @@ describe("the admin's frame", () => {
       daysIn: 3,
       leadTalked: true,
     });
-    paused.account.admin = {
+    paused.core.admin = {
       ...told,
       paused: true,
       gate: { ...told.gate, threshold: 98 },
@@ -488,7 +488,7 @@ describe("the admin's frame", () => {
     const companies = await Promise.all(
       ["Acme", "Birch", "Cobalt"].map(async (name) => {
         const client = await liveClient();
-        client.account.admin = readySnapshot(name);
+        client.core.admin = readySnapshot(name);
         return client;
       })
     );
@@ -508,13 +508,13 @@ describe("the admin's frame", () => {
 
   it("counts only leads who talked, and the days of each company's own plan", async () => {
     const waiting = await liveClient();
-    waiting.account.admin = toldSnapshot("Waiting", {
+    waiting.core.admin = toldSnapshot("Waiting", {
       days: 21,
       daysIn: 3,
       leadTalked: false,
     });
     const talking = await liveClient();
-    talking.account.admin = toldSnapshot("Talking", {
+    talking.core.admin = toldSnapshot("Talking", {
       days: 21,
       daysIn: 3,
       leadTalked: true,
@@ -533,7 +533,7 @@ describe("the admin's frame", () => {
 
   it("counts an organization's days to its own plan beside its page", async () => {
     const company = await liveClient();
-    company.account.admin = toldSnapshot("Company", {
+    company.core.admin = toldSnapshot("Company", {
       days: 21,
       daysIn: 3,
       leadTalked: true,
@@ -552,9 +552,9 @@ describe("the admin's frame", () => {
 
   it("shows only the organizations in a phase when one is chosen", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
     const empty = await liveClient();
-    empty.account.admin = emptyAdminSnapshot("Empty");
+    empty.core.admin = emptyAdminSnapshot("Empty");
     const waiting = await recordClient("provisioning");
 
     const ready = await page("/?phase=ready");
@@ -575,7 +575,7 @@ describe("the admin's frame", () => {
 
   it("opens an organization the admin knows, and has no page for one it doesn't", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
 
     // Named like one of the admin's sections, and still its own page.
     const platform = await recordClient("provisioning", "platform");
@@ -640,7 +640,7 @@ describe("the admin's frame", () => {
 
   it("lays out an organization as the prototype does: its column of sections in order, what waits where, and where the overview comes from", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
 
     const { status, html } = await page(`/organizations/${acme.clientId}`);
     const column = columnOf(html, acme.name);
@@ -713,7 +713,7 @@ describe("the admin's frame", () => {
       daysIn: 10,
       leadTalked: true,
     });
-    closed.account.admin = snapshot;
+    closed.core.admin = snapshot;
     // Five days from day 0: the links worked until the fifth, day 4.
     const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
     last.setUTCDate(last.getUTCDate() + 4);
@@ -729,7 +729,7 @@ describe("the admin's frame", () => {
 
   it("sends what needs Grasp at a paused organization to its steps", async () => {
     const paused = await liveClient();
-    paused.account.admin = {
+    paused.core.admin = {
       ...toldSnapshot("Paused", { days: 14, daysIn: 3, leadTalked: true }),
       paused: true,
     };
@@ -748,7 +748,7 @@ describe("the admin's frame", () => {
 
   it("shows a section under its own path, titled, saying where what it shows comes from", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
     const contract = await page(`${base}/contract`);
@@ -800,7 +800,7 @@ describe("the admin's frame", () => {
   it("says nothing is known of a contract core doesn't hold, with no draft or fee, beside the agreements as core has them", async () => {
     const acme = await liveClient();
     const empty = emptyAdminSnapshot("Acme");
-    acme.account.admin = {
+    acme.core.admin = {
       ...empty,
       agreements: {
         processing: true,
@@ -895,7 +895,7 @@ describe("the admin's frame", () => {
 
   it("says the agreements aren't recorded yet while core holds nothing of them, instead of reading that as no works council", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
 
     const { html } = await page(`/organizations/${acme.clientId}/contract`);
     const at = html.indexOf(">Agreed before the first interview</h2>");
@@ -913,11 +913,11 @@ describe("the admin's frame", () => {
 
   it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
     const before = await liveClient();
-    before.account.admin = emptyAdminSnapshot("Before");
+    before.core.admin = emptyAdminSnapshot("Before");
     const signed = await liveClient();
     const empty = emptyAdminSnapshot("Signed");
     // Its directory is in, with every team's lead named: past its sign-in.
-    signed.account.admin = {
+    signed.core.admin = {
       ...empty,
       roster: {
         teams: [
@@ -976,7 +976,7 @@ describe("the admin's frame", () => {
     const acme = await liveClient();
     const empty = emptyAdminSnapshot("Acme");
     const crmSync = { id: "workflow-crm", name: "CRM sync" };
-    acme.account.admin = {
+    acme.core.admin = {
       ...empty,
       // Past its sign-in: its directory is in, every team's lead named.
       roster: {
@@ -1096,15 +1096,15 @@ describe("the admin's frame", () => {
       },
     ];
     const closed = await liveClient();
-    closed.account.admin = { ...empty, members };
+    closed.core.admin = { ...empty, members };
     const open = await liveClient();
-    open.account.admin = {
+    open.core.admin = {
       ...empty,
       members,
       gate: { ...empty.gate, open: true, openedAt: empty.now },
     };
     const nobody = await liveClient();
-    nobody.account.admin = empty;
+    nobody.core.admin = empty;
 
     const closedPage = await page(`/organizations/${closed.clientId}/members`);
     const openPage = await page(`/organizations/${open.clientId}/members`);
@@ -1159,7 +1159,7 @@ describe("the admin's frame", () => {
 
   it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
     const down = await liveClient();
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
     /** What a section of `client` says, on every section but its Setup. */
     const sectionsOf = async (client: { clientId: string; name: string }) => {
@@ -1249,7 +1249,7 @@ describe("the admin's frame", () => {
 
   it("has no page for a section an organization doesn't have", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
 
     const missing = await page(`/organizations/${acme.clientId}/nothing`);
     const unknown = await page("/organizations/client-unknown/members");
@@ -1259,7 +1259,7 @@ describe("the admin's frame", () => {
 
   it("gives a request Access doesn't vouch for nothing, asking no core", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Acme");
+    acme.core.admin = emptyAdminSnapshot("Acme");
 
     const answers = await Promise.all(
       [
@@ -1279,7 +1279,7 @@ describe("the admin's frame", () => {
 
     expect({
       answers,
-      readers: acme.account.adminReaders,
+      readers: acme.core.adminReaders,
     }).toStrictEqual({
       answers: [403, 403, 403, 403, 403, 403].map((status) => ({
         status,

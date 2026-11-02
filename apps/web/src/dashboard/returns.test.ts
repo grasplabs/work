@@ -5,9 +5,9 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import type {
+  AppWorkflowSummary as WorkflowSummary,
   RunActivity,
   RunActivityWorkflow,
-  WorkflowSummary,
 } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -18,6 +18,7 @@ import { goalProgressOf, teamProgressOf } from "./returns.ts";
 
 /** A workflow of the invoices App that handled `handled` items this week. */
 const workflow = (name: string, handled: number): WorkflowSummary => ({
+  type: "app",
   app: appIdSchema.parse("invoices"),
   appName: "Invoices",
   workflow: workflowIdSchema.parse(name),
@@ -98,6 +99,7 @@ const ran = (
   completed: number,
   completedAlone: number
 ): RunActivityWorkflow => ({
+  type: "app",
   app: appIdSchema.parse("invoices"),
   appName: "Invoices",
   workflow: workflowIdSchema.parse(name),
