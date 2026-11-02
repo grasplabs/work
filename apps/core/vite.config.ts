@@ -96,6 +96,7 @@ export const screenTests = [
   "test/preview-repairs.test.ts",
   "test/workflow-ai-steps.test.ts",
   "test/reviewed-calls.test.ts",
+  "test/held-wakes.test.ts",
   "test/unknown-outcome-resolutions.test.ts",
   "test/unknown-outcome-holds.test.ts",
   "test/decisions.test.ts",
