@@ -79,9 +79,9 @@ describe("the board's weekly report", slow, () => {
       programme: weekly.programme,
       to: runs?.to,
       days: runs?.days.length,
-      ran: runs?.workflows.map(({ workflow, started }) => ({
-        workflow,
-        started,
+      ran: runs?.workflows.map((ran) => ({
+        workflow: ran.type === "app" ? ran.workflow : ran.name,
+        started: ran.started,
       })),
       // Its one workflow ran, so none of the builder's sat idle.
       idle: weekly.idleWorkflows,
