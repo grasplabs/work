@@ -1,15 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
-import {
-  decisionFingerprint,
-  declaredWorkflows,
-  GraspClient,
-  readWorkflowReference,
-  workflowChannel,
-  workflowFingerprint,
-} from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
-import { errorPayloadSchema, expectedMessageOf } from "@grasp-os/shared/errors";
+import { readWorkflowReference, workflowChannel } from "@grasp-os/sdk/host";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
   appTokenPath,
@@ -17,14 +9,6 @@ import {
   portableLivePath,
 } from "@grasp-os/shared/portable";
 import type { PortableLiveApi } from "@grasp-os/shared/portable";
-import type { Role } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import {
-  appFunctionPath,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { newWebSocketRpcSession } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
@@ -33,18 +17,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
-import type { Release } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
-import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { requireResourceRole } from "../src/permission-resources.ts";
-import {
-  grantPermission,
-  requestPermission,
-  revokePermission,
-} from "../src/permissions.ts";
+import { revokePermission } from "../src/permissions.ts";
 import {
   answerWorkflowCommand,
   failureOf,
@@ -63,22 +38,30 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { WorkflowRuns } from "../src/workflows/run-object.ts";
-import { published } from "./apps.ts";
+import { grantReviewed } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  called,
+  following,
+  greetingOf,
+  jsonWorkflowAppsOf,
+  keyOf,
+  objectSchema,
+  outcomeOf,
+  screenClient,
+  screenOf,
+  settles,
+  staged,
+  wireOf,
+} from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { runInstance, sleeping, woken } from "./runs.ts";
-import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import {
-  auditedDuring,
-  outcome,
-  routed,
-  signedInApi,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
 
 // A screen's typed `useWorkflow` through the real host (spec 10.4,
 // screen-workflows.ts; the threat model is on GRA-626): its starts and
@@ -90,72 +73,15 @@ import {
 
 const idp = mockIdp();
 
-const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
 
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
-
-export const followUp = resource.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./operations/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  uses: [followUp],
-});
-`,
-  "screens/desk.tsx": `export default function Desk() {
-  return <main>Requests</main>;
-}
-`,
-});
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A greeting workflow's definition: it waits `hold`, if any, then greets. */
-const definitionOf = (
-  name: string,
-  hold: string | undefined,
-  semver = "1.0.0"
-): string =>
+/** A start of `workflow`, as whatever reference a page sends. */
+const rawStart = (workflow: unknown, input?: unknown): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: semver,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      ...(hold === undefined ? [] : [{ hold: { wait: hold } }]),
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-    ],
+    workflow,
+    command: "start",
+    input: input ?? { who: "Ada" },
+    idempotencyKey: keyOf(),
   });
 
 /**
@@ -267,265 +193,6 @@ const racingGeneration = (before: () => Promise<void>): Env => {
   };
 };
 
-/** Someone signed in, and as core's own calls take them. */
-const signedIn = async (role: Role) => {
-  const session = await signedInApi(idp, role);
-  const acting: Acting & Identity = {
-    userId: session.userId,
-    email: z.string().parse(session.person.email),
-    name: "Person",
-    role,
-    teams: [],
-    staff: false,
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-  };
-  return { ...session, acting };
-};
-
-type Person = Awaited<ReturnType<typeof signedIn>>;
-
-/** What `by` may hand a permission request: their App and resource roles. */
-const rolesOf = (by: Identity) => ({
-  app: async (named: string, role: "user" | "builder") =>
-    await appFor(env, by, named, role),
-  resource: async (
-    ref: Parameters<typeof requireResourceRole>[2],
-    needed: Parameters<typeof requireResourceRole>[3]
-  ) => {
-    await requireResourceRole(env, by, ref, needed);
-  },
-});
-
-/** The reference to `alias` as `#grasp` generates it from `release`. */
-const workflowReference = async (release: Release, alias: string) => {
-  const declared = declaredWorkflows(release.app, release.workflows).find(
-    (workflow) => workflow.alias === alias
-  );
-  if (declared === undefined) {
-    throw new Error(`No workflow ${alias}`);
-  }
-  const fingerprint = await workflowFingerprint(declared);
-  // Its decisions as the generator writes them (generate.ts).
-  const decisions: Record<string, unknown> = {};
-  for (const [key, decision] of Object.entries(declared.decisions)) {
-    decisions[key] = {
-      kind: "workflowDecision",
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      workflow: `workflows.${alias}`,
-      workflowFingerprint: fingerprint,
-      key,
-      // oxlint-disable-next-line no-await-in-loop -- one digest at a time
-      fingerprint: await decisionFingerprint(decision),
-      valueSchema: { kind: "descriptor", descriptor: decision.value },
-      context: decision.context,
-    };
-  }
-  return {
-    kind: "workflow",
-    visibility: "public",
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    alias,
-    contractId: `workflows.${alias}`,
-    fingerprint,
-    input: declared.input,
-    output: declared.output,
-    events: {},
-    listens: {},
-    decisions,
-  };
-};
-
-/** A reference as the SDK sends it. */
-const wireOf = (reference: Awaited<ReturnType<typeof workflowReference>>) => ({
-  resourceId: reference.resourceId,
-  resourceVersion: reference.resourceVersion,
-  contractId: reference.contractId,
-  fingerprint: reference.fingerprint,
-  kind: "workflow",
-});
-
-/**
- * The Requests App sealed and current, its screen approved, `followUp`
- * bound to a greeting workflow that waits `hold` first, with the App's
- * `start` grant.
- */
-const requestsApp = async (
-  hold?: string,
-  /** The people and workflow of another App's fixture, bound here too. */
-  sharing?: {
-    readonly admin: Person;
-    readonly builder: Person;
-    readonly workflow: { readonly id: string; readonly name: string };
-  },
-  /** The workflow's definition, if not a greeting that waits `hold`. */
-  definition?: (name: string) => string
-) => {
-  const admin = sharing?.admin ?? (await signedIn("admin"));
-  const builder = sharing?.builder ?? (await signedIn("builder"));
-  const workflow =
-    sharing?.workflow ??
-    (await createWorkflowResource(env, builder.acting, `greet-${unique()}`));
-  if (sharing === undefined) {
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition:
-        definition?.(workflow.name) ?? definitionOf(workflow.name, hold),
-      basedOn: null,
-    });
-  }
-  const fixture = await appWith(files(), "Requests", builder.acting);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "followUp",
-    version: 1,
-  });
-  await seal(fixture);
-  await setCurrentVersion(env, builder.acting, fixture.app, 1);
-  await published(fixture.app);
-  const asked = await requestPermission(
-    env,
-    builder.acting,
-    {
-      subject: { type: "app", appId: fixture.app },
-      object: { type: "workflow", workflowId: workflow.id },
-      actions: ["start"],
-      binding: "FOLLOW_UP",
-    },
-    rolesOf(builder.acting)
-  );
-  await grantPermission(env, admin.acting, asked.id, { version: 1 });
-  const review = await admin.api.screenTrust.review(fixture.app);
-  await admin.api.screenTrust.approve(fixture.app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
-  const release = await loadRelease(env, fixture.app, 1);
-  return {
-    admin,
-    builder,
-    app: fixture.app,
-    workflow: workflow.id,
-    workflowName: workflow.name,
-    sharing: { admin, builder, workflow },
-    grant: asked.id,
-    reference: await workflowReference(release, "followUp"),
-  };
-};
-
-/** A screen of `person`'s on the App, opened: its frame's lease. */
-const screenOf = async (person: Person, app: string): Promise<string> => {
-  const { lease } = await person.api.screens.open(app, "desk");
-  return lease;
-};
-
-/** A call of the page's, relayed to core's function route: its answer. */
-const called = async (
-  person: Person,
-  app: string,
-  lease: string,
-  request: string
-): Promise<unknown> => {
-  const response = await routed(`${appFunctionPath}/${app}`, {
-    method: "POST",
-    headers: {
-      origin: clientOrigin,
-      "content-type": "application/json",
-      cookie: person.session,
-      [screenLeaseHeader]: lease,
-      [screenPersonHeader]: person.userId,
-    },
-    body: request,
-  });
-  const answer: unknown = await response.json();
-  if (response.ok) {
-    return answer;
-  }
-  const payload = errorPayloadSchema.parse(answer);
-  throw Object.assign(new Error(payload.message), { code: payload.code });
-};
-
-/**
- * A session client of `person`'s screen, as the frame's own: its calls
- * over core's function route, its live queries over its frame
- * (`screens.frame`).
- */
-const screenClient = (
-  person: Person,
-  app: string,
-  lease: string
-): GraspClient => {
-  const transport: ClientTransport = {
-    call: async (request) => await called(person, app, lease, request),
-    watch: async (request, onSnapshot, onLost) => {
-      const callback = Object.assign(
-        (push: unknown): void => {
-          onSnapshot(push);
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            onLost();
-          },
-        }
-      );
-      const subscription = await person.api.screens
-        .frame(app, lease)
-        .watchQuery(request, callback);
-      return {
-        release: () => {
-          void subscription.release();
-        },
-      };
-    },
-  };
-  return new GraspClient(transport);
-};
-
-const resultSchema = z.union([
-  z.object({ ok: z.literal(true), value: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
-]);
-
-/** What a raw call answered: its value, or its refusal's code. */
-const outcomeOf = (answer: unknown): unknown => {
-  const { result } = z.object({ result: resultSchema }).parse(answer);
-  return result.ok ? result.value : result.error.code;
-};
-
-/** Follows `request` raw on `person`'s screen: what reached the page. */
-const following = async (
-  person: Person,
-  app: string,
-  lease: string,
-  request: unknown
-) => {
-  const received: { revision: number; outcome: unknown }[] = [];
-  const callback = Object.assign(
-    (push: unknown): void => {
-      const { revision, result } = z
-        .object({ revision: z.number(), result: resultSchema })
-        .parse(push);
-      received.push({
-        revision,
-        outcome: result.ok ? result.value : result.error.code,
-      });
-    },
-    {
-      [Symbol.dispose]: (): void => {
-        // Let go of: nothing more arrives.
-      },
-    }
-  );
-  const subscription = await person.api.screens
-    .frame(app, lease)
-    .watchQuery(JSON.stringify(request), callback);
-  return { received, subscription };
-};
-
-/** How long a push or a run's change may take, and how often to look. */
-const settles = { timeout: 30_000, interval: 50 };
-
 /** A workflow that sleeps a moment, then an hour, then greets. */
 const twoSleepsOf = (name: string): string =>
   JSON.stringify({
@@ -621,17 +288,6 @@ const waitsShown = (pushed: unknown): number | undefined =>
   z.object({ waits: z.array(z.unknown()) }).safeParse(pushed).data?.waits
     .length;
 
-/** A control's receipt, without its revision. */
-const staged = (receipt: unknown) => {
-  const { kind, state } = z
-    .object({ kind: z.string(), state: z.string(), revision: z.number() })
-    .parse(receipt);
-  return { kind, state };
-};
-
-/** A fresh command key, as the SDK makes one. */
-const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
-
 /** The code `work` was refused with, or "ok". */
 const refusalOf = async (work: Promise<unknown>): Promise<unknown> => {
   try {
@@ -649,7 +305,7 @@ describe(
   { timeout: 120_000 },
   () => {
     it("starts a run once per key, follows it to its end with its output, and tells the person they may start one", async () => {
-      const fixture = await requestsApp();
+      const fixture = await boundApp();
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -718,7 +374,7 @@ describe(
     });
 
     it("publishes what a run waits on with its status: its task's sleep while it runs, nothing once it has ended", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -802,10 +458,8 @@ describe(
         target: { kind: "decision", deciders: ["role:admin"] },
         reviewed: { version: 1 },
       });
-      const { app, reference } = await requestsApp(undefined, {
-        admin,
-        builder,
-        workflow,
+      const { app, reference } = await boundApp({
+        sharing: { admin, builder, workflow },
       });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -886,10 +540,8 @@ describe(
         target: { kind: "decision", deciders: ["role:admin"] },
         reviewed: { version: 1 },
       });
-      const { app, reference } = await requestsApp(undefined, {
-        admin,
-        builder,
-        workflow,
+      const { app, reference } = await boundApp({
+        sharing: { admin, builder, workflow },
       });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -940,11 +592,9 @@ describe(
     });
 
     it("shows a run's next wait at a revision of its own, though it was running all along", async () => {
-      const { builder, app, reference } = await requestsApp(
-        undefined,
-        undefined,
-        twoSleepsOf
-      );
+      const { builder, app, reference } = await boundApp({
+        definition: twoSleepsOf,
+      });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -976,7 +626,7 @@ describe(
     });
 
     it("cancels a run with a receipt answered again under its key", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1036,7 +686,7 @@ describe(
     });
 
     it("pauses and resumes a run, each receipt answered again under its key and audited under the App's screen for the person", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1163,7 +813,7 @@ describe(
     });
 
     it("keeps a stalled pause applying until a snapshot settles it, refuses a resume meanwhile, and lets a cancel supersede it", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1275,7 +925,7 @@ describe(
     });
 
     it("joins a pause still applying when asked again under another key, applying the one receipt", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1349,7 +999,7 @@ describe(
     });
 
     it("answers a retry of a pause that joined another that pause's receipt, never undoing a resume admitted since", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1435,7 +1085,7 @@ describe(
     });
 
     it("supersedes a stalled pause a newer control overtook, never sending it", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1488,7 +1138,7 @@ describe(
     });
 
     it("lets a cancel that lost its write to a pause admitted at once win all the same", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1591,7 +1241,7 @@ describe(
     });
 
     it("never applies a resume at once over a pause that reached the engine while the resume was being decided", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1707,7 +1357,7 @@ describe(
     });
 
     it("writes one receipt and one audit event for two overlapping requests under one key of a pause the run is already past", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1804,7 +1454,7 @@ describe(
     });
 
     it("applies a stalled pause at the next repair, the run's snapshot moving on from applying to paused", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1860,7 +1510,7 @@ describe(
     });
 
     it("refuses a cancel of a run that completed", async () => {
-      const { builder, app, reference } = await requestsApp();
+      const { builder, app, reference } = await boundApp();
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1884,7 +1534,9 @@ describe(
     });
 
     it("shows a run only to the person the App started it for: another member of the App, an admin and a made-up ID see none", async () => {
-      const { builder, admin, app, reference } = await requestsApp("PT1H");
+      const { builder, admin, app, reference } = await boundApp({
+        hold: "PT1H",
+      });
       const colleague = await signedIn("builder");
       await env.DB.prepare(
         "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
@@ -1939,16 +1591,9 @@ describe(
     });
 
     it("refuses a reference of another contract or release, input the declaration doesn't take, a watch sent as a call and a command sent as a watch, starting nothing", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const wire = wireOf(reference);
-      const start = (workflow: unknown, input?: unknown) =>
-        JSON.stringify({
-          workflow,
-          command: "start",
-          input: input ?? { who: "Ada" },
-          idempotencyKey: keyOf(),
-        });
       const commandWatched = await following(builder, app, lease, {
         workflow: wire,
         command: "start",
@@ -1964,15 +1609,15 @@ describe(
 
       expect({
         otherContract: await startOf(
-          start({ ...wire, fingerprint: "0".repeat(64) })
+          rawStart({ ...wire, fingerprint: "0".repeat(64) })
         ),
         otherRelease: await startOf(
-          start({ ...wire, resourceVersion: wire.resourceVersion + 1 })
+          rawStart({ ...wire, resourceVersion: wire.resourceVersion + 1 })
         ),
         unknownAlias: await startOf(
-          start({ ...wire, contractId: "workflows.other" })
+          rawStart({ ...wire, contractId: "workflows.other" })
         ),
-        badInput: await startOf(start(wire, { who: " " })),
+        badInput: await startOf(rawStart(wire, { who: " " })),
         watchAsCall: await startOf(
           JSON.stringify({ workflow: wire, watch: "binding" })
         ),
@@ -1994,8 +1639,9 @@ describe(
     });
 
     it("offers nothing once the App's start grant is revoked, and refuses its starts and cancels then", async () => {
-      const { builder, admin, app, grant, reference } =
-        await requestsApp("PT1H");
+      const { builder, admin, app, grant, reference } = await boundApp({
+        hold: "PT1H",
+      });
       const lease = await screenOf(builder, app);
       const read = readWorkflowReference(reference);
       const handle = await workflowChannel(
@@ -2037,7 +1683,7 @@ describe(
     });
 
     it("starts and shows nothing of another version the alias was bound to since the seal", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const read = readWorkflowReference(reference);
@@ -2047,7 +1693,7 @@ describe(
       // Version 2, bound with no seal: the release's references were made
       // for version 1.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: definitionOf(fixture.workflowName, undefined, "2.0.0"),
+        definition: greetingOf(fixture.workflowName, undefined, "2.0.0"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -2084,7 +1730,7 @@ describe(
     });
 
     it("tells a screen already following a run as the App's start grant is revoked and given again", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, admin, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2102,18 +1748,13 @@ describe(
       await vi.waitFor(() => {
         expect(canCancel()).toBeFalsy();
       }, settles);
-      const asked = await requestPermission(
-        env,
-        builder.acting,
-        {
-          subject: { type: "app", appId: appIdSchema.parse(app) },
-          object: { type: "workflow", workflowId: fixture.workflow },
-          actions: ["start"],
-          binding: "FOLLOW_UP",
-        },
-        rolesOf(builder.acting)
-      );
-      await grantPermission(env, admin.acting, asked.id, { version: 1 });
+      const asked = await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "workflow", workflowId: fixture.workflow },
+        actions: ["start"],
+        binding: "FOLLOW_UP",
+      });
+      await grantReviewed(admin.api, asked.id);
       await vi.waitFor(() => {
         expect(canCancel()).toBeTruthy();
       }, settles);
@@ -2121,7 +1762,7 @@ describe(
     });
 
     it("never shows a run as cancellable under a revision read after the grant was revoked", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, admin, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2168,11 +1809,9 @@ describe(
     });
 
     it("refuses what a run returned when it is more than the App declares", async () => {
-      const { builder, app, reference } = await requestsApp(
-        undefined,
-        undefined,
-        widerOf
-      );
+      const { builder, app, reference } = await boundApp({
+        definition: widerOf,
+      });
       const lease = await screenOf(builder, app);
       const handle = await workflowChannel(
         screenClient(builder, app, lease)
@@ -2193,7 +1832,7 @@ describe(
     });
 
     it("gives a second subscription to a run the revision the first already has", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const handle = await workflowChannel(
         screenClient(builder, app, lease)
@@ -2220,7 +1859,7 @@ describe(
     });
 
     it("refuses a run's watch and offers no start once the alias is rebound, then shows both again once rebound back, with nothing else changing", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2247,7 +1886,7 @@ describe(
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: definitionOf(fixture.workflowName, "PT1H", "2.0.0"),
+        definition: greetingOf(fixture.workflowName, "PT1H", "2.0.0"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -2299,7 +1938,7 @@ describe(
     });
 
     it("answers a screen that subscribes after a run's output passed its retention with no output, whatever another screen still shows", async () => {
-      const { builder, app, reference } = await requestsApp();
+      const { builder, app, reference } = await boundApp();
       const lease = await screenOf(builder, app);
       const handle = await workflowChannel(
         screenClient(builder, app, lease)
@@ -2335,7 +1974,7 @@ describe(
     });
 
     it("shows nothing of a screen's run but why while its alias is bound elsewhere, and the run again once bound back", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2355,7 +1994,7 @@ describe(
       const before = shown();
       // Bound away: the next read, which another run's end causes, refuses.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: definitionOf(fixture.workflowName, "PT1H", "2.0.0"),
+        definition: greetingOf(fixture.workflowName, "PT1H", "2.0.0"),
         basedOn: 1,
       });
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
@@ -2417,11 +2056,9 @@ describe(
     });
 
     it("shows a failed run only a code the platform defines, in its own words, never what the run read", async () => {
-      const { builder, app, reference } = await requestsApp(
-        undefined,
-        undefined,
-        failingOf
-      );
+      const { builder, app, reference } = await boundApp({
+        definition: failingOf,
+      });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2480,7 +2117,7 @@ describe(
     });
 
     it("shows what a restricted run returned only through an App still in restricted mode", async () => {
-      const { builder, app, reference } = await requestsApp();
+      const { builder, app, reference } = await boundApp();
       // Restricted as the start is decided, so its run is restricted for good.
       await appHost(env, appIdSchema.parse(app)).restrict();
       const lease = await screenOf(builder, app);
@@ -2525,8 +2162,8 @@ describe(
     });
 
     it("shows App B nothing of App A's run of the same workflow, and refuses its cancel", async () => {
-      const appA = await requestsApp("PT1H");
-      const appB = await requestsApp(undefined, appA.sharing);
+      const appA = await boundApp({ hold: "PT1H" });
+      const appB = await boundApp({ sharing: appA.sharing });
       const { builder } = appA;
       const leaseA = await screenOf(builder, appA.app);
       const handle = await workflowChannel(
@@ -2564,7 +2201,9 @@ describe(
     });
 
     it("refuses an App's workflows to its own server code's callers and to a portable host", async () => {
-      const { builder, admin, app, reference } = await requestsApp("PT1H");
+      const { builder, admin, app, reference } = await boundApp({
+        hold: "PT1H",
+      });
       const { generation } = await admin.api.screenTrust.review(app);
       await admin.api.screenTrust.classify(app, "ordinary", generation);
       const start = JSON.stringify({
@@ -2634,7 +2273,7 @@ describe(
     });
 
     it("fences a screen whose build lost its approval at its run's next change", async () => {
-      const fixture = await requestsApp("PT1H");
+      const fixture = await boundApp({ hold: "PT1H" });
       const { builder, admin, app, reference } = fixture;
       const { lease, artifact } = await builder.api.screens.open(app, "desk");
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -2669,7 +2308,7 @@ describe(
     });
 
     it("applies a cancel whose stop never went out at the next repair, settling its receipt", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2736,7 +2375,7 @@ describe(
     });
 
     it("settles a cancel as superseded, auditing no stop, when its run completed before the stop went out", async () => {
-      const { builder, app, reference } = await requestsApp();
+      const { builder, app, reference } = await boundApp();
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2781,7 +2420,7 @@ describe(
     });
 
     it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference } = await boundApp({ hold: "PT1H" });
       const lease = await screenOf(builder, app);
       const start = JSON.stringify({
         workflow: wireOf(reference),
@@ -2871,7 +2510,9 @@ describe(
         workflow: string;
       }) => Promise<unknown>
     ) => {
-      const { builder, app, reference, workflow } = await requestsApp("PT1H");
+      const { builder, app, reference, workflow } = await boundApp({
+        hold: "PT1H",
+      });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -2979,7 +2620,9 @@ describe(
     });
 
     it("ends a cancelled run whose compensation failed as workflow.compensation_failed, though a stop comes before its end is told", async () => {
-      const { builder, app, reference, workflow } = await requestsApp("PT1H");
+      const { builder, app, reference, workflow } = await boundApp({
+        hold: "PT1H",
+      });
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);

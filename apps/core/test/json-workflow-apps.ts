@@ -1,0 +1,505 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import {
+  declaredWorkflows,
+  GraspClient,
+  workflowReferenceOf,
+} from "@grasp-os/sdk/host";
+import type { ClientTransport } from "@grasp-os/sdk/host";
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { Role } from "@grasp-os/shared/roles";
+import { builtArtifacts } from "@grasp-os/shared/screen-trust";
+import {
+  appFunctionPath,
+  screenLeaseHeader,
+  screenPersonHeader,
+} from "@grasp-os/shared/screens";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { env } from "cloudflare:workers";
+import { vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { loadRelease } from "../src/app-releases.ts";
+import { signedInSession } from "../src/auth/identity.ts";
+import { grantReviewed, release } from "./apps.ts";
+import type { Idp } from "./idp.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import { routed, signedInApi, unique } from "./sign-in.ts";
+
+// Independent JSON workflows as run tests drive them, through the public
+// paths people and Apps take, each over a real session's RPC: a workflow
+// created and published as its builder does it, bound to an App under an
+// alias the App's app.ts declares, the App's version made current, its
+// `start` grant asked for by its builder and granted by an admin, its
+// screen approved, and its runs started, followed and controlled by a
+// person or by the App's screen over core's function route. What replaces
+// an App's own workflow (workflow-apps.ts) in a test:
+//
+//   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
+//   const { builder, app, workflow, reference } = await boundApp({ hold: "PT1H" });
+//   const lease = await screenOf(builder, app);
+//   const { runId } = startedOf(await called(builder, app, lease, startCommand(reference)));
+//   await called(builder, app, lease, controlCommand(reference, "pause", runId));
+//   const run = await runFor(builder, workflow, runId);
+//
+// or, for a run a person starts without an App:
+//
+//   const builder = await signedIn("builder");
+//   const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+//   const runId = await startedBy(builder, id);
+//   const run = await endedRun(builder, id, runId);
+//
+// `person.acting` is who the session is, as core reads it from the
+// session's cookie: for a test that must reach past the public paths, as
+// a fault it injects does.
+
+/** How long a push or a run's change may take, and how often to look. */
+export const settles = { timeout: 30_000, interval: 50 };
+
+/** A JSON object schema of `properties`, each required, and nothing else. */
+export const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** The contract every workflow here keeps: input `{ who }`, output `{ status }`. */
+const greetingContract = {
+  input: { schema: objectSchema({ who: { type: "string" } }) },
+  output: { schema: objectSchema({ status: { type: "string" } }) },
+};
+
+/** The tasks of a workflow that waits `hold` (an ISO duration), if any, then greets. */
+export const greetingTasks = (hold?: string): unknown[] => [
+  ...(hold === undefined ? [] : [{ hold: { wait: hold } }]),
+  { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+];
+
+/**
+ * A definition of `name` running `tasks`, input `{ who }` and output
+ * `{ status }`, with the catalog `bindings` it declares (a decision's, a
+ * model's), at `semver`.
+ */
+export const definitionOf = (
+  name: string,
+  tasks: unknown[],
+  {
+    bindings = {},
+    semver = "1.0.0",
+  }: { bindings?: Record<string, unknown>; semver?: string } = {}
+): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: semver,
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
+      },
+    },
+    ...greetingContract,
+    do: tasks,
+  });
+
+/** A greeting workflow's definition: it waits `hold`, if any, then greets. */
+export const greetingOf = (
+  name: string,
+  hold?: string,
+  semver = "1.0.0"
+): string => definitionOf(name, greetingTasks(hold), { semver });
+
+/**
+ * A workflow of `by`'s, created and published as version 1 through their
+ * session: running `tasks`, or the definition `definition` makes of its
+ * name.
+ */
+export const publishedWorkflow = async (
+  by: Person,
+  tasks: unknown[] | ((name: string) => string)
+): Promise<{ id: string; name: string }> => {
+  const workflow = await by.api.workflowResources.create(`flow-${unique()}`);
+  await by.api.workflowResources.publish(workflow.id, {
+    definition:
+      typeof tasks === "function"
+        ? tasks(workflow.name)
+        : definitionOf(workflow.name, tasks),
+    basedOn: null,
+  });
+  return { id: workflow.id, name: workflow.name };
+};
+
+/**
+ * Starts a run of version 1 of workflow `id` through `by`'s session, as a
+ * person with a role in it starts one: its ID.
+ */
+export const startedBy = async (
+  by: Person,
+  id: string,
+  input?: unknown
+): Promise<string> => {
+  const { runId } = await by.api.workflowResources.start(id, {
+    version: 1,
+    input: input ?? { who: "Ada" },
+    key: unique(),
+  });
+  return z.string().parse(runId);
+};
+
+/** Run `runId` of workflow `id`, as `by`'s session reads it. */
+export const runFor = async (
+  by: Person,
+  id: string,
+  runId: string
+): Promise<WorkflowResourceRun> =>
+  await by.api.workflowResources.run(id, runId);
+
+/** Run `runId` of workflow `id` once `holds` says so of it, polling. */
+export const runOnce = async (
+  by: Person,
+  id: string,
+  runId: string,
+  holds: (run: WorkflowResourceRun) => boolean
+): Promise<WorkflowResourceRun> =>
+  await vi.waitFor(async () => {
+    const run = await runFor(by, id, runId);
+    if (!holds(run)) {
+      throw new Error(`The run is ${run.status}`);
+    }
+    return run;
+  }, settles);
+
+/** Run `runId` of workflow `id` once it has ended. */
+export const endedRun = async (
+  by: Person,
+  id: string,
+  runId: string
+): Promise<WorkflowResourceRun> =>
+  await runOnce(by, id, runId, ({ endedAt }) => endedAt !== null);
+
+/** The App every bound workflow here is bound to: one screen, one alias. */
+const boundAppFiles = (alias: string): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  requests: defineTable({ who: v.string() }),
+});
+`,
+  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+
+export const ${alias} = resource.workflow(${JSON.stringify(alias)}, {
+  input: v.object({ who: v.string().trim().min(1) }),
+  output: v.object({ status: v.string() }),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { ${alias} } from "./operations/requests.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Requests",
+  schema,
+  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  operations: {},
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+  uses: [${alias}],
+});
+`,
+  "screens/desk.tsx": `export default function Desk() {
+  return <main>Requests</main>;
+}
+`,
+});
+
+/**
+ * The reference to `alias` that the `#grasp` generator writes into the
+ * screens' references of version 1 of `app`, from its sealed release.
+ */
+const workflowReference = async (app: string, alias: string) => {
+  const sealed = await loadRelease(env, appIdSchema.parse(app), 1);
+  // The workflows as `generateModules` reads them for the references.
+  const declared = declaredWorkflows(sealed.app, sealed.workflows).find(
+    (workflow) => workflow.alias === alias
+  );
+  if (declared === undefined) {
+    throw new Error(`No workflow ${alias}`);
+  }
+  return await workflowReferenceOf(
+    {
+      resourceId: sealed.manifest.resourceId,
+      resourceVersion: sealed.manifest.resourceVersion,
+    },
+    declared
+  );
+};
+
+/** A workflow reference, as `#grasp` generates it for a screen. */
+export type WorkflowReference = Awaited<ReturnType<typeof workflowReference>>;
+
+/** A reference as the SDK sends it. */
+export const wireOf = (reference: WorkflowReference) => ({
+  resourceId: reference.resourceId,
+  resourceVersion: reference.resourceVersion,
+  contractId: reference.contractId,
+  fingerprint: reference.fingerprint,
+  kind: "workflow",
+});
+
+/** A fresh command key, as the SDK makes one. */
+export const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
+
+/** A screen's start of the workflow `reference` names, under `key`. */
+export const startCommand = (
+  reference: WorkflowReference,
+  input?: unknown,
+  key = keyOf()
+): string =>
+  JSON.stringify({
+    workflow: wireOf(reference),
+    command: "start",
+    input: input ?? { who: "Ada" },
+    idempotencyKey: key,
+  });
+
+/** A screen's pause, resume or cancel of run `runId`, under `key`. */
+export const controlCommand = (
+  reference: WorkflowReference,
+  command: "pause" | "resume" | "cancel",
+  runId: string,
+  key = keyOf()
+): string =>
+  JSON.stringify({
+    workflow: wireOf(reference),
+    command,
+    runId,
+    idempotencyKey: key,
+  });
+
+const resultSchema = z.union([
+  z.object({ ok: z.literal(true), value: z.unknown() }),
+  z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
+]);
+
+/** What a raw call answered: its value, or its refusal's code. */
+export const outcomeOf = (answer: unknown): unknown => {
+  const { result } = z.object({ result: resultSchema }).parse(answer);
+  return result.ok ? result.value : result.error.code;
+};
+
+/** The run a screen's start answered with. */
+export const startedOf = (answer: unknown) =>
+  z
+    .object({
+      runId: z.string(),
+      workflowId: z.string(),
+      workflowVersion: z.number(),
+    })
+    .parse(outcomeOf(answer));
+
+/** A control's receipt as a screen's command answered it, without its revision. */
+export const staged = (receipt: unknown) => {
+  const { kind, state } = z
+    .object({ kind: z.string(), state: z.string(), revision: z.number() })
+    .parse(receipt);
+  return { kind, state };
+};
+
+/**
+ * Someone of `role` signed in through `idp`, with their session's RPC, and
+ * who the session is as core reads it from its cookie (`acting`).
+ */
+const signedInAs = async (idp: Idp, role: Role) => {
+  const session = await signedInApi(idp, role);
+  const read = await signedInSession(
+    env,
+    new Headers({ cookie: session.session })
+  );
+  if (read === undefined) {
+    throw new Error("The session isn't signed in");
+  }
+  return { ...session, acting: read.person };
+};
+
+/** Someone signed in, as `jsonWorkflowAppsOf`'s `signedIn` has them. */
+export type Person = Awaited<ReturnType<typeof signedInAs>>;
+
+/**
+ * The people, Apps and workflows of the tests that call `jsonWorkflowAppsOf`
+ * with their file's identity provider.
+ */
+export const jsonWorkflowAppsOf = (idp: Idp) => {
+  /** Someone of `role` signed in, and as core's own calls take them. */
+  const signedIn = async (role: Role): Promise<Person> =>
+    await signedInAs(idp, role);
+
+  /**
+   * An App sealed and current, its screen approved, with `alias` bound to
+   * version 1 of a workflow and the App's `start` grant on it: a greeting
+   * that waits `hold` first, or the definition `definition` makes of its
+   * name; or, `sharing` another fixture's people and workflow, that one.
+   */
+  const boundApp = async ({
+    hold,
+    sharing,
+    definition,
+    alias = "followUp",
+  }: {
+    hold?: string;
+    sharing?: {
+      readonly admin: Person;
+      readonly builder: Person;
+      readonly workflow: { readonly id: string; readonly name: string };
+    };
+    definition?: (name: string) => string;
+    alias?: string;
+  } = {}) => {
+    const admin = sharing?.admin ?? (await signedIn("admin"));
+    const builder = sharing?.builder ?? (await signedIn("builder"));
+    const workflow =
+      sharing?.workflow ??
+      (await publishedWorkflow(
+        builder,
+        definition ?? ((name) => greetingOf(name, hold))
+      ));
+    const { id: app } = await builder.api.apps.create({ name: "Requests" });
+    await builder.api.workflowResources.bindToApp(workflow.id, {
+      app,
+      alias,
+      version: 1,
+    });
+    // Committed, sealed as it is made current, and published.
+    await release(builder, app, boundAppFiles(alias));
+    const { id: grant } = await builder.api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    });
+    await grantReviewed(admin.api, grant);
+    const review = await admin.api.screenTrust.review(app);
+    await admin.api.screenTrust.approve(app, {
+      version: review.version,
+      generation: review.generation,
+      artifacts: builtArtifacts(review.screens),
+    });
+    return {
+      admin,
+      builder,
+      app,
+      workflow: workflow.id,
+      workflowName: workflow.name,
+      sharing: { admin, builder, workflow },
+      grant,
+      reference: await workflowReference(app, alias),
+    };
+  };
+
+  return { signedIn, boundApp };
+};
+
+/** A screen of `person`'s on the App, opened: its frame's lease. */
+export const screenOf = async (
+  person: Person,
+  app: string
+): Promise<string> => {
+  const { lease } = await person.api.screens.open(app, "desk");
+  return lease;
+};
+
+/** A call of the page's, relayed to core's function route: its answer. */
+export const called = async (
+  person: Person,
+  app: string,
+  lease: string,
+  request: string
+): Promise<unknown> => {
+  const response = await routed(`${appFunctionPath}/${app}`, {
+    method: "POST",
+    headers: {
+      origin: clientOrigin,
+      "content-type": "application/json",
+      cookie: person.session,
+      [screenLeaseHeader]: lease,
+      [screenPersonHeader]: person.userId,
+    },
+    body: request,
+  });
+  const answer: unknown = await response.json();
+  if (response.ok) {
+    return answer;
+  }
+  const payload = errorPayloadSchema.parse(answer);
+  throw Object.assign(new Error(payload.message), { code: payload.code });
+};
+
+/**
+ * A session client of `person`'s screen, as the frame's own: its calls
+ * over core's function route, its live queries over its frame
+ * (`screens.frame`). Hand it to `workflowChannel` for the SDK's view.
+ */
+export const screenClient = (
+  person: Person,
+  app: string,
+  lease: string
+): GraspClient => {
+  const transport: ClientTransport = {
+    call: async (request) => await called(person, app, lease, request),
+    watch: async (request, onSnapshot, onLost) => {
+      const callback = Object.assign(
+        (push: unknown): void => {
+          onSnapshot(push);
+        },
+        {
+          [Symbol.dispose]: (): void => {
+            onLost();
+          },
+        }
+      );
+      const subscription = await person.api.screens
+        .frame(app, lease)
+        .watchQuery(request, callback);
+      return {
+        release: () => {
+          void subscription.release();
+        },
+      };
+    },
+  };
+  return new GraspClient(transport);
+};
+
+/** Follows `request` raw on `person`'s screen: what reached the page. */
+export const following = async (
+  person: Person,
+  app: string,
+  lease: string,
+  request: unknown
+) => {
+  const received: { revision: number; outcome: unknown }[] = [];
+  const callback = Object.assign(
+    (push: unknown): void => {
+      const { revision, result } = z
+        .object({ revision: z.number(), result: resultSchema })
+        .parse(push);
+      received.push({
+        revision,
+        outcome: result.ok ? result.value : result.error.code,
+      });
+    },
+    {
+      [Symbol.dispose]: (): void => {
+        // Let go of: nothing more arrives.
+      },
+    }
+  );
+  const subscription = await person.api.screens
+    .frame(app, lease)
+    .watchQuery(JSON.stringify(request), callback);
+  return { received, subscription };
+};
