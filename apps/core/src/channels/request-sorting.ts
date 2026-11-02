@@ -139,9 +139,7 @@ export const sortRequest = async (
   // With no AI provider connected nothing is sorted (`model.no_provider`).
   const settings = await modelSettings(env);
   const model =
-    settings.models.length === 0
-      ? undefined
-      : modelForRole(settings, "quick", { sensitive: true });
+    settings.models.length === 0 ? undefined : modelForRole(settings, "quick");
   if (model === undefined) {
     return null;
   }

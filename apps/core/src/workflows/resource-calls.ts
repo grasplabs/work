@@ -108,8 +108,7 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
-//   decision, resource-host.ts); its model calls are judged as restricted
-//   by the gateway's data rules; and the App owning a store it calls an
+//   decision, resource-host.ts); and the App owning a store it calls an
 //   operation of is restricted before the input reaches it, audited with
 //   the run as provenance (`callApprovedStoreOperation`).
 // - A run's files leaving through a connector write (GRA-887). A write

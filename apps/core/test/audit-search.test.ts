@@ -234,7 +234,7 @@ describe("audit log search", () => {
   it("finds a run's decisions, and the changes to what's configured, by type", async () => {
     const { api } = await signedInApi(idp, "admin");
     const resource = `item-${unique()}`;
-    const [opened, approved, offered, budget] = await logged(
+    const [opened, approved, offered, param] = await logged(
       event({
         source: "core",
         action: "workflow.decision.opened",
@@ -252,7 +252,7 @@ describe("audit log search", () => {
       }),
       event({
         source: "core",
-        action: "model.budget.alert",
+        action: "workflow.param.updated",
         provenance: [resource],
       }),
       event({ source: "core", action: "model.call", provenance: [resource] })
@@ -264,7 +264,7 @@ describe("audit log search", () => {
       new Set([opened?.id, approved?.id])
     );
     await expect(found("config")).resolves.toStrictEqual(
-      new Set([offered?.id, budget?.id])
+      new Set([offered?.id, param?.id])
     );
   });
 

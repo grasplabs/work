@@ -284,8 +284,8 @@ export class BrainAgentApi
   /**
    * A pinned skill at exactly its version, while the agent may still read
    * it, its collection recorded with the chat as a recall's sources are:
-   * the chat's later model requests are judged by it (a sensitive one's
-   * data rule), and its result is withheld once the agent may no longer
+   * the chat's later model requests carry it as their provenance, and
+   * its result is withheld once the agent may no longer
    * read it.
    */
   async skillsRead(input: unknown): Promise<SkillRead> {

@@ -12,7 +12,7 @@ import { personalWorkspaceId } from "./personal-workspace.ts";
 // env.dashboard.makeWidget({ request })`, as the prototype's chat tools
 // `make_widget` and `change_widget`. The same path as on the dashboard
 // (dashboard-widgets.ts): made from the person's own rows, through the
-// model gateway on their budget, recorded as the chat's agent acting for
+// model gateway counted as theirs, recorded as the chat's agent acting for
 // them. The agent hands over what was asked and gets back only the
 // widget's ID: the widget, its title and what the model said of it are
 // written from the names of the person's engines and workflows, which the

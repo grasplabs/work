@@ -107,10 +107,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "chat", text: msg`Changed a chat` },
   { action: "agent.call", text: msg`The agent looked something up` },
-  {
-    action: "model.budget",
-    text: msg`A model budget reached its alert or ran out`,
-  },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
   { action: "permission.requested", text: msg`Asked for a permission` },

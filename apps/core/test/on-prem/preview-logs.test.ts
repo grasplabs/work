@@ -5,13 +5,7 @@ import { z } from "zod";
 
 import { chatAgentId, personalWorkspaceId } from "../../src/chats-rpc.ts";
 import { workspace } from "../../src/durable-objects.ts";
-import {
-  codeResults,
-  codeStep,
-  model,
-  configureObject,
-  says,
-} from "../agent-chat.ts";
+import { codeResults, codeStep, model, says } from "../agent-chat.ts";
 import { release, requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { fakeProvider } from "../model-provider.ts";
@@ -104,7 +98,6 @@ describe(
         };`),
         says("Checked.")
       );
-      await configureObject(stub);
 
       await stub.ask(chatIdSchema.parse(chat.id), {
         text: "Try the invoice desk's notes",

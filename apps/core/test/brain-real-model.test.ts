@@ -99,7 +99,7 @@ describe("the Brain baseline against a real model", () => {
   it.runIf(settings.mode === "estimate")(
     "estimates a run's cost from the dev split, spending nothing",
     async () => {
-      const setup: BrainModelSetup = { model: testedModel, rules: {} };
+      const setup: BrainModelSetup = { model: testedModel };
       const requests: { arm: string; inputTokens: number }[] = [];
       // The stub, each answer counted as long as a real one may be.
       const respond: BrainProvider = (turn) => {
@@ -210,11 +210,7 @@ describe("the Brain baseline against a real model", () => {
         );
       }
       const exchanges: ModelExchange[] = [];
-      const setup: BrainModelSetup = {
-        model: testedModel,
-        // The run's budget, as the ledger enforces it on every request.
-        rules: { budgets: { deployment: { limit: budgetUsd, alertAt: 99 } } },
-      };
+      const setup: BrainModelSetup = { model: testedModel };
       const report = await runBrainBaseline(await setUpBrainCompany(idp), {
         split: settings.split,
         openSealed: settings.split === "sealed",

@@ -52,7 +52,6 @@ const { step, leaseOf } = engineOfTest();
 
 const hooks: HostHooks = {
   stepFailed: () => {},
-  busyRefusals: new Map(),
   leaseOf,
   tampered: () => {},
   waiting: async () => {

@@ -6,14 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
-import {
-  chatOf,
-  codeResults,
-  codeStep,
-  model,
-  configureObject,
-  says,
-} from "./agent-chat.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -169,7 +162,6 @@ describe("a workflow run Grasp staff start", () => {
 /** `someone`'s own chats, answered by the agent saying `text`. */
 const answering = async (someone: { userId: string }, text: string) => {
   await fakeProvider(says(text));
-  await configureObject(workspace(env, personalWorkspaceId(someone.userId)));
 };
 
 /** Sends `text` in a new chat of `chats`' and waits for its answer. */

@@ -183,7 +183,7 @@ const gatewayRefusal = /^The model call was refused \((?<code>[a-z_.]+)\)/u;
 
 /** What a gateway refusal tells the page: busy is worth a retry, the rest isn't. */
 const refusalOf = (code: string | undefined): TurnFailedError =>
-  code === "model.budget_busy" || code === "model.rate_limited"
+  code === "model.queued" || code === "model.rate_limited"
     ? new TurnFailedError("Stephen is busy. Try again in a minute.", 429)
     : new TurnFailedError("Stephen could not be reached. Try again.", 502);
 
@@ -446,12 +446,8 @@ export const turnStream = async ({
   // No provider connected yet: the interview isn't set up, as the person
   // with the link is told; the log says why (`model.no_provider`).
   const connected = settings.models.length > 0;
-  const quick = connected
-    ? modelForRole(settings, "quick", { sensitive: true })
-    : undefined;
-  const careful = connected
-    ? modelForRole(settings, "careful", { sensitive: true })
-    : undefined;
+  const quick = connected ? modelForRole(settings, "quick") : undefined;
+  const careful = connected ? modelForRole(settings, "careful") : undefined;
   if (quick === undefined || careful === undefined) {
     log.error("interview.no_model", {
       requestId,

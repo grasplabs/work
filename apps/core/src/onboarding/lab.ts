@@ -58,8 +58,8 @@ const viaOf = async (env: Env): Promise<LabVia> => {
     return { quick: null, careful: null };
   }
   return {
-    quick: modelForRole(settings, "quick", { sensitive: true }) ?? null,
-    careful: modelForRole(settings, "careful", { sensitive: true }) ?? null,
+    quick: modelForRole(settings, "quick"),
+    careful: modelForRole(settings, "careful"),
   };
 };
 
@@ -67,7 +67,7 @@ const viaOf = async (env: Env): Promise<LabVia> => {
 const refusalResponse = (error: unknown, requestId: string): Response => {
   const code = modelErrors.codeOf(error) ?? "model.failed";
   const status =
-    code === "model.budget_busy" || code === "model.rate_limited" ? 429 : 502;
+    code === "model.queued" || code === "model.rate_limited" ? 429 : 502;
   return errorResponse(status, modelErrors.create(code), requestId);
 };
 
@@ -86,14 +86,7 @@ const ask = async (
       requestId
     );
   }
-  const model = modelForRole(settings, asked.role, { sensitive: true });
-  if (model === undefined) {
-    return errorResponse(
-      503,
-      modelErrors.create("model.unconfigured"),
-      requestId
-    );
-  }
+  const model = modelForRole(settings, asked.role);
   let schema: z.ZodType;
   try {
     schema = z.fromJSONSchema(asked.schema);

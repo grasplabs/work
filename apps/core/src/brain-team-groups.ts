@@ -224,13 +224,11 @@ const modelProposal = async (
   // No AI provider connected yet (`model.no_provider`): no proposal.
   const settings = await modelSettings(env);
   const model =
-    settings.models.length === 0
-      ? undefined
-      : modelForRole(settings, "quick", { sensitive: true });
+    settings.models.length === 0 ? undefined : modelForRole(settings, "quick");
   if (model === undefined) {
     return { groups: [] };
   }
-  // The gateway's refusal (its rules, a spent budget) reaches the admin as it is.
+  // The gateway's refusal (its rules, say) reaches the admin as it is.
   const { output } = await models(env).call({
     model,
     system: instructions,

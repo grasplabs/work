@@ -35,11 +35,7 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.provider_key_failed": true,
   "model.provider_unavailable": true,
   "model.not_allowed": true,
-  "model.eu_only": true,
-  "model.sensitive_data": true,
-  "model.over_budget": true,
   "model.run_limit": true,
-  "model.budget_busy": true,
   "model.queued": true,
   "model.rate_limited": true,
   "model.unpriced": true,
@@ -204,7 +200,7 @@ const noProviderFor = async (identity: Identity, failure = noProvider) => {
   return shown;
 };
 
-/** A gateway error code, as "model.over_budget". */
+/** A gateway error code, as "model.run_limit". */
 const gatewayCode = /model\.[a-z_]+/u;
 
 const unreachable = "Grasp could not be reached. Try again.";

@@ -131,35 +131,32 @@ export const draft = action({
 
 let monthsUsed = 0;
 
-/** A month no other file counts budgets in. */
+/** A month no other file counts spend in. */
 export const newMonth = (): string => {
   monthsUsed += 1;
   return `${2500 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
 /**
- * What `run` returns, with `budgets` in the deployment's model rules and
- * the provider answering with `replies`, in order, or with what `respond`
- * makes of the requests so far: for the runs the dispatcher runs and the
+ * What `run` returns, with the provider answering with `replies`, in
+ * order, or with what `respond` makes of the requests so far, and spend
+ * counted in a month of its own: for the runs the dispatcher runs and the
  * calls the test makes alike.
  */
 export const withProvider = async <Result>(
-  budgets: Record<string, unknown> | undefined,
   replies:
     | ProviderReply[]
     | ((requests: readonly SentRequest[]) => ProviderReply | undefined),
   run: (fake: FakeProvider) => Promise<Result>
 ): Promise<Result> => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
+  const { MODEL_BUDGET_MONTH: month } = env;
   const fake = Array.isArray(replies)
     ? await fakeProviderFor([lineageModel], ...replies)
     : await answeringProvider(replies, { models: [lineageModel] });
   try {
-    env.MODEL_GATEWAY = budgets === undefined ? {} : { budgets };
     env.MODEL_BUDGET_MONTH = newMonth();
     return await run(fake);
   } finally {
-    env.MODEL_GATEWAY = before;
     env.MODEL_BUDGET_MONTH = month;
   }
 };

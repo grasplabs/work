@@ -1,9 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { configureObject, says } from "./agent-chat.ts";
+import { says } from "./agent-chat.ts";
 import {
   connectedDirectory,
   directoryHolds,
@@ -59,7 +57,6 @@ const directoryWith = async (
   await directoryHolds(users);
   const { admin } = await connectedDirectory(idp);
   const provider = await fakeProvider(...replies.map((text) => says(text)));
-  await configureObject(workspace(env, personalWorkspaceId(admin.userId)));
   return { admin, provider };
 };
 

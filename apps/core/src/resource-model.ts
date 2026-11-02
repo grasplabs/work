@@ -21,11 +21,10 @@ import type {
 // A model resource (spec 12, 32.3): one answer per request, from the model
 // its binding names, through the model gateway, never straight to a
 // provider and with no key anywhere near App code. The gateway applies the
-// deployment's allowlist and data rules, reserves and settles the call
-// against every budget it counts against (the deployment's, the person's
-// it acts for, the binding's own caps per request, day and month in
-// model-budgets.ts, and for a workflow run's call its workflow's and its
-// run lineage's), and audits it as metadata only. The declaration
+// organization's models, counts the call's spend (the deployment's, the
+// person's it acts for, the binding's, and for a workflow run's call its
+// workflow's and its run lineage's, model-spend.ts), and audits it as
+// metadata only. The declaration
 // bounds the answer's tokens, and a structured output is the descriptor's:
 // the model is told its JSON Schema, asked once more when an answer
 // doesn't fit, and the operation host checks the answer against the
@@ -103,9 +102,8 @@ const answerSchema = (descriptor: ValueDescriptor) => {
 /**
  * What a gateway refusal means to App code, from an allow-list: a model the
  * deployment no longer lets this call use is a binding that can't serve,
- * a budget used up is that (with when it resets, if it does), a budget
- * held by requests still under way is busy, a full share of the requests
- * in flight is queued and a provider's rate limit is rate-limited (each
+ * a run lineage out of model requests is used up for good, a full share
+ * of the requests in flight is queued and a provider's rate limit is rate-limited (each
  * worth asking again, after the wait core computed), an answer
  * that never fit is a contract the provider broke. Anything else stays the
  * gateway's, for the operation host to redact.
@@ -115,8 +113,6 @@ const refusalOf = (error: unknown): unknown => {
   if (
     code === "model.not_allowed" ||
     code === "model.unconfigured" ||
-    code === "model.eu_only" ||
-    code === "model.sensitive_data" ||
     code === "model.unpriced" ||
     code === "model.answer_too_long"
   ) {
@@ -127,13 +123,9 @@ const refusalOf = (error: unknown): unknown => {
     : undefined;
   const after =
     typeof wait === "number" ? { retryAfterSeconds: wait } : undefined;
-  // Used up until the budget resets (a month's or a day's, when), or for
-  // good (a run lineage's, none).
-  if (code === "model.over_budget" || code === "model.run_limit") {
+  // A run lineage out of model requests: used up for good.
+  if (code === "model.run_limit") {
     return operationErrors.create("resource.budget_exhausted", after);
-  }
-  if (code === "model.budget_busy") {
-    return operationErrors.create("resource.budget_busy", after);
   }
   // A full share of the requests in flight, and the provider's rate:
   // throttling, worth asking again after the wait core computed.
@@ -206,9 +198,9 @@ const generate = async (
       ),
       purpose: "app.resource",
       // The App for a screen's call; the run for a workflow's, whose
-      // workflow and run lineage budgets then count it too, as they do
-      // for a call made, through other Apps, from a run's: its requests
-      // are the run's, besides the called App's binding caps.
+      // workflow and run lineage then count it too, as they do for a call
+      // made, through other Apps, from a run's: its requests are the
+      // run's, besides the called App's binding.
       trigger: runOrigin?.actor ?? caller.actor,
       // A run's: whose share its requests take (BindingCaller).
       ...(shareSubject === undefined ? {} : { shareSubject }),
@@ -216,7 +208,7 @@ const generate = async (
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
-      binding: { app: caller.app, alias: record.alias, budget: record.budget },
+      binding: { app: caller.app, alias: record.alias },
       // A run's attempt let go of while the gateway admitted the request
       // sends nothing to the provider.
       ...(caller.requireHolds === undefined

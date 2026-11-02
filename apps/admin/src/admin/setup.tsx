@@ -869,11 +869,6 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
             attention: over.has("stephen_failing"),
           },
           {
-            label: "Over budget",
-            value: String(signals.overBudget),
-            attention: over.has("stephen_over_budget"),
-          },
-          {
             label: "Busy",
             value: String(signals.busy),
             attention: over.has("stephen_busy"),

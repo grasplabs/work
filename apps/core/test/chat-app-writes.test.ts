@@ -12,7 +12,6 @@ import {
   codeResults,
   codeStep,
   model,
-  configureObject,
   says,
   transcript,
 } from "./agent-chat.ts";
@@ -113,7 +112,6 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
     via
   );
   await fakeProvider(...replies);
-  await configureObject(stub);
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: id },
     object: { type: "connection", connectionId: mail.id },

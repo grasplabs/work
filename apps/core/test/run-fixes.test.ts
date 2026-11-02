@@ -1,19 +1,12 @@
 import type { ChatProvenance } from "@grasp-os/shared/chat";
-import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
-import { modelErrors } from "@grasp-os/shared/models";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
-import {
-  codeResults,
-  codeStep,
-  model,
-  configureObject,
-  says,
-} from "./agent-chat.ts";
+import { codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -23,7 +16,7 @@ import {
   storedGrant,
 } from "./knowledge.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
-import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -42,9 +35,6 @@ const idp = mockIdp();
 const slow = { timeout: 60_000 };
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
-
-/** A model the tests' config says is hosted in the EU. */
-const euModel = "openai/gpt-5.4";
 
 /** What a failed run's error says: an attack on whoever reads it. */
 const injection =
@@ -76,7 +66,6 @@ const endedRun = async (person: Person, app: string, workflow: string) => {
 /** Answers `person`'s chats with `replies`, from a fake provider. */
 const answering = async (person: Person, ...replies: ProviderReply[]) => {
   const provider = await fakeProvider(...replies);
-  await configureObject(workspace(env, personalWorkspaceId(person.userId)));
   return provider;
 };
 
@@ -335,38 +324,6 @@ describe("asking the agent to fix a failed run", slow, () => {
       },
       stranger: "workflow.run_not_found",
       chats: 0,
-    });
-  });
-
-  it("keeps the chat, and says why, when its question is refused once the chat is made", async () => {
-    const owner = await signedInApi(idp, "builder");
-    const app = await appWith(owner, workflows("Customer c-1 is blocked"));
-    const run = await endedRun(owner, app, "careless");
-    // The client's rules keep every call in the EU, and the model isn't
-    // hosted there: it is allowed, so the chat is made, and the rules
-    // refuse its question.
-    await fakeProviderFor([model, euModel]);
-    await configureObject(workspace(env, personalWorkspaceId(owner.userId)), {
-      rules: { eu: { models: [euModel], deployment: true } },
-    });
-
-    const started = await owner.api.chats.fixRun(run, model);
-    const chats = await owner.api.chats.list();
-    const attached = await workspace(
-      env,
-      personalWorkspaceId(owner.userId)
-    ).attachments(chatIdSchema.parse(started.chat.id));
-    expect({
-      sent: started.sent,
-      reason: started.sent ? null : started.reason,
-      // The one chat, holding the report, for the page to open.
-      chats: chats.map(({ id }) => id),
-      attached: attached.map(({ run: attachedRun }) => attachedRun),
-    }).toStrictEqual({
-      sent: false,
-      reason: modelErrors.create("model.eu_only").message,
-      chats: [started.chat.id],
-      attached: [run],
     });
   });
 

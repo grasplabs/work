@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { monthEnd, shareOf } from "./money.ts";
+import { monthEnd } from "./money.ts";
 
 describe("this month's spend", () => {
   it("ends where the days so far lead, in this month only", () => {
@@ -12,11 +12,5 @@ describe("this month's spend", () => {
       // Core counts in a month that isn't this one: no guess.
       monthEnd(20, "2026-09", new Date("2026-10-01T00:00:00Z")),
     ]).toStrictEqual([62, 290, null]);
-  });
-
-  it("is a share of its budget, all of a budget of nothing", () => {
-    expect([shareOf(5, 20), shareOf(0, 20), shareOf(1, 0)]).toStrictEqual([
-      25, 0, 100,
-    ]);
   });
 });

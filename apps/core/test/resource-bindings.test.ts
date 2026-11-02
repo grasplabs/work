@@ -1,14 +1,10 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
-import type { ModelBindingSpend } from "@grasp-os/shared/models";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type {
-  ModelBindingBudgetInput,
-  ResourceBindingsReview,
-} from "@grasp-os/shared/resource-bindings";
+import type { ResourceBindingsReview } from "@grasp-os/shared/resource-bindings";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -59,19 +55,6 @@ import { openRpc, signedInWithRole } from "./sign-in.ts";
 
 /** The model the organization chose, which answers at most 65,536 tokens. */
 const chosenModel = "mistral/mistral-large-latest";
-
-/**
- * The `writer` token bound at which one request reserves some $0.009 for
- * its longest answer ($1.50 a million tokens): one fits a cent, two never
- * do.
- */
-const nearCentBound = 5500;
-
-/**
- * The `writer` token bound at which one request reserves some $0.0117:
- * more than a cent, one fits two cents, two never do.
- */
-const overCentBound = 7300;
 
 /** An App whose actions use a text model and a structured one. */
 const modelFiles = (
@@ -236,17 +219,15 @@ const requestFor = (release: Release, path: string, input: unknown): string => {
 };
 
 /**
- * Core's env with the client's `rules`, the organization having chosen
- * `models`, whose provider answers `replies` in turn.
+ * Core's env, the organization having chosen `models`, whose provider
+ * answers `replies` in turn.
  */
 const providerEnv = async (
   replies: ProviderReply[],
-  models: string[] = [chosenModel],
-  rules: Record<string, unknown> = {}
+  models: string[] = [chosenModel]
 ) => {
   const provider = await fakeProviderFor(models, ...replies);
-  const withProvider: Env = { ...env, MODEL_GATEWAY: rules };
-  return { provider, providerEnv: withProvider };
+  return { provider, providerEnv: env };
 };
 
 /**
@@ -814,28 +795,6 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
     }).toStrictEqual({ outcome: { failed: "resource.unavailable" }, sent: 0 });
   });
 
-  it("count every request against the person's budget", async () => {
-    const sealed = await sealedApp(modelFiles(overCentBound));
-    await approveModel(sealed, "writer");
-    // Less than the longest answer the declaration allows could cost:
-    // refused by the ledger before anything is sent.
-    const { provider, providerEnv: withProvider } = await providerEnv(
-      [answer("Too dear.")],
-      [chosenModel],
-      { budgets: { user: { limit: 0.01 } } }
-    );
-    const result = await call(withProvider, sealed, "assist.draft", {
-      prompt: "Hi",
-    });
-    expect({
-      outcome: outcomeOf(result),
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      outcome: { failed: "resource.budget_exhausted" },
-      sent: 0,
-    });
-  });
-
   it("are approved by admins only, never staff or builders", async () => {
     const sealed = await sealedApp(modelFiles());
     const staff = { ...(await person("admin")), staff: true };
@@ -1302,32 +1261,6 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
     });
   });
 
-  it("hand what a call read to the gateway's data rules", async () => {
-    const { sealed, documents } = await knowledgeApp();
-    await approveModel(sealed, "writer");
-    // Sensitive data may go to another model only.
-    const { provider, providerEnv: withProvider } = await providerEnv(
-      [answer("Leave needs your lead's yes.")],
-      [chosenModel, "openai/gpt-5.4"],
-      { sensitive: { models: ["openai/gpt-5.4"], connections: [] } }
-    );
-    const plain = await call(withProvider, sealed, "help.summarize", {
-      id: documents.leave,
-    });
-    const sensitive = await call(withProvider, sealed, "help.summarize", {
-      id: documents.pay,
-    });
-    expect({
-      plain: outcomeOf(plain),
-      sensitive: outcomeOf(sensitive),
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      plain: "Leave needs your lead's yes.",
-      sensitive: { failed: "resource.unavailable" },
-      sent: 1,
-    });
-  });
-
   it("stop knowledge whose collection permission was revoked", async () => {
     const { sealed, admin, permissions } = await knowledgeApp();
     await revokePermission(env, admin, permissions.salaries);
@@ -1597,7 +1530,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
             declarationHash: "0".repeat(64),
             fingerprint: letter.contentHash,
           },
-          { alias: "letter", budget: null }
+          { alias: "letter" }
         )
     );
     expect(read).toBe("resource.unavailable");
@@ -1620,440 +1553,25 @@ export const idle = resource.model("idle", { maxOutputTokens: 65537 });
   });
 });
 
-/** An admin's approval of the App's `writer`, with its own caps if given. */
-const approveWriter = async (
-  sealed: Sealed,
-  budget?: ModelBindingBudgetInput
-) =>
-  await approveResourceBinding(env, await person("admin"), {
-    ...writerApproval(sealed),
-    ...(budget === undefined ? {} : { budget }),
-  });
+/** An admin's approval of the App's `writer`. */
+const approveWriter = async (sealed: Sealed) =>
+  await approveResourceBinding(
+    env,
+    await person("admin"),
+    writerApproval(sealed)
+  );
 
-/**
- * An answer that uses most of what a `nearCentBound` request reserves,
- * some $0.0082, and never more: past 80% of a cent on its own.
- */
-const longAnswer: ProviderReply = {
-  text: "Long.",
-  inputTokens: 100,
-  outputTokens: 5400,
-};
-
-/** Calls `path` of the App through `callEnv`, counting days as `day`. */
+/** Calls `path` of the App through `callEnv`. */
 const callOn = async (
   callEnv: Env,
   sealed: Sealed,
-  path: string,
-  day = "2031-01-01"
+  path: string
 ): Promise<OperationResult> =>
-  await call({ ...callEnv, MODEL_BUDGET_DAY: day }, sealed, path, {
-    prompt: "Hi",
-  });
+  await call(callEnv, sealed, path, { prompt: "Hi" });
 
 /** Calls the App's `draft` through `callEnv`: its outcome. */
-const draftOn = async (
-  callEnv: Env,
-  sealed: Sealed,
-  day?: string
-): Promise<Json> =>
-  outcomeOf(await callOn(callEnv, sealed, "assist.draft", day));
-
-describe("model binding budgets", { timeout: 120_000 }, () => {
-  beforeEach(chooseModel);
-
-  it("cap a binding's day, alerting admins, until the next day", async () => {
-    const sealed = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(sealed, { perDay: 0.01 });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      longAnswer,
-      answer("Next day."),
-    ]);
-    const first = await draftOn(withProvider, sealed);
-    const second = await draftOn(withProvider, sealed);
-    const sentThatDay = provider.requests.length;
-    const nextDay = await draftOn(withProvider, sealed, "2031-01-02");
-    expect({ first, second, sentThatDay, nextDay }).toStrictEqual({
-      first: "Long.",
-      second: { failed: "resource.budget_exhausted" },
-      sentThatDay: 1,
-      nextDay: "Next day.",
-    });
-    const alerted = await auditedFor("model.budget.alert", sealed.app);
-    const refused = await auditedFor("model.refused", sealed.app);
-    expect({
-      alerted: alerted.map(({ detail }) => detail),
-      refused: refused.map(({ detail }) => detail),
-    }).toStrictEqual({
-      alerted: [
-        expect.objectContaining({
-          scope: "binding_day",
-          app: sealed.app,
-          binding: "writer",
-          day: "2031-01-01",
-          limit: 0.01,
-        }),
-      ],
-      refused: [
-        expect.objectContaining({
-          reason: "model.over_budget",
-          because: "binding_day",
-          binding: "writer",
-        }),
-      ],
-    });
-  });
-
-  it("count a binding's month at what each request used once it settled", async () => {
-    // Two requests' reservations never fit a cent together: the second
-    // fits only once the first settled at what it used.
-    const sealed = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(sealed, { perMonth: 0.01 });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      answer("One."),
-      answer("Two."),
-      longAnswer,
-      answer("Never sent."),
-    ]);
-    const outcomes: Json[] = [];
-    for (let made = 0; made < 4; made += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await draftOn(withProvider, sealed));
-    }
-    expect({ outcomes, sent: provider.requests.length }).toStrictEqual({
-      outcomes: [
-        "One.",
-        "Two.",
-        "Long.",
-        { failed: "resource.budget_exhausted" },
-      ],
-      sent: 3,
-    });
-  });
-
-  it("keep each App's spend apart, whatever their aliases", async () => {
-    const one = await sealedApp(modelFiles(nearCentBound));
-    const other = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(one, { perDay: 0.01 });
-    await approveWriter(other, { perDay: 0.01 });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      longAnswer,
-      answer("Other App."),
-    ]);
-    expect({
-      outcomes: [
-        await draftOn(withProvider, one),
-        await draftOn(withProvider, one),
-        await draftOn(withProvider, other),
-      ],
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      outcomes: [
-        "Long.",
-        { failed: "resource.budget_exhausted" },
-        "Other App.",
-      ],
-      sent: 2,
-    });
-  });
-
-  it("hold one App request's provider requests to the cap per request, retries included", async () => {
-    const sealed = await sealedApp(modelFiles(overCentBound));
-    await approveWriter(sealed, { perRequest: 0.01 });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      { status: 429, headers: { "retry-after": "1" } },
-      answer("After the refusal."),
-    ]);
-    // Its longest answer alone could cost more than the cap.
-    const tooDear = await draftOn(withProvider, sealed);
-    const sentTooDear = provider.requests.length;
-    // A 429 is refused before the provider took the request on: it costs
-    // nothing, so its retry fits beside it under two cents.
-    await approveWriter(sealed, { perRequest: 0.02 });
-    const retried = await draftOn(withProvider, sealed);
-    const refused = await auditedFor("model.refused", sealed.app);
-    expect({
-      tooDear,
-      sentTooDear,
-      retried,
-      sent: provider.requests.length,
-      because: refused.map(({ detail }) => detail?.because),
-    }).toStrictEqual({
-      tooDear: { failed: "resource.budget_exhausted" },
-      sentTooDear: 0,
-      retried: "After the refusal.",
-      sent: 2,
-      because: ["binding_request"],
-    });
-  });
-
-  it("give a second attempt the room the first left once it settled", async () => {
-    // Each attempt reserves some $0.0117 for its half of the bound: both
-    // fit two cents only because the first settled at what it used.
-    const sealed = await sealedApp(modelFiles(300, overCentBound * 2));
-    await approveResourceBinding(env, await person("admin"), {
-      app: sealed.app,
-      alias: "tagger",
-      target: { kind: "model", model: chosenModel },
-      reviewed: { version: 1 },
-      budget: { perRequest: 0.02 },
-    });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      answer("not json"),
-      answer('{"tags": ["launch"]}'),
-    ]);
-    const tagged = await call(withProvider, sealed, "assist.tag", {
-      text: "Notes",
-    });
-    expect({
-      outcome: outcomeOf(tagged),
-      sent: provider.requests.length,
-    }).toStrictEqual({ outcome: { tags: ["launch"] }, sent: 2 });
-  });
-
-  it("refuse a second attempt the room a first of unknown cost still holds", async () => {
-    // The first answer came with no count of what it used: it keeps all
-    // it reserved, and the second attempt has no room beside it.
-    const sealed = await sealedApp(modelFiles(300, overCentBound * 2));
-    await approveResourceBinding(env, await person("admin"), {
-      app: sealed.app,
-      alias: "tagger",
-      target: { kind: "model", model: chosenModel },
-      reviewed: { version: 1 },
-      budget: { perRequest: 0.02 },
-    });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      { ...answer("not json"), noUsage: true },
-      answer('{"tags": ["never sent"]}'),
-    ]);
-    const tagged = await call(withProvider, sealed, "assist.tag", {
-      text: "Notes",
-    });
-    expect({
-      outcome: outcomeOf(tagged),
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      outcome: { failed: "resource.budget_exhausted" },
-      sent: 1,
-    });
-  });
-
-  it("tell a busy binding from one used up, worth trying again later", async () => {
-    const sealed = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(sealed, { perDay: 0.015 });
-    const gate = Promise.withResolvers<unknown>();
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      { ...answer("First."), pause: { at: 2, until: gate.promise } },
-      answer("Once settled."),
-    ]);
-    const running = draftOn(withProvider, sealed);
-    while (provider.requests.length === 0) {
-      // oxlint-disable-next-line no-await-in-loop -- until the first request is out
-      await scheduler.wait(10);
-    }
-    // The first still holds what it reserved: no room for a second now.
-    const racing = await callOn(withProvider, sealed, "assist.draft");
-    const seenByApp = await callOn(withProvider, sealed, "assist.attempt");
-    gate.resolve(null);
-    const first = await running;
-    // Once the first settled at what it used, there is room again.
-    const after = await draftOn(withProvider, sealed);
-    expect({
-      first,
-      racing: racing.ok
-        ? racing.value
-        : {
-            code: racing.error.code,
-            retryable: racing.error.retryable,
-            details: racing.error.details,
-          },
-      seenByApp: outcomeOf(seenByApp),
-      after,
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      first: "First.",
-      // A binding's scopes are shared by everyone the App acts for: a
-      // fixed wait, never one that tells when others' requests were sent.
-      racing: {
-        code: "resource.budget_busy",
-        retryable: true,
-        details: { retryAfterSeconds: 60 },
-      },
-      seenByApp: "resource.budget_busy|60",
-      after: "Once settled.",
-      sent: 2,
-    });
-  });
-
-  it("tell an App its provider's rate limit from a used-up budget, each with when to try again", async () => {
-    const sealed = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(sealed, { perDay: 0.01 });
-    const { providerEnv: withProvider } = await providerEnv([
-      // Refused for its rate, retries and all, the provider asking for a
-      // second and a half.
-      ...Array.from({ length: 3 }, () => ({
-        status: 429,
-        errorType: "rate_limit_error",
-        headers: { "retry-after-ms": "1500" },
-      })),
-      longAnswer,
-    ]);
-    const rateLimited = outcomeOf(
-      await callOn(withProvider, sealed, "assist.attempt")
-    );
-    // Most of the day's cent spent: the next request has no room until
-    // the day is over.
-    const spent = await draftOn(withProvider, sealed);
-    const usedUp = outcomeOf(
-      await callOn(withProvider, sealed, "assist.attempt")
-    );
-    const [code, wait] = (typeof usedUp === "string" ? usedUp : "").split("|");
-    expect({
-      rateLimited,
-      spent,
-      usedUp: code,
-      untilTheDayIsOver: Number(wait) > 0 && Number(wait) <= 24 * 60 * 60,
-    }).toStrictEqual({
-      rateLimited: "resource.rate_limited|2",
-      spent: "Long.",
-      usedUp: "resource.budget_exhausted",
-      untilTheDayIsOver: true,
-    });
-  });
-
-  it("apply a budget approved again to the next request, keeping what was spent", async () => {
-    const sealed = await sealedApp(modelFiles(nearCentBound));
-    await approveWriter(sealed, { perMonth: 0.01 });
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      longAnswer,
-      answer("Raised."),
-      answer("Never sent."),
-    ]);
-    const first = await draftOn(withProvider, sealed);
-    const spent = await draftOn(withProvider, sealed);
-    await approveWriter(sealed, { perMonth: 0.05 });
-    const raised = await draftOn(withProvider, sealed);
-    // Lowered below what was spent and a request's reservation: one
-    // request alone would fit it, had approving again started afresh.
-    await approveWriter(sealed, { perMonth: 0.012, alertAt: 50 });
-    const lowered = await draftOn(withProvider, sealed);
-    const [listed] = await listResourceBindings(env, sealed.owner, sealed.app);
-    const approved = await auditedFor(
-      "app.resource_binding.approved",
-      sealed.app
-    );
-    const budgetsAudited = approved.map(({ detail }) => [
-      detail?.budgetPerRequest,
-      detail?.budgetPerDay,
-      detail?.budgetPerMonth,
-      detail?.budgetAlertAt,
-    ]);
-    expect({
-      outcomes: [first, spent, raised, lowered],
-      sent: provider.requests.length,
-      shown: [listed?.budget, listed?.budgetDamaged],
-      audited: budgetsAudited.at(-1),
-    }).toStrictEqual({
-      outcomes: [
-        "Long.",
-        { failed: "resource.budget_exhausted" },
-        "Raised.",
-        { failed: "resource.budget_exhausted" },
-      ],
-      sent: 2,
-      shown: [{ perMonth: 0.012, alertAt: 50 }, false],
-      audited: [null, null, 0.012, 50],
-    });
-  });
-
-  it("record that a binding approved without a budget has none", async () => {
-    const sealed = await sealedApp(modelFiles());
-    const binding = await approveWriter(sealed);
-    const [approved] = await auditedFor(
-      "app.resource_binding.approved",
-      sealed.app
-    );
-    expect({
-      budget: binding.budget,
-      audited: [
-        approved?.detail?.budgetPerRequest,
-        approved?.detail?.budgetPerDay,
-        approved?.detail?.budgetPerMonth,
-        approved?.detail?.budgetAlertAt,
-      ],
-    }).toStrictEqual({ budget: null, audited: [null, null, null, null] });
-  });
-
-  it("are set for a model binding only, with at least one cap", async () => {
-    const sealed = await sealedApp(letterFiles());
-    const admin = await person("admin");
-    const refused = {
-      template: await failure(
-        async () =>
-          await approveResourceBinding(env, admin, {
-            ...letterApproval(sealed, crypto.randomUUID(), 1),
-            budget: { perDay: 1 },
-          })
-      ),
-      noCap: await failure(
-        async () =>
-          await approveResourceBinding(env, admin, {
-            ...writerApproval(sealed),
-            budget: { alertAt: 50 },
-          })
-      ),
-    };
-    expect(refused).toStrictEqual({
-      template: "resource.binding_invalid",
-      noCap: "resource.binding_invalid",
-    });
-  });
-
-  it("serve nothing through a binding whose budget is stored damaged, and say so", async () => {
-    const sealed = await sealedApp(modelFiles());
-    const binding = await approveWriter(sealed, { perDay: 1 });
-    await drizzle(env.DB)
-      .update(appResourceBindings)
-      .set({ budget: JSON.stringify({ perDay: "lots" }) })
-      .where(eq(appResourceBindings.id, binding.id));
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      answer("Uncapped."),
-    ]);
-    const outcome = await draftOn(withProvider, sealed);
-    const [listed] = await listResourceBindings(env, sealed.owner, sealed.app);
-    expect({
-      outcome,
-      sent: provider.requests.length,
-      shown: [listed?.budget, listed?.budgetDamaged],
-    }).toStrictEqual({
-      outcome: { failed: "resource.unavailable" },
-      sent: 0,
-      shown: [null, true],
-    });
-  });
-});
-
-/**
- * What a binding spent today, as it stands to a cent a day alerted at
- * 80%: the capped writer's.
- */
-const standing = (amount: number): string | number => {
-  if (amount >= 0.008 && amount < 0.01) {
-    return "past the alert";
-  }
-  return amount > 0 && amount < 0.008 ? "under the alert" : amount;
-};
-
-/** A listed binding's spend, today's as it `standing`s, and its month as against its day. */
-const spent = (listed: ModelBindingSpend | undefined) =>
-  listed === undefined
-    ? undefined
-    : {
-        ...listed,
-        today: standing(listed.today),
-        thisMonth:
-          listed.thisMonth === listed.today ? "today's" : listed.thisMonth,
-      };
+const draftOn = async (callEnv: Env, sealed: Sealed): Promise<Json> =>
+  outcomeOf(await callOn(callEnv, sealed, "assist.draft"));
 
 /** App `app`'s active binding's row, to damage what it stores. */
 const active = (app: string) =>
@@ -2067,123 +1585,114 @@ describe("model binding spend", { timeout: 120_000 }, () => {
 
   const idp = mockIdp();
 
-  /** The model bindings the models settings list, as `role` reads them on `day`. */
-  const bindingsOn = async (day: string, role: "admin" | "builder") => {
+  /** The model bindings the models settings list, as `role` reads them. */
+  const bindings = async (role: "admin" | "builder") => {
     const { session } = await signedInWithRole(idp, role);
-    const { core } = await openRpc(session, {
-      coreEnv: { ...env, MODEL_BUDGET_DAY: day },
-    });
+    const { core } = await openRpc(session, { coreEnv: env });
     return await core.authenticate().models.settings();
   };
 
-  it("list each App's model bindings with their caps, today's and this month's spend and alert, to admins only", async () => {
+  it("tell an App its provider's rate limit, with when to try again", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveWriter(sealed);
+    const { providerEnv: withProvider } = await providerEnv(
+      // Refused for its rate, retries and all, the provider asking for a
+      // second and a half.
+      Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after-ms": "1500" },
+      }))
+    );
+    expect(
+      outcomeOf(await callOn(withProvider, sealed, "assist.attempt"))
+    ).toBe("resource.rate_limited|2");
+  });
+
+  it("list each App's model bindings with this month's spend, each App's apart, to admins only", async () => {
     // Named to sort first, ahead of this file's other Apps.
-    const capped = await sealedApp(modelFiles(nearCentBound), "0 Capped");
-    const free = await sealedApp(modelFiles(), "0 Free");
-    await approveWriter(capped, { perDay: 0.01 });
-    const freeBinding = await approveWriter(free);
+    const one = await sealedApp(modelFiles(), "0 A One");
+    const other = await sealedApp(modelFiles(), "0 B Other");
+    const idle = await sealedApp(modelFiles(), "0 C Idle");
+    await approveWriter(one);
+    await approveWriter(other);
+    const idleBinding = await approveWriter(idle);
     const { providerEnv: withProvider } = await providerEnv([
-      longAnswer,
-      answer("Free."),
+      answer("One."),
+      answer("Again."),
+      answer("Other."),
     ]);
-    const first = "2031-02-01";
-    // Past 80% of the capped writer's cent a day.
-    await draftOn(withProvider, capped, first);
-    await draftOn(withProvider, free, first);
+    await draftOn(withProvider, one);
+    await draftOn(withProvider, one);
+    await draftOn(withProvider, other);
 
     const ours = ({ appId }: { appId: string }): boolean =>
-      appId === capped.app || appId === free.app;
-    const thatDay = await bindingsOn(first, "admin");
-    const nextDay = await bindingsOn("2031-02-02", "admin");
-    const [cappedThen, freeThen] = thatDay.bindings.listed.filter(ours);
-    const cappedNext = nextDay.bindings.listed.find(ours);
+      appId === one.app || appId === other.app || appId === idle.app;
+    const read = await bindings("admin");
+    const listed = read.bindings.listed.filter(ours);
+    const [oneSpent, otherSpent, idleSpent] = listed.map(
+      ({ thisMonth }) => thisMonth
+    );
     expect({
-      day: thatDay.day,
-      capped: spent(cappedThen),
-      free: spent(freeThen),
-      // Another day starts the day afresh; the month keeps it.
-      next: [
-        cappedNext?.today,
-        cappedNext?.thisMonth === cappedThen?.thisMonth,
-        cappedNext?.alert,
-      ],
-      more: thatDay.bindings.more,
+      listed: listed.map(({ appId, appName, alias, model }) => ({
+        appId,
+        appName,
+        alias,
+        model,
+      })),
+      // The same request twice costs twice one; nothing for the idle one.
+      twice:
+        oneSpent !== undefined && otherSpent !== undefined
+          ? Math.abs(oneSpent - 2 * otherSpent) < 1e-9 && otherSpent > 0
+          : false,
+      idle: idleSpent,
+      month: read.month,
     }).toStrictEqual({
-      day: first,
-      capped: {
-        appId: capped.app,
-        appName: "0 Capped",
-        alias: "writer",
-        model: chosenModel,
-        budget: { perDay: 0.01, alertAt: 80 },
-        budgetDamaged: false,
-        today: "past the alert",
-        thisMonth: "today's",
-        alert: "alerted",
-      },
-      free: {
-        appId: free.app,
-        appName: "0 Free",
-        alias: "writer",
-        model: chosenModel,
-        budget: null,
-        budgetDamaged: false,
-        today: "under the alert",
-        thisMonth: "today's",
-        // Counted all the same, with no cap to alert on.
-        alert: "none",
-      },
-      next: [0, true, "none"],
-      more: false,
+      listed: [
+        {
+          appId: one.app,
+          appName: "0 A One",
+          alias: "writer",
+          model: chosenModel,
+        },
+        {
+          appId: other.app,
+          appName: "0 B Other",
+          alias: "writer",
+          model: chosenModel,
+        },
+        {
+          appId: idle.app,
+          appName: "0 C Idle",
+          alias: "writer",
+          model: chosenModel,
+        },
+      ],
+      twice: true,
+      idle: 0,
+      month: read.month,
     });
 
-    // A revoked binding isn't listed; one whose caps or target can't be
-    // read is, as such, and never hides the others.
-    const garbled = await sealedApp(modelFiles(), "0 Garbled");
-    await approveWriter(garbled, { perMonth: 3 });
-    await revokeResourceBinding(env, await person("admin"), freeBinding.id);
-    await drizzle(env.DB)
-      .update(appResourceBindings)
-      .set({ budget: JSON.stringify({ perDay: "lots" }) })
-      .where(active(capped.app));
+    // A revoked binding isn't listed; one whose target can't be read is,
+    // as such, and never hides the others.
+    await revokeResourceBinding(env, await person("admin"), idleBinding.id);
     await drizzle(env.DB)
       .update(appResourceBindings)
       .set({ target: "{not json" })
-      .where(active(garbled.app));
-    const later = await bindingsOn(first, "admin");
+      .where(active(other.app));
+    const later = await bindings("admin");
     expect(
       later.bindings.listed
-        .filter(
-          ({ appId }) =>
-            appId === capped.app || appId === free.app || appId === garbled.app
-        )
-        .map(({ appId, model, budget, budgetDamaged, alert }) => ({
-          appId,
-          model,
-          budget,
-          budgetDamaged,
-          alert,
-        }))
+        .filter(ours)
+        .map(({ appId, model }) => ({ appId, model }))
     ).toStrictEqual([
-      {
-        appId: capped.app,
-        model: chosenModel,
-        budget: null,
-        budgetDamaged: true,
-        alert: "none",
-      },
-      {
-        appId: garbled.app,
-        model: null,
-        budget: { perMonth: 3, alertAt: 80 },
-        budgetDamaged: false,
-        alert: "none",
-      },
+      { appId: one.app, model: chosenModel },
+      { appId: other.app, model: null },
     ]);
 
-    await expect(
-      failure(async () => await bindingsOn(first, "builder"))
-    ).resolves.toBe("role.forbidden");
+    await expect(failure(async () => await bindings("builder"))).resolves.toBe(
+      "role.forbidden"
+    );
   });
 });
 
@@ -2550,48 +2059,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       changed: { help: "grant_lost", letter: "declaration_changed" },
       undeclared: ["writer"],
       read: { failed: "resource.unavailable" },
-    });
-  });
-
-  it("shows a model binding's budget, and a damaged one as serving nothing", async () => {
-    const { sealed, admin } = await deskApp();
-    const capped = await approveResourceBinding(env, admin, {
-      app: sealed.app,
-      alias: "writer",
-      target: { kind: "model", model: chosenModel },
-      reviewed: { version: 1 },
-      budget: { perDay: 1 },
-    });
-    const writerIn = async () => {
-      const review = await reviewResourceBindings(env, admin, sealed.app);
-      const writer = review.resources.find(({ alias }) => alias === "writer");
-      return {
-        state: writer?.state,
-        perDay: writer?.binding?.budget?.perDay ?? null,
-        damaged: writer?.binding?.budgetDamaged,
-      };
-    };
-    const intact = await writerIn();
-    await drizzle(env.DB)
-      .update(appResourceBindings)
-      .set({ budget: JSON.stringify({ perDay: "lots" }) })
-      .where(eq(appResourceBindings.id, capped.id));
-    const { provider, providerEnv: withProvider } = await providerEnv([
-      answer("Uncapped."),
-    ]);
-    const drafted = await call(withProvider, sealed, "desk.draft", {
-      prompt: "Hi",
-    });
-    expect({
-      intact,
-      damaged: await writerIn(),
-      drafted: outcomeOf(drafted),
-      sent: provider.requests.length,
-    }).toStrictEqual({
-      intact: { state: "served", perDay: 1, damaged: false },
-      damaged: { state: "budget_damaged", perDay: null, damaged: true },
-      drafted: { failed: "resource.unavailable" },
-      sent: 0,
     });
   });
 

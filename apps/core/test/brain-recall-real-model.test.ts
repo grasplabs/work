@@ -75,19 +75,10 @@ describe("experiment E02 against a real reranking model", () => {
       realProvider(realKey, () => {})(() => ({ phase: "prior" })),
       { models: [settings.model] }
     );
-    const before = Reflect.get(env, "MODEL_GATEWAY");
-    // The run's budget, as the ledger enforces it on every request.
-    Reflect.set(env, "MODEL_GATEWAY", {
-      budgets: { deployment: { limit: settings.budgetUsd, alertAt: 99 } },
-    });
-    try {
-      const reranker = modelForRole(await modelSettings(env), "quick", {
-        sensitive: true,
-      });
+    {
+      const reranker = modelForRole(await modelSettings(env), "quick");
       if (reranker !== settings.model) {
-        throw new Error(
-          `A rerank asks ${String(reranker)}, not ${settings.model}`
-        );
+        throw new Error(`A rerank asks ${reranker}, not ${settings.model}`);
       }
       const report = await runBrainRecallComparison(company, {
         repeats: settings.repeats,
@@ -110,8 +101,6 @@ describe("experiment E02 against a real reranking model", () => {
         model: report.identity.model,
         withinBudget: spent <= settings.budgetUsd * micros,
       }).toStrictEqual({ model: settings.model, withinBudget: true });
-    } finally {
-      Reflect.set(env, "MODEL_GATEWAY", before);
     }
   });
 });

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, model, configureObject, says } from "./agent-chat.ts";
+import { codeStep, model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -37,7 +37,6 @@ const answering = async (
   ...replies: ProviderReply[]
 ) => {
   await fakeProvider(...replies);
-  await configureObject(objectOf(someone));
 };
 
 /** Follows a chat, keeping every update. */

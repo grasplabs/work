@@ -68,24 +68,6 @@ export const pausedReply = (answer: Answer, at: number) => {
 export type WorkspaceStub = ReturnType<typeof workspace>;
 
 /**
- * Sets the object's model rules (`MODEL_GATEWAY`), none unless given.
- * Objects may share their env, so every test sets it; a restarted object
- * may get a new one, so it is set again.
- */
-export const configureObject = async (
-  stub: WorkspaceStub,
-  { rules = {} }: { rules?: object } = {}
-) => {
-  await runInDurableObject(stub, (instance) => {
-    const objectEnv: unknown = Reflect.get(instance, "env");
-    if (typeof objectEnv !== "object" || objectEnv === null) {
-      throw new TypeError("The Workspace object has no env");
-    }
-    Object.assign(objectEnv, { MODEL_GATEWAY: rules });
-  });
-};
-
-/**
  * A new chat of `personId`'s in a new workspace, answered by `replies`,
  * and the agent subject its permissions are granted to.
  */
@@ -94,7 +76,6 @@ export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
   const stub = workspace(env, id);
   const chat = await stub.createChat("Questions", personId, id);
   const provider = await fakeProvider(...replies);
-  await configureObject(stub);
   const ask = async (text: string) => await stub.ask(chat.id, { text, model });
   // The workspace's agent: its grants hold in all the workspace's chats.
   const agent = { type: "agent" as const, agentId: id };
@@ -113,7 +94,6 @@ export const personalChatsOf = async (
   const id = personalWorkspaceId(personId);
   const stub = workspace(env, id);
   const provider = await fakeProvider(...replies);
-  await configureObject(stub);
   const agent = { type: "agent" as const, agentId: crypto.randomUUID() };
   const newChat = async () => {
     const chat = await stub.createChat("Questions", personId, agent.agentId);
@@ -165,8 +145,7 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
 };
 
 /**
- * Sets `vars` in the object's env, as `configureObject` sets its rules:
- * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say. The env is the
+ * Sets `vars` in the object's env: a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say. The env is the
  * test Worker's own, shared by every object of the file, so the test puts
  * back what was there with the restore this returns (in a `finally`), or
  * the tests after it run under its values.

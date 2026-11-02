@@ -1,5 +1,4 @@
 import type { RerankRequest } from "@grasp-os/brain/brain";
-import { brainErrors } from "@grasp-os/brain/contract";
 import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
@@ -9,7 +8,7 @@ import type { Reader } from "./access.ts";
 // Core's side of the Brain's `rerank` port (GRA-304; packages/brain's
 // recall.ts): ordering a recall's best candidates by how well each answers
 // its question, through the model gateway like every model call, with its
-// rules, budgets and audit. Only a recall whose budget asks for it comes
+// rules, metering and audit. Only a recall whose budget asks for it comes
 // here, and the Brain checks again that its reader may read every
 // candidate before handing it over. The call is the reader's: a delegate's
 // (an App, agent or run) under its own authority and context, so its
@@ -42,12 +41,7 @@ export const rerankCandidates = async (
   reader: Reader,
   { question, candidates, provenance, deadlineMs }: RerankRequest
 ): Promise<string[]> => {
-  const model = modelForRole(await modelSettings(env), "quick", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw brainErrors.create("brain.unavailable");
-  }
+  const model = modelForRole(await modelSettings(env), "quick");
   const { output } = await models(env).call({
     model,
     system: instructions,

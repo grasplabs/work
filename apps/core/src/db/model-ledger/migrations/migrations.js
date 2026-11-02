@@ -11,6 +11,7 @@ import m0008 from './0008_platform_feature.sql';
 import m0009 from './0009_platform_spend.sql';
 import m0010 from './0010_provider_failing_since.sql';
 import m0011 from './0011_request_scopes_recorded.sql';
+import m0012 from './0012_drop_budgets.sql';
 
   export default {
     journal,
@@ -26,7 +27,8 @@ m0007,
 m0008,
 m0009,
 m0010,
-m0011
+m0011,
+m0012
     }
   }
   

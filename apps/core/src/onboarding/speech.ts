@@ -104,14 +104,10 @@ const gatewayRefusals: Partial<
     { status: number; code: Parameters<typeof speechErrors.create>[0] }
   >
 > = {
-  "model.over_budget": { status: 429, code: "speech.limited" },
-  "model.budget_busy": { status: 429, code: "speech.busy" },
   "model.rate_limited": { status: 429, code: "speech.busy" },
   "model.queued": { status: 429, code: "speech.busy" },
   "model.unconfigured": { status: 503, code: "speech.unavailable" },
   "model.not_allowed": { status: 503, code: "speech.unavailable" },
-  "model.eu_only": { status: 503, code: "speech.unavailable" },
-  "model.sensitive_data": { status: 503, code: "speech.unavailable" },
   "model.unpriced": { status: 503, code: "speech.unavailable" },
 };
 

@@ -10,7 +10,7 @@ import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { modelRules, models, usableAnswerTokens } from "../models.ts";
+import { models, usableAnswerTokens } from "../models.ts";
 import type { ModelAnswer, ModelCall } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import {
@@ -36,13 +36,13 @@ import type ExtractorWorker from "./extractor/worker.ts";
 //   each page as an image, so a scan is read too, by OpenAI's model at its
 //   EU data residency host (platform-ai.ts). A model call like any:
 //   through the model gateway (models.ts, `platformCall`), judged by the
-//   rules, metered against the budgets of the person who uploaded it and
+//   rules, metered on Grasp's own spend for the person who uploaded it and
 //   audited as metadata only, and through connect with Grasp's own key. It
 //   sends the file out of the deployment, to Grasp's project in the EU.
 // - The local extractor for everything else: a Word or Excel file, which
 //   it reads exactly, as their text is structured XML, for nothing; a
 //   WebVTT file, which only it reads as a transcript; a file in a
-//   sensitive collection (the flag the gateway's data rule reads too);
+//   sensitive collection;
 //   and every file while Grasp has no key for the conversion's provider
 //   (on-prem, a stack without Grasp's keys). So a sensitive file's content
 //   never leaves the deployment's own Workers.
@@ -409,15 +409,12 @@ const unavailableCodes: ReadonlySet<string> = new Set([
   "model.unconfigured",
   "model.no_provider",
   "model.not_allowed",
-  "model.eu_only",
-  "model.sensitive_data",
   "model.unpriced",
   "model.answer_too_long",
 ]);
 
 /** The gateway's refusals that pass with time: waited out, no retry spent. */
 const busyCodes: ReadonlySet<string> = new Set([
-  "model.budget_busy",
   "model.queued",
   "model.rate_limited",
 ]);
@@ -532,11 +529,7 @@ export const extractorFor = async (
   trigger: AuditActor
 ): Promise<{ name: ExtractorName; extract: Extractor }> => {
   const local = { name: "local", extract: localExtractor(env) } as const;
-  if (
-    collection.sensitive ||
-    mediaType !== uploadTypes.pdf ||
-    modelRules(env) === undefined
-  ) {
+  if (collection.sensitive || mediaType !== uploadTypes.pdf) {
     return local;
   }
   const { conversion } = platformAi;
