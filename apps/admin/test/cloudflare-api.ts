@@ -986,6 +986,7 @@ export const fakeCloudflareApi = (token: string) => {
       scriptUploads: [],
       notices: [],
       adminReaders: [],
+      coreAsked: [],
       kickoffAsks: [],
       commands: [],
     };
@@ -1233,6 +1234,7 @@ export const fakeCloudflareApi = (token: string) => {
     url: URL,
     { account, live }: NonNullable<ReturnType<typeof workerAt>>
   ): Promise<Response> => {
+    account.coreAsked.push(url.pathname);
     if (account.unhealthy !== undefined && account.unhealthy > 0) {
       account.unhealthy -= 1;
       return new Response("Starting", { status: 503 });

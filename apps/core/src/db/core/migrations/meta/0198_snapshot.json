@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3e9cbdf4-73a2-4907-9227-750ff8c61cd7",
+  "id": "8b2800ed-df11-4e09-9a4a-5fefb1d3a14a",
   "prevId": "ed7dcbd5-14de-4fc8-8516-a92293cdad0b",
   "tables": {
     "access_revocations": {
@@ -11800,6 +11800,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "account_run_id": {
+          "name": "account_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -11828,15 +11835,6 @@
           "isUnique": false,
           "where": "\"workflow_resource_runs\".\"status\" = 'starting'"
         },
-        "workflow_resource_runs_status_ended_idx": {
-          "name": "workflow_resource_runs_status_ended_idx",
-          "columns": [
-            "status",
-            "ended_at",
-            "id"
-          ],
-          "isUnique": false
-        },
         "workflow_resource_runs_newest_idx": {
           "name": "workflow_resource_runs_newest_idx",
           "columns": [
@@ -11859,8 +11857,7 @@
         "workflow_resource_runs_created_idx": {
           "name": "workflow_resource_runs_created_idx",
           "columns": [
-            "created_at",
-            "id"
+            "created_at"
           ],
           "isUnique": false
         }

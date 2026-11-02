@@ -177,6 +177,50 @@ describe("a standalone Brain", () => {
     }).toStrictEqual({ started: true, duringFound: true, afterFound: false });
   });
 
+  it("finds a copy whose reading started between two attempts at one purge", async () => {
+    const { brain } = testHost();
+    const collection = await newCollection(brain, "People");
+    const name = word();
+    const writer = writerOf("admin");
+    const written = await writeVersion(brain, writer, {
+      collection,
+      path: "team.md",
+      text: `# Team\n${name} leads it.`,
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const place = { collectionId: collection.id, path: "team.md" };
+    const input = {
+      type: "content",
+      documentIds: [written.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    // The first attempt stops as it forgets the host's copies, its
+    // document not yet rewritten.
+    const stopping: OnErase = {
+      ...noCopies,
+      forgetDocuments: () => {
+        throw new Error("the host is away");
+      },
+    };
+    const first = await preparePurge(brain, writer, input, stopping);
+    const stopped = await outcome(
+      purge(brain, writer, input, first.token, stopping)
+    );
+    // A host's writer starts reading now, from the text still there; the
+    // purge is run again, and goes on from its record.
+    const mark = await erasureMark(brain);
+    const again = await preparePurge(brain, writer, input, noCopies);
+    await purge(brain, writer, input, again.token, noCopies);
+
+    expect({
+      stopped: stopped !== "ok",
+      found: await erasedSince(brain, mark, [place]),
+    }).toStrictEqual({ stopped: true, found: true });
+  });
+
   it("erases a term from every version and from search", async () => {
     const { brain } = testHost();
     const collection = await newCollection(brain, "People");

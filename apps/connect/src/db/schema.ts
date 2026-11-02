@@ -342,10 +342,12 @@ export const pendingActions = sqliteTable(
  * OAuth flows under way: one row from the moment a person starts
  * connecting until the provider sends them back, at most ten minutes.
  * Keyed by the SHA-256 of the flow's `state`, so the state itself, which
- * travels through the browser, is stored nowhere. A flow is taken (deleted)
- * the first time its state comes back, whatever happens next, so it is
- * used at most once. `verifier` is the PKCE code verifier, sealed like a
- * token (src/vault.ts).
+ * travels through the browser, is stored nowhere. A flow is taken the
+ * first time its state comes back, whatever happens next, so it is used at
+ * most once: marked finishing (`finishing_until`) while its code is
+ * exchanged and what it got is kept, so an owed revoke waits for it
+ * (revocations.ts), and deleted once it is done. `verifier` is the PKCE
+ * code verifier, sealed like a token (src/vault.ts).
  */
 export const oauthFlows = sqliteTable(
   "oauth_flows",
@@ -360,6 +362,8 @@ export const oauthFlows = sqliteTable(
     returnTo: text("return_to").notNull(),
     verifier: text().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
+    /** Until when a taken flow holds its row, at most; null until taken. */
+    finishingUntil: timestamp("finishing_until"),
   },
   (table) => [
     index("oauth_flows_expires_idx").on(table.expiresAt),
@@ -476,25 +480,35 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
- * A revoke at its provider still owed for a disconnected connection
- * (GRA-1191): the provider was down, or refused, when it was
- * disconnected. Its sealed tokens stay in `connection_tokens` until the
- * revoke goes through, so the cron trigger can try again
- * (`retryRevocations`, src/revocations.ts); the connection is
- * disconnected, so nothing calls with them meanwhile. `attempts` counts
- * the failed tries, each waiting longer, until `retry_at`.
+ * A revoke at its provider still owed for a connection's grant (GRA-1191,
+ * GRA-1196): the provider was down, or refused, when the connection was
+ * disconnected (`disconnected`), or its tokens went while the grant was
+ * still valid because it was asked to connect again (`needs_reauth`). The
+ * row holds its own sealed copy of the tokens to revoke with (sealed for
+ * the connection, as `connection_tokens` are), so the connection's tokens
+ * go as ever and nothing calls with these: only the cron trigger opens
+ * them, to revoke (`retryRevocations`, src/revocations.ts). A connection
+ * can owe more than one: the grant asked again for, then the one that
+ * replaced it. `attempts` counts the failed tries, each waiting longer,
+ * until `retry_at`.
  */
 export const tokenRevocations = sqliteTable(
   "token_revocations",
   {
+    id: text().primaryKey(),
     connectionId: text("connection_id")
-      .primaryKey()
+      .notNull()
       .references(() => connections.id),
+    sealed: text().notNull(),
+    reason: text({ enum: ["disconnected", "needs_reauth"] }).notNull(),
     attempts: integer().notNull().default(0),
     retryAt: timestamp("retry_at").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
-  (table) => [index("token_revocations_retry_idx").on(table.retryAt)]
+  (table) => [
+    index("token_revocations_retry_idx").on(table.retryAt),
+    index("token_revocations_connection_idx").on(table.connectionId),
+  ]
 );
 
 /**
