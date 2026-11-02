@@ -9,12 +9,13 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { identifyFull } from "../auth/identity.ts";
 import { collectionTeams, permissions } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { errorResponse } from "../errors.ts";
 import { personWriter } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
@@ -38,6 +39,8 @@ export const coreExport = (env: Env): OnExport => ({
   excluded: [onboardingDocumentsCollection],
   files: async (collectionIds) => {
     const db = drizzle(env.DB);
+    // The IDs bound as one parameter (`inList`): a company may have more
+    // collections than D1 binds to one statement.
     const ids = [...collectionIds];
     const teams =
       ids.length === 0
@@ -45,7 +48,7 @@ export const coreExport = (env: Env): OnExport => ({
         : await db
             .select()
             .from(collectionTeams)
-            .where(inArray(collectionTeams.collectionId, ids));
+            .where(inList(collectionTeams.collectionId, ids));
     const grants = await db
       .select({
         id: permissions.id,
@@ -67,7 +70,7 @@ export const coreExport = (env: Env): OnExport => ({
               ? undefined
               : and(
                   eq(permissions.objectType, "collection"),
-                  inArray(permissions.objectId, ids)
+                  inList(permissions.objectId, ids)
                 )
           )
         )
