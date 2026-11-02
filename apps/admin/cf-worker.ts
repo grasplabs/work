@@ -8,7 +8,8 @@
  *   `env.staging` over it for staging, as Wrangler merges them);
  * - declares each Durable Object class the migrations create, and each
  *   Workflow, as an export of cf's exports model (the admin's Worker is
- *   new on Grasp's account: nothing there was migrated the classic way);
+ *   new on Grasp's account: nothing there was migrated the classic way),
+ *   a class a migration deleted as a `deleted` tombstone;
  * - declares where it answers: wrangler.jsonc's Custom Domain routes as
  *   cf's `domains`, any other route as a fetch trigger, so every deploy
  *   applies them (without them it is uploaded and served nowhere);
@@ -101,21 +102,28 @@ const stageView = (config: Json, stage: Stage): Json => {
   return { ...inherited, ...env };
 };
 
-/** The Durable Object classes `config`'s migrations create, still live. */
-const durableObjectClasses = (config: Json): string[] => {
-  const live = new Set<string>();
+/**
+ * The Durable Object classes `config`'s migrations create, each still live
+ * or deleted. cf retires a deleted class's namespace only from a `deleted`
+ * tombstone in `exports`: left out, its namespace is an orphan and the
+ * deploy stops.
+ */
+const durableObjectClasses = (
+  config: Json
+): Map<string, "live" | "deleted"> => {
+  const classes = new Map<string, "live" | "deleted">();
   for (const migration of list(config.migrations)) {
     for (const name of [
       ...strings(migration.new_classes),
       ...strings(migration.new_sqlite_classes),
     ]) {
-      live.add(name);
+      classes.set(name, "live");
     }
     for (const name of strings(migration.deleted_classes)) {
-      live.delete(name);
+      classes.set(name, "deleted");
     }
   }
-  return [...live];
+  return classes;
 };
 
 /** Its vars: every setting of the admin's, per stage, in wrangler.jsonc. */
@@ -228,9 +236,11 @@ const classBindings = (
 ): { env: Env; exports: Exports } => {
   const env: Env = {};
   const declared: Exports = Object.fromEntries(
-    durableObjectClasses(config).map((className) => [
+    [...durableObjectClasses(config)].map(([className, state]) => [
       className,
-      exports.durableObject({ storage: "sqlite" }),
+      state === "live"
+        ? exports.durableObject({ storage: "sqlite" })
+        : exports.durableObject({ state: "deleted" }),
     ])
   );
   for (const object of list(objectOf(config.durable_objects).bindings)) {

@@ -4102,6 +4102,13 @@ export const workflowResourceRuns = sqliteTable(
      */
     stopRequestedAt: timestamp("stop_requested_at"),
     /**
+     * When the stop an erasure claimed for it (`stopRequestedAt`) was taken
+     * (person-erasure.ts, `stopRunsFor`): the erasure's runs are done only
+     * once each has this or has ended. Null while a claim's sender may
+     * have died before it sent the stop.
+     */
+    stopTakenAt: timestamp("stop_taken_at"),
+    /**
      * The newest control generation a screen's pause, resume or cancel took
      * (screen-workflows.ts): each admitted one takes the next, and goes to
      * the engine with it, which ignores one older than the newest it took.
