@@ -100,10 +100,12 @@ const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
 /**
  * One of core's waits of a round of a step (resource-host.ts, `#rounds`),
  * by the round's key: for its turn (`busy`) or its AI provider (`key`), a
- * record of waiting (`:waiting`) and the round's run again (`:run`).
+ * record of waiting (`:waiting`), the round's run again (`:run`), and a
+ * wait for its AI provider that ran out (`:timed_out`), failed with the
+ * step's error.
  */
 const coreWait = new RegExp(
-  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:busy|key):\\d+(?<rest>:waiting|:run)?$`,
+  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?$`,
   "u"
 );
 
@@ -203,6 +205,8 @@ type Place =
 const placeOf = (name: string): Place | undefined => {
   const waited = coreWait.exec(name)?.groups;
   if (waited?.key !== undefined) {
+    // Its waits and a timed-out wait's failure tell the step's state; its
+    // runs again are its attempts.
     return {
       kind: "wait",
       key: waited.key,

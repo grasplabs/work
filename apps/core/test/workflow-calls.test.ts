@@ -1344,6 +1344,53 @@ describe("grasp.model calls of JSON workflows", () => {
     }
   });
 
+  it("shows a call whose AI provider never came back, once its wait ran out, in its run's trace as its task's step failed with the provider's code", async () => {
+    const admin = await person("admin");
+    const signedIn = await signedInApi(idp, "builder");
+    const ada = identityOf(signedIn.userId, "builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    await answeringProvider(
+      () => ({ status: 401, errorType: "authentication_error" }),
+      { models: [allowedModel] }
+    );
+    const keyHold = env.WORKFLOW_AI_KEY_HOLD_MS;
+    env.WORKFLOW_AI_KEY_HOLD_MS = "1500";
+    let run: WorkflowResourceRun;
+    let runId: string;
+    try {
+      runId = await started(ada, workflow.id);
+      run = await ended(ada, workflow.id, runId);
+    } finally {
+      env.WORKFLOW_AI_KEY_HOLD_MS = keyHold;
+    }
+    const { steps, tasks } = await signedIn.api.workflowResources.runTrace(
+      workflow.id,
+      runId,
+      { doors: false }
+    );
+    const greet = steps.filter(({ task }) => task === "greet");
+
+    expect({
+      end: endOf(run),
+      steps: greet.map(({ state, errorCode, endedAt }) => ({
+        state,
+        errorCode,
+        ended: endedAt !== null,
+      })),
+      task: tasks.find(({ task }) => task === "greet")?.state,
+    }).toStrictEqual({
+      end: { status: "failed", code: "model.provider_key_failed" },
+      steps: [
+        {
+          state: "failed",
+          errorCode: "model.provider_key_failed",
+          ended: true,
+        },
+      ],
+      task: "failed",
+    });
+  });
+
   it("waits while the provider fails its call with a 5xx and no answer, and goes on by itself once calls work again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
