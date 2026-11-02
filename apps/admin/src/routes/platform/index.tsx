@@ -12,7 +12,6 @@ import { useEffect, useState } from "react";
 
 import { Channels, PromotionHistory } from "../../admin/channel-parts.tsx";
 import { PageLoading } from "../../admin/failure.tsx";
-import { GraspOrganization } from "../../admin/grasp-organization.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
@@ -33,7 +32,6 @@ import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
-import { fetchPlatformSettings } from "../../platform-settings.ts";
 import { channelWords } from "../../rollout/channel-words.ts";
 
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
@@ -189,7 +187,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * need a look first, what Grasp's own AI costs, and what staff did.
  */
 const PlatformPage = () => {
-  const { rows, platform, readiness, settings, spend } = Route.useLoaderData();
+  const { rows, platform, readiness, spend } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -222,7 +220,6 @@ const PlatformPage = () => {
         <SharedSecrets />
         <EveryCompany live={live} rows={rows} />
         <PlatformSpendPanel spend={spend} />
-        <GraspOrganization settings={settings} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
@@ -241,13 +238,12 @@ export const Route = createFileRoute("/platform/")({
         return null;
       }
     })();
-    const [rows, platform, readiness, settings] = await Promise.all([
+    const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
-      fetchPlatformSettings(),
     ]);
-    return { rows, platform, readiness, settings, spend };
+    return { rows, platform, readiness, spend };
   },
   component: PlatformPage,
   pendingComponent: PageLoading,
