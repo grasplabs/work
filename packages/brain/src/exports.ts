@@ -66,6 +66,15 @@ import { citesReadable } from "./memory-cites.ts";
 // - what the host adds of its own (`OnExport`: core's grants and who
 //   reads which collection).
 //
+// Each part is written in files of its own, in this order, a page of rows
+// at a time: `collections-0001.jsonl` and on, `documents-…`,
+// `memories-…`, `erasures-…`, then each of the host's, `host-<name>-…`. A
+// file closes once the next row would take it past `exportFileBytes`,
+// recording where the next goes on (`brain_export_files.cursor`): no step
+// holds more than one file, however much the company holds, and a run cut
+// short goes on from the next file. A restore reads each part's files in
+// name order.
+//
 // A purge that runs while it is written, or before its files are
 // downloaded, fails it (`knowledge.export_purged`): it may hold what the
 // purge erased, so its files are deleted, to be asked for again. One
@@ -95,11 +104,16 @@ export const exportLeaseMs = 10 * 60 * 1000;
 export const documentsPerFile = 25;
 
 /**
- * The text one file of documents holds before it is closed: a version
- * holds 1 MiB at most, so a file is never far past it, and a document
- * whose history is longer goes on in the next file (`documentsFile`).
+ * What one file of the export holds before it is closed, of any part:
+ * a run past it goes on in the next file, so no file, and no step that
+ * writes one, holds more than this and one row (a document's version
+ * holds 1 MiB at most). Every file is paged so (`pagedFile`,
+ * `documentsFile`); only the manifest isn't, one short line per file.
  */
-export const documentsFileBytes = 8 * 1024 * 1024;
+export const exportFileBytes = 8 * 1024 * 1024;
+
+/** Rows one page of a part reads at a time. */
+const pageRows = 100;
 
 /** The export's format, as its manifest names it. */
 export const exportFormat = "grasp-brain-export";
@@ -110,18 +124,40 @@ export const exportFormatVersion = 1;
 /** The manifest's name: written last. */
 export const manifestName = "manifest.json";
 
-/** One file the host adds, as rows of JSON. */
+/**
+ * A row of a part, with the key the next page goes on after: the rows
+ * come in the order of their keys.
+ */
+export interface KeyedRow {
+  row: Json;
+  key: string;
+}
+
+/**
+ * A page of a part's rows after `after` (null: from the first), a
+ * hundred or so at most: none once all are read.
+ */
+export type ExportPage = (after: string | null) => Promise<KeyedRow[]>;
+
+/** One part the host adds, read a page at a time (`ExportPage`). */
 export interface HostExportFile {
-  /** Lower-case letters, digits and dashes: it becomes `host-<name>.jsonl`. */
+  /**
+   * Lower-case letters, digits and dashes: its files are
+   * `host-<name>-0001.jsonl` and on.
+   */
   name: string;
-  rows: Json[];
+  page: (
+    collectionIds: readonly string[],
+    after: string | null
+  ) => Promise<KeyedRow[]>;
 }
 
 /** What the host adds to an export of its own (core: grants, teams). */
 export interface OnExport {
   /** Collections never exported: no company content (core: interviews'). */
   excluded: readonly string[];
-  files: (collectionIds: readonly string[]) => Promise<HostExportFile[]>;
+  /** Its parts, each in files of its own, in this order. */
+  files: readonly HostExportFile[];
 }
 
 const hostNamePattern = /^[a-z][a-z0-9-]{0,40}$/u;
@@ -133,8 +169,14 @@ const prefixOf = (exportId: string): string => `exports/${exportId}/`;
 const objectFor = (exportId: string, name: string): string =>
   `${prefixOf(exportId)}${crypto.randomUUID()}-${name}`;
 
-/** The marker that the host's files are all written, naming them. */
-const hostedName = "hosted.jsonl";
+/** File `index` (from 1) of the part named `prefix`. */
+const partName = (prefix: string, index: number): string =>
+  `${prefix}-${String(index).padStart(4, "0")}.jsonl`;
+
+/** Whether `name` is a file of the part named `prefix`. */
+const isPartOf = (prefix: string, name: string): boolean =>
+  name.startsWith(`${prefix}-`) &&
+  /^\d{4,}\.jsonl$/u.test(name.slice(prefix.length + 1));
 
 /** Rows as JSON Lines. */
 const linesOf = (rows: readonly unknown[]): string =>
@@ -498,7 +540,7 @@ const writeFile = async <C>(
 //    "transcript"}
 //
 // A document whose versions don't fit in what is left of the file
-// (`documentsFileBytes`) goes on in lines of their own, in this file or
+// (`exportFileBytes`) goes on in lines of their own, in this file or
 // the next, each with the versions that follow, in order:
 //
 //   {"continues": "<document ID>", "versions": [...]}
@@ -725,7 +767,7 @@ const nextDocument = async <C>(
 
 /**
  * The next file of documents from `from` (null: the first), each version
- * with its text, closed at `documentsFileBytes` or `documentsPerFile`
+ * with its text, closed at `exportFileBytes` or `documentsPerFile`
  * documents begun: its lines, and where the next goes on (null: none).
  */
 const documentsFile = async <C>(
@@ -740,7 +782,7 @@ const documentsFile = async <C>(
     from === null ? null : documentsCursorSchema.parse(JSON.parse(from));
   for (;;) {
     const within = cursor !== null && "document" in cursor;
-    if (!within && (begun >= documentsPerFile || bytes >= documentsFileBytes)) {
+    if (!within && (begun >= documentsPerFile || bytes >= exportFileBytes)) {
       return { rows, last: JSON.stringify(cursor) };
     }
     const id =
@@ -757,14 +799,14 @@ const documentsFile = async <C>(
           await continuedPiece(
             brain,
             cursor,
-            documentsFileBytes - bytes,
+            exportFileBytes - bytes,
             rows.length === 0
           )
         : // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
           await firstPiece(
             brain,
             id ?? "",
-            documentsFileBytes - bytes,
+            exportFileBytes - bytes,
             rows.length === 0
           );
     // Not even its first version fits: it begins the next file.
@@ -784,6 +826,232 @@ const documentsFile = async <C>(
 };
 
 /**
+ * The rows `page` reads from `from` (null: the first), as one file of a
+ * part: closed once the next row would take it past `exportFileBytes`,
+ * with the key it goes on after (null: none left).
+ */
+const pagedFile = async (
+  page: ExportPage,
+  from: string | null
+): Promise<{ rows: Json[]; last: string | null }> => {
+  const rows: Json[] = [];
+  let bytes = 0;
+  let after = from;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time, to bound memory
+    const keyed = await page(after);
+    if (keyed.length === 0) {
+      return { rows, last: null };
+    }
+    for (const { row, key } of keyed) {
+      const size = jsonBytes(row) + 1;
+      if (rows.length > 0 && bytes + size > exportFileBytes) {
+        return { rows, last: after };
+      }
+      rows.push(row);
+      bytes += size;
+      after = key;
+    }
+  }
+};
+
+/** The collections an export holds, a page at a time, by ID. */
+const collectionsPage =
+  <C>(brain: Brain<C>, collectionIds: readonly string[]): ExportPage =>
+  async (after) => {
+    if (collectionIds.length === 0) {
+      return [];
+    }
+    const page = await brain.db
+      .select()
+      .from(collections)
+      .where(
+        and(
+          inList(collections.id, collectionIds),
+          after === null ? undefined : gt(collections.id, after)
+        )
+      )
+      .orderBy(asc(collections.id))
+      .limit(pageRows);
+    return page.map((collection) => ({
+      key: collection.id,
+      row: {
+        id: collection.id,
+        name: collection.name,
+        description: collection.description,
+        owner: collection.owner,
+        access: collection.access,
+        sensitive: collection.sensitive,
+        source: collection.source,
+        createdAt: collection.createdAt.toISOString(),
+      },
+    }));
+  };
+
+/**
+ * The accepted team and company memory records resting on nothing
+ * outside the export's collections, a page at a time, by ID.
+ */
+const memoriesPage =
+  <C>(brain: Brain<C>, collectionIds: readonly string[]): ExportPage =>
+  async (after) => {
+    const page = await brain.db
+      .select()
+      .from(brainMemories)
+      .where(
+        and(
+          inArray(brainMemories.scope, ["team", "company"]),
+          eq(brainMemories.state, "accepted"),
+          citesReadable(collectionIds),
+          after === null ? undefined : gt(brainMemories.id, after)
+        )
+      )
+      .orderBy(asc(brainMemories.id))
+      .limit(pageRows);
+    return page.map((row) => ({
+      key: row.id,
+      row: { ...recordOf(row), scopeId: row.scopeId, ownerId: row.ownerId },
+    }));
+  };
+
+/** The erasure records, by kind and, within one, by ID. */
+const erasureKinds = ["purge", "forgotten_person", "erased_evidence"] as const;
+type ErasureKind = (typeof erasureKinds)[number];
+
+const erasureKeySchema = z.object({
+  type: z.enum(erasureKinds),
+  after: z.string(),
+});
+
+/** A page of erasure records of `type` after `after`. */
+const erasuresOf = async <C>(
+  brain: Brain<C>,
+  type: ErasureKind,
+  after: string | null
+): Promise<KeyedRow[]> => {
+  const { db } = brain;
+  const keyed = (id: string, row: Json): KeyedRow => ({
+    key: JSON.stringify({ type, after: id }),
+    row,
+  });
+  if (type === "purge") {
+    const page = await db
+      .select()
+      .from(brainPurges)
+      .where(after === null ? undefined : gt(brainPurges.id, after))
+      .orderBy(asc(brainPurges.id))
+      .limit(pageRows);
+    return page.map((purge) =>
+      keyed(purge.id, {
+        type,
+        id: purge.id,
+        kind: purge.kind,
+        createdAt: purge.createdAt.toISOString(),
+        completedAt: purge.completedAt?.toISOString() ?? null,
+        supersededBy: purge.supersededBy,
+      })
+    );
+  }
+  if (type === "forgotten_person") {
+    const page = await db
+      .select()
+      .from(brainForgottenPeople)
+      .where(
+        after === null ? undefined : gt(brainForgottenPeople.userId, after)
+      )
+      .orderBy(asc(brainForgottenPeople.userId))
+      .limit(pageRows);
+    return page.map((person) =>
+      keyed(person.userId, {
+        type,
+        userId: person.userId,
+        at: person.forgottenAt.toISOString(),
+      })
+    );
+  }
+  const page = await db
+    .select()
+    .from(brainErasedEvidence)
+    .where(
+      after === null ? undefined : gt(brainErasedEvidence.evidenceId, after)
+    )
+    .orderBy(asc(brainErasedEvidence.evidenceId))
+    .limit(pageRows);
+  return page.map((each) =>
+    keyed(each.evidenceId, {
+      type,
+      evidenceId: each.evidenceId,
+      at: each.erasedAt.toISOString(),
+    })
+  );
+};
+
+/**
+ * The erasure records (which purges ran, who was forgotten, which
+ * evidence was erased), a page at a time: IDs and times alone.
+ */
+const erasuresPage =
+  <C>(brain: Brain<C>): ExportPage =>
+  async (after) => {
+    const at =
+      after === null ? null : erasureKeySchema.parse(JSON.parse(after));
+    const first = at === null ? 0 : erasureKinds.indexOf(at.type);
+    for (const type of erasureKinds.slice(first)) {
+      // oxlint-disable-next-line no-await-in-loop -- one kind after another
+      const page = await erasuresOf(
+        brain,
+        type,
+        type === at?.type ? at.after : null
+      );
+      if (page.length > 0) {
+        return page;
+      }
+    }
+    return [];
+  };
+
+/** A part of the export: its files are `<prefix>-0001.jsonl` and on. */
+interface ExportPart {
+  prefix: string;
+  /** Its next file from `from` (null: its first), and where it goes on. */
+  file: (from: string | null) => Promise<{ rows: Json[]; last: string | null }>;
+}
+
+/** The export's parts, in the order they are written. */
+const exportParts = <C>(
+  brain: Brain<C>,
+  collectionIds: readonly string[],
+  onExport: OnExport
+): ExportPart[] => [
+  {
+    prefix: "collections",
+    file: async (from) =>
+      await pagedFile(collectionsPage(brain, collectionIds), from),
+  },
+  {
+    prefix: "documents",
+    file: async (from) => await documentsFile(brain, collectionIds, from),
+  },
+  {
+    prefix: "memories",
+    file: async (from) =>
+      await pagedFile(memoriesPage(brain, collectionIds), from),
+  },
+  {
+    prefix: "erasures",
+    file: async (from) => await pagedFile(erasuresPage(brain), from),
+  },
+  ...onExport.files.map((host): ExportPart => ({
+    prefix: `host-${host.name}`,
+    file: async (from) =>
+      await pagedFile(
+        async (after) => await host.page(collectionIds, after),
+        from
+      ),
+  })),
+];
+
+/**
  * Writes the next file `run`'s export owes, or its manifest when none is
  * left. Whether more is left to write.
  */
@@ -793,6 +1061,13 @@ const writeNext = async <C>(
   onExport: OnExport
 ): Promise<boolean> => {
   const { exportId, collectionIds } = run;
+  const hostNames = onExport.files.map(({ name }) => name);
+  if (
+    hostNames.some((name) => !hostNamePattern.test(name)) ||
+    new Set(hostNames).size !== hostNames.length
+  ) {
+    throw knowledgeErrors.create("knowledge.invalid");
+  }
   // A purge since it began may have erased what it holds: it goes.
   if (await purgedSince(brain, run.purgeMark)) {
     throw knowledgeErrors.create("knowledge.export_purged");
@@ -805,151 +1080,28 @@ const writeNext = async <C>(
     recorded.filter(({ stored }) => !stored)
   );
   const written = recorded.filter(({ stored }) => stored);
-  const names = new Set(written.map(({ name }) => name));
   const position = written.length;
-  if (!names.has("collections.jsonl")) {
-    const company =
-      collectionIds.length === 0
-        ? []
-        : await brain.db
-            .select()
-            .from(collections)
-            .where(inList(collections.id, collectionIds))
-            .orderBy(asc(collections.id));
-    const rows = company.map((collection) => ({
-      id: collection.id,
-      name: collection.name,
-      description: collection.description,
-      owner: collection.owner,
-      access: collection.access,
-      sensitive: collection.sensitive,
-      source: collection.source,
-      createdAt: collection.createdAt.toISOString(),
-    }));
-    await writeFile(
-      brain,
-      run,
-      position,
-      "collections.jsonl",
-      linesOf(rows),
-      rows.length
-    );
-    return true;
-  }
-  const parts = written.filter(({ name }) => name.startsWith("documents-"));
-  const lastPart = parts.at(-1);
-  if (lastPart === undefined || lastPart.cursor !== null) {
-    const { rows, last } = await documentsFile(
-      brain,
-      collectionIds,
-      lastPart?.cursor ?? null
-    );
-    const name = `documents-${String(parts.length + 1).padStart(4, "0")}.jsonl`;
-    await writeFile(
-      brain,
-      run,
-      position,
-      name,
-      linesOf(rows),
-      rows.length,
-      last
-    );
-    return true;
-  }
-  if (!names.has("memories.jsonl")) {
-    const rows = await brain.db
-      .select()
-      .from(brainMemories)
-      .where(
-        and(
-          inArray(brainMemories.scope, ["team", "company"]),
-          eq(brainMemories.state, "accepted"),
-          citesReadable(collectionIds)
-        )
-      )
-      .orderBy(asc(brainMemories.id));
-    const shown = rows.map((row) => ({
-      ...recordOf(row),
-      scopeId: row.scopeId,
-      ownerId: row.ownerId,
-    }));
-    await writeFile(
-      brain,
-      run,
-      position,
-      "memories.jsonl",
-      linesOf(shown),
-      shown.length
-    );
-    return true;
-  }
-  if (!names.has("erasures.jsonl")) {
-    const [purges, people, evidence] = await Promise.all([
-      brain.db.select().from(brainPurges).orderBy(asc(brainPurges.createdAt)),
-      brain.db.select().from(brainForgottenPeople),
-      brain.db.select().from(brainErasedEvidence),
-    ]);
-    const rows: Json[] = [
-      ...purges.map((purge) => ({
-        type: "purge",
-        id: purge.id,
-        kind: purge.kind,
-        createdAt: purge.createdAt.toISOString(),
-        completedAt: purge.completedAt?.toISOString() ?? null,
-        supersededBy: purge.supersededBy,
-      })),
-      ...people.map((person) => ({
-        type: "forgotten_person",
-        userId: person.userId,
-        at: person.forgottenAt.toISOString(),
-      })),
-      ...evidence.map((each) => ({
-        type: "erased_evidence",
-        evidenceId: each.evidenceId,
-        at: each.erasedAt.toISOString(),
-      })),
-    ];
-    await writeFile(
-      brain,
-      run,
-      position,
-      "erasures.jsonl",
-      linesOf(rows),
-      rows.length
-    );
-    return true;
-  }
-  if (!names.has(hostedName)) {
-    // The host's files are written all from one ask: any a run stopped
-    // among are written again with the rest, never mixed with another's.
-    const stale = written.filter(({ name }) => name.startsWith("host-"));
-    await removeFiles(brain, run, stale);
-    const files = await onExport.files(collectionIds);
-    const hostNames = files.map(({ name }) => name);
-    if (
-      hostNames.some((name) => !hostNamePattern.test(name)) ||
-      new Set(hostNames).size !== hostNames.length
-    ) {
-      throw knowledgeErrors.create("knowledge.invalid");
-    }
-    let at = position - stale.length;
-    for (const file of files) {
-      // oxlint-disable-next-line no-await-in-loop -- one file after another, in order
+  // Each part in files of its own, in order: the next file owed is that
+  // of the first part whose last file says where it goes on (or that has
+  // none yet).
+  for (const part of exportParts(brain, collectionIds, onExport)) {
+    const files = written.filter(({ name }) => isPartOf(part.prefix, name));
+    const last = files.at(-1);
+    if (last === undefined || last.cursor !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- one file per step
+      const { rows, last: next } = await part.file(last?.cursor ?? null);
+      // oxlint-disable-next-line no-await-in-loop -- one file per step
       await writeFile(
         brain,
         run,
-        at,
-        `host-${file.name}.jsonl`,
-        linesOf(file.rows),
-        file.rows.length
+        position,
+        partName(part.prefix, files.length + 1),
+        linesOf(rows),
+        rows.length,
+        next
       );
-      at += 1;
+      return true;
     }
-    // Then that they all are, naming them: a run stopped before this
-    // writes them again.
-    const hosted = hostNames.map((name) => ({ name: `host-${name}.jsonl` }));
-    await writeFile(brain, run, at, hostedName, linesOf(hosted), hosted.length);
-    return true;
   }
   const body = {
     format: exportFormat,
