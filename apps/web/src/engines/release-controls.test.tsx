@@ -53,6 +53,7 @@ const desk: ViewedApp = {
   process: null,
   createdAt: "2026-10-01T09:00:00.000Z",
   role: "builder",
+  link: null,
 };
 
 const person = (role: Identity["role"], staff = false): Identity => ({

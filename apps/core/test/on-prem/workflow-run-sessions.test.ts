@@ -1,30 +1,50 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { isolateCall, runOwnerOf } from "../../src/workflows/code.ts";
+import { release } from "../apps.ts";
+import { allEvents } from "../audit-events.ts";
 import { mockIdp } from "../idp.ts";
+import {
+  definitionOf,
+  endedRun,
+  endLiveResourceRuns,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  objectSchema,
+  publishedWorkflow,
+  startedBy,
+} from "../json-workflow-apps.ts";
 import { fakeProviderFor } from "../model-provider.ts";
 import {
   endLiveRuns,
-  finished,
   liveStatus,
   sleeping,
   whileEngineRefuses,
   woken,
 } from "../runs.ts";
-import {
-  bindModel,
-  modelRegistration,
-  workflowFiles,
-} from "../workflow-apps.ts";
-import { appsOf, oneStep, runTime, stepsOf } from "./workflow-runs.ts";
+import { signedInApi, unique } from "../sign-in.ts";
+import { workflowFiles } from "../workflow-apps.ts";
 
-// A workflow's runs on-prem, in their sessions: one per load, let go of
-// while a run waits, and waited for while the sandbox is full.
+// An independent JSON workflow's runs on-prem, in their sessions: one per
+// load, owned by the workflow, let go of while a run waits, and waited for
+// while the sandbox is full. Runs, the engine, the host and the sandbox
+// supervisor are real; a run is started through its builder's session.
+// Already covered: a load across a wait, and a listen's event after it
+// (json-workflow-runs.test.ts). Gone with App workflows: the budget of
+// time a run's own code spends between steps, which a JSON run has none
+// of. Kept as an App run until JSON cancels have it, a platform gap: a
+// run cancelled while the engine refuses the stop never takes a place (a
+// JSON run still takes one and runs once one frees up).
 
-const appWith = appsOf(mockIdp());
+const idp = mockIdp();
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
 const extractionModel = "mistral/mistral-large-latest";
+
+/** A load of each run here may wait out a full sandbox: room for a slow runner. */
+const runTime = { timeout: 90_000 };
 
 /**
  * Holds one of the sandbox's places as `owner`, spinning, until the
@@ -54,164 +74,130 @@ const holdPlace = (owner: string): (() => Promise<void>) => {
   };
 };
 
-/**
- * What `run` returns with each activation's budget of time between steps
- * `ms` (between-steps.ts), the platform's again after it.
- */
-const withBetweenStepsBudget = async <Result>(
-  ms: number,
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const kept = env.WORKFLOW_BETWEEN_STEPS_MS;
-  env.WORKFLOW_BETWEEN_STEPS_MS = String(ms);
-  try {
-    return await run();
-  } finally {
-    if (kept === undefined) {
-      Reflect.deleteProperty(env, "WORKFLOW_BETWEEN_STEPS_MS");
-    } else {
-      env.WORKFLOW_BETWEEN_STEPS_MS = kept;
-    }
-  }
-};
+describe("an independent JSON workflow's runs on-prem", runTime, () => {
+  afterEach(endLiveResourceRuns);
 
-describe("a workflow's runs on-prem", runTime, () => {
-  afterEach(endLiveRuns);
-
-  it("runs its steps in a session, a model call going through the step's attempt host", async () => {
-    const { builder, app } = await appWith({
-      ...modelRegistration({ extractor: 6000 }),
-      ...workflowFiles(
-        "reader",
-        `  const total = await step.llm("extract", {
-    description: "Read the total",
-    binding: "extractor",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    retries: { limit: 0 },
-  });
-  return await step.do("double", { description: "Double it" }, async () => total.total * 2);`,
-        { extract: { total: 1 } }
-      ),
-    });
-    // The organization's model, and the App's binding to it, approved:
-    // the step names the binding, not a model.
+  it("runs a model call in its session, through the run's host", async () => {
+    const [admin, builder] = await Promise.all([
+      signedIn("admin"),
+      signedIn("builder"),
+    ]);
+    const key = `extractor-${unique()}`;
+    await admin.api.workflowResources.publishContract({ key, kind: "model" });
+    const { id } = await publishedWorkflow(builder, (name) =>
+      definitionOf(
+        name,
+        [
+          {
+            extract: {
+              call: "grasp.model",
+              with: {
+                binding: "extractor",
+                instructions: "Read the total in cents.",
+                input: { text: "Total 12.34 EUR" },
+                outputSchema: objectSchema({ total: { type: "integer" } }),
+              },
+              export: { as: "${ {total: .total} }" },
+            },
+          },
+          {
+            answer: {
+              set: {
+                status: '${ "Total " + ($context.total * 2 | tostring) }',
+              },
+            },
+          },
+        ],
+        { bindings: { extractor: { kind: "model", contract: key } } }
+      )
+    );
+    // The organization's model, and the workflow's binding to it, approved:
+    // the task names the binding, not a model.
     await fakeProviderFor([extractionModel], {
       text: '{"total": 1234}',
       inputTokens: 10,
       outputTokens: 5,
     });
-    await bindModel(app, "extractor", extractionModel);
-    const run = await builder.api.workflows.start(app, "reader");
-    await finished(run.id);
-    await expect(builder.api.workflows.status(run.id)).resolves.toMatchObject({
+    await admin.api.workflowResources.approveBinding(id, {
+      alias: "extractor",
+      target: { kind: "model", model: extractionModel },
+      reviewed: { version: 1 },
+    });
+    const run = await endedRun(builder, id, await startedBy(builder, id));
+    expect({ status: run.status, output: run.output }).toStrictEqual({
       status: "completed",
-      output: 2468,
+      output: { status: "Total 2468" },
     });
   });
 
-  it("lets go of a run's session while it waits, and resumes it in a new one, its steps replayed", async () => {
-    const { builder, app } = await appWith(
-      workflowFiles(
-        "waiter",
-        `  const before = await step.do("before", { description: "Before" }, async () => 1);
-  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => before + 1);`,
-        { before: 1, after: 2 }
-      )
-    );
-    const first = await builder.api.workflows.start(app, "waiter");
-    await sleeping(first.id, "go");
-    // The App holds one session at a time: a second run loads only once
-    // the first's, waiting, was let go of.
-    const second = await builder.api.workflows.start(app, "waiter");
-    await sleeping(second.id, "go");
-    await woken(first.id);
-    await finished(first.id);
-    await expect(builder.api.workflows.status(first.id)).resolves.toMatchObject(
-      { status: "completed", output: 2 }
-    );
-    await expect(stepsOf(first.id)).resolves.toStrictEqual([
-      "workflow.step.completed $params",
-      "workflow.step.completed before",
-      "workflow.step.completed after",
-    ]);
-  });
-
-  it("ends a run whose code waits on a timer between steps past its budget, and lets go of its session", async () => {
-    const { builder, app } = await appWith({
-      ...workflowFiles(
-        "lingers",
-        `  const real = await step.do("before", { description: "Before" }, async () => true);
-  // Its tests mock the step: only a run waits.
-  if (real) {
-    await new Promise((resolve) => setTimeout(resolve, 60_000));
-  }
-  return await step.do("after", { description: "After" }, async () => 1);`,
-        { before: false, after: 1 }
-      ),
-      ...oneStep,
-    });
-    const ended = await withBetweenStepsBudget(3000, async () => {
-      const run = await builder.api.workflows.start(app, "lingers");
-      await finished(run.id);
-      // The App's runs hold one session at a time: this one loads at once
-      // only if the first's session was let go of, its timer still set.
-      const next = await builder.api.workflows.start(app, "single");
-      await finished(next.id);
-      return { run, next };
-    });
-    const { status, failure } = await builder.api.workflows.status(
-      ended.run.id
-    );
-    expect({
-      status,
-      step: failure?.step,
-      code: failure?.error.code,
-      steps: await stepsOf(ended.run.id),
-      next: await builder.api.workflows.status(ended.next.id),
-    }).toMatchObject({
-      status: "failed",
-      step: null,
-      code: "workflow.between_steps_limit",
-      steps: [
-        "workflow.step.completed $params",
-        "workflow.step.completed before",
-      ],
-      next: { status: "completed", output: "done" },
+  it("lets go of a run's session while it waits, so the workflow's next run loads, and resumes it in a new one", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks("P1D"));
+    const first = await startedBy(builder, id);
+    await sleeping(first, "task:hold");
+    // The workflow's runs hold one session at a time: a second run loads
+    // only once the first's, waiting, was let go of.
+    const second = await startedBy(builder, id, { who: "Grace" });
+    await sleeping(second, "task:hold");
+    await woken(first, "task:hold");
+    const run = await endedRun(builder, id, first);
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { status: "Hello, Ada" },
     });
   });
 
-  it("waits for a place while the sandbox is full, then loads, rather than failing the run, the wait no time of its code's between steps", async () => {
-    const { builder, app } = await appWith(oneStep);
+  it("waits for a place while the sandbox is full, then loads, rather than failing the run", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks());
     // Both processes held, by calls of two others.
     const letGo = [holdPlace("app-full-a"), holdPlace("app-full-b")];
-    // Its wait for a place is longer than its budget between steps.
-    const { run, whileFull } = await withBetweenStepsBudget(3000, async () => {
-      const started = await builder.api.workflows.start(app, "single");
-      // Long enough for its load to be refused, the pool full, more than once.
-      await scheduler.wait(8000);
-      const status = await liveStatus(started.id);
-      await Promise.all(
-        letGo.map(async (free) => {
-          await free();
-        })
-      );
-      await finished(started.id);
-      return { run: started, whileFull: status };
-    });
+    const runId = await startedBy(builder, id);
+    // Long enough for its load to be refused, the pool full, more than once.
+    await scheduler.wait(8000);
+    const whileFull = await liveStatus(runId);
+    await Promise.all(
+      letGo.map(async (free) => {
+        await free();
+      })
+    );
+    const run = await endedRun(builder, id, runId);
     expect({
       whileFull,
-      after: await builder.api.workflows.status(run.id),
-    }).toMatchObject({
+      after: { status: run.status, output: run.output },
+    }).toStrictEqual({
       whileFull: "running",
-      after: { status: "completed", output: "done" },
+      after: { status: "completed", output: { status: "Hello, Ada" } },
     });
   });
+});
+
+/** A workflow of one step, as `workflowFiles` writes it. */
+const oneStep = workflowFiles(
+  "single",
+  `  return await step.do("only", { description: "The only step" }, async () => "done");`,
+  { only: "done" }
+);
+
+/** The steps of `run` the audit log has, each as its action and step. */
+const stepsOf = async (run: string): Promise<string[]> => {
+  const events = await allEvents();
+  return events.flatMap(({ action, target, detail }) =>
+    action.startsWith("workflow.step.") && target?.id === run
+      ? [`${action} ${String(detail.step)}`]
+      : []
+  );
+};
+
+// Kept until JSON cancels stop a run waiting for a place: an App
+// workflow's run, as before.
+describe("an App workflow's runs on-prem", runTime, () => {
+  afterEach(endLiveRuns);
 
   it("stops a run's wait for a place once the run is cancelled, its activation not yet ended: it never takes one", async () => {
-    const { builder, app } = await appWith(oneStep);
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Runs" });
+    await release(builder, app, oneStep);
     // The App's runs' one place, held.
     const letGo = holdPlace(runOwnerOf(app));
     const run = await builder.api.workflows.start(app, "single");

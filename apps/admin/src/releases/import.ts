@@ -48,6 +48,7 @@ import {
   releaseImportProgress,
   releases,
 } from "../db/schema.ts";
+import { toEdge } from "../rollout/channels.ts";
 import { startsMajor } from "./version.ts";
 
 /**
@@ -261,7 +262,10 @@ const importRelease = async (
         commit: manifest.commit,
         manifestSha256,
       },
-    }
+    },
+    // Edge takes it in the same batch: a run that dies after saving it
+    // never leaves it saved, and so skipped from then on, but off Edge.
+    toEdge(db, id)
   );
   // Bookkeeping only: the import itself is what's audited.
   await db.batch([

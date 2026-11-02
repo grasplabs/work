@@ -14,7 +14,7 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   bindingNameSchema,
@@ -35,6 +35,7 @@ import type {
   PermissionSubject,
   PermissionSubjectType,
   WorkContext,
+  StoreReach,
 } from "@grasp-os/shared/permissions";
 import {
   isMemberAdmin,
@@ -85,6 +86,7 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./screen-trust.ts";
 import type { Grantee } from "./screen-trust.ts";
+import { storeReachOf } from "./workflow-store-host.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -736,7 +738,10 @@ const requireStoreObject = async (
     return;
   }
   const row = await drizzle(env.DB)
-    .select({ owner: sdkStoreOwners.appId })
+    .select({
+      owner: sdkStoreOwners.appId,
+      workflow: sdkStoreOwners.workflowId,
+    })
     .from(businessStores)
     .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
     .where(
@@ -746,6 +751,32 @@ const requireStoreObject = async (
       )
     )
     .get();
+  // A standalone workflow's store (GRA-682): asked for by someone with a
+  // role in that workflow, for another workflow, whose approved bindings
+  // its generated operations serve (workflow-store-operations.ts). An
+  // App's binding of one isn't served yet, so isn't asked for either.
+  if (row?.workflow !== null && row?.workflow !== undefined) {
+    try {
+      await roles.resource({ type: "workflow", id: row.workflow }, "user");
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw noSuchStore();
+      }
+      throw error;
+    }
+    if (subject.type !== "workflow") {
+      refuseRequest(
+        "object.storeId: Only a workflow calls a workflow's store's operations."
+      );
+      return;
+    }
+    if (subject.workflowId === row.workflow) {
+      refuseRequest(
+        "object.storeId: A workflow's store serves other workflows, not itself."
+      );
+    }
+    return;
+  }
   const owner = appIdSchema.safeParse(row?.owner);
   if (!owner.success) {
     throw noSuchStore();
@@ -1646,6 +1677,26 @@ export const revokePermission = async (
   return permission;
 };
 
+/** What a store's operations reach, every one of them, or undefined. */
+type StoreReachReading = StoreReach[] | undefined;
+
+/**
+ * What every operation of store `storeId` reaches (`storeReachOf`), or an
+ * empty list when a workflow's store can't be read now: the review then
+ * says so rather than show it as any other store.
+ */
+const readStoreReach = async (
+  env: Env,
+  storeId: StoreId
+): Promise<StoreReachReading> => {
+  try {
+    return await storeReachOf(env, storeId);
+  } catch (error) {
+    log.warn("permissions.store_reach_unreadable", errorFields(error));
+    return [];
+  }
+};
+
 /**
  * Every permission, or those of one App or agent, oldest first; only those
  * in `status` when given. With `openApps` (a condition on `apps`: the Apps
@@ -1690,8 +1741,10 @@ export const listPermissions = async (
             ne(permissions.objectType, "app"),
             inArray(permissions.objectId, open)
           ),
-          // A store's permission names the App that owns it, as its
-          // operations are that App's: listed only where that App is open.
+          // A store's permission names the App or the workflow that owns
+          // it, as its operations are its owner's: listed only where that
+          // App is open, or while that workflow is live (whose roles
+          // permissions-open.ts checks).
           or(
             ne(permissions.objectType, "store"),
             inArray(
@@ -1699,7 +1752,18 @@ export const listPermissions = async (
               db
                 .select({ id: sdkStoreOwners.storeId })
                 .from(sdkStoreOwners)
-                .where(inArray(sdkStoreOwners.appId, open))
+                .where(
+                  or(
+                    inArray(sdkStoreOwners.appId, open),
+                    inArray(
+                      sdkStoreOwners.workflowId,
+                      db
+                        .select({ id: workflowResources.id })
+                        .from(workflowResources)
+                        .where(isNull(workflowResources.deletedAt))
+                    )
+                  )
+                )
             )
           )
         );
@@ -1720,7 +1784,31 @@ export const listPermissions = async (
     // asked, are that person's alone: never listed to admins or builders.
     .where(and(ofOne, ofOpenApp, inStatus, eq(permissions.personal, false)))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
-  return rows.map((row) => toPermission(row));
+  // A workflow's store: what its operations reach, for the review. Read
+  // once per store; one that can't be read shows as such, and never fails
+  // the list.
+  const reaches = new Map<StoreId, Promise<StoreReachReading>>();
+  return await Promise.all(
+    rows.map(async (row) => {
+      const permission = toPermission(row);
+      if (permission.object.type !== "store") {
+        return permission;
+      }
+      const { storeId } = permission.object;
+      const reading = reaches.get(storeId) ?? readStoreReach(env, storeId);
+      reaches.set(storeId, reading);
+      const read = await reading;
+      if (read === undefined) {
+        return permission;
+      }
+      return {
+        ...permission,
+        reach: read.flatMap((entry) =>
+          permission.actions.includes(entry.operation) ? [entry] : []
+        ),
+      };
+    })
+  );
 };
 
 /**

@@ -265,7 +265,7 @@ export const personErasureAreas = sqliteTable(
       .notNull()
       .references(() => personErasures.userId),
     area: text().notNull(),
-    state: text({ enum: ["pending", "complete"] }).notNull(),
+    state: text({ enum: ["pending", "complete", "skipped"] }).notNull(),
     attempts: integer().notNull().default(0),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -660,61 +660,71 @@ export const permissions = sqliteTable(
  * `pending_version` one put up for review. Both only ever name a version
  * the App has.
  */
-export const apps = sqliteTable("apps", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text().notNull(),
-  /** The user who created it, whom its triggered runs act for. */
-  ownerId: text("owner_id").notNull(),
-  /**
-   * Who answers for it (apps.ts `updateApp`), when a builder named someone
-   * other than its owner; null for its owner. Grants nothing.
-   */
-  responsibleId: text("responsible_id"),
-  /**
-   * Whom it is made for, a person or a team, when a builder said; both
-   * null otherwise. Grants nothing.
-   */
-  audienceType: text("audience_type", { enum: ["person", "team"] }),
-  audienceId: text("audience_id"),
-  /**
-   * The business process it serves (@grasp-os/shared/business-processes),
-   * when a builder said; null otherwise. Grants nothing.
-   */
-  process: text(),
-  blueprint: text(),
-  currentVersion: integer("current_version"),
-  pendingVersion: integer("pending_version"),
-  /**
-   * Where it is in its life (app-status.ts): a new App is a draft, open to
-   * its builders alone, until one publishes it.
-   */
-  status: text({ enum: ["draft", "published", "archived"] })
-    .notNull()
-    .default("draft"),
-  /** When its status last changed, and who changed it; null until then. */
-  statusChangedAt: timestamp("status_changed_at"),
-  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
-    userId: string;
-    staff: boolean;
-  }>(),
-  createdAt: timestamp("created_at").notNull(),
-  /**
-   * When it was removed (app-removal.ts), and by whom: a removed App is a
-   * tombstone, kept so what names it stays history, and answers nothing.
-   * Null while it is an App.
-   */
-  removedAt: timestamp("removed_at"),
-  removedBy: text("removed_by"),
-  /**
-   * Where a chat's agent created it (agent-builds.ts), while nobody has
-   * accepted it yet: provisional until its first version is made current
-   * (`makeCurrent`), and reaped once abandoned (app-removal.ts). Both null
-   * for an App a person created, and once accepted.
-   */
-  provisionalWorkspaceId: text("provisional_workspace_id"),
-  provisionalChatId: text("provisional_chat_id"),
-});
+export const apps = sqliteTable(
+  "apps",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** The user who created it, whom its triggered runs act for. */
+    ownerId: text("owner_id").notNull(),
+    /**
+     * Who answers for it (apps.ts `updateApp`), when a builder named someone
+     * other than its owner; null for its owner. Grants nothing.
+     */
+    responsibleId: text("responsible_id"),
+    /**
+     * Whom it is made for, a person or a team, when a builder said; both
+     * null otherwise. Grants nothing.
+     */
+    audienceType: text("audience_type", { enum: ["person", "team"] }),
+    audienceId: text("audience_id"),
+    /**
+     * The business process it serves (@grasp-os/shared/business-processes),
+     * when a builder said; null otherwise. Grants nothing.
+     */
+    process: text(),
+    blueprint: text(),
+    currentVersion: integer("current_version"),
+    pendingVersion: integer("pending_version"),
+    /**
+     * Where it is in its life (app-status.ts): a new App is a draft, open to
+     * its builders alone, until one publishes it.
+     */
+    status: text({ enum: ["draft", "published", "archived"] })
+      .notNull()
+      .default("draft"),
+    /** When its status last changed, and who changed it; null until then. */
+    statusChangedAt: timestamp("status_changed_at"),
+    statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * The last part of its own address under the workspace's (app-own-links.ts),
+     * one App's at most; null while its builders gave it none. It opens the
+     * App only while it is published.
+     */
+    link: text(),
+    /**
+     * When it was removed (app-removal.ts), and by whom: a removed App is a
+     * tombstone, kept so what names it stays history, and answers nothing.
+     * Null while it is an App.
+     */
+    removedAt: timestamp("removed_at"),
+    removedBy: text("removed_by"),
+    /**
+     * Where a chat's agent created it (agent-builds.ts), while nobody has
+     * accepted it yet: provisional until its first version is made current
+     * (`makeCurrent`), and reaped once abandoned (app-removal.ts). Both null
+     * for an App a person created, and once accepted.
+     */
+    provisionalWorkspaceId: text("provisional_workspace_id"),
+    provisionalChatId: text("provisional_chat_id"),
+  },
+  (table) => [uniqueIndex("apps_link").on(table.link)]
+);
 
 /**
  * The integrations a builder added to an App by hand (app-integrations.ts):
@@ -2274,12 +2284,18 @@ export const runLineageAccounts = sqliteTable(
     rootRunId: text("root_run_id")
       .notNull()
       .references(() => runLineages.rootRunId),
+    /**
+     * The App whose runs it is charged; for a `triggered` account, the
+     * independent workflow's ID instead.
+     */
     appId: text("app_id").notNull(),
     /**
      * `joined` for an App's runs in a lineage another App started,
-     * `rejoined` for the root's App's runs under another App's run.
+     * `rejoined` for the root's App's runs under another App's run,
+     * `triggered` for an independent workflow's runs its triggers started
+     * in the lineage (quotas.ts, `triggeredAccountClaimed`).
      */
-    kind: text({ enum: ["joined", "rejoined"] }).notNull(),
+    kind: text({ enum: ["joined", "rejoined", "triggered"] }).notNull(),
     accountRunId: text("account_run_id").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
@@ -4134,7 +4150,8 @@ export const workflowResourceRuns = sqliteTable(
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
      * start admitted, the root of its own lineage. A run an emitted event's
      * trigger started (workflows/event-delivery.ts) has a root and a depth
-     * but no parent: it joins the emitting run's lineage, not its life.
+     * but no parent: it joins the emitting run's lineage, not its life, and
+     * is charged to its workflow's account there (`accountRunId`).
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -4164,6 +4181,14 @@ export const workflowResourceRuns = sqliteTable(
      * of its compensation (spec 10.7.3); kept once it ended.
      */
     compensation: text(),
+    /**
+     * The run whose allowances its work is charged to (quotas.ts,
+     * `triggeredAccountClaimed`), pinned with it: for a run a trigger
+     * started in another run's lineage, its workflow's account there; for
+     * a child, its parent's. Null for a run charged to its lineage's root,
+     * or a root itself.
+     */
+    accountRunId: text("account_run_id"),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.

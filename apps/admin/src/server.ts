@@ -10,13 +10,16 @@
  * are served from the root.
  *
  * The cron imports newly published releases (src/releases/import.ts),
- * then resumes provisioning that isn't getting anywhere
- * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
+ * each taken to Edge as it's saved (src/rollout/channels.ts), deploys each client
+ * whose Workers run something other than its target
+ * (src/rollout/reconciler.ts), then resumes provisioning that isn't
+ * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
  * fares at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
- * hosting destination (src/hosting/workflow.ts), rollouts and the runs
+ * hosting destination (src/hosting/workflow.ts), clients' deploys
+ * (src/rollout/deploy.ts), rollouts and the runs
  * that deploy their fleet clients (src/rollout/workflow.ts,
  * src/rollout/fleet-client.ts), and rollbacks (src/rollout/rollback.ts).
  *
@@ -36,6 +39,7 @@ import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
+import { reconcile } from "./rollout/reconciler.ts";
 
 export { AdminRuns } from "./run-object.ts";
 
@@ -67,6 +71,12 @@ export default {
       await importReleases(env.RELEASES, adminDatabase(env.DB));
     } catch (error) {
       log.error("releases.import_failed", { error: errorCode(error) });
+    }
+    // Each client to its target: Edge's new release among them.
+    try {
+      await reconcile(env);
+    } catch (error) {
+      log.error("reconcile.failed", { error: errorCode(error) });
     }
     // After the import: a client waiting for a newer release takes it.
     await reconcileProvisioning(env, new Date(controller.scheduledTime));

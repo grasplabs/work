@@ -527,3 +527,92 @@ export const following = async (
     .watchQuery(JSON.stringify(request), callback);
   return { received, subscription };
 };
+
+/**
+ * A run of `by`'s that waits an hour, once the engine has journaled its
+ * wait: the root of a lineage of its own, still live, for a test to ask
+ * the lineage's quotas as the run's activations ask them (`owner`), and
+ * to `end` once done. An ended run's attempts are fenced (quotas.ts).
+ */
+export const liveLineage = async (by: Person) => {
+  const { id } = await publishedWorkflow(by, greetingTasks("PT1H"));
+  const run = await startedBy(by, id);
+  await vi.waitFor(async () => {
+    const trace = await by.api.workflowResources.runTrace(id, run, {
+      doors: false,
+    });
+    if (trace.steps.length === 0) {
+      throw new Error("The engine hasn't journaled the wait yet");
+    }
+  }, settles);
+  return {
+    workflow: id,
+    run,
+    owner: {
+      run,
+      root: run,
+      subject: by.userId,
+      resource: `workflow-resource:${id}`,
+    },
+    end: async (): Promise<void> => {
+      await by.api.workflowResources.terminateRun(id, run);
+    },
+  };
+};
+
+/**
+ * The model the asking workflows here go through: Mistral Large, as a
+ * test's fake provider makes it one the organization chose
+ * (model-provider.ts).
+ */
+export const askedModel = "mistral/mistral-large-latest";
+
+/** A task that asks the model binding `reader` for a line to greet `who` with. */
+export const askTask = {
+  ask: {
+    call: "grasp.model",
+    with: {
+      binding: "reader",
+      instructions: "Greet them.",
+      input: { who: "${ $workflow.input.who }" },
+      outputSchema: objectSchema({ line: { type: "string" } }),
+    },
+    export: { as: "${ {line: .line} }" },
+  },
+};
+
+/** The tasks of a workflow that asks its model for a line, then ends with it. */
+export const askingTasks = (): unknown[] => [
+  askTask,
+  { greet: { set: { status: "${ $context.line }" } } },
+];
+
+/**
+ * A workflow of `builder`'s, published as version 1, running `tasks`
+ * (`askingTasks` unless said) with a model binding `reader`, which
+ * `admin` approves to `model` (`askedModel` unless said): catalog
+ * contract, definition and approval each through their session.
+ */
+export const askingWorkflow = async (
+  admin: Person,
+  builder: Person,
+  tasks: unknown[] = askingTasks(),
+  model: string = askedModel
+): Promise<{ id: string; name: string; contract: string }> => {
+  const contract = `reader-${unique()}`;
+  await admin.api.workflowResources.publishContract({
+    key: contract,
+    kind: "model",
+  });
+  const workflow = await publishedWorkflow(builder, (name) =>
+    definitionOf(name, tasks, {
+      bindings: { reader: { kind: "model", contract } },
+    })
+  );
+  await admin.api.workflowResources.approveBinding(workflow.id, {
+    alias: "reader",
+    target: { kind: "model", model },
+    reviewed: { version: 1 },
+  });
+  return { ...workflow, contract };
+};

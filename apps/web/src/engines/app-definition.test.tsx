@@ -37,6 +37,7 @@ const invoices: ViewedApp = {
   status: "published",
   createdAt: "2026-10-20T08:00:00.000Z",
   role: "builder",
+  link: "invoices",
 };
 
 /** What core packages of the App's current release, abridged. */

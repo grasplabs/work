@@ -2553,6 +2553,7 @@ const hostOf = async (
       calling: {
         runId,
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -2699,6 +2700,7 @@ const activationOf = async (
       calling: {
         runId,
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
