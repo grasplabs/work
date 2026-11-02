@@ -1,5 +1,17 @@
-import { appCodeFiles, buildFiles, workflowFiles } from "@grasp-os/compiler";
+import {
+  appCodeFiles,
+  buildFiles,
+  generatedFolder,
+  workflowFiles,
+} from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
+import {
+  generatedPaths,
+  generateModules,
+  serverModuleSource,
+  symbolicModules,
+} from "@grasp-os/sdk/host";
+import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -7,15 +19,19 @@ import type {
 } from "@grasp-os/shared/apps";
 import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
+import { filesManifest } from "./app-inspection.ts";
+import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { withDraftReferences } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
 import {
+  buildAppCode,
   buildScreens,
   buildWorkflows,
-  checkDraftAppCode,
+  checkAppCode,
   withinBuildWait,
 } from "./screens.ts";
 import type { BuildProfile } from "./screens.ts";
@@ -185,14 +201,89 @@ const layoutProblem = (file: string, message: string): BuildDiagnostic => ({
 });
 
 /**
+ * Why inspecting server code that builds refused it, as one diagnostic:
+ * what its registration threw, or the SDK's reason its manifest doesn't
+ * read.
+ */
+const inspectionProblem = (
+  error: Error & { details?: unknown }
+): Diagnostic => {
+  const { details } = error;
+  const said =
+    typeof details === "object" &&
+    details !== null &&
+    "message" in details &&
+    typeof details.message === "string"
+      ? details.message
+      : "";
+  return {
+    rule: "server",
+    severity: "error",
+    message: said === "" ? error.message : `${error.message} ${said}`,
+  };
+};
+
+/**
+ * `files`' server code type-checked as its seal type-checks it
+ * (`checkAppCode`, with every gate), against the references the seal
+ * generates: from what its registration answers, inspected in the sandbox
+ * as a save inspects it for its screens (`filesManifest`), with the
+ * workflows it declares as the App binds them now. So what a check passes,
+ * the seal's type check passes too. Server code that doesn't build or
+ * register fails on what its build says, or, when it builds, on why its
+ * inspection refused it.
+ */
+const checkedDraftCode = async (
+  env: Env,
+  { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
+  // Whatever the draft holds under `.grasp/` is the host's to generate.
+  const code = Object.fromEntries(
+    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
+  );
+  const options = { profile: "preview", signal } as const;
+  let manifest: AppManifest;
+  try {
+    manifest = await filesManifest(env, code, app, options);
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    // Its build, as inspection built it (from the build cache): what fails
+    // there, or else why inspection refused it.
+    const built = await buildAppCode(
+      env,
+      {
+        ...code,
+        ...symbolicModules(),
+        [generatedPaths.server]: serverModuleSource,
+      },
+      app,
+      options
+    );
+    return built.ok
+      ? { ok: false, diagnostics: [inspectionProblem(error)] }
+      : built;
+  }
+  const generated = await generateModules(
+    manifest,
+    { resourceId: app, resourceVersion: version },
+    await boundWorkflowsOf(env, app, manifest)
+  );
+  return await checkAppCode(env, { ...code, ...generated }, app, options);
+};
+
+/**
  * A draft's server code (`app.ts`, `schema.ts`, `values.ts`,
  * `operations/`, `migrations/`), checked as a check reports it: type
- * errors and every gate a seal holds it to (`checkDraftAppCode`), without
- * running any of it (server code with no app.ts and schema.ts fails
- * there, saying so). Failed too when it holds files under `app/`, which
- * no commit takes (`app.v1_server`), each named; `none` when it has no
- * server code. Never
- * throws, unless `signal` gave up on it, as `buildOnSave`.
+ * errors and every gate a seal holds it to, against the references its
+ * seal would generate (`checkedDraftCode`); its registration runs in the
+ * sandbox to say what they are, none of its operations (server code with
+ * no app.ts and schema.ts fails there, saying so). Failed too when it
+ * holds files under `app/`, which no commit takes (`app.v1_server`), each
+ * named; `none` when it has no server code. Never throws, unless `signal`
+ * gave up on it, as `buildOnSave`.
  */
 export const draftServerBuild = async (
   env: Env,
@@ -216,7 +307,7 @@ export const draftServerBuild = async (
     "server",
     source,
     appCodeFiles,
-    async () => await checkDraftAppCode(env, files, source.app, signal),
+    async () => await checkedDraftCode(env, source, signal),
     env,
     signal
   );

@@ -77,7 +77,8 @@ import type { Draft } from "./workspace.ts";
 //
 // It checks a draft as a save does (screens and
 // workflows: type errors, @shadcn/lint and build errors), and its server
-// code as its seal type-checks it, none of it run (`draftServerBuild`),
+// code as its seal type-checks it, against the references the seal
+// generates, only its registration run (`draftServerBuild`),
 // and runs its workflows' tests; what fails only once it runs, the preview
 // reports as it seals it. A check also reads
 // what the preview of the draft in the person's side panel ran into so far
@@ -319,8 +320,9 @@ export interface DraftCheck {
   screens: SavedBuild;
   /**
    * Its server code of spec 8's layout, type-checked with every gate its
-   * seal holds it to, none of it run (`draftServerBuild`): what fails
-   * only once it runs, its preview reports.
+   * seal holds it to, against the references its seal generates, only
+   * its registration run (`draftServerBuild`): what fails only once it
+   * runs, its preview reports.
    */
   server: SavedBuild;
   workflows: SavedBuild;
@@ -1312,7 +1314,7 @@ build: {
   /**
    * Builds the draft's screens and workflows (type errors, lint and build
    * errors), type-checks its server code (app.ts, schema.ts, values.ts,
-   * operations/, migrations/) as its seal does, without running it, and runs
+   * operations/, migrations/) as its seal does, without running its operations, and runs
    * its workflows' tests, and reads what its
    * screens ran into so far in the person's preview (runtime errors). Fix what fails
    * and check again; after ${maxFailedChecks} checks in a row that didn't pass, checking

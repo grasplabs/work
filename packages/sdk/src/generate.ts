@@ -1189,28 +1189,8 @@ const symbolicTree = (visibility: "public" | "internal"): string =>
  * that registration. Sealing then generates the real modules and inspects
  * again with them; nothing symbolic survives into a release.
  */
-export const symbolicModules = ({
-  untyped = false,
-}: {
-  /**
-   * Typed loosely, for a draft's type check (core's `checkDraftAppCode`),
-   * which runs no registration: what paths there are, and their types,
-   * only the seal's generated modules say. So any path of `api` and
-   * `internal` types as a reference of any arguments and answer
-   * (`internal.notes.count` checks, its answer `any`), and the other
-   * trees as `any`. Inspection keeps them `object`.
-   */
-  readonly untyped?: boolean;
-} = {}): Record<string, string> => {
-  const loose = untyped
-    ? 'import type { OperationReference } from "@grasp-os/sdk";\ntype Untyped = OperationReference<any, any, any, any> & { readonly [name: string]: Untyped };\n'
-    : "";
-  const tree = (visibility: "public" | "internal"): string =>
-    untyped
-      ? `: Untyped = ${symbolicTree(visibility)} as Untyped`
-      : ` = ${symbolicTree(visibility)}`;
-  const as = untyped ? ": any" : "";
-  const prelude = `${banner}${loose}const symbolic = (visibility: string) => {
+export const symbolicModules = (): Record<string, string> => {
+  const prelude = `${banner}const symbolic = (visibility: string) => {
   const nodes = new Map<string, object>();
   const node = (path: string): object => {
     const known = nodes.get(path);
@@ -1239,7 +1219,7 @@ export const symbolicModules = ({
 };
 `;
   return {
-    [generatedPaths.serverReferences]: `${prelude}\nexport const internal${tree("internal")};\n`,
-    [generatedPaths.references]: `${prelude}\nexport const api${tree("public")};\nexport const workflows${as} = Object.freeze({});\nexport const resources${as} = Object.freeze({});\nexport const screens${as} = Object.freeze({});\nexport const preferences${as} = Object.freeze({});\n`,
+    [generatedPaths.serverReferences]: `${prelude}\nexport const internal = ${symbolicTree("internal")};\n`,
+    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\nexport const preferences = Object.freeze({});\n`,
   };
 };

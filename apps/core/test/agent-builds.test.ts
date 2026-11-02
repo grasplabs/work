@@ -1230,36 +1230,47 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("type-checks a draft's server code as its seal would, with no preview open, and proposes nothing that fails it", async () => {
-    // Calls an internal operation by its reference, as the seal's real
-    // references type it: the check's stand-ins must not refuse it.
+    // Calls an internal operation by its reference, typed as the seal's
+    // generated references type it from the draft's own operations: what
+    // it answers is typed, and a wrong call fails.
     const operations = `${(notesFiles["operations/notes.ts"] ?? "").replace(
       "import { action, doc, mutation, query }",
       'import { internal } from "#grasp/server-references";\nimport { action, doc, internalQuery, mutation, query }'
     )}
-export const count = internalQuery({
+export const listAll = internalQuery({
   args: {},
-  returns: v.number(),
-  handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
+  returns: v.array(doc("notes")),
+  handler: async (ctx) => await ctx.db.query("notes").take(100),
 });
 
-export const tally = action({
+export const titles = action({
   args: {},
-  returns: v.number(),
-  uses: [internal.notes.count],
-  handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
+  returns: v.array(v.string()),
+  uses: [internal.notes.list],
+  handler: async (ctx) => (await ctx.runQuery(internal.notes.list, {})).map(note => note.title),
 });
 `;
+    const wrongCall = operations.replace(
+      "(await ctx.runQuery(internal.notes.list, {})).map(note => note.title)",
+      "await ctx.runQuery(internal.notes.missing, {})"
+    );
+    // The public `list` registered as `page`: `notes.list` is internal here.
     const registration = (notesFiles["app.ts"] ?? "")
-      .replace("import { big,", "import { big, count, tally,")
-      .replace("stamp, big }", "stamp, big, tally }")
+      .replace("import { big,", "import { big, listAll, titles,")
+      .replace("notes: { list,", "notes: { page: list,")
+      .replace("stamp, big }", "stamp, big, titles }")
       .replace(
         "internalOperations: {}",
-        "internalOperations: { notes: { count } }"
+        "internalOperations: { notes: { list: listAll } }"
       );
     const sound = {
       ...notesFiles,
       "operations/notes.ts": operations,
       "app.ts": registration,
+      "screens/notes.tsx": (notesFiles["screens/notes.tsx"] ?? "").replace(
+        "api.notes.list",
+        "api.notes.page"
+      ),
     };
     const mistyped = operations.replace(
       "import { AppError,",
@@ -1272,6 +1283,8 @@ export const tally = action({
           const checked = await env.build.check(app.id);
           return { passed: checked.passed, status: checked.server.status, diagnostics: checked.server.diagnostics.map(({ file, rule, category }) => ({ file, rule, category })) };
         };
+        await env.build.write(app.id, ${JSON.stringify({ ...sound, "operations/notes.ts": wrongCall })});
+        const wrongCall = await server();
         await env.build.write(app.id, ${JSON.stringify(sound)});
         const sound = await server();
         await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })});
@@ -1281,7 +1294,7 @@ export const tally = action({
         const leftover = await server();
         await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })});
         const unregistered = await server();
-        return { sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
+        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
       };`),
       says("Checked."),
     ]);
@@ -1291,6 +1304,13 @@ export const tally = action({
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toMatchObject({
+      wrongCall: {
+        passed: false,
+        status: "failed",
+        diagnostics: [
+          { file: "operations/notes.ts", rule: "TS2339", category: "types" },
+        ],
+      },
       sound: { passed: true, status: "ok", diagnostics: [] },
       mistyped: {
         passed: false,
