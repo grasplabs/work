@@ -667,6 +667,12 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
 export const brainErasedDocuments = sqliteTable(
   "brain_erased_documents",
   {
+    /**
+     * Its place in the order records were written: a copy's mark
+     * (../erasures.ts). AUTOINCREMENT, so a sequence once used is never
+     * used again, also after the records of an attempt before go.
+     */
+    seq: integer().primaryKey({ autoIncrement: true }),
     purgeId: text("purge_id").notNull(),
     documentId: text("document_id").notNull(),
     /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
@@ -679,8 +685,11 @@ export const brainErasedDocuments = sqliteTable(
     doneAt: timestamp("done_at"),
   },
   (table) => [
-    primaryKey({ columns: [table.purgeId, table.documentId] }),
-    // A copy's check, by the place it read (and the rowid, as its mark).
+    uniqueIndex("brain_erased_documents_purge_document_idx").on(
+      table.purgeId,
+      table.documentId
+    ),
+    // A copy's check, by the place it read (and the sequence, as its mark).
     index("brain_erased_documents_place_idx").on(table.place),
   ]
 );
