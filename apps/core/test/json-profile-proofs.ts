@@ -26,9 +26,18 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import { allEvents } from "./audit-events.ts";
+import {
+  consentCode,
+  graphAttachmentReadsUrl,
+  graphAttachmentUrl,
+} from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { liveStatus, runInstance, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
-import { unique } from "./sign-in.ts";
+import { acmeTenant } from "./sign-in-config.ts";
+import { routed, signedInApi, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // The Open Workflow JSON profile proved end to end (GRA-1132, spec 13.10):
 // each task kind and named call that needs no outside system, in a
@@ -279,6 +288,88 @@ const jobEvents = async (admin: Identity): Promise<string> => {
   return contract;
 };
 
+/** The model the organization chose, the one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+/** The calls run `runId` made of `call`, by outcome, as the audit log has them. */
+const receiptsOf = async (runId: string, call: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target, detail }) =>
+        action === "workflow.run.called" &&
+        target?.id === runId &&
+        detail?.call === call
+    )
+    .map(({ detail }) => detail?.outcome);
+};
+
+type Idp = ReturnType<typeof mockIdp>;
+
+/** Someone signed in through the identity provider, as core takes them. */
+const signedIn = async (idp: Idp, role: "admin" | "builder") => {
+  const session = await signedInApi(idp, role);
+  const identity: Identity = {
+    userId: session.userId,
+    email: z.string().parse(session.person.email),
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+  return { session, identity };
+};
+
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
+
+/** The outside systems connect reaches (test/connect-providers.ts). */
+const providers = (): Fetcher => {
+  const fetcher = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(fetcher)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  return fetcher;
+};
+
+/**
+ * A shared Microsoft 365 mailbox `admin` connects through connect's own
+ * consent flow, as `subject`: its connection's ID and the mailbox.
+ */
+const connectShared = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  subject: string
+) => {
+  const { url } = await admin.api.connections.start({
+    provider: "microsoft",
+    scope: "shared",
+  });
+  const authorization = new URL(url);
+  const query = new URLSearchParams({
+    code: consentCode(authorization, acmeTenant, subject),
+    state: authorization.searchParams.get("state") ?? "",
+  });
+  await routed(`/api/connections/callback?${query.toString()}`, {
+    headers: { cookie: admin.session },
+  });
+  const listed = await admin.api.connections.list();
+  const connection = listed.find(
+    ({ accountName }) => accountName?.startsWith(`${subject}@`) === true
+  );
+  if (typeof connection?.accountName !== "string") {
+    throw new TypeError("Expected the shared connection");
+  }
+  return { id: connection.id, mailbox: connection.accountName };
+};
+
+/** A JSON Schema text of connect's, as the catalog's envelope text for it. */
+const enveloped = (text: string): string =>
+  JSON.stringify({
+    format: "json",
+    document: z.unknown().parse(JSON.parse(text)),
+  });
+
 /** The proofs, where they run (Cloudflare's runtime, or plain workerd). */
 export const profileProofs = (where: string): void => {
   describe(
@@ -287,6 +378,10 @@ export const profileProofs = (where: string): void => {
       timeout: 180_000,
     },
     () => {
+      // The identity provider people sign in through, faked as the outside
+      // system it is.
+      const idp = mockIdp();
+
       it("set: answers its value as the run's output", async () => {
         const by = await person("builder");
         const workflow = await published(by, {
@@ -691,6 +786,188 @@ export const profileProofs = (where: string): void => {
           status: "completed",
           deadline: startedAt + 3000,
           slept: true,
+        });
+      });
+
+      it("grasp.model: asks the provider once for the task's structured output, and nothing again after a restart", async () => {
+        const admin = await person("admin");
+        const by = await person("builder");
+        const contract = `summary-${unique()}`;
+        await publishCatalogContract(env, admin, {
+          key: contract,
+          kind: "model",
+        });
+        const workflow = await published(by, {
+          bindings: { summary: { kind: "model", contract } },
+          do: [
+            {
+              greet: {
+                call: "grasp.model",
+                with: {
+                  binding: "summary",
+                  instructions: "Greet them.",
+                  input: { who: "${ $workflow.input.who }" },
+                  outputSchema: objectSchema({ line: { type: "string" } }),
+                },
+                export: { as: "${ {line: .line} }" },
+              },
+            },
+            { pause: { wait: "PT2S" } },
+            { finish: { set: { status: "${ $context.line }" } } },
+          ],
+        });
+        // The provider behind connect, the one outside system here: the
+        // model chosen before the binding to it is approved.
+        const provider = await fakeProviderFor([allowedModel], {
+          text: '{"line":"Hello Ada"}',
+          inputTokens: 100,
+          outputTokens: 20,
+        });
+        await approveWorkflowBinding(env, admin, workflow.id, {
+          alias: "summary",
+          target: { kind: "model", model: allowedModel },
+          reviewed: { version: 1 },
+        });
+        const runId = await started(by, workflow.id);
+        await restarted(runId);
+        const run = await ended(by, workflow.id, runId);
+        expect({
+          end: endOf(run),
+          requests: provider.requests.length,
+          receipts: await receiptsOf(runId, "grasp.model"),
+        }).toStrictEqual({
+          end: { status: "completed", output: { status: "Hello Ada" } },
+          requests: 1,
+          receipts: ["started", "done"],
+        });
+      });
+
+      it("grasp.connector: calls a native connector through connect once, its provider answering, and nothing again after a restart", async () => {
+        const admin = await signedIn(idp, "admin");
+        const builder = await signedIn(idp, "builder");
+        const { id: connectionId, mailbox } = await connectShared(
+          admin.session,
+          `proof-${unique()}`
+        );
+        // The operation's schemas, exactly as connect serves them.
+        const served = await env.CONNECT.connectorContract({
+          contract: "microsoft-365.mail@1",
+          connectionId,
+        });
+        const operation = Object.values(served.actions).find(
+          (each) => each.tool === "mail.readAttachment"
+        );
+        if (operation === undefined) {
+          throw new Error("Expected mail.readAttachment in the contract");
+        }
+        const key = `mail-${unique()}`;
+        await publishCatalogContract(env, admin.identity, {
+          key,
+          kind: "connector",
+          operations: {
+            "mail.readAttachment": {
+              input: enveloped(operation.input),
+              output: enveloped(operation.output),
+              readOnly: true,
+              // As its connector declares it: a read whose content an
+              // action may keep as a file of its run (GRA-886).
+              ...(operation.answersFile === true ? { answersFile: true } : {}),
+            },
+          },
+        });
+        const workflow = await published(builder.identity, {
+          bindings: { mail: { kind: "connector", contract: key } },
+          input: {
+            mailbox: { type: "string" },
+            message: { type: "string" },
+            attachment: { type: "string" },
+          },
+          do: [
+            {
+              read: {
+                call: "grasp.connector",
+                with: {
+                  binding: "mail",
+                  operation: "mail.readAttachment",
+                  arguments: {
+                    mailbox: "${ $workflow.input.mailbox }",
+                    message: "${ $workflow.input.message }",
+                    attachment: "${ $workflow.input.attachment }",
+                    as: "text",
+                  },
+                },
+                export: { as: "${ {read: .content} }" },
+              },
+            },
+            { pause: { wait: "PT2S" } },
+            { finish: { set: { status: "${ $context.read }" } } },
+          ],
+        });
+        const asked = await requestPermission(
+          env,
+          builder.identity,
+          {
+            subject: { type: "workflow", workflowId: workflow.id },
+            object: { type: "connection", connectionId },
+            actions: ["mail.readAttachment"],
+            binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+          },
+          rolesOf(builder.identity)
+        );
+        await grantPermission(env, admin.identity, asked.id, {
+          version: null,
+        });
+        await approveWorkflowBinding(env, admin.identity, workflow.id, {
+          alias: "mail",
+          target: {
+            kind: "connector",
+            permissionId: asked.id,
+            contract: "microsoft-365.mail@1",
+          },
+          reviewed: { version: 1 },
+        });
+        // Microsoft Graph, the one outside system here, holds the attachment.
+        await providers().fetch(graphAttachmentUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            mailbox,
+            message: "m1",
+            id: "a1",
+            name: "notes.txt",
+            contentType: "text/plain",
+            contentBytes: btoa("due 2026-11-01"),
+          }),
+        });
+        const runId = await started(builder.identity, workflow.id, {
+          mailbox,
+          message: "m1",
+          attachment: "a1",
+        });
+        await restarted(runId);
+        const run = await ended(builder.identity, workflow.id, runId);
+        const events = await allEvents();
+        const calls = events.filter(
+          ({ action, detail }) =>
+            action === "connection.call" && detail?.run === runId
+        );
+        // What left the platform: Graph handed out the content once.
+        const graph = await providers().fetch(
+          `${graphAttachmentReadsUrl}?${new URLSearchParams({ mailbox, message: "m1", id: "a1" }).toString()}`
+        );
+        const { reads } = z
+          .object({ reads: z.number() })
+          .parse(await graph.json());
+        expect({
+          end: endOf(run),
+          receipts: await receiptsOf(runId, "grasp.connector"),
+          // Connect's own record of the call: once.
+          calls: calls.length,
+          reads,
+        }).toStrictEqual({
+          end: { status: "completed", output: { status: "due 2026-11-01" } },
+          receipts: ["started", "done"],
+          calls: 1,
+          reads: 1,
         });
       });
 
