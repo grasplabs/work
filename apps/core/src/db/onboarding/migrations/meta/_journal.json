@@ -225,6 +225,13 @@
       "when": 1793683241412,
       "tag": "0031_drop_staff_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1793683259433,
+      "tag": "0032_drop_unread_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,7 @@ import m0028 from './0028_more_voices.sql';
 import m0029 from './0029_document_checks.sql';
 import m0030 from './0030_link_erased.sql';
 import m0031 from './0031_drop_staff_notes.sql';
+import m0032 from './0032_drop_unread_tables.sql';
 
   export default {
     journal,
@@ -66,7 +67,8 @@ m0027,
 m0028,
 m0029,
 m0030,
-m0031
+m0031,
+m0032
     }
   }
   

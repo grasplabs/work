@@ -300,7 +300,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.readbacks": { erased: "interview" },
   "onboarding.approvals": { erased: "interview" },
   "onboarding.interview_states": { erased: "interview" },
-  "onboarding.interview_texts": { erased: "interview" },
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
@@ -319,7 +318,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.audit_outbox": {
     kept: "audit events on their way to the log (D2)",
   },
-  "onboarding.answer_waits": noPerson,
   "onboarding.brain_teams": noPerson,
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
@@ -585,7 +583,6 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
-  "onboarding.interview_texts": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
   "onboarding.links": ["person"],

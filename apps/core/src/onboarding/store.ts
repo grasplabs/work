@@ -123,7 +123,6 @@ import {
   drawnWorks,
   events,
   interviewStates,
-  interviewTexts,
   interviewSettings,
   interviews,
   linesToForget,
@@ -6819,8 +6818,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Removes someone's interview, in the transaction it is called in: what
-   * they said and agreed to, where it stood, the texts it was held with,
-   * and every drawing it was in (`#forgetDrawings`). From then on nothing
+   * they said and agreed to, where it stood, the text it last ran on, and
+   * every drawing it was in (`#forgetDrawings`). From then on nothing
    * they agreed to counts (`#agreedAt` is null), which is how the brain's
    * records resting on them are found (`#toPurge`). Returns what was said
    * in it, as its lines may have been kept.
@@ -6829,13 +6828,6 @@ export class Onboarding extends DurableObject<Env> {
     const said = this.#saidIn(person);
     this.#forgetDrawings(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
-    // Nothing writes the texts an interview was held with any more; what
-    // the release before kept of them goes with the interview until the
-    // table is dropped.
-    this.#db
-      .delete(interviewTexts)
-      .where(eq(interviewTexts.person, person))
-      .run();
     this.#db
       .delete(interviewStates)
       .where(eq(interviewStates.person, person))

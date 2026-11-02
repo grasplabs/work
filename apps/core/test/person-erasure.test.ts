@@ -1086,9 +1086,8 @@ describe("erasing a person", () => {
     );
     const before = await sessionWith(theirSecret);
     await onList(
-      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'what they said', ?)",
-      theirs,
-      new Date().toISOString()
+      "INSERT INTO interview_settings (person, mark, interviewer, locale) VALUES (?, 'what they heard', 'stephen', 'en')",
+      theirs
     );
     // A reminder to them, still to go, as the onboarding queues one.
     const queue = async (id: string): Promise<void> => {
@@ -1115,9 +1114,9 @@ describe("erasing a person", () => {
 
     await admin.api.members.erase(person.userId, String(person.person.name));
 
-    const textsOf = async (id: string) => {
+    const settingsOf = async (id: string) => {
       const rows = await onList(
-        "SELECT person FROM interview_texts WHERE person = ?",
+        "SELECT person FROM interview_settings WHERE person = ?",
         id
       );
       return rows.length;
@@ -1145,7 +1144,7 @@ describe("erasing a person", () => {
       // Their old link opens nothing any more, so nothing new is saved.
       after: await sessionWith(theirSecret),
       other: await sessionWith(otherSecret),
-      theirTexts: await textsOf(theirs),
+      theirSettings: await settingsOf(theirs),
       theirEntry: await listed(theirs),
       otherEntry: await listed(others),
       theirMail: await queuedFor(theirs),
@@ -1156,7 +1155,7 @@ describe("erasing a person", () => {
       before: "open",
       after: "interview.link_invalid",
       other: "open",
-      theirTexts: 0,
+      theirSettings: 0,
       // Their entry is the company's: it stays, for an admin to remove.
       theirEntry: 1,
       otherEntry: 1,
@@ -1498,9 +1497,8 @@ describe("erasing a person", () => {
       String(person.person.email)
     );
     await onList(
-      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'the new owner said', ?)",
-      theirs,
-      new Date().toISOString()
+      "INSERT INTO interview_settings (person, mark, interviewer, locale) VALUES (?, 'what the new owner heard', 'stephen', 'en')",
+      theirs
     );
     // The address released and a link sent to the entry again while the
     // erasure ran: sent after the erasure was asked for.
@@ -1515,15 +1513,15 @@ describe("erasing a person", () => {
       String(person.person.name)
     );
 
-    const texts = await onList(
-      "SELECT person FROM interview_texts WHERE person = ?",
+    const settings = await onList(
+      "SELECT person FROM interview_settings WHERE person = ?",
       theirs
     );
     expect({
       interview: erased.areas.find(({ area }) => area === "interview")?.state,
-      texts: texts.length,
+      settings: settings.length,
       link: await sessionWith(theirSecret),
-    }).toStrictEqual({ interview: "complete", texts: 1, link: "open" });
+    }).toStrictEqual({ interview: "complete", settings: 1, link: "open" });
   });
 
   it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications, teams, and what they asked Stephen", async () => {

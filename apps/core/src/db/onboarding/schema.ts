@@ -265,24 +265,6 @@ export const interviewStates = sqliteTable("interview_states", {
 });
 
 /**
- * The interviewer's texts each interview was held with, by their mark
- * (onboarding/interviewer-text.ts), and when each first spoke in it: so
- * staff, and the lab, know which Stephen they read. Gone with what was said.
- * No longer written, as nothing reads it: it stays while the release
- * before still writes it (expand, then contract), and goes with the
- * interview until a later release drops it.
- */
-export const interviewTexts = sqliteTable(
-  "interview_texts",
-  {
-    person: text().notNull(),
-    mark: text().notNull(),
-    at: text().notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.person, table.mark] })]
-);
-
-/**
  * Everyone ever counted in the admin's numbers (`teamCounts`), once: the
  * team they were asked in, and whether their talking was counted. Kept when
  * they leave the roster, so taking someone off and on again can't count
@@ -565,24 +547,6 @@ export const interviewSettings = sqliteTable("interview_settings", {
   interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
   locale: text().notNull(),
 });
-
-/**
- * How long people waited for Stephen's voice, from the end of what they
- * said to his first sound, as their page measured it: by day, how many
- * answers took up to each tenth of a second (`upTo`, in ms). Whose
- * answers they were isn't kept. No longer written, as nothing reads it: it
- * stays while the release before still writes it (expand, then contract),
- * until a later release drops it.
- */
-export const answerWaits = sqliteTable(
-  "answer_waits",
-  {
-    day: text().notNull(),
-    upTo: integer("up_to").notNull(),
-    answers: integer().notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.day, table.upTo] })]
-);
 
 /**
  * Audit events of changes here, each stored in the same transaction as its
