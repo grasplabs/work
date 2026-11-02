@@ -21,6 +21,7 @@ import {
   detailIssues,
   GraspError,
   issueDetails,
+  receiptLinkOf,
   settlesSubmission,
 } from "./client-error.ts";
 import { writeDraft } from "./form-drafts.ts";
@@ -136,6 +137,20 @@ export interface FormFailure {
   readonly message: string;
   readonly category: GraspError["category"];
 }
+
+/**
+ * Whether a resend that failed with `error` may not have run (a sign-out,
+ * the request budget, a busy sandbox), so its outcome is as unknown as it
+ * was: kept, key and all, so the next submit sends it again rather than
+ * anew, by the same rule the session client keeps the key's person by.
+ * Not once someone else signed in: then it was the person's before. Nor
+ * once a decision's answer sent again finds it closed (answered, or past
+ * its deadline): a definite end, nothing more to send.
+ */
+const leavesResendUnknown = (error: GraspError): boolean =>
+  error.code !== "auth.principal_changed" &&
+  error.code !== "decision.closed" &&
+  !settlesSubmission(error);
 
 /** What a form shows of its submission, beside its fields' own state. */
 export interface FormStatus {
@@ -317,6 +332,12 @@ interface Submission {
   readonly input: unknown;
   /** The key the session client said it went under, its outcome unknown. */
   readonly key?: string;
+  /**
+   * A local form's call whose outcome is unknown, sent again exactly as
+   * it went (`receiptLinkOf`): a decision's answer, never a fresh one,
+   * and never by asking its callback again.
+   */
+  readonly again?: () => Promise<unknown>;
 }
 
 /** A document's identity and revision, as the SDK binds records by them. */
@@ -1321,7 +1342,9 @@ export class FormBinding {
   async #send(submission: Submission): Promise<unknown> {
     const target = this.#target;
     if (target.kind === "schema") {
-      return await this.#options.onSubmit?.(submission.input);
+      return await (submission.again === undefined
+        ? this.#options.onSubmit?.(submission.input)
+        : submission.again());
     }
     return await target.send(
       submission.input,
@@ -1351,7 +1374,9 @@ export class FormBinding {
     // key the client says it went under: the next submit sends it again
     // under it (see `SubmitPhase`), or the person discards it. A local
     // form's callback has no identity to keep, so its failure is a plain
-    // one.
+    // one, unless it failed with a call's own (`receiptLinkOf`: a
+    // decision's answer, spec 10.7.2): then that call is kept, the fields
+    // locked, and the next submit sends it again, never the callback.
     const key = isPlainObject(error.details)
       ? error.details.idempotencyKey
       : undefined;
@@ -1364,15 +1389,18 @@ export class FormBinding {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;
     }
-    // A resend that may not have run (a sign-out, the request budget, a
-    // busy sandbox) leaves its outcome as unknown as it was: kept, key and
-    // all, so the next submit sends it again rather than anew, by the same
-    // rule the session client keeps the key's person by. Not once someone
-    // else signed in: then it was the person's before.
+    const again =
+      error.category === "uncertain" && this.#target.kind === "schema"
+        ? receiptLinkOf(error)
+        : undefined;
+    if (again !== undefined) {
+      this.#uncertain = { ...submission, again };
+      this.#set({ phase: "uncertain", failure: failureOf(error) });
+      return error;
+    }
     if (
-      submission.key !== undefined &&
-      error.code !== "auth.principal_changed" &&
-      !settlesSubmission(error)
+      (submission.key !== undefined || submission.again !== undefined) &&
+      leavesResendUnknown(error)
     ) {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;

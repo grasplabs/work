@@ -1,10 +1,6 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayRequest } from "./ai-gateway.ts";
 import { setUpBrainCompany } from "./brain-harness.ts";
 import {
   brainRecallArms,
@@ -16,6 +12,8 @@ import {
   brainRecallCasesVersion,
 } from "./fixtures/brain-recall-cases.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { SentRequest } from "./model-provider.ts";
 
 // Experiment E02 (GRA-304) as CI runs it: every case, its three policies
 // each asked with both its inputs over two repeats, through the real Knowledge API, recall, permissions, model
@@ -62,10 +60,10 @@ const wordsOf = (text: string): Set<string> =>
   new Set(text.toLowerCase().match(wordPattern));
 
 /** The stub reranker: the pieces sharing most of the question's words first. */
-const lexicalRanking = (requests: readonly GatewayRequest[]) => {
+const lexicalRanking = (requests: readonly SentRequest[]) => {
   const input = rerankInputOf(requests.at(-1)?.body);
   if (input === undefined) {
-    throw new Error("Only reranks reach this gateway");
+    throw new Error("Only reranks reach this provider");
   }
   const asked = wordsOf(input.question);
   const overlap = (text: string) =>
@@ -87,21 +85,15 @@ let report: Promise<BrainRecallReport> | undefined;
 const run = async (): Promise<BrainRecallReport> => {
   report ??= (async () => {
     const company = await setUpBrainCompany(idp);
-    const gateway = answeringGateway(lexicalRanking);
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-    try {
-      return await runBrainRecallComparison(company, {
-        repeats,
-        measured: false,
-        identity: {
-          model: "stub: lexical overlap",
-          profile: "workerd (Vitest pool), stub reranker",
-        },
-      });
-    } finally {
-      spy.mockRestore();
-    }
+    await answeringProvider(lexicalRanking);
+    return await runBrainRecallComparison(company, {
+      repeats,
+      measured: false,
+      identity: {
+        model: "stub: lexical overlap",
+        profile: "workerd (Vitest pool), stub reranker",
+      },
+    });
   })();
   return await report;
 };

@@ -16,7 +16,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { MessageResponse } from "./message.tsx";
+import { AnswerMarkdown } from "./answer-markdown.tsx";
 
 // An answer's links to notes, against core's Knowledge as the page reaches
 // it over RPC, faked: a note the answer cites opens on its collection's
@@ -65,7 +65,7 @@ const shown = async (
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <MessageResponse cited={cited} sources={sources} text={text} />
+      <AnswerMarkdown cited={cited} sources={sources} text={text} />
     ),
   });
   const collection = createRoute({
@@ -147,7 +147,7 @@ const kinds = (...labels: string[]) =>
     })
   );
 
-describe(MessageResponse, () => {
+describe(AnswerMarkdown, () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

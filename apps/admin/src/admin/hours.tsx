@@ -10,7 +10,7 @@
  * hours, and the section says so; those come with the work.
  */
 import { SectionToCome, useOrganization } from "./organization.tsx";
-import { Panel } from "./parts.tsx";
+import { Section } from "./section.tsx";
 
 /** Why no hours are known yet: the interviews haven't started, are under way, or the work drawn from them isn't read. */
 const whyNone = ({
@@ -37,7 +37,7 @@ export const Hours = () => {
     return <SectionToCome />;
   }
   return (
-    <Panel
+    <Section
       description="They come from the interviews: how many of each piece of work there are, and how long one takes."
       title="No hours known yet"
     >
@@ -48,6 +48,6 @@ export const Hours = () => {
           unread: view.unknown.works,
         })}
       </p>
-    </Panel>
+    </Section>
   );
 };

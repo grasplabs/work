@@ -1,6 +1,8 @@
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import { runsPageSize } from "@grasp-os/shared/workflows";
 import type {
   ListedRun,
+  RunAiProviderWait,
   RunQueue,
   RunStatus,
 } from "@grasp-os/shared/workflows";
@@ -18,7 +20,7 @@ import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatSince } from "../format.ts";
 import { AskToFix } from "./fix-in-chat.tsx";
 
 // Runs as the Workflows page and a workflow's page list them, in the
@@ -102,24 +104,61 @@ const RunStatusDot = ({ status }: { status: RunStatus }) => (
 );
 
 /**
+ * What a run waits for when its AI provider failed a model call, in words:
+ * what the provider showed, by what was seen, and since when. It goes on
+ * by itself once calls work.
+ */
+export const WaitingForAiProvider = ({ wait }: { wait: RunAiProviderWait }) => {
+  const { t } = useLingui();
+  const since = formatSince(wait.since);
+  const provider = aiProviderIdSchema.safeParse(wait.provider);
+  const label = provider.success
+    ? aiProviders[provider.data].label
+    : wait.provider;
+  switch (wait.trouble) {
+    case "refused": {
+      return t`Waiting for ${ph({ label })}, which is refusing the key, since ${ph({ since })}. It goes on by itself once calls work.`;
+    }
+    case "not_answering": {
+      return t`Waiting for ${ph({ label })}, which isn't answering, since ${ph({ since })}. It goes on by itself once calls work.`;
+    }
+    case "limiting": {
+      return t`Waiting for ${ph({ label })}, which is limiting requests, since ${ph({ since })}. It goes on by itself once calls work.`;
+    }
+    default: {
+      return wait.trouble satisfies never;
+    }
+  }
+};
+
+/**
  * A run's status with its dot, as the prototype's `RunResult`: green once
  * done, the attention colour where someone is needed (waiting, failed),
  * ink while it goes on (queued included) or after it stopped. A queued
- * run also says which share it waits for and when it tries again.
+ * run also says which share it waits for and when it tries again, or
+ * since when it waits for a working AI provider key.
  */
 export const RunResult = ({
   status,
   queued,
+  aiProvider,
 }: {
   status: RunStatus;
   /** While it is queued: the share it waits for, and when it asks again. */
   queued?: RunQueue | undefined;
+  /** While it is queued for a working AI provider key: since when. */
+  aiProvider?: RunAiProviderWait | undefined;
 }) => (
   <span className="inline-flex flex-col items-start gap-0.5">
     <RunStatusDot status={status} />
     {status === "queued" && queued !== undefined ? (
       <span className="text-muted-foreground text-xs">
         <QueuedFor queued={queued} />
+      </span>
+    ) : null}
+    {status === "queued" && aiProvider !== undefined ? (
+      <span className="text-muted-foreground text-xs">
+        <WaitingForAiProvider wait={aiProvider} />
       </span>
     ) : null}
   </span>
@@ -142,7 +181,11 @@ const RunOutcome = ({
   const { t } = useLingui();
   return (
     <div className="flex flex-col items-start gap-1">
-      <RunResult queued={run.queued} status={run.status} />
+      <RunResult
+        aiProvider={run.aiProvider}
+        queued={run.queued}
+        status={run.status}
+      />
       {run.decision === undefined ? null : (
         <Link
           className="underline-offset-4 hover:underline"

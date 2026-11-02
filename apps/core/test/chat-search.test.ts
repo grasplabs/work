@@ -8,10 +8,10 @@ import { saidOf, snippetOf } from "../src/chat-search.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { searchHitsMax } from "../src/workspace.ts";
-import { model, pointAtGateway, says, transcript } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { Answer } from "./ai-gateway.ts";
+import { model, says, transcript } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { Answer } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Finding a chat by what was said in it, through `/rpc` as the ⌘K window
@@ -40,7 +40,7 @@ const ask = async (
   text: string,
   answer: Answer
 ) => {
-  await pointAtGateway(objectOf(someone), fakeGateway(answer));
+  await fakeProvider(answer);
   await someone.chats.send(chatId, { text, model });
   await vi.waitFor(
     async () => {

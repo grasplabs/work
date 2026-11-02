@@ -112,48 +112,14 @@ export const teamNamed = (
 const isKnown = (work: WorkEvidence) =>
   work.state === "complete" || work.state === "variants";
 
-/** Whether a sentence names an app, as a word of its own. */
-const names = (sentence: string, app: string) =>
-  new RegExp(
-    String.raw`(^|[^\p{L}\p{N}])${escaped(app)}($|[^\p{L}\p{N}])`,
-    "iu"
-  ).test(sentence);
-
-/**
- * The apps a piece of work is done in: as the people who do it named them for each step, at an
- * organization that is onboarded for real; otherwise the apps the company connected that its own
- * sentences name.
- */
-const toolsOf = (view: OrgView, work: Work): string[] => {
-  const named = view.org.real?.tools.get(work.id);
-  if (named) {
-    return named;
-  }
-  const said = [
-    ...work.steps,
-    work.starts,
-    work.own ?? "",
-    work.ai ?? "",
-    work.decides ?? "",
-  ].join(" ");
-  return view.org.integrations
-    .filter(
-      (each) =>
-        each.kind !== "signIn" &&
-        each.kind !== "pulse" &&
-        names(said, each.name)
-    )
-    .map((each) => each.name);
-};
+/** The apps a piece of work is done in, as the people who do it named them for each step. */
+const toolsOf = (view: OrgView, work: Work): string[] =>
+  view.org.real.tools.get(work.id) ?? [];
 
 export const organizationOf = (view: OrgView): Organization => {
   const { org } = view;
-  const doing = (work: Work, person: PersonView) => {
-    const named = org.real?.doers.get(work.id);
-    return named
-      ? named.includes(person.person.id)
-      : person.person.work === work.id;
-  };
+  const doing = (work: Work, person: PersonView) =>
+    org.real.doers.get(work.id)?.includes(person.person.id) === true;
   const handoffs: Handoff[] = view.works.flatMap((work) => {
     const text = work.work.next.trim();
     return text

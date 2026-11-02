@@ -23,7 +23,7 @@ const unknownSeconds = ((): number => {
   return sorted[Math.floor(sorted.length / 2)] ?? 1;
 })();
 
-const keyOf = (spec: TestSpecification): string =>
+export const keyOf = (spec: TestSpecification): string =>
   `${spec.project.name} ${path.relative(spec.project.config.root, spec.moduleId)}`;
 
 const secondsOf = (spec: TestSpecification): number =>
@@ -35,6 +35,16 @@ const timed = (spec: TestSpecification): TimedFile => ({
   seconds: durations[keyOf(spec)],
 });
 
+/** `spec` as the split between shards sees it (scripts/test-shards.ts). */
+export const shardFileOf = (spec: TestSpecification): ShardFile => ({
+  key: keyOf(spec),
+  project: spec.project.name,
+  group: spec.project.config.sequence.groupOrder,
+  // `fileParallelism: false` resolves to one worker.
+  serial: spec.project.config.maxWorkers === 1,
+  seconds: secondsOf(spec),
+});
+
 export default class DurationSequencer extends BaseSequencer {
   override async shard(
     files: TestSpecification[]
@@ -44,17 +54,7 @@ export default class DurationSequencer extends BaseSequencer {
       return await super.shard(files);
     }
     const specs = new Map(files.map((spec) => [keyOf(spec), spec]));
-    const split = splitIntoShards(
-      files.map((spec): ShardFile => ({
-        key: keyOf(spec),
-        project: spec.project.name,
-        group: spec.project.config.sequence.groupOrder,
-        // `fileParallelism: false` resolves to one worker.
-        serial: spec.project.config.maxWorkers === 1,
-        seconds: secondsOf(spec),
-      })),
-      shard.count
-    );
+    const split = splitIntoShards(files.map(shardFileOf), shard.count);
     return (split[shard.index - 1] ?? []).flatMap(({ key }) => {
       const spec = specs.get(key);
       return spec === undefined ? [] : [spec];

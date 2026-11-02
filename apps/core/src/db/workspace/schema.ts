@@ -2,7 +2,7 @@
  * Workspace Durable Object SQLite: chats, agent state, and its person's
  * dashboard and email preferences. Migrates itself on first wake-up after a release.
  */
-import type { ChatChannel } from "@grasp-os/shared/chat";
+import type { ChatChannel, ChatFileType } from "@grasp-os/shared/chat";
 import type { DashboardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
 import type { CustomWidgetId } from "@grasp-os/shared/widgets";
@@ -454,6 +454,32 @@ export const chatAttachments = sqliteTable(
 );
 
 /**
+ * Files the person attached to the chat's questions (`chats.attachFile`):
+ * the text core read from each, never the file itself, which nothing
+ * keeps. `messageId` is the question that carried it, null while it waits
+ * for one. Its agent reads the text through `env.chat.readFile`, as data.
+ * Deleted with the chat.
+ */
+export const chatFiles = sqliteTable(
+  "chat_files",
+  {
+    id: text().primaryKey(),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    messageId: integer("message_id").references(() => chatMessages.id),
+    name: text().notNull(),
+    type: text().$type<ChatFileType>().notNull(),
+    /** The file's size, in bytes. */
+    bytes: integer().notNull(),
+    text: text().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("chat_files_chat").on(table.chatId, table.createdAt)]
+);
+
+/**
  * Every code run of a chat's agent, as evidence of what ran and how it
  * ended: its run ID (the lease its stubs answer to, random and never
  * reused), the tool call it ran for, the SHA-256 and length of its module
@@ -654,20 +680,6 @@ export const customWidgets = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.personId, table.id] })]
 );
-
-/**
- * A person's own choice of the emails Grasp sends them, once they changed
- * it: a row for each person who saved theirs; one never saved gets every
- * email (`defaultEmailPreferences`). Kept in their own Workspace object,
- * as their dashboard is.
- */
-export const emailPreferences = sqliteTable("email_preferences", {
-  personId: text("person_id").primaryKey(),
-  needsYou: integer("needs_you", { mode: "boolean" }).notNull(),
-  weeklySummary: integer("weekly_summary", { mode: "boolean" }).notNull(),
-  billingProblems: integer("billing_problems", { mode: "boolean" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
 
 /**
  * The draft release a chat's preview of its draft of an App runs

@@ -4,12 +4,21 @@ import * as React from "react";
 
 // A table with more columns than its room moves sideways inside itself, never the page. The
 // side with more columns behind it fades (`watchEnds` marks it), since nothing else would say so.
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+// `card`: the table stands in a card of its own, as the prototype's lists do.
+function Table({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"table"> & { variant?: "default" | "card" }) {
   return (
     <div
       data-slot="table-container"
+      data-variant={variant}
       ref={watchEnds}
-      className="relative w-full overflow-x-auto data-more-end:mask-r-from-[calc(100%-2.5rem)] data-more-start:mask-l-from-[calc(100%-2.5rem)]"
+      className={cn(
+        "relative w-full overflow-x-auto data-more-end:mask-r-from-[calc(100%-2.5rem)] data-more-start:mask-l-from-[calc(100%-2.5rem)]",
+        variant === "card" && "bg-card rounded-xl border"
+      )}
     >
       <table
         data-slot="table"

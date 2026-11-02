@@ -87,7 +87,7 @@ export const DrawerEdge = ({
           event.currentTarget.releasePointerCapture(event.pointerId);
           onDragging(false);
           onClose();
-          setDockDrawerWidth(dockDrawer.normal);
+          setDockDrawerWidth(settledDrawerWidth(dockDrawer.normal, widest));
           return;
         }
         dragged.current = next;

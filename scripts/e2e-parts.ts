@@ -1,6 +1,6 @@
 // Which e2e files a CI part runs, of the parallel part's (playwright.config.ts):
 //
-//   vp run e2e $(node scripts/e2e-parts.ts 3/8)
+//   vp run e2e $(node scripts/e2e-parts.ts 3/4)
 //
 // Split by how long each file takes (scripts/e2e-durations.json), as the
 // test shards are (scripts/test-shards.ts). Playwright's own `--shard`

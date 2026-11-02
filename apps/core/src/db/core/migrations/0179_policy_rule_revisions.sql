@@ -1,0 +1,1 @@
+ALTER TABLE `policy_rules` ADD `revision` integer DEFAULT 1 NOT NULL;

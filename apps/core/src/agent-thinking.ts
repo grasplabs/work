@@ -11,6 +11,8 @@ import {
 } from "@grasp-os/shared/thinking";
 import type { ThinkingNoteKind, ThinkingStep } from "@grasp-os/shared/thinking";
 
+import { showThinkingName } from "./agent-messages.ts";
+
 // Grasp's thinking, shown in the brain while it answers (GRA-1274): the
 // chat agent's `show_thinking` tool. A step says in a short sentence what
 // Grasp does, names what it looks at, and the shape the brain takes
@@ -25,8 +27,6 @@ import type { ThinkingNoteKind, ThinkingStep } from "@grasp-os/shared/thinking";
 // later; the model is told at once, so the answer never waits on the
 // picture. Only for a chat's agent that holds the brain permission, in a
 // person's own chat (workspace.ts).
-
-export const showThinkingName = "show_thinking";
 
 /** The brain as a step may name it: what the asker may read of it. */
 export interface ThinkingBrain {

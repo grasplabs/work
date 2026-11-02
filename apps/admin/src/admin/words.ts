@@ -86,6 +86,17 @@ const wholeNumber = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 /** A fee or a value: always in whole euros. */
 export const euros = (amount: number): string => wholeEuros.format(amount);
 
+const euroFractions = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 3,
+});
+
+/** A price per unit in euros: to a tenth of a cent, as a minute of voice costs less than a cent or two. */
+export const euroRate = (amount: number): string =>
+  amount >= 10 ? euros(amount) : euroFractions.format(amount);
+
 /** An amount in euros: to the cent while it is small, in whole euros from ten on. */
 export const euro = (amount: number): string =>
   amount >= 10 ? euros(amount) : euroCents.format(amount);
@@ -104,6 +115,22 @@ export const money = (amount: number, currency: string): string => {
     return `${amount.toFixed(2)} ${currency.toUpperCase()}`;
   }
 };
+
+const dollarCents = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** The least amount said to the cent. */
+const cent = 0.01;
+
+/** An amount in US dollars, to the cent: "under $0.01" for less than a cent but not nothing. */
+export const dollars = (amount: number): string =>
+  amount > 0 && amount < cent
+    ? `under ${dollarCents.format(cent)}`
+    : dollarCents.format(amount);
 
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
@@ -226,9 +253,7 @@ const researchLine = (view: OrgView): string => {
       ? "Done. Two sources disagree"
       : "Done";
   }
-  return org.made === true
-    ? "Not run for an organization made here"
-    : "Not started";
+  return "Not started";
 };
 
 const agreedLine = (view: OrgView): string => {
@@ -339,9 +364,6 @@ export const needLine = (need: Need, view: OrgView): string => {
     case "ask": {
       const count = need.fields.length;
       return `The first conversation left ${count} ${plural(count, "thing", "things")} open. Ask the sponsor.`;
-    }
-    case "research": {
-      return "Stephen has read the first conversation. Start the research.";
     }
     case "conflict": {
       return "Two sources disagree about the company. The company’s own account wins, so this goes to its admin.";

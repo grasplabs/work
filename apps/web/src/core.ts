@@ -1,8 +1,3 @@
-// Routes split into chunks of their own share this module, so the bundler
-// moves it, with Zod and the shared schemas, into a chunk that runs before
-// main.tsx does. Importing this first keeps Zod jitless before any of them
-// builds a schema, whichever chunk they land in.
-import "./zod-jitless.ts";
 import { internalErrors } from "@grasp-os/shared/errors";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { t } from "@lingui/core/macro";
@@ -120,6 +115,21 @@ export const reconnectDelay = (attempt: number): number =>
   Math.min(reconnectCeilingMs.most, reconnectCeilingMs.first * 2 ** attempt);
 
 /**
+ * Whether `error` is a connection to core that failed or broke, not an
+ * answer from core: it has no string `code`. A socket that drops rejects
+ * what was on its way with its own words ("Peer closed WebSocket: 0"),
+ * which are nobody's to read; everything core says carries a code.
+ */
+export const isConnectionFailure = (error: unknown): boolean => {
+  const coded =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string";
+  return !coded;
+};
+
+/**
  * Whether `error` may pass when core is asked again: core out of reach or
  * failing, never a refusal it meant. Told by the error's shape alone, so a
  * code from a family this chunk hasn't loaded still counts as an answer.
@@ -129,17 +139,8 @@ export const reconnectDelay = (attempt: number): number =>
  * `internal.unexpected`, such as a busy database. Any other coded error
  * (nobody signed in, not found, forbidden) is core's answer.
  */
-export const isTransient = (error: unknown): boolean => {
-  if (internalErrors.codeOf(error) !== undefined) {
-    return true;
-  }
-  const coded =
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string";
-  return !coded;
-};
+export const isTransient = (error: unknown): boolean =>
+  internalErrors.codeOf(error) !== undefined || isConnectionFailure(error);
 
 /**
  * Runs `attempt`, and again after each of `delaysMs` for as long as it

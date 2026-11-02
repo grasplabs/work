@@ -9,6 +9,8 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
 
+import { localePreload } from "./locale-preload.ts";
+
 // Lingui looks for its config from the working directory, which is the repo
 // root when Vite+ runs this build, so both of its plugins get this app's.
 const linguiConfigPath = fileURLToPath(
@@ -21,11 +23,15 @@ export default defineConfig({
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
-      // Only a page itself is a file of its own. What stands in its place
-      // (failed, not found, loading) comes with the app: when a page's file
-      // can't be fetched, as after a new release, the error that says so
-      // must not need a file of its own too.
-      codeSplittingOptions: { defaultBehavior: [["component"]] },
+      // Only a page itself is a file of its own: its component and its
+      // loader together, so what the loader reads with comes with the page,
+      // not with the app, in one file. What stands in its place (failed,
+      // not found, loading) comes with the app: when a page's file can't be
+      // fetched, as after a new release, the error that says so must not
+      // need a file of its own too. What a route checks before it loads
+      // (`validateSearch`, `beforeLoad`) comes with the app too, so it
+      // imports only small modules of plain checks.
+      codeSplittingOptions: { defaultBehavior: [["loader", "component"]] },
     }),
     react(),
     babel({
@@ -42,6 +48,7 @@ export default defineConfig({
     }),
     // Compiles a `.po` catalog when the page imports it.
     lingui({ configPath: linguiConfigPath }),
+    localePreload(),
     tailwindcss(),
   ],
   define: {
@@ -50,16 +57,6 @@ export default defineConfig({
     "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
       process.env.GITHUB_SHA ?? "local"
     ),
-  },
-  build: {
-    rolldownOptions: {
-      output: {
-        // Modules run in the order they're imported, whichever chunk holds
-        // them: zod-jitless.ts has to run before any module builds a schema,
-        // also when Zod lands in a chunk shared with a lazy route.
-        strictExecutionOrder: true,
-      },
-    },
   },
   test: {
     setupFiles: ["./src/test-setup.ts"],

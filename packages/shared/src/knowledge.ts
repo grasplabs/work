@@ -213,6 +213,23 @@ export interface SkillCollections {
   client: CollectionId | null;
 }
 
+/** Most shared chats `sharedChats` lists, the most recently active first. */
+export const sharedChatsMax = 50;
+
+/**
+ * A chat others share that the person is in, which a memory record can be
+ * published into (`memoriesPublish`, scope `session`): Grasp knows
+ * everyone in it. Named by who else is in it, as platforms give Grasp no
+ * name for a channel.
+ */
+export interface SharedChat {
+  chatId: string;
+  /** The names of the others in it, as the organization knows them. */
+  others: string[];
+  /** When Grasp last saw who is in it (ISO 8601). */
+  updatedAt: string;
+}
+
 /** A collection, as the catalog lists it. */
 export interface CatalogCollection {
   id: CollectionId;
@@ -285,6 +302,32 @@ export interface KnowledgeTools {
  * session and what the person may see and change, on the server, and
  * every read of documents is recorded in the audit log.
  */
+/** How many entity match proposals to show. */
+export interface EntityMatchesOptions {
+  limit?: number;
+}
+
+/** Entities of different collections that may be one, on their name alone. */
+export interface EntityMatch {
+  kind: string;
+  name: string;
+  basis: "name";
+  entities: { id: string; collectionIds: string[]; sources: number }[];
+}
+
+/** A decision on two entities, and the evidence for `same`. */
+export interface EntityMatchDecisionInput {
+  entities: [string, string];
+  decision: "same" | "different";
+  evidence?: { documentId: string; version: number };
+}
+
+/** A decision as recorded. */
+export interface EntityMatchDecision {
+  entities: [string, string];
+  decision: "same" | "different";
+}
+
 export interface KnowledgeApi {
   /** The collections the person may read. */
   listCollections: () => Promise<Collection[]>;
@@ -379,6 +422,21 @@ export interface KnowledgeApi {
     expectedRevision: number;
   }) => Promise<void>;
   /**
+   * Entities of different collections the person reads that may be one
+   * (GRA-1080): of one kind and name, worked out from what they read now,
+   * never kept, and never merged. A collection they can't read is never a
+   * side, nor shapes what they see.
+   */
+  entityMatches: (options?: EntityMatchesOptions) => Promise<EntityMatch[]>;
+  /**
+   * Decides whether two entities are one: by a person who reads both
+   * sides, `same` only with a document they read as evidence, audited. It
+   * rewrites no ID, and shows only to readers of both sides.
+   */
+  decideEntityMatch: (
+    input: EntityMatchDecisionInput
+  ) => Promise<EntityMatchDecision>;
+  /**
    * Publishes a record into a team's, the company's or a chat's memory,
    * where the person may (GRA-298): retry-safe, as `remember`.
    */
@@ -386,6 +444,12 @@ export interface KnowledgeApi {
     input: MemoriesPublishInput,
     options: CommandOptions
   ) => Promise<CommandReceipt>;
+  /**
+   * The chats others share that the person is in now and that a record
+   * can be published into: only those Grasp knows everyone in, most
+   * recently active first, at most `sharedChatsMax`.
+   */
+  sharedChats: () => Promise<SharedChat[]>;
   /**
    * Corrects one of the person's own records against the revision read,
    * keeping its history (GRA-298).

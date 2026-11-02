@@ -39,12 +39,16 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { AppAccessRequests } from "../engines/app-access-requests.tsx";
+import { ExportDefinition } from "../engines/app-definition.tsx";
+import { RemoveApp } from "../engines/app-remove.tsx";
 import {
   AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
-import { EngineIcon } from "../engines/engine-icon.tsx";
+import { AppVersions } from "../engines/app-versions.tsx";
+import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
@@ -67,6 +71,7 @@ import {
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
 import { useCore } from "../use-core.ts";
+import { processNames } from "../workflows/business-process.tsx";
 import { listRuns, listWorkflows } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
@@ -504,6 +509,25 @@ const SettingsScreen = ({
   );
 };
 
+/** What the domain is for, after the standard name of the process it serves, if any. */
+const AboutLine = ({ app }: { app: App }) => {
+  const { i18n } = useLingui();
+  const { process, description } = app;
+  const name = process === null ? null : i18n._(processNames[process]);
+  // Not said twice: a domain named after its process.
+  if (name === null || name === app.name) {
+    return description === "" ? null : (
+      <p className="text-muted-foreground">{description}</p>
+    );
+  }
+  return (
+    <p className="text-muted-foreground">
+      <span className="text-foreground/80">{name}</span>
+      {description === "" ? null : ` · ${description}`}
+    </p>
+  );
+};
+
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
   <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -521,7 +545,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     packages,
     surfaces,
   } = Route.useLoaderData();
-  const { tab } = Route.useSearch();
+  const { tab: asked } = Route.useSearch();
   const entry = useRouterState({
     select: ({ location }) => location.state.__TSR_key,
   });
@@ -533,15 +557,24 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     useState<Deferred<DependencyApprovals>>();
   const { app, contents } = page;
   const { version } = contents;
+  // Where it opens, as the prototype's: a business process's domain on
+  // its workflows, where its work is; one made for something else on its
+  // apps, which are what fill it.
+  const first = app.process === null ? "apps" : "workflows";
+  // Versions are for its builders, Grasp staff among them: core lists them
+  // to no one else, so the tab isn't there for a user.
+  const readsVersions = app.role === "builder";
+  const tab = asked === "versions" && !readsVersions ? undefined : asked;
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
       <div className="flex flex-wrap items-start gap-4">
-        <EngineIcon />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {/* The name keeps a width of its own: with no room beside it, the
+            actions go under it rather than squeezing it. */}
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
           <PageHeaderTitle>{app.name}</PageHeaderTitle>
-          {app.description === "" ? null : (
-            <p className="text-muted-foreground">{app.description}</p>
-          )}
+          {/* As the prototype: the standard name of the process it serves
+              opens the line under it, for whoever knows it by that name. */}
+          <AboutLine app={app} />
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
             <StatusBadge status={app.status} />
             <span>
@@ -554,16 +587,20 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
-        {/* On its bar, as the prototype's Publish: for who builds. */}
-        <AppStatusControls app={app} identity={identity} />
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportDefinition app={app} identity={identity} />
+          {/* On its bar, as the prototype's Publish: for who builds. */}
+          <AppStatusControls app={app} identity={identity} />
+          <RemoveApp app={app} identity={identity} />
+        </div>
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
         // The address's tab, again for each entry of the page's history:
         // a navigation to the App's settings opens that tab, whichever the
         // person had chosen on this page since.
-        defaultValue={tab ?? "apps"}
-        key={`${tab ?? "apps"}/${entry ?? ""}`}
+        defaultValue={tab ?? first}
+        key={`${tab ?? first}/${entry ?? ""}`}
         onValueChange={(value) => {
           if (value === "packages") {
             setPackagesRead(
@@ -576,18 +613,27 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           }
         }}
       >
+        {/* The prototype's order: Workflows, Apps, Integrations. */}
         <TabsList variant="line">
-          <TabsTrigger value="apps">
-            <Trans>Apps</Trans>
-            <Count count={contents.screens.length} />
-          </TabsTrigger>
           <TabsTrigger value="workflows">
             <Trans>Workflows</Trans>
             <Count count={contents.workflows.length} />
           </TabsTrigger>
+          <TabsTrigger value="apps">
+            <Trans>Apps</Trans>
+            <Count count={contents.screens.length} />
+          </TabsTrigger>
           {integrations === undefined ? null : (
             <TabsTrigger value="integrations">
               <Trans>Integrations</Trans>
+              {/* Counted once its read is in; nothing while it comes. */}
+              <Await fallback={null} promise={integrations}>
+                {(loaded) =>
+                  loaded.state === "ready" ? (
+                    <Count count={loaded.data.length} />
+                  ) : null
+                }
+              </Await>
             </TabsTrigger>
           )}
           {resources === undefined ? null : (
@@ -600,6 +646,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
+          {readsVersions ? (
+            <TabsTrigger value="versions">
+              <Trans>Versions</Trans>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="workflows">
           <div className="pt-4">
@@ -625,6 +676,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsContent value="integrations">
             <div className="pt-4">
               <Integrations identity={identity} integrations={integrations} />
+              <div className="pt-6">
+                <AppAccessRequests app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}
@@ -639,6 +693,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   />
                 )}
               </Later>
+              <div className="pt-6">
+                <AppWorkflows app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}
@@ -666,6 +723,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </Await>
           </div>
         </TabsContent>
+        {readsVersions ? (
+          <TabsContent value="versions">
+            <div className="pt-4">
+              <AppVersions app={app} identity={identity} />
+            </div>
+          </TabsContent>
+        ) : null}
         <TabsContent value="members">
           <div className="pt-4">
             <Members app={app} identity={identity} members={members} />
@@ -767,8 +831,11 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
   // pass through unchecked.
   validateSearch: (
     search: Record<string, unknown>
-  ): { tab?: "settings" | undefined } => ({
-    tab: search.tab === "settings" ? "settings" : undefined,
+  ): { tab?: "settings" | "versions" | undefined } => ({
+    tab:
+      search.tab === "settings" || search.tab === "versions"
+        ? search.tab
+        : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them. Core lists every

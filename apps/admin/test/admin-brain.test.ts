@@ -69,6 +69,7 @@ const link = (id: string, state: "completed" | "opened") => ({
   openedAt: started,
   remindedAt: null,
   deletedAt: null,
+  failedMail: null,
   state,
 });
 
@@ -145,11 +146,12 @@ describe("an organization's brain", () => {
       html.indexOf('aria-label="The brain in numbers"'),
       html.indexOf("</section>", html.indexOf("The brain in numbers"))
     );
+    // The figure after its label: the kit's key figure (`Stat`).
     const figureOf = (label: string): string => {
       const at = numbers.indexOf(`>${label}</span>`);
       return at === -1
         ? ""
-        : (/<span class="[^"]*\bcol-span-2 row-start-2[^"]*">(?<value>[^<]*)</u.exec(
+        : (/<span data-slot="stat"[^>]*>(?<value>[^<]*)</u.exec(
             numbers.slice(at)
           )?.groups?.value ?? "");
     };

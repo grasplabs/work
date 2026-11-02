@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chainHash } from "../src/audit-chain.ts";
-import { archiveRetentionDays } from "../src/audit-log.ts";
 import { appendStored, oversizedFields } from "./audit-events.ts";
 
 // A fresh log per test; the deployment's own is `auditLog(env)`.
@@ -836,7 +835,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 /**
  * Runs `run` with the clock `days` ahead: the log works out what to purge
- * from its own clock and archive retention (365 days in tests).
+ * from its own clock and archive retention (seven years).
  */
 const inDays = async <T>(days: number, run: () => Promise<T>): Promise<T> => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -848,9 +847,12 @@ const inDays = async <T>(days: number, run: () => Promise<T>): Promise<T> => {
   }
 };
 
+/** Days an event is kept in all, archive included: seven years. */
+const archiveRetentionDays = 7 * 365;
+
 /** Purges as the log would once archive retention has passed. */
 const purgeLater = async (log: Log) =>
-  await inDays(366, async () => await log.purge());
+  await inDays(archiveRetentionDays + 1, async () => await log.purge());
 
 /** Archives what the log holds now, and then a second stretch. */
 const archiveTwoStretches = async (log: Log): Promise<void> => {
@@ -869,7 +871,7 @@ describe("AuditLog purges", () => {
 
     // Not before archive retention has passed.
     await expect(
-      inDays(364, async () => await log.purge())
+      inDays(archiveRetentionDays - 1, async () => await log.purge())
     ).resolves.toBeNull();
     await expect(purgeLater(log)).resolves.toStrictEqual({
       from: 1,
@@ -890,57 +892,6 @@ describe("AuditLog purges", () => {
         },
       },
     ]);
-  });
-
-  it("works out archive retention from deployment config, seven years unless set, and purges nothing on one that is invalid", () => {
-    // Unset: seven years, or the log's own retention when that is longer.
-    expect(archiveRetentionDays({})).toBe(2555);
-    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "3000" })).toBe(3000);
-    // Nor any while unset, if the log's own retention is invalid.
-    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "7" })).toBeUndefined();
-    // Below the floor, above the ceiling, or not whole days: none.
-    for (const days of ["30", "364", "3651", "400.5", "a year"]) {
-      expect(
-        archiveRetentionDays({ AUDIT_ARCHIVE_RETENTION_DAYS: days })
-      ).toBeUndefined();
-    }
-    expect(archiveRetentionDays({ AUDIT_ARCHIVE_RETENTION_DAYS: "730" })).toBe(
-      730
-    );
-  });
-
-  it("refuses an archive retention shorter than retention, as it's an event's total age", () => {
-    const logged = vi.spyOn(console, "error").mockReturnValue();
-    try {
-      // Events would be purged before they were archived.
-      expect(
-        archiveRetentionDays({
-          AUDIT_RETENTION_DAYS: "800",
-          AUDIT_ARCHIVE_RETENTION_DAYS: "700",
-        })
-      ).toBeUndefined();
-      expect(logged).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: "config.invalid",
-          var: "AUDIT_ARCHIVE_RETENTION_DAYS",
-        })
-      );
-    } finally {
-      logged.mockRestore();
-    }
-    expect(
-      archiveRetentionDays({
-        AUDIT_RETENTION_DAYS: "800",
-        AUDIT_ARCHIVE_RETENTION_DAYS: "800",
-      })
-    ).toBe(800);
-    // Nor any while retention itself is invalid.
-    expect(
-      archiveRetentionDays({
-        AUDIT_RETENTION_DAYS: "7",
-        AUDIT_ARCHIVE_RETENTION_DAYS: "730",
-      })
-    ).toBeUndefined();
   });
 
   it("verifies a purged stretch as purged, and the chain across it", async () => {
@@ -1081,7 +1032,7 @@ describe("AuditLog purges", () => {
     await archivedKey(log);
 
     const purged = await inDays(
-      366,
+      archiveRetentionDays + 1,
       async () =>
         await runInDurableObject(
           log,
@@ -1172,5 +1123,101 @@ describe("AuditLog purges", () => {
     await expect(verifyAll(log)).resolves.toMatchObject({
       result: { ok: false, brokenAt: 4, reason: "unlinked" },
     });
+  });
+});
+
+/** The positions and actions of a page's records, newest first. */
+const positions = (page: Awaited<ReturnType<Log["searchArchive"]>>) =>
+  "records" in page
+    ? {
+        records: page.records.map(({ seq, event, verified }) => ({
+          seq,
+          action: event?.action,
+          verified,
+        })),
+        next: page.next,
+      }
+    : page;
+
+describe("AuditLog archive search", () => {
+  it("finds archived events newest first, a stretch per page, each checked against the chain", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+
+    const newer = await log.searchArchive({ filter: {}, limit: 10 });
+    expect(positions(newer)).toStrictEqual({
+      records: [
+        { seq: 7, action: "test.c", verified: true },
+        { seq: 6, action: "test.b", verified: true },
+        { seq: 5, action: "test.a", verified: true },
+        { seq: 4, action: "audit.archived", verified: true },
+      ],
+      next: 4,
+    });
+    await expect(
+      log.searchArchive({ filter: {}, before: 4, limit: 10 }).then(positions)
+    ).resolves.toStrictEqual({
+      records: [
+        { seq: 3, action: "test.c", verified: true },
+        { seq: 2, action: "test.b", verified: true },
+        { seq: 1, action: "test.a", verified: true },
+      ],
+      next: null,
+    });
+  });
+
+  it("filters archived events as a search does, and carries on within a stretch past its page", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+
+    await expect(
+      log
+        .searchArchive({ filter: { action: "test.b" }, limit: 10 })
+        .then(positions)
+    ).resolves.toMatchObject({ records: [{ seq: 6 }], next: 4 });
+    const first = await log.searchArchive({ filter: {}, limit: 2 });
+    expect(positions(first)).toMatchObject({
+      records: [{ seq: 7 }, { seq: 6 }],
+      next: 6,
+    });
+    await expect(
+      log.searchArchive({ filter: {}, before: 6, limit: 2 }).then(positions)
+    ).resolves.toMatchObject({ records: [{ seq: 5 }, { seq: 4 }], next: 4 });
+  });
+
+  it("passes over a stretch archive retention purged, and one before the filter's times", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+    await purgeLater(log);
+
+    await expect(
+      log.searchArchive({ filter: {}, before: 4, limit: 10 }).then(positions)
+    ).resolves.toStrictEqual({ records: [], next: null });
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 }).then(positions)
+    ).resolves.toMatchObject({ next: null });
+    await expect(
+      log
+        .searchArchive({
+          filter: { from: new Date(Date.now() + dayMs).toISOString() },
+          limit: 10,
+        })
+        .then(positions)
+    ).resolves.toStrictEqual({ records: [], next: null });
+  });
+
+  it("says which stretch it can't read when its archived copy is gone or isn't entries", async () => {
+    const log = newLog();
+    await appendThree(log);
+    const key = await archivedKey(log);
+    await env.AUDIT_ARCHIVE.put(key, "not an entry\n");
+
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 })
+    ).resolves.toStrictEqual({ unreadable: { from: 1, through: 3 } });
+    await env.AUDIT_ARCHIVE.delete(key);
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 })
+    ).resolves.toStrictEqual({ unreadable: { from: 1, through: 3 } });
   });
 });

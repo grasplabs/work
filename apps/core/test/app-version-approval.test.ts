@@ -5,16 +5,8 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
-import type { AppCallerInput } from "../src/app.ts";
 import { setCurrentVersion } from "../src/apps.ts";
-import {
-  grantReviewed,
-  racingDb,
-  release,
-  reviewedOf,
-  serverBuilt,
-} from "./apps.ts";
+import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -40,47 +32,9 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** Each stub call's outcome: `{ ok }` with its answer, or `{ error }` with its code. */
-const serverCode = `import { DurableObject } from "cloudflare:workers";
-
-type Caller = { userId: string; token: string };
-type Stub = Record<string, (caller: Caller, ...args: unknown[]) => Promise<unknown>>;
-
-const outcome = async (run: () => Promise<unknown>): Promise<unknown> => {
-  try {
-    return { ok: await run() };
-  } catch (error) {
-    return { error: (error as { code?: string }).code ?? "failed" };
-  }
-};
-
-export class App extends DurableObject {
-  stub(binding: string): Stub {
-    return (this.env as Record<string, Stub>)[binding] ?? {};
-  }
-
-  async list(caller: Caller, binding: string): Promise<unknown> {
-    return await outcome(async () => {
-      const page = (await this.stub(binding).listDocuments(caller)) as { documents: unknown[] };
-      return page.documents.length;
-    });
-  }
-
-  async guests(caller: Caller, binding: string): Promise<unknown> {
-    return await outcome(async () => ((await this.stub(binding).list(caller)) as unknown[]).length);
-  }
-
-  async write(caller: Caller, binding: string, method: string, input: unknown): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding)[method]?.(caller, input));
-  }
-
-  async read(caller: Caller, binding: string, id: string): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).getDocument(caller, id));
-  }
-
-  bindings(): string[] {
-    return Object.keys(this.env as object).toSorted();
-  }
+/** The App's one screen: what a version changes to differ from the last. */
+const deskScreen = `export default function Desk() {
+  return <main>Desk</main>;
 }
 `;
 
@@ -117,25 +71,14 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
   binding,
 });
 
-const as = (userId: string): AppCallerInput => ({
-  userId,
-  mode: "interactive",
-});
-
-/** The App's count of its guest chats, under `GUESTS`. */
-const guestsArgs = ["GUESTS"];
-
 /**
- * An App `builder` built and released, which `admin` granted guests, and
+ * An App `builder` released, which `admin` granted guests, and
  * the collection to read.
  */
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
-  await serverBuilt(
-    id,
-    await release(builder, id, { "app/server.ts": serverCode })
-  );
+  await release(builder, id, { "screens/desk.tsx": deskScreen });
   for (const request of [guestsFor(app), collectionFor(app)]) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
     const { id: permission } = await builder.api.permissions.request(request);
@@ -145,16 +88,15 @@ const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   return app;
 };
 
-/** `by` releases other server code for `app`, built ahead. */
+/** `by` releases another version of `app`. */
 const changedBy = async (
   by: Pick<Person, "api">,
   app: AppId,
   change: string
 ): Promise<void> => {
-  await serverBuilt(
-    app,
-    await release(by, app, { "app/server.ts": `${serverCode}\n// ${change}\n` })
-  );
+  await release(by, app, {
+    "screens/desk.tsx": `${deskScreen}\n// ${change}\n`,
+  });
 };
 
 /** The detail of each `action` event in `events`, by its target's ID. */
@@ -197,31 +139,14 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     ]);
     const app = await builtBy(builder, admin);
     const [write, read] = await permissionsOf(admin, app);
-    const before = await callApp(
-      env,
-      app,
-      as(admin.userId),
-      "guests",
-      guestsArgs
-    );
 
     // The attack: the builder ships other code, which the admin's next
     // call runs, under the grant the admin gave the code before.
     const events = await auditedDuring(async () => {
       await changedBy(builder, app, "Rewrites every rule.");
     });
-    const after = await callApp(
-      env,
-      app,
-      as(admin.userId),
-      "guests",
-      guestsArgs
-    );
 
     expect({
-      before,
-      after,
-      bindings: await callApp(env, app, as(admin.userId), "bindings", []),
       permissions: await permissionsOf(admin, app),
       audited: events
         .filter(({ action }) => action.startsWith("permission."))
@@ -232,10 +157,6 @@ describe("An App's next version", { timeout: 60_000 }, () => {
           detail,
         })),
     }).toStrictEqual({
-      before: { ok: 0 },
-      // The new version has no stub to invite guests with.
-      after: { error: "failed" },
-      bindings: ["NOTES_READ", "STATISTICS"],
       // Asked for again, it is the newest request, and still says who
       // granted it before: not a first request.
       permissions: [
@@ -267,11 +188,10 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       ],
     });
 
-    // Granted again, by an admin who saw the new code, its stub is back.
+    // Granted again, by an admin who saw the new code, it holds again.
     await grantReviewed(admin.api, write?.id ?? "");
-    await expect(
-      callApp(env, app, as(admin.userId), "guests", guestsArgs)
-    ).resolves.toStrictEqual({ ok: 0 });
+    const [, granted] = await permissionsOf(admin, app);
+    expect(granted?.status).toBe("active");
   });
 
   it("records each permission it asks for again by the IDs its grant was recorded with", async () => {
@@ -348,7 +268,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Asks for more.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Asks for more.\n`,
       },
       "More"
     );
@@ -439,7 +359,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const source = appIdSchema.parse(id);
     const { version } = await builder.api.apps.files.commit(
       source,
-      { "app/server.ts": serverCode },
+      { "screens/desk.tsx": deskScreen },
       "Never run"
     );
     await builder.api.permissions.request(guestsFor(source));
@@ -486,7 +406,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Reviewed.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Reviewed.\n`,
       },
       "Reviewed"
     );
@@ -529,7 +449,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Demoted.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Demoted.\n`,
       },
       "Demoted"
     );
@@ -581,79 +501,21 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     expect({
       permissions: await permissionsOf(admin, app),
       audited: events.filter(({ action }) => action.startsWith("permission.")),
-      listed: await callApp(env, app, as(admin.userId), "guests", guestsArgs),
     }).toStrictEqual({
       permissions: granted,
       audited: [],
-      listed: { ok: 0 },
     });
 
-    // Grasp staff are admins, but never decide a client's permissions.
+    // Grasp staff never release a client's App, nor decide its permissions.
     const { core } = await openRpc(
       await signedIn(idp, "grasp-staff", staffPerson())
     );
-    await changedBy({ api: core.authenticate() }, app, "Changed by staff.");
-    const byStaff = await permissionsOf(admin, app);
-    expect(
-      byStaff.map(({ binding, status }) => ({ binding, status }))
-    ).toStrictEqual([
-      { binding: "NOTES_READ", status: "active" },
-      { binding: "GUESTS", status: "requested" },
-    ]);
-  });
-});
-
-describe("An App's collection stub", { timeout: 60_000 }, () => {
-  beforeEach(async () => {
-    const admin = await personApi("admin");
-    ({ id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Notes ${unique()}`,
-      access: "everyone",
-    }));
-  });
-
-  // An App keeps what it writes in its own store: its stub of a
-  // collection only reads, for an admin who may write there too.
-  it("writes nothing to the collection, whatever method its code calls", async () => {
-    const [admin, builder] = await Promise.all([
-      personApi("admin"),
-      personApi("builder"),
-    ]);
-    const app = await builtBy(builder, admin);
-    const note = {
-      path: `notes/${unique()}.md`,
-      ifVersion: 0,
-      text: "# Pay supplier invoices",
-      record: { type: "doc", title: "Pay supplier invoices" },
-      body: "Paid weekly.",
-    };
-    const methods = [
-      "saveRecord",
-      "saveDocument",
-      "deleteDocument",
-      "moveDocument",
-      "linkWorkflow",
-    ];
-    const tried: Record<string, unknown> = {};
-    for (const method of methods) {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time
-      tried[method] = await callApp(env, app, as(admin.userId), "write", [
-        "NOTES_READ",
-        method,
-        note,
-      ]);
-    }
-    const written = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS written FROM documents WHERE collection_id = ?"
-    )
-      .bind(collectionId)
-      .first<number>("written");
-
-    expect({ tried, written }).toStrictEqual({
-      tried: Object.fromEntries(
-        methods.map((method) => [method, { error: "failed" }])
-      ),
-      written: 0,
-    });
+    const byStaff = await outcome(
+      changedBy({ api: core.authenticate() }, app, "Changed by staff.")
+    );
+    expect({
+      byStaff,
+      permissions: await permissionsOf(admin, app),
+    }).toStrictEqual({ byStaff: "role.forbidden", permissions: granted });
   });
 });

@@ -15,7 +15,6 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import {
@@ -135,8 +134,6 @@ export interface AppDecisionRun {
   app: string;
   workflow: string;
   version: number;
-  /** Whom it acts for, when known: a staff-started run's names them. */
-  authority?: Pick<Authority, "onBehalfOf" | "staff">;
 }
 
 /**
@@ -1144,7 +1141,7 @@ const toView = async (
     // None is asked with an empty description: one that is empty went with
     // its run's details (workflows/retention.ts), and says so.
     description:
-      decision.description === "" ? removedText(env) : decision.description,
+      decision.description === "" ? removedText : decision.description,
     ...(decision.input === null ? {} : { input: decision.input }),
     status: statusOf(found),
     expiresAt: decision.expiresAt.toISOString(),

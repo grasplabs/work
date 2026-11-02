@@ -895,7 +895,7 @@ describe("who ends an approval, and on what", () => {
     expect(refused).toStrictEqual({
       otherAdmin: "dependency.forbidden",
       builder: "dependency.forbidden",
-      staff: "dependency.forbidden",
+      staff: "role.forbidden",
       agent: "dependency.forbidden",
       builderImpact: "dependency.not_found",
       noReason: "dependency.invalid",

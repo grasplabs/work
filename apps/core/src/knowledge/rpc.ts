@@ -33,7 +33,12 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
-import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
+import {
+  decideEntityMatch,
+  entitiesFor,
+  entityMatchProposals,
+  entitySources,
+} from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -63,6 +68,8 @@ import type {
   DocumentPage,
   DocumentRead,
   DocumentSummary,
+  EntityMatch,
+  EntityMatchDecision,
   FollowResult,
   HistoryOptions,
   HistoryPage,
@@ -78,6 +85,7 @@ import type {
   SaveInput,
   SearchOptions,
   SearchResults,
+  SharedChat,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -101,6 +109,7 @@ import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
 import { uploadErasure } from "./uploads.ts";
@@ -230,6 +239,13 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
+  /** The shared chats the person is in that a record can be published into. */
+  async sharedChats(): Promise<SharedChat[]> {
+    return await this.#asReader(
+      async (reader) => await sharedChatsOf(this.#env, reader)
+    );
+  }
+
   /** Corrects one of the person's own records, keeping its history (GRA-298). */
   async memoriesProposeChange(
     input: MemoriesProposeChangeInput,
@@ -294,6 +310,28 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
     return await this.#asReader(
       async (reader) => await memoriesLineage(brainOf(this.#env), reader, input)
+    );
+  }
+
+  // Entity matches (GRA-1080), as the signed-in person alone reads them
+  // (`#asReader`: never a reader a request names). The Brain asks the
+  // recall grant first and records each call, a read or an audited
+  // decision. Grasp's staff never get here: the session's full-access
+  // check refuses them before either call. Nothing here reaches a model,
+  // and neither takes a name to look for: a filter on a name would make
+  // probing targeted.
+
+  async entityMatches(options?: unknown): Promise<EntityMatch[]> {
+    return await this.#asReader(
+      async (reader) =>
+        await entityMatchProposals(brainOf(this.#env), reader, options)
+    );
+  }
+
+  async decideEntityMatch(input: unknown): Promise<EntityMatchDecision> {
+    return await this.#asReader(
+      async (reader) =>
+        await decideEntityMatch(brainOf(this.#env), reader, input)
     );
   }
 

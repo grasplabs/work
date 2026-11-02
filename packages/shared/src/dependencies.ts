@@ -745,8 +745,6 @@ export interface DependenciesApi {
    * `dependencies.approve` now; none otherwise.
    */
   waiting: () => Promise<DependenciesWaiting>;
-  /** How many wait on the person: what `waiting` would list. */
-  waitingCount: () => Promise<number>;
   /** One request in full, for whoever may decide it or builds its App. */
   get: (request: string) => Promise<DependencyReview>;
   /**

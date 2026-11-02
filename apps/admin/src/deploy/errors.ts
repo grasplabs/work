@@ -9,37 +9,6 @@ import { MissingStoreSecretError } from "./context.ts";
 export const deployErrorCodes = [
   /** The release isn't imported, or its manifest no longer parses. */
   "release_not_imported",
-  /** The release declares nothing of what its code works with. */
-  "release_undeclared",
-  /**
-   * The release raises a platform limit over what the client runs without
-   * capacity and security evidence for the client's runtime profile
-   * (src/releases/limits.ts).
-   */
-  "limit_evidence_missing",
-  /**
-   * The release records no platform limits: it was built before they
-   * were, and isn't made live (src/releases/limits.ts).
-   */
-  "release_without_limits",
-  /**
-   * A release on the way to the one deployed, named by the next as the one
-   * before it, isn't imported: its evidence can't be read
-   * (src/releases/limits.ts).
-   */
-  "release_history_incomplete",
-  /**
-   * The release doesn't work with what the client runs: a Worker would
-   * call one of its Workers, or one of its Workers another, at a version
-   * that one doesn't serve, or it doesn't read a workflow journal or run
-   * an App release the client's code may have left.
-   */
-  "release_incompatible",
-  /**
-   * The release's code doesn't run on a database's schema as the
-   * client's migrations left it: a later release's contracted it.
-   */
-  "schema_incompatible",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */
@@ -56,15 +25,6 @@ export const deployErrorCodes = [
   "unknown_migration_tag",
   /** A binding in the manifest names a placeholder the admin doesn't fill. */
   "unknown_placeholder",
-  /** A client setting isn't a deployment config var core reads. */
-  "unknown_setting",
-  /** A client setting, or the config derived for it, isn't one core would take. */
-  "setting_invalid",
-  /**
-   * A `MAIL_FROM` setting names another address than the onboarding
-   * sender's, the only one the client's `EMAIL` binding sends from.
-   */
-  "mail_sender_locked",
   /**
    * The client's sign-in can't be made: its record doesn't parse, or it
    * names an IdP the admin has no app id for.

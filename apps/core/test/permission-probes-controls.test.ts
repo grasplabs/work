@@ -8,9 +8,9 @@ import { mockIdp } from "./idp.ts";
 import {
   askedInWorkspace,
   askedThroughDoor,
-  clockRunsAhead,
   colleaguesInHrNotes,
   companyOnce,
+  doorClockRunsAhead,
   later,
   leaksIn,
   outsiderProbes,
@@ -49,7 +49,7 @@ watched();
 const setUp = companyOnce(idp);
 
 describe("the permission probes", probeTime, () => {
-  clockRunsAhead();
+  doorClockRunsAhead();
 
   it("reach what their asker may read: the same reads would catch a leak", async () => {
     const place = await setUp();
@@ -78,7 +78,7 @@ describe("the permission probes", probeTime, () => {
         },
         place
       );
-      const sent = sentSince(place.model.gateway.requests, 0);
+      const sent = sentSince(place.model.provider.requests, 0);
       reachedSecrets.push(
         ...(secretsOf(target).every((secret) => sent.includes(secret))
           ? [target]
@@ -126,7 +126,7 @@ describe("the permission probes", probeTime, () => {
 });
 
 describe("people matters", probeTime, () => {
-  clockRunsAhead();
+  doorClockRunsAhead();
 
   it("go to a person: the rule is what Stephen is told on Teams, in every language, and no colleague HR keeps notes about reaches a model or the answer", async () => {
     const place = await setUp();
@@ -138,7 +138,7 @@ describe("people matters", probeTime, () => {
           queries: [matter.question, "sick leave", "complaint"],
           ids: [place.brain.documents.get("sickNotes")?.id ?? ""],
         });
-        const from = place.model.gateway.requests.length;
+        const from = place.model.provider.requests.length;
         const person = place.teams[asker];
         // oxlint-disable-next-line no-await-in-loop -- one message at a time
         const before = await sentCount(person);
@@ -150,7 +150,7 @@ describe("people matters", probeTime, () => {
             locale: matter.language,
           })
         );
-        const sent = sentSince(place.model.gateway.requests, from);
+        const sent = sentSince(place.model.provider.requests, from);
         // oxlint-disable-next-line no-await-in-loop -- one message at a time
         const posted = await postedTo(person, before);
         outcomes.push({

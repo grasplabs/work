@@ -27,7 +27,7 @@ import { thinkAddress } from "../brain/thinking/play.ts";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { thinkingMap } from "../brain/thinking/shapes.ts";
 import { usePlayedThinking } from "../brain/thinking/use-thinking.ts";
-import { WorkHours } from "../brain/thinking/work-hours.tsx";
+import { useWorkHoursText } from "../brain/thinking/work-hours.tsx";
 
 // Grasp's thinking where the question was asked (GRA-1283; grasplabs/
 // prototype `components/chat/thinking-card.tsx`): on any page but the
@@ -38,7 +38,11 @@ import { WorkHours } from "../brain/thinking/work-hours.tsx";
 // fitted to the shape and follows it. Once the thinking is done it shows
 // the finding; the whole card opens the brain, where it plays again.
 
-/** A workflow's hours in the card: in full, or only the number where the name has no room. */
+/**
+ * A workflow's hours in the card, as text for its SVG: in full, or only
+ * the number where the name has no room. Text alone, as SVG paints no
+ * HTML element inside it.
+ */
 const CardHours = ({
   hours,
   short,
@@ -47,11 +51,10 @@ const CardHours = ({
   short: boolean;
 }) => {
   const { i18n } = useLingui();
-  return !short || hours === null ? (
-    <WorkHours hours={hours} />
-  ) : (
-    <>{new Intl.NumberFormat(i18n.locale).format(roundHours(hours))}</>
-  );
+  const full = useWorkHoursText(hours);
+  return !short || hours === null
+    ? full
+    : new Intl.NumberFormat(i18n.locale).format(roundHours(hours));
 };
 
 /** Watches an element's width, `fallback` while it has none; the way to stop. */

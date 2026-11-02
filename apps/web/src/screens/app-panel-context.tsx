@@ -1,7 +1,7 @@
 import { createContext, use, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { LeaveConfirmDialog } from "./screen-frame.tsx";
+import { LeaveConfirmDialog } from "./leave-confirm-dialog.tsx";
 
 // What the shell's panel slot shows (app-panel.tsx), held for the whole
 // shell so a page navigating under it leaves it as it is. Its screen

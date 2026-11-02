@@ -40,7 +40,7 @@ export interface TailOf {
   /**
    * The function the isolate runs, for an App of spec 8's layout, whose
    * every isolate runs one (release-runner.ts): named as the lines'
-   * `method`, as a v1 server's RPC method is.
+   * `method`.
    */
   method?: string;
 }

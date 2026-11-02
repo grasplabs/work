@@ -51,14 +51,26 @@ export const RequestTeams = ({
   const { t } = useLingui();
   const names = useRequestNames(page);
   const asking = new Set(page.report.byTeam.map(({ key }) => key));
-  // Teams five or more can reach that nobody of asked are teams too.
+  // Teams five or more can reach that aren't named are teams too: fewer
+  // than five of them asked, none perhaps, which the report folds into
+  // Other teams, so their counts stay hidden rather than shown as none.
   const quiet = page.teams
     .filter(({ id, reach }) => reach >= 5 && !asking.has(id))
-    .map(({ id, reach }) => ({ key: id, people: 0, billed: 0, reach }));
+    .map(({ id, reach }) => ({
+      key: id,
+      people: 0,
+      billed: 0,
+      reach,
+      hidden: true,
+    }));
   const rows = [
-    ...page.report.byTeam.filter(({ key }) => key !== elsewhere),
+    ...page.report.byTeam
+      .filter(({ key }) => key !== elsewhere)
+      .map((row) => ({ ...row, hidden: false })),
     ...quiet,
-    ...page.report.byTeam.filter(({ key }) => key === elsewhere),
+    ...page.report.byTeam
+      .filter(({ key }) => key === elsewhere)
+      .map((row) => ({ ...row, hidden: false })),
   ];
   return (
     <ul className="@container mt-3">
@@ -79,13 +91,18 @@ export const RequestTeams = ({
       {rows.map((row) => {
         const asked = formatNumber(row.people);
         const of = formatNumber(row.reach);
+        const reach = of;
         const name = names.team(row.key);
+        let askedText = row.reach > 0 ? t`${asked} of ${of}` : asked;
+        if (row.hidden) {
+          askedText = t`Fewer than five of ${reach} asked him`;
+        }
         return (
           <OpenRow
             className={teamRow}
             key={row.key}
             onOpen={
-              row.key === elsewhere
+              row.key === elsewhere || row.hidden
                 ? undefined
                 : () => {
                     onOpen(row.key);
@@ -99,15 +116,19 @@ export const RequestTeams = ({
                 askedCell
               )}
             >
-              {row.reach > 0 ? t`${asked} of ${of}` : asked}
+              {askedText}
             </span>
             <span className={barCell}>
-              <ShareBar
-                label={t`Share of ${name} who asked`}
-                share={row.reach > 0 ? row.people / row.reach : 0}
-              />
+              {row.hidden ? null : (
+                <ShareBar
+                  label={t`Share of ${name} who asked`}
+                  share={row.reach > 0 ? row.people / row.reach : 0}
+                />
+              )}
             </span>
-            <span className={countCell}>{formatNumber(row.billed)}</span>
+            <span className={countCell}>
+              {row.hidden ? null : formatNumber(row.billed)}
+            </span>
           </OpenRow>
         );
       })}

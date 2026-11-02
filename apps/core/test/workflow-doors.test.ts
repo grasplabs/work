@@ -260,5 +260,26 @@ describe("a workflow's parts and doors", () => {
       child: [{ flow: "waits", workflowId: child.id, name: child.name }],
       announce: [{ flow: "hands", workflowId: started.id, name: started.name }],
     });
+
+    // An edit that doesn't pass leaves the checkpoint Ada holds, doors and
+    // all: its answer draws that diagram again without them, and a read
+    // of the draft still has them.
+    const failed = await editWorkflowDraft(env, ada, parent.id, {
+      expectedRevision: saved.revision,
+      source: "{",
+      modules: {},
+    });
+    const read = await workflowDraft(env, ada, parent.id);
+    const doorsOf = (tasks: readonly DiagramTask[]) =>
+      allTasks(tasks).flatMap((task) => task.doors ?? []).length;
+    expect({
+      checkpoint: failed.checkpoint?.revision,
+      answered: doorsOf(failed.checkpoint?.diagram.tasks ?? []),
+      read: doorsOf(read.checkpoint?.diagram.tasks ?? []),
+    }).toStrictEqual({
+      checkpoint: saved.revision,
+      answered: 0,
+      read: 2,
+    });
   });
 });

@@ -4,6 +4,7 @@ import type {
   NotificationCursor,
   NotificationPage,
 } from "@grasp-os/shared/notifications";
+import type { StoppedEventsItem } from "@grasp-os/shared/waiting";
 import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
@@ -12,6 +13,7 @@ import { TriangleAlertIcon } from "lucide-react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { frameChanged } from "../frame/frame-read.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { AskToFix } from "../workflows/fix-in-chat.tsx";
 import { ItemMark } from "./dashboard-card.tsx";
@@ -29,11 +31,20 @@ export interface NotificationsPage {
    * chats are off, or no model is set up, and nobody is offered to ask.
    */
   model: string | undefined;
+  /**
+   * The accounts of the connections the page's stopped sources are at,
+   * by connection ID, as the feed named them; none where it couldn't.
+   */
+  accounts?: ReadonlyMap<string, StoppedAccount>;
 }
+
+/** A connection's account and catalog entry, as the feed names it. */
+export type StoppedAccount = NonNullable<StoppedEventsItem["account"]>;
 
 /**
  * Marks read the unread ones of the notifications a page shows, only as
- * they were when listed: one failed again since stays unread.
+ * they were when listed: one failed again since stays unread. The nav's
+ * count is read again once they are.
  */
 export const markShownRead = async (
   session: Session,
@@ -46,6 +57,7 @@ export const markShownRead = async (
       unread.map(({ id }) => id),
       newest.at
     );
+    frameChanged();
   }
 };
 

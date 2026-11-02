@@ -16,10 +16,11 @@ import {
 import type {
   App,
   AppContents,
-  CurrentExports,
+  AppOverview,
   AppFiles,
   AppRole,
   AppVersion,
+  ListedScreen,
   ViewedApp,
   CommittedVersion,
   FileDiff,
@@ -53,7 +54,8 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import { exportsIn } from "./app-exports.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
+import { refuseV1Server } from "./app-v1-server.ts";
 import {
   auditedBatch,
   outboxed,
@@ -214,6 +216,18 @@ export const changeEntry = (
   action,
   target: { type: "app", id: app },
   detail,
+});
+
+/** Where a chat's agent created an App, while nobody accepted it yet. */
+export interface ProvisionalOrigin {
+  readonly workspaceId: string;
+  readonly chatId: string;
+}
+
+/** An App row's provisional columns, for `origin` or none. */
+export const provisionalColumns = (origin: ProvisionalOrigin | undefined) => ({
+  provisionalWorkspaceId: origin?.workspaceId ?? null,
+  provisionalChatId: origin?.chatId ?? null,
 });
 
 /**
@@ -462,7 +476,6 @@ const checkLimits = (
  * its limit, and only if it also grew, as with `checkLimits`.
  */
 const checkMemory = (
-  env: Env,
   before: string | undefined,
   after: string | undefined
 ): void => {
@@ -470,7 +483,7 @@ const checkMemory = (
     after !== undefined &&
     (before === undefined || after.length > before.length);
   if (grew) {
-    requireWithinLimit(env, "AGENTS.md", after);
+    requireWithinLimit("AGENTS.md", after);
   }
 };
 
@@ -570,7 +583,12 @@ export const createApp = async (
   by: Acting,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * Where a chat's agent creates it: provisional there until its first
+   * version is made current (app-removal.ts, `reapAbandonedApps`).
+   */
+  provisional?: ProvisionalOrigin
 ): Promise<App> => {
   requireBuilder(by);
   const { name, description, blueprint } = appErrors.parse(
@@ -597,6 +615,7 @@ export const createApp = async (
     link: null,
     removedAt: null,
     removedBy: null,
+    ...provisionalColumns(provisional),
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
@@ -734,21 +753,75 @@ export const appContents = async (
 };
 
 /**
- * What an App's current version exports to other Apps, for anyone with a
- * role in it, people and the agent alike: read from its row alone, no
- * files.
+ * The Apps `by` has a role in, as `listApps` gives them, each with what
+ * `appContents` says of it: one query, from its current version's row
+ * (`app_versions.screens`, `workflows`), so no files are read.
  */
-export const appExports = async (
+export const listAppOverviews = async (
   env: Env,
-  by: Person,
-  app: unknown
-): Promise<CurrentExports> => {
-  const { id, currentVersion } = await appFor(env, by, app, "user");
-  if (currentVersion === null) {
-    return { version: null, exports: {} };
-  }
-  const row = await findVersion(env, id, currentVersion);
-  return { version: currentVersion, exports: row.exports };
+  by: Member
+): Promise<AppOverview[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      app: apps,
+      screens: appVersions.screens,
+      workflows: appVersions.workflows,
+    })
+    .from(apps)
+    .leftJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(appsFoundBy(env, by))
+    .orderBy(asc(apps.createdAt), asc(apps.id));
+  const found = rows.map((row) => ({ ...row, app: toApp(row.app) }));
+  const builds = await appsBuiltBy(
+    env,
+    by,
+    found.map(({ app }) => app.id)
+  );
+  return found.map(({ app, screens, workflows }) => ({
+    app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
+    // None without a current version, whose row the join doesn't find.
+    contents: {
+      version: app.currentVersion,
+      screens: (screens ?? []).toSorted(),
+      workflows: (workflows ?? []).toSorted(),
+    },
+  }));
+};
+
+/**
+ * Every screen of the current version of each App `by` has a role in
+ * (`appsFoundBy`, as `listApps`), newest App first, its screens by name:
+ * one query, the names its version's row keeps (`app_versions.screens`),
+ * so no files are read. An App with no current version has none.
+ */
+export const listScreens = async (
+  env: Env,
+  by: Member
+): Promise<ListedScreen[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ app: apps, screens: appVersions.screens })
+    .from(apps)
+    .innerJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(appsFoundBy(env, by))
+    .orderBy(desc(apps.createdAt), asc(apps.id));
+  return rows.flatMap(({ app, screens }) => {
+    const { id, name, status, process } = toApp(app);
+    return screens
+      .toSorted()
+      .map((screen) => ({ app: { id, name, status, process }, screen }));
+  });
 };
 
 /** An App's files at `version`, or at its latest version without one. */
@@ -797,7 +870,7 @@ export const applyChanges = (
   }
   checkLimits(files, before);
   checkPaths(files.keys(), added);
-  checkMemory(env, agentsBefore, files.get(appMemoryPath));
+  checkMemory(agentsBefore, files.get(appMemoryPath));
   return changes;
 };
 
@@ -865,7 +938,7 @@ export const commitFiles = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  const exported = exportsIn(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -882,8 +955,8 @@ export const commitFiles = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls,
-    exports: exported,
     proposedBy: null,
     workflowBindings,
   };
@@ -1003,6 +1076,15 @@ export const draftOverLatest = async (
   app: AppId,
   { base, changes }: DraftChanges
 ): Promise<DraftOverLatest> => {
+  // A draft saved before its agent was refused writes under `workflows/`
+  // may hold such a change still: it goes over the latest version, to be
+  // proposed, no more than it is written. A builder's workflow it doesn't change, or deletes,
+  // stands (app-no-workflows.ts).
+  refuseAppWorkflows(
+    Object.entries(changes).flatMap(([path, content]) =>
+      content === null ? [] : [path]
+    )
+  );
   const { latest, files } = await latestFiles(env, app);
   const parent = latest?.version ?? null;
   if (parent !== base) {
@@ -1069,7 +1151,7 @@ export const proposeDraft = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  const exported = exportsIn(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -1085,8 +1167,8 @@ export const proposeDraft = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls,
-    exports: exported,
     proposedBy: by.via ?? null,
     workflowBindings,
   };
@@ -1601,14 +1683,11 @@ export const makeCurrent = async (
   // retention sweep's deletion lands in between. Its tests passed as its
   // candidate was verified (`verifyVersion`), on the same files.
   const sealedLayout = isAppLayout(files);
-  let sampleGate: SQL | undefined;
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
-    const { noFailedSampleSql, requireMigrationEvidence } =
+    const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
-    // And again as the version is made current, below.
-    sampleGate = noFailedSampleSql(appId, number);
     await requireStoreSchemaActive(env, appId, number);
   }
   const triggers = await triggerRegistration(env, appId, number, files);
@@ -1632,22 +1711,6 @@ export const makeCurrent = async (
     // as such. Only a batch that keeps failing leaves the store switched
     // ahead of D1, until making it current is asked again.
     //
-    // A failed sample of its migrations is looked for once more first:
-    // the switch is where it is decided, since a store switched over
-    // supersedes the schema the version still current writes under, and
-    // refusing the version after it would only lock that one out of its
-    // store. Nothing a sample could fail on is left by then: the store
-    // switches only from ready, with no record left to transform (work
-    // queued again refuses it as `migration.pending`), and a sample of a
-    // ready store reads nothing, so it is `empty` and clears. A failure
-    // landing after this look read its records before the store was
-    // ready, and the backfill has since transformed and validated every
-    // one. Where nothing switched now (no ready migration, or a store a
-    // lost batch switched before), the change still refuses one
-    // (`sampleGate`).
-    const { requireMigrationEvidence } =
-      await import("./migration-evidence.ts");
-    await requireMigrationEvidence(env, appId, number);
     // Its candidate still verified, superseded by no commit meanwhile:
     // asked here, before the store switches, so a candidate refused below
     // never leaves the version current locked out of its store.
@@ -1657,11 +1720,7 @@ export const makeCurrent = async (
     // the candidate was verified, and a verified candidate never expires,
     // so an artifact changed in storage since must refuse it here.
     await requireReleaseAsReported(env, appId, number, candidate);
-    if (
-      await requireStoreSchemaActive(env, appId, number, { activate: true })
-    ) {
-      sampleGate = undefined;
-    }
+    await requireStoreSchemaActive(env, appId, number, { activate: true });
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
@@ -1675,6 +1734,10 @@ export const makeCurrent = async (
           .set({
             currentVersion: number,
             pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
+            // Accepted: an App a chat created is provisional no more, and
+            // is never reaped (app-removal.ts).
+            provisionalWorkspaceId: null,
+            provisionalChatId: null,
           })
           .where(
             and(
@@ -1687,7 +1750,6 @@ export const makeCurrent = async (
               sealedLayout
                 ? releaseAsReportedSql(appId, number, candidate)
                 : undefined,
-              sampleGate,
               verifiedCandidateSql(appId, number, candidate)
             )
           )
@@ -1785,15 +1847,8 @@ export const makeCurrent = async (
     }
     requireNotArchived(await findApp(env, appId));
     if (sealedLayout) {
-      // Revoked or deleted since it was checked, or a sample of its
-      // migrations failed since, where the change still checked that (its
-      // store didn't switch): refused as such.
+      // Revoked or deleted since it was checked: refused as such.
       await requireRunnableRelease(env, appId, number);
-      if (sampleGate !== undefined) {
-        const { requireMigrationEvidence } =
-          await import("./migration-evidence.ts");
-        await requireMigrationEvidence(env, appId, number);
-      }
     }
     // A verified candidate is never superseded (`supersededBy`), so what
     // is left is a conflict: the base moved, or the candidate ended.

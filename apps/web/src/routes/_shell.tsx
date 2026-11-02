@@ -4,7 +4,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatDock } from "../chat/chat-dock.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
-import { loadCoreStatus, readWithin } from "../core-connection.ts";
+import { readWithin, shellStatus } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import { landingAfterSignIn, takeJustSignedIn } from "../landing.ts";
@@ -85,7 +85,9 @@ export const Route = createFileRoute("/_shell")({
   // Before any page's loader, so each runs for someone signed in, with
   // their identity in its context.
   beforeLoad: async ({ context: { core }, location }) => {
-    const { connected, identity } = await loadCoreStatus(core);
+    // Asked of core once, then known (shellStatus): no round trip before
+    // each page's own reads.
+    const { connected, identity } = await shellStatus(core);
     if (!connected) {
       // Nobody can tell who is signed in: sending them to sign in again
       // would say they were signed out.

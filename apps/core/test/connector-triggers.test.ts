@@ -1,3 +1,4 @@
+import { createAuditEvent } from "@grasp-os/shared/audit";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions, and text that looks like one, are written as ${ … } strings */
 import {
   connectionIdSchema,
@@ -5,7 +6,6 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -13,6 +13,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  drainAuditOutboxesNoticing,
+  noticeStoppedSources,
+} from "../src/connector-source-notices.ts";
+import { listNotifications } from "../src/notifications.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -43,6 +48,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -53,7 +59,9 @@ import { connectDb } from "./test-env.ts";
 // takes it; its input is a mapping of JSON Pointers and literals, never
 // code; a revoked grant to hear starts nothing, and a refusal for good is
 // audited; a connection its creator may not use, and a grant on any
-// connection but its own, are refused; and connect listens where it does.
+// connection but its own, are refused; connect listens where it does;
+// and when connect stops hearing a source, the owners of the triggers
+// listening there are told, once, and nobody else.
 
 const person = async (role: Role): Promise<Identity> => {
   const userId = crypto.randomUUID();
@@ -329,11 +337,15 @@ const fillHour = async (receipt: string): Promise<void> => {
   );
 };
 
-/** Each policy a test sets, under a generation higher than any before. */
-let generations = 3000;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
+/** The sources connect stopped hearing that `who` is told of, as listed. */
+const stopsToldTo = async (who: Identity) => {
+  const { notifications } = await listNotifications(env, who);
+  return notifications.flatMap((notification) =>
+    notification.type === "events_stopped"
+      ? [{ ...notification, id: "", at: "" }]
+      : []
+  );
+};
 
 describe("connector triggers", { timeout: 120_000 }, () => {
   it("start one run per event with the mapped input, however often it is delivered, and never again once cancelled", async () => {
@@ -427,6 +439,79 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     );
 
     expect(counts).toStrictEqual([0, 0, 0, 1]);
+  });
+
+  it("tell their owners, once, when connect stops hearing where they listen, and nobody else", async () => {
+    const admin = await person("admin");
+    const other = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    await connectorTrigger(admin, workflow.id, shared, {
+      resource: "mailbox-ben",
+    });
+    const othersWorkflow = await filing(other);
+    await connectorTrigger(other, othersWorkflow.id, shared, {
+      resource: "mailbox-ann",
+    });
+    // As connect records it, at its tenth failure in a row (events.ts).
+    const stopped = createAuditEvent(
+      {
+        actor: { type: "system" },
+        action: "connection.events.refused",
+        target: { type: "connection", id: shared },
+        detail: {
+          type: "m365.mail.received",
+          resource: "mailbox-ben",
+          status: 403,
+          failures: 10,
+        },
+      },
+      "connect"
+    );
+    // In connect's outbox, as the clock drains it into the log.
+    await connectDb()
+      .prepare(
+        "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)"
+      )
+      .bind(stopped.id, JSON.stringify(stopped), Date.now())
+      .run();
+    await drainAuditOutboxesNoticing(env);
+    // A drain cut short hands the same event over again.
+    await noticeStoppedSources(env, [stopped]);
+    // The same action recorded by anyone but connect tells nobody.
+    await noticeStoppedSources(env, [
+      createAuditEvent(
+        {
+          actor: { type: "system" },
+          action: "connection.events.failed",
+          target: { type: "connection", id: shared },
+          detail: { type: "m365.mail.received", resource: "mailbox-ben" },
+        },
+        "core"
+      ),
+    ]);
+
+    const logged = await allEvents();
+    expect({
+      inLog: logged.some(({ id }) => id === stopped.id),
+      owner: await stopsToldTo(admin),
+      other: await stopsToldTo(other),
+    }).toStrictEqual({
+      inLog: true,
+      owner: [
+        {
+          id: "",
+          type: "events_stopped",
+          connection: shared,
+          event: "m365.mail.received",
+          resource: "mailbox-ben",
+          reason: "refused",
+          at: "",
+          read: false,
+        },
+      ],
+      other: [],
+    });
   });
 
   it("hear a personal connection only for its owner, who alone may make one on it", async () => {
@@ -584,11 +669,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     const shared = await connection();
     const mailbox = await accountOf(shared);
     const trigger = await connectorTrigger(admin, workflow.id, shared);
-    generations += 1;
-    env.QUOTA_LIMITS = {
-      generation: generations,
-      limits: { workflowNestingLevels: 3 },
-    };
+    env.TEST_QUOTA_LIMITS = { workflowNestingLevels: 3 };
     try {
       // Mail from outside: a root.
       await deliverConnectorEvent(env, mailEvent(shared));
@@ -618,8 +699,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         );
       }
     } finally {
-      generations += 1;
-      env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     const lineage = await env.DB.prepare(
       "SELECT run.depth, run.root_run_id AS root FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_id = ? ORDER BY run.depth"
@@ -697,6 +777,25 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       delivered: { runs: 0 },
       runs: 0,
       refused: ["lineage.unjoinable"],
+    });
+  });
+
+  it("refuse an event that isn't one", async () => {
+    const shared = await connection();
+
+    expect({
+      unshaped: await outcome(
+        deliverConnectorEvent(env, { id: "e", type: "x" })
+      ),
+      tooLarge: await outcome(
+        deliverConnectorEvent(
+          env,
+          mailEvent(shared, { payload: { body: "x".repeat(64 * 1024) } })
+        )
+      ),
+    }).toStrictEqual({
+      unshaped: "workflow.invalid",
+      tooLarge: "workflow.invalid",
     });
   });
 

@@ -33,7 +33,6 @@ import {
   clientWatch,
   clientWorkers,
   rolloutTargets,
-  settings,
 } from "../db/schema.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 
@@ -129,9 +128,8 @@ const stillDiscardable = (clientId: string): SQL =>
 
 /**
  * Discards client `clientId`, as `staff`, audited (`client.discard`):
- * its record and what only the admin keeps of it (settings, sealed
- * secrets, reads, its watch and an ended runner's claim), in one
- * batch. Refused unless it was never placed and has nothing recorded
+ * its record and what only the admin keeps of it (sealed secrets, reads,
+ * its watch and an ended runner's claim), in one batch. Refused unless it was never placed and has nothing recorded
  * anywhere (`DiscardErrorCode`). Its id is free afterwards.
  */
 export const discardClient = async (
@@ -146,7 +144,6 @@ export const discardClient = async (
   // operation since the check, loses nothing, and no discard is audited.
   const still = stillDiscardable(clientId);
   const results = await db.batch([
-    db.delete(settings).where(and(eq(settings.clientId, clientId), still)),
     db
       .delete(clientSealedSecrets)
       .where(and(eq(clientSealedSecrets.clientId, clientId), still)),

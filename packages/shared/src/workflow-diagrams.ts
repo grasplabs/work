@@ -1,4 +1,5 @@
 import type { WorkflowRunStatus } from "./workflow-resources.ts";
+import type { RunAiProviderWait } from "./workflows.ts";
 // A workflow's diagram (platform specification 13.10 and 22.7): drawn
 // only from a definition that passed the profile, never a second model of
 // it. Every declared path is in it, each task by its stable ID; showing it
@@ -144,10 +145,16 @@ export interface WorkflowRunTrace {
   /** False when the journal held more than one read takes. */
   complete: boolean;
   /**
-   * The run's retention, as the deployment has it now, is over, or its
+   * The run's retention is over, or its
    * details were swept: nothing of what it reached is shown.
    */
   detailsRemoved: boolean;
+  /**
+   * While it runs, a step of it waiting for its AI provider (as the run
+   * says it, `WorkflowResourceRun.aiProvider`): so what follows its trace
+   * sees a wait begin and end, which its status, still running, doesn't.
+   */
+  aiProvider?: RunAiProviderWait;
 }
 
 /**

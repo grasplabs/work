@@ -14,7 +14,6 @@ import {
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   uploadErrors,
@@ -36,15 +35,10 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
-import {
-  identifyFull,
-  memberRole,
-  staffRole,
-  teamsOf,
-} from "../auth/identity.ts";
+import { identify, memberRole, teamsOf } from "../auth/identity.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
-import { auditStaffRoute } from "../staff-audit.ts";
+import { routeMember } from "../staff-audit.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import { requireWritable } from "./collection-rules.ts";
@@ -118,7 +112,7 @@ const vttSignature = bytesOf("WEBVTT");
  * Office files, and WebVTT's signature (after a byte order mark, if any)
  * as the WebVTT spec defines it.
  */
-const signatures: Readonly<
+export const signatures: Readonly<
   Record<UploadExtension, (bytes: Uint8Array) => boolean>
 > = {
   pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
@@ -392,7 +386,7 @@ const pageHeading = /^#{1,6} Page \d+$/gmu;
  * Whether Markdown holds any text: a heading's counts, table rules and
  * the page headings a PDF's sections get don't.
  */
-const hasText = (markdown: string): boolean =>
+export const hasText = (markdown: string): boolean =>
   markdown
     .replaceAll(pageHeading, "")
     .replaceAll(headingMarks, "")
@@ -431,6 +425,7 @@ export const finalFailures: ReadonlySet<string> = new Set([
   "upload.no_text",
   "upload.original_missing",
   "upload.superseded",
+  "upload.conversion_unavailable",
   "knowledge.too_large",
   "knowledge.too_many_sections",
   "knowledge.too_many_links",
@@ -442,12 +437,10 @@ export const finalFailures: ReadonlySet<string> = new Set([
 /**
  * Refuses the save of `row` into `collection` unless its uploader may
  * still change the collection, as they are now, the way `identify` would
- * see them: a member still, with their role and teams now; Grasp staff
- * while the staff window is open and they are on the staff list, with the
- * config's role. Then reading it, and allowed to write it
- * (`requireWritable`). Someone removed from the organization or the team
- * it is shared with, or staff whose window closed, gets nothing saved in
- * their name.
+ * see them: a member still, with their role and teams now, never Grasp
+ * staff. Then reading it, and allowed to write it (`requireWritable`).
+ * Someone removed from the organization or the team it is shared with
+ * gets nothing saved in their name.
  */
 const requireStillWritable = async (
   env: Env,
@@ -456,14 +449,9 @@ const requireStillWritable = async (
   collection: CollectionRow
 ): Promise<void> => {
   const staff = auditActorSchema.parse(JSON.parse(row.actor)).type === "staff";
-  // Staff who reach the onboarding alone reach no Knowledge.
-  let role: Role | undefined = undefined;
-  if (staff) {
-    const access = await staffRole(env, row.uploadedBy);
-    role = access?.scope === "full" ? access.role : undefined;
-  } else {
-    role = await memberRole(env.DB, row.uploadedBy);
-  }
+  // Grasp staff reach no Knowledge (session-check.ts `reachesWorkspace`):
+  // an upload a staff session started is never saved.
+  const role = staff ? undefined : await memberRole(env.DB, row.uploadedBy);
   if (role === undefined) {
     throw knowledgeErrors.create("knowledge.forbidden");
   }
@@ -472,8 +460,8 @@ const requireStillWritable = async (
     email: "",
     name: "",
     role,
-    teams: staff ? [] : await teamsOf(env.DB, row.uploadedBy),
-    staff,
+    teams: await teamsOf(env.DB, row.uploadedBy),
+    staff: false,
     expiresAt: "",
   };
   const readable = await db
@@ -512,7 +500,8 @@ const extractionError = (uploadId: string, error: unknown): unknown => {
 /**
  * The extraction run's one step: extracts the upload's text with the
  * extractor its collection gets (extract.ts), after recording that the
- * file is sent out when the extractor is Workers AI, and saves it as the
+ * file is sent out when it is converted by Grasp's own conversion, and
+ * saves it as the
  * next version of its document, marking the upload ready and recording
  * which extractor read it in the same batch. Safe to run again:
  * an upload that is ready or failed, or forgotten (its collection deleted,
@@ -551,8 +540,15 @@ export const extractUpload = async (
     throw uploadErrors.create("upload.original_missing");
   }
   const bytes = new Uint8Array(await original.arrayBuffer());
-  const extractor = extractorFor(env, collection, mediaTypeOf(row));
-  if (extractor.name === "workers-ai") {
+  const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
+  // Converted for whoever uploaded it, on their budget.
+  const extractor = await extractorFor(
+    env,
+    collection,
+    mediaTypeOf(row),
+    actor
+  );
+  if (extractor.name === "platform") {
     // Recorded before the file leaves the Worker, so a failure after it
     // left is on record too; one that can't be recorded fails the step,
     // which is retried, and nothing is sent.
@@ -587,7 +583,6 @@ export const extractUpload = async (
     throw uploadErrors.create("upload.superseded");
   }
   await requireStillWritable(env, knowledge, row, collection);
-  const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
   // Claimed for the save, unless it was forgotten meanwhile (a purge of
   // its document, whose text this would save again) or ended: then it is
   // left. A purge's forgetting refuses a claimed upload, so none forgets
@@ -842,7 +837,14 @@ export const originalResponse = async (
   if (request.method !== "GET") {
     return notFound();
   }
-  const person = await identifyFull(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "uploads.original",
+    { uploadId }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -850,8 +852,6 @@ export const originalResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "uploads.original", { uploadId });
   const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;
   const ready = await drizzle(env.DB)

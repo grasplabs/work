@@ -13,7 +13,6 @@ import { acmeTenant, clients } from "./provider-config.ts";
 
 export type ProviderName = Exclude<
   keyof typeof clients,
-  | "microsoftLandscape"
   | "microsoftDirectory"
   | "googleDirectory"
   | "microsoftDocuments"
@@ -187,7 +186,6 @@ export const fakeProviders = () => {
     const client =
       [
         clients.google,
-        clients.microsoftLandscape,
         clients.microsoftDirectory,
         clients.googleDirectory,
         clients.microsoftDocuments,

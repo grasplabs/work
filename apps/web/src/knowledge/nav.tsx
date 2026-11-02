@@ -6,6 +6,14 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -18,15 +26,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -543,23 +543,23 @@ export const KnowledgeNav = ({
   if (folded) {
     return (
       <PageSidebar folded label={t`Knowledge`}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the navigation`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
-        <RailButton
+        <PageSidebarRailDivider />
+        <PageSidebarRailButton
           active={at.collection === undefined}
           label={t`Knowledge`}
           render={<Link search={{}} to="/knowledge" />}
         >
           <LibraryIcon />
-        </RailButton>
+        </PageSidebarRailButton>
         {data.collections.state === "ready"
           ? data.collections.data.map((collection) => (
-              <RailButton
+              <PageSidebarRailButton
                 active={collection.id === at.collection}
                 key={collection.id}
                 label={collection.name}
@@ -572,7 +572,7 @@ export const KnowledgeNav = ({
                 }
               >
                 <CollectionIcon collection={collection} />
-              </RailButton>
+              </PageSidebarRailButton>
             ))
           : null}
       </PageSidebar>

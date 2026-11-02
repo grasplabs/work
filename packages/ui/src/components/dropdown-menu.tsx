@@ -55,19 +55,30 @@ function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
   return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />;
 }
 
+/*
+ * `variant="person"`: who the menu is of, atop a person menu, as the
+ * sidebar's foot shows them: their avatar and their name at the menu's
+ * own size, still muted, as a heading is.
+ */
 function DropdownMenuLabel({
   className,
   inset,
+  variant = "default",
   ...props
 }: MenuPrimitive.GroupLabel.Props & {
   inset?: boolean;
+  variant?: "default" | "person";
 }) {
   return (
     <MenuPrimitive.GroupLabel
       data-slot="dropdown-menu-label"
       data-inset={inset}
+      data-variant={variant}
       className={cn(
-        "text-muted-foreground px-2 py-1.5 text-xs font-medium data-inset:pl-8",
+        variant === "default" &&
+          "text-muted-foreground px-2 py-1.5 text-xs font-medium data-inset:pl-8",
+        variant === "person" &&
+          "text-muted-foreground flex items-center gap-2 px-1 py-1.5 text-sm",
         className
       )}
       {...props}

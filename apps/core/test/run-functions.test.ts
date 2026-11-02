@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import {
   appIdSchema,
   runIdSchema,
@@ -10,7 +9,14 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
@@ -19,8 +25,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
+import { bindingKey, spendMonth } from "../src/model-spend.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
@@ -28,13 +34,13 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { isolationFiles } from "./isolation-app.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { endLiveRuns, finished, runObject, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -50,8 +56,8 @@ import { hitsOf, runEvents, sampleApp } from "./workflow-apps.ts";
 // run of one App reaching another's bindings, a model request escaping
 // the run's budgets, a retried step repeating a side effect, a held side
 // effect completing the step without the person. Everything runs for
-// real, through the dispatcher, the engine and connect; only AI Gateway,
-// Microsoft's sign-in and Graph are faked.
+// real, through the dispatcher, the engine and connect; only the model
+// provider behind connect, Microsoft's sign-in and Graph are faked.
 
 const idp = mockIdp();
 
@@ -60,10 +66,8 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** The model the tests' deployment allows. */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-/** Hosted in the EU, as the tests' config says: its provider's EU region. */
-const euModel = "openai/gpt-5.4";
+/** The model the organization chose. */
+const chosenModel = "mistral/mistral-large-latest";
 
 /** A step of a workflow that calls one of its App's functions. */
 interface CallingStep {
@@ -532,29 +536,29 @@ const appWith = async (
   return id;
 };
 
-/** `admin`'s approval of the App's `writer` to the allowed model. */
-const bindWriter = async (
-  admin: Person,
-  app: string,
-  budget?: { perDay: number }
-) =>
+/** `admin`'s approval of the App's `writer` to the chosen model. */
+const bindWriter = async (admin: Person, app: string) =>
   await admin.api.resourceBindings.approve({
     app,
     alias: "writer",
-    target: { kind: "model", model: allowedModel },
+    target: { kind: "model", model: chosenModel },
     reviewed: { version: 1 },
-    ...(budget === undefined ? {} : { budget }),
   });
 
-/** AI Gateway answering `replies` in turn, behind the AI binding. */
-const gatewayAnswering = (...replies: GatewayReply[]) => {
-  const gateway = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  return gateway;
+/**
+ * The organization chooses the model the tests bind, as an admin binds
+ * only a model it chose, with a provider that answers nothing: a test
+ * whose calls reach it connects its own (`providerAnswering`, `callEnv`).
+ */
+const chooseModel = async (): Promise<void> => {
+  await fakeProviderFor([chosenModel]);
 };
 
-const answer = (text: string): GatewayReply => ({
+/** The chosen model's provider answering `replies` in turn. */
+const providerAnswering = async (...replies: ProviderReply[]) =>
+  await fakeProviderFor([chosenModel], ...replies);
+
+const answer = (text: string): ProviderReply => ({
   text,
   inputTokens: 100,
   outputTokens: 20,
@@ -785,25 +789,16 @@ const startedBefore = (
 };
 
 /**
- * Core's env with AI Gateway answering `replies` behind the AI binding,
- * the model gateway's `rules`, and `db` as its database.
+ * Core's env with `db` as its database, and the chosen model's provider
+ * answering `replies` in turn.
  */
-const callEnv = (
-  replies: GatewayReply[],
-  { rules = {}, db = env.DB }: { rules?: object; db?: D1Database } = {}
+const callEnv = async (
+  replies: ProviderReply[],
+  { db = env.DB }: { db?: D1Database } = {}
 ) => {
-  const gateway = fakeGateway(...replies);
-  const changed: Env = {
-    ...env,
-    DB: db,
-    MODEL_GATEWAY: {
-      gateway: "grasp-os-test",
-      models: [allowedModel],
-      ...rules,
-    },
-  };
-  Reflect.set(changed, "AI", gateway.binding);
-  return { gateway, env: changed };
+  const provider = await fakeProviderFor([chosenModel], ...replies);
+  const changed: Env = { ...env, DB: db };
+  return { provider, env: changed };
 };
 
 /**
@@ -862,7 +857,7 @@ const twoStepApp = async () => {
 /**
  * A run of the two-step workflow (`twoStepApp`) `starter` starts, with
  * `change` made while it waits between its steps: its output, as
- * `reader`, an admin, sees it, and how many requests reached the gateway.
+ * `reader`, an admin, sees it, and how many requests reached the provider.
  */
 const changedBetween = async (
   reader: Person,
@@ -870,17 +865,22 @@ const changedBetween = async (
   app: string,
   change: () => Promise<void>
 ) => {
-  const gateway = gatewayAnswering(answer("One."), answer("Never sent."));
+  const provider = await providerAnswering(
+    answer("One."),
+    answer("Never sent.")
+  );
   const run = await starter.api.workflows.start(app, "assist");
   await sleeping(run.id, "go");
   await change();
   await woken(run.id);
   await finished(run.id);
   const { status, output } = await reader.api.workflows.status(run.id);
-  return { status, output, asked: gateway.requests.length };
+  return { status, output, asked: provider.requests.length };
 };
 
 describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
+  beforeEach(chooseModel);
+
   afterEach(async () => {
     vi.restoreAllMocks();
     await endLiveRuns();
@@ -909,7 +909,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     }).toStrictEqual({ answered: [true, true, true], hits: 3 });
   });
 
-  it("reach a model through the App's binding as the run, counted against the binding's caps and the run's budgets", async () => {
+  it("reach a model through the App's binding as the run, counted in the binding's and the run's spend", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const app = await appWith(builder, {
@@ -918,14 +918,18 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         { name: "draft", reference: draft, input: { prompt: "Hi" } },
       ]),
     });
-    await bindWriter(admin, app, { perDay: 1 });
-    const gateway = gatewayAnswering(answer("Hello."));
+    await bindWriter(admin, app);
+    const provider = await providerAnswering(answer("Hello."));
     const run = await builder.api.workflows.start(app, "assist");
     const ended = await endedRun(builder, run.id);
-    const [runSpend] = await modelLedger(env).spendOfKeys(
-      budgetMonth(env),
-      "run",
-      [run.id]
+    const ledger = modelLedger(env);
+    const [runSpend] = await ledger.spendOfKeys(spendMonth(env), "run", [
+      run.id,
+    ]);
+    const [bindingSpend] = await ledger.spendOfKeys(
+      spendMonth(env),
+      "binding",
+      [bindingKey({ app, alias: "writer" })]
     );
     const events = await allEvents();
     const calls = events.filter(
@@ -937,22 +941,23 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const { bindings } = await admin.api.models.settings();
     expect({
       ended,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
       runSpent: (runSpend?.spentMicros ?? 0) > 0,
       calls: calls.map(({ actor, detail }) => ({
         actor,
         purpose: detail.purpose,
       })),
-      bindingSpent:
-        (bindings.listed.find((binding) => binding.appId === app)?.today ?? 0) >
-        0,
+      bindingSpent: (bindingSpend?.spentMicros ?? 0) > 0,
+      listed:
+        (bindings.listed.find((binding) => binding.appId === app)?.thisMonth ??
+          0) > 0,
     }).toMatchObject({
       ended: { status: "completed", output: [{ ok: true, value: "Hello." }] },
       asked: 1,
-      // The run lineage's spend counts it, so the run's budgets limit it,
-      // and so do the binding's own caps.
+      // The run lineage's spend counts it, and so does the binding's.
       runSpent: true,
       bindingSpent: true,
+      listed: true,
       // Audited as the run, not as the App.
       calls: [
         {
@@ -1235,11 +1240,11 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         },
       ]),
     });
-    const gateway = gatewayAnswering(answer("Never sent."));
+    const provider = await providerAnswering(answer("Never sent."));
     const run = await builder.api.workflows.start(app, "assist");
     expect({
       ended: await endedRun(builder, run.id),
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toMatchObject({
       ended: {
         status: "completed",
@@ -1274,14 +1279,14 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
     await bindWriter(admin, app);
     const gate = Promise.withResolvers<unknown>();
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       { ...answer("first"), pause: { at: 2, until: gate.promise } },
       answer("Never sent.")
     );
     const run = await builder.api.workflows.start(app, "assist");
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 20_000, interval: 50 }
     );
@@ -1302,7 +1307,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       { timeout: 20_000, interval: 200 }
     );
     const { status } = await endedRun(builder, run.id);
-    expect({ status, asked: gateway.requests.length }).toStrictEqual({
+    expect({ status, asked: provider.requests.length }).toStrictEqual({
       status: "cancelled",
       asked: 1,
     });
@@ -1501,7 +1506,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     await bindWriter(asleep.admin, asleep.app);
     const lease = { holds: true };
     // The call's start reads the membership once, the request again.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("members", 2, () => {
         lease.holds = false;
       }),
@@ -1515,7 +1520,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1524,7 +1529,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     await bindWriter(asleep.admin, asleep.app);
     const lease = { holds: true };
     // After the gate: the request reads its binding, then asks.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("app_resource_bindings", 1, () => {
         lease.holds = false;
       }),
@@ -1538,7 +1543,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1546,7 +1551,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const asleep = await sleepingRun(mailFiles());
     const lease = { holds: true };
     // The call's start reads the membership once, the commit again.
-    const { env: racing } = callEnv([], {
+    const { env: racing } = await callEnv([], {
       db: racingRead("members", 2, () => {
         lease.holds = false;
       }),
@@ -1574,59 +1579,6 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
-  it("count a run's requests through a binding against its run lineage's budget, which a screen's don't", async () => {
-    const asleep = await sleepingRun(modelFiles());
-    await bindWriter(asleep.admin, asleep.app);
-    // The first answer costs far more than the run lineage may spend.
-    const { gateway, env: budgeted } = callEnv(
-      [
-        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
-        // The run's second request never reaches it: the screen's does.
-        answer("For the screen."),
-      ],
-      { rules: { budgets: { run: { limit: 0.01 } } } }
-    );
-    const step = stepOf(asleep, { holds: true });
-    const call = async () =>
-      await callRunFunction(
-        budgeted,
-        { ...step, requestId: crypto.randomUUID() },
-        draft,
-        { prompt: "Hi" },
-        `step:${crypto.randomUUID()}`
-      );
-    const first = await call();
-    const second = await call();
-    const app = appIdSchema.parse(asleep.app);
-    const released = await loadRelease(env, app, 1);
-    const screen = await callAppFunction(
-      budgeted,
-      await asleep.builder.api.whoami(),
-      app,
-      JSON.stringify({
-        reference: {
-          resourceId: app,
-          resourceVersion: 1,
-          contractId: "assist.draft",
-          fingerprint: released.fingerprints["assist.draft"] ?? "",
-          kind: "action",
-        },
-        input: { prompt: "Hi" },
-      })
-    );
-    expect({
-      first,
-      second: second.ok ? null : second.error.code,
-      screen: screen.result,
-      asked: gateway.requests.length,
-    }).toMatchObject({
-      first: { ok: true, value: "Costly." },
-      second: "resource.budget_exhausted",
-      screen: { ok: true, value: "For the screen." },
-      asked: 2,
-    });
-  });
-
   it("send nothing through connect for an attempt let go of while the request was signed", async () => {
     const subject = `Invoice ${crypto.randomUUID()}`;
     const mailer = await mailerApp(sleeper);
@@ -1635,7 +1587,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const lease = { holds: true };
     // The binding's grant is read as it is resolved, then the permission
     // again as the call is signed: the lease goes during the signing.
-    const { env: racing } = callEnv([], {
+    const { env: racing } = await callEnv([], {
       db: racingRead("permissions", 2, () => {
         lease.holds = false;
       }),
@@ -1659,7 +1611,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     const lease = { holds: true };
     // The gateway's rules read the run as they judge the request, after
     // the binding was resolved and before the request is sent.
-    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+    const { provider, env: racing } = await callEnv([answer("Never sent.")], {
       db: racingRead("workflow_runs", 1, () => {
         lease.holds = false;
       }),
@@ -1673,7 +1625,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     );
     expect({
       failed: result.ok ? null : result.error.code,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
   });
 
@@ -1698,14 +1650,14 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       ),
     });
     await bindWriter(admin, app);
-    const gateway = gatewayAnswering(answer("One."), answer("Two."));
+    const provider = await providerAnswering(answer("One."), answer("Two."));
     const run = await builder.api.workflows.start(app, "assist");
     const ended = await endedRun(admin, run.id);
     expect({
       status: ended.status,
       code: ended.failure?.error.code,
       // Each attempt asked once before its function failed.
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
     }).toStrictEqual({
       status: "failed",
       code: "internal.unexpected",
@@ -1718,6 +1670,8 @@ describe(
   "a workflow run's calls of its App's functions, beside other callers'",
   { timeout: 120_000 },
   () => {
+    beforeEach(chooseModel);
+
     afterEach(async () => {
       await endLiveRuns();
     });
@@ -1852,6 +1806,8 @@ describe(
   "a workflow run's call on a version no admin approved",
   { timeout: 120_000 },
   () => {
+    beforeEach(chooseModel);
+
     afterEach(async () => {
       await endLiveRuns();
     });
@@ -1908,7 +1864,7 @@ describe(
 
     it("refuse the resource request of a call started before an admin granted for a later version", async () => {
       const { asleep, grant } = await unapprovedRun();
-      const { gateway, env: calling } = callEnv([answer("Never sent.")]);
+      const { provider, env: calling } = await callEnv([answer("Never sent.")]);
       const result = await callRunFunction(
         calling,
         startedBefore(stepOf(asleep, { holds: true }), grant),
@@ -1918,7 +1874,7 @@ describe(
       );
       expect({
         failed: result.ok ? null : result.error.code,
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
       }).toStrictEqual({ failed: "permission.denied", asked: 0 });
     });
   }
@@ -1961,37 +1917,43 @@ const screenCall = async (
 };
 
 describe("another App's functions an App calls", { timeout: 120_000 }, () => {
+  beforeEach(chooseModel);
+
   afterEach(async () => {
     await endLiveRuns();
   });
 
-  it("count a run's model requests through another App against the run lineage's budget, which a screen's don't", async () => {
+  it("count a run's model requests through another App in the run lineage's spend, which a screen's don't", async () => {
     const asleep = await sleepingRun(relayingFiles());
     const assistant = await appWith(asleep.builder, modelFiles());
     await bindWriter(asleep.admin, assistant);
     await bindAssistant(asleep.admin, asleep.app, assistant);
-    // The first answer costs far more than the run lineage may spend.
-    const { gateway, env: budgeted } = callEnv(
-      [
-        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
-        // The run's second request never reaches it: the screen's does.
-        answer("For the screen."),
-      ],
-      { rules: { budgets: { run: { limit: 0.01 } } } }
-    );
+    const { provider, env: counted } = await callEnv([
+      answer("First."),
+      answer("Second."),
+      answer("For the screen."),
+    ]);
+    const runSpent = async (): Promise<number> => {
+      const [row] = await modelLedger(env).spendOfKeys(spendMonth(env), "run", [
+        asleep.runId,
+      ]);
+      return row?.spentMicros ?? 0;
+    };
     const step = stepOf(asleep, { holds: true });
     const ask = async () =>
       await callRunFunction(
-        budgeted,
+        counted,
         { ...step, requestId: crypto.randomUUID() },
         { contractId: "relay.ask", kind: "action" },
         {},
         `step:${crypto.randomUUID()}`
       );
     const first = await ask();
+    const afterFirst = await runSpent();
     const second = await ask();
+    const afterSecond = await runSpent();
     const screen = await screenCall(
-      budgeted,
+      counted,
       asleep.builder,
       asleep.app,
       "relay.ask"
@@ -2000,15 +1962,19 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
       first,
       second,
       screen,
-      asked: gateway.requests.length,
+      asked: provider.requests.length,
+      // Each of the run's requests adds to its lineage; the screen's none.
+      runSpend: [
+        afterFirst > 0,
+        afterSecond > afterFirst,
+        (await runSpent()) === afterSecond,
+      ],
     }).toStrictEqual({
-      first: { ok: true, value: "Costly." },
-      second: {
-        ok: true,
-        value: "error:resource.operation_failed:resource.budget_exhausted",
-      },
+      first: { ok: true, value: "First." },
+      second: { ok: true, value: "Second." },
       screen: { ok: true, value: "For the screen." },
-      asked: 2,
+      asked: 3,
+      runSpend: [true, true, true],
     });
     // Each request named as the run's, with the Assistant's binding it
     // went through, so the log tells it from the Relay's own.
@@ -2016,7 +1982,7 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
     const models = events
       .filter(
         ({ action, actor }) =>
-          (action === "model.call" || action === "model.refused") &&
+          action === "model.call" &&
           actor?.type === "workflow" &&
           actor.runId === asleep.runId
       )
@@ -2040,72 +2006,11 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
         bindingApp: assistant,
       },
       {
-        action: "model.refused",
+        action: "model.call",
         actor: run,
         binding: "writer",
         bindingApp: assistant,
       },
-    ]);
-  });
-
-  it("hold another App's model requests to the rules for what the calling App read, an EU-only connection's included", async () => {
-    const admin = await personApi("admin");
-    const builder = await personApi("builder");
-    const relay = await appWith(builder, relayingFiles());
-    const assistant = await appWith(builder, modelFiles());
-    await bindWriter(admin, assistant);
-    await bindAssistant(admin, relay, assistant);
-    const connectionId = await connectShared(admin);
-    const requested = await builder.api.permissions.request({
-      subject: { type: "app", appId: relay },
-      object: { type: "connection", connectionId },
-      actions: ["mail.list"],
-      binding: "MAIL",
-    });
-    await admin.api.permissions.grant(requested.id, { version: 1 });
-    await admin.api.resourceBindings.approve({
-      app: relay,
-      alias: "mail",
-      target: { kind: "connector", permissionId: requested.id },
-      reviewed: { version: 1 },
-    });
-    // The connection's data must stay with a model hosted in the EU; the
-    // Assistant's writer isn't one.
-    const { gateway, env: euOnly } = callEnv(
-      [answer("Nothing read."), answer("Never sent.")],
-      {
-        rules: {
-          models: [allowedModel, euModel],
-          eu: { models: [euModel], connections: [connectionId] },
-        },
-      }
-    );
-    const plain = await screenCall(euOnly, builder, relay, "relay.ask");
-    const afterReading = await screenCall(
-      euOnly,
-      builder,
-      relay,
-      "relay.readThenAsk"
-    );
-    expect({
-      plain,
-      afterReading,
-      asked: gateway.requests.length,
-    }).toStrictEqual({
-      plain: { ok: true, value: "Nothing read." },
-      afterReading: { ok: true, value: "error:resource.unavailable" },
-      asked: 1,
-    });
-    // Refused for the connection the calling App read, as the Assistant.
-    const events = await allEvents();
-    const refused = events.filter(
-      ({ action, actor }) =>
-        action === "model.refused" &&
-        actor?.type === "app" &&
-        actor.appId === assistant
-    );
-    expect(refused).toMatchObject([
-      { detail: { reason: "model.eu_only", because: "connection" } },
     ]);
   });
 });

@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { Workspace } from "@grasp-os/shared/brain";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
@@ -11,21 +10,20 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { keepLine, keptLine } from "../src/speech-cache.ts";
+import { platformAi } from "../src/platform-ai.ts";
+import { keepLine, keptLine, sweepSpokenLines } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
+  answeringWith,
   approve,
-  gatewayConfig,
   holdAlarm,
   onLink,
   participate,
 } from "./interview-link.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import {
   agree,
   fact,
@@ -56,8 +54,8 @@ import {
 // else does (a sentinel), and the tests look for them, and for who said
 // them, everywhere they could be left: the store's tables, core's
 // database, the brain, the audit log, the lines kept of Stephen's voice,
-// and what the work is drawn again from. AI Gateway is the outside
-// system, faked behind the AI binding. The threat model's delete cases
+// and what the work is drawn again from. The model provider is the
+// outside system, faked behind connect. The threat model's delete cases
 // (GRA-361), tried here:
 //
 // - D1: drawn work left behind, or drawn again with them in it.
@@ -83,6 +81,8 @@ import {
 // - T8: a line put right while the team is given to the brain leaving its
 //   old words in what landed.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 /** Words only one person says, to look for where they must not be. */
@@ -149,9 +149,9 @@ const toldWith = async (ids: Ids, said: Said) => {
 };
 
 /** Draws every piece of work due, each with the tickets' drawing, until none is. */
-const drawAll = async (ids: Ids): Promise<GatewayRequest[]> => {
+const drawAll = async (ids: Ids): Promise<SentRequest[]> => {
   const store = onboardingStore(env);
-  const requests: GatewayRequest[] = [];
+  const requests: SentRequest[] = [];
   for (let round = 0; round < 5; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
     const drew = await answering(
@@ -345,26 +345,6 @@ const ways: {
     audited: ["brain.records.purged", "onboarding.person.removed"],
   },
 ];
-
-/** A fake AI binding for the duration of `run`, answering as `respond` does. */
-const answeringWith = async <T>(
-  respond: (
-    requests: readonly GatewayRequest[]
-  ) => Promise<GatewayReply | undefined>,
-  run: () => Promise<T>
-) => {
-  const before = env.MODEL_GATEWAY;
-  const fake = answeringGateway(respond);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
-};
 
 /** Waits until someone's interview is gone from the store. */
 const goneFromStore = async (person: string): Promise<void> => {
@@ -570,7 +550,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
     await approve(anew, facts);
     // Her map can't be drawn again, until it is given up.
-    const failing: GatewayReply = {
+    const failing: ProviderReply = {
       status: 400,
       errorType: "invalid_request_error",
     };
@@ -630,7 +610,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     let deleted: number | undefined;
-    const drew = await answeringWith(
+    const { result: drew } = await answeringWith(
       async () => {
         // Max deletes his interview while his work is drawn.
         deleted ??= await deleteOnLink(ids.max);
@@ -679,7 +659,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       linesWith(said.lea)
     );
     let deleted: number | undefined;
-    const drew = await answeringWith(
+    const { result: drew } = await answeringWith(
       async () => {
         // Lea deletes her interview while her team's map is drawn from it.
         deleted ??= await deleteOnLink(ids.lea);
@@ -762,9 +742,10 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     const keyOf = (words: string): SpokenKey => ({
+      text: stephenSays(words),
       spoken: `[warm] ${stephenSays(words)}`,
-      voice: speakerVoices.stephen,
-      model: voiceModels.said,
+      voice: platformAi.speech.voices.stephen,
+      model: speechModel,
       language: "en",
     });
     const answer = JSON.stringify({
@@ -774,11 +755,53 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
     await keepLine(env, keyOf(said.max), answer);
     await keepLine(env, keyOf(said.mia), answer);
+    // Said before the speech settings changed: another model and voice,
+    // another language, no tone. Erased all the same.
+    const before: SpokenKey = {
+      text: stephenSays(said.max),
+      spoken: stephenSays(said.max),
+      voice: "EXAVITQu4vr4xnSDxMaL",
+      model: "elevenlabs/eleven_v3",
+      language: "nl",
+    };
+    await keepLine(env, before, answer);
     await deleteOnLink(ids.max);
     expect({
       max: await keptLine(env, keyOf(said.max)),
+      before: await keptLine(env, before),
       mia: await keptLine(env, keyOf(said.mia)),
-    }).toStrictEqual({ max: undefined, mia: answer });
+    }).toStrictEqual({ max: undefined, before: undefined, mia: answer });
+  });
+
+  it("leaves no line kept the flat way, by model and voice, past the cache's next sweep, whatever its age", async () => {
+    const flat = `spoken-lines/${"a".repeat(64)}.json`;
+    const fresh: SpokenKey = {
+      text: "Hello, I'm Stephen.",
+      spoken: "Hello, I'm Stephen.",
+      voice: platformAi.speech.voices.stephen,
+      model: speechModel,
+      language: "en",
+    };
+    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
+    await env.FILES.put(flat, answer);
+    await keepLine(env, fresh, answer);
+
+    // Every page of the cache from its start, as the clock sweeps it a
+    // page a run.
+    await env.FILES.delete("spoken-lines-sweep.json");
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one page a run, in turn
+      await sweepSpokenLines(env, new Date());
+      // oxlint-disable-next-line no-await-in-loop -- until the sweep is round
+      if ((await env.FILES.get("spoken-lines-sweep.json")) === null) {
+        break;
+      }
+    }
+
+    expect({
+      flat: await env.FILES.head(flat),
+      fresh: await keptLine(env, fresh),
+    }).toStrictEqual({ flat: null, fresh: answer });
   });
 });
 
@@ -875,9 +898,10 @@ describe(
       await mapped(ids);
       await toldWith(ids, said);
       const keyOf = (words: string): SpokenKey => ({
+        text: stephenSays(words),
         spoken: `[warm] ${stephenSays(words)}`,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: platformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       });
       const answer = JSON.stringify({
@@ -934,7 +958,7 @@ describe(
       const before = await versionsOf();
       await putRight(ids, said, sentinelOf("inbox"));
       // Every drawing of the tickets fails, until it is given up.
-      const failing: GatewayReply = {
+      const failing: ProviderReply = {
         status: 400,
         errorType: "invalid_request_error",
       };
@@ -1074,9 +1098,10 @@ describe(
       await mapped(ids);
       await toldWith(ids, said);
       const key: SpokenKey = {
+        text: stephenSays(said.max),
         spoken: `[warm] ${stephenSays(said.max)}`,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: platformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       };
       const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });

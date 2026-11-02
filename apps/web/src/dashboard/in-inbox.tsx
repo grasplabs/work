@@ -9,18 +9,24 @@ import { DashboardGroup } from "./dashboard-card.tsx";
 import type { Viewer, Waiting } from "./waiting.ts";
 
 // What waits on the person that only the inbox settles: versions of Apps
-// and workflows asked to go live, decisions runs wait on, questions of the
-// brain asked of them, and schedules that stopped. The nav's count holds
-// them, so the dashboard lists them too, each a way to its item in the
-// inbox, where it is decided.
+// and workflows asked to go live, decisions runs wait on, starts of
+// workflows their chats' agents asked for, questions of the brain asked of
+// them, schedules that stopped, mailboxes or drives connect stopped hearing
+// for their triggers, workflows' bindings that wait on an admin, and
+// packages revoked as malware. The nav's count holds them, so the dashboard
+// lists them too, each a way to its item in the inbox, where it is decided.
 
 /** What the inbox settles and the dashboard has no card of its own for. */
 const settledInInbox = new Set<InboxSource["type"]>([
   "version",
   "workflowGoLive",
   "decision",
+  "heldStart",
   "asked",
   "stopped",
+  "stoppedEvents",
+  "bindings",
+  "revoked",
 ]);
 
 /** The items of what was read that wait in the inbox, in its order. */

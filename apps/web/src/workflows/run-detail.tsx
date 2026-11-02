@@ -16,6 +16,7 @@ import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { WaitingForAiProvider } from "./runs.tsx";
 
 // One run of an independent workflow, opened beside the page (prototype
 // `workflow-inside/inside-traces.tsx` `Detail`): when it ran, how it
@@ -24,13 +25,26 @@ import { runDotOf, runStatusLabels } from "./run-status.ts";
 // own (`workflowResources.run`) and again until it ends: the list carries
 // no result, as only the person it acted for and the organization's admins
 // see what it returned or why it failed (it can hold what the run read for
-// them). Everyone else is told so, rather than shown nothing.
+// them). Everyone else is told so, rather than shown nothing. Where its
+// steps show under it, they follow the run (`status`): the run is read
+// again only when where it is moves (its status, or a wait for its AI
+// provider begun or ended, traces.tsx `followedState`), never on a second
+// timer of its own.
 
 /** How often a run still going is read again. */
 const followMs = 1500;
 
 /** Whether `run` has ended: nothing about it changes after. */
 const ended = (run: WorkflowResourceRun): boolean => run.endedAt !== null;
+
+/**
+ * Whether a run's facts are read again on their own timer: only while it
+ * goes on, and only where no steps follow it (`status`).
+ */
+const readsAgain = (
+  run: WorkflowResourceRun,
+  status: string | null | undefined
+): boolean => status === undefined && !ended(run);
 
 /** A label over what it names, in a run's facts. */
 const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -41,6 +55,30 @@ const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
 );
 
 /** What an ended run returned, or why it failed, as far as the reader may see. */
+/**
+ * An opened run's status, and, while a step of it waits for its AI
+ * provider, what for: as the runs table says it (`WaitingForAiProvider`).
+ */
+export const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => {
+  const { t } = useLingui();
+  return (
+    <Fact label={t`Status`}>
+      <output className="inline-flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
+        />
+        {t(runStatusLabels[run.status])}
+      </output>
+      {run.aiProvider === undefined ? null : (
+        <span className="text-muted-foreground block text-xs">
+          <WaitingForAiProvider wait={run.aiProvider} />
+        </span>
+      )}
+    </Fact>
+  );
+};
+
 export const RunResultView = ({
   run,
   seesResult,
@@ -90,17 +128,23 @@ export const RunResultView = ({
   );
 };
 
-/** Run `opened`, read again until it ends: its facts, then its result. */
+/**
+ * Run `opened`: its facts, then its result. Read again until it ends, or,
+ * given `status` (what its followed steps last said of it; null before
+ * they said anything), once each time that moves.
+ */
 const RunFacts = ({
   workflow,
   opened,
   names,
   admin,
+  status,
 }: {
   workflow: string;
   opened: WorkflowResourceRun;
   names: Names;
   admin: boolean;
+  status: string | null | undefined;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -121,7 +165,7 @@ const RunFacts = ({
         }
         setRun(read);
         setFailure(undefined);
-        if (!ended(read)) {
+        if (readsAgain(read, status)) {
           timer = setTimeout(() => {
             void follow();
           }, followMs);
@@ -142,22 +186,14 @@ const RunFacts = ({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [core, opened.id, workflow]);
+  }, [core, opened.id, workflow, status]);
 
   const seesResult = run.principal === names.me || admin;
   return (
     <div className="flex flex-col gap-6">
       <ErrorText>{failure}</ErrorText>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
-        <Fact label={t`Status`}>
-          <output className="inline-flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-            />
-            {t(runStatusLabels[run.status])}
-          </output>
-        </Fact>
+        <RunStatusFact run={run} />
         <Fact label={t`Started by`}>
           {run.principal === names.me
             ? t`You`
@@ -191,6 +227,7 @@ export const RunSheet = ({
   admin,
   onClose,
   steps,
+  status,
 }: {
   workflow: string;
   opened: WorkflowResourceRun | null;
@@ -199,6 +236,12 @@ export const RunSheet = ({
   admin: boolean;
   onClose: () => void;
   steps?: ReactNode;
+  /**
+   * Where `steps` follow the run: where it is as they last read it, its
+   * status and any wait for its AI provider (traces.tsx `followedState`;
+   * null before they did), so the run's facts are not read on a timer too.
+   */
+  status?: string | null;
 }) => {
   const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
   return (
@@ -230,6 +273,7 @@ export const RunSheet = ({
                 admin={admin}
                 names={names}
                 opened={opened}
+                status={status}
                 workflow={workflow}
               />
             )}

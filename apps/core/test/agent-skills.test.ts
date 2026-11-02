@@ -39,8 +39,7 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 //   returns; a pinned read outlives the agent's read of the collection;
 // - a selection goes unrecorded, or its record carries a skill's text;
 // - a skill's text stays in the chat's later requests once the agent may
-//   no longer read it, because the chat didn't keep where it came from
-//   (the same record judges a sensitive one by the client's data rule).
+//   no longer read it, because the chat didn't keep where it came from;
 // - a shipped Grasp skill is never selected for its task, or an admin's
 //   adapted copy of one leaves the task ambiguous, or doesn't take its
 //   place.
@@ -384,7 +383,7 @@ describe("a chat's skills", setUpTime, () => {
       ),
       ifVersion: 0,
     });
-    const { gateway, ask, agent } = await chatOf(
+    const { provider, ask, agent } = await chatOf(
       person.userId,
       calling(
         `env.brain.skillsRead({ documentId: "${skill.id}", version: 1 }).then(({ text }) => text)`
@@ -408,11 +407,11 @@ describe("a chat's skills", setUpTime, () => {
     // Words no section holds: the turn's own recall finds nothing to quote.
     await ask("Zebras?");
     await ask("Giraffes?");
-    const before = gateway.requests.length;
+    const before = provider.requests.length;
     await admin.api.permissions.revoke(grant);
     await ask("Okapis?");
 
-    const sent = gateway.requests.map(({ body }) => JSON.stringify(body));
+    const sent = provider.requests.map(({ body }) => JSON.stringify(body));
     expect({
       whileReadable: sent.slice(0, before).at(-1)?.includes(secret),
       afterRevoking: sent.slice(before).map((body) => ({

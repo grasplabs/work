@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { randomToken } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
@@ -6,23 +5,24 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
+import { secondsPerCharacter } from "./ai-providers-fake.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, participate } from "./interview-link.ts";
+import { carrying } from "./platform-providers.ts";
 import { routed, signedInWithRole, unique } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
-// for an admin signed in. AI Gateway, and ElevenLabs behind it, is the
-// outside system: a fake behind the AI binding, which says each character
-// in 100 ms. The store, the cache, the gateway's rules and its ledger are
-// real. The ways it can fail, tried here:
+// for an admin signed in. ElevenLabs, Grasp's own speech feature's
+// provider (@grasp-os/shared/platform-ai), is the outside system: a fake
+// behind connect's fetch, which says each character in 25 ms. Connect, the
+// store, the cache, the gateway's rules and its ledger are real. The ways
+// it can fail, tried here:
 //
 // - A line said for a link that isn't one, a device that isn't the
 //   link's, someone who isn't an admin, or another site.
@@ -30,14 +30,9 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-const voiceModel = "elevenlabs/eleven_v4";
-const quickVoice = "elevenlabs/eleven_v4_turbo";
-
-/** Stephen's voice and Claire's, by their ElevenLabs IDs. */
+/** Stephen's voice and Claire's, by their ElevenLabs IDs, the defaults. */
 const stephen = "s3TPKV1kjDlVtZbl4Ksh";
 const claire = "r1KmysJdVYZjJCm4mL3b";
-
-const said: GatewayReply = { speech: { audio: "mp3 bytes" } };
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -64,7 +59,7 @@ const askedSchema = z.object({
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** A line no other test says, so the cache has never seen it. */
+/** A line no other test says, so the cache and the provider have never seen it. */
 const newLine = (): string =>
   `Hello there, ${unique().replaceAll(/\d/gu, "x")}.`;
 
@@ -125,30 +120,14 @@ const codeOf = async (response: Response) => {
   return [response.status, parsed.success ? parsed.data.code : null];
 };
 
-/** What `run` returns while the gateway answers with `replies`, under `models`. */
-const answering = async <T>(
-  replies: GatewayReply[],
-  run: () => Promise<T>,
-  models: string[] = [voiceModel, quickVoice]
-) => {
-  const before = env.MODEL_GATEWAY;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = { gateway: "grasp-os-test", models };
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
+/** What ElevenLabs was asked for the lines carrying `text`: the voice, from the path, and the body. */
+const askedFor = async (text: string) => {
+  const carried = await carrying(text);
+  return carried.map(({ path, body }) => ({
+    voice: path.split("/").at(-2),
+    ...askedSchema.parse(JSON.parse(body)),
+  }));
 };
-
-/** What ElevenLabs was asked: the voice, from the route, and the body. */
-const askedOf = ({ url, body }: GatewayRequest) => ({
-  voice: new URL(url).pathname.split("/").at(-2),
-  ...askedSchema.parse(body),
-});
 
 /** Seconds of voice the onboarding counted for `purpose`. */
 const voiceCounted = async (purpose: string): Promise<number> => {
@@ -164,36 +143,31 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     const text = newLine();
     const before = await voiceCounted("interviews");
 
-    const { requests, result } = await answering([said, said], async () => {
-      const first = await speak({ text, language: "en", link });
-      const again = await speak({ text, language: "en", link });
-      return {
-        first: { status: first.status, body: await first.json() },
-        again: { status: again.status, body: await again.json() },
-      };
-    });
+    const first = await speak({ text, language: "en", link });
+    const again = await speak({ text, language: "en", link });
+    const result = {
+      first: { status: first.status, body: await first.json() },
+      again: { status: again.status, body: await again.json() },
+    };
 
     const answer = answerSchema.parse(result.first.body);
+    const said = text.length * secondsPerCharacter * 1000;
     expect({
       status: result.first.status,
-      audio: atob(answer.audio),
       mime: answer.mime,
-      words: answer.words.map(({ startMs, endMs }) => [startMs, endMs]),
+      words: answer.words.map(({ text: word }) => word),
+      ends: answer.words.at(-1)?.endMs,
     }).toStrictEqual({
       status: 200,
-      audio: "mp3 bytes",
       mime: "audio/mpeg",
-      words: [
-        [0, 500],
-        [600, 1200],
-        [1300, 1300 + (text.length - 13) * 100],
-      ],
+      words: text.split(" "),
+      ends: said,
     });
     expect(result.again).toStrictEqual(result.first);
-    expect(requests).toHaveLength(1);
-    // Counted once, for the line said: 100 ms for each of its characters.
+    await expect(carrying(text)).resolves.toHaveLength(1);
+    // Counted once, for the line said: 25 ms for each of its characters.
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
-      before + text.length / 10
+      before + text.length * secondsPerCharacter
     );
   });
 
@@ -222,59 +196,49 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
         withdrawn: link,
       }[kind];
 
-      const { requests, result } = await answering(
-        [said],
-        async () =>
-          await codeOf(
-            await speak({ text: newLine(), language: "en", link: asked })
-          )
+      const text = newLine();
+
+      const result = await codeOf(
+        await speak({ text, language: "en", link: asked })
       );
 
       expect(result).toStrictEqual([status, code]);
-      expect(requests).toStrictEqual([]);
+      await expect(carrying(text)).resolves.toStrictEqual([]);
     }
   );
 
   it("leads an English line with its tone and takes it out of the timing; another language is said bare", async () => {
     const { link } = await opened();
-    const text = "Hello there, Ada.";
+    const text = newLine();
 
-    const { requests, result } = await answering([said, said], async () => {
-      const english = await speak({
-        text,
-        language: "en",
-        tone: "warm, relaxed",
-        link,
-      });
-      const dutch = await speak({
-        text,
-        language: "nl",
-        tone: "warm, relaxed",
-        link,
-      });
-      return [
-        answerSchema.parse(await english.json()).words,
-        answerSchema.parse(await dutch.json()).words,
-      ];
+    const english = await speak({
+      text,
+      language: "en",
+      tone: "warm, relaxed",
+      link,
     });
+    const dutch = await speak({
+      text,
+      language: "nl",
+      tone: "warm, relaxed",
+      link,
+    });
+    const said = [
+      answerSchema.parse(await english.json()).words,
+      answerSchema.parse(await dutch.json()).words,
+    ];
 
-    expect(requests.map((request) => askedOf(request).text)).toStrictEqual([
+    const asked = await askedFor(text);
+    expect(asked.map(({ text: spoken }) => spoken)).toStrictEqual([
       `[warm, relaxed] ${text}`,
       text,
     ]);
-    // The direction's 16 characters come first, said in 1.6 s.
-    expect(result).toStrictEqual([
-      [
-        { text: "Hello", startMs: 1600, endMs: 2100 },
-        { text: "there,", startMs: 2200, endMs: 2800 },
-        { text: "Ada.", startMs: 2900, endMs: 3300 },
-      ],
-      [
-        { text: "Hello", startMs: 0, endMs: 500 },
-        { text: "there,", startMs: 600, endMs: 1200 },
-        { text: "Ada.", startMs: 1300, endMs: 1700 },
-      ],
-    ]);
+    // Only the line's words, timed as said: in English after the
+    // direction's 16 characters, in 400 ms; in Dutch at once.
+    expect(
+      said.map((words) => words.map(({ text: word }) => word))
+    ).toStrictEqual([text.split(" "), text.split(" ")]);
+    expect(said.map((words) => words[0]?.startMs)).toStrictEqual([400, 0]);
   });
 
   it.each([
@@ -285,60 +249,29 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     ["a speaker there isn't", { speaker: "adam" }],
   ])("refuses a line with %s, sending nothing", async (_, change) => {
     const { link } = await opened();
+    const text = newLine();
 
-    const { requests, result } = await answering(
-      [said],
-      async () =>
-        await codeOf(
-          await speak({ text: newLine(), language: "en", link, ...change })
-        )
+    const result = await codeOf(
+      await speak({ text, language: "en", link, ...change })
     );
 
     expect(result).toStrictEqual([400, "speech.invalid"]);
-    expect(requests).toStrictEqual([]);
+    await expect(carrying(text)).resolves.toStrictEqual([]);
   });
 
   it.each([
-    [
-      "Stephen's line in Eleven v4",
-      {},
-      [voiceModel, quickVoice],
-      stephen,
-      "eleven_v4",
-    ],
-    [
-      "a quick line in v4 Turbo",
-      { quick: true },
-      [voiceModel, quickVoice],
-      stephen,
-      "eleven_v4_turbo",
-    ],
-    [
-      "a quick line in v4 where the deployment allows no Turbo",
-      { quick: true },
-      [voiceModel],
-      stephen,
-      "eleven_v4",
-    ],
-    [
-      "Claire's line in her voice",
-      { speaker: "claire" },
-      [voiceModel, quickVoice],
-      claire,
-      "eleven_v4",
-    ],
-  ])("says %s", async (_, change, models, voice, model) => {
+    ["Stephen's line in Eleven v4", {}, stephen, "eleven_v4"],
+    ["a quick line in v4 Turbo", { quick: true }, stephen, "eleven_v4_turbo"],
+    ["Claire's line in her voice", { speaker: "claire" }, claire, "eleven_v4"],
+  ])("says %s", async (_, change, voice, model) => {
     const { link } = await opened();
+    const text = newLine();
 
-    const { requests } = await answering(
-      [said],
-      async () =>
-        await speak({ text: newLine(), language: "de", link, ...change }),
-      models
-    );
+    const response = await speak({ text, language: "de", link, ...change });
+    await response.body?.cancel();
 
-    expect(requests.map(askedOf)).toMatchObject([
-      { voice, model_id: model, language_code: "de" },
+    await expect(askedFor(text)).resolves.toStrictEqual([
+      { voice, text, model_id: model, language_code: "de" },
     ]);
   });
 
@@ -347,43 +280,45 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     const before = newLine();
     const after = newLine();
 
-    const { requests, result } = await answering([said, said], async () => {
-      const first = await speak({ text: before, language: "en", link });
-      await first.body?.cancel();
-      await onboardingStore(env).countVoice(
-        `link:${person}`,
-        "interviews",
-        voiceBudgets.link
-      );
-      const again = await speak({ text: before, language: "en", link });
-      await again.body?.cancel();
-      const fresh = await speak({ text: after, language: "en", link });
-      return { again: again.status, new: await codeOf(fresh) };
-    });
+    const first = await speak({ text: before, language: "en", link });
+    await first.body?.cancel();
+    await onboardingStore(env).countVoice(
+      `link:${person}`,
+      "interviews",
+      voiceBudgets.link
+    );
+    const again = await speak({ text: before, language: "en", link });
+    await again.body?.cancel();
+    const fresh = await speak({ text: after, language: "en", link });
+    const result = { again: again.status, new: await codeOf(fresh) };
 
     expect(result).toStrictEqual({
       again: 200,
       new: [429, "speech.limited"],
     });
-    expect(requests).toHaveLength(1);
+    await expect(carrying(before)).resolves.toHaveLength(1);
+    await expect(carrying(after)).resolves.toStrictEqual([]);
   });
 
   it("says a line for an admin signed in, counted as their own onboarding's", async () => {
     const { session } = await signedInWithRole(idp, "admin");
     const before = await voiceCounted("reading");
+    const text = newLine();
 
-    const { requests, result } = await answering([said], async () => {
-      const response = await speak(
-        { text: "Hello there, Ada.", language: "en", speaker: "mark" },
-        { cookie: session, "sec-fetch-site": "same-origin" }
-      );
-      return { status: response.status, body: await response.json() };
-    });
+    const response = await speak(
+      { text, language: "en", speaker: "mark" },
+      { cookie: session, "sec-fetch-site": "same-origin" }
+    );
+    const result = { status: response.status, body: await response.json() };
 
     expect(result.status).toBe(200);
     expect(answerSchema.parse(result.body).words).toHaveLength(3);
-    expect(requests).toHaveLength(1);
-    await expect(voiceCounted("reading")).resolves.toBeCloseTo(before + 1.7);
+    await expect(askedFor(text)).resolves.toMatchObject([
+      { voice: "cjVigY5qzO86Huf0OWal" },
+    ]);
+    await expect(voiceCounted("reading")).resolves.toBeCloseTo(
+      before + text.length * secondsPerCharacter
+    );
   });
 
   it.each([
@@ -410,16 +345,14 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
         headers["sec-fetch-site"] = "cross-site";
       }
 
-      const { requests, result } = await answering(
-        [said],
-        async () =>
-          await codeOf(
-            await speak({ text: newLine(), language: "en" }, headers)
-          )
+      const text = newLine();
+
+      const result = await codeOf(
+        await speak({ text, language: "en" }, headers)
       );
 
       expect(result).toStrictEqual([status, code]);
-      expect(requests).toStrictEqual([]);
+      await expect(carrying(text)).resolves.toStrictEqual([]);
     }
   );
 });

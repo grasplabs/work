@@ -122,7 +122,7 @@ describe("the door, against every way in", setUpTime, () => {
   });
 
   it("[GRA-700 P?] Teams resending a message: taken once (door.ts, each activity's id)", async () => {
-    const { teams, gateway } = await member(
+    const { teams, provider } = await member(
       idp,
       says("First."),
       says("Second.")
@@ -130,7 +130,7 @@ describe("the door, against every way in", setUpTime, () => {
     const message = messageFrom(teams);
     await post(message);
     await post(message);
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 });
 

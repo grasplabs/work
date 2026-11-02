@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
-import { act, useRef } from "react";
+import { act, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -24,36 +24,48 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-/** The folded dock: its box, and the way in beside it. */
-const Folded = ({ drawer = false }: { drawer?: boolean }) => {
+/** How many times the dock was opened, by whichever way in. */
+let opened = 0;
+
+/** What a drag of the drawer's edge shows the drawer as, while it is dragged. */
+const previews = new Map<"dock", (width: number) => void>();
+
+/** The one way the dock opens, as the dock's own (`moveTo`) is for both ways in. */
+const open = (): void => {
+  opened += 1;
+  setDockMode("frame");
+};
+
+/** The dock: its box, and the way in beside it while it is folded. */
+const Folded = () => {
   const dock = useRef<HTMLElement>(null);
   const mode = useDockMode();
-  useUnfoldOnPointer(dock, mode === "bar");
-  useDockWidth(dock, drawer);
+  useUnfoldOnPointer(dock, mode === "bar", open);
+  const preview = useDockWidth(dock, mode === "drawer");
+  useEffect(() => {
+    previews.set("dock", preview);
+  });
   return (
     <section data-mode={mode} id="dock" ref={dock}>
       <textarea aria-describedby="hint" aria-label="Ask" />
       {mode === "bar" ? (
-        <OpenChat
-          controls="dock"
-          hint="hint"
-          onOpen={() => {
-            setDockMode("frame");
-          }}
-        />
+        <OpenChat controls="dock" hint="hint" onOpen={open} />
       ) : null}
     </section>
   );
 };
 
 const show = async (drawer = false): Promise<void> => {
+  if (drawer) {
+    setDockMode("drawer");
+  }
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <Folded drawer={drawer} />
+        <Folded />
       </I18nProvider>
     );
     await Promise.resolve();
@@ -93,6 +105,8 @@ const cleanUp = (): void => {
   document.body.replaceChildren();
   setDockMode("bar");
   setDockDrawerWidth(dockDrawer.normal);
+  opened = 0;
+  previews.clear();
 };
 
 describe("the folded chat", () => {
@@ -104,7 +118,10 @@ describe("the folded chat", () => {
       box().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
       await Promise.resolve();
     });
-    expect(dock().dataset.mode).toBe("frame");
+    expect({ mode: dock().dataset.mode, opened }).toStrictEqual({
+      mode: "frame",
+      opened: 1,
+    });
   });
 
   it("stays folded when the box takes the focus from the keyboard", async () => {
@@ -163,5 +180,18 @@ describe("the chat drawer's width", () => {
     await show(true);
     await resize(500);
     expect(dockDrawerWidth()).toBe(dockDrawer.least);
+  });
+
+  it("is the frame's own again when a drag leaves the drawer", async () => {
+    Reflect.set(window, "innerWidth", 1400);
+    await show(true);
+    await act(async () => {
+      previews.get("dock")?.(320);
+      setDockMode("frame");
+      await Promise.resolve();
+    });
+    expect(dock().style.getPropertyValue("--dock-width")).toBe(
+      `${dockDrawer.normal}px`
+    );
   });
 });

@@ -19,7 +19,7 @@ import {
   endedLive,
   findRun,
   nextRevision,
-  projectStatus,
+  projectEnded,
   runEntry,
   toRun,
   unended,
@@ -390,10 +390,7 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     // Ended: whatever was asked, the run is past it. Its row says so, and
     // the receipt settles with it: a cancel as done once the run ended
     // cancelled, anything else as overtaken by the end.
-    await projectStatus(env, row.id, {
-      status: state?.status.status ?? "terminated",
-      at: Date.now(),
-    });
+    await projectEnded(env, row.id, state?.status);
     const ended = await findRun(env, runIdSchema.parse(row.id));
     await settle(
       env,

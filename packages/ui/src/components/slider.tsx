@@ -51,7 +51,7 @@ function Slider({
           data-slot="slider-track"
           className={
             pill
-              ? "bg-muted relative h-11 w-full grow rounded-full select-none"
+              ? "bg-muted relative h-7 w-full grow rounded-full select-none"
               : "bg-muted relative grow overflow-hidden rounded-full select-none data-horizontal:h-1.5 data-horizontal:w-full data-vertical:h-full data-vertical:w-1.5"
           }
         >
@@ -71,7 +71,7 @@ function Slider({
             key={index}
             className={
               pill
-                ? "bg-tile ring-foreground/10 hover:ring-foreground/25 focus-visible:ring-ring block size-9 shrink-0 cursor-grab rounded-full shadow-md ring-1 transition-[inset-inline-start,box-shadow,scale] duration-300 ease-out select-none focus-visible:ring-2 focus-visible:outline-hidden active:scale-95 active:cursor-grabbing"
+                ? "bg-tile ring-foreground/10 hover:ring-foreground/25 focus-visible:ring-ring block size-5.5 shrink-0 cursor-grab rounded-full shadow-md ring-1 transition-[inset-inline-start,box-shadow,scale] duration-150 ease-out select-none focus-visible:ring-2 focus-visible:outline-hidden active:scale-95 active:cursor-grabbing"
                 : "border-primary ring-ring/50 bg-tile block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] select-none hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
             }
           />

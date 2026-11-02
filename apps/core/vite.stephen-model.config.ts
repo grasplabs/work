@@ -1,30 +1,30 @@
 import { execFileSync } from "node:child_process";
 
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
-
 import { coreProject } from "./vite.config.ts";
 
 // Stephen's eval against a real model (GRA-720), on request only: it costs
-// money, so it is in no project the root runs, and CI never runs it. It
-// runs as vite.brain-model.config.ts runs the Brain baseline (GRA-676):
-// the model is `STEPHEN_MODEL`, a gateway ref such as
-// `anthropic/claude-sonnet-5`, or while unset the one a deployment's
-// gateway asks by default for chat, listed first in the run's gateway and
-// reached through core's model gateway and ledger over the real AI binding
-// with your Wrangler login (`wrangler whoami`). The judge asks the same
+// money, so no project the root runs has it; it runs by hand or weekly in
+// CI (.github/workflows/stephen-eval.yml, stephen-weekly.yml). It runs as
+// vite.brain-model.config.ts runs the Brain baseline (GRA-676): the model
+// is `STEPHEN_MODEL`, as the gateway names it, such as
+// `anthropic/claude-sonnet-5` or `mistral/mistral-large-latest` (the
+// latter while unset), the one the run's organization chooses, reached
+// through core's model gateway, ledger and connect, then from the test's
+// isolate to the provider's own API with the real key `STEPHEN_MODEL_KEY`
+// (test/brain-real-provider.ts): Anthropic's, Mistral's or OpenRouter's.
+// Never commit the key; give it in the shell. The judge asks the same
 // model. Run from the repository root, with the most it may spend, in US
 // dollars:
 //
-//   STEPHEN_MODEL=anthropic/claude-sonnet-5 STEPHEN_MODEL_BUDGET_USD=5 \
+//   STEPHEN_MODEL=anthropic/claude-sonnet-5 STEPHEN_MODEL_KEY=… STEPHEN_MODEL_BUDGET_USD=5 \
 //     vp -C apps/core test -c vite.stephen-model.config.ts
 //
 // `STEPHEN_MODEL_CASES` takes case IDs, comma-separated, to run only
-// those (`R1,X2`); `STEPHEN_MODEL_GATEWAY` names the AI Gateway, the
-// account's `default` unless set (CI's has a spend limit of its own). The budget is the ledger's deployment limit for the
-// run: core refuses any request that could take the spend past it. The
-// report and every model exchange go to the output as JSON lines
-// (`STEPHEN_MODEL_REPORT`, `STEPHEN_MODEL_EXCHANGES`); keep them outside
-// the repository.
+// those (`R1,X2`). The budget is the ledger's deployment limit for the
+// run, and the only cap on it here: core refuses any request that could
+// take the spend past it. The report and every model exchange go to the
+// output as JSON lines (`STEPHEN_MODEL_REPORT`, `STEPHEN_MODEL_EXCHANGES`);
+// keep them outside the repository.
 
 /** Dollars the run may spend: required before anything is sent. */
 const budgetUsd = Number(process.env.STEPHEN_MODEL_BUDGET_USD);
@@ -34,11 +34,14 @@ if (!(Number.isFinite(budgetUsd) && budgetUsd > 0)) {
   );
 }
 
-/** The model under test: a gateway ref, the deployment default if unset. */
-const [deploymentDefault] = defaultGatewayModels;
+/** The model under test, as the gateway names it. */
 const named = process.env.STEPHEN_MODEL;
-// CI passes an unset repository variable as empty.
-const model = named === undefined || named === "" ? deploymentDefault : named;
+// CI passes an unset setting as empty.
+const model =
+  named === undefined || named === "" ? "mistral/mistral-large-latest" : named;
+
+/** The provider's real key: from the shell or CI's secret, never committed. */
+const key = process.env.STEPHEN_MODEL_KEY ?? "";
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, {
@@ -57,17 +60,8 @@ export default coreProject(
     hookTimeout: maxHours * 60 * 60 * 1000,
   },
   {
-    remoteBindings: true,
     bindings: {
-      // A deployment's gateway as the console first configures it, with
-      // the model under test listed first, which makes it the one chats ask.
-      MODEL_GATEWAY: {
-        gateway: process.env.STEPHEN_MODEL_GATEWAY ?? "default",
-        models: [
-          model,
-          ...defaultGatewayModels.filter((listed) => listed !== model),
-        ],
-      },
+      ...(key === "" ? {} : { STEPHEN_MODEL_KEY: key }),
       STEPHEN_MODEL: {
         model,
         budgetUsd,
@@ -79,7 +73,7 @@ export default coreProject(
           sha: git("rev-parse", "HEAD"),
           dirty: git("status", "--porcelain", "--untracked-files=no") !== "",
           profile:
-            "workerd (Vitest pool, RUNTIME_PROFILE=workerd), AI binding remote over Wrangler login",
+            "workerd (Vitest pool, RUNTIME_PROFILE=workerd), the provider's own API with a real key",
         },
       },
     },

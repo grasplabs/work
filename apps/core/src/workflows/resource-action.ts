@@ -1,5 +1,6 @@
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { isRetryableCode } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
@@ -74,6 +75,8 @@ import { filesCallOperations } from "./run-files.ts";
 // - Doing more with the run's own files than its files uses name
 //   (GRA-724): only the operations a use declares, on files of its own
 //   run, each written only by the task that opened it (run-files.ts).
+//   A connector read kept as a file (`into`, GRA-886) goes only into a
+//   files use the action declared, to write.
 // - Model calls past the run's cap, or uncounted once its step replays
 //   (GRA-700). A model use's calls send the binding's own model the
 //   sealed output shape, never one the action makes up, and the host
@@ -90,10 +93,18 @@ const actionFailed = (): Error =>
 
 const jsonSchema = z.json();
 
-/** What an action asks of a connector binding: an operation, and its args. */
+/**
+ * What an action asks of a connector binding: an operation, and its args;
+ * for a read that answers a file, the files use of its own that keeps it
+ * as a file of the run (`into`, GRA-886); and, for a write that attaches
+ * run files, the files use of its own they are read through (`from`,
+ * GRA-887).
+ */
 const connectorRequestSchema = z.strictObject({
   operation: z.string().min(1).max(256),
   arguments: jsonSchema,
+  into: z.string().min(1).max(128).optional(),
+  from: z.string().min(1).max(128).optional(),
 });
 
 /** What an action asks of an operation binding: its args. */
@@ -171,6 +182,14 @@ interface ActionHostState {
     | { readonly reason: AdmissionReason; readonly call: string | null }
     | undefined;
   readonly made: Promise<unknown>[];
+  /** How many of its calls reached their effect, so may have taken it. */
+  reached: number;
+  /**
+   * Whether a call before the first refusal reached its effect: a paid
+   * model call, a write. Then a refusal that says its own call sent
+   * nothing (a busy store) no longer says the action sent nothing.
+   */
+  refusedAfterEffect: boolean;
 }
 
 /** How deep and big one call's arguments may be: a step's payload. */
@@ -239,9 +258,15 @@ class ActionHost extends RpcTarget {
     const previous = this.#last;
     const made = (async (): Promise<Json> => {
       await Promise.allSettled([previous]);
+      // One at a time: every call before this one reached its effect or
+      // didn't by now.
+      const reachedBefore = this.#state.reached;
       try {
         return await this.#call(alias, request);
       } catch (error) {
+        if (this.#state.refusal === undefined) {
+          this.#state.refusedAfterEffect = reachedBefore > 0;
+        }
         this.#state.refusal ??=
           error instanceof Error
             ? error
@@ -256,6 +281,15 @@ class ActionHost extends RpcTarget {
     return await made;
   }
 
+  /** Makes `call` through the attempt's effects, counting it as reached. */
+  async #make(
+    call: Parameters<ActionEffects["make"]>[0],
+    ordinal: number
+  ): Promise<Json> {
+    this.#state.reached += 1;
+    return await this.#effects.make(call, ordinal);
+  }
+
   /**
    * Refuses a call at the host's own admission with `error`, noting why
    * (`call` a declared alias, or null) when it is the attempt's first
@@ -266,6 +300,69 @@ class ActionHost extends RpcTarget {
       this.#state.admission ??= { reason, call };
     }
     throw error;
+  }
+
+  /**
+   * One call of a connector use: only an operation it declares; a read
+   * kept as a file (`into`, GRA-886) only in a files use it declares, to
+   * write.
+   */
+  async #connector(
+    alias: string,
+    operations: ReadonlySet<string>,
+    request: unknown,
+    ordinal: number
+  ): Promise<Json> {
+    const parsed = connectorRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      return this.#refuse(
+        "request_invalid",
+        alias,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
+    }
+    // Only an operation its sealed contract declares (GRA-704): what
+    // review and approval saw, whatever name the action computes. The
+    // evidence names the use, never the computed operation.
+    if (!operations.has(parsed.data.operation)) {
+      return this.#refuse(
+        "operation_undeclared",
+        alias,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
+    }
+    // Kept as a file only in a files use the action declared, to write:
+    // what its approval shows it keeps (GRA-886). Attached from a files
+    // use it declared, to read: what its approval shows it sends out
+    // (GRA-887).
+    const { into, from } = parsed.data;
+    const declares = (use: string | undefined, operation: string): boolean => {
+      const files = use === undefined ? undefined : this.#uses.get(use);
+      return files?.kind === "files" && files.operations.has(operation);
+    };
+    if (
+      (into !== undefined && !declares(into, "write")) ||
+      (from !== undefined && !declares(from, "read"))
+    ) {
+      return this.#refuse(
+        "operation_undeclared",
+        alias,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
+    }
+    return await this.#make(
+      {
+        name: "grasp.connector",
+        binding: alias,
+        operation: parsed.data.operation,
+        arguments: parsed.data.arguments,
+        // An action passes its own values only: no parameter of the run.
+        sensitive: [],
+        ...(into === undefined ? {} : { into }),
+        ...(from === undefined ? {} : { from }),
+      },
+      ordinal
+    );
   }
 
   /**
@@ -293,7 +390,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_denied")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       {
         name: "grasp.files",
         binding: alias,
@@ -317,7 +414,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_invalid")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       { name: "grasp.template", binding: alias },
       ordinal
     );
@@ -355,35 +452,7 @@ class ActionHost extends RpcTarget {
     this.#count += 1;
     const ordinal = this.#count;
     if (kind === "connector") {
-      const parsed = connectorRequestSchema.safeParse(request);
-      if (!parsed.success) {
-        return this.#refuse(
-          "request_invalid",
-          alias,
-          workflowResourceErrors.create("workflow.call_invalid")
-        );
-      }
-      // Only an operation its sealed contract declares (GRA-704): what
-      // review and approval saw, whatever name the action computes. The
-      // evidence names the use, never the computed operation.
-      if (!use.operations.has(parsed.data.operation)) {
-        return this.#refuse(
-          "operation_undeclared",
-          alias,
-          workflowResourceErrors.create("workflow.call_denied")
-        );
-      }
-      return await this.#effects.make(
-        {
-          name: "grasp.connector",
-          binding: alias,
-          operation: parsed.data.operation,
-          arguments: parsed.data.arguments,
-          // An action passes its own values only: no parameter of the run.
-          sensitive: [],
-        },
-        ordinal
-      );
+      return await this.#connector(alias, use.operations, request, ordinal);
     }
     if (kind === "knowledge") {
       const parsed = knowledgeRequestSchema.safeParse(request);
@@ -402,7 +471,7 @@ class ActionHost extends RpcTarget {
           workflowResourceErrors.create("workflow.call_denied")
         );
       }
-      return await this.#effects.make(
+      return await this.#make(
         {
           name: "grasp.knowledge",
           binding: alias,
@@ -427,7 +496,7 @@ class ActionHost extends RpcTarget {
           workflowResourceErrors.create("workflow.call_invalid")
         );
       }
-      return await this.#effects.make(
+      return await this.#make(
         {
           name: "grasp.model",
           binding: alias,
@@ -448,7 +517,7 @@ class ActionHost extends RpcTarget {
         workflowResourceErrors.create("workflow.call_invalid")
       );
     }
-    return await this.#effects.make(
+    return await this.#make(
       {
         name: "grasp.operation",
         binding: alias,
@@ -489,6 +558,8 @@ export const callAction = async (
     refusal: undefined,
     admission: undefined,
     made: [],
+    reached: 0,
+    refusedAfterEffect: false,
   };
   const host = new ActionHost(contract.uses ?? [], effects, state);
   const modules = {
@@ -599,6 +670,18 @@ export const callAction = async (
       } finally {
         clearTimeout(giveUp);
       }
+    }
+    // A refusal that says only its own call sent nothing (a busy store, a
+    // rate limit), after an earlier call of the action reached its effect:
+    // trying the action again would make that call again, a paid model
+    // call or a write. Never a retry's to take (resource-errors.ts).
+    const code: unknown = Reflect.get(state.refusal, "code");
+    if (
+      state.refusedAfterEffect &&
+      typeof code === "string" &&
+      isRetryableCode(code)
+    ) {
+      throw workflowResourceErrors.create("workflow.failed_after_effect");
     }
     throw state.refusal;
   }

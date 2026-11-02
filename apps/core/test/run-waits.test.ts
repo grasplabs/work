@@ -137,6 +137,67 @@ describe("the waits a screen is shown of a run", () => {
     ]);
   });
 
+  it("shows a retried round's held call as a first round's, once each round, and its run again as a retry", () => {
+    expect(
+      shownWaits(
+        [
+          pendingOf(
+            20,
+            "task:send:retry:2:held:1:0",
+            "waitForEvent",
+            "held-wake"
+          ),
+          pendingOf(21, "task:send:retry:2:held:1:1:check", "retry"),
+          // Another round's hold is a hold of its own.
+          pendingOf(
+            22,
+            "task:send:retry:3:held:1:0",
+            "waitForEvent",
+            "held-wake"
+          ),
+          pendingOf(23, "task:send:retry:2:held:1:run", "retry"),
+          // A step of the run's code under a retry's name: never shown.
+          pendingOf(
+            24,
+            "task:send:retry:2:held:x",
+            "waitForEvent",
+            "held-wake"
+          ),
+        ],
+        context
+      ).map((wait) =>
+        z.object({ id: z.string(), kind: z.string() }).loose().parse(wait)
+      )
+    ).toMatchObject([
+      { id: "hold-20", kind: "blocked", reason: "policy" },
+      { id: "hold-22", kind: "blocked", reason: "policy" },
+      { id: "wait-23", kind: "timer", purpose: "retry" },
+    ]);
+  });
+
+  it("shows a try's backoff before a step runs again, and that round's own retry, as retries, a loop item's too", () => {
+    expect(
+      shownWaits(
+        [
+          pendingOf(13, "task:hold:retry:2:wait"),
+          pendingOf(14, "task:hold@0/1:retry:3:wait"),
+          pendingOf(15, "task:send:retry:2", "retry"),
+          // A sleep of the run's code under a task's name: never shown.
+          pendingOf(16, "task:hold:retry:2:nap"),
+        ],
+        context
+      ).map((wait) =>
+        z
+          .object({ id: z.string(), kind: z.string(), purpose: z.string() })
+          .parse(wait)
+      )
+    ).toStrictEqual([
+      { id: "wait-13", kind: "timer", purpose: "retry" },
+      { id: "wait-14", kind: "timer", purpose: "retry" },
+      { id: "wait-15", kind: "timer", purpose: "retry" },
+    ]);
+  });
+
   it("shows a decision by the ID its event names, as the key the release sealed, and none of a key it didn't", () => {
     const decision = crypto.randomUUID();
     expect({

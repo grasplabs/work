@@ -379,10 +379,10 @@ describe("an organization's billing, with Stripe's key", () => {
         "Not linked to its customer in Stripe yet. Link it by the customer’s id, and this fills in by itself."
       ),
       form: contract.includes('name="customerId"'),
-      // The invoices are the model's own, as before Stripe was read.
-      invoices: contract.includes("None known yet"),
+      // No invoices without Stripe.
+      invoices: contract.includes('id="contract-invoices"'),
       requests: stripe.requests,
-    }).toStrictEqual({ line: true, form: true, invoices: true, requests: 0 });
+    }).toStrictEqual({ line: true, form: true, invoices: false, requests: 0 });
   });
 
   it("links only by a customer's id, audits each change, and unlinks", async () => {

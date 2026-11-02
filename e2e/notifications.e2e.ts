@@ -71,9 +71,6 @@ test("the person a run acted for is told it failed, and asks the agent to fix it
   await expect(nav.getByRole("link", { name: "Dashboard" })).toHaveText(
     "Dashboard"
   );
-  // An old link to the notifications leads to the dashboard.
-  await page.goto("/notifications");
-  await expect(page).toHaveURL(/\/dashboard$/u);
 
   await item.getByRole("button", { name: "Ask the agent to fix" }).click();
   await expect(page).toHaveURL(/[?&]chat=/u, pageRead);

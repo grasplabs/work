@@ -624,7 +624,7 @@ const start = async (
     tools,
     consent: composioConsentText,
     origin: clientOrigin,
-    returnTo: "/connections",
+    returnTo: "/integrations",
   });
 
 describe("the admin's allowlist, when they connect", () => {

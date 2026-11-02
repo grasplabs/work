@@ -652,10 +652,10 @@ describe(
 
       // The refusal reached the model, which answered: the turn didn't
       // stop on a read that handed nothing over.
-      const [, after] = chat.gateway.requests;
+      const [, after] = chat.provider.requests;
       const sent = JSON.stringify(after?.body);
       expect({
-        requests: chat.gateway.requests.length,
+        requests: chat.provider.requests.length,
         refusal: sent.includes("app.not_found"),
         withheld: sent.includes(withheldResult),
         stopped: JSON.stringify(
@@ -696,7 +696,7 @@ describe(
       await chat.ask("And now?");
 
       expect(
-        chat.gateway.requests.map(({ body }) => {
+        chat.provider.requests.map(({ body }) => {
           const sent = JSON.stringify(body);
           return {
             secret: sent.includes(secret),
@@ -744,7 +744,7 @@ describe(
       // The answer reached the model while the agent held the App, and no
       // request after the revocation carries it.
       expect(
-        chat.gateway.requests.map(({ body }) => {
+        chat.provider.requests.map(({ body }) => {
           const sent = JSON.stringify(body);
           return {
             secret: sent.includes(secret),

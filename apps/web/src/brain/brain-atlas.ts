@@ -58,9 +58,6 @@ export interface Region {
   does: string;
 }
 
-export const isRegion = (value: unknown): value is RegionId =>
-  typeof value === "string" && REGION_IDS.some((id) => id === value);
-
 /** Something still open that someone can answer, and where it shows. */
 export interface OpenItem {
   id: string;

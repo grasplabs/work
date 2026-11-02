@@ -44,6 +44,7 @@ const chat = (
   running: false,
   projectId,
   appId: null,
+  via: "web",
 });
 
 const board = chat("board", "Board report", "p-1");
@@ -133,12 +134,18 @@ const press = async (init: KeyboardEventInit): Promise<void> => {
   });
 };
 
-/** Opens the window with `keys`, once it has read the chats. */
+/** How long the window may take to open: the first time, its code loads first. */
+const openMs = 5000;
+
+/** Opens the window with `keys`, once it has loaded and read the chats. */
 const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
   await press(keys);
-  await vi.waitFor(() => {
-    expect(rows().length).toBeGreaterThan(0);
-  });
+  await vi.waitFor(
+    () => {
+      expect(rows().length).toBeGreaterThan(0);
+    },
+    { timeout: openMs }
+  );
 };
 
 /** Types `text` into the window's search, as a person would. */
@@ -202,6 +209,19 @@ describe("the chats window", () => {
       "Lease of the office",
     ]);
     expect(dialog()?.querySelector("mark")?.textContent).toBe("lease");
+  });
+
+  it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, { ...lease, via: "slack" }, { ...travel, via: "teams" }]
+    );
+    await openWindow({ key: "k", metaKey: true });
+    expect(rows()).toStrictEqual([
+      "Board reportQ4 board ·",
+      "Lease of the officevia Slack ·",
+      "Trip to Lyonvia Microsoft Teams ·",
+    ]);
   });
 
   it("shows a chat found as core lists it now, renamed or moved since", async () => {

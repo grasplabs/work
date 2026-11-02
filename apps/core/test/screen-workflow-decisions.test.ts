@@ -1,13 +1,17 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
-import { generatedPaths } from "@grasp-os/sdk/host";
+import {
+  declaredWorkflows,
+  generatedPaths,
+  workflowFingerprint,
+} from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
@@ -17,12 +21,17 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { setCurrentVersion, versionFiles } from "../src/apps.ts";
+import { appFor, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { boundWorkflowsOf } from "../src/bound-workflows.ts";
+import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
+import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import { buildScreens } from "../src/screens.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import {
   publishCatalogContract,
   resolveCatalogKeys,
@@ -31,12 +40,21 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { withRespond } from "../src/workflows/run-waits.ts";
 import {
   confirmScreenDecision,
   decideScreenRun,
   reviewScreenDecision,
 } from "../src/workflows/screen-runs.ts";
+import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
+import {
+  resumed,
+  runInstance,
+  stopped as stopRun,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -301,6 +319,128 @@ const codeOf = async (call: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
+/**
+ * The person `who`'s whole answer `answer` to decision `of` on `screen`, as
+ * the page makes it: reviewed, confirmed in its dialog, then sent with
+ * that confirmation. Answers the decision's status as it answered, or the
+ * code it was refused with.
+ */
+const answered = async (
+  who: Parameters<typeof reviewScreenDecision>[1],
+  screen: Parameters<typeof reviewScreenDecision>[2],
+  of: { runId: string; decisionId: string },
+  answer: { approved: boolean; payload?: unknown },
+  /** Between the confirmation and the answer. */
+  between: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
+): Promise<unknown> => {
+  try {
+    const reviewed = await reviewScreenDecision(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      answer
+    );
+    if (reviewed.state !== "review") {
+      return reviewed.decision.status;
+    }
+    const { confirmation } = await confirmScreenDecision(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      reviewed.decision.revision,
+      reviewed.response
+    );
+    await between();
+    const view = await decideScreenRun(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      reviewed.response,
+      confirmation
+    );
+    return view.status;
+  } catch (error) {
+    return error instanceof Error && "code" in error
+      ? error.code
+      : String(error);
+  }
+};
+
+/** Decision `decision`'s status, as its row has it. */
+const statusOf = async (decision: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT status FROM workflow_decisions WHERE id = ?"
+  )
+    .bind(decision)
+    .first();
+  return z.object({ status: z.string() }).parse(row).status;
+};
+
+/**
+ * `database`, but ending run `runId` (completed, with an output) right
+ * after the read that admits a person to its snapshot (screen-workflows.ts,
+ * `seenRun`), before the snapshot reads the run again.
+ */
+const endsRunAfterAdmission = (database: D1Database, runId: string) => {
+  const ended = async () => {
+    await database
+      .prepare(
+        "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"
+      )
+      .bind(Date.now(), runId)
+      .run();
+  };
+  /** `statement`, ending the run once any of its reads settled. */
+  const ending = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (inner, name) => {
+        const member: unknown = Reflect.get(inner, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        if (name === "bind") {
+          return (...args: unknown[]) => {
+            // SAFETY: `bind` answers a prepared statement, as D1 types it.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            const bound = Reflect.apply(
+              member,
+              inner,
+              args
+            ) as D1PreparedStatement;
+            return ending(bound);
+          };
+        }
+        return async (...args: unknown[]) => {
+          const result: unknown = await Reflect.apply(member, inner, args);
+          await ended();
+          return result;
+        };
+      },
+    });
+  return new Proxy(database, {
+    get: (target, property) => {
+      const member: unknown = Reflect.get(target, property);
+      if (property !== "prepare") {
+        return typeof member === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(member, target, args)
+          : member;
+      }
+      return (query: string) =>
+        query.includes("origin_app_version")
+          ? ending(target.prepare(query))
+          : target.prepare(query);
+    },
+  });
+};
+
 /** What a call answered, or its refusal's code. */
 const answerOf = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
@@ -354,7 +494,7 @@ const decisionInbox = async () => {
     const decisionId = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, ?, ?, ?, 1, 'h', ?)"
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at, origin_app_version) VALUES (?, 'app', ?, ?, ?, ?, ?, ?, 1, 'h', ?, 1)"
       ).bind(
         runId,
         app,
@@ -417,6 +557,7 @@ const decisionInbox = async () => {
   };
   return {
     fixture,
+    release,
     binding,
     workflowId,
     manifestHash,
@@ -860,6 +1001,545 @@ describe(
       });
     });
 
+    it("keep one answer of a decision answered from screens at once, or against its deadline, and take none against a changed context or a binding gone", async () => {
+      const { fixture, binding, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const { app } = fixture;
+      const screen = { app, version: 1 };
+      const second = await person("admin");
+      await env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      )
+        .bind(app, second.userId, fixture.owner.userId, Date.now())
+        .run();
+      const approve = { approved: true, payload: { comment: "Yes" } };
+      const reject = { approved: false, payload: { comment: "No" } };
+
+      // Two reviewers answer at once, differently: both confirm before
+      // either answers (a barrier), so both confirmed answers reach the
+      // final write together. One answer stands.
+      const raced = await runAsking(app, opened);
+      let confirmed = 0;
+      const bothConfirmed = Promise.withResolvers<null>();
+      const barrier = async (): Promise<void> => {
+        confirmed += 1;
+        if (confirmed === 2) {
+          bothConfirmed.resolve(null);
+        }
+        await bothConfirmed.promise;
+      };
+      const both = await Promise.all([
+        answered(reviewer, screen, raced, approve, barrier),
+        answered(second, screen, raced, reject, barrier),
+      ]);
+      const racedStatus = await statusOf(raced.decisionId);
+      const racedEvents = await allEvents();
+      const racedAnswers = racedEvents.filter(
+        ({ action, target }) =>
+          (action === "workflow.decision.approved" ||
+            action === "workflow.decision.rejected") &&
+          target?.id === raced.decisionId
+      ).length;
+
+      // An answer against its run closing it at the deadline, both orders,
+      // each landed at the exact point: reviewed and confirmed first, then
+      // the close just before the answer's write, or just after it.
+      const runOf = (asked: { runId: string }) => ({
+        kind: "resource" as const,
+        runId: asked.runId,
+        workflow: workflowId,
+        version: 1,
+      });
+      const closedFirst = await runAsking(app, opened + 1000);
+      let closedBefore: { answered: boolean } | undefined;
+      const lateAnswer = await answered(
+        reviewer,
+        screen,
+        closedFirst,
+        approve,
+        async () => {
+          closedBefore = await decisionOutcome(
+            env,
+            runOf(closedFirst),
+            closedFirst.decisionId,
+            true
+          );
+        }
+      );
+      const answeredFirst = await runAsking(app, opened + 1500);
+      const intime = await answered(reviewer, screen, answeredFirst, approve);
+      const closedAfter = await decisionOutcome(
+        env,
+        runOf(answeredFirst),
+        answeredFirst.decisionId,
+        true
+      );
+      const deadline = {
+        closedFirst: {
+          answer: lateAnswer,
+          status: await statusOf(closedFirst.decisionId),
+          answered: closedBefore?.answered,
+        },
+        answeredFirst: {
+          answer: intime,
+          status: await statusOf(answeredFirst.decisionId),
+          answered: closedAfter.answered,
+        },
+      };
+
+      // The context changes between the confirmation and the answer.
+      const changed = await runAsking(app, opened + 2000);
+      const conflict = await answered(
+        reviewer,
+        screen,
+        changed,
+        approve,
+        async () => {
+          await env.DB.prepare(
+            "UPDATE workflow_decisions SET description = 'Approve this larger invoice?' WHERE id = ?"
+          )
+            .bind(changed.decisionId)
+            .run();
+        }
+      );
+      const changedStatus = await statusOf(changed.decisionId);
+      // Asked again, against the context as it is: it takes the answer.
+      const reviewedAgain = await answered(reviewer, screen, changed, approve);
+      // Its acknowledgement lost, the page asks once more: the recorded
+      // answer, never a second one.
+      const askedTwice = await answered(reviewer, screen, changed, approve);
+      const events = await allEvents();
+      const answers = events.filter(
+        ({ action, target }) =>
+          action.startsWith("workflow.decision.") &&
+          ["approved", "rejected"].some((end) => action.endsWith(end)) &&
+          target?.id === changed.decisionId
+      ).length;
+
+      // The App unbinds the workflow between the confirmation and the answer.
+      const unbound = await runAsking(app, opened + 3000);
+      const gone = await answered(
+        reviewer,
+        screen,
+        unbound,
+        approve,
+        async () => {
+          await unbindWorkflowFromApp(env, fixture.owner, binding);
+        }
+      );
+
+      const winners = both.filter(
+        (outcome) => outcome === "approved" || outcome === "rejected"
+      );
+      expect({
+        // Exactly one answered; the other found it closed.
+        oneStands: winners.length === 1 && both.includes("decision.closed"),
+        racedMatches: racedStatus === winners[0],
+        racedAnswers,
+        // The answer and the close agree on how it ended, either way.
+        deadline,
+        conflict,
+        changedStatus,
+        reviewedAgain,
+        askedTwice,
+        answers,
+        gone,
+        unboundStatus: await statusOf(unbound.decisionId),
+      }).toStrictEqual({
+        oneStands: true,
+        racedMatches: true,
+        racedAnswers: 1,
+        deadline: {
+          closedFirst: {
+            answer: "decision.closed",
+            status: "timed_out",
+            answered: false,
+          },
+          answeredFirst: {
+            answer: "approved",
+            status: "approved",
+            answered: true,
+          },
+        },
+        conflict: "decision.conflict",
+        changedStatus: "open",
+        reviewedAgain: "approved",
+        askedTwice: "approved",
+        answers: 1,
+        gone: "decision.not_found",
+        unboundStatus: "open",
+      });
+    });
+
+    it("let a reviewer watch the run a decision asks them about, its decisions to them alone and no control, until it no longer asks them", async () => {
+      const {
+        fixture,
+        release,
+        opened,
+        reviewer,
+        starter,
+        outsider,
+        runAsking,
+      } = await decisionInbox();
+      const { app } = fixture;
+      const declared = declaredWorkflows(release.app, release.workflows).find(
+        ({ alias }) => alias === "review"
+      );
+      if (declared === undefined) {
+        throw new Error("The release declares no review");
+      }
+      const workflow = {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: "workflows.review",
+        fingerprint: await workflowFingerprint(declared),
+        kind: "workflow" as const,
+      };
+      /** `who`'s snapshot of run `runId`, or the code it was refused with. */
+      const watched = async (
+        who: Parameters<typeof readWorkflowWatch>[1],
+        runId: string
+      ): Promise<unknown> => {
+        try {
+          const read = await readWorkflowWatch(env, who, app, {
+            workflow,
+            watch: "run",
+            runId,
+          });
+          return read.value;
+        } catch (error) {
+          return error instanceof Error && "code" in error
+            ? error.code
+            : String(error);
+        }
+      };
+      const shownTo = async (who: typeof reviewer, runId: string) => {
+        const snapshot = await watched(who, runId);
+        const parsed = z
+          .looseObject({
+            waits: z.array(z.looseObject({ kind: z.string() })),
+            control: z.looseObject({}),
+          })
+          .safeParse(snapshot);
+        return parsed.success
+          ? {
+              fields: Object.keys(parsed.data).toSorted(),
+              waits: parsed.data.waits.map(({ kind, canRespond }) => ({
+                kind,
+                canRespond,
+              })),
+              control: parsed.data.control,
+            }
+          : snapshot;
+      };
+      const asked = await runAsking(app, opened);
+      const staff = { ...(await person("admin")), staff: true };
+      // A control asked of it by the reviewer: refused, as for no run.
+      const cancelled = await callScreenFunction(
+        env,
+        reviewer,
+        app,
+        JSON.stringify({
+          workflow,
+          command: "cancel",
+          runId: asked.runId,
+          idempotencyKey: "0".repeat(32),
+        }),
+        Date.now() + 30_000,
+        async () => {
+          // Nothing here is charged.
+        }
+      );
+      const before = {
+        reviewer: await shownTo(reviewer, asked.runId),
+        outsider: await watched(outsider, asked.runId),
+        staff: await watched(staff, asked.runId),
+        cancel: answerOf(cancelled.result),
+      };
+      // Each way a decision stops asking the reviewer: answered, closed at
+      // its deadline, or asked of someone else.
+      const answeredRun = await runAsking(app, opened + 1000);
+      const closedRun = await runAsking(app, opened + 2000);
+      const reassignedRun = await runAsking(app, opened + 3000);
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET status = 'approved', decided_by = ?, decided_at = ? WHERE id = ?"
+        ).bind(starter.userId, Date.now(), answeredRun.decisionId),
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET status = 'timed_out' WHERE id = ?"
+        ).bind(closedRun.decisionId),
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET deciders = ? WHERE id = ?"
+        ).bind(`person:${outsider.userId}`, reassignedRun.decisionId),
+      ]);
+      // A run that ends between the read that admits the reviewer and the
+      // read of what it is: they see neither its output nor its error.
+      const endingRun = await runAsking(app, opened + 4000);
+      const racing = {
+        ...env,
+        DB: endsRunAfterAdmission(env.DB, endingRun.runId),
+      };
+      let ending: unknown;
+      try {
+        const read = await readWorkflowWatch(racing, reviewer, app, {
+          workflow,
+          watch: "run",
+          runId: endingRun.runId,
+        });
+        ending = read.value;
+      } catch (error) {
+        ending =
+          error instanceof Error && "code" in error
+            ? error.code
+            : String(error);
+      }
+      // Read before restricting the App, which refuses these on its own.
+      const stopped = {
+        answered: await watched(reviewer, answeredRun.runId),
+        closed: await watched(reviewer, closedRun.runId),
+        reassigned: await watched(reviewer, reassignedRun.runId),
+      };
+      // The App in restricted mode: the run, unrestricted, isn't its
+      // screen's to answer, so not the reviewer's to watch.
+      const unrestrictedBefore = await watched(reviewer, asked.runId);
+      await appHost(env, appIdSchema.parse(app)).restrict();
+
+      expect({
+        ...before,
+        unrestrictedBefore: typeof unrestrictedBefore,
+        afterRestricting: await watched(reviewer, asked.runId),
+        ...stopped,
+        ending,
+      }).toStrictEqual({
+        reviewer: {
+          // Who the run is, its status, its waits and no control: nothing
+          // of its outcome (what it returned, why it failed, what it rolls
+          // back after), however the snapshot grows.
+          fields: [
+            "control",
+            "fingerprint",
+            "finishedAt",
+            "manifestHash",
+            "runId",
+            "startedAt",
+            "status",
+            "waits",
+            "workflowId",
+            "workflowVersion",
+          ],
+          // No engine runs these rows' run, so it waits on nothing the
+          // engine lists (run-waits.ts); a real run's decision wait, as a
+          // reviewer and its starter see it, is screen-typed-workflows'.
+          waits: [],
+          control: {
+            canPause: false,
+            canResume: false,
+            canCancel: false,
+            pendingControl: null,
+          },
+        },
+        outsider: "workflow.run_unavailable",
+        staff: "workflow.run_unavailable",
+        cancel: "workflow.run_unavailable",
+        unrestrictedBefore: "object",
+        afterRestricting: "workflow.run_unavailable",
+        ending: "workflow.run_unavailable",
+        answered: "workflow.run_unavailable",
+        closed: "workflow.run_unavailable",
+        reassigned: "workflow.run_unavailable",
+      });
+    });
+
+    it("go on once with a screen's answer whose wake is lost while the run is down, the answer given again recording nothing twice", async () => {
+      const { fixture, workflowId } = await boundApp();
+      const { app, owner } = fixture;
+      const admin = await person("admin");
+      const reviewer = await person("admin");
+      await approveWorkflowBinding(env, admin, workflowId, {
+        alias: "approval",
+        target: { kind: "decision", deciders: ["role:admin"] },
+        reviewed: { version: 1 },
+      });
+      const release = await seal(fixture);
+      await setCurrentVersion(env, owner, app, 1);
+      const asked = await requestPermission(
+        env,
+        owner,
+        {
+          subject: { type: "app", appId: app },
+          object: { type: "workflow", workflowId },
+          actions: ["start"],
+          binding: "REVIEW",
+        },
+        {
+          app: async (named, role) => await appFor(env, owner, named, role),
+          resource: async (ref, needed) => {
+            await requireResourceRole(env, owner, ref, needed);
+          },
+        }
+      );
+      await grantPermission(env, admin, asked.id, {
+        version: release.manifest.resourceVersion,
+      });
+      const declared = declaredWorkflows(release.app, release.workflows).find(
+        ({ alias }) => alias === "review"
+      );
+      if (declared === undefined) {
+        throw new Error("The release declares no review");
+      }
+      // The App's screen starts a run on the real engine, as its owner.
+      const { result } = await callScreenFunction(
+        env,
+        owner,
+        app,
+        JSON.stringify({
+          workflow: {
+            resourceId: release.manifest.resourceId,
+            resourceVersion: release.manifest.resourceVersion,
+            contractId: "workflows.review",
+            fingerprint: await workflowFingerprint(declared),
+            kind: "workflow",
+          },
+          command: "start",
+          input: { amount: 5 },
+          idempotencyKey: "1".repeat(32),
+        }),
+        Date.now() + 30_000,
+        async () => {
+          // Nothing here is charged.
+        }
+      );
+      const { runId } = z.object({ runId: z.string() }).parse(answerOf(result));
+      const decisionId = await vi.waitFor(
+        async () => {
+          const row = await env.DB.prepare(
+            "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
+          )
+            .bind(runId)
+            .first<{ id: string }>();
+          if (row === null) {
+            throw new Error("No decision yet");
+          }
+          return row.id;
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+      const screen = { app, version: 1 };
+      const answer = { approved: true, payload: { comment: "Looks right" } };
+      const reviewed = await reviewScreenDecision(
+        env,
+        reviewer,
+        screen,
+        runId,
+        decisionId,
+        answer
+      );
+      if (reviewed.state !== "review") {
+        throw new Error("Nothing to review");
+      }
+      const { confirmation } = await confirmScreenDecision(
+        env,
+        reviewer,
+        screen,
+        runId,
+        decisionId,
+        reviewed.decision.revision,
+        reviewed.response
+      );
+      const decide = async (response: unknown) =>
+        await codeOf(async () => {
+          const decided = await decideScreenRun(
+            env,
+            reviewer,
+            screen,
+            runId,
+            decisionId,
+            response,
+            confirmation
+          );
+          return decided.status;
+        });
+      // Waiting on the engine for its wake, as the engine reports it: its
+      // look at the decision (`:decision:reached`) done, it heard no
+      // answer. Stopped before that look, it would read the answer as it
+      // resumes and need no wake.
+      {
+        using waits = await runInstance(runId).subscribe({
+          filter: ["wait_started"],
+        });
+        const { done } = await waits.next();
+        if (done === true) {
+          throw new Error(`Run ${runId} ended before it waited`);
+        }
+      }
+      // Killed while it waits, and the engine unreachable as the screen's
+      // answer comes in: the answer is recorded, and the wake it owes is
+      // lost.
+      await stopRun(runId);
+      const first = await whileEngineRefuses(
+        (method) => method === "sendEvent",
+        async () => await decide(reviewed.response)
+      );
+      // The page sends the same answer again, as after an acknowledgement
+      // that never came: the decision already taken. Another finds it
+      // closed.
+      const again = await decide(reviewed.response);
+      const other = await decide({ ...reviewed.response, approved: false });
+      // The repair sends the wake while the run is down; it takes it once,
+      // back up.
+      await repairWakes(env, new Date(Date.now() + 60_000));
+      await resumed(runId);
+      const ended = await vi.waitFor(
+        async () => {
+          const run = await resourceRunFor(env, owner, workflowId, runId);
+          expect(run.status).toBe("completed");
+          return run.status === "completed"
+            ? { status: run.status, output: run.output }
+            : { status: run.status };
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      const events = await allEvents();
+
+      expect({
+        first,
+        again,
+        other,
+        ended,
+        decisions: await env.DB.prepare(
+          "SELECT status, decided_by AS decidedBy FROM workflow_decisions WHERE resource_run_id = ?"
+        )
+          .bind(runId)
+          .all()
+          .then(({ results }) => results),
+        openings: events.filter(
+          ({ action, target }) =>
+            action === "workflow.decision.opened" && target?.id === decisionId
+        ).length,
+        approvals: events.filter(
+          ({ action, target }) =>
+            action === "workflow.decision.approved" && target?.id === decisionId
+        ).length,
+        receipts: events
+          .filter(
+            ({ action, target, detail }) =>
+              action === "workflow.run.called" &&
+              target?.id === runId &&
+              detail?.call === "grasp.decision"
+          )
+          .map(({ detail }) => detail?.outcome),
+      }).toStrictEqual({
+        first: "answered",
+        again: "answered",
+        other: "decision.closed",
+        ended: { status: "completed", output: { status: "done" } },
+        decisions: [{ status: "approved", decidedBy: reviewer.userId }],
+        openings: 1,
+        approvals: 1,
+        receipts: ["opened", "answered"],
+      });
+    });
+
     it("answer from a screen only a decision of the version the release pins, as its inbox lists them", async () => {
       const { fixture, opened, reviewer, runAsking } = await decisionInbox();
       const { app } = fixture;
@@ -885,6 +1565,82 @@ describe(
             )
         )
       ).resolves.toBe("decision.not_found");
+    });
+
+    it("say a run's decision wait is answerable only by whom it asks, never staff, and only where the run's restricted mode is the App's", async () => {
+      const { fixture, opened, reviewer, starter, outsider, runAsking } =
+        await decisionInbox();
+      const asked = await runAsking(fixture.app, opened);
+      const decisionWait = {
+        kind: "decision",
+        id: asked.decisionId,
+        taskId: "ask",
+        key: "approval",
+        title: "ask",
+        openedAt: opened,
+        deadline: opened + 86_400_000,
+        canRespond: false,
+      };
+      // A timer beside it, which nothing of this changes.
+      const timer = { kind: "timer", id: "wait-1", purpose: "sleep" };
+      const respond = async (
+        viewer: Parameters<typeof withRespond>[3]
+      ): Promise<unknown[]> => {
+        const waits = await withRespond(
+          env,
+          asked.runId,
+          [decisionWait, timer],
+          viewer
+        );
+        return waits.map(
+          (wait) =>
+            z.object({ canRespond: z.boolean() }).safeParse(wait).data
+              ?.canRespond
+        );
+      };
+      const shown = {
+        reviewer: await respond({
+          userId: reviewer.userId,
+          sameRestriction: true,
+        }),
+        starter: await respond({
+          userId: starter.userId,
+          sameRestriction: true,
+        }),
+        outsider: await respond({
+          userId: outsider.userId,
+          sameRestriction: true,
+        }),
+        staff: await respond({
+          userId: reviewer.userId,
+          staff: true,
+          sameRestriction: true,
+        }),
+        otherRestriction: await respond({
+          userId: reviewer.userId,
+          sameRestriction: false,
+        }),
+      };
+      await env.DB.prepare(
+        "UPDATE workflow_decisions SET status = 'approved' WHERE id = ?"
+      )
+        .bind(asked.decisionId)
+        .run();
+
+      expect({
+        ...shown,
+        answered: await respond({
+          userId: reviewer.userId,
+          sameRestriction: true,
+        }),
+      }).toStrictEqual({
+        reviewer: [true, undefined],
+        starter: [false, undefined],
+        outsider: [false, undefined],
+        staff: [false, undefined],
+        otherRestriction: [false, undefined],
+        answered: [false, undefined],
+      });
     });
 
     it("follow the App's bindings in a draft, and fail a screen's type check on a decision the workflow doesn't have", async () => {

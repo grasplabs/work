@@ -8,7 +8,7 @@ import type {
   ScreenProblem,
 } from "./screens.ts";
 import type { ThinkingStep } from "./thinking.ts";
-import { uploadNameSchema } from "./uploads.ts";
+import { uploadNameSchema, uploadTypes } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
 // (core's chats-rpc.ts). Each chat belongs to the person who made it: only
@@ -28,6 +28,25 @@ export const chatPlatformSchema = z
   });
 
 export type ChatPlatform = z.infer<typeof chatPlatformSchema>;
+
+/**
+ * The chat platforms and mail Grasp is reached through, as each writes its
+ * own name, by adapter name: the same in every language. Every list of
+ * chat accounts, places and chats names them from here.
+ */
+export const chatPlatformNames: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+  slack: "Slack",
+  discord: "Discord",
+  gchat: "Google Chat",
+  "google-chat": "Google Chat",
+  github: "GitHub",
+  linear: "Linear",
+};
+
+/** A chat platform as people know it, or its adapter's name for one not listed. */
+export const chatPlatformName = (platform: string): string =>
+  chatPlatformNames[platform] ?? platform;
 
 /**
  * Which channel a chat came through: Grasp's own app (`web`), or a chat
@@ -59,6 +78,11 @@ export interface ChatSummary {
   projectId: string | null;
   /** The App it is for (`ChatsApi.forApp`), or null for none. */
   appId: string | null;
+  /**
+   * Which channel it came through: Grasp's own app (`web`), or a chat
+   * platform by its adapter's name (`teams`, `slack`), for good.
+   */
+  via: ChatChannel;
 }
 
 /**
@@ -149,6 +173,67 @@ export interface ProjectDocument {
   bytes: number;
   /** When it was added (ISO 8601). */
   createdAt: string;
+}
+
+// Files attached to a question: the person attaches each to the chat
+// (`ChatsApi.attachFile`), core reads its text then, with Knowledge's
+// extractor, and the question that names it (`ChatQuestion.files`) carries
+// it. Its agent reads the text as data (`env.chat.readFile`), never as its
+// instructions. Only the text is kept, with the chat, and goes with it.
+
+/**
+ * The file types a chat file may be, by extension: what Knowledge reads
+ * an upload of, and the text a project document is.
+ */
+export const chatFileTypes = {
+  pdf: uploadTypes.pdf,
+  docx: uploadTypes.docx,
+  xlsx: uploadTypes.xlsx,
+  md: "text/markdown",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+} as const;
+export type ChatFileType = keyof typeof chatFileTypes;
+
+/** Largest file one attachment takes, in bytes: 10 MB, as an upload. */
+export const chatFileMaxBytes = 10 * 1024 * 1024;
+
+/** Most files one question carries. */
+export const chatFilesPerQuestionMax = 5;
+
+/** Most files one chat keeps, sent or waiting for their question. */
+export const chatFilesMax = 20;
+
+const isChatFileType = (value: string): value is ChatFileType =>
+  Object.hasOwn(chatFileTypes, value);
+
+/** A chat file's type, by its name's extension; `undefined` for none it takes. */
+export const chatFileTypeOf = (name: string): ChatFileType | undefined => {
+  const extension = projectExtension
+    .exec(name)
+    ?.groups?.extension?.toLowerCase();
+  return extension !== undefined && isChatFileType(extension)
+    ? extension
+    : undefined;
+};
+
+/** A file attached to a chat, as its person sees it. */
+export interface ChatFile {
+  id: string;
+  /** The file's name, as it was attached. */
+  name: string;
+  type: ChatFileType;
+  /** The file's size, in bytes. */
+  bytes: number;
+  /** When it was attached (ISO 8601). */
+  createdAt: string;
+}
+
+/** A file to attach: its name, with one of {@link chatFileTypes}, and itself. */
+export interface ChatFileInput {
+  name: string;
+  bytes: Uint8Array;
 }
 
 /** One of the person's projects. */
@@ -346,6 +431,76 @@ export interface ChatCitedDocument {
 export const citedSnippetMax = 200;
 
 /**
+ * How much the chat's agent may ask at once (`askQuestions`, GRA-1001):
+ * a few short questions, each with a few short choices, plain text, one
+ * line each. The person can always answer otherwise ("Something else") or
+ * type instead.
+ */
+export const chatAskLimits = {
+  questions: 4,
+  choicesMin: 2,
+  choices: 6,
+  questionLength: 300,
+  choiceLength: 120,
+} as const;
+
+/** Text starting and ending with something other than space. */
+const unpadded = /^\S(?:.*\S)?$/su;
+
+/**
+ * What a question or a choice never holds: controls (line breaks among
+ * them), invisible formatting (bidi overrides, zero-width characters) and
+ * the line and paragraph separators, so it shows as the one line it reads
+ * as, and can't pass for something the page itself shows.
+ */
+const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * One line of plain text, as a question or a choice is: taken as written
+ * or refused, never trimmed.
+ */
+const askLine = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .regex(unpadded)
+    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
+      message:
+        "A question or choice is one line of well-formed text, with no control or invisible formatting characters",
+    });
+
+/** What the agent asks the person at once, as it calls `askQuestions`. */
+export const chatAskSchema = z.strictObject({
+  questions: z
+    .array(
+      z.strictObject({
+        question: askLine(chatAskLimits.questionLength),
+        choices: z
+          .array(askLine(chatAskLimits.choiceLength))
+          .min(chatAskLimits.choicesMin)
+          .max(chatAskLimits.choices)
+          .refine((choices) => new Set(choices).size === choices.length, {
+            message: "A question's choices are all different",
+          }),
+      })
+    )
+    .min(1)
+    .max(chatAskLimits.questions),
+});
+export type ChatAsk = z.infer<typeof chatAskSchema>;
+
+/**
+ * Questions the agent asked the person, with choices: data, never
+ * commands. A choice only says what the person may answer; their answer
+ * is their own next message, and anything the agent then changes still
+ * waits for them to confirm it in Grasp.
+ */
+export interface ChatAsked extends ChatAsk {
+  /** The call that asked them. */
+  callId: string;
+}
+
+/**
  * What the model thought before it answered, as its provider let it be
  * shown: its own words, or a summary of them (OpenAI's). A redacted part
  * (Anthropic's safety filters) shows nothing, but its time counts.
@@ -366,7 +521,14 @@ export interface ChatReasoning {
  * instructions and the APIs it was shown aren't among them.
  */
 export type ChatMessage =
-  | { id: number; role: "user"; text: string; at: string }
+  | {
+      id: number;
+      role: "user";
+      text: string;
+      /** The files the question carried, in the order they were attached. */
+      files?: ChatFile[];
+      at: string;
+    }
   | {
       id: number;
       role: "assistant";
@@ -382,6 +544,12 @@ export type ChatMessage =
       code: ChatCode[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
+      /**
+       * The questions it asked the person, with choices, if it ended its
+       * response asking them (`askQuestions`): shown in place of the
+       * composer until they answer.
+       */
+      asked?: ChatAsked;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -655,6 +823,12 @@ export interface ChatQuestion {
    * think ignores it.
    */
   effort?: ModelEffort;
+  /**
+   * The chat's files the question carries (`ChatsApi.attachFile`), at
+   * most {@link chatFilesPerQuestionMax}: each one attached and not yet
+   * carried by another question.
+   */
+  files?: string[];
 }
 
 /**
@@ -742,6 +916,21 @@ export interface ChatsApi {
    */
   remove: (chatId: string) => Promise<void>;
   /**
+   * Attaches a file to the chat, for its next question to carry: a file
+   * of one of {@link chatFileTypes} of at most {@link chatFileMaxBytes},
+   * up to {@link chatFilesMax} a chat. Resolves once its text is read,
+   * and is refused with why when it can't be. Audited.
+   */
+  attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
+  /**
+   * Removes a file attached to the chat that no question carries yet,
+   * freeing its place among the chat's {@link chatFilesMax}. A file a
+   * question carried stays: refused as `agent.file_not_found`. Refused as
+   * `agent.busy` while the chat's agent works, as a starting question may
+   * carry it. Audited.
+   */
+  removeFile: (chatId: string, fileId: string) => Promise<void>;
+  /**
    * Asks the chat's agent a question. Resolves once the agent has taken
    * it; the answer streams to `watch`, and goes on without anyone
    * watching.
@@ -786,6 +975,12 @@ export interface ChatsApi {
     app: string,
     version: number
   ) => Promise<ChatDraftVersion>;
+  /**
+   * Discards the chat's draft of `app`: its changes go, and the agent's
+   * next write starts over from the App's latest version; its versions
+   * stay, to restore one. For the person while they build the App.
+   */
+  discardDraft: (chatId: string, app: string) => Promise<void>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

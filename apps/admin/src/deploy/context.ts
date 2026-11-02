@@ -8,7 +8,11 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
-import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
+import {
+  clientDomain as stageDomain,
+  clientsNamespace,
+  stageNamed,
+} from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
 import type { ClientDispatcher } from "../clients/core-address.ts";
@@ -22,13 +26,29 @@ import type { SignInApps } from "./core-config.ts";
 import type { RouterHosts, SmokeOptions } from "./router.ts";
 import type { DeploySecrets } from "./secrets.ts";
 
+/**
+ * Grasp's own AI provider keys, one per provider it pays for its platform
+ * features with (conversion, transcription, speech: @grasp-os/shared/
+ * platform-ai), as connect's secrets name them (@grasp-os/shared/
+ * ai-providers, `platformSecret`).
+ */
+const platformKeySecrets = [
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ELEVENLABS_API_KEY",
+] as const;
+type PlatformKeySecret = (typeof platformKeySecrets)[number];
+
 /** The secrets every client shares, as their bindings are named. */
 type SharedSecret =
   | "ENTRA_CLIENT_SECRET"
   | "MICROSOFT_CLIENT_SECRET"
   | "GOOGLE_CLIENT_SECRET"
   | "COMPOSIO_API_KEY"
-  | "APP_OAUTH_CLIENTS";
+  | "APP_OAUTH_CLIENTS"
+  | PlatformKeySecret;
 
 /**
  * Which Worker gets which shared secret: core signs people in with the
@@ -40,6 +60,15 @@ type SharedSecret =
  * JSON by provider (`{"<provider>": {"id", "secret"}}`): one secret for
  * them all, so a new app is an entry in the store, never a change here or
  * in connect (connect's src/providers.ts).
+ *
+ * Grasp's AI provider keys go to connect alone, which makes every
+ * provider call (connect's src/ai-providers.ts): never to core, which
+ * holds no key, and never into the admin's database. And only ever to
+ * Grasp Cloud: a deploy runs only in a Cloudflare destination the admin's
+ * own deployer reaches (hosting/operation.ts refuses a workerd one,
+ * `destination_unsupported`, before it delivers anything). On-prem never
+ * gets them: its operator leaves them unset, and its platform features run
+ * locally or not at all.
  */
 const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
   core: ["ENTRA_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"],
@@ -48,6 +77,7 @@ const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
     "GOOGLE_CLIENT_SECRET",
     "COMPOSIO_API_KEY",
     "APP_OAUTH_CLIENTS",
+    ...platformKeySecrets,
   ],
 };
 
@@ -142,21 +172,19 @@ const optionalSharedSecrets: Readonly<Partial<Record<SharedSecret, string>>> = {
 const notInStore = /not found/iu;
 
 /**
- * A shared secret's value, or its stand-in while the store has none: not
- * there at all, or empty, or left unbound because the store didn't have
- * it at deploy time (scripts/wrangler-deploy.ts). A read that failed any
- * other way stops the deploy as a missing required secret does, so a
- * store that answered badly once never deploys connect without the apps'
- * clients it has.
+ * Optional secret `name`'s value, or undefined while the store has none:
+ * not there at all, or empty, or left unbound because the store didn't
+ * have it at deploy time (scripts/wrangler-deploy.ts). A read that failed
+ * any other way stops the caller as a missing required secret does, so a
+ * store that answered badly once is never taken for one without it.
  */
-const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
-  const standIn = optionalSharedSecrets[name];
-  if (standIn === undefined) {
-    return await storeSecret(env, name);
-  }
+const optionalStoreSecret = async (
+  env: Env,
+  name: SharedSecret
+): Promise<string | undefined> => {
   const binding: SecretsStoreSecret | undefined = env[name];
   if (binding === undefined) {
-    return standIn;
+    return undefined;
   }
   let value = "";
   try {
@@ -166,7 +194,32 @@ const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
       throw new MissingStoreSecretError(name);
     }
   }
-  return value === "" ? standIn : value;
+  return value === "" ? undefined : value;
+};
+
+const isPlatformKey = (name: SharedSecret): name is PlatformKeySecret =>
+  platformKeySecrets.some((each) => each === name);
+
+/**
+ * A shared secret's value, its stand-in while the store has none, or
+ * undefined for one of Grasp's AI provider keys the store doesn't have:
+ * connect then goes without it, and a platform feature whose provider has
+ * no key says it isn't configured yet, never served by another provider.
+ * A deploy never waits on one; Platform's Readiness names a key the
+ * features staff chose still lack (src/admin/readiness.ts).
+ */
+const sharedSecret = async (
+  env: Env,
+  name: SharedSecret
+): Promise<string | undefined> => {
+  if (isPlatformKey(name)) {
+    return await optionalStoreSecret(env, name);
+  }
+  const standIn = optionalSharedSecrets[name];
+  if (standIn === undefined) {
+    return await storeSecret(env, name);
+  }
+  return (await optionalStoreSecret(env, name)) ?? standIn;
 };
 
 /** Each app's shared secrets, by name, read from Secrets Store. */
@@ -174,7 +227,7 @@ const sharedValues = async (env: Env): Promise<DeploySecrets["shared"]> => {
   const names = [...new Set(Object.values(sharedSecrets).flat())];
   const values = new Map(
     await Promise.all(
-      names.map(async (name): Promise<[string, string]> => [
+      names.map(async (name): Promise<[string, string | undefined]> => [
         name,
         await sharedSecret(env, name),
       ])
@@ -183,7 +236,12 @@ const sharedValues = async (env: Env): Promise<DeploySecrets["shared"]> => {
   return Object.fromEntries(
     Object.entries(sharedSecrets).map(([app, secrets]) => [
       app,
-      Object.fromEntries(secrets.map((name) => [name, values.get(name) ?? ""])),
+      Object.fromEntries(
+        secrets.flatMap((name) => {
+          const value = values.get(name);
+          return value === undefined ? [] : [[name, value]];
+        })
+      ),
     ])
   );
 };
@@ -284,16 +342,20 @@ export interface DeployContext {
 /**
  * Relay mode for every client this admin deploys: the stage whose OAuth
  * relay (@grasp-os/shared/oauth-relay) their sign-in and connections come
- * back through, while `OAUTH_RELAY` is `on`, as wrangler.jsonc sets it
- * for both stages: every client the admin deploys is Grasp-hosted, under
- * its stage's hosted domain, on Grasp's shared OAuth apps. `off` leaves
- * each client's IdPs returning to its own origin, as on-prem has it.
+ * back through. Every client the admin deploys is Grasp-hosted, under its
+ * stage's hosted domain, on Grasp's shared OAuth apps, so the relay is
+ * always on there. A local run or a test serves clients under a domain of
+ * its own, which no relay serves: their IdPs return to their own origin.
  */
 export const oauthRelayOf = (env: {
   STAGE?: string;
-  OAUTH_RELAY?: string;
-}): Stage | undefined =>
-  env.OAUTH_RELAY === "on" ? stageNamed(env.STAGE) : undefined;
+  CLIENT_DOMAIN?: string;
+}): Stage | undefined => {
+  const stage = stageNamed(env.STAGE);
+  return stage !== undefined && env.CLIENT_DOMAIN?.trim() === stageDomain(stage)
+    ? stage
+    : undefined;
+};
 
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);

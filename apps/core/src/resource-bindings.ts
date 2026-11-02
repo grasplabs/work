@@ -6,7 +6,6 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -14,12 +13,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { bindingSpendListed } from "@grasp-os/shared/models";
-import type { ModelBindingAlert, ModelSettings } from "@grasp-os/shared/models";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import type { ModelSettings } from "@grasp-os/shared/models";
+import { operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
-  modelBindingBudgetSchema,
   resourceBindingErrors,
 } from "@grasp-os/shared/resource-bindings";
 import type {
@@ -28,7 +26,6 @@ import type {
   BindingState,
   BindingTarget,
   DeclaredResource,
-  ModelBindingBudget,
   ResourceBinding,
   ResourceBindingsReview,
 } from "@grasp-os/shared/resource-bindings";
@@ -48,11 +45,10 @@ import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 // Each list bound as one parameter: a review may name more permissions or
 // collections than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
-import { bindingScopes } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
-import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings, usableAnswerTokens } from "./models.ts";
+import { bindingKey } from "./model-spend.ts";
+import { modelSettings, usableAnswerTokens } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
@@ -78,6 +74,11 @@ import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
+import {
+  declarationHash,
+  projectStoreResource,
+  unprojectStoreResource,
+} from "./resource-declarations.ts";
 import { guestsAdapter } from "./resource-guests.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
@@ -86,6 +87,7 @@ import type { PlatformAction } from "./resource-platform.ts";
 import { statisticsAdapter } from "./resource-statistics.ts";
 import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 import { auditStoreRefusal } from "./store-operations.ts";
 import type { StoreGrant } from "./store-operations.ts";
 
@@ -120,11 +122,6 @@ import type { StoreGrant } from "./store-operations.ts";
 // - A binding of one App serves another: rows are found by the release's
 //   own App, never by anything the caller sends; the adapter acts for the
 //   invocation's authority, the App and the person core resolved.
-// - One App's model binding spends a person's or the deployment's whole
-//   budget: the admin who approves it may cap it per request, day and
-//   month (`budget`), enforced by the model gateway and its ledger on
-//   every provider request (model-budgets.ts). Caps stored damaged serve
-//   nothing.
 // - An approval races a version change: the admin names the version they
 //   reviewed; the batch writes only while it is still current, as a
 //   permission grant does (`app.conflict` otherwise).
@@ -145,17 +142,6 @@ const adapters: {
   statistics: statisticsAdapter,
   guests: guestsAdapter,
   app: appAdapter,
-};
-
-/** The SHA-256 of `declaration`, canonical, as a release sealed it. */
-export const declarationHash = async (
-  declaration: AnyResource
-): Promise<string> => {
-  const json = jsonOf(declaration);
-  if (json === undefined) {
-    throw new Error("A resource declaration is JSON");
-  }
-  return await sha256Hex(canonicalJson(json));
 };
 
 /**
@@ -224,68 +210,23 @@ const jsonOrUndefined = (text: string): unknown => {
   }
 };
 
-/** Bindings whose damaged caps this isolate logged already. */
-const loggedDamaged = new Set<string>();
-
-/**
- * A row's own caps: null for none, `unreadable` for caps stored damaged,
- * logged once per binding and isolate. A binding whose caps can't be read
- * serves nothing (`resourceBindingsFor`), so it never runs uncapped.
- */
-const storedBudget = (
-  row: Pick<Row, "id" | "budget">
-): ModelBindingBudget | null | "unreadable" => {
-  if (row.budget === null) {
-    return null;
-  }
-  const parsed = modelBindingBudgetSchema.safeParse(
-    jsonOrUndefined(row.budget)
-  );
-  if (!parsed.success) {
-    if (!loggedDamaged.has(row.id)) {
-      loggedDamaged.add(row.id);
-      log.error("resource_binding.budget_unreadable", { binding: row.id });
-    }
-    return "unreadable";
-  }
-  return parsed.data;
-};
-
-/**
- * What the audit log records of a binding's caps, in US dollars: each one,
- * null where none is set, all null for a binding without a budget.
- */
-const budgetDetail = (
-  budget: ModelBindingBudget | undefined
-): Record<string, Json> => ({
-  budgetPerRequest: budget?.perRequest ?? null,
-  budgetPerDay: budget?.perDay ?? null,
-  budgetPerMonth: budget?.perMonth ?? null,
-  budgetAlertAt: budget?.alertAt ?? null,
-});
-
 /** A row as the API returns it. */
-const toBinding = (row: Row): ResourceBinding => {
-  const budget = storedBudget(row);
-  return {
-    id: row.id,
-    appId: row.appId,
-    alias: row.alias,
-    kind: row.kind,
-    target: bindingTargetSchema.parse(JSON.parse(row.target)),
-    contractId: row.contractId,
-    fingerprint: row.fingerprint,
-    declarationHash: row.declarationHash,
-    reviewedVersion: row.reviewedVersion,
-    budget: budget === "unreadable" ? null : budget,
-    budgetDamaged: budget === "unreadable",
-    status: row.status,
-    approvedBy: row.approvedBy,
-    approvedAt: row.approvedAt.toISOString(),
-    revokedBy: row.revokedBy,
-    revokedAt: row.revokedAt?.toISOString() ?? null,
-  };
-};
+const toBinding = (row: Row): ResourceBinding => ({
+  id: row.id,
+  appId: row.appId,
+  alias: row.alias,
+  kind: row.kind,
+  target: bindingTargetSchema.parse(JSON.parse(row.target)),
+  contractId: row.contractId,
+  fingerprint: row.fingerprint,
+  declarationHash: row.declarationHash,
+  reviewedVersion: row.reviewedVersion,
+  status: row.status,
+  approvedBy: row.approvedBy,
+  approvedAt: row.approvedAt.toISOString(),
+  revokedBy: row.revokedBy,
+  revokedAt: row.revokedAt?.toISOString() ?? null,
+});
 
 /** What the audit log records of a binding's target: IDs only. */
 const targetDetail = (target: BindingTarget): Record<string, Json> => {
@@ -394,7 +335,7 @@ export const approveResourceBinding = async (
   input: unknown
 ): Promise<ResourceBinding> => {
   requireMemberAdmin(by);
-  const { app, alias, target, reviewed, budget } = resourceBindingErrors.parse(
+  const { app, alias, target, reviewed } = resourceBindingErrors.parse(
     "resource.binding_invalid",
     bindingApprovalSchema,
     input
@@ -436,12 +377,23 @@ export const approveResourceBinding = async (
     approvedAt: now,
     revokedBy: null,
     revokedAt: null,
-    budget: budget === undefined ? null : canonicalJson(budget),
   };
   // Written only while `by` is still an admin and the reviewed version
   // still current, both read by the statements themselves.
   const stillReviewed = sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${found.id}) IS ${reviewed.version}`;
-  const allowed = and(stillAdminSql(by), stillReviewed);
+  // A store resource's store, too, only while it is live and no deletion
+  // has it closing: so a deletion that found no consumer resolving to it
+  // (data-stores.ts) never races an approval that does.
+  const allowed = and(
+    stillAdminSql(by),
+    stillReviewed,
+    target.kind === "store"
+      ? liveStoreSql(
+          sql`(SELECT object_id FROM permissions WHERE id = ${target.permissionId})`,
+          Date.now()
+        )
+      : undefined
+  );
   const db = drizzle(env.DB);
   // The alias's binding until now, if it had one, is revoked in the same
   // batch; without one, the update names no row and its event isn't kept.
@@ -467,7 +419,7 @@ export const approveResourceBinding = async (
       db
         .insert(appResourceBindings)
         .select(
-          sql`SELECT ${row.id}, ${row.appId}, ${row.alias}, ${row.kind}, ${row.target}, ${row.declarationHash}, ${row.contractId}, ${row.fingerprint}, ${row.reviewedVersion}, 'active', ${row.approvedBy}, ${now.getTime()}, NULL, NULL, ${row.budget} WHERE ${allowed}`
+          sql`SELECT ${row.id}, ${row.appId}, ${row.alias}, ${row.kind}, ${row.target}, ${row.declarationHash}, ${row.contractId}, ${row.fingerprint}, ${row.reviewedVersion}, 'active', ${row.approvedBy}, ${now.getTime()}, NULL, NULL WHERE ${allowed}`
         ),
       outboxedIfChanged(
         db,
@@ -477,9 +429,31 @@ export const approveResourceBinding = async (
           fingerprint: row.fingerprint,
           declarationHash: row.declarationHash,
           ...targetDetail(target),
-          ...budgetDetail(budget),
         })
       ),
+      // The binding inventory (spec 24): the rows the replaced approval
+      // resolved name their declaration alone again, and those of every
+      // release kept whose declaration this one serves name its store.
+      ...(previous === undefined
+        ? []
+        : [
+            unprojectStoreResource(
+              db,
+              previous.id,
+              sql`EXISTS (SELECT 1 FROM app_resource_bindings WHERE id = ${row.id})`
+            ),
+          ]),
+      ...(target.kind === "store"
+        ? [
+            projectStoreResource(db, {
+              app: found.id,
+              alias,
+              declared: row.declarationHash,
+              approval: sql`(SELECT id FROM app_resource_bindings
+                WHERE id = ${row.id} AND status = 'active')`,
+            }),
+          ]
+        : []),
     ]);
   } catch (error) {
     // Another approval of the alias took its place first: the unique
@@ -547,6 +521,14 @@ export const revokeResourceBinding = async (
       db,
       bindingEntry(by, "app.resource_binding.revoked", found, {})
     ),
+    // The rows it resolved in the binding inventory name their
+    // declaration alone again.
+    unprojectStoreResource(
+      db,
+      found.id,
+      sql`EXISTS (SELECT 1 FROM app_resource_bindings
+        WHERE id = ${found.id} AND status = 'revoked')`
+    ),
   ]);
   const [row] = revoked;
   if (row === undefined) {
@@ -602,17 +584,13 @@ type NotServed =
   /** The target serves another contract, or a changed one. */
   | "drift"
   /** A review's limit on asking connect left it unchecked. */
-  | "unchecked"
-  /** Its stored budget doesn't read, so it would run uncapped. */
-  | "budget";
+  | "unchecked";
 
 /** How an active binding resolves for a declaration now. */
 type Resolution =
   | {
       readonly state: "served";
       readonly served: ServedBinding;
-      /** Its caps; null when it has none. */
-      readonly budget: ModelBindingBudget | null;
       /** What it binds, as its row names it. */
       readonly target: BindingTarget;
     }
@@ -646,12 +624,6 @@ const resolved = async (
   if ((await declarationHash(declaration)) !== row.declarationHash) {
     return { state: "declaration_changed", why: "declaration" };
   }
-  // A budget that doesn't read serves nothing, so it never runs uncapped;
-  // checked before connect is asked anything.
-  const budget = storedBudget(row);
-  if (budget === "unreadable") {
-    return { state: "budget_damaged", why: "budget" };
-  }
   const served = await bindWith(env, app, declaration, target.data, asks);
   // Never served unless checked: a review that ran out of asks says so.
   if (served === unchecked) {
@@ -662,7 +634,7 @@ const resolved = async (
   }
   return served.contractId === row.contractId &&
     served.fingerprint === row.fingerprint
-    ? { state: "served", served, budget, target: target.data }
+    ? { state: "served", served, target: target.data }
     : { state: "contract_changed", why: "drift" };
 };
 
@@ -888,10 +860,11 @@ const choicesFor = async (
   grants: ReviewGrants
 ): Promise<BindingChoices> => {
   if (declaration["~resource"] === "model") {
+    const { models: allowed } = await modelSettings(env);
     return {
       kind: "model",
       // Only those approving accepts: each can give its longest request.
-      models: gatewaySettings(env).models.filter((model) =>
+      models: allowed.filter((model) =>
         modelAnswers(model, longestAsk(declaration))
       ),
       truncated: false,
@@ -1395,7 +1368,7 @@ export const resourceBindingsFor = (
       }
       return undefined;
     }
-    const { served, budget } = resolution;
+    const { served } = resolution;
     return {
       kind: declaration["~resource"],
       contract:
@@ -1413,7 +1386,7 @@ export const resourceBindingsFor = (
             declarationHash: row.declarationHash,
             fingerprint: row.fingerprint,
           },
-          { alias: row.alias, budget }
+          { alias: row.alias }
         ),
     };
   };
@@ -1426,12 +1399,8 @@ const notServed = () => operationErrors.create("resource.unavailable");
 export interface StepModel {
   /** The model the binding's admin approved. */
   readonly model: string;
-  /** The binding, with its caps, as the gateway counts it. */
-  readonly binding: {
-    readonly app: AppId;
-    readonly alias: string;
-    readonly budget: ModelBindingBudget | null;
-  };
+  /** The binding, as the gateway counts its spend. */
+  readonly binding: { readonly app: AppId; readonly alias: string };
   /** The declaration's bound on the answer, for the step's request as a whole. */
   readonly maxOutputTokens: number;
 }
@@ -1493,7 +1462,7 @@ export const stepModelBinding = async (
   }
   return {
     model: resolution.target.model,
-    binding: { app, alias, budget: resolution.budget },
+    binding: { app, alias },
     maxOutputTokens: declaration.maxOutputTokens,
   };
 };
@@ -1505,10 +1474,9 @@ export const stepModelBinding = async (
  * the same one and still active, the current release declares exactly
  * what was approved and an action of it uses the alias, the binding
  * resolves as a live request's would (its target serving exactly the
- * contract pinned, its budget readable), and that contract still names
- * the call's tool. A binding revoked or replaced since, a version that
- * widened the declaration, a drifted contract, a damaged budget or a lost
- * grant: `resource.unavailable`, and nothing runs.
+ * contract pinned), and that contract still names the call's tool. A
+ * binding revoked or replaced since, a version that widened the
+ * declaration, a drifted contract or a lost grant: `resource.unavailable`, and nothing runs.
  */
 export const requireHeldBinding = async (
   env: Env,
@@ -1555,7 +1523,7 @@ export const requireHeldBinding = async (
     throw notServed();
   }
   // Resolved as a live request resolves it (`resolved`): its kind, target,
-  // declaration, budget and contract, all as now. Then what only a held
+  // declaration and contract, all as now. Then what only a held
   // call needs: its contract still names the call's tool.
   const resolution = await resolved(env, found.id, declaration, row);
   if (
@@ -1566,51 +1534,18 @@ export const requireHeldBinding = async (
   }
 };
 
-/** How far `spentMicros` is into `scope`'s cap: the ledger alerts at the same points. */
-const alertOf = (
-  { limitMicros, alertMicros }: LedgerScope,
-  spentMicros: number
-): ModelBindingAlert => {
-  if (limitMicros !== null && spentMicros >= limitMicros) {
-    return "reached";
-  }
-  return alertMicros !== null && spentMicros >= alertMicros
-    ? "alerted"
-    : "none";
-};
-
-const alertRank: Readonly<Record<ModelBindingAlert, number>> = {
-  none: 0,
-  alerted: 1,
-  reached: 2,
-};
-
-/** The further into its cap of a month's and a day's alert. */
-const furthest = (
-  month: ModelBindingAlert,
-  day: ModelBindingAlert
-): ModelBindingAlert => (alertRank[day] > alertRank[month] ? day : month);
-
-/** What each key of a scope spent, in micros. */
-const spentByKey = (spent: readonly ScopeSpend[]): Map<string, number> =>
-  new Map(spent.map(({ key, spentMicros }) => [key, spentMicros]));
-
 /**
  * The Apps' active model bindings, by App name and alias (at most
- * `bindingSpendListed`, and whether more are bound), each with its own
- * caps and what its requests spent in `periods`' month and day: for
- * admins to read (models-rpc.ts), who core checks.
- *
- * Spend is read under the very scopes a request through the binding
- * counts against (`bindingScopes`), keyed by App and alias, so it is what
- * the next request's admission counts, settled: reservations still held
- * aren't spend yet. A binding without caps is listed too, its spend
- * counted all the same. One whose caps or target can't be read is listed
- * as damaged (`budgetDamaged`, a null `model`), as it serves nothing.
+ * `bindingSpendListed`, and whether more are bound), each with what its
+ * requests spent in `month`: for admins to read (models-rpc.ts), who core
+ * checks. Spend is read under the very scope a request through the
+ * binding counts against (`bindingKey`), keyed by App and alias. One whose
+ * target can't be read is listed with a null `model`, as it serves
+ * nothing.
  */
 export const modelBindingSpend = async (
   env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
-  periods: { month: string; day: string }
+  month: string
 ): Promise<ModelSettings["bindings"]> => {
   // One more than are listed, to tell whether any are left out.
   const rows = await drizzle(env.DB)
@@ -1629,69 +1564,35 @@ export const modelBindingSpend = async (
       asc(appResourceBindings.appId)
     )
     .limit(bindingSpendListed + 1);
-  const listed = rows
-    .slice(0, bindingSpendListed)
-    .flatMap(({ row, appName }) => {
-      // Each row read without throwing, so one stored damaged never hides
-      // the others: its target or its caps are listed as damaged.
-      const stored = storedBudget(row);
-      const budget = stored === "unreadable" ? null : stored;
-      const target = bindingTargetSchema.safeParse(jsonOrUndefined(row.target));
-      const [month, day] = bindingScopes(
-        { app: row.appId, alias: row.alias, budget },
-        periods.day
-      );
-      return month === undefined || day === undefined
-        ? []
-        : [
-            {
-              row,
-              appName,
-              budget,
-              budgetDamaged: stored === "unreadable",
-              model:
-                target.success && target.data.kind === "model"
-                  ? target.data.model
-                  : null,
-              month,
-              day,
-            },
-          ];
-    });
-  const ledger = modelLedger(env);
-  const [monthSpend, daySpend] = await Promise.all([
-    ledger.spendOfKeys(
-      periods.month,
-      "binding",
-      listed.map(({ month }) => month.key)
-    ),
-    // A day's spend is kept under its month, keyed by the day.
-    ledger.spendOfKeys(
-      periods.month,
-      "binding_day",
-      listed.map(({ day }) => day.key)
-    ),
-  ]);
-  const monthSpent = spentByKey(monthSpend);
-  const daySpent = spentByKey(daySpend);
+  const listed = rows.slice(0, bindingSpendListed).map(({ row, appName }) => ({
+    row,
+    appName,
+    key: bindingKey({ app: row.appId, alias: row.alias }),
+  }));
+  const spent = await modelLedger(env).spendOfKeys(
+    month,
+    "binding",
+    listed.map(({ key }) => key)
+  );
+  const spentByKey = new Map(
+    spent.map(({ key, spentMicros }) => [key, spentMicros])
+  );
   return {
-    listed: listed.map(
-      ({ row, appName, budget, budgetDamaged, model, month, day }) => {
-        const monthMicros = monthSpent.get(month.key) ?? 0;
-        const dayMicros = daySpent.get(day.key) ?? 0;
-        return {
-          appId: row.appId,
-          appName,
-          alias: row.alias,
-          model,
-          budget,
-          budgetDamaged,
-          today: dayMicros / microsPerDollar,
-          thisMonth: monthMicros / microsPerDollar,
-          alert: furthest(alertOf(month, monthMicros), alertOf(day, dayMicros)),
-        };
-      }
-    ),
+    listed: listed.map(({ row, appName, key }) => {
+      // Each target read without throwing, so one stored damaged never
+      // hides the others.
+      const target = bindingTargetSchema.safeParse(jsonOrUndefined(row.target));
+      return {
+        appId: row.appId,
+        appName,
+        alias: row.alias,
+        model:
+          target.success && target.data.kind === "model"
+            ? target.data.model
+            : null,
+        thisMonth: (spentByKey.get(key) ?? 0) / microsPerDollar,
+      };
+    }),
     more: rows.length > bindingSpendListed,
   };
 };

@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { confirmAction } from "../src/channels/cards.tsx";
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
-import { codeStep, pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
+import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import {
@@ -107,14 +106,11 @@ const sendingTurn = async (
   const person = await signedInApi(idp, "user");
   const outlook = await ownOutlook(person, binding);
   const mail = { mailbox: outlook.mailbox, to, cc, subject, body };
-  await pointAtGateway(
-    workspace(env, personalWorkspaceId(person.userId)),
-    fakeGateway(
-      codeStep(
-        `export default async (self, env) => { try { const { pending } = await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
-      ),
-      says("Done.")
-    )
+  await fakeProvider(
+    codeStep(
+      `export default async (self, env) => { try { const { pending } = await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
+    ),
+    says("Done.")
   );
   const teams = teamsPerson(String(person.person.oid));
   // The invoice's number is the person's, as a real one would be.

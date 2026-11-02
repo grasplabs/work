@@ -58,7 +58,7 @@ import {
 } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
 import { graspSkills } from "./knowledge/grasp-skills.ts";
-import { gatewaySettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import { authorize } from "./permissions.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
 
@@ -285,7 +285,9 @@ export const inviteGuest = async (
     throw guestErrors.create("guest.invalid");
   }
   const { name, skill, days } = parsed.data;
-  const [model] = gatewaySettings(env).models;
+  const {
+    models: [model],
+  } = await modelSettings(env);
   const origin = signInConfig(env)?.origin;
   if (model === undefined || origin === undefined) {
     throw guestErrors.create("guest.no_model");

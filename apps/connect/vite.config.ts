@@ -41,6 +41,14 @@ const smokeBindings = Object.fromEntries(
   })
 );
 
+/**
+ * `CONNECT_WALK_ALL=1` walks every order of the Composio tool-sync tests
+ * (test/composio-connections.test.ts) instead of a sample: minutes, so
+ * for local runs.
+ */
+const walkAll: Record<string, string> =
+  process.env.CONNECT_WALK_ALL === "1" ? { CONNECT_WALK_ALL: "1" } : {};
+
 /** Seals the tests' tokens: 32 bytes, in base64, as a real key is. */
 const testTokenKey = btoa("test-token-key-of-exactly-32-b!!");
 
@@ -93,8 +101,6 @@ export default defineProject({
           // Grasp's OAuth apps, as test/oauth-provider.ts knows them.
           MICROSOFT_CLIENT_ID: clients.microsoft.id,
           MICROSOFT_CLIENT_SECRET: clients.microsoft.secret,
-          MICROSOFT_LANDSCAPE_CLIENT_ID: clients.microsoftLandscape.id,
-          MICROSOFT_LANDSCAPE_CLIENT_SECRET: clients.microsoftLandscape.secret,
           MICROSOFT_DIRECTORY_CLIENT_ID: clients.microsoftDirectory.id,
           MICROSOFT_DIRECTORY_CLIENT_SECRET: clients.microsoftDirectory.secret,
           MICROSOFT_DOCUMENTS_CLIENT_ID: clients.microsoftDocuments.id,
@@ -115,6 +121,7 @@ export default defineProject({
           TEAMS_BOT_SECRET: teamsBot.secret,
           CONNECT_MIGRATIONS: migrations,
           ...smokeBindings,
+          ...walkAll,
         },
       },
     }),

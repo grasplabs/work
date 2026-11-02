@@ -56,10 +56,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     core[Symbol.dispose]();
   }
   const page = await pageOf(admin);
-  // An admin's permission requests wait on the dashboard; the old
-  // Settings link leads there.
-  await page.goto("/settings/approvals");
-  await expect(page).toHaveURL(/\/dashboard$/u);
+  // An admin's permission requests wait on the dashboard.
+  await page.goto("/dashboard");
   // Other tests' requests wait in the pile too: it is gone through to this
   // App's cards.
   const reading = await toCard(
@@ -105,9 +103,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   } finally {
     reader.core[Symbol.dispose]();
   }
-  // An old link to the log leads to the audit trail, filters and all.
-  await page.goto(`/activity?target=${approved}`);
-  await expect(page).toHaveURL(/\/settings\/audit\?/u);
+  // A link to the audit trail keeps its filters.
+  await page.goto(`/settings/audit?target=${approved}`);
   await expect(page.getByRole("textbox", { name: "Target ID" })).toHaveValue(
     approved
   );
@@ -196,9 +193,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
 
   try {
     const page = await pageOf(admin);
-    // An old link to them leads there too.
-    await page.goto("/activity?tab=pending");
-    await expect(page).toHaveURL(/\/dashboard$/u);
+    await page.goto("/dashboard");
     const card = await toCard(
       page,
       new RegExp(`^${appName}: guests on Guest chats\\.`, "u")

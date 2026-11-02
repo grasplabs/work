@@ -5,14 +5,16 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
 import { release } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { chatsOf, chatWithDraft, requestFor } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Every write of a chat's draft of an App is kept as a version: listed,
-// previewed read-only and restored as a new version, only by the chat's
-// person while they build the App, and gone with the chat. These tests
+// previewed read-only and restored as a new version, the draft discarded,
+// only by the chat's person while they build the App, and gone with the
+// chat. These tests
 // start from the ways it can fail: a write lost or kept out of order when
 // writes land together, a restore that rewrites history, an earlier
 // version's preview that runs or changes anything, someone else (or a
@@ -210,6 +212,51 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     });
   });
 
+  it("are kept when the person discards the draft, which the agent's next write can't undo, and restore it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { app, chatId, write, revision } = await twoVersions(builder);
+    const { chats } = builder.api;
+    const before = await chats.draftVersions(chatId, app);
+
+    await chats.discardDraft(chatId, app);
+    const drafts = await chats.drafts(chatId);
+    const after = await chats.draftVersions(chatId, app);
+    // The agent's write that read the draft before it was discarded.
+    const stale = await failure(
+      async () => await write({ "screens/desk.tsx": desk("Three") }, revision)
+    );
+    const afterStale = await chats.drafts(chatId);
+    const restored = await chats.restoreDraftVersion(chatId, app, 2);
+    const [back] = await chats.drafts(chatId);
+    const logged = await allEvents();
+
+    expect({
+      drafts,
+      versionsKept: after,
+      staleLanded: stale === "ok",
+      afterStale,
+      restored: restored.restoredFrom,
+      back: back?.app,
+      audited: logged
+        .filter(
+          ({ action, target }) =>
+            action === "chat.draft_discarded" && target?.id === chatId
+        )
+        .map(({ actor, detail }) => ({
+          by: actor.type === "person" ? actor.userId : actor.type,
+          app: detail.app,
+        })),
+    }).toStrictEqual({
+      drafts: [],
+      versionsKept: before,
+      staleLanded: false,
+      afterStale: [],
+      restored: 2,
+      back: app,
+      audited: [{ by: builder.userId, app }],
+    });
+  });
+
   it("are only for the chat's person while they build the App", async () => {
     const owner = await signedInApi(idp, "builder");
     const { id } = await owner.api.apps.create({ name: "Desk" });
@@ -242,6 +289,9 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       restore: await failure(
         async () => await person.api.chats.restoreDraftVersion(chatId, app, 1)
       ),
+      discard: await failure(async () => {
+        await person.api.chats.discardDraft(chatId, app);
+      }),
     });
 
     const another = await outcomes(other);
@@ -258,16 +308,19 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         list: "agent.chat_not_found",
         preview: "agent.chat_not_found",
         restore: "agent.chat_not_found",
+        discard: "agent.chat_not_found",
       },
       notMember: {
         list: "app.not_found",
         preview: "app.not_found",
         restore: "app.not_found",
+        discard: "app.not_found",
       },
       demoted: {
         list: "role.forbidden",
         preview: "role.forbidden",
         restore: "role.forbidden",
+        discard: "role.forbidden",
       },
     });
   });

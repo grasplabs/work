@@ -25,8 +25,8 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { callTimeoutMs } from "./app-call-timeout.ts";
 import type { Release } from "./app-releases.ts";
-import { callTimeoutMs } from "./app.ts";
 import type { CallTree, RunnerCall } from "./call-tree.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
@@ -619,7 +619,6 @@ export const noStore = (): OpenStore => ({
   defineTables: unbound,
   get: unbound,
   claim: unbound,
-  receiptStanding: unbound,
   commit: unbound,
   read: unbound,
   generations: unbound,

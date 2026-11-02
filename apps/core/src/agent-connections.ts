@@ -435,12 +435,15 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           forSandbox(error)
         )
     );
-    // Connect records the call in the audit log; the chat shows it here.
+    // Connect records the call in the audit log; the chat shows it here,
+    // with the app it is of where a chat app's call knows it, as Stephen's
+    // requests count calls by app, whatever the connection was named.
     const shown = {
       method: "connections.call",
       detail: {
         connection: typeof connection === "string" ? connection : null,
         action: typeof action === "string" ? action : null,
+        ...(shape === undefined ? {} : { app: shape.provider }),
       },
     };
     try {

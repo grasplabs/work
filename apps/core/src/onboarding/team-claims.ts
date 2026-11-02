@@ -3,11 +3,10 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { statementKinds, withoutNames } from "./brain-intake.ts";
 import { allowed, hidden, terminal } from "./plain-text.ts";
 import type { Took } from "./store.ts";
-import { NoDrawingModelError } from "./team-map.ts";
 
 // What a team says, put together (GRA-1084): the brain's statements of a
 // team are claims five or more of its people made, never one person's
@@ -155,7 +154,13 @@ const promptOf = (facts: readonly Labelled[]): string => {
 /** Longest a claim may be: one short sentence. */
 export const claimCharsMax = 240;
 
-const sentences = new Intl.Segmenter("und", { granularity: "sentence" });
+// Made at first use: a sentence segmenter loads ICU's break rules, about
+// 15 ms of CPU that core would otherwise spend as it starts.
+let sentences: Intl.Segmenter | undefined;
+const sentencesOf = (line: string): number => {
+  sentences ??= new Intl.Segmenter("und", { granularity: "sentence" });
+  return [...sentences.segment(line)].length;
+};
 
 /**
  * A claim's words, when they are a claim: one sentence (by
@@ -182,7 +187,7 @@ const claimOf = (value: string): string | null => {
     first !== "-" &&
     !line.includes("  ") &&
     body.every(allowed) &&
-    [...sentences.segment(line)].length === 1
+    sentencesOf(line) === 1
     ? line
     : null;
 };
@@ -287,12 +292,7 @@ export const check = async (
   }
   checks.left -= 1;
   const { env, count } = checks;
-  const model = modelForRole(gatewaySettings(env), "quick", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw new NoDrawingModelError("No model may check the team's claims.");
-  }
+  const model = modelForRole(await modelSettings(env), "quick");
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.claims",
@@ -370,14 +370,7 @@ export const teamClaims = async (
   if (facts.length === 0) {
     return [];
   }
-  const model = modelForRole(gatewaySettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw new NoDrawingModelError(
-      "No model may put the team's claims together."
-    );
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.claims",

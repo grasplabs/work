@@ -37,8 +37,6 @@ export const parityRoutes: readonly ParityRoute[] = [
   { name: "domains", prototype: "/domains", grasp: "/domains" },
   { name: "brain", prototype: "/brain", grasp: "/brain" },
   { name: "integrations", prototype: "/integrations", grasp: "/integrations" },
-  { name: "landscape", prototype: "/landscape", grasp: "/landscape" },
-  { name: "policies", prototype: "/policies", grasp: "/policies" },
   {
     name: "onboarding",
     prototype: "/onboarding",
@@ -67,11 +65,6 @@ export const parityRoutes: readonly ParityRoute[] = [
     grasp: "/settings/models",
   },
   {
-    name: "settings-notifications",
-    prototype: "/settings/notifications",
-    grasp: "/settings/notifications",
-  },
-  {
     name: "settings-security",
     prototype: "/settings/security",
     grasp: "/settings/security",
@@ -90,11 +83,6 @@ export const parityRoutes: readonly ParityRoute[] = [
     name: "settings-billing",
     prototype: "/settings/billing",
     grasp: "/settings/billing",
-  },
-  {
-    name: "settings-pulse",
-    prototype: "/settings/pulse",
-    grasp: "/settings/pulse",
   },
 ];
 

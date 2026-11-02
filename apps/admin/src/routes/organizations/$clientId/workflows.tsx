@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { WaitingOnConnectionsRows } from "../../../admin/connections.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
-import { Panel } from "../../../admin/panel.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { OrgWorkflows } from "../../../admin/workflows.tsx";
 
 /**
@@ -15,14 +15,14 @@ const Workflows = () => {
   const { integrations } = admin.snapshot;
   return (
     <>
-      <OrgWorkflows view={view} />
+      <OrgWorkflows clientId={admin.client.id} view={view} />
       {integrations === null ? null : (
-        <Panel
+        <Section
           description="Workflows that can’t run as they are: an app they work in isn’t connected, stopped, or has no connection approved for it yet."
           title="Waiting on a connection"
         >
           <WaitingOnConnectionsRows integrations={integrations} />
-        </Panel>
+        </Section>
       )}
     </>
   );

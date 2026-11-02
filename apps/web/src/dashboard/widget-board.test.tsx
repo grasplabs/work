@@ -68,6 +68,23 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** How long a widget Grasp made may take to draw: its charts load first. */
+const drawMs = 5000;
+
+/**
+ * Lets the page's work run until nothing on the board is loading: a widget
+ * Grasp made draws once its charts' code has loaded.
+ */
+const drawn = async (until = Date.now() + drawMs): Promise<void> => {
+  await settled();
+  if (
+    document.querySelector('[aria-busy="true"]') !== null &&
+    Date.now() < until
+  ) {
+    await drawn(until);
+  }
+};
+
 /** What core answers a request for a widget with, telling the page how it goes on `told`. */
 type Answer = (
   told: (progress: WidgetProgress) => void
@@ -200,6 +217,7 @@ describe(WidgetBoard, () => {
     });
 
     await ask("  Which workflows failed?  ");
+    await drawn();
     const block = document.querySelector(
       'section[aria-label="Failures this week"]'
     );
@@ -276,7 +294,7 @@ describe(WidgetBoard, () => {
     );
     const dots = document.querySelectorAll("canvas").length;
     resolve(true);
-    await settled();
+    await drawn();
 
     expect({
       asked,
@@ -306,7 +324,7 @@ describe(WidgetBoard, () => {
       dots: document.querySelectorAll("canvas").length,
     };
     resolve(true);
-    await settled();
+    await drawn();
 
     expect({
       making,
@@ -361,7 +379,7 @@ describe(WidgetBoard, () => {
       await after({ stage: "keeping" }),
     ];
     resolve(true);
-    await settled();
+    await drawn();
 
     expect({
       before,

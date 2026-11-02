@@ -1,839 +1,513 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import type { Role } from "@grasp-os/shared/roles";
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { v } from "@grasp-os/sdk";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { runEngine } from "../src/workflows/engine.ts";
 import {
-  batchesPerSweep,
+  answerDecision,
+  confirmDecision,
+  decisionFor,
+  reviewDecision,
+} from "../src/decisions/decisions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { setWorkflowParams } from "../src/workflow-params.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
+import {
+  startDetailsPerSweep,
   sweepRunDetails,
-  sweptPerBatch,
+  sweepWorkflowStartDetails,
 } from "../src/workflows/retention.ts";
-import { startRun } from "../src/workflows/runs.ts";
-import { allEvents } from "./audit-events.ts";
-import {
-  approvalTests,
-  asksOf,
-  confirmedAnswer,
-  approvalAppWith,
-  remember,
-} from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  endedRun,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  objectSchema,
+  publishedWorkflow,
+  runFor,
+  runOnce,
+  settles,
+  startedBy,
+} from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
-import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
-import {
-  aroundEngine,
-  endLiveRuns,
-  finished,
-  runObject,
-  runObjectId,
-  sleeping,
-  stopped,
-  woken,
-} from "./runs.ts";
-import { openRpc, signedInApi } from "./sign-in.ts";
-import {
-  appWith,
-  hitCall,
-  hitsOf,
-  runEvents,
-  workflowFiles,
-} from "./workflow-apps.ts";
+import { runObject, sleeping, stopped, woken } from "./runs.ts";
+import { unique } from "./sign-in.ts";
 
-// Retention of workflow runs, from its threat model (src/workflows/
-// retention.ts): once a run has ended for the deployment's retention, the
-// engine removes its record of it, the clock, every 15 minutes, what core and
-// connect keep of it, and the run stays. Each case below is a way that
-// could go wrong: a run swept too early, or while it still waits; a run
-// left half swept; a swept run run again; and a reader handed a swept run
-// as if nothing were missing.
+// Retention of independent (JSON) workflow runs, from its threat model
+// (src/workflows/retention.ts, `sweepWorkflowStartDetails`): a run reads
+// what its person may read and keeps it, as its input and parameters on
+// its start receipt, in what it returned or why it failed with the engine,
+// and in what its decisions asked and were answered. Once the run has
+// ended for the run retention (30 days), the engine purges its record
+// (every run is admitted with the retention as its own), and the 15-minute
+// clock empties the receipt and the decisions and marks the receipt; the
+// run's row stays. Each case below is a way that could go wrong:
+// - details removed too early, or while the run still waits on them
+//   (paused, or asleep), or taken from a run that goes on after a sweep;
+// - a reader handed a swept run as if nothing were missing;
+// - a sweep stopped half-way, or two at once, leaving a run half swept or
+//   marked twice;
+// - a sweep that takes everything due at once.
 //
-// Runs are real, on the engine (Workerflow), which takes the retention
-// core gives each run and purges an ended run's record once it is over
-// (its own tests show the purge). Here the tests check that core asks for
-// it, and everything core does. Time is the
-// clock's own: each sweep is run for a time that many days on, as the
-// clock would run it then, so no test waits or fakes the time.
+// Runs are real, on the engine. Time is the clock's own: each sweep runs
+// for a time that many days on, as the clock would run it then.
+//
+// What App runs' retention alone does (the engine instance of a cancel it
+// couldn't terminate; a row marked after its receipts in two batches) has
+// no JSON counterpart: a JSON run's cancel ends its row only as the engine
+// confirms, or owes the engine its termination (resource-runs.ts), and its
+// details go in one batch. Covered elsewhere for JSON runs:
+// workflow-resource-runs.test.ts (a live run's receipt kept; attempt
+// receipts removed, one still held settled; reads past retention, swept
+// or not) and workflow-bindings.test.ts (a swept start sent again is the
+// same start). The sweep found by an index with nothing read whole:
+// covered by GRA-1460's tests.
 
 const idp = mockIdp();
-
-const personApi = async (role: Role) => await signedInApi(idp, role);
-type Person = Awaited<ReturnType<typeof personApi>>;
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
 const day = 24 * 60 * 60 * 1000;
 
 /** What a run reads, that must not outlive its retention. */
 const transcript = "TRANSCRIPT the guest said the margin is 12%";
 
-/** What readers say in place of a swept run's words, kept `days` days. */
-const removed = (days: number): string =>
-  `The details of this run were removed: they are kept for ${days} days after a run ends.`;
+/** What readers say in place of a swept run's words. */
+const removedWords =
+  "The details of this run were removed: they are kept for 30 days after a run ends.";
 
 /** The time `days` from now, for the clock to run at. */
 const daysOn = (days: number): Date => new Date(Date.now() + days * day);
 
-/**
- * A workflow that keeps what it reads in all the places a run does: its
- * input, a step's result and its output. `done` counts how often its
- * side-effect step really ran.
- */
-const keeps = workflowFiles(
-  "keeps",
-  `  const { notes = "" } = (input ?? {}) as { notes?: string };
-  const read = await step.do("read", { description: "Read", input: { notes } }, async ({ input: given }) => given.notes);
-  await step.do("done", { description: "Count", sideEffect: true, input: { counter: "done" } }, async ({ input: given }) => await ${hitCall(`given.counter`)});
-  return { read };`,
-  { read: "notes", done: 1 }
-);
-
-/**
- * A workflow that fails, quoting what it read in its error, in a step
- * keyed by what it read.
- */
-/**
- * A workflow whose one keyed step's last attempt hangs until it times
- * out: its receipt is never settled by the attempt itself.
- */
-const hangs = workflowFiles(
-  "hangs",
-  `  await step.do("wait", { key: "TRANSCRIPT", description: "Hang", timeout: "1 second", retries: { limit: 0 } }, async () => {
-    await new Promise(() => {});
-  });
-  return null;`,
-  { wait: null }
-);
-
-const fails = workflowFiles(
-  "fails",
-  `  const { notes = "none" } = (input ?? {}) as { notes?: string };
-  await step.do("read", { key: notes, description: "Read", input: { notes } }, async ({ input: given }) => {
-    throw new Error("Couldn't read: " + given.notes);
-  });
-  return null;`,
-  { read: null }
-);
-
-/**
- * A workflow that does a step, sleeps a day, and returns what it
- * read: a live run, until it is woken.
- */
-const waits = workflowFiles(
-  "waits",
-  `  const { notes = "" } = (input ?? {}) as { notes?: string };
-  const read = await step.do("work", { description: "Work" }, async () => {
-    await ${hitCall(`"work"`)};
-    return notes;
-  });
-  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return { read };`,
-  { work: "notes" }
-);
-
-/**
- * A workflow that waits for one decision, keyed by a note it read, which
- * its description quotes too, and returns how it ended.
- */
-const keyedApproval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "approval",
+/** Tasks that fail on what the run read: it is no number. */
+const failingTasks = [
   {
-    params: {},
-    input: z.object({ from: z.string(), timeout: z.number(), note: z.string().optional() }),
-  },
-  async (step, { input, env }) =>
-    await step.decision("review", {
-      key: input.note ?? "none",
-      description: "Approve: " + (input.note ?? "nothing"),
-      from: input.from as Person,
-      ask: async ({ recipients, reminder }) => {
-${remember}
-      },
-      timeout: input.timeout,
-    })
-);
-`;
-
-/** A run's row, as the database has it. */
-const rowOf = async (run: string) =>
-  await env.DB.prepare("SELECT * FROM workflow_runs WHERE id = ?")
-    .bind(run)
-    .first<Record<string, string | number | null>>();
-
-/** How many receipts of its steps' attempts its lineage keeps of `run`. */
-const receiptsOf = async (run: string): Promise<number> =>
-  (await env.DB.prepare(
-    "SELECT count(*) AS n FROM run_lineage_attempts WHERE run_id = ?"
-  )
-    .bind(run)
-    .first<number>("n")) ?? 0;
-
-/** Whether the sweep marked `run` as having had its details removed. */
-const markedOf = async (run: string): Promise<boolean> => {
-  const row = await rowOf(run);
-  return row !== null && row.details_removed_at !== null;
-};
-
-/** Whether the engine still has anything of the run. */
-const inEngine = async (run: string): Promise<boolean> =>
-  (await runEngine(env).status(run)) !== undefined;
-
-/** A run of `workflow` reading the transcript, once it has ended. */
-/**
- * Once the run has ended, as the engine says (`finished`), and as core's
- * row records it: the engine's notification of the end reaches core on
- * its own, so a sweep run as soon as the engine says it ended can find
- * the row not ended yet, and rightly leave it.
- */
-const endedInCore = async (run: string): Promise<void> => {
-  await finished(run);
-  await vi.waitFor(
-    async () => {
-      const row = await rowOf(run);
-      expect(row?.ended_at ?? null).not.toBeNull();
+    greet: {
+      set: { status: "${ $workflow.input.who | tonumber | tostring }" },
     },
-    { timeout: 20_000, interval: 100 }
-  );
+  },
+];
+
+/** What run `id`'s start receipt keeps of it. */
+const receiptOf = async (id: string) =>
+  await env.DB.prepare(
+    "SELECT input, params, details_removed_at AS removed FROM workflow_start_receipts WHERE id = ?"
+  )
+    .bind(id)
+    .first<{
+      input: string | null;
+      params: string | null;
+      removed: number | null;
+    }>();
+
+/** What run `id`'s start receipt keeps of its input. */
+const inputOf = async (id: string): Promise<string | null> => {
+  const receipt = await receiptOf(id);
+  return receipt?.input ?? null;
 };
 
-const endedRun = async (person: Person, app: string, workflow: string) => {
-  const run = await person.api.workflows.start(app, workflow, {
-    notes: transcript,
+/** What run `runId` of workflow `workflow` returned, as `by` reads it. */
+const outputOf = async (by: Person, workflow: string, runId: string) => {
+  const run = await runFor(by, workflow, runId);
+  return run.output;
+};
+
+/** A run of a workflow of `by`'s running `tasks`, reading the transcript, once ended. */
+const endedReading = async (by: Person, tasks: unknown[]) => {
+  const { id } = await publishedWorkflow(by, tasks);
+  const runId = await startedBy(by, id, { who: transcript });
+  await endedRun(by, id, runId);
+  return { workflow: id, runId };
+};
+
+/** What a read of a run says of its details. */
+const detailsOf = ({
+  status,
+  output,
+  error,
+}: {
+  status: string;
+  output?: unknown;
+  error?: { code: string | null; message: string };
+}) => ({ status, output, error });
+
+/** What a reviewer may answer with: a comment, or nothing. */
+const response = v.union(v.null(), v.object({ comment: v.string() }));
+
+/**
+ * A workflow that asks its reviewer param to approve what it read (the
+ * `approval` decision binding of `contract`), its prompt quoting it.
+ */
+const approvalDefinition = (name: string, contract: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {
+            reviewer: {
+              schema: { type: "string", "x-grasp-value": { kind: "person" } },
+              label: "Reviewer",
+              required: true,
+              sensitive: false,
+            },
+          },
+          bindings: { approval: { kind: "decision", contract } },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        review: {
+          call: "grasp.decision",
+          with: {
+            binding: "approval",
+            recipients: "${ [$params.reviewer] }",
+            prompt: '${ "Approve: " + $workflow.input.who }',
+            input: "${ $workflow.input }",
+          },
+          export: { as: "${ $context + {review: .} }" },
+        },
+      },
+      {
+        route: {
+          switch: [
+            {
+              accepted: {
+                when: "${ $context.review.approved == true }",
+                then: "approved",
+              },
+            },
+            { declined: { then: "rejected" } },
+          ],
+        },
+      },
+      { approved: { set: { status: "approved" }, then: "finished" } },
+      { rejected: { set: { status: "rejected" }, then: "finished" } },
+      { finished: { set: "${ . }" } },
+    ],
   });
-  await endedInCore(run.id);
-  return run;
+
+/** The decision run `runId` opened, as its row has it, once it has. */
+const decisionOf = async (runId: string) =>
+  await vi.waitFor(async () => {
+    const row = await env.DB.prepare(
+      "SELECT id, description, payload, input FROM workflow_decisions WHERE resource_run_id = ?"
+    )
+      .bind(runId)
+      .first<Record<string, string | null>>();
+    if (row === null) {
+      throw new Error("No decision yet");
+    }
+    return row;
+  }, settles);
+
+/**
+ * `by`'s answer to `decision` through the trusted host decision UI:
+ * reviewed, confirmed, then answered with that confirmation.
+ */
+const confirmedAnswer = async (
+  by: Identity,
+  decision: string,
+  answer: { approved: boolean; payload?: { comment: string } }
+) => {
+  const review = await reviewDecision(env, by, decision, answer);
+  if (review.state === "recorded") {
+    return review.decision;
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    by,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  return await answerDecision(env, by, decision, review.response, confirmation);
 };
 
 /**
- * Rows of runs that ended `daysAgo` days ago, as old releases left them:
- * `count` of them, with nothing in the engine.
+ * Start receipts that admitted no run, `count` of them, each a copy of
+ * receipt `of` under its own ID and key, the first admitted `daysAgo`
+ * days ago and each next a millisecond later: their IDs, oldest first.
  */
-const oldRuns = async (
-  person: Person,
-  app: string,
+const oldReceipts = async (
+  of: string,
   count: number,
   daysAgo: number
 ): Promise<string[]> => {
   const ids = Array.from({ length: count }, () => crypto.randomUUID());
-  const endedAt = Date.now() - daysAgo * day;
   const statement = env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'keeps', 1, ?, 'completed', ?, ?)"
+    `INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, created_at)
+      SELECT ?, invoker_type, invoker_id, ?, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, ?
+      FROM workflow_start_receipts WHERE id = ?`
   );
+  const createdAt = Date.now() - daysAgo * day;
   await env.DB.batch(
-    ids.map((id) => statement.bind(id, app, person.userId, endedAt, endedAt))
+    ids.map((id, index) =>
+      statement.bind(id, `old-${id}`, createdAt + index, of)
+    )
   );
   return ids;
 };
 
-/** How many of `runs` have had their details removed. */
-const sweptOf = async (runs: readonly string[]): Promise<number> => {
+/** Of start receipts `ids`, the ones the sweep hasn't marked. */
+const unsweptOf = async (ids: readonly string[]): Promise<string[]> => {
   const { results } = await env.DB.prepare(
-    "SELECT id FROM workflow_runs WHERE details_removed_at IS NOT NULL"
+    "SELECT id FROM workflow_start_receipts WHERE details_removed_at IS NOT NULL"
   ).all<{ id: string }>();
   const swept = new Set(results.map(({ id }) => id));
-  return runs.filter((id) => swept.has(id)).length;
+  return ids.filter((id) => !swept.has(id));
 };
 
-/** What a read says of a run's details. */
-const detailsOf = ({
-  output,
-  error,
-  failure,
-  detailsRemoved,
-}: {
-  output?: unknown;
-  error?: unknown;
-  failure?: { step: string | null; error: { message: string } };
-  detailsRemoved?: boolean;
-}) => ({
-  output,
-  error,
-  step: failure?.step,
-  message: failure?.error.message,
-  detailsRemoved,
-});
-
-describe("run retention", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
-
-  it("removes what an ended run read and returned once its retention is over, not a day before, and keeps the run", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, { ...keeps, ...fails });
-    const done = await endedRun(builder, app, "keeps");
-    const failed = await endedRun(builder, app, "fails");
-    const before = {
-      done: await builder.api.workflows.status(done.id),
-      failed: await builder.api.workflows.status(failed.id),
-    };
+describe("JSON run retention", { timeout: 60_000 }, () => {
+  it("removes what an ended run read and returned once its retention is over, not a day before, says so when read, and keeps the run", async () => {
+    const builder = await signedIn("builder");
+    const by = builder;
+    const done = await endedReading(by, greetingTasks());
+    const failed = await endedReading(by, failingTasks);
+    const read = async () => ({
+      done: detailsOf(await runFor(by, done.workflow, done.runId)),
+      failed: detailsOf(await runFor(by, failed.workflow, failed.runId)),
+    });
+    const before = await read();
 
     await runQuarterHourTasks({}, daysOn(29));
     const within = {
-      done: await builder.api.workflows.status(done.id),
-      failed: await builder.api.workflows.status(failed.id),
+      read: await read(),
+      receipt: await inputOf(done.runId),
     };
-    const receiptsWithin = await receiptsOf(done.id);
     const at = daysOn(31);
     await runQuarterHourTasks({}, at);
-    const after = {
-      done: await builder.api.workflows.status(done.id),
-      failed: await builder.api.workflows.status(failed.id),
-    };
-    const rows = [await rowOf(done.id), await rowOf(failed.id)];
-    const receipts = {
-      within: receiptsWithin > 0,
-      after: (await receiptsOf(done.id)) + (await receiptsOf(failed.id)),
-    };
-    const listed = await builder.api.workflows.list(app);
-    const { runs: page } = await builder.api.workflows.runs({ app });
+    // Read now, well within the run's retention by its row's own time: the
+    // sweep's mark alone says its details went.
+    const after = await read();
+    const receipts = [
+      await receiptOf(done.runId),
+      await receiptOf(failed.runId),
+    ];
 
     expect({
-      before: {
-        output: before.done.output,
-        step: before.failed.failure?.step,
-        message: before.failed.failure?.error.message,
-        error: before.failed.error?.message,
-      },
+      before,
       within,
       after,
-      markedAt: rows.map((row) => row?.details_removed_at),
-      inRows: JSON.stringify(rows).includes("TRANSCRIPT"),
-      // Its attempts' settled receipts go with its details.
       receipts,
-      listed: listed.map(({ id, status, detailsRemoved }) => ({
-        id,
-        status,
-        detailsRemoved,
-      })),
-      page: page.map(({ id, detailsRemoved }) => ({ id, detailsRemoved })),
-      screen: await builder.api.screens.frame(app, "").run(done.id),
-      // The audit log keeps its own events of the run.
-      audited: await runEvents(done.id, "workflow.run.completed"),
     }).toStrictEqual({
       before: {
-        output: { read: transcript },
-        step: `read:${encodeURIComponent(transcript)}`,
-        message: `Couldn't read: ${transcript}`,
-        error: `Couldn't read: ${transcript}`,
-      },
-      within: before,
-      after: {
-        // The run as it was, without what it returned: nothing the local
-        // engine, which keeps its record, still has of it.
         done: {
-          id: done.id,
-          app,
-          workflow: "keeps",
-          version: 1,
-          startedBy: { type: "person", userId: builder.userId },
           status: "completed",
-          createdAt: before.done.createdAt,
-          endedAt: before.done.endedAt,
-          detailsRemoved: true,
+          output: { status: `Hello, ${transcript}` },
+          error: undefined,
         },
-        // Where and how it failed, without the workflow's own words, or
-        // the key it gave the step.
         failed: {
-          id: failed.id,
-          app,
-          workflow: "fails",
-          version: 1,
-          startedBy: { type: "person", userId: builder.userId },
           status: "failed",
-          createdAt: before.failed.createdAt,
-          endedAt: before.failed.endedAt,
-          detailsRemoved: true,
-          failure: {
-            ...before.failed.failure,
-            step: "read",
-            error: { code: "workflow.run_failed", message: removed(30) },
+          output: undefined,
+          error: {
+            code: "expression.failed",
+            message: "The expression failed.",
           },
         },
       },
-      markedAt: [at.getTime(), at.getTime()],
-      inRows: false,
-      receipts: { within: true, after: 0 },
-      listed: [
-        { id: failed.id, status: "failed", detailsRemoved: true },
-        { id: done.id, status: "completed", detailsRemoved: true },
-      ],
-      page: [
-        { id: failed.id, detailsRemoved: true },
-        { id: done.id, detailsRemoved: true },
-      ],
-      screen: {
-        id: done.id,
-        app,
-        workflow: "keeps",
-        version: 1,
-        startedBy: { type: "person", userId: builder.userId },
-        status: "completed",
-        createdAt: before.done.createdAt,
-        endedAt: before.done.endedAt,
-        detailsRemoved: true,
-        waitingFor: [],
-      },
-      audited: [
-        // What the Brain captured of the run goes with its details.
-        "knowledge.episode.erased",
-        "workflow.run.completed",
-        "workflow.run.started",
-        "workflow.step.completed $params",
-        "workflow.step.completed done",
-        "workflow.step.completed read",
-      ],
-    });
-  });
-
-  it("settles the receipt of a last attempt that never returned as its run ends, charging its lineage, and removes it once the run's retention is over", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, hangs);
-    const run = await builder.api.workflows.start(app, "hangs");
-    await endedInCore(run.id);
-    const lineage = async () =>
-      await env.DB.prepare(
-        "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
-      )
-        .bind(run.id)
-        .first<{ used: number; held: number }>();
-    // Ended, the run's object gives back what its attempts held.
-    const ended = await vi.waitFor(
-      async () => {
-        const now = await lineage();
-        expect(now?.held).toBe(0);
-        return now;
-      },
-      { timeout: 10_000, interval: 200 }
-    );
-    const before = { receipts: await receiptsOf(run.id), lineage: ended };
-
-    await runQuarterHourTasks({}, daysOn(31));
-    const after = {
-      receipts: await receiptsOf(run.id),
-      lineage: await lineage(),
-    };
-
-    expect({
-      before: {
-        receipts: before.receipts,
-        // Charged up to its deadline: its second of time.
-        used: (before.lineage?.used ?? 0) >= 900,
-      },
+      within: { read: before, receipt: JSON.stringify({ who: transcript }) },
       after: {
-        receipts: after.receipts,
-        held: after.lineage?.held,
-        used: after.lineage?.used,
+        // The run as it ended, without what it returned.
+        done: { status: "completed", output: undefined, error: undefined },
+        // How it failed, by its code, without the engine's own words.
+        failed: {
+          status: "failed",
+          output: undefined,
+          error: { code: "expression.failed", message: removedWords },
+        },
       },
-    }).toStrictEqual({
-      before: { receipts: 2, used: true },
-      after: { receipts: 0, held: 0, used: before.lineage?.used },
+      receipts: [
+        { input: null, params: null, removed: at.getTime() },
+        { input: null, params: null, removed: at.getTime() },
+      ],
     });
   });
 
-  it("removes a run's attempt receipts before it marks the run, so a sweep stopped in between leaves the run due, and the next finishes it", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, hangs);
-    const run = await builder.api.workflows.start(app, "hangs");
-    await endedInCore(run.id);
-    // The database fails at the sweep's second batch, once: the one after
-    // its receipts' (no other run is due).
-    let batches = 0;
-    const db = racingDb(() => {
-      batches += 1;
-      if (batches === 2) {
-        throw new Error("D1_ERROR: broken for the test");
-      }
-    });
-    const halted = await sweepRunDetails({ ...env, DB: db }, daysOn(31)).catch(
-      (error: unknown) => error
-    );
-    const between = {
-      receipts: await receiptsOf(run.id),
-      marked: await markedOf(run.id),
-    };
-    await sweepRunDetails({ ...env, DB: db }, daysOn(31));
-    const lineage = await env.DB.prepare(
-      "SELECT active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
-    )
-      .bind(run.id)
-      .first<{ held: number }>();
+  it("never touches a run that hasn't ended, paused or not, and one a sweep passed goes on to keep all it did", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const runId = await startedBy(builder, id, { who: transcript });
+    await sleeping(runId, "task:hold");
+    const started = await receiptOf(runId);
 
-    expect({
-      halted: halted instanceof Error && halted.message,
-      between,
-      after: {
-        receipts: await receiptsOf(run.id),
-        marked: await markedOf(run.id),
-        held: lineage?.held,
-      },
-    }).toStrictEqual({
-      halted: "D1_ERROR: broken for the test",
-      between: { receipts: 0, marked: false },
-      after: { receipts: 0, marked: true, held: 0 },
-    });
-  });
-
-  it("says how long details are kept as the deployment has it when the run is read, and keeps no number in the row", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, fails);
-    const failed = await endedRun(builder, app, "fails");
-    const shorter = { ...env, RUN_RETENTION_DAYS: "7" };
-
-    await runQuarterHourTasks(shorter, daysOn(6));
-    const within = await builder.api.workflows.status(failed.id);
-    await runQuarterHourTasks(shorter, daysOn(8));
-    // Read where the retention is 7 days, and where it is the default.
-    const { core } = await openRpc(builder.session, { coreEnv: shorter });
-    const asSet = await core.authenticate().workflows.status(failed.id);
-    const byDefault = await builder.api.workflows.status(failed.id);
-    const row = await rowOf(failed.id);
-
-    expect({
-      within: within.failure?.error.message,
-      asSet: asSet.failure?.error.message,
-      byDefault: byDefault.failure?.error.message,
-      removed: byDefault.detailsRemoved,
-      kept: z
-        .object({ error: z.object({ message: z.string() }) })
-        .parse(JSON.parse(String(row?.failure))).error.message,
-    }).toStrictEqual({
-      within: `Couldn't read: ${transcript}`,
-      asSet: removed(7),
-      byDefault: removed(30),
-      removed: true,
-      kept: "",
-    });
-  });
-
-  it("removes nothing while the deployment's retention is no number of days it may be", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    const old = await oldRuns(builder, app, 1, 4000);
-
-    const invalid = [];
-    // Over 30 days the engine no longer has the run's record to keep.
-    for (const days of ["0", "soon", "31", "1.5"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      await runQuarterHourTasks({ RUN_RETENTION_DAYS: days });
-      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      invalid.push(await sweptOf(old));
-    }
-    // The longest it may be.
-    await runQuarterHourTasks({ RUN_RETENTION_DAYS: "30" });
-
-    expect({ invalid, valid: await sweptOf(old) }).toStrictEqual({
-      invalid: [0, 0, 0, 0],
-      valid: 1,
-    });
-  });
-
-  it("has the engine keep each run's record for the deployment's retention, and no longer", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    const start = {
-      app: appIdSchema.parse(app),
-      workflow: workflowIdSchema.parse("keeps"),
-      input: { notes: transcript },
-      startedBy: builder.userId,
-      actor: { type: "system" },
-    } as const;
-
-    const byDefault = await startRun(env, start);
-    const shorter = await startRun({ ...env, RUN_RETENTION_DAYS: "7" }, start);
-    // A config core can't read: the engine keeps it as long as it may.
-    const unset = await startRun({ ...env, RUN_RETENTION_DAYS: "soon" }, start);
-    const asked = await Promise.all(
-      [byDefault, shorter, unset].map(
-        async ({ id }) =>
-          await runInDurableObject(runObject(id), (_object, state) =>
-            state.storage.sql
-              .exec<{ success: number; error: number }>(
-                "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
-              )
-              .one()
-          )
-      )
-    );
-    await Promise.all(
-      [byDefault, shorter, unset].map(async ({ id }) => {
-        await endedInCore(id);
-      })
-    );
-    expect(asked).toStrictEqual([
-      { success: 30 * day, error: 30 * day },
-      { success: 7 * day, error: 7 * day },
-      { success: 30 * day, error: 30 * day },
-    ]);
-  });
-
-  it("reads the same everywhere once its retention is over, swept or not: details removed, and nothing it returned or said", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, { ...keeps, ...fails });
-    const done = await endedRun(builder, app, "keeps");
-    const failed = await endedRun(builder, app, "fails");
-    const before = await builder.api.workflows.status(done.id);
-
-    // Their retention is over, and the sweep hasn't reached them: the
-    // engine and their rows still have all of both.
-    await env.DB.prepare(
-      "UPDATE workflow_runs SET ended_at = ? WHERE id IN (?, ?)"
-    )
-      .bind(Date.now() - 31 * day, done.id, failed.id)
-      .run();
-    const status = {
-      done: await builder.api.workflows.status(done.id),
-      failed: await builder.api.workflows.status(failed.id),
-    };
-    const listed = await builder.api.workflows.list(app);
-    const { runs: page } = await builder.api.workflows.runs({ app });
-    const onScreen = [
-      await builder.api.screens.frame(app, "").run(done.id),
-      await builder.api.screens.frame(app, "").run(failed.id),
-      ...(await builder.api.screens.frame(app, "").runs("keeps")),
-      ...(await builder.api.screens.frame(app, "").runs("fails")),
-    ];
-    const gone = {
-      output: undefined,
-      error: undefined,
-      step: undefined,
-      message: undefined,
-      detailsRemoved: true,
-    };
-    const goneFailed = { ...gone, step: "read", message: removed(30) };
-
-    expect({
-      before: { output: before.output, removed: before.detailsRemoved },
-      status: [detailsOf(status.done), detailsOf(status.failed)],
-      listed: listed.map(detailsOf),
-      page: page.map(detailsOf),
-      onScreen: onScreen.map(detailsOf),
-      swept: await sweptOf([done.id, failed.id]),
-    }).toStrictEqual({
-      before: { output: { read: transcript }, removed: undefined },
-      status: [gone, goneFailed],
-      // Newest first: the failed run, then the one that completed.
-      listed: [goneFailed, gone],
-      page: [goneFailed, gone],
-      onScreen: [gone, goneFailed, gone, goneFailed],
-      swept: 0,
-    });
-  });
-
-  it("never touches a run that hasn't ended, however long ago it started, stopped or not, and it goes on with all it did", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, waits);
-    const run = await builder.api.workflows.start(app, "waits", {
-      notes: transcript,
-    });
-    await sleeping(run.id, "go");
-    // Started long before any retention.
-    await env.DB.prepare("UPDATE workflow_runs SET created_at = ? WHERE id = ?")
-      .bind(Date.now() - 400 * day, run.id)
-      .run();
-
-    // While it sleeps.
+    // While it sleeps, long after it started.
     await runQuarterHourTasks({}, daysOn(400));
-    const waiting = await rowOf(run.id);
-    // While it is stopped, as by a deploy or a crash.
-    await stopped(run.id);
+    const asleep = await receiptOf(runId);
+    // While it is paused, as by a deploy or a crash.
+    await stopped(runId);
+    const paused = await runOnce(
+      builder,
+      id,
+      runId,
+      ({ status }) => status === "paused"
+    );
     await runQuarterHourTasks({}, daysOn(400));
-    const whileStopped = {
-      row: await rowOf(run.id),
-      engine: await inEngine(run.id),
-    };
-    // Resumed, it replays the step it did from the engine's record.
-    await woken(run.id);
-    await endedInCore(run.id);
-    const ended = await builder.api.workflows.status(run.id);
+    const whilePaused = await receiptOf(runId);
+    // Resumed, it finishes as if no sweep had come by.
+    await woken(runId, "task:hold");
+    const ended = await endedRun(builder, id, runId);
 
     expect({
-      waiting: waiting?.details_removed_at,
-      whileStopped: {
-        removed: whileStopped.row?.details_removed_at,
-        status: whileStopped.row?.status,
-        engine: whileStopped.engine,
-      },
-      ended: {
-        status: ended.status,
-        output: ended.output,
-        removed: ended.detailsRemoved,
-      },
-      worked: await hitsOf(builder, app, "work"),
+      asleep,
+      paused: paused.status,
+      whilePaused,
+      ended: { status: ended.status, output: ended.output },
+      kept: await receiptOf(runId),
     }).toStrictEqual({
-      waiting: null,
-      whileStopped: { removed: null, status: "paused", engine: true },
+      asleep: started,
+      paused: "paused",
+      whilePaused: started,
       ended: {
         status: "completed",
-        output: { read: transcript },
-        removed: undefined,
+        output: { status: `Hello, ${transcript}` },
       },
-      worked: 1,
+      kept: {
+        input: JSON.stringify({ who: transcript }),
+        params: JSON.stringify({}),
+        removed: null,
+      },
     });
   });
 
-  it("leaves a decision a run still waits for as it was asked, and removes it with the run once that has ended, its key too", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const app = await approvalAppWith(builder, {
-      "workflows/approval.ts": keyedApproval,
-      "workflows/approval.workflow-tests.ts": approvalTests,
-    });
-    const run = await builder.api.workflows.start(app, "approval", {
-      from: `person:${decider.userId}`,
-      timeout: 7 * day,
-      note: transcript,
-    });
-    // Asked: its decision is open.
-    await asksOf(app);
-    const decisionRow = async () =>
-      await env.DB.prepare(
-        "SELECT id, step, description, payload FROM workflow_decisions WHERE run_id = ?"
-      )
-        .bind(run.id)
-        .first<Record<string, string | null>>();
+  it("has the engine keep each run's record for the retention, and no longer", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks());
+    const runId = await startedBy(builder, id, { who: transcript });
+    const asked = await vi.waitFor(
+      async () =>
+        await runInDurableObject(runObject(runId), (_object, state) =>
+          state.storage.sql
+            .exec<{ success: number; error: number }>(
+              "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
+            )
+            .one()
+        ),
+      settles
+    );
+    await endedRun(builder, id, runId);
+    expect(asked).toStrictEqual({ success: 30 * day, error: 30 * day });
+  });
 
-    await runQuarterHourTasks({}, daysOn(400));
-    const asked = await decisionRow();
-    const decision = asked?.id ?? "";
-    const open = await decider.api.decisions.get(decision);
-    await confirmedAnswer(decider, decision, {
+  it("leaves a decision a run still waits for as it was asked, and empties it once the run has ended for its retention, keeping who decided", async () => {
+    const admin = await signedIn("admin");
+    const owner = await signedIn("builder");
+    const reviewer = await signedIn("user");
+    const contract = `approval-${unique()}`;
+    await publishCatalogContract(env, admin.acting, {
+      key: contract,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(response.descriptor),
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      owner.acting,
+      `approve-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner.acting, workflow.id, {
+      definition: approvalDefinition(workflow.name, contract),
+      basedOn: null,
+    });
+    await approveWorkflowBinding(env, admin.acting, workflow.id, {
+      alias: "approval",
+      target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },
+      reviewed: { version: 1 },
+    });
+    await setWorkflowParams(env, owner.acting, workflow.id, {
+      values: { reviewer: reviewer.userId },
+      expectedRevision: 0,
+    });
+    const runId = await startedBy(owner, workflow.id, {
+      who: transcript,
+    });
+    const asked = await decisionOf(runId);
+    const decision = asked.id ?? "";
+
+    // Long after it started, while it still waits.
+    await sweepRunDetails(env, daysOn(400));
+    const waiting = await decisionOf(runId);
+    const open = await decisionFor(env, reviewer.acting, decision);
+    await confirmedAnswer(reviewer.acting, decision, {
       approved: true,
       payload: { comment: transcript },
     });
-    await endedInCore(run.id);
-    const answered = await builder.api.workflows.status(run.id);
+    const ended = await endedRun(owner, workflow.id, runId);
+    const answered = await decisionOf(runId);
     await runQuarterHourTasks({}, daysOn(31));
-    const after = await decider.api.decisions.get(decision);
-    const kept = await decisionRow();
+    const after = await decisionFor(env, reviewer.acting, decision);
+    const kept = await decisionOf(runId);
 
     expect({
-      asked: { step: asked?.step, description: asked?.description },
+      waiting,
       open: { description: open.description, status: open.status },
-      answered: answered.output,
+      ended: ended.output,
+      answered: answered.payload,
       after: {
         description: after.description,
+        input: after.input,
         status: after.status,
         by: after.decided?.by.userId,
       },
       kept,
       inRow: JSON.stringify(kept).includes("TRANSCRIPT"),
     }).toStrictEqual({
-      asked: {
-        step: `review:${encodeURIComponent(transcript)}`,
-        description: `Approve: ${transcript}`,
-      },
+      waiting: asked,
       open: { description: `Approve: ${transcript}`, status: "open" },
-      // The run got the answer it waited for, payload and all.
-      answered: {
-        timedOut: false,
-        approved: true,
-        by: decider.userId,
-        payload: { comment: transcript },
-      },
+      ended: { status: "approved" },
+      answered: JSON.stringify({ comment: transcript }),
       // Who decided, and how, stays; what was asked and sent doesn't.
       after: {
-        description: removed(30),
+        description: removedWords,
+        input: undefined,
         status: "approved",
-        by: decider.userId,
+        by: reviewer.userId,
       },
-      // Its step keeps its name, with the decision's ID for its key.
-      kept: {
-        id: decision,
-        step: `review:${decision}`,
-        description: "",
-        payload: null,
-      },
+      kept: { id: decision, description: "", payload: null, input: null },
       inRow: false,
     });
   });
 
   it("marks a run once when two sweeps run at once, and changes nothing when one runs again", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, fails);
-    const failed = await endedRun(builder, app, "fails");
+    const builder = await signedIn("builder");
+    const { runId } = await endedReading(builder, greetingTasks());
     const [early, late] = [daysOn(31), daysOn(32)];
 
     await Promise.all([
       sweepRunDetails(env, early),
       sweepRunDetails(env, late),
     ]);
-    const once = await rowOf(failed.id);
+    const once = await receiptOf(runId);
     await runQuarterHourTasks({}, daysOn(60));
-    const again = await rowOf(failed.id);
 
     expect({
-      at: [early.getTime(), late.getTime()].includes(
-        Number(once?.details_removed_at)
-      ),
-      again,
+      at: [early.getTime(), late.getTime()].includes(Number(once?.removed)),
+      again: await receiptOf(runId),
     }).toStrictEqual({ at: true, again: once });
   });
 
-  it("takes no step when a swept run is started again: its trigger finds the run, and an instance under its ID is refused", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    const key = `schedule:${crypto.randomUUID()}`;
-    const delivery = {
-      app: appIdSchema.parse(app),
-      workflow: workflowIdSchema.parse("keeps"),
-      input: { notes: transcript },
-      startedBy: null,
-      actor: { type: "system" },
-      trigger: { type: "schedule", key, version: 1 },
-    } as const;
-    const run = await startRun(env, delivery);
-    await endedInCore(run.id);
-    await runQuarterHourTasks({}, daysOn(31));
-    // The engine's record went as its retention ended.
-    await runObject(run.id).deleteRun();
+  it("finishes a sweep that stopped before it marked the run, which until then reads in full", async () => {
+    const builder = await signedIn("builder");
+    const by = builder;
+    const { workflow, runId } = await endedReading(by, greetingTasks());
 
-    // Its trigger delivered again: this run, no new one.
-    const again = await startRun(env, delivery);
-    // And its start sent to the engine again, as nothing in core sends it:
-    // the engine finds it deleted, and creates nothing.
-    await runEngine(env).create({
-      id: run.id,
-      pinned: { app: run.app, workflow: run.workflow, version: run.version },
-      input: { notes: transcript },
-    });
-    const events = await allEvents();
-    const { results: rows } = await env.DB.prepare(
-      "SELECT id FROM workflow_runs WHERE app_id = ?"
-    )
-      .bind(app)
-      .all();
-
-    expect({
-      again: { id: again.id, status: again.status },
-      rows: rows.length,
-      instance: await runEngine(env).status(run.id),
-      status: await builder.api.workflows.status(run.id),
-      cancelled: await builder.api.workflows.cancel(run.id),
-      done: await hitsOf(builder, app, "done"),
-      completed: events.filter(
-        ({ action, target }) =>
-          action === "workflow.run.completed" && target?.id === run.id
-      ).length,
-    }).toMatchObject({
-      again: { id: run.id, status: "completed" },
-      rows: 1,
-      instance: undefined,
-      // Still the run that completed, its details gone: not failed anew.
-      status: { status: "completed", detailsRemoved: true },
-      cancelled: { status: "completed" },
-      done: 1,
-      completed: 1,
-    });
-  });
-
-  it("finishes a sweep that stopped before its rows were marked", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, fails);
-    const failed = await endedRun(builder, app, "fails");
-
-    // The database fails as the rows are marked, as D1 can.
+    // The database fails as the run's details are removed, as D1 can.
     let broken = true;
     const db = racingDb(() => {
       if (broken) {
@@ -843,129 +517,49 @@ describe("run retention", { timeout: 60_000 }, () => {
     const first = await sweepRunDetails({ ...env, DB: db }, daysOn(31)).catch(
       (error: unknown) => error
     );
-    const between = await builder.api.workflows.status(failed.id);
+    const between = {
+      receipt: await receiptOf(runId),
+      output: await outputOf(by, workflow, runId),
+    };
     broken = false;
     await sweepRunDetails({ ...env, DB: db }, daysOn(31));
-    const after = await builder.api.workflows.status(failed.id);
 
     expect({
       first: first instanceof Error && first.message,
-      // Not marked, so still there in full.
-      between: {
-        message: between.failure?.error.message,
-        removed: between.detailsRemoved,
-      },
+      between,
       after: {
-        message: after.failure?.error.message,
-        removed: after.detailsRemoved,
+        receipt: await inputOf(runId),
+        output: await outputOf(by, workflow, runId),
       },
     }).toStrictEqual({
       first: "D1_ERROR: broken for the test",
-      between: { message: `Couldn't read: ${transcript}`, removed: undefined },
-      after: { message: removed(30), removed: true },
-    });
-  });
-
-  it("removes the instance of a cancelled run the engine never ended, and leaves one it can't remove for the next sweep, sweeping the rest", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, { ...waits, ...keeps });
-    const done = await endedRun(builder, app, "keeps");
-    const run = await builder.api.workflows.start(app, "waits", {
-      notes: transcript,
-    });
-    await sleeping(run.id, "go");
-    // A cancel whose termination failed: the row has ended, the instance
-    // waits on, and the engine's own retention never starts for it.
-    await env.DB.prepare(
-      "UPDATE workflow_runs SET status = 'cancelled', ended_at = ? WHERE id = ?"
-    )
-      .bind(Date.now(), run.id)
-      .run();
-
-    // The engine fails for that run, and only for it.
-    const between = await aroundEngine(
-      async (_method, call, object) => {
-        if (object.equals(runObjectId(run.id))) {
-          throw new Error("The engine is unavailable");
-        }
-        return await call();
+      // Not marked, so still there in full.
+      between: {
+        receipt: {
+          input: JSON.stringify({ who: transcript }),
+          params: JSON.stringify({}),
+          removed: null,
+        },
+        output: { status: `Hello, ${transcript}` },
       },
-      async () => {
-        await runQuarterHourTasks({}, daysOn(31));
-        return {
-          cancelled: await sweptOf([run.id]),
-          other: await sweptOf([done.id]),
-        };
-      }
-    );
-    const stillThere = await inEngine(run.id);
-    await runQuarterHourTasks({}, daysOn(31));
-
-    expect({
-      between,
-      stillThere,
-      after: {
-        cancelled: await sweptOf([run.id]),
-        engine: await inEngine(run.id),
-      },
-    }).toStrictEqual({
-      between: { cancelled: 0, other: 1 },
-      stillThere: true,
-      after: { cancelled: 1, engine: false },
+      after: { receipt: null, output: undefined },
     });
   });
 
-  it("sweeps a bounded number of runs at a time, and the rest the next time", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    const perSweep = batchesPerSweep * sweptPerBatch;
-    const runs = await oldRuns(builder, app, perSweep + 1, 40);
+  it("sweeps a bounded number of starts at a time, oldest first, and the rest the next time", async () => {
+    const builder = await signedIn("builder");
+    const { runId } = await endedReading(builder, greetingTasks());
+    const starts = await oldReceipts(runId, startDetailsPerSweep + 1, 40);
+    const now = new Date();
 
-    await runQuarterHourTasks();
-    const first = await sweptOf(runs);
-    await runQuarterHourTasks();
+    await sweepWorkflowStartDetails(env, now, now);
+    const first = await unsweptOf(starts);
+    await sweepWorkflowStartDetails(env, now, now);
 
-    expect({ first, second: await sweptOf(runs) }).toStrictEqual({
-      first: perSweep,
-      second: perSweep + 1,
-    });
-  });
-
-  it("finds the runs to sweep by an index, reading no table whole and sorting nothing", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, keeps);
-    // More than a batch, so the sweep pages on from its first.
-    const runs = await oldRuns(builder, app, sweptPerBatch + 3, 40);
-    // A fresh D1 has no statistics: SQLite goes by the queries alone.
-    const stats = await env.DB.prepare(
-      "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
-    ).all();
-
-    const queries = await recordedQueries(async () => {
-      await sweepRunDetails(env, new Date());
-    });
-    const plans = await Promise.all(
-      queries
-        .filter(({ query }) => /workflow_(?:runs|decisions)/u.test(query))
-        .map(async (recorded) => await planOf(recorded))
-    );
-    const steps = plans.flat();
-
-    expect({
-      stats: stats.results,
-      swept: await sweptOf(runs),
-      // The first batch, and the next from past its last run.
-      byIndex: steps.filter((step) =>
-        step.includes("workflow_runs_details_kept_idx")
-      ).length,
-      scans: steps.filter((step) => fullScan.test(step)),
-      sorts: steps.filter((step) => step.includes("TEMP B-TREE")),
-    }).toStrictEqual({
-      stats: [],
-      swept: sweptPerBatch + 3,
-      byIndex: 2,
-      scans: [],
-      sorts: [],
+    expect({ first, second: await unsweptOf(starts) }).toStrictEqual({
+      // All but the one admitted last.
+      first: starts.slice(startDetailsPerSweep),
+      second: [],
     });
   });
 });

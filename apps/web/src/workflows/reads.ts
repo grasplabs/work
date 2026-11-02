@@ -17,10 +17,10 @@ import type { Session } from "../core.ts";
 const refused = (error: unknown): boolean =>
   roleErrors.codeOf(error) === "role.forbidden";
 
-/** The engines (core's Apps) core lets the person open: their own, those shared with them, and every one for admins. */
-export const openableApps = async (session: Session): Promise<App[]> => {
+/** What `read` lists, or none when core refuses it to the person's role. */
+export const noneIfRefused = async <T>(read: Promise<T[]>): Promise<T[]> => {
   try {
-    return await session.apps.list();
+    return await read;
   } catch (error) {
     if (refused(error)) {
       return [];
@@ -28,6 +28,10 @@ export const openableApps = async (session: Session): Promise<App[]> => {
     throw error;
   }
 };
+
+/** The engines (core's Apps) core lets the person open: their own, those shared with them, and every one for admins. */
+export const openableApps = async (session: Session): Promise<App[]> =>
+  await noneIfRefused(session.apps.list());
 
 /** The workflows core lists for the person. */
 export const listWorkflows = async (

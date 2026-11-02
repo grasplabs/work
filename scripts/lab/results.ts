@@ -3,8 +3,8 @@
  * (`scripts/lab/results/`) and in the hidden set's own folder for the
  * hidden one. Every result says which Stephen it measured, by the marks of
  * his text and of the code that makes him speak, write down and draw, and
- * the commit; and how the models were reached: the local core's AI Gateway
- * and the model of each role. Two results are set side by side only when
+ * the commit; and how the models were reached: the model of each role,
+ * through the local core's gateway. Two results are set side by side only when
  * both say the same (compare.ts). Ported from the prototype
  * (grasplabs/prototype, packages/grasp: lab/results.ts, lab/version.ts).
  */
@@ -183,7 +183,6 @@ export const alike = (a: Result, b: Result): boolean =>
   a.bench === b.bench &&
   a.set === b.set &&
   a.stephen.interviewer === b.stephen.interviewer &&
-  a.via.gateway === b.via.gateway &&
   a.via.quick === b.via.quick &&
   a.via.careful === b.via.careful &&
   (a.people ?? "") === (b.people ?? "") &&

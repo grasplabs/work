@@ -10,10 +10,11 @@ import {
 } from "@grasp-os/ui/components/table";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
-import { Panel } from "../../../admin/panel.tsx";
 import { PlatformNav, platformCrumb } from "../../../admin/platform-nav.tsx";
 import { Quiet } from "../../../admin/release-parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchReleases } from "../../../releases/functions.ts";
 import type { ReleaseSummary } from "../../../releases/queries.ts";
@@ -25,7 +26,7 @@ import {
 
 /** Any two releases, compared: a plain GET form, so it needs no script. */
 const Compare = ({ releases }: { releases: ReleaseSummary[] }) => (
-  <Panel
+  <Section
     description="What changed between any two releases, with the notes of those in between."
     title="Compare two releases"
   >
@@ -61,7 +62,7 @@ const Compare = ({ releases }: { releases: ReleaseSummary[] }) => (
         Compare
       </Button>
     </form>
-  </Panel>
+  </Section>
 );
 
 /** Every release, the newest first, each with what changed since the one before. */
@@ -72,7 +73,7 @@ const EveryRelease = ({
   releases: ReleaseSummary[];
   older: ReleaseSummary | null;
 }) => (
-  <Panel
+  <Section
     description={
       older === null
         ? "As CI made them, the newest first. A release opens what it holds."
@@ -148,7 +149,7 @@ const EveryRelease = ({
         </Table>
       </div>
     )}
-  </Panel>
+  </Section>
 );
 
 /**
@@ -175,4 +176,5 @@ const ReleasesPage = () => {
 export const Route = createFileRoute("/platform/releases/")({
   loader: async () => await fetchReleases(),
   component: ReleasesPage,
+  pendingComponent: PageLoading,
 });

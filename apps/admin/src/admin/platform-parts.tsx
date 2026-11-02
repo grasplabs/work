@@ -122,7 +122,8 @@ export const eventWords = (
     "client.create": `added ${company}`,
     "client.discard": `discarded ${company}, which was never placed`,
     "client.ring": `moved ${company} to another ring`,
-    "client.model_spend_ceiling": `changed ${company}'s model spend ceiling`,
+    "platform.ai":
+      "changed which provider and model Grasp's own AI features use",
     "client.pin": `pinned ${company} to ${target}`,
     "client.unpin": `unpinned ${company}`,
     "client.rotate_secrets": `rotated ${company}'s secrets`,
@@ -130,10 +131,6 @@ export const eventWords = (
     "client.sign_in": `changed how ${company}'s people sign in`,
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
-    "platform.grasp_client":
-      company === ""
-        ? "chose no organization as Grasp's own"
-        : `chose ${company} as Grasp's own organization`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

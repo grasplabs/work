@@ -21,9 +21,22 @@
  * alone. Outside packages it also refuses a TypeScript-private or
  * -protected method, which Cap'n Web calls like any other but types hide.
  * With `reexportsOnly` (packages), only the exports are checked.
+ *
+ * no-slow-motion: Grasp answers within 300 ms (AGENTS.md, Design). It
+ * reads the durations of motion only: a class list's `duration-*`, a
+ * Motion `transition` (in seconds, as a `transition` prop or option, or
+ * the options of Motion's `animate()`), and the Web Animations API's
+ * `element.animate()` (in milliseconds, as an option or bare). It refuses
+ * one over 300 ms, unless it repeats for ever (work still going on:
+ * `repeat: Infinity` or `Number.POSITIVE_INFINITY`). Any other `duration`,
+ * such as how long a toast stays, is not motion and passes. What is rare
+ * or seen once is turned off for its files in vite.config.ts, each with
+ * its reason; a stylesheet's own animations are for review.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
+import { durationMs, findSlowClass, LIMIT_MS } from "./slow-motion.ts";
+import type { MotionUnit } from "./slow-motion.ts";
 
 interface Node {
   type: string;
@@ -42,6 +55,10 @@ interface Node {
   expressions?: Node[];
   object?: Node;
   properties?: Node[];
+  key?: Node;
+  parent?: Node;
+  callee?: Node;
+  property?: Node;
   argument?: Node;
   elements?: (Node | null)[];
   consequent?: Node;
@@ -475,11 +492,165 @@ const noUnboundedRpcTarget = {
   },
 };
 
+/** Whether `node` is infinity: `Infinity`, or `Number.POSITIVE_INFINITY`. */
+const isInfinity = (node: Node): boolean =>
+  node.type === "MemberExpression"
+    ? nameOf(node.object) === "Number" &&
+      nameOf(node.property) === "POSITIVE_INFINITY"
+    : nameOf(node) === "Infinity";
+
+/** Whether an options object repeats for ever, as work still going on does. */
+const repeatsForever = (object: Node): boolean =>
+  (object.properties ?? []).some(
+    (each) =>
+      nameOf(each.key) === "repeat" &&
+      isNode(each.value) &&
+      isInfinity(each.value)
+  );
+
+/** The name of what a call calls: `animate` for `animate(...)` and `el.animate(...)`. */
+const calleeName = (call: Node): unknown =>
+  call.callee?.type === "MemberExpression"
+    ? nameOf(call.callee.property)
+    : nameOf(call.callee);
+
+/** Whether `call` is the Web Animations API's `element.animate(keyframes, …)`. */
+const isElementAnimate = (call: Node): boolean =>
+  call.callee?.type === "MemberExpression" && calleeName(call) === "animate";
+
+/**
+ * The unit of the motion an options object sets, or undefined when it
+ * sets no motion: Motion's `transition` (a prop, a key, or the options of
+ * its `animate(target, keyframes, options)`) in seconds; the Web
+ * Animations API's `element.animate(keyframes, options)` in milliseconds.
+ * A `transition` nests (`transition={{ scale: { duration } }}`), so the
+ * object's parents up to it count.
+ */
+const motionUnit = (object: Node): MotionUnit | undefined => {
+  let node: Node = object;
+  while (node.parent !== undefined) {
+    const { parent } = node;
+    if (parent.type === "JSXExpressionContainer") {
+      const attribute = parent.parent;
+      return attribute?.type === "JSXAttribute" &&
+        typeof attribute.name === "object" &&
+        nameOf(attribute.name) === "transition"
+        ? "s"
+        : undefined;
+    }
+    if (parent.type === "CallExpression") {
+      const args = parent.arguments ?? [];
+      if (calleeName(parent) !== "animate") {
+        return undefined;
+      }
+      if (isElementAnimate(parent) && args[1] === node) {
+        return "ms";
+      }
+      return args[2] === node ? "s" : undefined;
+    }
+    if (parent.type === "Property" && nameOf(parent.key) === "transition") {
+      return "s";
+    }
+    if (
+      parent.type !== "Property" &&
+      parent.type !== "ObjectExpression" &&
+      parent.type !== "ConditionalExpression"
+    ) {
+      return undefined;
+    }
+    node = parent;
+  }
+  return undefined;
+};
+
+const noSlowMotion = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Every answer of the interface is over within 300 ms.",
+    },
+    messages: {
+      slow: "{{ms}} ms is longer than an answer may take ({{limit}} ms). Shorten it, or, if it is rare or seen once, turn the rule off for its file in vite.config.ts with the reason.",
+      unread:
+        "`{{value}}` comes to no time the lint can work out. Write it as a time, or, if it follows something such as a swipe, turn the rule off for its file in vite.config.ts with the reason.",
+    },
+    schema: [],
+  },
+  create: (context: Context) => {
+    const report = (node: Node, ms: number): void => {
+      context.report({
+        node,
+        messageId: "slow",
+        data: { ms: String(ms), limit: String(LIMIT_MS) },
+      });
+    };
+    const check = (node: Node, text: string): void => {
+      const found = findSlowClass(text);
+      if (found === undefined) {
+        return;
+      }
+      if ("ms" in found) {
+        report(node, found.ms);
+      } else {
+        context.report({
+          node,
+          messageId: "unread",
+          data: { value: found.unread },
+        });
+      }
+    };
+    return {
+      Literal: (node: Node): void => {
+        if (typeof node.value === "string") {
+          check(node, node.value);
+        }
+      },
+      TemplateLiteral: (node: Node): void => {
+        for (const quasi of node.quasis ?? []) {
+          check(node, quasi.value.raw);
+        }
+      },
+      // The Web Animations API also takes its duration bare, in ms:
+      // `element.animate(keyframes, 600)`.
+      CallExpression: (node: Node): void => {
+        const [, timing] = node.arguments ?? [];
+        if (
+          isElementAnimate(node) &&
+          timing?.type === "Literal" &&
+          typeof timing.value === "number" &&
+          timing.value > LIMIT_MS
+        ) {
+          report(timing, timing.value);
+        }
+      },
+      ObjectExpression: (node: Node): void => {
+        const unit = motionUnit(node);
+        if (unit === undefined || repeatsForever(node)) {
+          return;
+        }
+        for (const each of node.properties ?? []) {
+          const { value } = each;
+          if (
+            nameOf(each.key) === "duration" &&
+            isNode(value) &&
+            value.type === "Literal" &&
+            typeof value.value === "number" &&
+            durationMs(value.value, unit) > LIMIT_MS
+          ) {
+            report(each, durationMs(value.value, unit));
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
   rules: {
     "no-unbounded-rpc-target": noUnboundedRpcTarget,
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,
+    "no-slow-motion": noSlowMotion,
   },
 };

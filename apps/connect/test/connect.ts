@@ -289,7 +289,7 @@ export const startAs = async (
     scope: "personal",
     origin: clientOrigin,
     tenant: provider === "microsoft" ? acmeTenant : acmeDomain,
-    returnTo: "/connections",
+    returnTo: "/integrations",
     ...options,
   });
   return new URL(url);

@@ -4,9 +4,10 @@ import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { PlatformNav, platformCrumb } from "../../admin/platform-nav.tsx";
-import { Quiet } from "../../admin/release-parts.tsx";
+import { EmptySection } from "../../admin/section.tsx";
 import {
   deletePlacedClientFn,
   fetchOffboardedClients,
@@ -20,14 +21,16 @@ import { thenRefresh, useAction } from "../../use-action.ts";
 /**
  * Deleting one offboarded client's resources: once their retention is
  * over, with staff confirming that no export of it was made, until the
- * export exists (GRA-413). A bucket still holding objects expires them,
- * and deleting again after deletes it.
+ * export exists (GRA-413). Before then the button is off, saying from
+ * when. A bucket still holding objects expires them, and deleting again
+ * after deletes it: said from what was recorded, so it stays on reload.
  */
 const DeleteResources = ({ client }: { client: OffboardedClient }) => {
   const router = useRouter();
   const { busy, failure, run } = useAction(offboardRefusals);
   const [noExport, setNoExport] = useState(false);
   const [deleted, setDeleted] = useState<OffboardResult["deletion"]>(null);
+  const waits = !client.deletable;
   const id = `no-export-${client.clientId}`;
   const remove = () => {
     void run(async () => {
@@ -55,6 +58,7 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
           <Field orientation="horizontal">
             <Checkbox
               checked={noExport}
+              disabled={waits}
               id={id}
               onCheckedChange={setNoExport}
             />
@@ -64,12 +68,18 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
           </Field>
           <div className="flex flex-wrap items-center gap-4">
             <Button
-              disabled={busy || !noExport}
+              size="sm"
+              disabled={busy || waits || !noExport}
               onClick={remove}
               variant="destructive"
             >
               Delete its resources
             </Button>
+            {waits ? (
+              <p className="text-muted-foreground">
+                {`It can be deleted from ${formatTime(client.deletableFrom)} UTC, once its 30 days are over.`}
+              </p>
+            ) : null}
             {failure === null ? null : (
               <p className="text-destructive" role="alert">
                 {failure}
@@ -79,11 +89,16 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
         </>
       )}
       {deleted === null ? null : (
-        <output>
-          {deleted.emptying.length === 0
-            ? `Deleted ${deleted.deleted} of its resources.`
-            : `Deleted ${deleted.deleted}; ${deleted.emptying.join(", ")} still hold objects, which expire in a day: delete again after.`}
-        </output>
+        <output>{`Deleted ${deleted.deleted} of its resources.`}</output>
+      )}
+      {client.emptying.length === 0 ? null : (
+        <ul className="flex flex-col gap-1">
+          {client.emptying.map(({ physicalName, emptyBy }) => (
+            <li key={physicalName}>
+              {`${physicalName} still held objects, which expire by ${formatTime(emptyBy)} UTC: delete again after that to delete it.`}
+            </li>
+          ))}
+        </ul>
       )}
     </li>
   );
@@ -105,7 +120,7 @@ const OffboardedPage = () => {
     >
       <PlatformNav />
       {offboarded.length === 0 ? (
-        <Quiet>No client is offboarded.</Quiet>
+        <EmptySection>No client is offboarded.</EmptySection>
       ) : (
         <ul className="flex flex-col gap-4">
           {offboarded.map((client) => (
@@ -121,4 +136,5 @@ export const Route = createFileRoute("/platform/offboarded")({
   loader: async () => await fetchOffboardedClients(),
   head: () => ({ meta: [{ title: "Offboarded" }] }),
   component: OffboardedPage,
+  pendingComponent: PageLoading,
 });

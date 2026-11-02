@@ -9,17 +9,15 @@ import {
   chatOf,
   codeResults,
   codeStep,
-  gatewayConfig,
   model,
-  pointAtGateway,
   says,
   transcript,
 } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -415,9 +413,11 @@ describe("a chat's connections", setUpTime, () => {
     const searchedBefore = await mail.searched();
     await person.api.pendingActions.confirm(id, held?.inputHash ?? "");
 
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(outcomeOf(id), says("Found it."), outcomeOf(id), says("No."))
+    await fakeProvider(
+      outcomeOf(id),
+      says("Found it."),
+      outcomeOf(id),
+      says("No.")
     );
     await chat.ask("What did it find?");
     // Another chat of the same person and agent, and another person's chat.
@@ -518,13 +518,10 @@ describe("a chat's connections", setUpTime, () => {
     );
     const heldIdOf = (subject: string): string =>
       held.find(({ input }) => subjectOf(input) === subject)?.id ?? "";
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        outcomeOf(heldIdOf("First")),
-        outcomeOf(heldIdOf("Second")),
-        says("One went, one may go again.")
-      )
+    await fakeProvider(
+      outcomeOf(heldIdOf("First")),
+      outcomeOf(heldIdOf("Second")),
+      says("One went, one may go again.")
     );
     await chat.ask("What became of them?");
 
@@ -579,7 +576,7 @@ describe("a chat's connections", setUpTime, () => {
 
     // The permission for that resource goes; one for another stays.
     await admin.api.permissions.revoke(invoices);
-    await pointAtGateway(chat.stub, fakeGateway(outcomeOf(id), says("No.")));
+    await fakeProvider(outcomeOf(id), says("No."));
     await chat.ask("What did it find?");
 
     await expect(texts(chat.stub, chat.chat.id)).resolves.toStrictEqual([
@@ -613,7 +610,7 @@ describe("a chat's connections", setUpTime, () => {
     await chat.ask("And now?");
 
     expect(
-      chat.gateway.requests.slice(1).map(({ body }) => {
+      chat.provider.requests.slice(1).map(({ body }) => {
         const sent = JSON.stringify(body);
         return {
           found: sent.includes(`${marker}-1`),
@@ -673,7 +670,7 @@ describe("a chat's connections", setUpTime, () => {
     await chat.ask("And now?");
 
     expect(
-      chat.gateway.requests.slice(1).map(({ body }) => {
+      chat.provider.requests.slice(1).map(({ body }) => {
         const sent = JSON.stringify(body);
         return {
           found: sent.includes(`${marker}-1`),
@@ -706,43 +703,6 @@ describe("a chat's connections", setUpTime, () => {
         resource: null,
       },
     ]);
-  });
-
-  it("keep a chat that read an EU-only connection to EU models, in every later turn", async () => {
-    const { mail, chat, grant } = await setUp(
-      codeStep(
-        `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: "invoice" })).output;`
-      ),
-      says("Never sent.")
-    );
-    const euModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-    await pointAtGateway(chat.stub, chat.gateway, {
-      config: {
-        gateway: gatewayConfig.gateway,
-        models: [model, euModel],
-        eu: { connections: [mail.id], models: [euModel] },
-      },
-    });
-    await grant(mail.id, "MAIL");
-
-    const first = await chat.ask("Find the invoice.");
-    await expect(outcome(chat.ask("And now?"))).resolves.toBe("model.eu_only");
-
-    expect({
-      first: first.outcome,
-      requests: chat.gateway.requests.length,
-      searched: await mail.searched(),
-    }).toStrictEqual({ first: "failed", requests: 1, searched: ["invoice"] });
-    const events = await eventsOf(
-      chat.agent.agentId,
-      (all) =>
-        all.filter(({ action }) => action === "model.refused").length === 2
-    );
-    expect(
-      events
-        .filter(({ action }) => action === "model.refused")
-        .map(({ detail }) => detail.because)
-    ).toStrictEqual(["connection", "connection"]);
   });
 
   it("end a write held in a Teams chat at midnight of the company's day, and run nothing pressed after it", async () => {

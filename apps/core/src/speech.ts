@@ -1,13 +1,14 @@
 import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 
-import { gatewaySettings, models } from "./models.ts";
-import type { ModelsEnv, SpeechCall } from "./models.ts";
+import { models } from "./models.ts";
+import type { SpeechCall } from "./models.ts";
+import { platformAi } from "./platform-ai.ts";
 
-// Speech synthesis as core implements it (`elevenlabs-gateway`):
-// ElevenLabs, through the model gateway (models.ts), which judges every
-// line by the deployment's rules, charges it against the budgets and
-// audits it. On plain workerd, with no AI binding, every line fails
-// closed (`model.unconfigured`), as model calls do.
+// Speech synthesis as core implements it: Grasp's own speech feature,
+// ElevenLabs's (platform-ai.ts), through the model gateway (models.ts),
+// which judges every line by the deployment's rules, meters and audits
+// it, and reaches ElevenLabs's EU host through connect with Grasp's own
+// key. Without that key, every line is refused (`model.not_allowed`).
 
 /** Who says lines, and why: the gateway's audit and rules go by it. */
 export type SpeechCaller = Omit<
@@ -16,23 +17,21 @@ export type SpeechCaller = Omit<
 >;
 
 /**
- * The voice model a line is said in where the deployment allows none: the
- * gateway refuses it, so the line is refused, and audited, for what it is.
+ * The speech model, as the gateway names it: the quicker one for a line
+ * only known as it is said (`quick`).
  */
-const unallowedVoiceModel = "elevenlabs/eleven_v4";
+export const speechModelOf = (quick = false): string => {
+  const { speech } = platformAi;
+  return `${speech.provider}/${quick ? speech.quickModel : speech.model}`;
+};
 
-/**
- * Speech for `caller`, through the deployment's AI Gateway: each line in
- * the voice model it names, or the first voice model the deployment
- * allows when it names none.
- */
-export const gatewaySpeech = (
-  env: ModelsEnv,
+/** Speech for `caller`: each line in the speech model, or the one the request names. */
+export const platformSpeech = (
+  env: Env,
   caller: SpeechCaller
 ): SpeechSynthesis => ({
   speak: async ({ text, voice, language, model }, signal) => {
-    const [allowed] = gatewaySettings(env).voices;
-    const named = model ?? allowed ?? unallowedVoiceModel;
+    const named = model ?? speechModelOf();
     return await models(env).speak(
       { ...caller, model: named, text, voice, language },
       signal

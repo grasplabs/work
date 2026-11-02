@@ -26,7 +26,7 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
     core[Symbol.dispose]();
   }
   const page = await pageOf(builder);
-  await page.goto(`/engines/${app}/apps/writer/full`);
+  await page.goto(`/domains/${app}/apps/writer/full`);
   const screen = page.frameLocator('iframe[title="writer app"]');
   await expect(screen.getByRole("heading", { name: "Writer" })).toBeVisible({
     timeout: 20_000,

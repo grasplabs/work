@@ -1,6 +1,7 @@
 import { NavigationMenu as NavigationMenuPrimitive } from "@base-ui/react/navigation-menu";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 
 function NavigationMenuPositioner({
@@ -54,17 +55,32 @@ function NavigationMenu({
   );
 }
 
+// `line`: a record's own pages in a row under its title, the one shown
+// underlined, as line tabs look; links, so each page has its address.
+const navigationMenuListVariants = cva(
+  "group flex flex-1 list-none items-center",
+  {
+    variants: {
+      variant: {
+        default: "justify-center gap-0",
+        line: "flex-wrap justify-start gap-1 pb-2",
+      },
+    },
+    defaultVariants: { variant: "default" },
+  }
+);
+
 function NavigationMenuList({
   className,
+  variant = "default",
   ...props
-}: React.ComponentPropsWithRef<typeof NavigationMenuPrimitive.List>) {
+}: React.ComponentPropsWithRef<typeof NavigationMenuPrimitive.List> &
+  VariantProps<typeof navigationMenuListVariants>) {
   return (
     <NavigationMenuPrimitive.List
       data-slot="navigation-menu-list"
-      className={cn(
-        "group flex flex-1 list-none items-center justify-center gap-0",
-        className
-      )}
+      data-variant={variant}
+      className={cn(navigationMenuListVariants({ variant }), className)}
       {...props}
     />
   );
@@ -123,17 +139,33 @@ function NavigationMenuContent({
   );
 }
 
+const navigationMenuLinkVariants = cva(
+  "focus-visible:ring-ring/50 flex items-center gap-1.5 rounded-md text-sm transition-all outline-none focus-visible:ring-3 focus-visible:outline-1 [&_svg:not([class*='size-'])]:size-4",
+  {
+    variants: {
+      variant: {
+        default:
+          "hover:bg-muted focus:bg-muted data-[active=true]:bg-muted/50 data-[active=true]:hover:bg-muted data-[active=true]:focus:bg-muted p-2 in-data-[slot=navigation-menu-content]:rounded-sm",
+        // The page shown (`active`, announced as the current page) in the
+        // foreground with the line under it, where a line tab has its line.
+        line: "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground data-active:text-foreground after:bg-foreground relative h-9 px-2 py-1 font-medium whitespace-nowrap after:absolute after:inset-x-0 after:-bottom-1.25 after:h-0.5 after:opacity-0 after:transition-opacity data-active:after:opacity-100",
+      },
+    },
+    defaultVariants: { variant: "default" },
+  }
+);
+
 function NavigationMenuLink({
   className,
+  variant = "default",
   ...props
-}: NavigationMenuPrimitive.Link.Props) {
+}: NavigationMenuPrimitive.Link.Props &
+  VariantProps<typeof navigationMenuLinkVariants>) {
   return (
     <NavigationMenuPrimitive.Link
       data-slot="navigation-menu-link"
-      className={cn(
-        "hover:bg-muted focus:bg-muted focus-visible:ring-ring/50 data-[active=true]:bg-muted/50 data-[active=true]:hover:bg-muted data-[active=true]:focus:bg-muted flex items-center gap-1.5 rounded-md p-2 text-sm transition-all outline-none focus-visible:ring-3 focus-visible:outline-1 in-data-[slot=navigation-menu-content]:rounded-sm [&_svg:not([class*='size-'])]:size-4",
-        className
-      )}
+      data-variant={variant}
+      className={cn(navigationMenuLinkVariants({ variant }), className)}
       {...props}
     />
   );

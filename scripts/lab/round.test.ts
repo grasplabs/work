@@ -22,7 +22,7 @@ const run = (id: string, talks: string, right: number[]): Result => ({
     draws: "d",
     commit: "",
   },
-  via: { gateway: "local", quick: "q", careful: "c" },
+  via: { quick: "q", careful: "c" },
   cases: right.map((value, at) => ({
     id: `m${at}`,
     scores: { right: value, single: 1 },

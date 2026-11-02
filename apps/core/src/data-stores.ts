@@ -19,8 +19,6 @@ import {
 } from "@grasp-os/shared/stores";
 import type {
   ClaimInput,
-  ReceiptLookup,
-  ReceiptStanding,
   Claimed,
   Commit,
   Committed,
@@ -45,6 +43,7 @@ import {
   apps,
   businessStoreMembers,
   businessStores,
+  sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type { FileReader } from "./file-host.ts";
@@ -112,6 +111,14 @@ import type { ReadResult } from "./store-host.ts";
 //   store closing, before its object is touched; a seal's binding in turn
 //   requires the store live and not closing (app-releases.ts), so of the
 //   two, one wins. Deleting an App never deletes its stores.
+// - A store is deleted under a consumer an admin approved to call its
+//   operations (a workflow's operation binding, workflow-bindings.ts), so
+//   the consumer fails later, unseen: refused (`data.store_consumed`,
+//   naming how many) while any live workflow's or App's active approval resolves
+//   to it in the binding inventory, read in the same statement that marks
+//   the store closing. An approval in turn requires the store live and not
+//   closing in its own batch, so of the two, one wins. Revoking the
+//   approvals, or deleting the workflows, lets the store go.
 // - A deletion stops half-way, or its records go unaudited: the object is
 //   marked first, with who deleted it and when; then the inventory row and
 //   the `store.deleted` event in one batch, which core runs at once and
@@ -120,6 +127,10 @@ import type { ReadResult } from "./store-host.ts";
 //   the mark alone, and only the batch that marks the row stores it, so it
 //   is stored once whichever runs first; a store marked in its object is
 //   refused even while its inventory row lags.
+// - A workflow's store managed around its workflow (GRA-682): only the
+//   organization's admins manage it as a store, and it is never shared or
+//   unshared as one (`data.store_managed_by_workflow`); its schema is its
+//   workflow's versions', applied only as one is published.
 // - A deleted store comes back: its ID is never minted again (random), its
 //   object keeps its deletion mark after purging its records, and its
 //   inventory row keeps `deleted_at`.
@@ -141,13 +152,6 @@ export interface OpenStore {
   ) => Promise<DefinedTables>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
-  /**
-   * Where a mutation's receipt stands, never claiming it
-   * (`StoreHost.receiptStanding`).
-   */
-  receiptStanding: (
-    lookup: Omit<ReceiptLookup, "storeId">
-  ) => Promise<ReceiptStanding>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
   /**
    * One read for `scope`, which the caller resolved for the invocation
@@ -245,6 +249,16 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   return id;
 };
 
+/** Whether a workflow owns store `id` (`sdk_store_owners`, GRA-682). */
+const workflowOwned = async (env: Env, id: StoreId): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ workflowId: sdkStoreOwners.workflowId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, id))
+    .get();
+  return row?.workflowId !== null && row?.workflowId !== undefined;
+};
+
 /** The App a default store serves: whose roles decide who manages it. */
 type DefaultStoreApp = Pick<App, "id" | "owner" | "status"> & {
   createdAt: Date;
@@ -313,12 +327,39 @@ const managedBy = async (
   id: string,
   /** Whether to change it: an archived App's default store is read-only. */
   change = true
-): Promise<{ id: StoreId; owner: string; defaultOf?: DefaultStoreApp }> => {
+): Promise<{
+  id: StoreId;
+  owner: string;
+  defaultOf?: DefaultStoreApp;
+  workflowOwned?: true;
+}> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
   }
   const db = drizzle(env.DB);
+  // A workflow's store (GRA-682, workflow-stores.ts): its versions decide
+  // its schema, and only the organization's admins manage it as a store,
+  // never its creator as such, nor anyone it might be shared with.
+  if (await workflowOwned(env, parsed.data)) {
+    if (!isAdmin(by.role)) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+    const live = await db
+      .select({ owner: businessStores.ownerId })
+      .from(businessStores)
+      .where(
+        and(
+          eq(businessStores.id, parsed.data),
+          isNull(businessStores.deletedAt)
+        )
+      )
+      .get();
+    if (live === undefined) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+    return { id: parsed.data, owner: live.owner, workflowOwned: true };
+  }
   const app = await defaultStoreApp(env, parsed.data);
   // A removed App's default store has no builders left: the
   // organization's own admins, never Grasp staff, read, export, change
@@ -380,9 +421,15 @@ const managedBy = async (
  * Refuses (`data.store_managed_by_app`) to share or unshare an App's
  * default store as a store: whom it serves follows the App's membership.
  */
-const requireSharableStore = (store: { defaultOf?: DefaultStoreApp }): void => {
+const requireSharableStore = (store: {
+  defaultOf?: DefaultStoreApp;
+  workflowOwned?: true;
+}): void => {
   if (store.defaultOf !== undefined) {
     throw dataErrors.create("data.store_managed_by_app");
+  }
+  if (store.workflowOwned === true) {
+    throw dataErrors.create("data.store_managed_by_workflow");
   }
 };
 
@@ -415,6 +462,28 @@ const boundSql = (id: StoreId): SQL =>
     WHERE bound.kind = 'store' AND bound.target_id = ${id})`;
 
 /**
+ * The consumers whose active approval resolves to store `id`, in the
+ * binding inventory (spec 24): each live workflow with an active approval
+ * that serves one of its operation bindings with the store's operation
+ * (workflow-bindings.ts), and each App with an active approval that binds
+ * one of its declared store resources to it (resource-bindings.ts).
+ * Revoking the approvals, or deleting the workflow, lets the store go.
+ */
+const consumersSql = (id: StoreId): SQL =>
+  sql`(SELECT COUNT(*) FROM (
+    SELECT bound.resource_id FROM sdk_resource_bindings AS bound
+      JOIN workflow_binding_approvals AS approval
+        ON approval.id = bound.approval_id AND approval.status = 'active'
+      JOIN workflow_resources AS consumer
+        ON consumer.id = bound.resource_id AND consumer.deleted_at IS NULL
+      WHERE bound.kind = 'operation' AND bound.target_id = ${id}
+    UNION
+    SELECT bound.resource_id FROM sdk_resource_bindings AS bound
+      JOIN app_resource_bindings AS approval
+        ON approval.id = bound.approval_id AND approval.status = 'active'
+      WHERE bound.kind = 'storeResource' AND bound.target_id = ${id}))`;
+
+/**
  * Marks store `id` closing at `now` for the deletion `owner`, in one
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
@@ -443,11 +512,34 @@ const markClosing = async (
             new Date(now.getTime() - storeClosingMs)
           )
         ),
-        sql`NOT ${boundSql(id)}`
+        sql`NOT ${boundSql(id)}`,
+        sql`${consumersSql(id)} = 0`
       )
     )
     .returning({ owner: businessStores.closingOwner });
   return marked[0]?.owner === owner;
+};
+
+/**
+ * The refusal of a store's deletion while `consumers` call its operations
+ * through approvals: how many, and that an admin revokes them first.
+ */
+const consumedError = (consumers: number) =>
+  Object.assign(dataErrors.create("data.store_consumed", { consumers }), {
+    message:
+      consumers === 1
+        ? "One workflow or App calls this store's operations through an approval. Revoke that approval first, then delete the store."
+        : `${consumers} workflows or Apps call this store's operations through approvals. Revoke those approvals first, then delete the store.`,
+  });
+
+/** How many consumers' active approvals resolve to store `id`. */
+const consumersOf = async (env: Env, id: StoreId): Promise<number> => {
+  const row = await drizzle(env.DB)
+    .select({ count: sql<number>`${consumersSql(id)}` })
+    .from(businessStores)
+    .where(eq(businessStores.id, id))
+    .get();
+  return row?.count ?? 0;
 };
 
 /** Whether some sealed release is bound to store `id`. */
@@ -553,17 +645,29 @@ export const deleteStore = async (
   // the mark if its close is refused).
   const owner = crypto.randomUUID();
   if (!(await markClosing(env, store.id, owner, new Date()))) {
-    const reason = (await boundToRelease(env, store.id))
-      ? "data.store_bound"
-      : "data.store_closing";
+    const consumers = await consumersOf(env, store.id);
+    let reason:
+      | "data.store_bound"
+      | "data.store_consumed"
+      | "data.store_closing" = "data.store_closing";
+    if (await boundToRelease(env, store.id)) {
+      reason = "data.store_bound";
+    } else if (consumers > 0) {
+      reason = "data.store_consumed";
+    }
     const db = drizzle(env.DB);
     await auditedBatch(env, db, [
       outboxed(
         db,
-        storeEntry(by, "store.delete_refused", store.id, { reason })
+        storeEntry(by, "store.delete_refused", store.id, {
+          reason,
+          ...(reason === "data.store_consumed" ? { consumers } : {}),
+        })
       ),
     ]);
-    throw dataErrors.create(reason);
+    throw reason === "data.store_consumed"
+      ? consumedError(consumers)
+      : dataErrors.create(reason);
   }
   let mark: StoreDeletionMark;
   try {
@@ -625,7 +729,7 @@ const sharingRules = (owner: string) => ({
  * Refuses a change to store `id` while it is the default store of an
  * archived App (`app.archived`): read-only, as the App is, until a builder
  * restores it (app-status.ts). For changes made by admins without a role
- * check of their own on the App (backfills, migration samples). A removed
+ * check of their own on the App (backfills). A removed
  * App's default store isn't refused: nobody can restore the App, and its
  * admins manage the store from then on (`managedBy`).
  */
@@ -787,8 +891,6 @@ const storeClient = (
       await stub.defineTables(storeId, manifest, consumer, migrations),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
-    receiptStanding: async (lookup) =>
-      await stub.receiptStanding({ ...lookup, storeId }),
     commit: async (commit) =>
       committedSchema.parse(
         JSON.parse(await stub.commit({ ...commit, storeId }))
