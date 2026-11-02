@@ -372,13 +372,16 @@ describe(
       const adaListed = await ada.api.workflowResources.runFiles(id, run);
       const { core: staffCore } = await openRpc(staff);
       const staffApi = staffCore.authenticate();
-      const staffListed = await staffApi.workflowResources.runFiles(id, run);
+      const staffListed = await outcome(
+        staffApi.workflowResources.runFiles(id, run)
+      );
 
       expect({
         // A user of the workflow, not the run's person: the run isn't theirs.
         user: await statusOf(bob.session, path),
         // A builder who isn't an admin: sees the run, not its files.
         builder: await statusOf(carol.session, path),
+        // Staff aren't signed in to the workspace at all.
         staff: await statusOf(staff, path),
         signedOut: await statusOf(null, path),
         crossSite: await statusOf(ada.session, path, "cross-site"),
@@ -401,13 +404,13 @@ describe(
             id,
             restricted.run
           ),
-          // Staff see the run, never its files.
+          // Staff reach nothing in the workspace, its runs' files included.
           staff: staffListed,
         },
       }).toStrictEqual({
         user: 404,
         builder: 404,
-        staff: 404,
+        staff: 401,
         signedOut: 401,
         crossSite: 403,
         sameSite: 403,
@@ -419,7 +422,7 @@ describe(
           carol: null,
           bob: "workflow.run_unavailable",
           restrictedAdmin: null,
-          staff: null,
+          staff: "role.forbidden",
         },
       });
     });

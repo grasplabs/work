@@ -46,8 +46,9 @@ import { detailsRemoved } from "./retention.ts";
 //   organization's admins with a role in the workflow, as for what the run
 //   returned (`resourceRunFor`); in a restricted run its person alone, so
 //   what a restricted run read never leaves but to them. Grasp staff
-//   never. Anyone else, and any file not found by its own ID, its run's
-//   and its workflow's together, is told the file isn't there
+//   never: a staff session isn't signed in to the workspace at all
+//   (`identifyFull`). Anyone else, and any file not found by its own ID,
+//   its run's and its workflow's together, is told the file isn't there
 //   (`file.not_found`), as a missing one is.
 // - A file half written, deleted, or kept past its run's details: only a
 //   finished file, and none once the run's details are gone, as for
