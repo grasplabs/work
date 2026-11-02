@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b819173c-e383-4e1a-90f3-71794e9f0e67",
+  "id": "64708d12-5e1c-4001-bdb0-aafbcf7f8fb9",
   "prevId": "9ea47a8c-234d-4228-883a-ae280c1daa3b",
   "tables": {
     "audit_outbox": {
@@ -1091,6 +1091,13 @@
         },
         "claimed_at": {
           "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "files_removed_at": {
+          "name": "files_removed_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

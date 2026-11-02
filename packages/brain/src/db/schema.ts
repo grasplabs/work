@@ -451,6 +451,11 @@ export const brainExports = sqliteTable(
     /** A run's claim while it writes, and when: one writer at a time. */
     claim: text(),
     claimedAt: timestamp("claimed_at"),
+    /**
+     * When its files were found gone from the bucket, after it expired or
+     * failed: it leaves the sweep that deletes them (../exports.ts).
+     */
+    filesRemovedAt: timestamp("files_removed_at"),
   },
   (table) => [
     index("brain_exports_state_idx").on(table.state),

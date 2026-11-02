@@ -7,6 +7,7 @@ import { createBrain } from "../src/brain.ts";
 import type { Brain } from "../src/brain.ts";
 import { ensureCollection } from "../src/collections.ts";
 import {
+  brainExports,
   brainMemories,
   collections as collectionsTable,
 } from "../src/db/schema.ts";
@@ -18,6 +19,8 @@ import {
   exportFileReads,
   exportLeaseMs,
   exportStatus,
+  exportSweepLimit,
+  expireExports,
   manifestName,
   prepareExport,
   startExport,
@@ -92,6 +95,34 @@ const withPorts = (
   brain: Brain<Caller>,
   change: Partial<Brain<Caller>["ports"]>
 ): Brain<Caller> => createBrain(env.BRAIN, { ...brain.ports, ...change });
+
+/** An export's prefix in the bucket, naming it. */
+const exportPrefixPattern = /^exports\/(?<exportId>[^/]+)\//u;
+
+/**
+ * `brain` with its bucket's listings counted: how many each export's
+ * prefix was listed (`listed`, by export ID).
+ */
+const listingCounted = (brain: Brain<Caller>) => {
+  const listed = new Map<string, number>();
+  const counting = withPorts(brain, {
+    blobs: {
+      delete: env.BLOBS.delete.bind(env.BLOBS),
+      get: env.BLOBS.get.bind(env.BLOBS),
+      head: env.BLOBS.head.bind(env.BLOBS),
+      put: env.BLOBS.put.bind(env.BLOBS),
+      list: async (options) => {
+        const exportId = exportPrefixPattern.exec(options?.prefix ?? "")?.groups
+          ?.exportId;
+        if (exportId !== undefined) {
+          listed.set(exportId, (listed.get(exportId) ?? 0) + 1);
+        }
+        return await env.BLOBS.list(options);
+      },
+    },
+  });
+  return { counting, listed };
+};
 
 /** An export begun, confirmed with its token. */
 const begun = async (brain: Brain<Caller>, onExport: OnExport) => {
@@ -720,6 +751,80 @@ describe("exporting the company's Brain", () => {
     };
     const again = await preparePurge(brain, admin, input, noCopies);
     await purge(brain, admin, input, again.token, noCopies);
+  });
+
+  it("lists a failed export's files no more once its sweep found them gone", async () => {
+    const { brain } = testHost();
+    const plans = await newCollection(brain, "Plans");
+    const plan = await writeVersion(brain, admin, {
+      collection: plans,
+      path: "plan.md",
+      text: "# Plan\nThe route.",
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const onExport = hostWith();
+    // Failed, as a purge begins while it is written.
+    const exportId = await begun(brain, onExport);
+    const blocked = await blockedPurge(brain, plan.id);
+    const ended = await ranToEnd(brain, exportId, onExport);
+    // Every minute, as core's clock sweeps: however many failed before it.
+    const { counting, listed } = listingCounted(brain);
+    const perSweep: number[] = [];
+    for (let sweep = 0; sweep < 12; sweep += 1) {
+      const before = listed.get(exportId) ?? 0;
+      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
+      await expireExports(counting, new Date());
+      perSweep.push((listed.get(exportId) ?? 0) - before);
+    }
+    // Finished, as its host's copies come back in reach: exports may run.
+    const input = {
+      type: "content",
+      documentIds: [plan.id],
+      terms: ["route"],
+      reason: "erasure_request",
+    };
+    const again = await preparePurge(brain, admin, input, noCopies);
+    await purge(brain, admin, input, again.token, noCopies);
+
+    expect({
+      blocked,
+      ended,
+      swept: perSweep.some((count) => count > 0),
+      sinceGone: perSweep.slice(-3),
+    }).toStrictEqual({
+      blocked: "Error: The host's copies are out of reach",
+      ended: "knowledge.export_purged",
+      swept: true,
+      sinceGone: [0, 0, 0],
+    });
+  });
+
+  it("sweeps no more failed exports at once than its bound, oldest first", async () => {
+    const { brain } = testHost();
+    // Failed long ago, their files never found gone: older than any other.
+    const failed = Array.from({ length: exportSweepLimit + 2 }, (_, at) => ({
+      id: crypto.randomUUID(),
+      by: "admin",
+      state: "failed" as const,
+      reason: "knowledge.export_purged",
+      createdAt: new Date(at),
+      updatedAt: new Date(at),
+      collectionIds: "[]",
+      purgeMark: 0,
+    }));
+    for (const row of failed) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, within D1's bound values
+      await brain.db.insert(brainExports).values(row);
+    }
+    const { counting, listed } = listingCounted(brain);
+    await expireExports(counting, new Date());
+    const swept = failed.filter(({ id }) => listed.has(id)).map(({ id }) => id);
+
+    expect(swept).toStrictEqual(
+      failed.slice(0, exportSweepLimit).map(({ id }) => id)
+    );
   });
 
   // Runs last: what it writes is large, and goes once it has run.

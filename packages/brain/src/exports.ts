@@ -1281,6 +1281,18 @@ const deleteFiles = async <C>(
   } while (cursor !== undefined);
 };
 
+/** Whether the bucket holds nothing of export `exportId` any more. */
+const filesGone = async <C>(
+  brain: Brain<C>,
+  exportId: string
+): Promise<boolean> => {
+  const listed = await brain.ports.blobs.list({
+    prefix: prefixOf(exportId),
+    limit: 1,
+  });
+  return listed.objects.length === 0;
+};
+
 /**
  * Goes on with the running export `exportId` until it is complete, or
  * `until` passes, or another file could take it past the subrequests one
@@ -1400,8 +1412,19 @@ const failPurged = async <C>(
 };
 
 /**
+ * Exports whose files one sweep deletes at most, oldest first: each a
+ * listing and a delete per thousand objects, a listing to see them gone
+ * and its record, so a sweep takes some forty subrequests beside a call
+ * writing an export (`exportInvocationReads`).
+ */
+export const exportSweepLimit = 10;
+
+/**
  * Deletes the files of every complete export past its download window,
- * and of every failed one, noting the complete ones expired.
+ * and of every failed one, noting the complete ones expired; each once,
+ * as an export whose files are found gone leaves the sweep
+ * (`files_removed_at`), and one whose delete left some is swept again.
+ * `exportSweepLimit` exports a sweep, oldest first.
  */
 export const expireExports = async <C>(
   brain: Brain<C>,
@@ -1428,19 +1451,30 @@ export const expireExports = async <C>(
           eq(brainExports.state, "complete"),
           lt(brainExports.expiresAt, now)
         ),
-        eq(brainExports.state, "failed")
+        and(
+          inArray(brainExports.state, ["failed", "expired"]),
+          isNull(brainExports.filesRemovedAt)
+        )
       )
-    );
+    )
+    .orderBy(asc(brainExports.updatedAt), asc(brainExports.id))
+    .limit(exportSweepLimit);
   for (const { id, state } of due) {
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
     await deleteFiles(brain, id);
-    if (state === "complete") {
-      // oxlint-disable-next-line no-await-in-loop -- one export at a time
-      await brain.db
-        .update(brainExports)
-        .set({ state: "expired", updatedAt: now })
-        .where(eq(brainExports.id, id));
-    }
+    // Gone only if the bucket says so: a delete that left some is swept
+    // again.
+    // oxlint-disable-next-line no-await-in-loop -- one export at a time
+    const gone = await filesGone(brain, id);
+    // oxlint-disable-next-line no-await-in-loop -- one export at a time
+    await brain.db
+      .update(brainExports)
+      .set({
+        ...(state === "complete" ? { state: "expired" as const } : {}),
+        ...(gone ? { filesRemovedAt: now } : {}),
+        updatedAt: now,
+      })
+      .where(eq(brainExports.id, id));
   }
 };
 
