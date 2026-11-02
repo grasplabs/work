@@ -50,7 +50,10 @@ import {
 //   longer after every failed try, doubling up to a day, a few a run, and
 //   a try under way holds its row (`underWayMs`) so two runs never ask at
 //   once.
-// - A revoke racing a reconnect: where the provider's grant is the
+// - A revoke racing a reconnect: while a sign-in that could connect the
+//   connection again is open, or finishing (its consent's tokens in hand,
+//   not kept yet), the owed revoke waits, so it never ends the grant that
+//   consent may hand back before it is kept. Where the provider's grant is the
 //   account's with one of Grasp's clients (`accountWideGrant`: each Google
 //   client), the account connected again (a new connection, or the same
 //   one connected again in place) holds the grant the owed copy would
@@ -249,16 +252,19 @@ const markGrantRevoked = async (
 
 /**
  * When the latest sign-in flow that could connect `connection` again
- * lapses, if one is open: its owner's at its provider for a personal one,
- * any at its provider for a shared one.
+ * lapses, if one is open or finishing: its owner's at its provider for a
+ * personal one, any at its provider for a shared one. A finishing flow
+ * (oauth.ts `takeFlow`) may hold tokens of the grant the revoke would end,
+ * from its consent, not yet kept.
  */
 const signInOpen = async (
   env: Env,
   connection: ConnectionRow,
   now: number
 ): Promise<number | undefined> => {
+  const lapses = sql<number>`max(${oauthFlows.expiresAt}, coalesce(${oauthFlows.finishingUntil}, 0))`;
   const [flow] = await drizzle(env.DB)
-    .select({ expiresAt: oauthFlows.expiresAt })
+    .select({ lapses })
     .from(oauthFlows)
     .where(
       and(
@@ -267,12 +273,12 @@ const signInOpen = async (
         connection.ownerUserId === null
           ? undefined
           : eq(oauthFlows.userId, connection.ownerUserId),
-        sql`${oauthFlows.expiresAt} > ${now}`
+        sql`${lapses} > ${now}`
       )
     )
-    .orderBy(desc(oauthFlows.expiresAt))
+    .orderBy(desc(lapses))
     .limit(1);
-  return flow?.expiresAt.getTime();
+  return flow?.lapses;
 };
 
 /**

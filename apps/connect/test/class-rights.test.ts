@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { connections, connectionTokens } from "../src/db/schema.ts";
+import { finishConnection } from "../src/oauth.ts";
 import {
   auditEvents,
   connectAccount,
@@ -662,6 +663,57 @@ describe("a grant asked to connect again", () => {
       attempts: owed?.attempts,
       later: (owed?.retryAt ?? 0) > Date.now(),
     }).toStrictEqual({ revokes: 0, grant: true, attempts: 0, later: true });
+  });
+
+  it("waits while a sign-in to connect it again is coming back, so the tokens it has from the consent are never revoked before they are kept", async () => {
+    const anna = await connectGoogle(googleDefaultGrant);
+    const account = ownAccount(anna.person, "google");
+    await exports.default.requireClassRights({ classes: ["read-company"] });
+    const url = await startAs(anna.person, {
+      provider: "google",
+      classes: ["read-own", "change-own", "read-company"],
+    });
+    // Back from Google: the code exchanged, the account's addresses being
+    // read with the new token, nothing kept yet.
+    const lookup = Promise.withResolvers<Response>();
+    const lookingUp = Promise.withResolvers<boolean>();
+    providers.state.profile = async () => {
+      providers.state.profile = undefined;
+      lookingUp.resolve(true);
+      return await lookup.promise;
+    };
+    // In connect itself: the request finishing it is under way.
+    const finishing = finishConnection(env, {
+      person: anna.person,
+      state: stateOf(url),
+      code: providers.authorize(url.href, {
+        ...account,
+        granted: `${googleDefaultGrant} ${googleScope("drive.readonly")}`,
+      }),
+    });
+    await lookingUp.promise;
+    const asked = providers.revocations().length;
+
+    await owedDue(anna.connectionId);
+    await runMaintenance();
+    lookup.resolve(new Response(null, { status: 503 }));
+    const { connectionId } = await finishing;
+    await owedDue(anna.connectionId);
+    await runMaintenance();
+
+    expect({
+      same: connectionId === anna.connectionId,
+      stored: await stored(anna.connectionId),
+      grant: providers.grantHolds(account),
+      revokes: providers.revocations().length - asked,
+      left: await owedFor(anna.connectionId),
+    }).toStrictEqual({
+      same: true,
+      stored: active,
+      grant: true,
+      revokes: 0,
+      left: [],
+    });
   });
 
   it("owes nothing at Microsoft, which can't revoke a grant", async () => {

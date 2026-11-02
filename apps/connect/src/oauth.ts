@@ -25,7 +25,7 @@ import {
   relayedClientOf,
 } from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -318,16 +318,39 @@ export const startConnection = async (
 };
 
 /**
- * Takes the flow `state` names: deleted before anything is checked, so it
- * is spent whatever happens next, even when it isn't this person's.
+ * How long a taken flow holds its row at most: its code exchanged, its
+ * account checked and read, what it got kept. Should its finish never end
+ * (the Worker stopped), an owed revoke waits no longer for it.
+ */
+const finishingForMs = 5 * 60 * 1000;
+
+/**
+ * Takes the flow `state` names: marked finishing before anything is
+ * checked, so it is spent whatever happens next, even when it isn't this
+ * person's. Its row is kept until `doneWith`, so an owed revoke of the
+ * grant it may come back with waits for it (revocations.ts): the tokens a
+ * consent just handed back are never revoked before they are kept.
  */
 const takeFlow = async (env: Env, state: string) => {
   const stateHash = await sha256Hex(state);
   const [flow] = await drizzle(env.DB)
-    .delete(oauthFlows)
-    .where(eq(oauthFlows.stateHash, stateHash))
+    .update(oauthFlows)
+    .set({ finishingUntil: new Date(Date.now() + finishingForMs) })
+    .where(
+      and(
+        eq(oauthFlows.stateHash, stateHash),
+        isNull(oauthFlows.finishingUntil)
+      )
+    )
     .returning();
   return flow;
+};
+
+/** Deletes `flow`, taken, once its finish is done, however it went. */
+const doneWith = async (env: Env, flow: FlowRow): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(oauthFlows)
+    .where(eq(oauthFlows.stateHash, flow.stateHash));
 };
 
 /**
@@ -342,6 +365,7 @@ export const abandonFlow = async (env: Env, state: unknown): Promise<void> => {
   }
   const flow = await takeFlow(env, parsed.data);
   if (flow !== undefined) {
+    await doneWith(env, flow);
     return;
   }
   const toolkitFlow = await takeToolkitFlow(env, await sha256Hex(parsed.data));
@@ -701,28 +725,14 @@ const keepTokens = async (
   );
 };
 
-/**
- * Finishes a flow with the provider's answer, for the person who started
- * it: exchanges the code, checks the account is in the organization's
- * tenant, and stores the connection with its tokens, sealed. A connection
- * that holds the account and needs connecting again gets the tokens
- * instead, if the person may reconnect it (`keepTokens`).
- */
-export const finishConnection = async (
+/** Finishes `flow`, taken, as `finishConnection` says. */
+const finishFlow = async (
   env: Env,
-  request: unknown
+  person: ConnectionPerson,
+  flow: FlowRow | undefined,
+  code: string | undefined,
+  error: string | undefined
 ): Promise<{ connectionId: string; returnTo: string }> => {
-  const parsed = finishConnectionSchema.safeParse(request);
-  if (!parsed.success) {
-    const given: unknown =
-      typeof request === "object" && request !== null
-        ? Reflect.get(request, "state")
-        : undefined;
-    await abandonFlow(env, given);
-    throw connectionErrors.create("connection.invalid");
-  }
-  const { person, state, code, error } = parsed.data;
-  const flow = await takeFlow(env, state);
   const refuse: Refuse = async (
     reason,
     { outcome = "refused", connectionId } = {}
@@ -789,6 +799,37 @@ export const finishConnection = async (
     refuse
   );
   return { connectionId, returnTo: flow.returnTo };
+};
+
+/**
+ * Finishes a flow with the provider's answer, for the person who started
+ * it: exchanges the code, checks the account is in the organization's
+ * tenant, and stores the connection with its tokens, sealed. A connection
+ * that holds the account and needs connecting again gets the tokens
+ * instead, if the person may reconnect it (`keepTokens`).
+ */
+export const finishConnection = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string; returnTo: string }> => {
+  const parsed = finishConnectionSchema.safeParse(request);
+  if (!parsed.success) {
+    const given: unknown =
+      typeof request === "object" && request !== null
+        ? Reflect.get(request, "state")
+        : undefined;
+    await abandonFlow(env, given);
+    throw connectionErrors.create("connection.invalid");
+  }
+  const { person, state, code, error } = parsed.data;
+  const flow = await takeFlow(env, state);
+  try {
+    return await finishFlow(env, person, flow, code, error);
+  } finally {
+    if (flow !== undefined) {
+      await doneWith(env, flow);
+    }
+  }
 };
 
 /**
@@ -1306,7 +1347,16 @@ export const resealFlows = async (env: Env): Promise<void> => {
 
 /** Deletes OAuth flows nobody finished in time. The clock calls it. */
 export const purgeExpiredFlows = async (env: Env): Promise<void> => {
+  const now = new Date();
   await drizzle(env.DB)
     .delete(oauthFlows)
-    .where(lte(oauthFlows.expiresAt, new Date()));
+    .where(
+      and(
+        lte(oauthFlows.expiresAt, now),
+        or(
+          isNull(oauthFlows.finishingUntil),
+          lte(oauthFlows.finishingUntil, now)
+        )
+      )
+    );
 };

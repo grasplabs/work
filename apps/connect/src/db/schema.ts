@@ -342,10 +342,12 @@ export const pendingActions = sqliteTable(
  * OAuth flows under way: one row from the moment a person starts
  * connecting until the provider sends them back, at most ten minutes.
  * Keyed by the SHA-256 of the flow's `state`, so the state itself, which
- * travels through the browser, is stored nowhere. A flow is taken (deleted)
- * the first time its state comes back, whatever happens next, so it is
- * used at most once. `verifier` is the PKCE code verifier, sealed like a
- * token (src/vault.ts).
+ * travels through the browser, is stored nowhere. A flow is taken the
+ * first time its state comes back, whatever happens next, so it is used at
+ * most once: marked finishing (`finishing_until`) while its code is
+ * exchanged and what it got is kept, so an owed revoke waits for it
+ * (revocations.ts), and deleted once it is done. `verifier` is the PKCE
+ * code verifier, sealed like a token (src/vault.ts).
  */
 export const oauthFlows = sqliteTable(
   "oauth_flows",
@@ -360,6 +362,8 @@ export const oauthFlows = sqliteTable(
     returnTo: text("return_to").notNull(),
     verifier: text().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
+    /** Until when a taken flow holds its row, at most; null until taken. */
+    finishingUntil: timestamp("finishing_until"),
   },
   (table) => [
     index("oauth_flows_expires_idx").on(table.expiresAt),
