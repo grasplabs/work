@@ -3794,6 +3794,13 @@ export const triggerResources = sqliteTable("trigger_resources", {
   enabled: integer({ mode: "boolean" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * For an email trigger: the part before the `@` of the address it
+   * receives mail at (`trigger-<token>`, 128 random bits), set as it is
+   * created and never changed; null for any other kind. Unlike its ID,
+   * shown only to whoever may see the trigger, never logged or audited.
+   */
+  emailAddress: text("email_address").unique(),
 });
 
 /**
@@ -3955,9 +3962,9 @@ export const agentHeldStarts = sqliteTable(
 );
 
 /**
- * Where an event stands for a connector trigger that didn't start its run
- * (src/workflows/connector-triggers.ts), by the trigger and the event's
- * key: held back at its hourly limit since `held_since` (`settled` null),
+ * Where an event stands for a connector trigger, or a message for an email
+ * trigger, that didn't start its run (src/workflows/connector-triggers.ts,
+ * `startOnce`), by the trigger and the event's key: held back at its hourly limit since `held_since` (`settled` null),
  * or settled for it for good: `dropped`, held past a day, or `refused`,
  * refused for good. A settled row is a tombstone, so the same event
  * delivered again for another trigger's sake is known and starts nothing

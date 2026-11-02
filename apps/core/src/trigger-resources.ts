@@ -1,6 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
@@ -11,7 +11,6 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   connectorTriggerConfigSchema,
   emailTriggerConfigSchema,
-  emailTriggerLocalPart,
   scheduleTriggerConfigSchema,
   systemTriggerConfigSchema,
   workflowTriggerCreateSchema,
@@ -20,7 +19,11 @@ import type {
   TriggerKind,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
+import {
+  emailTriggerPrefix,
+  maxFailedStarts,
+  nextScheduledRun,
+} from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -96,10 +99,14 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
 //   into the event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
-// - An email trigger taking mail meant for another: its address is its
-//   own, from its ID (`emailTriggerLocalPart`), which no App's may take.
-//   Its input is a fixed mapping as a connector trigger's is. Its mail
-//   starts runs as workflows/inbound-email.ts says.
+// - An email trigger taking mail meant for another, or mailed by anyone
+//   who learned its ID: its address is `trigger-` and 128 random bits of
+//   its own (`emailAddressOf`), never derived from its ID (which builders,
+//   admins, staff and the audit log see), shown only to whoever may see
+//   the trigger, never audited or logged, and no App's address may start
+//   so. It is never changed: deleting the trigger and making another is
+//   how it changes. Its input is a fixed mapping as a connector trigger's
+//   is. Its mail starts runs as workflows/inbound-email.ts says.
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -257,6 +264,13 @@ const kindFieldsOf = async (
   };
 };
 
+/** Random bytes in an email trigger's address: 128 bits. */
+const addressBytes = 16;
+
+/** A new email trigger's address, before the `@`: random, its own. */
+const emailAddressOf = (): string =>
+  `${emailTriggerPrefix}${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
+
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
   id: TriggerId;
@@ -351,6 +365,7 @@ export const createTriggerResource = async (
       currentVersion: 1,
       enabled: true,
       createdAt: now,
+      emailAddress: kind === "email" ? emailAddressOf() : null,
     }),
     db.insert(triggerResourceVersions).values({
       triggerId: id,
@@ -748,6 +763,7 @@ interface TriggerRow {
   workflowId: string;
   workflowVersion: number;
   principal: string;
+  emailAddress: string | null;
   eventContract: string | null;
   eventType: string | null;
   scheduleCron: string | null;
@@ -832,7 +848,7 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   createdAt: row.createdAt.toISOString(),
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
-  address: row.kind === "email" ? emailTriggerLocalPart(row.id) : null,
+  address: row.emailAddress,
   // Stopped by its own failing starts (workflows/schedule-triggers.ts):
   // no next time, after `maxFailedStarts` in a row.
   stopped:
@@ -857,6 +873,7 @@ const triggersWhere = async (
       workflowId: triggerResourceVersions.workflowResourceId,
       workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
+      emailAddress: triggerResources.emailAddress,
       eventContract: triggerResourceVersions.eventContract,
       eventType: triggerResourceVersions.eventType,
       scheduleCron: triggerResourceVersions.scheduleCron,

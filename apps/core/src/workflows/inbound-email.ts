@@ -1,20 +1,16 @@
 import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import { readAtMost } from "@grasp-os/shared/http";
 import {
   appIdSchema,
   runIdSchema,
-  triggerIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
+import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
-  emailTriggerIdOf,
-  inputMappingSchema,
-} from "@grasp-os/shared/workflow-triggers";
-import {
+  emailTriggerPrefix,
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
   workflowErrors,
@@ -31,13 +27,8 @@ import {
   triggerResourceVersions,
   workflowTriggers,
 } from "../db/core/schema.ts";
-import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
-import {
-  causeOf,
-  inputOf as mappedInput,
-  refusedForGood,
-  roomSql,
-} from "./connector-triggers.ts";
+import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
+import type { Outcome, Taker } from "./connector-triggers.ts";
 import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
 import {
   learnMailDomain,
@@ -46,7 +37,7 @@ import {
   runsOwnMail,
   stampedMessageRun,
 } from "./mail-stamps.ts";
-import type { MailStamp } from "./mail-stamps.ts";
+import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
@@ -127,24 +118,32 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // fresh deployment's first hop is a root.
 //
 // Independent workflows' email triggers (trigger-resources.ts) receive
-// mail the same way, each at an address of its own (`trigger-<id>`), which
-// no App's may be: the same ingress, size limit, parser, loop refusal and
-// input (`InboundEmail`, mapped into the run's input as a connector
-// trigger maps its event). Threat model, and how each is closed:
+// mail the same way, each at an address of its own (`trigger-<token>`,
+// 128 random bits, never its ID), which no App's may be: the same
+// ingress, size limit, parser, loop refusal and input (`InboundEmail`,
+// mapped into the run's input as a connector trigger maps its event).
+// Each message then takes the steps a connector event does
+// (connector-triggers.ts, `startOnce`): its start, its refusals and its
+// drops once each, by the message. Threat model, and how each is closed:
 //
 // - Forged delivery: mail reaches here only from Email Routing or the
 //   router-signed raw-mail ingress (mail-ingress.ts), as App mail does.
 // - Mail to a trigger that is disabled, deleted or doesn't exist bounces,
-//   as mail nobody receives does, before it is read.
+//   as mail nobody receives does, before it is read. Its ID names no
+//   address: knowing it mails nothing. Nothing on this path logs its
+//   address or its ID.
 // - Mail loops: mail sent automatically or from the deployment's own
 //   domain is dropped, audited, as above. A run's own mail joins its
 //   lineage: an independent run's by the stamp its message carries
 //   (`stampHeader`, `stampedMessageRun`), one level deeper (`causeOf`),
 //   until the lineage's limits refuse it; an App run's (its token, or its
-//   stamp) can't join an independent lineage and is refused, never started
-//   as a new root. Besides, a trigger starts at most `triggeredRunsPerHour`
-//   runs an hour; past that the delivery fails for now, for its sender to
-//   try again later.
+//   stamp) can't join an independent lineage and is refused, audited with
+//   the run, never started as a new root. A recorded stamp counts for at
+//   most a few messages at the address (`maxClaimsPerSource`). Besides, a
+//   trigger starts and refuses at most `triggeredRunsPerHour` messages an
+//   hour, loop drops included, so mail can't write the audit log without
+//   end; past that the delivery fails for now, for its sender to try again
+//   later, and one held back a day is dropped, audited once.
 // - An oversized or malicious attachment: the message bounces past
 //   `maxMessageBytes`, attachments are only listed, and none is kept:
 //   an independent run has no way to read one (`stored: null`).
@@ -155,7 +154,9 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 //   trigger's (workflow-starts.ts), acting for its creator, read again as
 //   it is admitted: the trigger live and enabled, its creator still with
 //   a role, its own `start` grant active. A refusal for good is audited
-//   (`workflow.email.refused`) and the message dropped, never bounced.
+//   (`workflow.email.refused`) and the message dropped, never bounced. A
+//   trigger moved to another version as the message arrived fails it for
+//   now, to be started at the new version.
 // - The same message delivered twice: its start is keyed by the trigger
 //   and the message (its Message-ID, or bytes), so it is one run.
 
@@ -503,20 +504,11 @@ const stampOf = (parsed: Email): string | undefined => {
     .find((value) => stampPattern.test(value));
 };
 
-/** An independent workflow's email trigger, as its current version pins it. */
-interface EmailTaker {
-  id: string;
-  version: number;
-  workflowId: string;
-  workflowVersion: number;
-  inputMapping: string | null;
-}
-
-/** Email trigger `id`, if it is live and enabled. */
-const emailTakerOf = async (
+/** The live, enabled email trigger at `address`, if there is one. */
+const emailTakerAt = async (
   env: Env,
-  id: string
-): Promise<EmailTaker | undefined> =>
+  address: string
+): Promise<Taker | undefined> =>
   await drizzle(env.DB)
     .select({
       id: triggerResources.id,
@@ -535,7 +527,7 @@ const emailTakerOf = async (
     )
     .where(
       and(
-        eq(triggerResources.id, id),
+        eq(triggerResources.emailAddress, address),
         eq(triggerResources.kind, "email"),
         eq(triggerResources.enabled, true),
         isNull(triggerResources.deletedAt)
@@ -544,19 +536,19 @@ const emailTakerOf = async (
     .get();
 
 /**
- * Takes a message to email trigger `triggerId` (at `address`, its token
+ * Takes a message to the email trigger at `address` (its token
  * `recorded`, if any, gone): starts its run, the message mapped into its
  * input, acting for its creator; bounces it, drops it (audited), or fails
- * it for now, as the threat model above says.
+ * it for now, as the threat model above says. Logs the message's hash
+ * alone: never the address or the trigger.
  */
 const receiveForTrigger = async (
   message: InboundMessage,
   env: Env,
   address: string,
-  triggerId: string,
   recorded: MailStamp | undefined
 ): Promise<void> => {
-  const taker = await emailTakerOf(env, triggerId);
+  const taker = await emailTakerAt(env, address);
   if (taker === undefined) {
     message.setReject("No such address.");
     return;
@@ -566,95 +558,58 @@ const receiveForTrigger = async (
     return;
   }
   const { parsed, id, domain } = read;
-  const db = drizzle(env.DB);
-  const refuse = async (reason: string): Promise<void> => {
-    await keepAuditEvent(env, db, {
-      actor: { type: "system" },
-      action: "workflow.email.refused",
-      target: { type: "trigger", id: taker.id },
-      detail: { reason, version: taker.version, message: id },
-    });
-  };
+  const messageKey = await messageKeyOf(parsed, id);
+  // Mail that may loop is refused for good, as a start refused is.
   const loop = loopOf(message.to, message.from, parsed);
-  if (loop !== undefined) {
-    await refuse(loop);
-    return;
-  }
   // A run's own mail: an App run's token, or a run's stamp, each only to
   // this address from one of the run's senders.
   const to = `${address}@${domain ?? ""}`;
   const token = runsOwnMail(recorded, to, message.from);
-  const stamped =
-    token === undefined
-      ? await stampedMessageRun(env, stampOf(parsed), to, message.from)
-      : { kind: "app" as const, runId: token.run };
-  const messageKey = await messageKeyOf(parsed, id);
+  let stamped: StampedRun | undefined =
+    token === undefined ? undefined : { kind: "app", runId: token.run };
+  if (stamped === undefined && loop === undefined) {
+    // Mail refused as a loop claims no place of a stamp.
+    stamped = await stampedMessageRun(
+      env,
+      stampOf(parsed),
+      to,
+      message.from,
+      messageKey
+    );
+  }
   const same =
     stamped === undefined
       ? messageKey
       : await sha256Hex(`stamp:${stamped.runId}:${messageKey}`);
-  const key = `${coreStartKeyPrefix}email:${taker.id}:${same}`;
-  try {
-    const cause = await causeOf(env, `email:${same}:${taker.id}`, stamped);
-    if (cause === "unjoinable") {
-      // Never a new root: that is how a loop would go on.
-      await refuse("lineage.unjoinable");
-      return;
-    }
-    const mapping = inputMappingSchema.parse(
-      JSON.parse(taker.inputMapping ?? "{}")
-    );
-    await startWorkflow(
-      env,
-      {
-        type: "trigger",
-        triggerId: triggerIdSchema.parse(taker.id),
-        ...(cause === undefined ? {} : { cause }),
-      },
-      taker.workflowId,
-      {
-        version: taker.workflowVersion,
-        input: mappedInput(mapping, inputOf(id, null, message.from, parsed)),
-        key,
-      },
-      roomSql(taker.id, key),
-      {
-        message: id,
-        ...(cause === undefined ? {} : { emittingRun: cause.runId }),
-      }
-    );
-  } catch (error) {
-    // Refused as it was admitted (at its hourly limit, which `roomSql`
-    // asks, or on authority that changed meanwhile), or core's own
-    // failure: fails for now, for its sender to try again, decided afresh
-    // then, starting the same run if it started.
-    if (isStaleRefusal(error)) {
-      log.warn("workflow.trigger_deferred", {
-        type: "email",
-        trigger: taker.id,
-        message: id,
-      });
-      throw new Error(`Message ${id} didn't start trigger ${taker.id} yet`, {
-        cause: error,
-      });
-    }
-    if (!isExpectedError(error)) {
-      log.error("workflow.trigger_failed", {
-        type: "email",
-        trigger: taker.id,
-        message: id,
-        ...errorFields(error),
-      });
-      throw error;
-    }
-    if (error.code === "workflow.trigger_unavailable") {
+  const mapping = inputMappingSchema.parse(
+    JSON.parse(taker.inputMapping ?? "{}")
+  );
+  const outcome: Outcome = await startOnce(env, taker, {
+    same,
+    key: `${coreStartKeyPrefix}email:${taker.id}:${same}`,
+    admission: `email:${same}:${taker.id}`,
+    input: mappedInput(mapping, inputOf(id, null, message.from, parsed)),
+    stamped,
+    noted: { message: id },
+    audited: {
+      refused: "workflow.email.refused",
+      dropped: "workflow.email.dropped",
+      detail: { message: id },
+    },
+    logged: { type: "email", message: id },
+    ...(loop === undefined ? {} : { refusedAs: loop }),
+  });
+  if (outcome === "unavailable") {
+    // Disabled or deleted as it arrived: no such address. Moved to
+    // another version: tried again, at that version.
+    if ((await emailTakerAt(env, address)) === undefined) {
       message.setReject("No such address.");
       return;
     }
-    if (!refusedForGood.has(error.code)) {
-      throw error;
-    }
-    await refuse(error.code);
+    throw new Error(`Message ${id} arrived as its trigger changed`);
+  }
+  if (outcome === "retry") {
+    throw new Error(`Message ${id} didn't start its trigger's run yet`);
   }
 };
 
@@ -677,9 +632,8 @@ export const receiveEmail = async (
     local === ""
       ? { local: "", stamp: undefined }
       : await mailRecipient(env, local);
-  const triggerId = emailTriggerIdOf(address);
-  if (triggerId !== undefined) {
-    await receiveForTrigger(message, env, address, triggerId, recorded);
+  if (address.startsWith(emailTriggerPrefix)) {
+    await receiveForTrigger(message, env, address, recorded);
     return;
   }
   const receivers = address === "" ? [] : await receiversAt(env, address);

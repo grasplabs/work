@@ -241,18 +241,24 @@ export const isCronExpression = (cron: string): boolean =>
   undefined;
 
 /**
+ * How the part before the `@` of an independent workflow's email trigger's
+ * address starts (`trigger-<token>`): mail to such an address goes to
+ * those triggers alone.
+ */
+export const emailTriggerPrefix = "trigger-";
+
+/**
  * The part of an address before the `@` that an email trigger receives
  * mail at, e.g. `invoices`: lower case letters, digits, `.`, `_`, `+` and
- * `-`, with no dot first, last or twice in a row. Never `trigger-…`: the
- * addresses of independent workflows' email triggers
- * (`emailTriggerLocalPart` in workflow-triggers.ts), so no App takes one's
- * mail.
+ * `-`, with no dot first, last or twice in a row. Never one starting with
+ * {@link emailTriggerPrefix}: those are independent workflows' email
+ * triggers', so no App takes one's mail.
  */
 export const emailLocalPartSchema = z
   .string()
   .regex(/^[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*$/u)
   .max(64)
-  .refine((local) => !local.startsWith("trigger-"), {
+  .refine((local) => !local.startsWith(emailTriggerPrefix), {
     message: "Addresses starting with trigger- are independent workflows'.",
   });
 

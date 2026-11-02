@@ -106,9 +106,17 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   (`workflow.event.refused`) and the event settled for it; anything
 //   else fails the delivery, so connect delivers it again, until held
 //   back too long, audited as dropped.
+// - Refusals writing the audit log without end. A refusal for good takes
+//   a place in the trigger's hourly room, as a start does
+//   (`hourRoomSql`), so at most `triggeredRunsPerHour` starts and
+//   refusals are written an hour; past that the event is held back as a
+//   start is, and dropped after a day, audited once.
+//
+// Email triggers' messages (inbound-email.ts) go through the same steps
+// (`startOnce`), each message an event of its own.
 
-/** A connector trigger that takes an event, as its current version pins it. */
-interface Taker {
+/** A trigger that takes an event or a message, as its current version pins it. */
+export interface Taker {
   id: string;
   version: number;
   workflowId: string;
@@ -145,18 +153,28 @@ const hearsSql = (id: string, event: ConnectorEvent): SQL =>
       : eq(permissions.resource, event.resource)
   })`;
 
-/** That trigger `id` has room for another run this hour, as SQL. */
-const hourRoomSql = (id: string): SQL =>
-  sql`((SELECT COUNT(*) FROM ${workflowStartReceipts}
+/**
+ * That trigger `id` has room for another start or refusal this hour, as
+ * SQL: the runs it started and the events it refused for good in the
+ * last hour, together under `triggeredRunsPerHour`.
+ */
+const hourRoomSql = (id: string): SQL => {
+  const since = Date.now() - 60 * 60 * 1000;
+  return sql`(((SELECT COUNT(*) FROM ${workflowStartReceipts}
     WHERE ${workflowStartReceipts.invokerType} = 'trigger'
       AND ${workflowStartReceipts.invokerId} = ${id}
-      AND ${workflowStartReceipts.createdAt} > ${Date.now() - 60 * 60 * 1000}) < ${triggeredRunsPerHour})`;
+      AND ${workflowStartReceipts.createdAt} > ${since})
+    + (SELECT COUNT(*) FROM ${connectorTriggerHolds}
+    WHERE ${connectorTriggerHolds.triggerId} = ${id}
+      AND ${connectorTriggerHolds.settled} = 'refused'
+      AND ${connectorTriggerHolds.settledAt} > ${since})) < ${triggeredRunsPerHour})`;
+};
 
 /**
  * That trigger `id` has room for another run this hour, or started the
  * run of `key` already, as SQL: what admitting a start of it requires.
  */
-export const roomSql = (id: string, key: string): SQL =>
+const roomSql = (id: string, key: string): SQL =>
   sql`(${hourRoomSql(id)} OR EXISTS (SELECT 1 FROM ${workflowStartReceipts}
     WHERE ${workflowStartReceipts.invokerType} = 'trigger'
       AND ${workflowStartReceipts.invokerId} = ${id}
@@ -238,106 +256,145 @@ const holdOf = (taker: Taker, same: string) =>
   );
 
 /**
- * `taker` at its hourly limit for the event of key `same`: held back since
- * its first such try, to be delivered again. Whether it is dropped is
- * decided before its next try (`startFor`).
+ * One event (or message) for one trigger: what it is, what its start
+ * takes, and how its refusals are audited and its failures logged.
+ */
+export interface Arrival {
+  /** The key of the event for the trigger: its holds and tombstones are by it. */
+  same: string;
+  /** The start's idempotency key. */
+  key: string;
+  /** What a stamped event's place in its lineage is admitted once by. */
+  admission: string;
+  input: Json;
+  /** The run whose own mail it is, if any. */
+  stamped: StampedRun | undefined;
+  /** What admitting its start requires besides room (a grant to hear). */
+  also?: SQL;
+  /** Noted with its start. */
+  noted: Readonly<Record<string, string>>;
+  /** The audit actions of a refusal and a drop, and the detail of both. */
+  audited: {
+    refused: string;
+    dropped: string;
+    detail: Readonly<Record<string, string | number>>;
+  };
+  /** What its log lines say of it. */
+  logged: Readonly<Record<string, string>>;
+  /** Refused for good, as this, without a try (mail that may loop). */
+  refusedAs?: string;
+}
+
+/** What became of one trigger's turn at an event. */
+export type Outcome = "started" | "gone" | "retry" | "unavailable";
+
+/**
+ * `taker` at its hourly limit for `arrival`: held back since its first
+ * such try, to be delivered again. Whether it is dropped is decided before
+ * its next try (`startOnce`).
  */
 const heldBack = async (
   env: Env,
   taker: Taker,
-  same: string
+  arrival: Arrival
 ): Promise<"retry"> => {
   await drizzle(env.DB)
     .insert(connectorTriggerHolds)
-    .values({ triggerId: taker.id, eventKey: same, heldSince: new Date() })
+    .values({
+      triggerId: taker.id,
+      eventKey: arrival.same,
+      heldSince: new Date(),
+    })
     .onConflictDoNothing();
-  log.warn("workflow.trigger_rate_limited", {
-    type: "connector",
-    trigger: taker.id,
-  });
+  log.warn("workflow.trigger_rate_limited", arrival.logged);
   return "retry";
 };
 
 /**
- * Settles the event of key `same` for `taker` for good, as `settled`: a
- * tombstone (`connectorTriggerHolds`), so a delivery of it again for
- * another trigger's sake starts nothing here, and audited as `action`
- * once, only by the write that settled it.
+ * Settles `arrival` for `taker` for good, as `settled`: a tombstone
+ * (`connectorTriggerHolds`), so a delivery of it again starts nothing
+ * here, and audited once, only by the write that settled it. A refusal
+ * takes a place in the hour's room: without one, it is held back.
  */
 const settle = async (
   env: Env,
   taker: Taker,
-  event: ConnectorEvent,
-  same: string,
+  arrival: Arrival,
   settled: "dropped" | "refused",
   detail: Record<string, string | number>
-): Promise<"gone"> => {
+): Promise<"gone" | "retry"> => {
   const db = drizzle(env.DB);
-  const now = new Date();
+  if (settled === "refused") {
+    const now = await db.get<{ room: number }>(
+      sql`SELECT ${hourRoomSql(taker.id)} AS room`
+    );
+    if (now.room === 0) {
+      return await heldBack(env, taker, arrival);
+    }
+  }
+  const at = new Date();
   await auditedBatch(env, db, [
     db
       .insert(connectorTriggerHolds)
       .values({
         triggerId: taker.id,
-        eventKey: same,
-        heldSince: now,
+        eventKey: arrival.same,
+        heldSince: at,
         settled,
-        settledAt: now,
+        settledAt: at,
       })
       .onConflictDoUpdate({
         target: [
           connectorTriggerHolds.triggerId,
           connectorTriggerHolds.eventKey,
         ],
-        set: { settled, settledAt: now },
+        set: { settled, settledAt: at },
         setWhere: isNull(connectorTriggerHolds.settled),
       }),
     outboxedIfChanged(db, {
       actor: { type: "system" },
       action:
         settled === "dropped"
-          ? "workflow.event.dropped"
-          : "workflow.event.refused",
+          ? arrival.audited.dropped
+          : arrival.audited.refused,
       target: { type: "trigger", id: taker.id },
-      detail: { event: event.type, version: taker.version, ...detail },
+      detail: { ...arrival.audited.detail, version: taker.version, ...detail },
     }),
   ]);
   return "gone";
 };
 
 /**
- * What became of `taker`'s start of `event` (key `same`) that threw
- * `error`: gone (the trigger disabled, deleted or moved meanwhile, or
- * refused for good, audited, or held back too long, dropped, audited:
- * settled), or to try again.
+ * What became of `taker`'s start of `arrival` that threw `error`: gone
+ * (refused for good, audited, or held back too long, dropped, audited:
+ * settled), unavailable (the trigger disabled, deleted or moved
+ * meanwhile), or to try again.
  */
 const refusalOf = async (
   env: Env,
   taker: Taker,
-  event: ConnectorEvent,
-  same: string,
+  arrival: Arrival,
   error: unknown
-): Promise<"gone" | "retry"> => {
+): Promise<Outcome> => {
   if (!isExpectedError(error)) {
     log.error("workflow.trigger_failed", {
-      type: "connector",
-      trigger: taker.id,
+      ...arrival.logged,
       ...errorFields(error),
     });
     return "retry";
   }
   if (error.code === "workflow.trigger_unavailable") {
-    return "gone";
+    return "unavailable";
   }
   let { code } = error;
   if (isStaleRefusal(error)) {
     // What the admitting statement required besides: its grant to hear,
     // revoked for good, or its room this hour, back later.
     const now = await drizzle(env.DB).get<{ hears: number; room: number }>(
-      sql`SELECT ${hearsSql(taker.id, event)} AS hears, ${hourRoomSql(taker.id)} AS room`
+      sql`SELECT ${arrival.also ?? sql`1`} AS hears, ${hourRoomSql(taker.id)} AS room`
     );
     if (now.hears === 1 && now.room === 0) {
-      return await heldBack(env, taker, same);
+      return await heldBack(env, taker, arrival);
     }
     if (now.hears === 1) {
       return "retry";
@@ -346,7 +403,7 @@ const refusalOf = async (
   } else if (!refusedForGood.has(code)) {
     return "retry";
   }
-  return await settle(env, taker, event, same, "refused", { code });
+  return await settle(env, taker, arrival, "refused", { code });
 };
 
 /**
@@ -357,7 +414,7 @@ const refusalOf = async (
  * stamped; `unjoinable` for an App run's mail, which can't join an
  * independent lineage (their runs are kept apart), or a run no longer kept.
  */
-export const causeOf = async (
+const causeOf = async (
   env: Env,
   admission: string,
   stamped: StampedRun | undefined
@@ -376,6 +433,99 @@ export const causeOf = async (
     admission
   );
   return { runId: run.id, restricted: run.restricted, place };
+};
+
+/**
+ * `taker`'s turn at `arrival`, a small state machine: started already (a
+ * receipt under its key): settled, nothing asked again; settled for it
+ * already (a tombstone: dropped or refused): gone; held past `maxHeldMs`:
+ * dropped, checked before any try; refused without a try
+ * (`refusedAs`): settled; else tried, admitted only while its room and
+ * `also` hold.
+ */
+export const startOnce = async (
+  env: Env,
+  taker: Taker,
+  arrival: Arrival
+): Promise<Outcome> => {
+  const { same, key } = arrival;
+  const db = drizzle(env.DB);
+  const admitted = await db
+    .select({ id: workflowStartReceipts.id })
+    .from(workflowStartReceipts)
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, "trigger"),
+        eq(workflowStartReceipts.invokerId, taker.id),
+        eq(workflowStartReceipts.idempotencyKey, key)
+      )
+    )
+    .get();
+  if (admitted !== undefined) {
+    await db
+      .delete(connectorTriggerHolds)
+      .where(and(holdOf(taker, same), isNull(connectorTriggerHolds.settled)));
+    return "started";
+  }
+  const state = await db
+    .select({
+      heldSince: connectorTriggerHolds.heldSince,
+      settled: connectorTriggerHolds.settled,
+    })
+    .from(connectorTriggerHolds)
+    .where(holdOf(taker, same))
+    .get();
+  if (state?.settled !== undefined && state.settled !== null) {
+    return "gone";
+  }
+  if (
+    state !== undefined &&
+    Date.now() - state.heldSince.getTime() >= maxHeldMs
+  ) {
+    return await settle(env, taker, arrival, "dropped", {
+      reason: "hourly_limit",
+      heldSince: state.heldSince.toISOString(),
+    });
+  }
+  if (arrival.refusedAs !== undefined) {
+    return await settle(env, taker, arrival, "refused", {
+      code: arrival.refusedAs,
+    });
+  }
+  try {
+    const cause = await causeOf(env, arrival.admission, arrival.stamped);
+    if (cause === "unjoinable") {
+      // Never a new root: that is how a loop would go on.
+      return await settle(env, taker, arrival, "refused", {
+        code: "lineage.unjoinable",
+        ...(arrival.stamped === undefined
+          ? {}
+          : { emittingRun: arrival.stamped.runId }),
+      });
+    }
+    await startWorkflow(
+      env,
+      {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(taker.id),
+        ...(cause === undefined ? {} : { cause }),
+      },
+      taker.workflowId,
+      { version: taker.workflowVersion, input: arrival.input, key },
+      // Read again as it is admitted: its room, and what else it needs.
+      sql`(${arrival.also ?? sql`1`} AND ${roomSql(taker.id, key)})`,
+      {
+        ...arrival.noted,
+        ...(cause === undefined ? {} : { emittingRun: cause.runId }),
+      }
+    );
+    await db
+      .delete(connectorTriggerHolds)
+      .where(and(holdOf(taker, same), isNull(connectorTriggerHolds.settled)));
+    return "started";
+  } catch (error) {
+    return await refusalOf(env, taker, arrival, error);
+  }
 };
 
 /** What delivering an event to connector triggers came to. */
@@ -400,100 +550,25 @@ export const startConnectorTriggers = async (
 ): Promise<TriggerDelivery> => {
   const takers = await takersOf(env, event);
   const outcomes = await Promise.all(
-    takers.map(async (taker): Promise<"started" | "gone" | "retry"> => {
-      const key = `${coreStartKeyPrefix}connector:${taker.id}:${same}`;
-      const db = drizzle(env.DB);
-      // 1. Started already, by an earlier delivery: nothing is asked again
-      //    (its grant, its room), and nothing of its hold is left.
-      const admitted = await db
-        .select({ id: workflowStartReceipts.id })
-        .from(workflowStartReceipts)
-        .where(
-          and(
-            eq(workflowStartReceipts.invokerType, "trigger"),
-            eq(workflowStartReceipts.invokerId, taker.id),
-            eq(workflowStartReceipts.idempotencyKey, key)
-          )
-        )
-        .get();
-      if (admitted !== undefined) {
-        await db
-          .delete(connectorTriggerHolds)
-          .where(
-            and(holdOf(taker, same), isNull(connectorTriggerHolds.settled))
-          );
-        return "started";
-      }
-      const state = await db
-        .select({
-          heldSince: connectorTriggerHolds.heldSince,
-          settled: connectorTriggerHolds.settled,
-        })
-        .from(connectorTriggerHolds)
-        .where(holdOf(taker, same))
-        .get();
-      // 2. Settled for it already (dropped, or refused for good), delivered
-      //    again for another trigger's sake: known, so nothing starts.
-      if (state?.settled !== undefined && state.settled !== null) {
-        return "gone";
-      }
-      // 3. Held back longer than a day: dropped, before any try, whatever
-      //    room it has now.
-      if (
-        state !== undefined &&
-        Date.now() - state.heldSince.getTime() >= maxHeldMs
-      ) {
-        return await settle(env, taker, event, same, "dropped", {
-          reason: "hourly_limit",
-          heldSince: state.heldSince.toISOString(),
-        });
-      }
-      // 4. Tried, admitted only while its grant to hear and its room hold.
-      try {
-        const cause = await causeOf(
-          env,
-          `connector:${same}:${taker.id}`,
-          stamped
-        );
-        if (cause === "unjoinable") {
-          // Never a new root: that is how a loop would go on.
-          return await settle(env, taker, event, same, "refused", {
-            code: "lineage.unjoinable",
-          });
-        }
-        const mapping = inputMappingSchema.parse(
-          JSON.parse(taker.inputMapping ?? "{}")
-        );
-        await startWorkflow(
-          env,
-          {
-            type: "trigger",
-            triggerId: taker.id,
-            ...(cause === undefined ? {} : { cause }),
-          },
-          taker.workflowId,
-          {
-            version: taker.workflowVersion,
-            input: inputOf(mapping, event),
-            key,
-          },
-          // Read again as it is admitted: its grant to hear, and its room.
-          sql`(${hearsSql(taker.id, event)} AND ${roomSql(taker.id, key)})`,
-          {
-            event: same,
-            connection: event.connection,
-            ...(cause === undefined ? {} : { emittingRun: cause.runId }),
-          }
-        );
-        await db
-          .delete(connectorTriggerHolds)
-          .where(
-            and(holdOf(taker, same), isNull(connectorTriggerHolds.settled))
-          );
-        return "started";
-      } catch (error) {
-        return await refusalOf(env, taker, event, same, error);
-      }
+    takers.map(async (taker): Promise<Outcome> => {
+      const mapping = inputMappingSchema.parse(
+        JSON.parse(taker.inputMapping ?? "{}")
+      );
+      return await startOnce(env, taker, {
+        same,
+        key: `${coreStartKeyPrefix}connector:${taker.id}:${same}`,
+        admission: `connector:${same}:${taker.id}`,
+        input: inputOf(mapping, event),
+        stamped,
+        also: hearsSql(taker.id, event),
+        noted: { event: same, connection: event.connection },
+        audited: {
+          refused: "workflow.event.refused",
+          dropped: "workflow.event.dropped",
+          detail: { event: event.type },
+        },
+        logged: { type: "connector", trigger: taker.id },
+      });
     })
   );
   if (outcomes.includes("retry")) {

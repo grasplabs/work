@@ -283,15 +283,42 @@ const runCount = async (id: string): Promise<number> => {
 /** A run's input, as its receipt keeps it. */
 const inputOf = (input: string | null): unknown => JSON.parse(input ?? "null");
 
-/** Why each of trigger `id`'s messages was refused, as audited. */
-const refusalsOf = async (id: string) => {
+/** What the log holds of trigger `id`'s messages, refused or dropped, as `action`. */
+const auditedOf = async (id: string, action: string) => {
   const logged = await allEvents();
   return logged
-    .filter(
-      ({ action, target }) =>
-        action === "workflow.email.refused" && target?.id === id
+    .filter(({ action: was, target }) => was === action && target?.id === id)
+    .map(({ detail }) => detail);
+};
+
+/** Why each of trigger `id`'s messages was refused, as audited. */
+const refusalsOf = async (id: string) => {
+  const refused = await auditedOf(id, "workflow.email.refused");
+  return refused.map(({ code }) => code);
+};
+
+/**
+ * Fills trigger `id`'s hour, whose run `receipt` started: copies of its
+ * receipt, each under a key of its own.
+ */
+const fillHour = async (receipt: string): Promise<void> => {
+  const columns = await env.DB.prepare(
+    "SELECT name FROM pragma_table_info('workflow_start_receipts')"
+  ).all<{ name: string }>();
+  const names = columns.results.map(({ name }) => name);
+  const copied = names.map((name) => {
+    if (name === "id") {
+      return "?1";
+    }
+    return name === "idempotency_key" ? "?2" : name;
+  });
+  await env.DB.batch(
+    Array.from({ length: triggeredRunsPerHour }, () =>
+      env.DB.prepare(
+        `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
+      ).bind(crypto.randomUUID(), `filler-${unique()}`, receipt)
     )
-    .map(({ detail }) => detail.reason);
+  );
 };
 
 /** A native mail connection in connect's registry, of `account`. */
@@ -356,6 +383,10 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     expect({
       statuses: [first.status, again.status],
       routed: routed.rejected,
+      // Random, its own: nothing of its ID in it.
+      addressOwn:
+        /^trigger-[0-9a-f]{32}$/u.test(trigger.address ?? "") &&
+        !(trigger.address ?? "").includes(trigger.id),
       shown: listed.map(({ id, kind, address: at, config }) => ({
         id,
         kind,
@@ -370,11 +401,12 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       statuses: [202, 202],
       routed: undefined,
+      addressOwn: true,
       shown: [
         {
           id: trigger.id,
           kind: "email",
-          address: `trigger-${trigger.id}`,
+          address: trigger.address,
           config: { input: mapping },
         },
       ],
@@ -420,8 +452,8 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     await deleted.builder.api.workflowResources.triggers.delete(
       deleted.trigger.id
     );
-    const nobody = `trigger-${crypto.randomUUID()}@${own}`;
-    const lookAlike = `trigger-${trigger.id}x@${own}`;
+    const nobody = `trigger-${"0".repeat(32)}@${own}`;
+    const lookAlike = address.replace("@", "x@");
 
     const responses = await Promise.all(
       [address, deleted.address, nobody, lookAlike].map(
@@ -443,6 +475,26 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       })),
       runs: 0,
     });
+  });
+
+  it("start nothing for mail to an address made from the trigger's ID, which builders, admins and the audit log see", async () => {
+    const { trigger, address } = await emailTrigger();
+
+    const responses = await Promise.all(
+      [`trigger-${trigger.id}@${own}`, `${trigger.id}@${own}`].map(
+        async (to) => await post(to, invoiceMail({ to }))
+      )
+    );
+    const logged = await allEvents();
+    const mentioned = logged.filter(({ detail }) =>
+      JSON.stringify(detail).includes(address.split("@")[0] ?? "")
+    );
+
+    expect({
+      statuses: responses.map(({ status }) => status),
+      runs: await runCount(trigger.id),
+      addressAudited: mentioned.length,
+    }).toStrictEqual({ statuses: [422, 422], runs: 0, addressAudited: 0 });
   });
 
   it("drop mail sent automatically or from the deployment's own domain, audited, never bounced, and take a forged From for untrusted data only", async () => {
@@ -673,52 +725,96 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       { envelopeFrom: mailbox }
     );
 
+    const refused = await auditedOf(trigger.id, "workflow.email.refused");
+
     expect({
       status: response.status,
       runs: await runCount(trigger.id),
-      refused: await refusalsOf(trigger.id),
+      refused: refused.map(({ code, emittingRun }) => ({ code, emittingRun })),
     }).toStrictEqual({
       status: 202,
       runs: 0,
-      refused: ["lineage.unjoinable"],
+      refused: [{ code: "lineage.unjoinable", emittingRun: appRun }],
     });
   });
 
-  it("fail a delivery for now past the trigger's hourly limit, starting nothing", async () => {
+  it("hold mail past the trigger's hourly limit, refusals and loop drops included, and drop it after a day, audited once", async () => {
     const { trigger, address } = await emailTrigger();
     await post(address, invoiceMail({ to: address }));
     const [started] = await runsOf(trigger.id);
-    // Fills the hour with copies of its receipt, each under a key of its own.
-    const columns = await env.DB.prepare(
-      "SELECT name FROM pragma_table_info('workflow_start_receipts')"
-    ).all<{ name: string }>();
-    const names = columns.results.map(({ name }) => name);
-    const copied = names.map((name) => {
-      if (name === "id") {
-        return "?1";
-      }
-      return name === "idempotency_key" ? "?2" : name;
-    });
-    await env.DB.batch(
-      Array.from({ length: triggeredRunsPerHour }, () =>
-        env.DB.prepare(
-          `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
-        ).bind(crypto.randomUUID(), `filler-${unique()}`, started?.id ?? "")
-      )
-    );
+    await fillHour(started?.id ?? "");
     const warned = vi.spyOn(console, "warn").mockReturnValue();
     const failed = vi.spyOn(console, "error").mockReturnValue();
+    const late = invoiceMail({
+      to: address,
+      messageId: `late-${unique()}@acme.test`,
+    });
 
-    const over = await post(
+    const over = await post(address, late);
+    // Mail that would be dropped as a loop takes the hour's room too, so
+    // it writes no audit row past it.
+    const loop = await post(
       address,
-      invoiceMail({ to: address, messageId: `late-${unique()}@acme.test` })
+      invoiceMail({ to: address, headers: ["Auto-Submitted: auto-replied"] })
     );
+    // Held back for over a day, then delivered again: dropped, audited.
+    await env.DB.prepare(
+      "UPDATE connector_trigger_holds SET held_since = ? WHERE trigger_id = ?"
+    )
+      .bind(Date.now() - 25 * 60 * 60 * 1000, trigger.id)
+      .run();
+    const dropped = await post(address, late);
+    const again = await post(address, late);
     warned.mockRestore();
     failed.mockRestore();
+    const drops = await auditedOf(trigger.id, "workflow.email.dropped");
 
     expect({
-      over: over.status === 202 || over.status === 422,
+      held: [over.status, loop.status].map((status) => status >= 500),
+      dropped: [dropped.status, again.status],
       runs: await runCount(trigger.id),
-    }).toStrictEqual({ over: false, runs: 1 });
+      refused: await refusalsOf(trigger.id),
+      drops: drops.map(({ reason }) => reason),
+    }).toStrictEqual({
+      held: [true, true],
+      dropped: [202, 202],
+      runs: 1,
+      refused: [],
+      drops: ["hourly_limit"],
+    });
+  });
+
+  it("let a run's stamp claim only a few messages at the address, the rest roots", async () => {
+    const { trigger, address } = await emailTrigger();
+    const mailbox = `ops-${unique()}@acme.test`;
+    const shared = await connection(mailbox);
+    await post(address, invoiceMail({ to: address }));
+    const [first] = await runsOf(trigger.id);
+    const stamp = await stampOf(
+      first?.id ?? "",
+      "resource",
+      shared,
+      mailbox,
+      address
+    );
+
+    for (let copy = 0; copy < 6; copy += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one copy after another
+      await post(
+        address,
+        invoiceMail({
+          to: address,
+          from: mailbox,
+          messageId: `copy-${copy}-${unique()}@acme.test`,
+          headers: [`X-Grasp-Stamp: ${stamp}`],
+        }),
+        { envelopeFrom: mailbox }
+      );
+    }
+    const runs = await runsOf(trigger.id);
+
+    expect(
+      runs.map(({ depth }) => depth).toSorted((a, b) => a - b)
+    ).toStrictEqual([0, 0, 1, 1, 1, 1, 1]);
   });
 });
