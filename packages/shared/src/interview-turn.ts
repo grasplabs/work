@@ -94,10 +94,11 @@ export const interviewTurnRequestSchema = z.strictObject({
   /** They agreed to the read-back before and are back to add something. */
   adding: z.boolean().default(false),
   /**
-   * How long they waited for his voice the answer before, in ms, from the
-   * end of what they said to his first sound, as the page measured it:
-   * none when nothing was heard, as with the sound off. Longer waits are
-   * sent as the longest.
+   * How long they waited for his voice the answer before, in ms, as a page
+   * of the release before measured it. Taken and not kept: nothing reads
+   * it, and pages no longer send it. Accepted while pages loaded before
+   * this release still send it (the request is strict), until a later
+   * release drops it.
    */
   waited: z.int().min(0).max(answerWaitMaxMs).optional(),
 });

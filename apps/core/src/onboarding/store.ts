@@ -113,7 +113,6 @@ import {
   approvals,
   askedAbout,
   moreVoices,
-  answerWaits,
   auditOutbox,
   brainSent,
   brainTeams,
@@ -729,9 +728,6 @@ const documentOf = (row: {
 
 /** How the log names someone who did something on their own interview link. */
 const interviewee = "interviewee";
-
-/** The waits for his voice are kept to the tenth of a second, rounded up. */
-const waitStepMs = 100;
 
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
@@ -2223,15 +2219,12 @@ export class Onboarding extends DurableObject<Env> {
    * what Stephen knows of the company beforehand, and what earlier
    * interviews about their work left open. Never from the page,
    * which could say anything. `work` stays empty until the team's map
-   * names their piece of work: Stephen then asks which one it is. With
-   * `texts`, the marks of the interviewer's text for each kind, the one
-   * this turn is held with is kept with the interview.
+   * names their piece of work: Stephen then asks which one it is.
    */
   turnContext(
     secretMark: string,
     keyMark: string,
-    now: string = new Date().toISOString(),
-    texts?: Record<InterviewKind, string>
+    now: string = new Date().toISOString()
   ): LinkAnswer<TurnContext> {
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
@@ -2246,17 +2239,7 @@ export class Onboarding extends DurableObject<Env> {
     if (taking !== null) {
       return refused(taking);
     }
-    const context = this.#contextOf(person, roster);
-    if (texts !== undefined) {
-      // The text this turn is held with, kept by its mark: the first time
-      // it spoke in this interview is when it came in.
-      this.#db
-        .insert(interviewTexts)
-        .values({ person: person.id, mark: texts[context.kind], at: now })
-        .onConflictDoNothing()
-        .run();
-    }
-    return answered(context);
+    return answered(this.#contextOf(person, roster));
   }
 
   /**
@@ -3592,46 +3575,29 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Notes what one turn of an interview ran on, for the staff's numbers:
-   * the text that spoke, kept with the interview of the link's person,
-   * and how long they waited for his voice the answer before, when their
-   * page measured it, kept by day alone. The turn checked the link and
-   * the device first (`turnContext`).
+   * Notes what one turn of an interview ran on: the text that spoke, its
+   * interviewer and language, kept with the interview of the link's
+   * person, so the lines of its voice can be found again when the
+   * interview goes (`#saidIn`). The turn checked the link and the device
+   * first (`turnContext`).
    */
   turnRan(
     secretMark: string,
-    ran: Omit<typeof interviewSettings.$inferInsert, "person">,
-    waited?: number,
-    at: string = new Date().toISOString()
+    ran: Omit<typeof interviewSettings.$inferInsert, "person">
   ): void {
     const [code] = this.#db
       .select({ person: linkCodes.person })
       .from(linkCodes)
       .where(eq(linkCodes.mark, secretMark))
       .all();
-    this.ctx.storage.transactionSync(() => {
-      if (code !== undefined) {
-        this.#db
-          .insert(interviewSettings)
-          .values({ person: code.person, ...ran })
-          .onConflictDoUpdate({ target: interviewSettings.person, set: ran })
-          .run();
-      }
-      if (waited !== undefined) {
-        this.#db
-          .insert(answerWaits)
-          .values({
-            day: dayOf(at),
-            upTo: Math.ceil(waited / waitStepMs) * waitStepMs,
-            answers: 1,
-          })
-          .onConflictDoUpdate({
-            target: [answerWaits.day, answerWaits.upTo],
-            set: { answers: sql`${answerWaits.answers} + 1` },
-          })
-          .run();
-      }
-    });
+    if (code === undefined) {
+      return;
+    }
+    this.#db
+      .insert(interviewSettings)
+      .values({ person: code.person, ...ran })
+      .onConflictDoUpdate({ target: interviewSettings.person, set: ran })
+      .run();
   }
 
   /** Where the agreements stand, as staff last said; none before they did. */
@@ -6863,6 +6829,9 @@ export class Onboarding extends DurableObject<Env> {
     const said = this.#saidIn(person);
     this.#forgetDrawings(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
+    // Nothing writes the texts an interview was held with any more; what
+    // the release before kept of them goes with the interview until the
+    // table is dropped.
     this.#db
       .delete(interviewTexts)
       .where(eq(interviewTexts.person, person))

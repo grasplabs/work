@@ -557,18 +557,10 @@ export const interviewTurnResponse = async (
     return linkRefusal("interview.invalid", requestId);
   }
   const turn = parsed.data;
-  // The text for either kind of interview: the store keeps the mark of the
-  // one this turn is held with, once it knows which kind it is.
-  const [own, lead] = await Promise.all([
-    interviewerText(turn.interviewer, "own", turn.locale),
-    interviewerText(turn.interviewer, "lead", turn.locale),
-  ]);
   const secretMark = await sha256Hex(turn.secret);
   const found = await onboardingStore(env).turnContext(
     secretMark,
-    await sha256Hex(turn.key),
-    new Date().toISOString(),
-    { own: own.mark, lead: lead.mark }
+    await sha256Hex(turn.key)
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -590,11 +582,11 @@ export const interviewTurnResponse = async (
       await onboardingStore(env).meter(took);
     },
     ran: async (mark) => {
-      await store.turnRan(
-        secretMark,
-        { mark, interviewer: turn.interviewer, locale: turn.locale },
-        turn.waited
-      );
+      await store.turnRan(secretMark, {
+        mark,
+        interviewer: turn.interviewer,
+        locale: turn.locale,
+      });
     },
   });
 };

@@ -232,6 +232,21 @@ const ofInterviews = [
   "brain_sent",
 ];
 
+/**
+ * The text `person`'s interview was held with, kept as the release before
+ * kept it: nothing writes it now, but what it wrote stays until the table
+ * is dropped, and goes with the interview.
+ */
+const textKeptBefore = async (person: string): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (_instance, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'text-mark', ?)",
+      person,
+      new Date().toISOString()
+    );
+  });
+};
+
 /** Where `words`, and who said them, are left, apart from the roster and its links. */
 const leftOf = async (person: string, words: string) => {
   const tables = await storeTables();
@@ -354,6 +369,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       const ids = await team();
       const said = sentinels();
       await inTheBrain(ids, said);
+      await textKeptBefore(ids.max);
       const before = await brainOf(ids);
       const events = await auditedDuring(async () => {
         await remove(ids);

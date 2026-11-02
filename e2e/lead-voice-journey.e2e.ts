@@ -193,7 +193,7 @@ const toldSchema = z.array(
     z.object({
       did: z.object({ type: z.string(), text: z.string().optional() }),
     }),
-    z.object({ measured: z.unknown(), waited: z.number().nullable() }),
+    z.object({ measured: z.unknown() }),
   ])
 );
 
