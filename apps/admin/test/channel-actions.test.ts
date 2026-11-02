@@ -83,6 +83,19 @@ describe("changing the desired state", () => {
     });
   });
 
+  it("leaves Edge on the newest release when two imports take it at once", async () => {
+    const first = await placedRelease("feat(core): first");
+    const second = await placedRelease("feat(core): second");
+
+    await Promise.all([
+      releaseToEdge(env, [first]),
+      releaseToEdge(env, [second]),
+    ]);
+
+    const { edge } = await channelReleases(db);
+    expect(edge).toBe(second);
+  });
+
   it("records every change of a channel, a rollback marked as one, and leaves Edge on a newer release than one imported late", async () => {
     const first = await placedRelease("feat(core): first");
     const second = await placedRelease("feat(core): second");

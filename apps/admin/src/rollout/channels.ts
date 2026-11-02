@@ -232,12 +232,17 @@ export const releaseToEdge = async (
   if (edge !== null && compareReleaseIds(newest, edge) <= 0) {
     return;
   }
-  await pointChannel(db, "system", {
+  const changed = await pointChannel(db, "system", {
     channel: "edge",
     releaseId: newest,
     from: edge,
     back: false,
   });
+  // Another import moved Edge between the read and the write, so the
+  // compare-and-set missed: read Edge again, as it may hold an older release.
+  if (!changed) {
+    await releaseToEdge(env, [newest]);
+  }
 };
 
 /** Retrying a channel's failed deploys. */
