@@ -2274,12 +2274,18 @@ export const runLineageAccounts = sqliteTable(
     rootRunId: text("root_run_id")
       .notNull()
       .references(() => runLineages.rootRunId),
+    /**
+     * The App whose runs it is charged; for a `triggered` account, the
+     * independent workflow's ID instead.
+     */
     appId: text("app_id").notNull(),
     /**
      * `joined` for an App's runs in a lineage another App started,
-     * `rejoined` for the root's App's runs under another App's run.
+     * `rejoined` for the root's App's runs under another App's run,
+     * `triggered` for an independent workflow's runs its triggers started
+     * in the lineage (quotas.ts, `triggeredAccountClaimed`).
      */
-    kind: text({ enum: ["joined", "rejoined"] }).notNull(),
+    kind: text({ enum: ["joined", "rejoined", "triggered"] }).notNull(),
     accountRunId: text("account_run_id").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
@@ -4134,7 +4140,8 @@ export const workflowResourceRuns = sqliteTable(
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
      * start admitted, the root of its own lineage. A run an emitted event's
      * trigger started (workflows/event-delivery.ts) has a root and a depth
-     * but no parent: it joins the emitting run's lineage, not its life.
+     * but no parent: it joins the emitting run's lineage, not its life, and
+     * is charged to its workflow's account there (`accountRunId`).
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -4164,6 +4171,14 @@ export const workflowResourceRuns = sqliteTable(
      * of its compensation (spec 10.7.3); kept once it ended.
      */
     compensation: text(),
+    /**
+     * The run whose allowances its work is charged to (quotas.ts,
+     * `triggeredAccountClaimed`), pinned with it: for a run a trigger
+     * started in another run's lineage, its workflow's account there; for
+     * a child, its parent's. Null for a run charged to its lineage's root,
+     * or a root itself.
+     */
+    accountRunId: text("account_run_id"),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.

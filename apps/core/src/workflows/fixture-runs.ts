@@ -329,6 +329,7 @@ export const runFixtureWorkflow = async (
         runId,
         // Its own lineage's root: a test's run starts no children.
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: pin.workflow,
         version: pin.version,
         principal: row.principal,

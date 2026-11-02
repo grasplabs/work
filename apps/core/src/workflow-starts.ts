@@ -28,6 +28,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { chatAuthority, chatContext } from "./agent-scope.ts";
@@ -58,6 +59,7 @@ import {
   packagesHoldSql,
   manifestPackagesSchema,
 } from "./workflows/package-seal.ts";
+import { triggeredAccountClaimed } from "./workflows/quotas.ts";
 import type { ChildPlace } from "./workflows/quotas.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
@@ -202,7 +204,8 @@ export type StartInvoker =
  * trigger's run already (quotas.ts, `admitChild`), and whether it ran
  * restricted, which the trigger's run then does too. The trigger's run
  * joins its lineage, never its life: it isn't the run's child, and goes
- * on after the run ends.
+ * on after the run ends. Its work is charged to its workflow's own
+ * account there (`triggeredAccountFor`), never the lineage's allowances.
  */
 export interface TriggerCause {
   readonly runId: string;
@@ -1438,6 +1441,38 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
           AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
 
 /**
+ * The statements that claim the account a run `authorization` admits is
+ * charged to, for a run a trigger starts in another run's lineage (an
+ * event or a stamped message of that run, `TriggerCause`): its workflow's
+ * account there, never the lineage's own allowances, which a busy
+ * workflow's runs would otherwise use up for the run that caused them and
+ * every other workflow triggered there (quotas.ts,
+ * `triggeredAccountClaimed`). Its restricted mode is its start's, as
+ * decided (`restrictedStart`): an account changes what its work is
+ * charged to, never that. None for any other start, or one that admits no
+ * run: `claim` goes before its run's row, `aged` after it.
+ */
+const triggeredAccountFor = (
+  db: DrizzleD1Database,
+  { lineage, buildHash, workflowId }: StartAuthorization,
+  run: { run: string; createdAt: number; admitted: SQL }
+) => {
+  if (
+    lineage === undefined ||
+    lineage.parentRunId !== null ||
+    buildHash === null
+  ) {
+    return { claim: [], aged: [] };
+  }
+  const { claim, aged } = triggeredAccountClaimed(db, {
+    ...run,
+    root: lineage.rootRunId,
+    workflow: workflowId,
+  });
+  return { claim: [claim], aged: [aged] };
+};
+
+/**
  * Admits the new start `authorization` decided on: its receipt, written in
  * one statement only while the authorization, and `also` (what its caller
  * requires besides, as SQL), still hold, with its audit event. A start
@@ -1462,6 +1497,11 @@ export const admitWorkflowStart = async (
   const receiptWritten = sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`;
   const alsoAdmitted = authorization.alsoAdmitted?.(receiptWritten) ?? [];
   const db = drizzle(env.DB);
+  const account = triggeredAccountFor(db, authorization, {
+    run: id,
+    createdAt: createdAt.getTime(),
+    admitted: receiptWritten,
+  });
   const values = [
     id,
     authorization.invoker.type,
@@ -1519,6 +1559,8 @@ export const admitWorkflowStart = async (
         .select(
           sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds} AND ${also} AND ${underRunLimit(authorization)}`
         ),
+      // Its workflow's account in the lineage a trigger started it in.
+      ...account.claim,
       // Its run, pinned to the version's build, with the receipt or not at
       // all (resource-runs.ts): the engine is sent it once this commits.
       ...(authorization.buildHash === null
@@ -1538,6 +1580,7 @@ export const admitWorkflowStart = async (
                 : { lineage: authorization.lineage }),
             }),
           ]),
+      ...account.aged,
       // The files its start handed its run: theirs once it is admitted.
       ...alsoAdmitted,
       // Only once the receipt is written, read as such: never inferred from
