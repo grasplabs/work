@@ -12,9 +12,10 @@
  * One tick at a time: a tick acts only while it holds the reconciler's
  * lease (`takeLease`), so the count of deploys out and the check for a
  * failure are one runner's, and ticks that overlap never start more than
- * `parallelDeploys` between them. Deploys only end while a tick runs, so
- * its count can only be high; a failure can land mid-tick, so each claim
- * checks for one in its own statement (`channelFailedSql`).
+ * `parallelDeploys` between them. While a tick runs, deploys can end but
+ * none start but its own, so its count can only be high; a failure can
+ * land mid-tick, so each claim checks for one in its own statement
+ * (`channelFailedSql`).
  *
  * Idempotent: a deploy starts only with a compare-and-set claim on the
  * client (`claim`), so a tick that read the client before a deploy came
