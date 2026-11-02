@@ -49,7 +49,12 @@ import {
 } from "../src/workflows/screen-runs.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
-import { resumed, stopped as stopRun, whileEngineRefuses } from "./runs.ts";
+import {
+  resumed,
+  runInstance,
+  stopped as stopRun,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -1454,6 +1459,19 @@ describe(
           );
           return decided.status;
         });
+      // Waiting on the engine for its wake, as the engine reports it: its
+      // look at the decision (`:decision:reached`) done, it heard no
+      // answer. Stopped before that look, it would read the answer as it
+      // resumes and need no wake.
+      {
+        using waits = await runInstance(runId).subscribe({
+          filter: ["wait_started"],
+        });
+        const { done } = await waits.next();
+        if (done === true) {
+          throw new Error(`Run ${runId} ended before it waited`);
+        }
+      }
       // Killed while it waits, and the engine unreachable as the screen's
       // answer comes in: the answer is recorded, and the wake it owes is
       // lost.
@@ -1498,6 +1516,10 @@ describe(
           ({ action, target }) =>
             action === "workflow.decision.opened" && target?.id === decisionId
         ).length,
+        approvals: events.filter(
+          ({ action, target }) =>
+            action === "workflow.decision.approved" && target?.id === decisionId
+        ).length,
         receipts: events
           .filter(
             ({ action, target, detail }) =>
@@ -1513,6 +1535,7 @@ describe(
         ended: { status: "completed", output: { status: "done" } },
         decisions: [{ status: "approved", decidedBy: reviewer.userId }],
         openings: 1,
+        approvals: 1,
         receipts: ["opened", "answered"],
       });
     });
