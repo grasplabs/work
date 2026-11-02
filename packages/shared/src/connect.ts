@@ -6,6 +6,8 @@ import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
 import { oauthProviderSchema } from "./connect-names.ts";
 import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
+import { attachmentBytesSchema } from "./connector-attachments.ts";
+import type { AttachmentEntry } from "./connector-attachments.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -56,6 +58,16 @@ export const connectCallSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{32}$/u)
     .optional(),
+  /**
+   * The bytes of the files the input attaches, by SHA-256 (GRA-887): core
+   * resolves a workflow's files and sends them here, beside an input that
+   * names each by digest only. Connect checks them against the input's
+   * digests, hands them to the connector's tool, and keeps none: a held
+   * action stores the digests, and its bytes are sent again with the
+   * confirmation (`confirmActionSchema`). Never in App or agent code's
+   * hands: only core's workflow host sets it.
+   */
+  attachments: attachmentBytesSchema.optional(),
 });
 export type ConnectCall = z.infer<typeof connectCallSchema>;
 
@@ -336,6 +348,17 @@ export interface ConnectionSummary {
    * whatever the admin allowed. Absent for a native connection.
    */
   offeredTools?: string[];
+  /**
+   * Those of `tools` the admin marked as only reading, which run without
+   * asking. Absent for a native connection.
+   */
+  readTools?: string[];
+  /**
+   * The input property naming the one resource a call of each tool acts
+   * on, for the tools the admin gave one, by tool name: kept by whatever
+   * changes the tools. Absent for a native connection.
+   */
+  toolResources?: Record<string, string>;
 }
 
 /**
@@ -541,6 +564,20 @@ export interface ConnectionsApi extends StephenReachApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Changes which tools a shared Composio connection allows, and which of
+   * them only read, for an admin, audited (GRA-993): only tools the
+   * toolkit has. A held action of a tool taken away is dropped. Someone
+   * changing them at the same moment makes it `connection.tools_changed`.
+   * The tools it allows now.
+   */
+  changeTools: (request: {
+    connectionId: string;
+    /** The tools to allow, each by name or with its rule. */
+    tools: (string | ComposioToolRule)[];
+    /** The tools the page showed allowed, which the change was made from. */
+    expected: (string | ComposioToolRule)[];
+  }) => Promise<{ tools: string[] }>;
   /**
    * Asks for an app the catalog doesn't have, audited. An app asked for
    * already, by its name in any case, isn't asked for again: that
@@ -1059,6 +1096,19 @@ export type StartToolkitConnection = z.input<
   typeof startToolkitConnectionSchema
 >;
 
+/** Changes the tools a shared Composio connection allows (GRA-993). */
+export const changeToolkitToolsSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: identifierSchema,
+  tools: composioToolsSchema,
+  /**
+   * The tools the admin's page showed allowed: a change made from a page
+   * another change made stale is refused (`connection.tools_changed`).
+   */
+  expected: composioToolsSchema,
+});
+export type ChangeToolkitTools = z.input<typeof changeToolkitToolsSchema>;
+
 /** Lists one entry's tools. */
 export const catalogToolsRequestSchema = z.strictObject({
   source: catalogSourceSchema,
@@ -1146,6 +1196,12 @@ export interface PendingAction {
    * the person was shown runs.
    */
   inputHash: string;
+  /**
+   * The files it attaches, each by name, type, size and digest (GRA-887):
+   * only a native action that takes files has any. Confirming it needs
+   * their bytes again, read from the run by these digests.
+   */
+  attachments?: AttachmentEntry[];
   /** ISO 8601. */
   requestedAt: string;
   /**
@@ -1176,6 +1232,12 @@ export const confirmActionSchema = z.strictObject({
    * core verified it: its events name it. None in Grasp's own app.
    */
   via: chatPlatformSchema.optional(),
+  /**
+   * The bytes of the files the held input attaches, read again from the
+   * run by their digests (GRA-887); connect accepts only bytes that match
+   * the digests the person was shown.
+   */
+  attachments: attachmentBytesSchema.optional(),
 });
 export type ConfirmAction = z.input<typeof confirmActionSchema>;
 
@@ -1237,7 +1299,7 @@ export interface HeldCall {
  * capability core made for exactly that call, as for carrying it out.
  */
 export const heldOutcomeRequestSchema = connectCallSchema
-  .omit({ input: true, stamp: true })
+  .omit({ input: true, stamp: true, attachments: true })
   .required({ idempotencyKey: true });
 export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 
@@ -1729,6 +1791,15 @@ export interface ConnectApi
     request: StartToolkitConnection
   ) => Promise<{ url: string }>;
   /**
+   * Changes the tools a shared Composio connection allows, for an admin:
+   * Composio's server first, then connect's own list, which every call
+   * goes by, only if it is still the one read (`connection.tools_changed`
+   * otherwise, Composio set back). Audited, failed attempts too.
+   */
+  changeToolkitTools: (
+    request: ChangeToolkitTools
+  ) => Promise<{ tools: string[] }>;
+  /**
    * One catalog entry's tools, or `connect.catalog_entry_not_found` for
    * anything `catalog` doesn't list. Composio's toolkits are listed only if
    * `composio` and connect has a Composio key, and only those that have
@@ -1941,6 +2012,8 @@ export const connectionErrors = defineErrorFamily({
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
+  "connection.tools_changed":
+    "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
 });
 
 /** Which App's held actions of which binding to drop. */
@@ -2029,6 +2102,19 @@ export interface ConnectorContractAction {
    */
   input: string;
   output: string;
+  /**
+   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * which a workflow action may have core keep as a file of its run
+   * (GRA-886). Only a native connector's read declares it; never Composio's.
+   */
+  answersFile?: true;
+  /**
+   * It attaches files (connector-kit's `takesFiles`): its input has an
+   * `attachments` property, which in this contract names run files by ID
+   * and which core turns into digests and bytes for a workflow's call
+   * (GRA-887). Only a native connector's write declares it.
+   */
+  takesFiles?: true;
 }
 
 /**
@@ -2052,6 +2138,10 @@ export interface NativeOperation {
   contract: string;
   /** Whether it only reads, as the connector declares. */
   readOnly: boolean;
+  /** That it answers a file, as the connector declares (GRA-886). */
+  answersFile?: true;
+  /** That it attaches files, as the connector declares (GRA-887). */
+  takesFiles?: true;
 }
 
 /** A generated contract, as connect serves it now. */
@@ -2108,6 +2198,8 @@ export const connectErrors = defineErrorFamily({
     "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
+  "connect.files_changed":
+    "The files this action attaches aren't the ones you were shown (a file was deleted, or isn't the same), so nothing was done.",
   "connect.held":
     "This action waits for the person it acts for to confirm it. Try again once they have.",
   "connect.run_ended":

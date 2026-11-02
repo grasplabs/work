@@ -3,8 +3,7 @@
  * entry, written from how onboarding fails when nobody looked first: a
  * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
- * namespace, Grasp's AI on a provider it has no key for; and an optional feature left
- * unconfigured without saying so.
+ * namespace.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
@@ -13,11 +12,10 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fetchReadiness } from "../src/admin/readiness.ts";
 import type { Readiness } from "../src/admin/readiness.ts";
-import { clients, hostingDestinations, releases } from "../src/db/schema.ts";
-import { setGraspClientFn } from "../src/platform-settings.ts";
+import { hostingDestinations, releases } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { client, db, destination } from "./hosting.ts";
+import { db, destination } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { placedRelease } from "./placed.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
@@ -29,7 +27,7 @@ mockAccess();
 
 /** Runs `run` with the admin's vars as `vars` set them, as a deploy would. */
 const withVars = async <T>(
-  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN" | "DISCORD_PUBLIC_KEY">>,
+  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN">>,
   run: () => Promise<T>
 ): Promise<T> => {
   const before = { ...env };
@@ -39,7 +37,6 @@ const withVars = async <T>(
   } finally {
     env.STAGE = before.STAGE;
     env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
-    env.DISCORD_PUBLIC_KEY = before.DISCORD_PUBLIC_KEY;
   }
 };
 
@@ -53,11 +50,6 @@ const readiness = async (): Promise<Readiness> =>
 /** Each check's status, by its id. */
 const statuses = ({ checks }: Readiness): Record<string, string> =>
   Object.fromEntries(checks.map(({ id, status }) => [id, status]));
-
-/** Chooses `clientId` as Grasp's own organization on Platform, or none. */
-const choose = async (clientId: string | null): Promise<void> => {
-  await callServerFn(setGraspClientFn, { clientId });
-};
 
 /** Check `id`'s words. */
 const wordsOf = ({ checks }: Readiness, id: string): string =>
@@ -96,9 +88,6 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        rooms: "not_configured",
-        discord_bot: "ready",
-        grasp_organization: "not_configured",
       },
       blocking: 3,
       release:
@@ -218,86 +207,9 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("says the Discord bot is ready with a spaced public key, as the bot reads it", async () => {
-    const read = await withVars(
-      {
-        ...production,
-        DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""} `,
-      },
-      readiness
-    );
-
-    expect(statuses(read).discord_bot).toBe("ready");
-  });
-
-  it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
-    const read = await withVars(
-      { ...production, DISCORD_PUBLIC_KEY: "" },
-      readiness
-    );
-
+  it("reads only for staff", async () => {
     await expect(
       callServerFn(fetchReadiness, undefined, { email: null })
     ).rejects.toThrow("The server function answered 403");
-    expect({
-      status: statuses(read).discord_bot,
-      words: wordsOf(read, "discord_bot"),
-    }).toStrictEqual({
-      status: "not_configured",
-      words:
-        "Not configured: the Discord bot refuses everything. Set DISCORD_PUBLIC_KEY in apps/admin/wrangler.jsonc for this stage, then run Deploy platform.",
-    });
-  });
-
-  it("says whether Grasp's own organization is chosen, live, or gone, and not that onboarding waits on it", async () => {
-    const chosen = await client();
-    /** The line's status and words, as Platform reads them. */
-    const line = async () => {
-      const read = await withVars(production, readiness);
-      return {
-        status: statuses(read).grasp_organization,
-        words: wordsOf(read, "grasp_organization"),
-        blocking: read.blocking,
-      };
-    };
-
-    await choose(null);
-    const none = await line();
-    await choose(chosen);
-    const settingUp = await line();
-    await db
-      .update(clients)
-      .set({ status: "active" })
-      .where(eq(clients.id, chosen));
-    const live = await line();
-    await db
-      .update(clients)
-      .set({ status: "offboarded" })
-      .where(eq(clients.id, chosen));
-    const gone = await line();
-
-    expect({ none, settingUp, live, gone }).toStrictEqual({
-      none: {
-        status: "not_configured",
-        words:
-          "None is chosen, so Ask Grasp isn't set up. Choose it under Grasp's own organization on this page.",
-        blocking: none.blocking,
-      },
-      settingUp: {
-        status: "waiting",
-        words: `${chosen} is chosen, and answers Ask Grasp once it's live.`,
-        blocking: none.blocking,
-      },
-      live: {
-        status: "ready",
-        words: `${chosen} answers Ask Grasp.`,
-        blocking: none.blocking,
-      },
-      gone: {
-        status: "not_configured",
-        words: `The one chosen (${chosen}) is gone or offboarded, so Ask Grasp isn't set up. Choose it again under Grasp's own organization on this page.`,
-        blocking: none.blocking,
-      },
-    });
   });
 });

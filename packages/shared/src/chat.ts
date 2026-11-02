@@ -30,6 +30,28 @@ export const chatPlatformSchema = z
 export type ChatPlatform = z.infer<typeof chatPlatformSchema>;
 
 /**
+ * The chat platforms and mail Grasp is reached through, as each writes its
+ * own name, by adapter name: the same in every language. Every list of
+ * chat accounts, places and chats names them from here.
+ */
+export const chatPlatformNames: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+  slack: "Slack",
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  gmail: "Gmail",
+  discord: "Discord",
+  gchat: "Google Chat",
+  "google-chat": "Google Chat",
+  github: "GitHub",
+  linear: "Linear",
+};
+
+/** A chat platform as people know it, or its adapter's name for one not listed. */
+export const chatPlatformName = (platform: string): string =>
+  chatPlatformNames[platform] ?? platform;
+
+/**
  * Which channel a chat came through: Grasp's own app (`web`), or a chat
  * platform.
  */
@@ -59,6 +81,11 @@ export interface ChatSummary {
   projectId: string | null;
   /** The App it is for (`ChatsApi.forApp`), or null for none. */
   appId: string | null;
+  /**
+   * Which channel it came through: Grasp's own app (`web`), or a chat
+   * platform by its adapter's name (`teams`, `slack`), for good.
+   */
+  via: ChatChannel;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { noBilling, quietPulse } from "@grasp-os/shared/org-settings";
+import { noBilling } from "@grasp-os/shared/org-settings";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -13,7 +13,7 @@ import {
   staffPerson,
 } from "./sign-in.ts";
 
-// The organization's billing and Pulse settings (src/org-settings.ts).
+// The organization's billing settings (src/org-settings.ts).
 // These tests start from the ways they can fail: someone but an admin
 // reading them (a billing address, a VAT number), someone but the
 // organization's own admins (Grasp staff included) changing them, a value
@@ -34,14 +34,6 @@ const billing = {
   emailReceipts: false,
 };
 
-/** Pulse reporting on weekdays from nine to five. */
-const officeHours = {
-  schedule: Array.from({ length: 7 }, (_, day) =>
-    Array.from({ length: 24 }, (__, hour) => day < 5 && hour >= 9 && hour < 17)
-  ),
-  employeeDomains: ["acme.test", "acme-old.test"],
-};
-
 describe("the organization's settings", () => {
   afterEach(async () => {
     await env.DB.prepare("DELETE FROM org_settings").run();
@@ -49,26 +41,20 @@ describe("the organization's settings", () => {
 
   it("read as unset until an admin saves them, then as saved", async () => {
     const admin = await signedInApi(idp, "admin");
-    const unset = await Promise.all([
-      admin.api.orgSettings.billing(),
-      admin.api.orgSettings.pulse(),
-    ]);
+    const unset = await admin.api.orgSettings.billing();
 
     await admin.api.orgSettings.updateBilling(billing);
-    await admin.api.orgSettings.updatePulse(officeHours);
 
     expect({
       unset,
       billing: await admin.api.orgSettings.billing(),
-      pulse: await admin.api.orgSettings.pulse(),
     }).toStrictEqual({
-      unset: [noBilling, quietPulse],
+      unset: noBilling,
       billing: {
         ...billing,
         company: "Acme Holding B.V.",
         vatNumber: "NL123456789B01",
       },
-      pulse: officeHours,
     });
   });
 
@@ -83,10 +69,10 @@ describe("the organization's settings", () => {
 
     expect({
       builder: await outcome(builder.api.orgSettings.billing()),
-      member: await outcome(member.api.orgSettings.pulse()),
+      member: await outcome(member.api.orgSettings.billing()),
       staffReads: await outcome(staffApi.orgSettings.billing()),
       builderChanges: await outcome(
-        builder.api.orgSettings.updatePulse(officeHours)
+        builder.api.orgSettings.updateBilling(billing)
       ),
       staffChanges: await outcome(
         staffApi.orgSettings.updateBilling({ ...billing, company: "Grasp" })
@@ -106,43 +92,26 @@ describe("the organization's settings", () => {
     });
   });
 
-  it("refuse what isn't a billing detail or a Pulse setting, and keep what was saved", async () => {
+  it("refuse what isn't a billing detail, and keep what was saved", async () => {
     const admin = await signedInApi(idp, "admin");
     const api = admin.api.orgSettings;
-    await api.updatePulse(officeHours);
-    const day = Array.from({ length: 24 }, () => true);
+    await api.updateBilling(billing);
     const sent = await Promise.all([
       outcome(api.updateBilling({ ...billing, email: "not an email" })),
       outcome(api.updateBilling({ ...billing, company: "Two\nlines" })),
       outcome(api.updateBilling({ ...billing, vatNumber: "123" })),
-      outcome(api.updatePulse({ ...officeHours, schedule: [day] })),
-      outcome(
-        api.updatePulse({
-          ...officeHours,
-          schedule: officeHours.schedule.map((hours) => hours.slice(1)),
-        })
-      ),
-      outcome(
-        api.updatePulse({
-          ...officeHours,
-          employeeDomains: ["acme.test", "acme.test"],
-        })
-      ),
-      outcome(
-        api.updatePulse({ ...officeHours, employeeDomains: ["Not a domain"] })
-      ),
     ]);
-    expect({ sent, kept: await api.pulse() }).toStrictEqual({
+    expect({ sent, kept: await api.billing() }).toStrictEqual({
       sent: [
         "org_settings.billing_invalid",
         "org_settings.billing_invalid",
         "org_settings.billing_invalid",
-        "org_settings.pulse_invalid",
-        "org_settings.pulse_invalid",
-        "org_settings.pulse_invalid",
-        "org_settings.pulse_invalid",
       ],
-      kept: officeHours,
+      kept: {
+        ...billing,
+        company: "Acme Holding B.V.",
+        vatNumber: "NL123456789B01",
+      },
     });
   });
 
@@ -156,7 +125,6 @@ describe("the organization's settings", () => {
         ...billing,
         emailReceipts: true,
       });
-      await admin.api.orgSettings.updatePulse(officeHours);
     });
 
     expect(events).toStrictEqual([
@@ -169,10 +137,6 @@ describe("the organization's settings", () => {
       expect.objectContaining({
         action: "org_settings.billing.updated",
         detail: { fields: "emailReceipts" },
-      }),
-      expect.objectContaining({
-        action: "org_settings.pulse.updated",
-        detail: { fields: "employeeDomains,schedule" },
       }),
     ]);
     expect(JSON.stringify(events)).not.toContain(sentinel);

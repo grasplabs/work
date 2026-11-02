@@ -18,7 +18,6 @@ import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
 import type { Took } from "./store.ts";
-import { NoDrawingModelError } from "./team-map.ts";
 
 // A piece of work, drawn from the facts everyone who told it agreed to
 // (GRA-366): how it runs today, each person's own numbers, and what the
@@ -474,12 +473,7 @@ export const drawWork = async (
   brief: WorkBrief,
   count: (took: Took) => void
 ): Promise<DrawnWork> => {
-  const model = modelForRole(await modelSettings(env), "careful", {
-    sensitive: true,
-  });
-  if (model === undefined) {
-    throw new NoDrawingModelError("No model may draw the work.");
-  }
+  const model = modelForRole(await modelSettings(env), "careful");
   // The model knows each person by a neutral label alone (`P2`), never
   // their id or their title (GRA-1084): it is told what was said, not by
   // whom. Its answer names them by those labels, read back here.

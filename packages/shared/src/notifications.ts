@@ -7,8 +7,9 @@ export const notificationErrors = defineErrorFamily({
 
 // What core tells a signed-in person in the product (core's
 // notifications.ts): that a workflow failed while acting for them, that
-// an admin asked them one of the brain's open questions, or that a
-// schedule trigger of theirs stopped. Only they
+// an admin asked them one of the brain's open questions, that a
+// schedule trigger of theirs stopped, or that packages of an App or
+// workflow they build or approved were revoked as malware. Only they
 // see their own; nobody else is told.
 
 /**
@@ -66,10 +67,35 @@ export interface TriggerStoppedNotification {
   read: boolean;
 }
 
+/**
+ * Packages of an App or workflow the person builds, or whose packages
+ * they approved, were revoked because one was reported as malware
+ * (core's dependencies/requests.ts): nothing of them is built, served or
+ * started until a builder removes it and an approver approves a new set.
+ * Listed while the person can still open the App or workflow, or approve
+ * packages.
+ */
+export interface PackageRevokedNotification {
+  id: string;
+  type: "package_revoked";
+  /** The App or workflow whose packages were revoked, by its name now. */
+  subject:
+    | { type: "app"; app: string; appName: string }
+    | { type: "workflow"; workflow: string; workflowName: string };
+  /** The package version reported as malware: the first, if several were. */
+  package: { name: string; version: string };
+  /** The advisory that reported it, such as an OSV or GHSA ID. */
+  advisory: string;
+  /** When they were revoked (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
 export type Notification =
   | RunFailedNotification
   | GapAskedNotification
-  | TriggerStoppedNotification;
+  | TriggerStoppedNotification
+  | PackageRevokedNotification;
 
 /** Most notifications `list` returns: the latest. */
 export const listedNotifications = 50;

@@ -336,82 +336,6 @@ export const searchRebuilds = sqliteTable("search_rebuilds", {
 });
 
 /**
- * Each version of a learning suite (GRA-311, ../eval-suites.ts): the
- * cases, grader and pins a skill is judged by, proposed from permitted
- * evidence and accepted by its owner. Its cases' digests, per split, and
- * its grader's are frozen with it: a change is a new version, never an
- * edit, and scores are never compared across versions.
- */
-export const brainEvalSuiteVersions = sqliteTable(
-  "brain_eval_suite_versions",
-  {
-    suiteId: text("suite_id").notNull(),
-    version: integer().notNull(),
-    /** Moved on by every change of state: what an acceptance names. */
-    revision: integer().notNull(),
-    /** User ID of the domain owner, who alone accepts it. */
-    ownerId: text("owner_id").notNull(),
-    /**
-     * Whom its owner handed the suite on to: the owner of the versions
-     * proposed after it. Null while they keep it.
-     */
-    nextOwnerId: text("next_owner_id"),
-    name: text().notNull(),
-    state: text({ enum: ["proposed", "calibrated", "accepted", "retired"] })
-      .notNull()
-      .default("proposed"),
-    /** SHA-256 of each split's cases, as canonical JSON. */
-    developmentDigest: text("development_digest").notNull(),
-    validationDigest: text("validation_digest").notNull(),
-    /** The sealed final cases': only the evaluator reads them. */
-    finalDigest: text("final_digest").notNull(),
-    /** The grader, as JSON (its version and checks), and its digest. */
-    grader: text().notNull(),
-    graderDigest: text("grader_digest").notNull(),
-    /** Baseline, model, environment and policy versions, as JSON. */
-    pins: text().notNull(),
-    /** User ID of whoever proposed it. */
-    proposedBy: text("proposed_by").notNull(),
-    acceptedBy: text("accepted_by"),
-    acceptedAt: timestamp("accepted_at"),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.suiteId, table.version] })]
-);
-
-/**
- * The cases of each suite version (../eval-suites.ts), in their split:
- * development, validation or the sealed final set. A case's group (its
- * related variants) and source stay in one split. Expected outcomes are
- * the evaluator's alone: never in recall, a skill's context or memory.
- */
-export const brainEvalCases = sqliteTable(
-  "brain_eval_cases",
-  {
-    suiteId: text("suite_id").notNull(),
-    version: integer().notNull(),
-    caseId: text("case_id").notNull(),
-    split: text({ enum: ["development", "validation", "final"] }).notNull(),
-    family: text().notNull(),
-    group: text().notNull(),
-    source: text().notNull(),
-    /** What the task is given, as JSON. */
-    input: text().notNull(),
-    /** What a correct outcome satisfies, as JSON: the answer key. */
-    expected: text().notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.suiteId, table.version, table.caseId] }),
-    index("brain_eval_cases_split_idx").on(
-      table.suiteId,
-      table.version,
-      table.split
-    ),
-  ]
-);
-
-/**
  * The Brain's memory records (../memories.ts): what a person, or
  * later an App or agent acting for one, asked the Brain to remember, as
  * they said it. A record starts `proposed`, never an accepted fact.
@@ -654,6 +578,35 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
   evidenceId: text("evidence_id").primaryKey(),
   erasedAt: timestamp("erased_at").notNull(),
 });
+
+/**
+ * The documents a content purge named, and when (GRA-1121): written before
+ * the purge reaches anything, the host's copies included, so a copy made
+ * from one that lands after the purge forgot that document's copies is
+ * found and forgotten too (../erasures.ts), by the rowid: a rowid table,
+ * never WITHOUT ROWID. Each document's ID and a hash of its place, never
+ * its name or a term: the erasure's own record.
+ */
+export const brainErasedDocuments = sqliteTable(
+  "brain_erased_documents",
+  {
+    purgeId: text("purge_id").notNull(),
+    documentId: text("document_id").notNull(),
+    /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
+    place: text().notNull(),
+    erasedAt: timestamp("erased_at").notNull(),
+    /**
+     * When the purge had forgotten the host's copies and rewritten what it
+     * names, or stopped trying: null while it runs (../erasures.ts).
+     */
+    doneAt: timestamp("done_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.purgeId, table.documentId] }),
+    // A copy's check, by the place it read (and the rowid, as its mark).
+    index("brain_erased_documents_place_idx").on(table.place),
+  ]
+);
 
 /**
  * The people a personal purge forgot, and when: a capture of their work

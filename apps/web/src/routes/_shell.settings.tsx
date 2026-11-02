@@ -19,8 +19,6 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import {
-  ActivityIcon,
-  BellIcon,
   BrainIcon,
   BuildingIcon,
   CircleHelpIcon,
@@ -57,7 +55,6 @@ type SettingsPath =
   | "/settings/models"
   | "/settings/spend"
   | "/settings/stephen"
-  | "/settings/pulse"
   | "/settings/onboarding"
   | "/settings/brain"
   | "/settings/audit"
@@ -65,11 +62,10 @@ type SettingsPath =
   | "/settings/billing"
   | "/settings/packages"
   | "/settings/profile"
-  | "/settings/notifications"
   | "/settings/security";
 
 interface SettingsItem {
-  /** Pulse is a name and stays as it is; the other labels are translated. */
+  /** Stephen is a name and stays as it is; the other labels are translated. */
   label: MessageDescriptor | string;
   to: SettingsPath;
   icon: LucideIcon;
@@ -119,13 +115,12 @@ const groupsFor = ({
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         // Its groups of teams, the brain's regions.
         { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
-        // A name, like Pulse: the company's assistant in its chat apps.
+        // A name: the company's assistant in its chat apps.
         {
           label: "Stephen",
           to: "/settings/stephen",
           icon: MessagesSquareIcon,
         },
-        { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
         {
           label: msg`Onboarding`,
           to: "/settings/onboarding",
@@ -160,11 +155,6 @@ const groupsFor = ({
       title: msg`Your account`,
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
-        {
-          label: msg`Notifications`,
-          to: "/settings/notifications",
-          icon: BellIcon,
-        },
         { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
       ],
     },

@@ -27,7 +27,7 @@ import { useCore } from "../use-core.ts";
 import { LessonsView } from "./lessons-view.tsx";
 import { recordOf } from "./memory-parts.tsx";
 import { RememberDialog } from "./remember-dialog.tsx";
-import { ShareRecord, shareTargets } from "./share-record.tsx";
+import { ShareRecord } from "./share-record.tsx";
 
 // The Brain's memory records, as a person inspects and corrects them
 // (GRA-298; the threat model is on the issue): their own, or the shared
@@ -360,8 +360,6 @@ const LineagePanel = ({
     own && !withheld && record.scope === "person" && record.state !== "retired";
   // One's own, any scope, by them; a shared one by an admin too. One they
   // may no longer read, withheld, only so.
-  // One's own, in their own memory, into a scope they may share with.
-  const shareable = correctable && shareTargets(teams, admin).length > 0;
   const retirable =
     record.state !== "retired" && (own || (admin && record.scope !== "person"));
   return (
@@ -399,7 +397,8 @@ const LineagePanel = ({
       {correctable ? (
         <CorrectForm key={record.revision} onDone={onChanged} record={record} />
       ) : null}
-      {shareable ? (
+      {/* One they may correct, they may share: the form says where. */}
+      {correctable ? (
         <ShareRecord
           admin={admin}
           onShared={onChanged}

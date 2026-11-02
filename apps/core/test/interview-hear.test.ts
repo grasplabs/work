@@ -25,11 +25,8 @@ import { routed, unique } from "./sign-in.ts";
 // - A request that isn't a recording, or is too large.
 // - The recording kept anywhere: the store, the database, the audit log.
 // - Listening out for words the page chose, or for more than 30.
-// - Charged to the organization's budgets, which limit its own keys only:
-//   what is heard is charged to Grasp's own key (GRA-1064).
-
-/** The deployment's rules: none, unless a test sets some. */
-const noRules = {};
+// - Charged to the organization's spend: what is heard is charged to
+//   Grasp's own key (GRA-1064).
 
 /** Something no recording would hold by chance: if it shows anywhere, the recording was kept. */
 const marker = "RECORDING-MARKER-7f3a";
@@ -80,33 +77,25 @@ const newAudio = (): string => `${marker}-${unique()}${"x".repeat(2000)}`;
 
 let monthsUsed = 0;
 
-/** A month no other test counts budgets in: from 2900, clear of other files. */
+/** A month no other test counts spend in: from 2900, clear of other files. */
 const newMonth = (): string => {
   monthsUsed += 1;
   return `${2900 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/**
- * What `run` returns under the deployment's rules `config`, budgets
- * counted in `month`.
- */
+/** What `run` returns with model spend counted in `month`. */
 const hearing = async <T>(
   run: () => Promise<T>,
-  { config = noRules, month }: { config?: unknown; month?: string } = {}
+  { month }: { month?: string } = {}
 ): Promise<T> => {
-  const before = {
-    gateway: env.MODEL_GATEWAY,
-    month: env.MODEL_BUDGET_MONTH,
-  };
-  Reflect.set(env, "MODEL_GATEWAY", config);
+  const before = env.MODEL_BUDGET_MONTH;
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
   try {
     return await run();
   } finally {
-    env.MODEL_GATEWAY = before.gateway;
-    env.MODEL_BUDGET_MONTH = before.month;
+    env.MODEL_BUDGET_MONTH = before;
   }
 };
 
@@ -120,18 +109,16 @@ const microsPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
 const heardMicros = (seconds: number): number =>
   Math.ceil((seconds * microsPerMillionSeconds) / 1e6);
 
-/** What the deployment spent and holds in `month`, as the ledger counts it. */
+/** What the deployment spent in `month`, as the ledger counts it. */
 const deploymentSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
-  const [row] = spent.deployment ?? [];
-  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+  return spent.deployment?.[0]?.spentMicros ?? 0;
 };
 
-/** What Grasp's own key spent and holds in `month`: what was heard counts there. */
+/** What Grasp's own key spent in `month`: what was heard counts there. */
 const graspSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
-  const [row] = spent.platform ?? [];
-  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+  return spent.platform?.[0]?.spentMicros ?? 0;
 };
 
 /** The gateway's audit events for recordings after `head`, as these tests read them. */
@@ -435,7 +422,7 @@ describe(
       expect(failing).toStrictEqual([502, "hear.failed"]);
     });
 
-    it("charges what was heard to Grasp's own key, never to the deployment's budget, which doesn't stop it", async () => {
+    it("charges what was heard to Grasp's own key, never to the deployment's spend", async () => {
       const { link } = await openedFor();
       const month = newMonth();
       const head = await logHead();
@@ -455,11 +442,7 @@ describe(
             grasp: await graspSpend(month),
           };
         },
-        {
-          // A cent: the two half minutes (0.5¢ each, rounded up) don't fit.
-          config: { budgets: { deployment: { limit: 0.01 } } },
-          month,
-        }
+        { month }
       );
       const sent = await Promise.all(
         Object.values(audio).map(async (one) => await sentCount(one))
@@ -481,9 +464,9 @@ describe(
       }).toStrictEqual({
         first: 200,
         second: 200,
-        deployment: { spent: 0, held: 0 },
+        deployment: 0,
         // Whole seconds, rounded up.
-        grasp: { spent: 2 * heardMicros(30), held: 0 },
+        grasp: 2 * heardMicros(30),
         sent: [1, 1],
         events: [heardEvent, heardEvent],
       });

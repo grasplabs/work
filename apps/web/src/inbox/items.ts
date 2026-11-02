@@ -9,7 +9,11 @@ import type {
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
-import type { GoLiveItem, WorkflowGoLiveItem } from "@grasp-os/shared/waiting";
+import type {
+  BindingApprovalItem,
+  GoLiveItem,
+  WorkflowGoLiveItem,
+} from "@grasp-os/shared/waiting";
 import { i18n } from "@lingui/core";
 import { ph, plural, t } from "@lingui/core/macro";
 
@@ -54,12 +58,14 @@ export type InboxKind =
   | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
+  | "revokedPackage"
+  | "bindingApproval"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
-  | { kind: "independentWorkflow"; workflow: string }
+  | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -76,6 +82,7 @@ export type InboxSource =
   | { type: "screens"; waiting: ScreensWaiting }
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
+  | { type: "bindings"; item: BindingApprovalItem }
   | {
       type: "failed";
       notification: RunFailedNotification;
@@ -84,6 +91,7 @@ export type InboxSource =
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
+  | { type: "revoked"; notification: PackageRevokedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -132,6 +140,8 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
+  revokedPackage: "apps",
+  bindingApproval: "workflows",
   decision: "workflows",
 };
 
@@ -279,9 +289,9 @@ const outcomeItems = (
 /** A permission an App or agent asked for, which an admin grants or rejects. */
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
-    const { directory, exports } = pending;
+    const { directory } = pending;
     const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory, exports);
+    const object = objectOf(request, directory);
     const actions = formatList(request.actions);
     const who = t`${subject}: ${actions} on ${object}`;
     const { binding } = request;
@@ -445,6 +455,45 @@ const workflowGoLiveItems = (
     };
   });
 
+/**
+ * A version of a workflow whose bindings no admin approved, so its starts
+ * are refused: approved here, binding by binding, by an admin.
+ */
+const bindingItems = (
+  pending: readonly BindingApprovalItem[],
+  readAt: string
+): InboxItem[] =>
+  pending.map((item) => {
+    const { workflow, version, live, bindings } = item.pending;
+    const { name } = workflow;
+    const count = bindings.length;
+    return {
+      id: item.id,
+      kind: "bindingApproval",
+      title: t`Approve what ${name} reaches`,
+      context: name,
+      body: [
+        live
+          ? t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`
+          : t`Version ${version} of ${name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`,
+      ],
+      facts: [
+        { label: t`Version`, value: String(version) },
+        {
+          label: t`Waiting`,
+          value: plural(count, {
+            one: "# binding",
+            other: "# bindings",
+          }),
+        },
+      ],
+      about: { kind: "independentWorkflow", workflow: workflow.id },
+      date: readAt,
+      urgent: item.urgent,
+      source: { type: "bindings", item },
+    };
+  });
+
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -503,6 +552,58 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** Packages of an App or workflow revoked as malware: what the notification says of it. */
+type PackageRevokedNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "package_revoked" }
+>;
+
+/** What a revocation is about: its name and the page it is replaced on. */
+const revokedSubject = (
+  subject: PackageRevokedNotification["subject"]
+): { name: string; about: Target } =>
+  subject.type === "app"
+    ? {
+        name: subject.appName,
+        about: { kind: "engine", engine: subject.app },
+      }
+    : {
+        name: subject.workflowName,
+        about: { kind: "independentWorkflow", workflow: subject.workflow },
+      };
+
+/** Packages of an App or workflow the person builds or approved, revoked because one was reported as malware. */
+const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "package_revoked") {
+      return [];
+    }
+    const { at, advisory } = notification;
+    const { name, about } = revokedSubject(notification.subject);
+    const revoked = `${notification.package.name}@${notification.package.version}`;
+    return [
+      {
+        id: `revoked:${notification.id}`,
+        kind: "revokedPackage",
+        title: t`Packages of ${name} were revoked as malware`,
+        context: name,
+        body: [
+          t`${revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of ${name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved.`,
+        ],
+        facts: [
+          { label: t`Package`, value: revoked },
+          { label: t`Advisory`, value: advisory },
+          { label: t`Revoked`, value: formatDateTime(at) },
+        ],
+        about,
+        forWhom: { person: me },
+        date: at,
+        urgent: true,
+        source: { type: "revoked", notification },
+      },
+    ];
+  });
+
 /** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
 const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -517,9 +618,15 @@ const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         title: t`The schedule of ${workflowName} stopped`,
         context: workflowName,
         body: [
-          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time.`,
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time.`,
         ],
         facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
+        // Its Triggers tab, where its owner turns it on again.
+        about: {
+          kind: "independentWorkflow",
+          workflow: notification.workflow,
+          tab: "triggers",
+        },
         forWhom: { person: me },
         date: at,
         urgent: false,
@@ -591,6 +698,9 @@ export const inboxItems = (
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
   const versions = readyOf(waiting.versions) ?? [];
   const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
+  const bindings = decidesRequests(viewer)
+    ? (readyOf(waiting.bindings) ?? [])
+    : [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
       const app =
@@ -633,9 +743,11 @@ export const inboxItems = (
     ...screenItems(screens, readAt),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
+    ...bindingItems(bindings, readAt),
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
+    ...(failed === undefined ? [] : revokedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };
@@ -654,6 +766,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.decisions,
     waiting.workflowGoLives,
     waiting.heldStarts,
+    waiting.bindings,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

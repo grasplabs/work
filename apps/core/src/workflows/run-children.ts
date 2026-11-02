@@ -36,7 +36,7 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 //   `maxModelCalls` bounds only that run, so every model call names the
 //   lineage's root (resource-calls.ts, `callModel`), and the model ledger
 //   holds the lineage's requests, every run's together, to the quota
-//   policy's `lineageModelRequests` (model-budgets.ts). A workflow bound to itself stops at the
+//   policy's `lineageModelRequests` (model-spend.ts). A workflow bound to itself stops at the
 //   nesting limit. Each task runs at most once a run, so a run starts at
 //   most one child per `run` task.
 // - A start retried, or its answer lost. The child's lineage slot is

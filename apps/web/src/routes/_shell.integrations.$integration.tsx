@@ -1,4 +1,4 @@
-import type { CatalogTool } from "@grasp-os/shared/connect";
+import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -36,6 +36,10 @@ import type {
   IntegrationState,
 } from "../connections/integrations.ts";
 import { OfferSwitch } from "../connections/offer-switch.tsx";
+import {
+  changeableConnectionOf,
+  ToolPermissions,
+} from "../connections/tool-permissions.tsx";
 import {
   WorkflowsCount,
   WorkflowsUsing,
@@ -157,15 +161,26 @@ const allowedToolsOf = (
     : undefined;
 };
 
-/** What its tools can do, as its provider declares them, reads first. */
+/** The connection whose tools the person may change here, and whether they are staff. */
+interface Changeable {
+  connection: ListedConnection;
+  staff: boolean;
+}
+
+/**
+ * What its tools can do, as its provider declares them, reads first: with
+ * a switch each where the person may change which a connection allows.
+ */
 const ToolList = ({
   tools,
   app,
   allowed,
+  changeable,
 }: {
   tools: Loaded<CatalogTool[]>;
   app: string;
   allowed: ReadonlySet<string> | undefined;
+  changeable: Changeable | undefined;
 }) => {
   const { i18n } = useLingui();
   if (tools.state !== "ready") {
@@ -176,6 +191,15 @@ const ToolList = ({
       <p className="text-muted-foreground">
         <Trans>{app} has no tools.</Trans>
       </p>
+    );
+  }
+  if (changeable !== undefined) {
+    return (
+      <ToolPermissions
+        connection={changeable.connection}
+        staff={changeable.staff}
+        tools={tools.data}
+      />
     );
   }
   return (
@@ -215,11 +239,13 @@ const Tools = ({
   catalog,
   app,
   allowed,
+  changeable,
 }: {
   tools: Promise<Loaded<CatalogTool[]>> | undefined;
   catalog: Loaded<unknown>;
   app: string;
   allowed: ReadonlySet<string> | undefined;
+  changeable: Changeable | undefined;
 }) => {
   const { i18n } = useLingui();
   if (tools === undefined && catalog.state !== "ready") {
@@ -236,7 +262,14 @@ const Tools = ({
   }
   return (
     <Await fallback={<LoadingLines />} promise={tools}>
-      {(loaded) => <ToolList allowed={allowed} app={app} tools={loaded} />}
+      {(loaded) => (
+        <ToolList
+          allowed={allowed}
+          app={app}
+          changeable={changeable}
+          tools={loaded}
+        />
+      )}
     </Await>
   );
 };
@@ -337,6 +370,17 @@ const AccountCard = ({
   );
 };
 
+/** What `identity` may change of `integration`'s tools here, if anything. */
+const changeableOf = (
+  integration: Integration,
+  identity: Identity
+): Changeable | undefined => {
+  const connection = changeableConnectionOf(integration, identity);
+  return connection === undefined
+    ? undefined
+    : { connection, staff: identity.staff };
+};
+
 const Overview = ({
   integration,
   tools,
@@ -372,6 +416,7 @@ const Overview = ({
         allowed={allowedToolsOf(integration)}
         app={integration.name}
         catalog={catalog}
+        changeable={changeableOf(integration, identity)}
         tools={tools}
       />
     </section>

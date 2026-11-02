@@ -25,6 +25,7 @@ import type { AttemptCall } from "./attempt-calls.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
+import { engineCall } from "./engine-asks.ts";
 import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import { runFixtureWorkflow } from "./fixture-runs.ts";
@@ -37,7 +38,6 @@ import {
 } from "./host.ts";
 import type {
   AiCalls,
-  BusyRefusals,
   FailedStep,
   HostHooks,
   HostedRun,
@@ -45,7 +45,11 @@ import type {
 } from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { accountOf, admitAttempt } from "./quotas.ts";
-import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import type {
+  ActionModelCalls,
+  ScopeFences,
+  TriedOnceMarks,
+} from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { childRunsOf } from "./run-children.ts";
 import { requireRunEvidenceReadable } from "./run-evidence.ts";
@@ -217,37 +221,48 @@ const testRetryDelayOf = (env: Env): number | undefined => {
 /** The engine's `step`, as the host and core's own workflows take it. */
 const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
   const delay = testRetryDelayOf(env);
+  // Each call told to the ask a host handles, if any, as it is made
+  // (engine-asks.ts).
   return {
     do: async (name, config, fn) =>
-      await step.do(
-        name,
-        delay === undefined || config.retries === undefined
-          ? config
-          : { ...config, retries: { ...config.retries, delay } },
-        fn
+      await engineCall(
+        async () =>
+          await step.do(
+            name,
+            delay === undefined || config.retries === undefined
+              ? config
+              : { ...config, retries: { ...config.retries, delay } },
+            fn
+          )
       ),
     sleep: async (name, duration) => {
-      await step.sleep(name, duration);
+      await engineCall(async () => {
+        await step.sleep(name, duration);
+      });
     },
     sleepUntil: async (name, timestamp) => {
-      await step.sleepUntil(name, timestamp);
+      await engineCall(async () => {
+        await step.sleepUntil(name, timestamp);
+      });
     },
     waitForEvent: async (name, options) =>
-      await step.waitForEvent(name, options),
+      await engineCall(async () => await step.waitForEvent(name, options)),
     waitForMatch: async (name, options) =>
-      await step.waitForMatch(name, options),
+      await engineCall(async () => await step.waitForMatch(name, options)),
+    busy: () => step.busy(),
   };
 };
 
 /**
- * What a run has of its own object beside the engine's journal: where it
- * keeps each step's busy-budget refusal, and the engine's lease of each
- * step's attempt, read from the journal as it is now (run-object.ts).
+ * What a run has of its own object beside the engine's journal: the
+ * engine's lease of each step's attempt, read from the journal as it is
+ * now (run-object.ts).
  */
 export interface RunMemory {
-  busyRefusals: BusyRefusals;
   /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
   triedOnce?: TriedOnceMarks;
+  /** The settled scopes of its JSON workflow's items and branches (resource-host.ts). */
+  fences?: ScopeFences;
   /** The model calls its JSON workflow's actions made (resource-host.ts). */
   modelCalls?: ActionModelCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
@@ -366,7 +381,6 @@ const runWorkflow = async (
     const host = new RunHost(env, step, run, {
       stepFailed,
       attemptCall: trackAttemptCalls(calls),
-      busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
       tampered: (error) => {

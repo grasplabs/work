@@ -426,8 +426,8 @@ const keyedUnderRun =
  * The invocation of `release` (the run's own App, at the version the run
  * is pinned to) for a step of `caller`'s run: as the person the run acts
  * for, in workflow mode, with the run as its work context, and with the
- * run as whoever the audit log names and whose budgets a model request
- * counts against besides its binding's (`BindingCaller.actor`), for the
+ * run as whoever the audit log names and whose spend a model request
+ * counts in besides its binding's (`BindingCaller.actor`), for the
  * call of `operation`, its public function's path. Nothing of it comes
  * from the run's isolate.
  */
@@ -1387,11 +1387,16 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
 };
 
 /**
- * Whether `request` calls a workflow reference's decision queries: read
- * again when a decision of one of the App's runs changes, for whomever it
- * asks (run-changes.ts, `tellDecisionFollowers`).
+ * Whether `request` calls a workflow reference's decision queries, or
+ * watches a run (screen-workflows.ts), which a reviewer may watch only
+ * while one of its decisions asks them: read again when a decision of one
+ * of the App's runs changes, for whomever it asks (run-changes.ts,
+ * `tellDecisionFollowers`).
  */
 export const callsDecisionQuery = (request: unknown): boolean => {
+  if (watchesWorkflow(request)) {
+    return true;
+  }
   try {
     return isDecisionQueryPath(
       readFunctionRequest(request).reference.contractId

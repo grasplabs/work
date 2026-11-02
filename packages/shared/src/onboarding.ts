@@ -290,6 +290,11 @@ export interface OnboardingView {
    * yet. Links then go out by hand alone.
    */
   mailSends: boolean;
+  /**
+   * The domain Grasp's mail comes from (`MAIL_FROM`'s address), for the
+   * admin to let through their mail filter; null while no sender is set.
+   */
+  mailDomain: string | null;
 }
 
 /**

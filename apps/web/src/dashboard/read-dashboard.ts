@@ -93,7 +93,8 @@ export const readWaiting = async (
     const notifications = read.items.flatMap((item) =>
       item.kind === "failedRun" ||
       item.kind === "openQuestion" ||
-      item.kind === "stoppedSchedule"
+      item.kind === "stoppedSchedule" ||
+      item.kind === "revokedPackage"
         ? [item.notification]
         : []
     );
@@ -160,6 +161,13 @@ export const readWaiting = async (
     workflowGoLives: partOf(feed, "workflowGoLives", (read) =>
       ofKind(read, "workflowGoLive")
     ),
+    ...(decidesRequests(identity)
+      ? {
+          bindings: partOf(feed, "bindings", (read) =>
+            ofKind(read, "bindingApproval")
+          ),
+        }
+      : {}),
   };
 };
 

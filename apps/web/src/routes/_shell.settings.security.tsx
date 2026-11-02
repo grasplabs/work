@@ -1,7 +1,6 @@
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LaptopIcon, SmartphoneIcon } from "lucide-react";
@@ -183,18 +182,6 @@ const Security = () => {
       )}
 
       {chat === undefined ? null : <ChatAccountsSection chat={chat} />}
-
-      <SettingsSection
-        description={t`Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it.`}
-        title={t`AI apps`}
-      >
-        <SettingsRow
-          description={t`Off. Nothing of this workspace is kept for an AI app.`}
-          label={t`Link for AI apps`}
-        >
-          <Switch aria-label={t`Link for AI apps`} checked={false} disabled />
-        </SettingsRow>
-      </SettingsSection>
     </>
   );
 };

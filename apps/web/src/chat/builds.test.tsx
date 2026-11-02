@@ -63,7 +63,6 @@ const review: VersionReview = {
   serverFiles: [],
   migrations: [],
   workflows: [],
-  exports: [],
   permissions: [],
   grants: [],
   tests: { status: "none", failures: [] },

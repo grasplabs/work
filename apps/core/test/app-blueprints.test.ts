@@ -161,14 +161,13 @@ const mailboxOf = async (owner: Person): Promise<string> => {
 // sleeps; sixty seconds is room for a slow runner, as the other tests
 // that release Apps give theirs.
 describe("blueprints", { timeout: 60_000 }, () => {
-  it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or another App", async () => {
+  it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or a workflow", async () => {
     const [owner, maker] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
     ]);
     const admin = await signedInApi(idp, "admin");
     const source = await notesApp(owner);
-    const hidden = await notesApp(owner);
     const [{ collectionId: handbook }, { collectionId: later }] =
       await Promise.all([
         collectionWithNote(admin.api, {
@@ -206,12 +205,6 @@ describe("blueprints", { timeout: 60_000 }, () => {
         object: { type: "workflow", workflowId: flow.id },
         actions: ["start"],
         binding: "REPORT",
-      },
-      {
-        subject: { type: "app", appId: source },
-        object: { type: "app", appId: hidden },
-        actions: ["read"],
-        binding: "HIDDEN_CRM",
       },
     ];
     for (const request of asked) {
@@ -260,7 +253,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
       ),
       // Nothing it answers or lists names another App, a connection or a
       // workflow.
-      names: [hidden, mail.id, mailbox, flow.id].filter(
+      names: [mail.id, mailbox, flow.id].filter(
         (id) =>
           JSON.stringify(created).includes(id) ||
           JSON.stringify(theirs).includes(id)

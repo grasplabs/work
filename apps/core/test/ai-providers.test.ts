@@ -991,7 +991,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const failed = await outcome(
         models(env).call({
           ...fields,
-          binding: { app: work.context.appId, alias: "writer", budget: null },
+          binding: { app: work.context.appId, alias: "writer" },
           // The provider's wait outlasts it: never asked again either.
           timeoutMs: 5000,
         })
@@ -1494,26 +1494,6 @@ describe("AI providers", { timeout: 60_000 }, () => {
         lastFailure: "auth",
         lastStatus: 401,
       });
-    });
-
-    it("sends nothing a budget can't hold", async () => {
-      const key = await connected(each);
-      const budgeted: Env = {
-        ...env,
-        MODEL_GATEWAY: { budgets: { user: { limit: 0.01 } } },
-      };
-
-      const held = await outcome(
-        models(budgeted).call(await callOf(each.model))
-      );
-
-      expect(held).toBe(
-        // An endpoint of the organization's own has no price to bound.
-        each.provider === "openai-compatible"
-          ? "model.unpriced"
-          : "model.over_budget"
-      );
-      await expect(carrying(key)).resolves.toStrictEqual([]);
     });
   });
 });

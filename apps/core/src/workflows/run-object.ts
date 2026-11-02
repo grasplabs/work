@@ -1,6 +1,5 @@
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
@@ -15,84 +14,23 @@ import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
-import type { AiCalls, BusyRefusals } from "./host.ts";
+import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
-import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import type {
+  ActionModelCalls,
+  ScopeFences,
+  TriedOnceMarks,
+} from "./resource-host.ts";
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import { wakeQueueFronts } from "./share-wakes.ts";
 
 /**
- * Where a run keeps each step's last busy-budget refusal (host.ts): a
- * table of its object's SQLite, beside the engine's journal, as each retry
- * of a step may run in an activation of its own. The engine's removal of
- * a run (a delete, or its purge once retention ends) drops every table of
- * the object but its tombstones (workerflow's `removeJournal`), this one
- * with them: nothing of the run outlives its retention.
- */
-const busyTable = "grasp_busy_refusals";
-
-/** A kept refusal's details, as the gateway gave them. */
-const busyDetailsSchema = errorPayloadSchema.shape.details.unwrap();
-
-/** The run's busy-budget refusals, kept with it (`busyTable`). */
-export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
-  get: (step) => {
-    const exists =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-          busyTable
-        )
-        .toArray().length > 0;
-    const [row] = exists
-      ? sql
-          .exec<{ at: number; details: string | null }>(
-            `SELECT at, details FROM ${busyTable} WHERE step = ?`,
-            step
-          )
-          .toArray()
-      : [];
-    return (
-      row && {
-        at: row.at,
-        details:
-          row.details === null
-            ? undefined
-            : busyDetailsSchema.parse(JSON.parse(row.details)),
-      }
-    );
-  },
-  set: (step, { at, details }) => {
-    // Only while the run is there: a late call of an activation whose run
-    // was removed leaves nothing behind.
-    const live =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'"
-        )
-        .toArray().length > 0;
-    if (!live) {
-      return;
-    }
-    sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${busyTable} (step TEXT PRIMARY KEY, at INTEGER NOT NULL, details TEXT)`
-    );
-    sql.exec(
-      `INSERT INTO ${busyTable} (step, at, details) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET at = excluded.at, details = excluded.details`,
-      step,
-      at,
-      details === undefined ? null : JSON.stringify(details)
-    );
-  },
-});
-
-/**
  * Where a run keeps the attempts of its steps tried once (resource-host.ts,
  * `TriedOnceMarks`): a table of its object's SQLite beside the engine's
- * journal, dropped with it as `busyTable` is. Only the host writes it,
- * never the run's code.
+ * journal, dropped with it by the engine's removal of the run. Only the
+ * host writes it, never the run's code.
  */
 const triedOnceTable = "grasp_tried_once";
 
@@ -159,10 +97,92 @@ const keptFailureSchema = z.object({
   code: z.string().optional(),
 });
 
+/**
+ * The settled scopes of the run's items and branches (resource-host.ts,
+ * `ScopeFences`): a table of its object's SQLite beside the engine's
+ * journal, dropped with it, one row a scope of the run's current
+ * execution, so a restarted run settles its scopes anew. Only the host
+ * writes it, never the run's code.
+ */
+const fencesTable = "grasp_scope_fences";
+
+/** The run's current execution, as the engine keeps it. */
+const executionOf = (sql: SqlStorage): string | undefined => {
+  if (!runIsThere(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ execution: string }>("SELECT execution_uid AS execution FROM run")
+    .toArray();
+  return row?.execution;
+};
+
+/** Whether the table of settled scopes is there yet. */
+const hasFences = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      fencesTable
+    )
+    .toArray().length > 0;
+
+/** The branch scope `place` of `execution` settled on, if it did. */
+const fenceOf = (
+  sql: SqlStorage,
+  execution: string,
+  place: string
+): number | undefined => {
+  if (!hasFences(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ branch: number }>(
+      `SELECT branch FROM ${fencesTable} WHERE execution = ? AND place = ?`,
+      execution,
+      place
+    )
+    .toArray();
+  return row?.branch;
+};
+
+/** The run's settled scopes, kept with it (`fencesTable`). */
+export const fencesIn = (sql: SqlStorage): ScopeFences => ({
+  settle: (place, branch) => {
+    const execution = executionOf(sql);
+    if (execution === undefined) {
+      return branch;
+    }
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${fencesTable} (execution TEXT NOT NULL, place TEXT NOT NULL, branch INTEGER NOT NULL, PRIMARY KEY (execution, place))`
+    );
+    // The first writer's: a scope settles once, whoever asks again.
+    sql.exec(
+      `INSERT OR IGNORE INTO ${fencesTable} (execution, place, branch) VALUES (?, ?, ?)`,
+      execution,
+      place,
+      branch
+    );
+    return fenceOf(sql, execution, place) ?? branch;
+  },
+  settled: (place) => {
+    const execution = executionOf(sql);
+    return execution === undefined ? undefined : fenceOf(sql, execution, place);
+  },
+});
+
 /** The run's tried-once attempts, kept with it (`triedOnceTable`). */
 export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
   markUnstarted: (key, attempt) => {
     writeTriedOnce(sql, key, attempt, { unstarted: 1 });
+  },
+  markStarted: (key, attempt) => {
+    if (hasTriedOnce(sql)) {
+      sql.exec(
+        `UPDATE ${triedOnceTable} SET unstarted = 0 WHERE key = ? AND attempt = ?`,
+        key,
+        attempt
+      );
+    }
   },
   unstarted: (key, attempt) => triedOnceRow(sql, key, attempt)?.unstarted === 1,
   keepFailure: (key, attempt, error) => {
@@ -227,7 +247,7 @@ export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
 /**
  * Where a run's object keeps that the run was cancelled (`markCancelled`):
  * a table of its SQLite beside the engine's journal, which the engine's
- * removal of the run drops with it, as `busyTable`.
+ * removal of the run drops with it, as `triedOnceTable`.
  */
 const cancelTable = "grasp_run_cancelled";
 
@@ -359,8 +379,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           return null;
         }
         return await runPinned(this.env, pin, event, step, {
-          busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           triedOnce: triedOnceIn(this.ctx.storage.sql),
+          fences: fencesIn(this.ctx.storage.sql),
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),

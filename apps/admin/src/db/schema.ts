@@ -145,13 +145,6 @@ export const clients = sqliteTable(
      */
     stripeCustomerId: text("stripe_customer_id"),
     /**
-     * The client's proposal in Grasp's Rooms: its room's id, as someone at
-     * Grasp linked it by hand (src/proposal/link.ts), never matched by
-     * name. Only the id is kept; the room and what was signed in it are
-     * read each time (src/proposal/rooms.ts). Null until it is linked.
-     */
-    roomsProjectId: text("rooms_project_id"),
-    /**
      * The client's company in Grasp's Attio: its record's id, as someone at
      * Grasp linked it by hand (src/crm/link.ts), never matched by name or
      * domain. Only the id is kept; the company, its people and its deals
@@ -589,20 +582,13 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
- * The platform's own settings that staff choose (src/platform-settings.ts):
- * one row, `id` 1. Which organization is Grasp's own is chosen on
- * Platform, audited; Grasp's own public settings live in wrangler.jsonc
- * per stage, and secrets in the stage's 1Password Environment.
+ * Unused: Ask Grasp calls Grasp's own AI directly, so nothing reads or
+ * writes this table any more. It stays for one release because "Deploy
+ * platform" applies migrations before the new admin is live, and the admin
+ * still running needs it (expand, then contract). A later release drops it.
  */
 export const platformSettings = sqliteTable("platform_settings", {
-  /** Always 1: there is one platform. */
   id: integer().primaryKey(),
-  /**
-   * Grasp's own organization: the client whose core answers Ask Grasp
-   * (src/admin/ask.ts). Null until staff choose one. Not a reference: a
-   * client discarded later leaves it naming one the admin no longer has,
-   * which Ask Grasp says.
-   */
   graspClientId: text("grasp_client_id"),
   updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at").notNull(),

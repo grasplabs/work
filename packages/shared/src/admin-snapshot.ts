@@ -272,8 +272,6 @@ export const adminStephenSignalsSchema = z.object({
   answered: z.int().nonnegative(),
   /** Turns that ended in Stephen's line for a failure. */
   failed: z.int().nonnegative(),
-  /** Turns refused for the company's AI budget. */
-  overBudget: z.int().nonnegative(),
   /** Turns refused as the model or the agent was busy. */
   busy: z.int().nonnegative(),
   /** Answers or lines the platform didn't take. */
@@ -345,8 +343,8 @@ export const adminSnapshotSchema = z.object({
     openedAt: isoTime.nullable(),
   }),
   /**
-   * The contract and its papers: null until core holds them, from Rooms
-   * and Stripe, with the issue that brings them.
+   * The contract and its papers: null until core holds them, with the
+   * issue that brings them.
    */
   contract: notYetHeld,
   /** The organization's members, by name. */

@@ -1,14 +1,20 @@
+import { adminOrgOf } from "@grasp-os/shared/admin/admin-snapshot-adapter";
 import { adminViewOf } from "@grasp-os/shared/admin/admin-view";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-// The admin's own sample organizations, as the model's tests count them:
-// core sends no drawn work yet, so only they have work to list.
-import { SAMPLE_ORGS } from "../../../packages/shared/test/admin/fixtures/admin-sample.ts";
+// A small company as core answers for it, with Sales's orders drawn from its
+// interviews: core sends the admin no drawn work yet.
+import {
+  bothTalked,
+  client,
+  orders,
+} from "../../../packages/shared/test/admin/fixtures/bakkerij.ts";
 import { OrgWorkflows } from "../src/admin/workflows.tsx";
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
@@ -38,8 +44,17 @@ const liveClient = async () => {
   return { clientId, account };
 };
 
-const { 0: noordkade, 3: hartog } = SAMPLE_ORGS;
-const day = "2026-10-02";
+const day = "2026-10-14";
+
+/** Bakkerij with its orders drawn, and what Grasp counted as known by hand. */
+const drawnView = (counted: string[], work = orders): AdminView => {
+  const { org, state } = adminOrgOf(bothTalked, client, {
+    works: [work],
+    rules: STARTING_ORG_RULES,
+    counted,
+  });
+  return adminViewOf(org, state, day);
+};
 
 /** The section as it renders for `view`. */
 const sectionOf = (view: AdminView): string =>
@@ -96,53 +111,61 @@ describe("an organization's workflows", () => {
   });
 
   it("lists every piece of work with how far it is known, who talked, the steps described and what is still missing", () => {
-    const view = adminViewOf(noordkade, noordkade.seed, day);
+    const view = drawnView([]);
     const html = sectionOf(view);
-    const papers = view.works.find((work) => work.id === "papers");
-    const intake = view.works.find((work) => work.id === "intake");
-    if (!(papers && intake)) {
-      throw new Error("Noordkade's sample lacks its work");
-    }
     const team = (id: string) =>
       view.teams.find((each) => each.team.id === id)?.team.name ?? "";
 
     expect({
       figures: [
-        "workflows known 5 of 20",
-        "still being mapped 15",
-        "things still missing 32",
+        "workflows known 0 of 1",
+        "still being mapped 1",
+        "things still missing 5",
       ].map((text) => textOf(html).includes(text)),
       rows: (html.match(/<tr/gu) ?? []).length,
-      papers: textOf(rowOf(html, papers.work.name)),
-      intake: textOf(rowOf(html, intake.work.name)),
+      orders: textOf(rowOf(html, orders.name)),
       teams: html.includes('aria-label="Team"'),
       rules: html.includes("When one counts as known"),
     }).toStrictEqual({
       figures: [true, true, true],
-      // The head's row and one for each piece of work.
-      rows: 21,
-      papers: `${papers.work.name} ${team(papers.team)} Known 6 of 13 5 of 5 1 thing missing Known`,
-      intake: `${intake.work.name} ${team(intake.team)} Being mapped 2 of 5 2 of 5 5 things missing Being mapped`,
-      teams: true,
+      // The head's row and one for the piece of work.
+      rows: 2,
+      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped`,
+      // Its work is all one team's: no column to tell teams apart.
+      teams: false,
       rules: true,
     });
   });
 
   it("marks work Grasp counted as known by hand, and nothing missing where everyone described it", () => {
-    const view = adminViewOf(hartog, hartog.seed, day);
-    const html = sectionOf(view);
-    const returns = view.works.find((work) => work.id === "returns");
-    const quotes = view.works.find((work) => work.id === "quotes");
-    if (!(returns && quotes)) {
-      throw new Error("Hartog's sample lacks its work");
-    }
+    const html = sectionOf(drawnView(["orders"]));
+    const everyone = sectionOf(
+      drawnView([], {
+        ...orders,
+        doers: ["lisa", "tom"],
+        drawn: orders.drawn && {
+          ...orders.drawn,
+          starts: "A shop calls.",
+          right: "The bakery has the order.",
+          next: "The bakery.",
+          // Both said what right looks like and who gets it next.
+          told: Object.fromEntries(
+            Object.entries(orders.drawn.told).map(([person, told]) => [
+              person,
+              { ...told, right: true, next: true },
+            ])
+          ),
+          open: [],
+        },
+      })
+    );
 
     expect({
-      known: textOf(html).includes("workflows known 11 of 11"),
-      returns: textOf(rowOf(html, returns.work.name)).includes(
+      known: textOf(html).includes("workflows known 1 of 1"),
+      byHand: textOf(rowOf(html, orders.name)).includes(
         "Counted as known by Grasp"
       ),
-      quotes: textOf(rowOf(html, quotes.work.name)).includes("Nothing missing"),
-    }).toStrictEqual({ known: true, returns: true, quotes: true });
+      nothing: textOf(rowOf(everyone, orders.name)).includes("Nothing missing"),
+    }).toStrictEqual({ known: true, byHand: true, nothing: true });
   });
 });

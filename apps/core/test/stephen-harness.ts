@@ -33,10 +33,10 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { workspace } from "../src/durable-objects.ts";
-import { configureObject, model, setObjectEnv } from "./agent-chat.ts";
+import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
-import { brainBudgetDay, brainBudgetMonth, charged } from "./brain-harness.ts";
+import { brainBudgetMonth, charged } from "./brain-harness.ts";
 import type { BrainModelSetup } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
 import { transcriptOf } from "./brain-stub-model.ts";
@@ -732,7 +732,7 @@ const providerOf = async (respond: StephenProvider, setup: BrainModelSetup) => {
     { models: [setup.model] }
   );
   return {
-    sent: { requests, rules: setup.rules },
+    sent: { requests },
     setTurn: (next: StephenTurn) => {
       turn = next;
     },
@@ -740,16 +740,9 @@ const providerOf = async (respond: StephenProvider, setup: BrainModelSetup) => {
 };
 type Provider = Awaited<ReturnType<typeof providerOf>>;
 
-/** Gives `stub` the run's model rules, its calls counted in the run's month. */
-const pointAt = async (
-  stub: ReturnType<typeof workspace>,
-  sent: Provider["sent"]
-) => {
-  await configureObject(stub, { rules: sent.rules });
-  await setObjectEnv(stub, {
-    MODEL_BUDGET_MONTH: brainBudgetMonth,
-    MODEL_BUDGET_DAY: brainBudgetDay,
-  });
+/** Has `stub`'s calls counted in the run's month. */
+const pointAt = async (stub: ReturnType<typeof workspace>) => {
+  await setObjectEnv(stub, { MODEL_BUDGET_MONTH: brainBudgetMonth });
 };
 
 const callDetail = z
@@ -821,7 +814,7 @@ const observeCase = async (
     mailbox: company.mailbox,
     suite,
   };
-  await pointAt(place.stub, sent);
+  await pointAt(place.stub);
   if (breaker?.mistake !== undefined) {
     await makeMistake(company, item.persona, breaker.mistake);
   }
@@ -921,7 +914,7 @@ const judgeCase = async (
   // The judge asks in its own object, the admin's, with no grants at all.
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
-  await pointAt(stub, provider.sent);
+  await pointAt(stub);
   const chat = await stub.createChat(
     `Judge ${item.id}`,
     company.admin.userId,
@@ -1015,7 +1008,7 @@ export interface StephenRunOptions {
   judge?: boolean;
 }
 
-const testModelSetup: BrainModelSetup = { model, rules: {} };
+const testModelSetup: BrainModelSetup = { model };
 
 /** Digest of the cases as run: what a comparison of two runs depends on. */
 const casesDigest = async (cases: readonly StephenCase[]): Promise<string> =>

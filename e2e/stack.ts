@@ -65,9 +65,8 @@ export const connectConfig = path.join(
  * The AI providers the stack's organization connects before any test, as
  * an admin does in Settings (`signInCast`, e2e/people.ts), and the models
  * it chooses: one that doesn't think, its default, and one that does, so
- * the composer offers how hard it thinks. Both have list prices, which
- * the stack's budgets need (playwright.config.ts): an OpenAI-compatible
- * endpoint's models have none, so no budget admits them. Connect sends
+ * the composer offers how hard it thinks. Both have list prices, so AI
+ * spend shows what they cost. Connect sends
  * their requests to the stack's fake providers, never to Mistral or
  * Anthropic (e2e/model-fake.ts), which refuse the key (401), as a
  * provider refuses one it doesn't know: the chat test shows that as the

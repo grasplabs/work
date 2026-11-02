@@ -8,13 +8,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { checkFiles } from "../src/agent-builds.ts";
 import { queuedJob } from "../src/build-admission.ts";
-import {
-  codeResults,
-  codeStep,
-  pausedReply,
-  configureObject,
-  says,
-} from "./agent-chat.ts";
+import { codeResults, codeStep, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   desk,
@@ -72,7 +66,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
               };`),
             says("It waits its turn.")
           );
-          await configureObject(chat.stub);
           await chat.ask("How's that build?");
           const results = await codeResults(chat.stub, chat.chat.id);
           expect(results.at(-1)?.text).toMatch(queuedForClient);

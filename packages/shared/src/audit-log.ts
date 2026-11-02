@@ -57,6 +57,8 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // An admin changing which tools a connected app allows (GRA-993).
+  { action: "connection.tools", type: "config" },
   // Connect sending, editing or deleting a message as the client's own bot
   // on a chat platform, or refusing a request core's chat adapters sent.
   { action: "channel.call", type: "action" },
@@ -128,22 +130,17 @@ const typeRules: readonly {
   // Its calls that can change something (a connector call, an App's
   // export) record themselves under their own actions.
   { action: "agent.call", type: "read" },
-  // A spending budget crossing its alert threshold or running out: filed
-  // with the budgets it belongs to, not as a model call.
-  { action: "model.budget", type: "config" },
-  // A company admin setting or removing a limit per person (core's
-  // src/model-ledger.ts): configuration, not a model call.
-  { action: "model.limit", type: "config" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
   // A chat or run whose context read restricted sources, and so is held to
   // them, and a staff member signing in to the deployment.
   { action: "context.restricted", type: "permission" },
   { action: "staff.session", type: "permission" },
-  // A call of another App's export, by the calling App (`app.call`) and
-  // as the called App records it (`app.called`): a read for an export
-  // that only reads, and an action for one that writes, or one refused
-  // before its access was known.
+  // A call of another App's function through an app resource, by the
+  // calling App (`app.call`), and as the v1 server's called App recorded
+  // it (`app.called`, read from older entries): a read for one that only
+  // reads, and an action for one that writes, or one refused before its
+  // access was known.
   // An App's server code refused a use its sealed manifest doesn't allow
   // (core's src/operations.ts): a function, resource or workflow it
   // doesn't list, or a request its declaration doesn't allow.
@@ -345,6 +342,15 @@ export interface AuditPage {
 export const auditExportFormatSchema = z.enum(["json", "csv"]);
 export type AuditExportFormat = z.infer<typeof auditExportFormatSchema>;
 
+/**
+ * How an export reads: `archive` takes in what retention moved to the
+ * archive, as `export` describes. Without it, what the log holds alone.
+ */
+export const auditExportOptionsSchema = z
+  .strictObject({ archive: z.boolean().optional() })
+  .optional();
+export type AuditExportOptions = z.input<typeof auditExportOptionsSchema>;
+
 /** Why the chain breaks at a position: see core's src/audit-chain.ts. */
 export type ChainBreak = "missing" | "unlinked" | "altered";
 
@@ -428,10 +434,22 @@ export interface AuditApi {
    * with `audit.export_too_large` past {@link auditExportMaxRecords}, and
    * with `audit.export_interrupted` if retention archives events it hasn't
    * read yet.
+   *
+   * With `{ archive: true }` (`archive=1` on the download), it takes in
+   * the archive too: every record, archived or held, in one order, by its
+   * position in the chain, oldest first, so archived ones come before the
+   * ones the log holds. Retention archiving under it is no interruption:
+   * what moved is read from the archive. A stretch purged by archive
+   * retention has nothing left: it is passed over, and JSON names it in
+   * `archive.purged` (`[{ from, through }]`, positions). An archived
+   * stretch that can't be read stops it with `audit.archive_unreadable`.
+   * The export is recorded with `archive: true` and `purged`, how many
+   * purged stretches it passes over as it begins.
    */
   export: (
     filter: AuditFilter | undefined,
-    format: AuditExportFormat
+    format: AuditExportFormat,
+    options?: AuditExportOptions
   ) => Promise<ReadableStream<Uint8Array>>;
   /** One step of verifying the whole chain, archived stretches included. */
   verify: (after?: number) => Promise<ChainVerification>;
@@ -441,6 +459,27 @@ export interface AuditApi {
    * in the log: it reads what passes already recorded.
    */
   lastVerification: () => Promise<FullVerification | null>;
+  /**
+   * The archived events that match `filter`, newest first, from before
+   * `before`: what retention moved out of the log, while it is kept (until
+   * archive retention purges it). Each page reads one archived stretch, so
+   * it may hold none and still have a next one. Recorded as a search is,
+   * marked as of the archive. Refused with `audit.archive_unreadable` at a
+   * stretch whose archived copy can't be read.
+   */
+  searchArchive: (filter?: AuditFilter, before?: number) => Promise<AuditPage>;
+  /** How long Grasp keeps events and run details. Not recorded. */
+  retention: () => Promise<AuditRetention>;
+}
+
+/** How long Grasp keeps what it records, in days, as fixed in code. */
+export interface AuditRetention {
+  /** Events stay in the log, where a search finds them, then are archived. */
+  auditDays: number;
+  /** Events are kept in all, archive included, then purged. */
+  archiveDays: number;
+  /** A run keeps its details after it ends, then they are removed. */
+  runDays: number;
 }
 
 /**
@@ -461,4 +500,6 @@ export const auditErrors = defineErrorFamily({
     "Too many events for one export. Narrow the time range or the filter.",
   "audit.export_interrupted":
     "Older events were archived while exporting. Export again.",
+  "audit.archive_unreadable":
+    "Part of the audit log's archive can't be read. Verify the chain to see where.",
 });

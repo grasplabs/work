@@ -87,7 +87,7 @@ describe(isRetryable, () => {
       "operation.sandbox_unavailable",
       "mutation.concurrent_change",
       "connect.server_unavailable",
-      "model.budget_busy",
+      "model.queued",
       "operation.cpu_exceeded",
       "resource.declined",
     ];
@@ -99,7 +99,7 @@ describe(isRetryable, () => {
       "operation.sandbox_unavailable": true,
       "mutation.concurrent_change": true,
       "connect.server_unavailable": true,
-      "model.budget_busy": true,
+      "model.queued": true,
       "operation.cpu_exceeded": false,
       "resource.declined": false,
     });
