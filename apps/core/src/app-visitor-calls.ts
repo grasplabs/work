@@ -3,16 +3,20 @@ import {
   appVisitorGrantsSchema,
 } from "@grasp-os/shared/app-visitors";
 import type { AppVisitorGrants } from "@grasp-os/shared/app-visitors";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { loadRelease } from "./app-releases.ts";
 import { editableApp } from "./apps.ts";
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
-import { appVisitorGrants } from "./db/core/schema.ts";
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  storedEvent,
+} from "./audit-outbox.ts";
+import { appVisitorGrants, auditOutbox } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 
 // A visitor's calls of a published App's functions (app-visitors.ts for
@@ -119,7 +123,9 @@ export const appVisitorGrantsOf = async (
  * Grants visitors `functions` of App `app`'s current version, the whole set
  * at once, for its builders: each a public query or mutation of that
  * version (`visitor.invalid` otherwise). A call already running is held
- * to the new set before it commits.
+ * to the new set before it commits. Saved only while the grants are the
+ * ones it read: a save that raced another is refused
+ * (`visitor.grants_changed`).
  */
 export const setAppVisitorGrants = async (
   env: Env,
@@ -154,42 +160,52 @@ export const setAppVisitorGrants = async (
   const before = await grantedFunctions(env, found.id, version);
   const added = wanted.filter((path) => !before.includes(path));
   const removed = before.filter((path) => !wanted.includes(path));
-  if (added.length === 0 && removed.length === 0) {
-    return { version, functions: before };
-  }
   const db = drizzle(env.DB);
-  const now = new Date();
-  await auditedBatch(env, db, [
-    db
-      .delete(appVisitorGrants)
-      .where(
-        and(
-          eq(appVisitorGrants.appId, found.id),
-          eq(appVisitorGrants.version, version)
-        )
-      ),
-    ...wanted.map((path) =>
-      db.insert(appVisitorGrants).values({
-        appId: found.id,
-        version,
-        function: path,
-        grantedBy: by.userId,
-        grantedAt: now,
-      })
-    ),
-    // One event per function: a path fits an audit value (256 characters
-    // at most), a whole set of them doesn't.
-    ...[
-      ...added.map((path) => ["app.visitor_granted", path] as const),
-      ...removed.map((path) => ["app.visitor_ungranted", path] as const),
-    ].map(([action, path]) =>
-      outboxed(db, {
+  const now = Date.now();
+  // One event per function: a path fits an audit value (256 characters
+  // at most), a whole set of them doesn't.
+  const [first, ...rest] = [
+    ...added.map((path) => ["app.visitor_granted", path] as const),
+    ...removed.map((path) => ["app.visitor_ungranted", path] as const),
+  ].map(([action, path]) =>
+    createAuditEvent(
+      {
         actor: actorOf(by),
         action,
         target: { type: "app", id: found.id },
         detail: { version, function: path },
-      })
+      },
+      "core"
+    )
+  );
+  if (first === undefined) {
+    // Nothing to change.
+    return { version, functions: before };
+  }
+  const ofVersion = and(
+    eq(appVisitorGrants.appId, found.id),
+    eq(appVisitorGrants.version, version)
+  );
+  // Compare and set: the first event goes in only while the grants are
+  // still the ones read above, and everything else only if it went in. So
+  // a save that raced another changes nothing, and the events always name
+  // what was replaced.
+  const unchanged = sql`(SELECT coalesce(group_concat(${sql.raw("path")}, ' '), '') FROM (SELECT ${appVisitorGrants.function} AS ${sql.raw("path")} FROM ${appVisitorGrants} WHERE ${ofVersion} ORDER BY ${appVisitorGrants.function})) = ${before.join(" ")}`;
+  const won = storedEvent(first.id);
+  const [stored] = await auditedBatch(env, db, [
+    outboxedEventWhere(db, first, unchanged).returning({ id: auditOutbox.id }),
+    db.delete(appVisitorGrants).where(and(ofVersion, won)),
+    ...wanted.map((path) =>
+      db
+        .insert(appVisitorGrants)
+        .select(
+          sql`SELECT ${found.id}, ${version}, ${path}, ${by.userId}, ${now} WHERE ${won}`
+        )
     ),
+    ...rest.map((event) => outboxedEventWhere(db, event, won)),
   ]);
+  if (stored.length === 0) {
+    throw appVisitorErrors.create("visitor.grants_changed");
+  }
   return { version, functions: await grantedFunctions(env, found.id, version) };
 };

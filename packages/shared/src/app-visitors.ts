@@ -182,4 +182,6 @@ export const appVisitorErrors = defineErrorFamily({
   "visitor.list_changed":
     "Someone else changed who may visit this App while you were editing it. Reload the list and try again.",
   "visitor.not_granted": "This App doesn't let visitors do that.",
+  "visitor.grants_changed":
+    "Someone else changed what visitors may do in this App while you were editing it. Reload and try again.",
 });

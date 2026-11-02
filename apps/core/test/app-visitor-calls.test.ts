@@ -593,6 +593,52 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     });
   });
 
+  it("refuse a grant save that raced another, so the audit names exactly what the winner replaced", async () => {
+    const { builder, app } = await portal(newDomain());
+    await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    const sets = {
+      // Adds `portal.add`, keeping `portal.mine`.
+      grow: ["portal.add", "portal.mine"],
+      // Takes `portal.mine` away, granting `portal.secrets`.
+      swap: ["portal.secrets"],
+    };
+
+    let outcomes: unknown[] = [];
+    const events = await auditedDuring(async () => {
+      // At once: both read the grants as they were before either saves.
+      outcomes = await Promise.all([
+        outcome(builder.api.apps.setVisitorGrants(app, sets.grow)),
+        outcome(builder.api.apps.setVisitorGrants(app, sets.swap)),
+      ]);
+    });
+    const winner = outcomes[0] === "visitor.grants_changed" ? "swap" : "grow";
+    const expected = {
+      grow: { granted: ["portal.add"], ungranted: [] },
+      swap: { granted: ["portal.secrets"], ungranted: ["portal.mine"] },
+    }[winner];
+    const named = (action: string) =>
+      events
+        .filter((event) => event.action === action && event.target?.id === app)
+        .map(
+          ({ detail }) =>
+            z.object({ function: z.string() }).parse(detail).function
+        )
+        .toSorted();
+    const { functions } = await builder.api.apps.visitorGrants(app);
+
+    expect({
+      refused: outcomes.filter((each) => each === "visitor.grants_changed"),
+      functions,
+      granted: named("app.visitor_granted"),
+      ungranted: named("app.visitor_ungranted"),
+    }).toStrictEqual({
+      refused: ["visitor.grants_changed"],
+      functions: sets[winner],
+      granted: expected.granted,
+      ungranted: expected.ungranted,
+    });
+  });
+
   it("are granted only by the App's builders, never staff or its users", async () => {
     const domain = newDomain();
     const { builder, app } = await portal(domain);
