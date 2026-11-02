@@ -65,7 +65,8 @@ import {
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
 // - What someone said, approved or not, on their team's interviews'
-//   source: it has no transcript, for members, admins and staff alike.
+//   source: it has no transcript, for members and admins alike, and
+//   Grasp's staff read no brain at all.
 
 const idp = mockIdp();
 
@@ -448,7 +449,7 @@ describe(
       });
     });
 
-    it("gives its interviews' source no transcript and no statement, for members, admins and staff alike, and nothing to anyone outside", async () => {
+    it("gives its interviews' source no transcript and no statement, for members and admins alike, and nothing to staff or anyone outside", async () => {
       const store = onboardingStore(env);
       const ids = await team();
       await mapped(ids);
@@ -517,7 +518,8 @@ describe(
       };
       expect({
         said: said.length > 2,
-        staff: await shownTo(staff),
+        // Staff read no brain at all (staff-scope.test.ts).
+        staff: await outcome(staff.brain.read()),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
         nobody: {
@@ -530,7 +532,7 @@ describe(
         },
       }).toStrictEqual({
         said: true,
-        staff: safe,
+        staff: "role.forbidden",
         admin: safe,
         member: safe,
         nobody: {
@@ -929,7 +931,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     ).not.toContain(orphan);
   });
 
-  it("shows members, admins and Grasp's staff the team's claims", async () => {
+  it("shows members and admins the team's claims, and Grasp's staff none", async () => {
     const ids = await drawnTeam();
     await intake(ids);
     const member = await signedInApi(idp, "user");
@@ -938,12 +940,12 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     expect({
       member: await statementsFor(member.api, ids),
       admin: await statementsFor(admin.api, ids),
-      staff: await statementsFor(staff, ids),
+      staff: await outcome(statementsFor(staff, ids)),
     }).toStrictEqual({
       member: ["Tickets come in through Zendesk."],
       admin: ["Tickets come in through Zendesk."],
-      // Staff read what admins read (Nick, 2026-10-25).
-      staff: ["Tickets come in through Zendesk."],
+      // Staff manage, and read no brain (Nick, 2026-11-01).
+      staff: "role.forbidden",
     });
   });
 
@@ -1458,7 +1460,7 @@ const givenWith = async (
 
 // A drawing reaches the brain only as far as five or more of the people it
 // was drawn from told it, each part apart (GRA-1084, brain-intake.ts
-// `versionOf`), and Grasp's staff read only its numbers. The lead is never
+// `versionOf`), and Grasp's staff read none of it. The lead is never
 // one of a drawing's tellers while others do the work (store.ts
 // `#briefOf`), and `versionOf` leaves them out of every count besides. The
 // ways it can fail, tried here:
@@ -1984,23 +1986,11 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("gives Grasp's staff the drawing as admins read it", async () => {
+  it("gives Grasp's staff no drawing, as they read no brain", async () => {
     const ids = await givenWith(fiveToldReply);
-    const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
-    await expect(ticketsDrawingFor(staff, ids)).resolves.toStrictEqual(
-      await ticketsDrawingFor(admin.api, ids)
-    );
-  });
-});
-
-describe("the brain as Grasp's staff read it", { timeout: 120_000 }, () => {
-  it("is the brain as an admin reads it: staff are admins, and read what admins read", async () => {
-    await givenWith(fiveToldReply);
-    const admin = await signedInApi(idp, "admin");
-    const staff = await asStaff();
-    await expect(staff.brain.read()).resolves.toStrictEqual(
-      await admin.api.brain.read()
+    await expect(outcome(ticketsDrawingFor(staff, ids))).resolves.toBe(
+      "role.forbidden"
     );
   });
 });

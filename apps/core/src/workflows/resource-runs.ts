@@ -67,7 +67,7 @@ import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
 import { loadRunIsolate } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
-import { runEngine } from "./engine.ts";
+import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { childEndType } from "./event-envelopes.ts";
 import type { ChildEnd } from "./event-envelopes.ts";
@@ -577,6 +577,13 @@ const startAbandoned = async (
     }),
     owedTermination(db, row.id, "failed", now),
   ]);
+  // A screen's pause, resume or cancel of it, superseded by the failed end
+  // now, as any end settles them (`settleCancels`): none stays admitted
+  // behind a run that never started until the next repair.
+  const ended = await runOf(env, row.id);
+  if (ended !== undefined) {
+    await settleCancels(env, ended);
+  }
   await tellQueryFollowers(env, row.id);
 };
 
@@ -745,6 +752,8 @@ export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
   /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
   triedOnce?: ResourceHostHooks["triedOnce"];
+  /** The run's settled scopes of items and branches (`ScopeFences`). */
+  fences?: ResourceHostHooks["fences"];
   /** The model calls its actions made (`ActionModelCalls`). */
   modelCalls?: ResourceHostHooks["modelCalls"];
   /** Aborts once the activation running the run is over. */
@@ -988,6 +997,7 @@ export const runActivation = async (
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
+    ...(memory.fences === undefined ? {} : { fences: memory.fences }),
     ...(memory.modelCalls === undefined
       ? {}
       : { modelCalls: memory.modelCalls }),
@@ -1043,7 +1053,11 @@ export const runActivation = async (
     try {
       return await code.run(host, { input: run.input });
     } catch (error) {
+      host.isolateDone();
       return await afterCpuKill(error, calls);
+    } finally {
+      // Nothing more comes from it (resource-host.ts, `#account`).
+      host.isolateDone();
     }
   });
   waking.open = false;
@@ -1662,10 +1676,45 @@ const stopResourceRun = async (
     }
     return "taken";
   }
-  // A run rolling back isn't cut short (spec 10.7.3): nothing was
-  // terminated, so nothing is audited as terminated.
-  if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+  // First, in the run's object, the stop's record, as an App run's cancel
+  // is (controls.ts): from then on no attempt of the run holds, so none of
+  // its calls is taken, and should the engine refuse the terminate below,
+  // or this request die, the object terminates the run itself on its next
+  // alarm, seconds on, with no repair to wait for. A run rolling back
+  // isn't cut short (spec 10.7.3): nothing is marked or terminated, so
+  // nothing is audited as terminated.
+  const marked = await markResourceRunStopped(env, row.id, actor);
+  if (marked === "rolling_back") {
     return "rolling_back";
+  }
+  try {
+    if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+      return "rolling_back";
+    }
+  } catch (error) {
+    // Unmarked (the engine has no journal of it), nothing will stop it:
+    // the caller hears so.
+    if (marked !== "marked") {
+      throw error;
+    }
+    log.error("workflow.resource_run_terminate_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    // Nothing terminated yet: the stop is audited as asked, under whoever
+    // asked, and the termination as it happens, when the object ends the
+    // run and its end is told (`workflow.run.cancelled`). A screen's
+    // cancel is audited as its receipt settles.
+    if (audited) {
+      const db = drizzle(env.DB);
+      await auditedBatch(env, db, [
+        outboxed(db, {
+          ...runEntry(row, "workflow.run.stop_requested"),
+          actor,
+        }),
+      ]);
+    }
+    return "taken";
   }
   // The engine took the terminate: audited below whatever this lookup
   // does, the row left to the end's notification if it can't be read.
@@ -1699,9 +1748,10 @@ const stopResourceRun = async (
     return "taken";
   }
   const now = await runOf(env, row.id);
-  // Whoever asked, whatever the row took: the engine tells the run's
-  // projection of the termination as it happens, so the row may say
-  // cancelled before the statement above does.
+  // The engine took it: audited under whoever asked, with the status the
+  // row has now. The engine tells the run's projection of the termination
+  // as it happens, so the row may say cancelled before the statement above
+  // does.
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
@@ -2142,7 +2192,10 @@ export const repairResourceTerminations = async (
  * sending it again (`repairResourceTerminations`), so an instance made
  * before the cancel never keeps its lease or alarm. A run the engine has
  * is the engine's to end: it terminates it, and the row takes the end the
- * engine confirms.
+ * engine confirms. Its stop is marked in its object first
+ * (`stopResourceRun`): its calls are refused from then on, and should the
+ * engine refuse the terminate, the object terminates it within seconds,
+ * so the stop is answered and never lost.
  */
 export const terminateResourceRun = async (
   env: Env,

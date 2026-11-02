@@ -168,7 +168,6 @@ const hostHeldTo = async (
   const { step, leaseOf, leases } = engineOfTest();
   const hooks: HostHooks = {
     stepFailed: () => {},
-    busyRefusals: new Map(),
     leaseOf,
     tampered: (error) => {
       tampered.push(error.code ?? error.message);

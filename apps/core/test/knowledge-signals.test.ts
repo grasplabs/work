@@ -48,6 +48,16 @@ const newOwner = async (): Promise<Person> => await signedInApi(idp, "admin");
 /** Someone who reads and searches Knowledge. */
 const newReader = async (): Promise<Person> => await signedInApi(idp, "user");
 
+/** How many signals there are for `userId` as an owner, in every computation. */
+const ownedBy = async (userId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS count FROM knowledge_signals WHERE owner = ?"
+  )
+    .bind(userId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
 /** A collection of `owner`'s for everyone; returns its ID. */
 const newCollection = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.knowledge.createCollection({
@@ -466,6 +476,85 @@ describe("Knowledge usage signals", () => {
       reviewed: [],
       next: [],
       signals: "number",
+    });
+  });
+
+  it("tell no owner who was erased, whatever their collections still hold", async () => {
+    const erased = await newOwner();
+    const kept = await newOwner();
+    for (const owner of [erased, kept]) {
+      // oxlint-disable-next-line no-await-in-loop -- one owner at a time
+      const collectionId = await newCollection(owner);
+      // oxlint-disable-next-line no-await-in-loop -- one owner at a time
+      await newDocument(owner, collectionId, "old.md", {
+        review: "2020-01-01",
+      });
+    }
+    await env.DB.prepare(
+      "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, 'Erased', ?, 1, ?, ?)"
+    )
+      .bind(erased.userId, `hash-${erased.userId}`, kept.userId, Date.now())
+      .run();
+
+    await refreshDailySignals(env, nextDay());
+
+    expect({
+      erased: await ownedBy(erased.userId),
+      kept: await ownedBy(kept.userId),
+    }).toStrictEqual({ erased: 0, kept: 1 });
+  });
+
+  it("tell no owner erased between the computation's read and its insert", async () => {
+    const erased = await newOwner();
+    const collectionId = await newCollection(erased);
+    await newDocument(erased, collectionId, "old.md", {
+      review: "2020-01-01",
+    });
+    // The database as the computation sees it: the erasure commits right
+    // before the batch that inserts the signals it read.
+    let inserting = false;
+    let erasedFirst = false;
+    const database = new Proxy(env.DB, {
+      get: (target, key): unknown => {
+        if (key === "prepare") {
+          return (query: string) => {
+            if (query.includes('insert into "knowledge_signals"')) {
+              inserting = true;
+            }
+            return target.prepare(query);
+          };
+        }
+        if (key === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (inserting && !erasedFirst) {
+              erasedFirst = true;
+              await target
+                .prepare(
+                  "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, 'Erased', ?, 1, ?, ?)"
+                )
+                .bind(
+                  erased.userId,
+                  `hash-${erased.userId}`,
+                  erased.userId,
+                  Date.now()
+                )
+                .run();
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await refreshDailySignals({ ...env, DB: database }, nextDay());
+
+    expect({ erasedFirst, owned: await ownedBy(erased.userId) }).toStrictEqual({
+      erasedFirst: true,
+      owned: 0,
     });
   });
 

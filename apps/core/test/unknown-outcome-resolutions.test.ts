@@ -427,7 +427,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         )
       ),
       memberAll: await codeOf(member.api.unknownOutcomes.listAll()),
-      // Grasp staff export the log as admins, without anyone's obligations.
+      // Grasp staff don't export the client's log at all.
       staffExport: await staffExport(),
       memberOwn: await member.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
@@ -473,7 +473,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       reads: [{ actor: "person", count: listed.length }],
       resolved: "connect.outcome_not_found",
       memberAll: "role.forbidden",
-      staffExport: null,
+      staffExport: "role.forbidden",
       memberOwn: [],
       stillListed: 1,
       live: "waiting",

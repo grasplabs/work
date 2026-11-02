@@ -1,3 +1,4 @@
+import { chatPlatformName } from "@grasp-os/shared/chat";
 import type {
   RequestsPage,
   RequestTool,
@@ -22,19 +23,10 @@ import { formatPercent } from "../../format.ts";
 // counts by id, marks for the tools and places, a row that opens what it
 // is about, and what grew.
 
-/** Chat platforms as people know them. */
-const placeNames: Readonly<Record<string, string>> = {
-  teams: "Microsoft Teams",
-  slack: "Slack",
-  whatsapp: "WhatsApp",
-  telegram: "Telegram",
-  gmail: "Gmail",
-};
-
 /**
  * Logos the deployment serves, by the platform or provider they are of
  * (`apps/web/public/logos`). Where each comes from:
- * - microsoft-teams.svg, slack.svg, whatsapp.svg and gmail.svg: the
+ * - microsoft-teams.svg and slack.svg: the
  *   gilbarbara/logos set, through @iconify-json/logos, CC0, as the
  *   prototype bundles them.
  * - microsoft.svg and google.svg: the marks of Microsoft's and Google's own
@@ -45,14 +37,12 @@ const placeNames: Readonly<Record<string, string>> = {
 const logos: Readonly<Record<string, string>> = {
   teams: "/logos/microsoft-teams.svg",
   slack: "/logos/slack.svg",
-  whatsapp: "/logos/whatsapp.svg",
   microsoft: "/logos/microsoft.svg",
-  gmail: "/logos/gmail.svg",
   google: "/logos/google.svg",
 };
 
 /** A place's name, as people know it. */
-export const placeName = (place: string): string => placeNames[place] ?? place;
+export const placeName = (place: string): string => chatPlatformName(place);
 
 /** A place's logo, as a tile beside its name. */
 export const PlaceLogo = ({

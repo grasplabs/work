@@ -651,13 +651,15 @@ describe("the requests report", setUpTime, () => {
       });
     });
     const after = await owner.api.stephenRequests.report({ range: "month" });
-    const staffSees = await staffApi.stephenRequests.report({ range: "month" });
+    const staffSees = await outcome(
+      staffApi.stephenRequests.report({ range: "month" })
+    );
 
     expect({
       before: before.report.byPerson,
       after: after.report.byPerson?.length,
       counts: Object.keys(after.report.byPerson?.[0] ?? {}).toSorted(),
-      staffSees: staffSees.report.byPerson,
+      staffSees,
       events: events.map(({ action, detail }) => ({ action, detail })),
       builder: await outcome(
         builder.api.stephenRequests.report({ range: "month" })
@@ -669,7 +671,7 @@ describe("the requests report", setUpTime, () => {
       before: null,
       after: 5,
       counts: ["billed", "key", "requests"],
-      staffSees: null,
+      staffSees: "role.forbidden",
       events: [
         {
           action: "stephen_requests.settings.updated",

@@ -1,10 +1,18 @@
 import { fileErrors } from "@grasp-os/shared/app-files";
+import { connectErrors } from "@grasp-os/shared/connect";
+import { attachmentLimits } from "@grasp-os/shared/connector-attachments";
+import type {
+  AttachmentBytes,
+  AttachmentEntry,
+} from "@grasp-os/shared/connector-attachments";
 import { sha256HexOfBytes, toBase64, toHex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import {
   runFileErrors,
   runFileIdSchema,
   runFileLimits,
+  runFileNameFits,
+  runFileNamed,
   runFileNameSchema,
   runFileTextTypes,
   runFileTypeOfBytes,
@@ -101,7 +109,10 @@ export type FilesCallOperation = keyof typeof filesCallOperations;
 const contentChars = Math.ceil(runFileLimits.callBytes / 3) * 4;
 
 const argumentSchemas = {
-  open: z.strictObject({ name: runFileNameSchema, type: runFileTypeSchema }),
+  // A Word or Excel document is named with its extension, never another's.
+  open: z
+    .strictObject({ name: runFileNameSchema, type: runFileTypeSchema })
+    .refine(({ name, type }) => runFileNameFits(name, type)),
   append: z.strictObject({
     file: runFileIdSchema,
     content: z.base64().min(1).max(contentChars),
@@ -398,7 +409,9 @@ const append = async (
   requireWriter(row, caller);
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
   // Reserved against every limit in the statement that adds it, before
-  // its bytes reach R2; the file's size follows in the same batch.
+  // its bytes reach R2; the file's size follows in the same batch. The
+  // lease again first: the reads above may have outlasted it.
+  caller.requireHolds();
   const [reserved] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO workflow_run_file_chunks
@@ -546,6 +559,8 @@ const finish = async (
   const now = new Date();
   if (!shown) {
     // Not what it says it is: gone, so it holds no place in the limits.
+    // The lease again first: hashing every chunk may have outlasted it.
+    caller.requireHolds();
     await db
       .update(workflowRunFiles)
       .set({ state: "deleted", deletedAt: now })
@@ -557,7 +572,9 @@ const finish = async (
       );
     throw fileErrors.create("file.content_mismatch");
   }
-  // Only the file as hashed: no append can have grown it since.
+  // Only the file as hashed: no append can have grown it since. The lease
+  // again first: hashing every chunk may have outlasted it.
+  caller.requireHolds();
   const finished = await db
     .update(workflowRunFiles)
     .set({ state: "done", sha256, finishedAt: now })
@@ -654,6 +671,7 @@ const remove = async (
   if (row.state === "deleted") {
     return { output: null, detail: detailOf(row) };
   }
+  caller.requireHolds();
   await drizzle(env.DB)
     .update(workflowRunFiles)
     .set({ state: "deleted", deletedAt: new Date() })
@@ -732,6 +750,236 @@ export const callFiles = async (
       return operation satisfies never;
     }
   }
+};
+
+/**
+ * Keeps `bytes` as a finished file of `caller`'s run, named `name` and of
+ * `type`, for a connector read an action asked to have as a file
+ * (GRA-886): opened, written in pieces of `callBytes` and finished as an
+ * action's own writes are, each under a key of the call's own effect key,
+ * so the same call again (a replay, a retry) answers the same file, and
+ * its bytes must be the same, all of them: never a prefix of them. Every
+ * limit, the lease check, the type check against the bytes and the
+ * SHA-256 apply as they do to an action's writes.
+ */
+export const keepFile = async (
+  env: Env,
+  caller: FilesCaller,
+  file: { name: string; type: RunFileType; bytes: Uint8Array }
+): Promise<FilesAnswer> => {
+  // Keys of the call's own step: `<step key>:<ordinal>#…`, so the task
+  // that opens the file is the one that writes and finishes it.
+  const as = (suffix: string): FilesCaller => ({
+    ...caller,
+    effectKey: `${caller.effectKey}#${suffix}`,
+  });
+  // Each through `callFiles`, as an action's own calls are: its lease
+  // checked before every one, so an attempt that went stale while Connect
+  // was answering opens, reserves and seals nothing.
+  // Named with its type's extension: a document typed docx is never
+  // kept as `.docm`.
+  const opened = await callFiles(env, as("open"), "open", {
+    name: runFileNamed(file.name, file.type),
+    type: file.type,
+  });
+  const id = runFileIdSchema.parse(
+    z.object({ file: z.string() }).parse(opened.output).file
+  );
+  for (
+    let at = 0, piece = 0;
+    at < file.bytes.length;
+    at += runFileLimits.callBytes, piece += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
+    await callFiles(env, as(`piece${String(piece)}`), "append", {
+      file: id,
+      content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
+    });
+  }
+  // Every piece above replays only with its own bytes, but a shorter
+  // retried read would leave pieces of a longer first attempt after its
+  // own: the file must hold exactly these bytes before it is sealed, and
+  // a file a first attempt sealed must be of them.
+  const written = await fileOf(env, caller, id);
+  if (written?.state === "writing" && written.size !== file.bytes.length) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  const finished = await callFiles(env, as("finish"), "finish", { file: id });
+  const sealed = z.object({ sha256: z.string() }).parse(finished.output);
+  if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  return finished;
+};
+
+/** All the bytes of a finished file, whole, as stored and as hashed. */
+const wholeFile = async (
+  env: Env,
+  row: FileRow
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const chunks = await drizzle(env.DB)
+    .select()
+    .from(workflowRunFileChunks)
+    .where(eq(workflowRunFileChunks.fileId, row.id))
+    .orderBy(asc(workflowRunFileChunks.index));
+  const bytes = new Uint8Array(row.size);
+  let at = 0;
+  for (const chunk of chunks) {
+    // oxlint-disable-next-line no-await-in-loop -- in order: each part follows the last
+    const object = await env.FILES.get(chunk.key);
+    if (object === null || at + chunk.size > bytes.length) {
+      throw fileErrors.create("file.incomplete");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    const part = new Uint8Array(await object.arrayBuffer());
+    if (part.length !== chunk.size) {
+      throw fileErrors.create("file.incomplete");
+    }
+    bytes.set(part, at);
+    at += part.length;
+  }
+  // Exactly what was finished: its size and its digest, read again, so a
+  // chunk that is not what it was when the file was sealed is never sent.
+  if (at !== row.size || (await sha256HexOfBytes(bytes)) !== row.sha256) {
+    throw fileErrors.create("file.incomplete");
+  }
+  return bytes;
+};
+
+/** A file attached to a write, as its entry, and its bytes. */
+export interface AttachedFiles {
+  /** The entries an input names the files by (`attachments`). */
+  readonly entries: AttachmentEntry[];
+  /** The bytes, by SHA-256. */
+  readonly bytes: AttachmentBytes;
+  /** What the call's receipt says of the files: never a name or content. */
+  readonly detail: Readonly<Record<string, string | number>>;
+}
+
+/**
+ * The files `ids` name of `caller`'s run, to attach to a connector write
+ * (GRA-887): each finished (`done`) and not deleted, looked up by its ID
+ * *and* the calling run's, so any other run's, or one that isn't there, is
+ * `file.not_found`; named once each, within what a write attaches
+ * (`attachmentLimits`), checked from the records before any bytes are
+ * read. Their name, type, size and SHA-256 are core's own records, never
+ * the action's; their bytes are read whole and checked against the digest
+ * the file was sealed with.
+ */
+export const attachRunFiles = async (
+  env: Env,
+  caller: Pick<FilesCaller, "runId">,
+  ids: readonly string[]
+): Promise<AttachedFiles> => {
+  if (ids.length === 0) {
+    return { entries: [], bytes: {}, detail: {} };
+  }
+  if (ids.length > attachmentLimits.files || new Set(ids).size !== ids.length) {
+    throw runFileErrors.create("file.attach_too_large");
+  }
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(workflowRunFiles)
+    .where(
+      and(
+        eq(workflowRunFiles.runId, caller.runId),
+        ne(workflowRunFiles.state, "deleted"),
+        inList(workflowRunFiles.id, [...ids])
+      )
+    );
+  const found = ids.map((id) => rows.find((row) => row.id === id));
+  const files = found.map((row) => {
+    if (row === undefined) {
+      throw notFound();
+    }
+    if (row.state !== "done" || row.sha256 === null) {
+      throw runFileErrors.create("file.not_finished");
+    }
+    return row;
+  });
+  if (
+    files.some(({ size }) => size > attachmentLimits.fileBytes) ||
+    files.reduce((sum, { size }) => sum + size, 0) > attachmentLimits.totalBytes
+  ) {
+    throw runFileErrors.create("file.attach_too_large");
+  }
+  const bytes: AttachmentBytes = {};
+  for (const row of files) {
+    if (row.sha256 !== null && !Object.hasOwn(bytes, row.sha256)) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time: at most a write's worth in memory
+      bytes[row.sha256] = await wholeFile(env, row);
+    }
+  }
+  const entries = files.map((row) => ({
+    name: row.name,
+    type: runFileTypeSchema.parse(row.type),
+    size: row.size,
+    sha256: row.sha256 ?? "",
+  }));
+  return {
+    entries,
+    bytes,
+    detail: {
+      attachmentCount: files.length,
+      ...Object.fromEntries(
+        files.map((row, at) => [
+          `attachment${String(at)}`,
+          `${row.id} ${row.type} ${String(row.size)} ${row.sha256 ?? ""}`,
+        ])
+      ),
+    },
+  };
+};
+
+/**
+ * The bytes of the files `entries` name, read again from `runId`'s own
+ * finished files by what a held write was shown (GRA-887): each entry's
+ * name, type, size and SHA-256, all four, must be those of a file of the
+ * run that is still there. A file deleted or swept since (the run's
+ * retention) is `connect.files_changed`, and nothing is sent: only what the
+ * person decided on goes out.
+ */
+export const attachedAgain = async (
+  env: Env,
+  runId: string,
+  entries: readonly AttachmentEntry[]
+): Promise<AttachmentBytes> => {
+  if (entries.length === 0) {
+    return {};
+  }
+  const digests = [...new Set(entries.map(({ sha256 }) => sha256))];
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(workflowRunFiles)
+    .where(
+      and(
+        eq(workflowRunFiles.runId, runId),
+        eq(workflowRunFiles.state, "done"),
+        inList(workflowRunFiles.sha256, digests)
+      )
+    );
+  const bytes: AttachmentBytes = {};
+  for (const entry of entries) {
+    const row = rows.find(
+      (each) =>
+        each.sha256 === entry.sha256 &&
+        each.name === entry.name &&
+        each.type === entry.type &&
+        each.size === entry.size
+    );
+    if (row === undefined) {
+      throw connectErrors.create("connect.files_changed");
+    }
+    if (!Object.hasOwn(bytes, entry.sha256)) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        bytes[entry.sha256] = await wholeFile(env, row);
+      } catch {
+        throw connectErrors.create("connect.files_changed");
+      }
+    }
+  }
+  return bytes;
 };
 
 /** Most chunks one sweep deletes at a time: R2's bound for one delete. */
