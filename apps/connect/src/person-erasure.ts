@@ -29,7 +29,8 @@ import { revokeOwedOf } from "./revocations.ts";
 // - A connection of theirs still live (a flow that finished after they
 //   were removed, say) is stopped as any removal stops it
 //   (`disconnectPersonal`). Where its provider won't take the revoke, the
-//   revoke is owed and its sealed tokens kept (src/revocations.ts): this
+//   revoke is owed, with a sealed copy of its tokens (src/revocations.ts),
+//   as is one owed for a grant asked to connect again: this
 //   asks again for every revoke of theirs still owed, since their removal
 //   too, and refuses (`connection.erase_pending`) while any is.
 // - A Composio connection is deleted at Composio after it is stopped, by
