@@ -274,6 +274,7 @@ const actorTypes = [
   "workflow",
   "staff",
   "guest",
+  "visitor",
   "system",
 ] as const satisfies readonly AuditActor["type"][];
 
