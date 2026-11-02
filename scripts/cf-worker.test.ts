@@ -126,7 +126,7 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
-  it("fills in the store and the hostname map a deploy looked up, and declares its classes as exports", () => {
+  it("fills in the store and the hostname map a deploy looked up, and declares its classes as exports, a deleted one as a tombstone", () => {
     const worker = cfWorker(wranglerText, "production", deployed);
     expect({
       store: bindingOf(worker, "CLIENT_KEY"),
@@ -142,7 +142,7 @@ describe("the admin's Worker for cf", () => {
       },
       hosts: { type: "kv", id: "hosts-1" },
       chat: undefined,
-      deleted: undefined,
+      deleted: { type: "durable-object", state: "deleted" },
       runs: { type: "durable-object", storage: "sqlite" },
     });
   });
