@@ -11,6 +11,7 @@ import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { StoreReach } from "@grasp-os/shared/permissions";
 import { readDescriptorVersion } from "@grasp-os/shared/store-reads";
+import type { FilterNode, RangeBound } from "@grasp-os/shared/store-reads";
 import { migrationErrors } from "@grasp-os/shared/stores";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -222,6 +223,34 @@ const scalarOf = (value: unknown): string | number | boolean | null =>
     ? value
     : null;
 
+/**
+ * The query of a list by an index, as `where` matches its fields: each one
+ * given equal to its value (an explicit null too), each one left out
+ * missing. Equal fields before the first missing one bound the index;
+ * the rest, which an index range can't express, filter it.
+ */
+const matching = (
+  indexFields: readonly string[],
+  where: Record<string, unknown> | undefined
+): { range: RangeBound[]; filter: FilterNode | null } => {
+  const range: RangeBound[] = [];
+  const rest: FilterNode[] = [];
+  for (const field of indexFields) {
+    const given = where !== undefined && Object.hasOwn(where, field);
+    if (!given) {
+      rest.push({ field, op: "exists", value: false });
+    } else if (rest.length === 0) {
+      range.push({ field, op: "eq", value: scalarOf(where[field]) });
+    } else {
+      rest.push({ field, op: "eq", value: scalarOf(where[field]) });
+    }
+  }
+  if (rest.length <= 1) {
+    return { range, filter: rest[0] ?? null };
+  }
+  return { range, filter: { and: rest } };
+};
+
 /** Runs one generated operation over the store's channel. */
 const runOperation = async (
   operation: DeclaredStoreOperation,
@@ -241,18 +270,15 @@ const runOperation = async (
   }
   if (kind === "list") {
     const { pageSize, cursor, where } = listArgsSchema.parse(args);
+    const { range, filter } = matching(indexFields ?? [], where);
     return await channel.read({
       kind: "query",
       query: {
         descriptorVersion: readDescriptorVersion,
         table,
         index: operation.index,
-        range: (indexFields ?? []).map((field) => ({
-          field,
-          op: "eq" as const,
-          value: scalarOf(where?.[field]),
-        })),
-        filter: null,
+        range,
+        filter,
         order: "asc",
         terminal: { kind: "paginate", pageSize, cursor },
       },
@@ -324,6 +350,17 @@ export const hostedWorkflowStore = (server: WorkflowStoreServer): HostedApp => {
   return { manifest, run };
 };
 
+/** What each kind of generated operation does to its table's records. */
+const accessOf = {
+  get: "reads",
+  list: "reads",
+  insert: "adds",
+  patch: "changes",
+} as const satisfies Record<
+  DeclaredStoreOperation["kind"],
+  StoreReach["access"]
+>;
+
 /**
  * What each operation of store `storeId` reaches, if a workflow owns it
  * and its current version serves it (`StoreReach`): what an admin
@@ -346,6 +383,6 @@ export const storeReachOf = async (
   return [...(server?.store.operations ?? [])].map(([path, operation]) => ({
     operation: path,
     table: operation.table,
-    changes: operation.kind === "insert" || operation.kind === "patch",
+    access: accessOf[operation.kind],
   }));
 };

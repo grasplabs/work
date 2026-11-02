@@ -104,10 +104,16 @@ const definitionOf = (
   });
 
 /** The owner workflow, its `intake` store published at 1.0.0. */
-const ownerOf = async (ada: Person, table = orders()) => {
+const ownerOf = async (
+  ada: Person,
+  table: unknown = orders(),
+  storeOperations: Record<string, unknown> = operations
+) => {
   const name = `intake-${unique()}`;
   const workflow = await createWorkflowResource(env, ada, name);
-  const stores = { intake: { tables: { orders: table }, operations } };
+  const stores = {
+    intake: { tables: { orders: table }, operations: storeOperations },
+  };
   const definition = definitionOf(name, "1.0.0", { stores });
   await publishWorkflowVersion(env, ada, workflow.id, {
     definition,
@@ -146,6 +152,11 @@ const callsOf: Record<
     input: {},
   },
   settle: { arguments: { id: byInput, set: { total: 1 } }, input: idInput },
+  // `note` left out: records without one.
+  unnoted: {
+    arguments: { where: { customer: "acme" }, pageSize: 10, cursor: null },
+    input: {},
+  },
 };
 
 const rolesOf = (by: Person) => ({
@@ -218,7 +229,7 @@ const consumerOf = async (
   const permissionId = await granted(admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "store", storeId: owner.storeId },
-    actions: Object.keys(operations),
+    actions: [...owner.store.operations.keys()],
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "orders",
@@ -315,6 +326,44 @@ describe("a workflow's store, called by another workflow", () => {
     });
   });
 
+  it("lists by an index whose optional field the call leaves out as the records without it, and one given as those with it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const owner = await ownerOf(
+      ada,
+      {
+        ...orders({ note: { type: "string" } }),
+        indexes: { byNote: ["customer", "note"] },
+      },
+      {
+        addOrder: operations.addOrder,
+        unnoted: { kind: "list", table: "orders", index: "byNote" },
+      }
+    );
+    const add = await consumerOf(admin, ada, owner, "addOrder");
+    const list = await consumerOf(admin, ada, owner, "unnoted");
+    await called(add, ada, { customer: "acme", total: 1 });
+    await called(add, ada, { customer: "acme", total: 2, note: "rush" });
+    const unnoted = await called(list, ada, {
+      where: { customer: "acme" },
+      pageSize: 10,
+      cursor: null,
+    });
+    const noted = await called(list, ada, {
+      where: { customer: "acme", note: "rush" },
+      pageSize: 10,
+      cursor: null,
+    });
+
+    expect({
+      unnoted: pageSchema.parse(unnoted).items.map((item) => fieldsOf(item)),
+      noted: pageSchema.parse(noted).items.map((item) => fieldsOf(item)),
+    }).toStrictEqual({
+      unnoted: [{ customer: "acme", total: 1, owner: ada.userId }],
+      noted: [{ customer: "acme", total: 2, owner: ada.userId }],
+    });
+  });
+
   it("tells the admin reviewing its permission that each operation reaches every record of its table", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -324,10 +373,10 @@ describe("a workflow's store, called by another workflow", () => {
     const permission = listed.find(({ id }) => id === add.permissionId);
 
     expect(permission?.reach).toStrictEqual([
-      { operation: "getOrder", table: "orders", changes: false },
-      { operation: "ordersOf", table: "orders", changes: false },
-      { operation: "addOrder", table: "orders", changes: true },
-      { operation: "settle", table: "orders", changes: true },
+      { operation: "getOrder", table: "orders", access: "reads" },
+      { operation: "ordersOf", table: "orders", access: "reads" },
+      { operation: "addOrder", table: "orders", access: "adds" },
+      { operation: "settle", table: "orders", access: "changes" },
     ]);
   });
 
