@@ -14,6 +14,7 @@ import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
 import {
+  brainEntityMatches,
   brainPayloads,
   collections,
   documents,
@@ -26,6 +27,7 @@ import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
 import { forgetCollectionEntities } from "./entities.ts";
+import { erasedDocumentsDone, erasedDocumentsRecord } from "./erasures.ts";
 import type { BrainEvent } from "./events.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
@@ -590,6 +592,16 @@ const purgePersonal = async <C>(
         // The entities only its documents name, with their keys, before the
         // documents take their mentions with them.
         forgetCollectionEntities(db, collectionId, holds),
+        // The matches its documents were evidence for, as a content purge
+        // forgets them (`forgetMatchesOn`): entities named elsewhere stay.
+        db
+          .delete(brainEntityMatches)
+          .where(
+            and(
+              inArray(brainEntityMatches.evidenceDocumentId, inCollection),
+              holds
+            )
+          ),
         db
           .delete(sections)
           .where(and(inArray(sections.documentId, inCollection), holds)),
@@ -1324,6 +1336,22 @@ const replacedEntry = (
  * rewritten text, and rewrites its message, in one batch that marks the
  * payloads left unreferenced for collecting.
  */
+/**
+ * The entity matches document `documentId` is the evidence for: forgotten
+ * in each batch that rewrites its text, so one decided on that text while
+ * it was rewritten goes with the rewrite (one decided after is refused, as
+ * it reads the evidence it cites again, entities.ts).
+ */
+const forgetMatchesOn = (
+  db: DrizzleD1Database,
+  documentId: string,
+  /** The purge's hold, which it is forgotten only while it holds. */
+  holds: SQL
+) =>
+  db
+    .delete(brainEntityMatches)
+    .where(and(eq(brainEntityMatches.evidenceDocumentId, documentId), holds));
+
 const repointVersions = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
@@ -1397,6 +1425,9 @@ const repointVersions = async <C>(
       ...released.after,
       ...replaced,
       ...(guarded?.also ?? []),
+      // With the rewrite itself: a match decided on this text meanwhile
+      // goes with it, even should the purge stop right after.
+      forgetMatchesOn(db, document.id, holds),
     ]);
   };
   // A payload it reuses can be let go of and collected before the batch
@@ -1628,6 +1659,10 @@ const purgeDocument = async <C>(
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
   await onErase.forgetFiles(by, filesNamed(document));
+  // An entity match it was the evidence for goes only with a batch that
+  // rewrites its text (earlier versions, the transcript, the version it
+  // saves), to be decided again on what is left: a purge that changes
+  // nothing of it, or one run again, keeps the decisions on it.
   const at = document.currentVersion;
   const { actor } = by;
   const earlier = await rewriteVersions(
@@ -1674,6 +1709,7 @@ const purgeDocument = async <C>(
         detail: { purgeId, version: transcript.version },
       }),
       save(counts),
+      forgetMatchesOn(db, document.id, holds()),
     ]);
   }
   if (current === undefined || changedVersions === 0) {
@@ -1741,7 +1777,8 @@ const purgeDocument = async <C>(
     // longer knows, or whose frontmatter no longer fits its type, is
     // purged all the same (`parseBaseFields`).
     purge: true,
-    also: pointCurrent,
+    // The version it saves forgets the matches on its text, as above.
+    also: [...pointCurrent, forgetMatchesOn(db, document.id, holding)],
     // Kept with the version the purge saves, its terms removed: a save
     // without one would take it away.
     ...(transcript?.version === at
@@ -1917,6 +1954,18 @@ const purgeContent = async <C>(
   if (wasBegun) {
     await resumed(brain, by, input, scope, purgeId);
   }
+  // The documents it names, before the host's copies of them are
+  // forgotten: one made after that is found by them (erasures.ts). Each
+  // attempt records them anew, so a copy started after an attempt before
+  // stopped is found by this one too.
+  await db.batch(
+    await erasedDocumentsRecord(
+      db,
+      purgeId,
+      named.map(({ document }) => document),
+      brain.ports.clock()
+    )
+  );
   const done: StepCounts[] = [];
   try {
     // The Brain's records hold people's words too, everyone's, whatever
@@ -2001,9 +2050,16 @@ const purgeContent = async <C>(
     }
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
-    // them failed: it writes no more.
+    // them failed: it writes no more. Its erasure records stop counting
+    // as running for the same reason (erasures.ts).
     await whileHeld(brain, held, (at) => [
       owedWritesDoneWhile(db, purgeId, attemptHoldsOrIdle(held, at)),
+      erasedDocumentsDone(
+        db,
+        purgeId,
+        brain.ports.clock(),
+        attemptHoldsOrIdle(held, at)
+      ),
     ]);
   }
   // What the rewrites let go of leaves R2 now; a failure fails the purge,

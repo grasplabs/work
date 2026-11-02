@@ -30,7 +30,7 @@ const modelNameSchema = z
  * What a binding binds an alias to, by the declaration's kind:
  *
  * - `model`: one model the deployment allows, called through the model
- *   gateway (its rules, budgets and accounting apply on every call);
+ *   gateway (its rules and accounting apply on every call);
  * - `connector`: one of the App's connection permissions, checked on every
  *   call, through connect;
  * - `knowledge`: one of the App's collection permissions for each
@@ -93,67 +93,19 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
 export type BindingTargetInput = z.input<typeof bindingTargetSchema>;
 
-/** US dollars a binding budget may cap: a cent at least, well within an integer. */
-const budgetDollarsSchema = z.number().min(0.01).max(1_000_000_000);
-
-/**
- * What a model binding may spend, in US dollars at the providers' list
- * prices, on top of every budget the gateway already counts its requests
- * against (the deployment's, the person's, a workflow's, a run lineage's):
- *
- * - `perRequest`: one request of the App as a whole, every provider request
- *   it sends included (a structured output's second attempt, a retry);
- * - `perDay`: all the binding's requests in a UTC day;
- * - `perMonth`: all the binding's requests in a UTC month.
- *
- * At least one is set. The day and month count the alias's binding across
- * approvals, so approving it again changes the cap and keeps what was
- * spent. Admins are alerted at `alertAt` percent of a day's or month's
- * cap, and when it is reached.
- *
- * The caps cover only requests made through the binding, from the App's
- * actions. A workflow's own model steps (`step.model`) don't go through a
- * binding: they count against the deployment's, the workflow's, the
- * person's and the run lineage's budgets only.
- */
-export const modelBindingBudgetSchema = z
-  .strictObject({
-    perRequest: budgetDollarsSchema.optional(),
-    perDay: budgetDollarsSchema.optional(),
-    perMonth: budgetDollarsSchema.optional(),
-    /** The percent of a day's or month's cap at which admins are alerted. */
-    alertAt: z.int().min(1).max(99).default(80),
-  })
-  .refine(
-    ({ perRequest, perDay, perMonth }) =>
-      perRequest !== undefined ||
-      perDay !== undefined ||
-      perMonth !== undefined,
-    { message: "At least one cap" }
-  );
-export type ModelBindingBudget = z.output<typeof modelBindingBudgetSchema>;
-export type ModelBindingBudgetInput = z.input<typeof modelBindingBudgetSchema>;
-
 /** An admin's approval of a binding, as a client sends it. */
-export const bindingApprovalSchema = z
-  .strictObject({
-    app: appIdSchema,
-    alias: aliasSchema,
-    target: bindingTargetSchema,
-    /**
-     * The version of the App the admin reviewed: the one current as they
-     * decided. Its sealed declaration of the alias is what they approve,
-     * and the approval is refused with `app.conflict` once another is
-     * current.
-     */
-    reviewed: z.strictObject({ version: z.int().min(1) }),
-    /** A model binding's own caps; none for no cap of its own. */
-    budget: modelBindingBudgetSchema.optional(),
-  })
-  .refine(
-    ({ target, budget }) => budget === undefined || target.kind === "model",
-    { message: "Only a model binding has a budget" }
-  );
+export const bindingApprovalSchema = z.strictObject({
+  app: appIdSchema,
+  alias: aliasSchema,
+  target: bindingTargetSchema,
+  /**
+   * The version of the App the admin reviewed: the one current as they
+   * decided. Its sealed declaration of the alias is what they approve,
+   * and the approval is refused with `app.conflict` once another is
+   * current.
+   */
+  reviewed: z.strictObject({ version: z.int().min(1) }),
+});
 export type BindingApproval = z.input<typeof bindingApprovalSchema>;
 
 /** A binding, as the API returns it. */
@@ -170,13 +122,6 @@ export interface ResourceBinding {
   declarationHash: string;
   /** The version whose declaration was reviewed. */
   reviewedVersion: number;
-  /** A model binding's own caps; null for none, or when damaged. */
-  budget: ModelBindingBudget | null;
-  /**
-   * Its caps are stored but can't be read: it serves nothing until an
-   * admin approves it again.
-   */
-  budgetDamaged: boolean;
   status: "active" | "revoked";
   approvedBy: string;
   approvedAt: string;
@@ -201,12 +146,7 @@ export interface ResourceBinding {
  *   one that does;
  * - `unchecked`: the review couldn't ask connect about its binding within
  *   its limit, so it is never reported served; the next request checks it
- *   live;
- * - `budget_damaged`: its stored budget doesn't read (`budgetDamaged` on
- *   the binding), so it serves nothing rather than run uncapped, until an
- *   admin binds it again.
- *
- * A model binding's caps are on the binding itself (`budget`).
+ *   live.
  */
 export type BindingState =
   | "served"
@@ -214,8 +154,7 @@ export type BindingState =
   | "declaration_changed"
   | "contract_changed"
   | "grant_lost"
-  | "unchecked"
-  | "budget_damaged";
+  | "unchecked";
 
 /** One of the App's connection permissions, as a connector's choice. */
 export interface ConnectorChoice {
@@ -378,9 +317,7 @@ export interface ResourceBindingsApi {
    * A connector's side effects still need a version an admin approved. For
    * a model, the declaration's `maxOutputTokens` is a hard ceiling on each
    * request of the App as a whole: an answer that must fit a structured
-   * output may be asked for twice, and then each attempt gets half. A
-   * model binding's `budget` caps what it may spend per request, day or
-   * month; a request it has no room for is refused, sending nothing.
+   * output may be asked for twice, and then each attempt gets half.
    */
   approve: (approval: BindingApproval) => Promise<ResourceBinding>;
   /** Revokes a binding: the next request through it is refused. */

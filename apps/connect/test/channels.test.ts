@@ -227,7 +227,7 @@ describe("what it refuses", () => {
     const connect = connectForBot();
     const unknown = await connect.channelFetch(
       "discord",
-      adapterRequest("https://graph.facebook.com/v21.0/123/messages")
+      adapterRequest("https://discord.com/api/v10/channels/123/messages")
     );
     const notARequest = await connect.channelFetch("teams", {
       url: activities(),

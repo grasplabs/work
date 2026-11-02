@@ -91,7 +91,7 @@ describe(chatMarkdown, () => {
           asked(5, "c"),
           answered(6, "", "cancelled"),
           asked(7, "d"),
-          answered(8, "", "failed", "model.over_budget"),
+          answered(8, "", "failed", "model.run_limit"),
         ],
         provenance: { sources: [], restricted: true },
         names: new Map(),
@@ -107,7 +107,7 @@ describe(chatMarkdown, () => {
         "**You:**\n\nc",
         "**Grasp:**\n\nStopped.",
         "**You:**\n\nd",
-        "**Grasp:**\n\nThe model budget is used up. Ask your admin to have Grasp raise it.",
+        "**Grasp:**\n\nThis run has made all the model calls it may make.",
         "## Sources",
         "**Restricted**",
       ].join("\n\n")

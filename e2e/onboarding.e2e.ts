@@ -223,8 +223,9 @@ test("staff open someone's interview and see where it stands, never a word of it
 
   // The look is in the audit log, by the staff member, once the log has
   // taken it from core's outbox: a staff access of the interview, naming
-  // the kind of what was asked and never the person (GRA-1087).
-  const reader = apiOf(staff);
+  // the kind of what was asked and never the person (GRA-1087). The
+  // company's admin reads it; staff read no audit log of the client's.
+  const reader = apiOf(admin);
   try {
     await expect
       .poll(async () => {
@@ -971,11 +972,16 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
       ],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    // Once the team is told what was agreed stays: the first test may
+    // already have put them in place.
+    const { agreed } = await api.onboardingStaff.agreements();
+    if (!agreed) {
+      await api.onboardingStaff.setAgreements({
+        processing: true,
+        assessment: true,
+        council: "none",
+      });
+    }
   } finally {
     core[Symbol.dispose]();
   }

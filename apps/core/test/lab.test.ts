@@ -27,7 +27,6 @@ import {
   answering,
   approveAgreed,
   countedFor,
-  interviewRules,
   modelOf,
   quick,
 } from "./interview-link.ts";
@@ -270,24 +269,6 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
         { actor: "staff", purpose: "onboarding.lab" },
         { actor: "staff", purpose: "onboarding.lab" },
       ],
-    });
-  });
-
-  it("refuses a call while the deployment's rules don't let any of the organization's models take what the interviews carry", async () => {
-    const session = await staffSession();
-    const { requests, result } = await answering([], async () => {
-      env.MODEL_GATEWAY = {
-        ...interviewRules,
-        sensitive: {
-          models: ["mistral/mistral-large-latest"],
-          connections: [],
-        },
-      };
-      return await refusedWith(asked, { session });
-    });
-    expect({ result, sent: requests.length }).toStrictEqual({
-      result: [503, "model.unconfigured"],
-      sent: 0,
     });
   });
 

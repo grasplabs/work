@@ -14,6 +14,8 @@ import type {
   ChatCitedDocument,
   ChatDraft,
   ChatDraftVersion,
+  ChatFile,
+  ChatFileInput,
   ChatProject,
   ChatQuestion,
   ChatSearchHit,
@@ -53,6 +55,7 @@ import type { FunctionAnswer } from "./app-functions.ts";
 import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
+import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { appHost, workspace } from "./durable-objects.ts";
@@ -553,8 +556,39 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  /**
+   * Reads the file's text (chat-files.ts), outside the person's Workspace
+   * object, then attaches it to their chat there, audited.
+   */
+  async attachFile(chatId: string, file: ChatFileInput): Promise<ChatFile> {
+    return await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      const read = await readChatFile(this.#env, file);
+      return await this.#chatsOf(person.userId).attachFile(
+        id,
+        person.userId,
+        read,
+        actorOf(person)
+      );
+    });
+  }
+
+  async removeFile(chatId: string, fileId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      if (typeof fileId !== "string") {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      await this.#chatsOf(person.userId).removeFile(
+        chatIdOf(chatId),
+        person.userId,
+        fileId,
+        actorOf(person)
+      );
+    });
+  }
+
   async send(chatId: string, question: ChatQuestion): Promise<void> {
-    await withPerson(this.#check, async ({ userId, staff }) => {
+    await withPerson(this.#check, async ({ userId }) => {
       const id = chatIdOf(chatId);
       // Its strings and effort only: whatever else the page passed goes no
       // further.
@@ -562,9 +596,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_question");
       }
-      // A Grasp staff member's turn is marked as theirs from their own
-      // session, never from what the page sends (GRA-1088).
-      await this.#chatsOf(userId).send(id, userId, parsed.data, staff);
+      await this.#chatsOf(userId).send(id, userId, parsed.data);
     });
   }
 
@@ -599,12 +631,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         via: chat.via,
       };
       try {
-        await chats.send(
-          chat.id,
-          userId,
-          { text: fixQuestion(fix.report), model },
-          person.staff
-        );
+        await chats.send(chat.id, userId, {
+          text: fixQuestion(fix.report),
+          model,
+        });
       } catch (error) {
         return {
           chat: { ...summary, running: false },

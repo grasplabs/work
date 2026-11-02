@@ -129,7 +129,7 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
  * The limits core reads as it admits work, each a ceiling: a run's steps,
  * a step's attempts (its first included), the levels and descendant runs
  * of a run lineage, the lineage's active execution and age, the provider
- * requests it sends to models (core's model ledger, model-budgets.ts), the
+ * requests it sends to models (core's model ledger, model-spend.ts), the
  * host calls its attempts make, the attempts running at once in the
  * client, for one person and of one App, the steps waiting for a share,
  * for one person and of one App, how long one step waits, the independent
@@ -249,7 +249,7 @@ const appOf = (id: string): SQL =>
  *
  * What it closes: one App using up another's allowances in a lineage
  * (its attempts' active time, its host calls, its model spend, keyed by
- * its account, model-budgets.ts) and taking the share of a person who
+ * its account, model-spend.ts) and taking the share of a person who
  * never used it (dispatcher.ts, `admissionSubjectOf`). Its place stays
  * the lineage's: it takes one of the lineage's descendant runs and sits a
  * level deeper (`admitChild`), which bound runs mailing each other back

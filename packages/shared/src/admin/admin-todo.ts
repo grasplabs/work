@@ -69,7 +69,6 @@ const NEED_STAGE: Record<Need["kind"], Stage | null> = {
   paused: "interviews",
   transcript: "conversation",
   ask: "conversation",
-  research: "research",
   conflict: "research",
   agreement: "agreed",
   lead: "leads",

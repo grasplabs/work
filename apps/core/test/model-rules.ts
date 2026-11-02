@@ -1,4 +1,3 @@
-import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -20,7 +19,7 @@ import {
 } from "./workflow-apps.ts";
 
 // What the tests of the client's rules for model calls share
-// (model-rules.test.ts, model-rules-budgets.test.ts): the rules as a test
+// (model-rules.test.ts, ai-step-answers.test.ts): the rules as a test
 // sets them, calls that meet them, and what the audit log says of each.
 // The model provider behind connect is the outside system
 // (test/model-provider.ts).
@@ -73,7 +72,7 @@ export const currentPastActivation = async (
 /** A model that doesn't think: the organization's default in these tests. */
 export const mistral = "mistral/mistral-large-latest";
 export const anthropic = "anthropic/claude-sonnet-4-5";
-/** Hosted in the EU, as the tests' config says. */
+/** A third model the organization chose. */
 export const euModel = "openai/gpt-5.4";
 
 /** The models the organization chose: its default, then its fallbacks. */
@@ -85,7 +84,7 @@ export const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
 let monthsUsed = 0;
 
 /**
- * A month no other test counts budgets in, so none depends on the real
+ * A month no other test counts spend in, so none depends on the real
  * month or another test's spend.
  */
 const newMonth = (): string => {
@@ -96,11 +95,9 @@ const newMonth = (): string => {
 
 /**
  * Core's env with the provider answering up to eight calls with `answer`,
- * for the `chosen` models, and the rules `config`; budgets count in
- * `month`.
+ * for the `chosen` models; spend counts in `month`.
  */
 export const withRules = async (
-  config: Record<string, unknown>,
   answer: ProviderReply = cheapAnswer,
   month = newMonth()
 ) => {
@@ -110,7 +107,6 @@ export const withRules = async (
   );
   const rulesEnv: Env = {
     ...env,
-    MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: month,
   };
   const { call, agent } = models(rulesEnv);
@@ -122,23 +118,20 @@ const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
 /**
- * What `run` returns, with `config` as the deployment's rules for the
- * workflow runs it starts, and the provider answering with `replies`, for
- * the `chosen` models.
+ * What `run` returns, for the workflow runs it starts, with the provider
+ * answering with `replies`, for the `chosen` models, and spend counted in
+ * a month of its own.
  */
 export const withDeploymentRules = async <Result>(
-  config: unknown,
   replies: ProviderReply[],
   run: () => Promise<Result>
 ) => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
+  const { MODEL_BUDGET_MONTH: month } = env;
   const fake = await fakeProviderFor(chosen, ...replies);
   try {
-    env.MODEL_GATEWAY = config;
     env.MODEL_BUDGET_MONTH = newMonth();
     return { fake, result: await run() };
   } finally {
-    env.MODEL_GATEWAY = before;
     env.MODEL_BUDGET_MONTH = month;
   }
 };
@@ -148,10 +141,6 @@ export const modelActions = (events: AuditEvent[]): string[] =>
   events
     .map(({ action }) => action)
     .filter((action) => action.startsWith("model."));
-
-/** A run of `workflow` in `app` no other test uses. */
-export const runOf = (app: string, workflow: string) =>
-  runActorOf({ runId: `run-${crypto.randomUUID()}`, app, workflow });
 
 /**
  * The audit events `actor` triggered, the model ledger's alerts included:

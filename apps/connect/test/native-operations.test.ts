@@ -110,9 +110,22 @@ describe("a native operation's schemas", () => {
         exports.default.nativeOperation({ tool: "mail.readAttachment" })
       ),
     }).toStrictEqual({
-      exact: { contract: "microsoft-365.mail@1", readOnly: true },
-      reordered: { contract: "microsoft-365.mail@1", readOnly: true },
-      write: { contract: "microsoft-365.mail@1", readOnly: false },
+      exact: {
+        contract: "microsoft-365.mail@1",
+        readOnly: true,
+        answersFile: true,
+      },
+      reordered: {
+        contract: "microsoft-365.mail@1",
+        readOnly: true,
+        answersFile: true,
+      },
+      // A write that attaches files says so (GRA-887).
+      write: {
+        contract: "microsoft-365.mail@1",
+        readOnly: false,
+        takesFiles: true,
+      },
       backtracking: "connect.contract_not_found",
       loosened: "connect.contract_not_found",
       keywordAdded: "connect.contract_not_found",

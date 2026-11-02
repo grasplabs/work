@@ -1,4 +1,3 @@
-import "@grasp-os/chat/workerd";
 import { durableObjectState } from "@grasp-os/chat/state";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, desc, eq } from "drizzle-orm";

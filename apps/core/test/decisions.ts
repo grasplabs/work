@@ -305,30 +305,3 @@ export const confirmedAnswer = async (
     confirmation
   );
 };
-
-/**
- * A screen's answer to the decision `name` of the App's run `run`, as the
- * page gives it once `person` confirmed it in its own dialog: reviewed
- * through the screen's App, confirmed for it, then answered with
- * that confirmation, which the screen never sees.
- */
-export const confirmedDecide = async (
-  person: Person,
-  app: string,
-  run: string,
-  name: string,
-  answer: Answer
-) => {
-  const review = await person.api.screens
-    .frame(app, "")
-    .reviewDecision(run, name, answer);
-  if (review.state === "recorded") {
-    return review.decision;
-  }
-  const { confirmation } = await person.api.screens
-    .frame(app, "")
-    .confirmDecision(run, name, review.decision.revision, review.response);
-  return await person.api.screens
-    .frame(app, "")
-    .decide(run, name, review.response, confirmation);
-};

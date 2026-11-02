@@ -10,13 +10,7 @@ import { z } from "zod";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import {
-  codeResults,
-  codeStep,
-  model,
-  configureObject,
-  says,
-} from "./agent-chat.ts";
+import { codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -45,7 +39,6 @@ const injection =
 /** Answers `person`'s chats with `replies`, from a fake provider. */
 const answering = async (person: Person, ...replies: ProviderReply[]) => {
   const provider = await fakeProvider(...replies);
-  await configureObject(workspace(env, personalWorkspaceId(person.userId)));
   return provider;
 };
 

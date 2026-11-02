@@ -148,6 +148,7 @@ export {
   serverModuleSource,
   symbolicModules,
   workflowFingerprint,
+  workflowReferenceOf,
 } from "./generate.ts";
 export type {
   BoundWorkflow,

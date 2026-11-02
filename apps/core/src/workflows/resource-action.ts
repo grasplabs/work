@@ -75,6 +75,8 @@ import { filesCallOperations } from "./run-files.ts";
 // - Doing more with the run's own files than its files uses name
 //   (GRA-724): only the operations a use declares, on files of its own
 //   run, each written only by the task that opened it (run-files.ts).
+//   A connector read kept as a file (`into`, GRA-886) goes only into a
+//   files use the action declared, to write.
 // - Model calls past the run's cap, or uncounted once its step replays
 //   (GRA-700). A model use's calls send the binding's own model the
 //   sealed output shape, never one the action makes up, and the host
@@ -91,10 +93,18 @@ const actionFailed = (): Error =>
 
 const jsonSchema = z.json();
 
-/** What an action asks of a connector binding: an operation, and its args. */
+/**
+ * What an action asks of a connector binding: an operation, and its args;
+ * for a read that answers a file, the files use of its own that keeps it
+ * as a file of the run (`into`, GRA-886); and, for a write that attaches
+ * run files, the files use of its own they are read through (`from`,
+ * GRA-887).
+ */
 const connectorRequestSchema = z.strictObject({
   operation: z.string().min(1).max(256),
   arguments: jsonSchema,
+  into: z.string().min(1).max(128).optional(),
+  from: z.string().min(1).max(128).optional(),
 });
 
 /** What an action asks of an operation binding: its args. */
@@ -293,6 +303,69 @@ class ActionHost extends RpcTarget {
   }
 
   /**
+   * One call of a connector use: only an operation it declares; a read
+   * kept as a file (`into`, GRA-886) only in a files use it declares, to
+   * write.
+   */
+  async #connector(
+    alias: string,
+    operations: ReadonlySet<string>,
+    request: unknown,
+    ordinal: number
+  ): Promise<Json> {
+    const parsed = connectorRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      return this.#refuse(
+        "request_invalid",
+        alias,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
+    }
+    // Only an operation its sealed contract declares (GRA-704): what
+    // review and approval saw, whatever name the action computes. The
+    // evidence names the use, never the computed operation.
+    if (!operations.has(parsed.data.operation)) {
+      return this.#refuse(
+        "operation_undeclared",
+        alias,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
+    }
+    // Kept as a file only in a files use the action declared, to write:
+    // what its approval shows it keeps (GRA-886). Attached from a files
+    // use it declared, to read: what its approval shows it sends out
+    // (GRA-887).
+    const { into, from } = parsed.data;
+    const declares = (use: string | undefined, operation: string): boolean => {
+      const files = use === undefined ? undefined : this.#uses.get(use);
+      return files?.kind === "files" && files.operations.has(operation);
+    };
+    if (
+      (into !== undefined && !declares(into, "write")) ||
+      (from !== undefined && !declares(from, "read"))
+    ) {
+      return this.#refuse(
+        "operation_undeclared",
+        alias,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
+    }
+    return await this.#make(
+      {
+        name: "grasp.connector",
+        binding: alias,
+        operation: parsed.data.operation,
+        arguments: parsed.data.arguments,
+        // An action passes its own values only: no parameter of the run.
+        sensitive: [],
+        ...(into === undefined ? {} : { into }),
+        ...(from === undefined ? {} : { from }),
+      },
+      ordinal
+    );
+  }
+
+  /**
    * One call of a files use (GRA-724): only what its sealed use declares,
    * opening, adding to and finishing a file all being writing it.
    */
@@ -379,35 +452,7 @@ class ActionHost extends RpcTarget {
     this.#count += 1;
     const ordinal = this.#count;
     if (kind === "connector") {
-      const parsed = connectorRequestSchema.safeParse(request);
-      if (!parsed.success) {
-        return this.#refuse(
-          "request_invalid",
-          alias,
-          workflowResourceErrors.create("workflow.call_invalid")
-        );
-      }
-      // Only an operation its sealed contract declares (GRA-704): what
-      // review and approval saw, whatever name the action computes. The
-      // evidence names the use, never the computed operation.
-      if (!use.operations.has(parsed.data.operation)) {
-        return this.#refuse(
-          "operation_undeclared",
-          alias,
-          workflowResourceErrors.create("workflow.call_denied")
-        );
-      }
-      return await this.#make(
-        {
-          name: "grasp.connector",
-          binding: alias,
-          operation: parsed.data.operation,
-          arguments: parsed.data.arguments,
-          // An action passes its own values only: no parameter of the run.
-          sensitive: [],
-        },
-        ordinal
-      );
+      return await this.#connector(alias, use.operations, request, ordinal);
     }
     if (kind === "knowledge") {
       const parsed = knowledgeRequestSchema.safeParse(request);

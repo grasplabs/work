@@ -90,7 +90,7 @@ const appNames: Readonly<Record<string, string>> = {
 };
 
 /** Places Stephen can be added to, by their chat platform. */
-const addable = ["teams", "slack", "whatsapp", "telegram", "gmail"] as const;
+const addable = ["teams", "slack"] as const;
 
 /** One setting's row: its name and what it means, then its control. */
 const Row = ({
