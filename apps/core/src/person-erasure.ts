@@ -35,6 +35,7 @@ import {
   stephenSummaryReaders,
   teamMembers,
   users,
+  workflowDecisionConfirmations,
 } from "./db/core/schema.ts";
 import { workspace, inJurisdiction } from "./durable-objects.ts";
 import {
@@ -47,6 +48,8 @@ import {
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import { cancelRunsStartedBy } from "./workflows/controls.ts";
+import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
 //
@@ -192,6 +195,50 @@ const identity: ErasureStep = {
           SELECT 1 FROM ${accounts} WHERE ${accounts.userId} = ${userId}
         )`
       ),
+    ]);
+  },
+};
+
+/**
+ * What still acts for them, and what of their decisions is
+ * theirs alone (GRA-1186). The runs they started are the company's
+ * records (Nick's D3): kept, naming them by their ID and name, their
+ * details removed only as run retention removes any run's. But nothing
+ * goes on running for someone erased: every unfinished run of theirs, of
+ * an App's workflow or an independent one, is cancelled or stopped as a
+ * builder's is, audited, for the admin who asked. The area is complete
+ * once each one's cancel or stop was taken, never on a stop claimed by a
+ * pass that died before sending it; the engine ends it. A run that starts for
+ * them after (a trigger of an App they own, a schedule of theirs) does
+ * nothing: every step of every run checks first that the person it acts
+ * for is still a member (`requireActivePerson`, the hosts'
+ * `#requirePerson`), so it fails at its first step. Moving ownership of
+ * what they owned is an admin's. Then the one-use
+ * confirmations they were given to answer decisions go. The decisions
+ * they answered keep who did, as company history.
+ */
+const runs: ErasureStep = {
+  area: "runs",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const by = { userId: erasure.requestedBy, staff: false };
+    const cancelled = await cancelRunsStartedBy(env, by, userId);
+    const stopped = await stopRunsFor(env, actorOf(by), userId);
+    if (cancelled.unasked > 0 || stopped.unasked > 0) {
+      throw new Error("Runs of theirs are still to be asked to end");
+    }
+    await db.batch([
+      db
+        .delete(workflowDecisionConfirmations)
+        .where(eq(workflowDecisionConfirmations.userId, userId)),
+      completed(db, userId, "runs"),
     ]);
   },
 };
@@ -439,6 +486,7 @@ const steps: readonly ErasureStep[] = [
   workspaceArea,
   apps,
   interview,
+  runs,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */

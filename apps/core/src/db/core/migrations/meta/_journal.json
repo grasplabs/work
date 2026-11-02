@@ -1422,6 +1422,13 @@
       "when": 1793655065864,
       "tag": "0202_model_waits_two_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "6",
+      "when": 1793660721760,
+      "tag": "0203_run_stop_taken",
+      "breakpoints": true
     }
   ]
 }
