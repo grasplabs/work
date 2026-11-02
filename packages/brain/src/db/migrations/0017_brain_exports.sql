@@ -26,7 +26,8 @@ CREATE TABLE `brain_exports` (
 	`collection_ids` text NOT NULL,
 	`purge_mark` integer NOT NULL,
 	`claim` text,
-	`claimed_at` integer
+	`claimed_at` integer,
+	`files_removed_at` integer
 );
 --> statement-breakpoint
 CREATE INDEX `brain_exports_state_idx` ON `brain_exports` (`state`);--> statement-breakpoint
