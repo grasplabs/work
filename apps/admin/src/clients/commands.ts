@@ -41,10 +41,14 @@ export const commandTimeoutMs = 30_000;
 export const commandInputSchema = z.object({
   clientId: z.string().min(1).max(63),
   /**
-   * The command's id, chosen by the page: a retry of one left unanswered
-   * keeps it, so core applies it once even if it took the first delivery.
+   * The command's id and when it was issued, chosen by the page: a retry
+   * of one left unanswered keeps both, so core applies it once even if it
+   * took the first delivery, and refuses it once it is no longer fresh
+   * (core's src/admin-command.ts counts on a command never being issued
+   * again).
    */
   id: z.uuid(),
+  issuedAt: z.iso.datetime(),
   command: adminCommandSchema,
 });
 
@@ -181,16 +185,16 @@ export const deliverCommand = async (
   }
 };
 
-/** `command` from `staff`, in its envelope under `id`, issued now. */
+/** `command` from `staff`, in its envelope under `id`, issued at `issuedAt`. */
 export const envelopeOf = (
   staff: Pick<Staff, "email">,
-  id: string,
+  { id, issuedAt }: { id: string; issuedAt: string },
   command: AdminCommand
 ): AdminCommandEnvelopeInput => ({
   id,
   ...command,
   staff: { email: staff.email },
-  issuedAt: new Date().toISOString(),
+  issuedAt,
 });
 
 /** What `staff` asked of client `clientId`'s onboarding, delivered: applied, or why not. */
@@ -199,6 +203,10 @@ export const giveCommand = async (
   staff: Pick<Staff, "email">,
   input: z.input<typeof commandInputSchema>
 ): Promise<CommandAnswer> => {
-  const { clientId, id, command } = commandInputSchema.parse(input);
-  return await deliverCommand(env, clientId, envelopeOf(staff, id, command));
+  const { clientId, id, issuedAt, command } = commandInputSchema.parse(input);
+  return await deliverCommand(
+    env,
+    clientId,
+    envelopeOf(staff, { id, issuedAt }, command)
+  );
 };

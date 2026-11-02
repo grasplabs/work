@@ -45,13 +45,15 @@ const liveClient = async () => {
 
 const pause: AdminCommand = { type: "onboarding.pause", payload: {} };
 
-/** Gives `command` to `clientId`'s onboarding under `id`, as staff (or as nobody, for null). */
+/** Gives `command` to `clientId`'s onboarding under `id`, issued at `issuedAt`, as staff (or as nobody, for null). */
 const give = async (
   clientId: string,
   command: AdminCommand,
   email: string | null = staff.email,
-  id: string = crypto.randomUUID()
-) => await callServerFn(commandFn, { clientId, id, command }, { email });
+  id: string = crypto.randomUUID(),
+  issuedAt: string = new Date().toISOString()
+) =>
+  await callServerFn(commandFn, { clientId, id, issuedAt, command }, { email });
 
 describe("commands from an organization's pages", () => {
   useStoreSecrets({ deployer: token });
@@ -119,13 +121,14 @@ describe("commands from an organization's pages", () => {
     };
     const remindId = crypto.randomUUID();
     const pauseId = crypto.randomUUID();
+    const issuedAt = new Date().toISOString();
 
     const answers = [
       await give(asked.clientId, remind, staff.email, remindId),
-      await give(asked.clientId, pause, staff.email, pauseId),
-      // Given again after an answer that didn't come: the same id, so core
-      // applies it once (core's src/admin-command.ts).
-      await give(asked.clientId, pause, staff.email, pauseId),
+      await give(asked.clientId, pause, staff.email, pauseId, issuedAt),
+      // Given again after an answer that didn't come: the same id, issued
+      // when it was, so core applies it once (core's src/admin-command.ts).
+      await give(asked.clientId, pause, staff.email, pauseId, issuedAt),
     ];
     expect({
       answers,
@@ -135,6 +138,9 @@ describe("commands from an organization's pages", () => {
         by: by.email,
       })),
       ids: asked.account.commands.map(({ id }) => id),
+      issued: asked.account.commands
+        .slice(1)
+        .map((each) => each.issuedAt === issuedAt),
       other: other.account.commands.length,
     }).toStrictEqual({
       answers: [{ refused: null }, { refused: null }, { refused: null }],
@@ -144,6 +150,7 @@ describe("commands from an organization's pages", () => {
         { ...pause, by: staff.email },
       ],
       ids: [remindId, pauseId, pauseId],
+      issued: [true, true],
       other: 0,
     });
   });

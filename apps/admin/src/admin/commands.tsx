@@ -57,22 +57,27 @@ const refusals: Readonly<Record<CommandRefusal, string>> = {
 export const useCommand = (clientId: string) => {
   const router = useRouter();
   const action = useAction(refusals);
-  // The last command given until its answer comes, and its id: core may
-  // have applied one whose answer never came, so giving it again keeps the
-  // id, and core applies it once.
-  const unanswered = useRef<{ key: string; id: string } | null>(null);
+  // The last command given until its answer comes, with its id and when
+  // it was issued: core may have applied one whose answer never came, so
+  // giving it again keeps both, and core applies it once.
+  const unanswered = useRef<{
+    key: string;
+    id: string;
+    issuedAt: string;
+  } | null>(null);
   /** Gives `command`: whether it applied. */
   const give = async (command: AdminCommand): Promise<boolean> => {
     const key = JSON.stringify(command);
-    const id =
+    const { id, issuedAt } =
       unanswered.current?.key === key
-        ? unanswered.current.id
-        : crypto.randomUUID();
-    unanswered.current = { key, id };
+        ? unanswered.current
+        : { id: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+    unanswered.current = { key, id, issuedAt };
     let applied = false;
     await action.run(async () => {
       const answer = await thenRefresh(
-        async () => await commandFn({ data: { clientId, id, command } }),
+        async () =>
+          await commandFn({ data: { clientId, id, issuedAt, command } }),
         async () => {
           await router.invalidate();
         }
