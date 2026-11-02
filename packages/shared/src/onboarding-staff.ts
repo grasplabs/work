@@ -10,7 +10,6 @@ import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
 import type { LogActor } from "./onboarding-staff-log.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
 import type {
-  Agreements,
   FailedMail,
   InterviewKind,
   InterviewLocale,
@@ -164,22 +163,6 @@ export interface StaffInterview {
 
 /** The longest note. */
 export const noteMaxLength = 2000;
-
-/** Where the agreements stand, as Grasp's staff keep them. */
-export interface StaffAgreements {
-  /** As staff last said; null before they said anything. */
-  agreements: Agreements | null;
-  /** All are in: links open and go out by the plan. */
-  agreed: boolean;
-  /**
-   * The team is told: links went out, so what was agreed stays as it was.
-   * Staff pause the interviews instead.
-   */
-  told: boolean;
-  /** How many links went out, and how many wait (taking part, not out yet). */
-  out: number;
-  waiting: number;
-}
 
 /**
  * The most lines in each of Stephen's lists, and the longest line: as long

@@ -106,9 +106,8 @@ export const Route = createFileRoute("/_shell")({
         },
       });
     }
-    // Grasp's staff work from the admin dashboard: nothing here is theirs
-    // but the agreements, until the admin's setup takes them.
-    if (identity.staff && !location.pathname.startsWith("/onboarding")) {
+    // Grasp's staff work from the admin dashboard: nothing here is theirs.
+    if (identity.staff) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/staff", replace: true });
     }

@@ -79,7 +79,6 @@ import {
 import type {
   LogActor,
   LogFilter,
-  StaffAgreements,
   StaffLog,
   StaffLogEntry,
   StaffNote,
@@ -4068,26 +4067,6 @@ export class Onboarding extends DurableObject<Env> {
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
-  }
-
-  /**
-   * Where the agreements stand for Grasp's staff: whether the team is
-   * told (a link ever went out, even to someone since taken off the
-   * roster), and how many links are out and wait.
-   */
-  staffAgreements(): StaffAgreements {
-    const { agreements } = this.#row();
-    const roster = this.#roster();
-    const { sent } = this.#linkFacts();
-    const taking =
-      roster?.people.filter((person) => takingPart(roster, person)) ?? [];
-    return {
-      agreements,
-      agreed: agreementsIn(agreements),
-      told: this.#told(),
-      out: sent.size,
-      waiting: taking.filter(({ id }) => !sent.has(id)).length,
-    };
   }
 
   /** Whether the team is told: a link ever went out, even to someone since taken off the roster. */

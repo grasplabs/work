@@ -1,8 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { Trans } from "@lingui/react/macro";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { shellStatus, signOut } from "../core-connection.ts";
@@ -10,17 +9,9 @@ import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
 
 // Where a Grasp staff sign-in lands: staff steer a company's Grasp from
 // Grasp's admin dashboard, never from inside it, so there is nothing for
-// them here but the agreements (routes/_shell.onboarding.agreements.tsx),
-// until the admin's setup takes them. To act in this workspace, they are
-// added to it as a user.
-
-const agreements = msg({
-  message: "Agreements",
-  context: "onboarding area section",
-});
+// them here. To act in this workspace, they are added to it as a user.
 
 const StaffPage = () => {
-  const { i18n } = useLingui();
   const { core } = Route.useRouteContext();
   const [busy, setBusy] = useState(false);
   const leave = async (): Promise<void> => {
@@ -44,13 +35,6 @@ const StaffPage = () => {
           in as one.
         </Trans>
       </p>
-      <Button
-        nativeButton={false}
-        render={<Link to="/onboarding/agreements" />}
-        variant="outline"
-      >
-        {i18n._(agreements)}
-      </Button>
       <Button
         disabled={busy}
         onClick={() => {

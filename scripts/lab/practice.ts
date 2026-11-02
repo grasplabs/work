@@ -23,7 +23,7 @@ import {
 import type { InterviewLocale, Roster } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
-import { adminCommand } from "../seed/admin-command.ts";
+import { adminCommand, adminSnapshot } from "../seed/admin-command.ts";
 import { origin } from "../seed/local.ts";
 import { ask, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
@@ -206,11 +206,12 @@ const mapWaitMs = 5 * 60_000;
 const mapLookMs = 5000;
 
 /** Waits until every employee's link is out: the team's map is drawn. */
-const linksOut = async (core: Core, count: number): Promise<void> => {
+const linksOut = async (count: number): Promise<void> => {
   const until = Date.now() + mapWaitMs;
   while (Date.now() < until) {
     // oxlint-disable-next-line no-await-in-loop -- one look at a time
-    const { out } = await core.session.api.onboardingStaff.agreements();
+    const { links } = await adminSnapshot();
+    const out = links.filter(({ sentAt }) => sentAt !== null).length;
     if (out >= count) {
       return;
     }
@@ -282,10 +283,11 @@ export const makePractice = async (
     days: 14,
   });
   await adminCommand({ type: "onboarding.resume", payload: {} });
-  await api.onboardingStaff.setAgreements({
-    processing: true,
-    assessment: true,
-    council: "none",
+  await adminCommand({
+    type: "onboarding.agreements",
+    payload: {
+      agreements: { processing: true, assessment: true, council: "none" },
+    },
   });
   const practice: Practice = {
     id,
@@ -311,7 +313,7 @@ export const makePractice = async (
   );
 
   log("Waiting for the team's map, drawn from what the lead agreed to");
-  await linksOut(core, roster.people.length);
+  await linksOut(roster.people.length);
   keepCards(practice, key, await linksOf(core));
   return practice;
 };

@@ -7,23 +7,17 @@ import { describe, expect, it } from "vite-plus/test";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // The onboarding's store (src/onboarding/store.ts), over `/rpc`: the
 // company's admin gives it who works where and the plan, and reads back
 // numbers per team; Grasp's staff pause the interviews and say the
-// agreements are in. From the threat model (GRA-307), the ways it can
+// agreements are in, from Grasp's admin. From the threat model (GRA-307), the ways it can
 // fail, tried here:
 //
-// - Someone else changing it: anyone but an admin, or anyone but staff
-//   pausing it or saying the agreements are in (S1).
+// - Someone else changing it: anyone but an admin, or anyone but Grasp's
+//   admin pausing it or saying the agreements are in (S1, tried in
+//   admin-command.test.ts).
 // - What comes in that isn't a roster or a plan, or a roster past its
 //   limits (C6), or a plan that starts in the past.
 // - A link out while the interviews are paused (L8), or before the
@@ -63,12 +57,6 @@ const roster: RosterInput = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const plan = () => ({ start: today(), days: 14 });
-
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
 
 /** The first team's numbers, as the admin reads them. */
 const numbers = (view: OnboardingView) => ({
@@ -324,28 +312,14 @@ describe("the admin's numbers", () => {
 });
 
 describe("Grasp's staff in the onboarding", () => {
-  it("are the only ones who say the agreements are in", async () => {
-    const { api } = await signedInApi(idp, "admin");
-    await expect(
-      outcome(
-        api.onboardingStaff.setAgreements({
-          processing: true,
-          assessment: true,
-          council: "none",
-        })
-      )
-    ).resolves.toBe("onboarding.staff_only");
-  });
-
   it("let no link out before the agreements are in, nor while the interviews are paused", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan(plan());
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.setAgreements({
+    await adminCommands().setAgreements({
       processing: true,
       assessment: true,
       council: "waiting",
@@ -354,7 +328,7 @@ describe("Grasp's staff in the onboarding", () => {
 
     await adminCommands().pause();
     // As every later test keeps them: once the team is told, they stay.
-    await staff.onboardingStaff.setAgreements({
+    await adminCommands().setAgreements({
       processing: true,
       assessment: true,
       council: "none",
@@ -377,7 +351,6 @@ describe("Grasp's staff in the onboarding", () => {
 
   it("send the links already due as the admin plans them, from a moment that has passed", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     const run = crypto.randomUUID().slice(0, 8);
     const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
@@ -399,7 +372,7 @@ describe("Grasp's staff in the onboarding", () => {
       days: 14,
     });
     await adminCommands().resume();
-    await staff.onboardingStaff.setAgreements({
+    await adminCommands().setAgreements({
       processing: true,
       assessment: true,
       council: "none",
@@ -471,7 +444,6 @@ const sharedAgain: RosterInput = {
 describe("a list shared again while the plan runs", () => {
   it("sends nobody new on it a link until the admin confirms the organization, and then each team as it goes", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     const now = new Date().toISOString();
     await api.onboarding.confirmRoster(confirmedFirst);
@@ -480,7 +452,7 @@ describe("a list shared again while the plan runs", () => {
       { start: weeksAgo(now), days: 42 },
       { type: "system" }
     );
-    await staff.onboardingStaff.setAgreements({
+    await adminCommands().setAgreements({
       processing: true,
       assessment: true,
       council: "none",
@@ -528,11 +500,10 @@ describe("a list shared again while the plan runs", () => {
 describe("someone taken off the list", () => {
   it("keeps no link and nothing of where their interview stood", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan(plan());
-    await staff.onboardingStaff.setAgreements({
+    await adminCommands().setAgreements({
       processing: true,
       assessment: true,
       council: "none",

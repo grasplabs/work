@@ -78,10 +78,15 @@ test("staff put the agreements in place, and the links that waited go out", asyn
       ],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: false,
-      assessment: false,
-      council: "waiting",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: false,
+          assessment: false,
+          council: "waiting",
+        },
+      },
     });
   } finally {
     core[Symbol.dispose]();
@@ -98,16 +103,12 @@ test("staff put the agreements in place, and the links that waited go out", asyn
   // Nothing goes out while the agreements aren't in.
   expect(await out()).toStrictEqual([]);
 
-  const agreeing = apiOf(staff);
-  try {
-    await agreeing.api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
-  } finally {
-    agreeing.core[Symbol.dispose]();
-  }
+  await adminCommand({
+    type: "onboarding.agreements",
+    payload: {
+      agreements: { processing: true, assessment: true, council: "none" },
+    },
+  });
 
   // At once: the lead's and Ona's; Sam's waits for Lea.
   expect(await out()).toStrictEqual([lead, `ona-${run}`].toSorted());
@@ -538,7 +539,9 @@ test("the company's admin goes through their onboarding: the staff list, the org
       roster?.people.find((person) => person.id === teamOf(name)?.lead)?.name;
     const ops = teamOf("Ops")?.id ?? "";
     const opsAt = plan?.later?.[ops];
-    const { waiting } = await api.onboardingStaff.agreements();
+    // Everyone who takes part, none of their links out yet.
+    const links = await api.onboarding.links();
+    const waiting = links.filter(({ path: link }) => link === null).length;
     expect({
       leads: [leadOf("Sales"), leadOf("Ops")],
       off: roster?.teams.filter((team) => team.off).map(({ name }) => name),
@@ -848,12 +851,13 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     await api.onboarding.savePlan({ start: today() });
     // Once the team is told what was agreed stays: the first test may
     // already have put them in place.
-    const { agreed } = await api.onboardingStaff.agreements();
+    const { agreed } = await adminSnapshot();
     if (!agreed) {
-      await api.onboardingStaff.setAgreements({
-        processing: true,
-        assessment: true,
-        council: "none",
+      await adminCommand({
+        type: "onboarding.agreements",
+        payload: {
+          agreements: { processing: true, assessment: true, council: "none" },
+        },
       });
     }
   } finally {

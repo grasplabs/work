@@ -130,15 +130,6 @@ export const kickoffInputSchema = z.strictObject({
 });
 export type KickoffInput = z.input<typeof kickoffInputSchema>;
 
-/** What only Grasp's staff do with the kickoff (`onboardingStaff`). */
-export interface KickoffApi {
-  kickoff: () => Promise<KickoffView>;
-  /** Brings the transcript in, replacing any before it, and reads it. */
-  saveKickoff: (input: KickoffInput) => Promise<KickoffView>;
-  /** Keeps the sponsor's answer to a field; an empty one takes it back. */
-  answerKickoff: (field: VisionField, text: string) => Promise<KickoffView>;
-}
-
 /** Why the kickoff was refused. */
 export const kickoffErrors = defineErrorFamily({
   "kickoff.too_short": "That is too short to be a conversation.",

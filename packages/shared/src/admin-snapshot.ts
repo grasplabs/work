@@ -24,8 +24,8 @@ import { roleSchema } from "./roles.ts";
 // summary it names people, so every read is in the company's audit log.
 //
 // Interviews are here as numbers only: what anyone said, the facts Stephen
-// wrote down and the transcripts stay behind the audited staff transcript
-// read (`OnboardingStaffApi.transcript`). The work drawn from them is
+// wrote down and the transcripts stay in the company's Grasp. The work
+// drawn from them is
 // here as the analyst drew it, for staff steer it from the admin: its
 // steps, and what each person told of it as counts and yes or no, never
 // the example they shared. Nor is any interview link here:
