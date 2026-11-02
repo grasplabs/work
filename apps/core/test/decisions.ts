@@ -110,6 +110,15 @@ export default workflowTests(approval, [
 
 export const week = 7 * 86_400_000;
 
+/**
+ * A decision a test acts on while it waits for the reminder: the reminder
+ * is due five seconds after the ask, which leaves a slow runner room for
+ * what a test does first (change a team, switch a feature off, stop the
+ * run). The deadline, ten seconds after the decision opened, leaves room
+ * to switch back on before it, where a test does that.
+ */
+export const reminding = { timeout: 10_000, remindAfter: 5000 };
+
 /** Who released each approval App (`approvalApp`), who reads its asks. */
 const builders = new Map<string, Person>();
 
@@ -225,6 +234,16 @@ export const outputOf = async (
   await finished(run);
   const { output } = await builder.api.workflows.status(run);
   return output;
+};
+
+/** Whether `decision`'s deadline has passed, by the database's clock. */
+export const deadlinePassed = async (decision: string): Promise<boolean> => {
+  const row = await env.DB.prepare(
+    "SELECT (julianday('now') - 2440587.5) * 86400000 > expires_at AS past FROM workflow_decisions WHERE id = ?"
+  )
+    .bind(decision)
+    .first<{ past: number }>();
+  return row?.past === 1;
 };
 
 /** An answer to a decision, as a person gives it. */

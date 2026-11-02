@@ -2,7 +2,13 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
-import { confirmedAnswer } from "./decisions.ts";
+import {
+  asking as askingInApp,
+  asksOf,
+  confirmedAnswer,
+  outputOf,
+  reminding,
+} from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import {
   decidingWorkflow,
@@ -15,7 +21,13 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
+import {
+  aroundEngine,
+  endLiveRuns,
+  resumed,
+  stopped,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
@@ -48,11 +60,14 @@ import {
 //   nor an event of its type".
 // Gone with App-owned TypeScript workflows (`step.decision`): its
 // `from: "person:<starter>"` exception for the run's own person, asking
-// the App's owner for a run a trigger started, its cap on how many people
-// one decision is from, and its reminders (`remindAfter`). An independent
-// workflow's decision never asks its run's person, asks a team past one
-// ask's list ("asks more people than one ask lists without failing the
-// run, audited by count, and one of them answers"), and has no reminder.
+// the App's owner for a run a trigger started, and its cap on how many
+// people one decision is from. An independent workflow's decision never
+// asks its run's person, and asks a team past one ask's list ("asks more
+// people than one ask lists without failing the run, audited by count,
+// and one of them answers").
+// Kept until JSON decisions have reminders: a reminder asking again,
+// whoever is in the team then, as an App run's (`remindAfter`), in its
+// own block below. An independent workflow's decision asks once.
 
 const idp = mockIdp();
 
@@ -436,6 +451,8 @@ describe("decisions", { timeout: 60_000 }, () => {
     await joinTeam(admin, team, joins);
     await admin.api.members.setRole(demoted.userId, "user");
     await admin.api.members.remove(removed.userId);
+    // A connection of theirs opened since: their session is gone.
+    const { core: removedSince } = await openRpc(removed.session);
 
     expect({
       leftTheTeam: await outcome(
@@ -444,12 +461,10 @@ describe("decisions", { timeout: 60_000 }, () => {
       demoted: await outcome(
         demoted.api.decisions.answer(byRole.decision, { approved: true })
       ),
-      // Refused by their session, or, while the connection still holds
-      // it, by the decision: either way before anything is taken.
-      removed: ["auth.unauthenticated", "decision.forbidden"].includes(
-        await outcome(
-          removed.api.decisions.answer(byPerson.decision, { approved: true })
-        )
+      removed: await outcome(
+        removedSince
+          .authenticate()
+          .decisions.answer(byPerson.decision, { approved: true })
       ),
       // Asked before they joined, so they weren't asked, but may answer.
       joinedTheTeam: await outcome(
@@ -458,7 +473,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       leftTheTeam: "decision.forbidden",
       demoted: "decision.forbidden",
-      removed: true,
+      removed: "auth.unauthenticated",
       joinedTheTeam: "ok",
     });
     await expect(
@@ -519,6 +534,40 @@ describe("decisions", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual({
       status: "completed",
       output: { status: `approved by ${decider.userId}: Fits` },
+    });
+  });
+});
+
+// Kept until JSON decisions have reminders: an App run's decision
+// (`step.decision`'s `remindAfter`), as before.
+describe("an App run's decisions", { timeout: 60_000 }, () => {
+  afterEach(endLiveRuns);
+
+  it("remind by asking again, whoever is in the team then", async () => {
+    const admin = await signedIn("admin");
+    const anna = await signedIn("user");
+    const ben = await signedIn("user");
+    const team = await newTeam(admin, [anna]);
+    const { app, run } = await askingInApp(admin, {
+      from: `team:${team}`,
+      ...reminding,
+    });
+    // Ben joins the team before the reminder goes out.
+    await joinTeam(admin, team, ben);
+    const asks = await asksOf(app, 2);
+
+    expect({
+      asks: asks.map(({ recipients, reminder }) => ({
+        reminder,
+        to: recipients.map(({ userId }) => userId).toSorted(),
+      })),
+      output: await outputOf(admin, run.id),
+    }).toStrictEqual({
+      asks: [
+        { reminder: false, to: [anna.userId] },
+        { reminder: true, to: [anna.userId, ben.userId].toSorted() },
+      ],
+      output: { timedOut: true },
     });
   });
 });
