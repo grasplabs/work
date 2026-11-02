@@ -89,7 +89,6 @@ const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
  */
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
-  step: key,
   number: 1,
   generation: 100,
   deadline: Date.now() + ms,

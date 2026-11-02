@@ -83,7 +83,6 @@ const attemptMs = 2000;
 
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
-  step: key,
   number: 1,
   generation: 100,
   deadline: Date.now() + ms,
@@ -165,7 +164,6 @@ const lineageOf = async () => {
   return {
     run: root.id,
     root: root.id,
-    subject: builder.userId,
     resource: app,
   };
 };
@@ -259,7 +257,6 @@ ${calling("over", 1)}
     const lineage = {
       run: root.id,
       root: root.id,
-      subject: builder.userId,
       resource: app,
     };
 

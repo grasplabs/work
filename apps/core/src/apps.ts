@@ -41,7 +41,6 @@ import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -1123,13 +1122,7 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>,
-  /**
-   * Statements the write's own transaction opens and closes with: one the
-   * database refuses fails the whole write (a build job's lease, build-
-   * admission.ts).
-   */
-  fence?: { open: BatchItem<"sqlite">; close: BatchItem<"sqlite"> }
+  admit?: () => Promise<void>
 ): Promise<AppVersion> => {
   const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -1202,11 +1195,9 @@ export const proposeDraft = async (
         sql`NOT ${archivedNow(appId)}`
       ),
     ] as const;
-    const results: readonly unknown[] = await (fence === undefined
-      ? auditedBatch(env, db, write)
-      : auditedBatch(env, db, [fence.open, ...write, fence.close]));
+    const results: readonly unknown[] = await auditedBatch(env, db, write);
     // The delete's rows: what an archive took back.
-    undone = results.at(fence === undefined ? 1 : 2);
+    undone = results.at(1);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");

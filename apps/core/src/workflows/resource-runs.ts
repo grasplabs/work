@@ -61,7 +61,6 @@ import {
 import { requireNotStaff } from "../sharing.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
-import { runDequeued } from "./admission.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
@@ -98,7 +97,6 @@ import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
-import { wakingOnSettle } from "./share-wakes.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -179,25 +177,10 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
 
 /**
  * Whose runs a run's isolate is among, for the sandbox's share; and whose
- * App share of the client's attempts running at once its attempts take
+ * App slots of the attempts running at once its attempts take
  * (admission.ts): the workflow's own, as an App's runs take their App's.
  */
 const ownerOf = (workflow: string): string => `workflow-resource:${workflow}`;
-
-/**
- * Whose person share of the attempts running at once a run's attempts
- * take (admission.ts), from its receipt, never its input: the person it
- * acts for, whose App runs take the same share; for a trigger's start, the
- * trigger's own (`trigger:<id>`), as an App's triggers take theirs, so
- * the events that fire it never take its principal's.
- */
-const admissionSubjectOf = (
-  row: Pick<RunRow, "principalId">,
-  receipt: { invokerType: string; invokerId: string }
-): string =>
-  receipt.invokerType === "trigger"
-    ? `trigger:${receipt.invokerId}`
-    : row.principalId;
 
 /** What a start's run is admitted as: its pins, from the authorization. */
 export interface RunAdmission {
@@ -785,7 +768,7 @@ const loadedRun = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
-): Promise<{ run: HostedResourceRun; output: string; subject: string }> => {
+): Promise<{ run: HostedResourceRun; output: string }> => {
   const row = await runOf(env, runId);
   if (
     row === undefined ||
@@ -871,7 +854,6 @@ const loadedRun = async (
       ),
     },
     output: JSON.stringify(contract.output),
-    subject: admissionSubjectOf(row, receipt),
   };
 };
 
@@ -943,16 +925,17 @@ export interface HostedActivation {
   readonly run: HostedResourceRun;
   /** Its version's output schema's descriptor (`acceptedOutput`). */
   readonly output: string;
-  /** Whose share of the sandbox its isolate takes, and of the client's attempts. */
+  /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
   readonly owner: string;
   /**
    * Its lineage, which admits each attempt against the quotas and the
-   * client's shares (quotas.ts); or, for a run an App's test started, the
-   * test's own admission, which counts nothing of the organization's
-   * (fixture-runs.ts), with the host's fixture checks (`fixture`).
+   * slots of the attempts running at once (quotas.ts); or, for a run an
+   * App's test started, the test's own admission, which counts nothing of
+   * the organization's (fixture-runs.ts), with the host's fixture checks
+   * (`fixture`).
    */
   readonly admission:
-    | { readonly run: string; readonly root: string; readonly subject: string }
+    | { readonly run: string; readonly root: string }
     | "fixture";
 }
 
@@ -981,11 +964,6 @@ export const runActivation = async (
   let tampered: StepError | undefined;
   // The run's own sandbox session on-prem, its actions' parent.
   let sessionId: string | undefined;
-  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
-  // the run's code is done, never before a step's outcome; none started
-  // after that, by a settle that came too late.
-  const wakes: Promise<void>[] = [];
-  const waking = { open: true };
   const host = new ResourceRunHost(env, step, run, {
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
@@ -1006,19 +984,7 @@ export const runActivation = async (
         }
       : {
           admitAttempt: async (attempt) =>
-            wakingOnSettle(
-              env,
-              await admitAttempt(
-                env,
-                { ...admission, resource: owner },
-                attempt
-              ),
-              (wake) => {
-                if (waking.open) {
-                  wakes.push(wake());
-                }
-              }
-            ),
+            await admitAttempt(env, { ...admission, resource: owner }, attempt),
         }),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(
@@ -1053,8 +1019,6 @@ export const runActivation = async (
       host.isolateDone();
     }
   });
-  waking.open = false;
-  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     throw new Error(`Run ${runId} is no longer this activation's`);
   }
@@ -1094,13 +1058,13 @@ export const runResourceWorkflow = async (
   engineStep: RunStep,
   memory: ResourceRunMemory
 ): Promise<unknown> => {
-  const { run, output, subject } = await loadedRun(env, pin, runId);
+  const { run, output } = await loadedRun(env, pin, runId);
   return await runActivation(env, engineStep, memory, {
     run,
     output,
     owner: ownerOf(pin.workflow),
     // Counted on its lineage's root: its own, or its parent's for a child.
-    admission: { run: runId, root: run.rootRunId ?? runId, subject },
+    admission: { run: runId, root: run.rootRunId ?? runId },
   });
 };
 
@@ -1438,18 +1402,6 @@ export const projectResourceRun = async (
             withFailure(runEntry(row, action), status, failure)
           ),
         ]),
-    // Ended or paused, it waits in the admission queue for nothing more:
-    // its places go now, rather than keep others waiting until they lapse.
-    // After the audit entry, which reads what the row's update changed.
-    ...(ended || status === "paused"
-      ? [
-          runDequeued(
-            db,
-            id,
-            sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${id} AND ${workflowResourceRuns.status} = ${status})`
-          ),
-        ]
-      : []),
   ]);
   // A screen's controls of it, settled by how it ended.
   const now = ended ? await runOf(env, id) : undefined;

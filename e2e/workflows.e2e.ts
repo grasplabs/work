@@ -549,7 +549,7 @@ const coreSql = (statement: string): void => {
   );
 };
 
-test("a run waiting for a share of its App's runs reads as queued, with when it tries again, not failed or running", async ({
+test("a run whose model call waits for a share of its App's requests reads as queued, with when it tries again, not failed or running", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("workflows");
@@ -571,13 +571,14 @@ test("a run waiting for a share of its App's runs reads as queued, with when it 
   expect(app).toMatch(plainId);
   expect(run).toMatch(plainId);
   expect(builder.userId).toMatch(plainId);
-  // Its step waits for its App's share, and asks again in ten minutes at
-  // the latest. A place stays live a minute and a half after its step
-  // asked: this one asked "now" a minute from now, room for pages to load.
+  // Its step's model call waits for its App's share, and asks again in ten
+  // minutes at the latest. A wait stays live a minute and a half after its
+  // call asked: this one asked "now" a minute from now, room for pages to
+  // load.
   const asked = Date.now() + 60_000;
   const retryAt = Date.now() + 10 * 60_000;
   coreSql(
-    `INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES ('${run}', 'e2e-step', '${builder.userId}', '${app}', ${asked}, ${asked}, 'app', ${retryAt}, 0, ${retryAt})`
+    `INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES ('${run}', 'e2e-step', 'e2e', 'app', ${retryAt}, ${asked})`
   );
   const page = await pageOf(builder);
   try {
@@ -604,7 +605,7 @@ test("a run waiting for a share of its App's runs reads as queued, with when it 
     await expect(header).not.toContainText("Failed");
     await expect(header).not.toContainText("Running");
   } finally {
-    coreSql(`DELETE FROM workflow_admission_queue WHERE run_id = '${run}'`);
+    coreSql(`DELETE FROM workflow_model_waits WHERE run_id = '${run}'`);
     await withApi(builder, async (api) => {
       await api.workflows.cancel(run);
     });

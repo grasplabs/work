@@ -72,16 +72,8 @@ const counted = (scope: "user" | "workflow", key: string): LedgerScope => ({
 
 /** Shares of the requests in flight roomy enough that none fills here. */
 const roomyFair = () => ({
-  place: crypto.randomUUID(),
   subject: "spend-settings",
-  resource: null,
-  shares: {
-    client: 1000,
-    person: 1000,
-    app: 1000,
-    queuedPerPerson: 1000,
-    queuedPerApp: 1000,
-  },
+  shares: { client: 1000, person: 1000 },
 });
 
 /** The settings as an admin reads them from `coreEnv`. */

@@ -63,7 +63,7 @@ import {
 } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
-import { queuedRuns, runDequeued } from "./admission.ts";
+import { queuedRuns } from "./admission.ts";
 import type { RunWait } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
@@ -1395,18 +1395,6 @@ export const projectStatus = async (
         ]
       : []),
     ...controlsSettledBy(db, row.id, engine, at),
-    // Paused or ended, it waits in the client's queue for nothing
-    // (admission.ts): its places go, once the row took this notification,
-    // never for one it refused as older.
-    ...(ended || status === "paused"
-      ? [
-          runDequeued(
-            db,
-            row.id,
-            sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = ${status}${engine.sequence === undefined ? sql`` : sql` AND ${workflowRuns.engineSequence} = ${engine.sequence}`})`
-          ),
-        ]
-      : []),
     // Its end and the cleanup of the statistics points its steps never
     // added up are written together: a retried notification finds the
     // row ended, so nothing would be left to clean up after it. Its outcome's capture for the Brain goes with its end too: a run
