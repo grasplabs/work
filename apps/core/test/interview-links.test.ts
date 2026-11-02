@@ -219,7 +219,7 @@ const storeText = async (): Promise<string> =>
     );
   });
 
-/** What the onboarding's own log, which only staff read, says of someone. */
+/** What the onboarding's own log says of someone. */
 const staffLog = async (person: string): Promise<string[]> =>
   await runInDurableObject(onboardingStore(env), (_instance, state) =>
     state.storage.sql

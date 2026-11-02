@@ -25,6 +25,7 @@ import {
   participate,
 } from "./interview-link.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import {
   agree,
   fact,
@@ -424,16 +425,14 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     // The team given to the brain again, so none of it waits for the next test.
     await drawAll(ids);
     await intakeAlike();
-    const { entries } = await onboardingStore(env).staffLog({
-      what: "interview.deleted",
-    });
+    const entries = await onboardingLog("interview.deleted");
     expect({
       audited: events
         .map(({ action }) => action)
         .filter((action) => action.startsWith("onboarding.")),
       logged: entries
-        .filter(({ person }) => person?.id === ids.max)
-        .map(({ actor }) => actor),
+        .filter(({ about }) => about === ids.max)
+        .map(({ by: who }) => (who === "interviewee" ? "person" : who)),
     }).toStrictEqual({
       audited,
       logged: [by],

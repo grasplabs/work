@@ -1,21 +1,19 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
-import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { labMarks } from "../src/onboarding/lab-marks.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
-import { answering, openedFor } from "./interview-link.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
 
 // The interviews by name as Grasp's admin reads and steers them (the
 // admin snapshot and admin commands): where everyone stands, the one
-// reminder, a team asked in, and who held a transcript on which text.
+// reminder, and a team asked in.
 // The ways it can fail, tried here:
 //
 // - A read that names people without a trace in the audit log; or a trace
@@ -153,16 +151,14 @@ describe("the interviews, as Grasp's admin sees and steers them", () => {
       .filter(({ remindedAt }) => remindedAt !== null)
       .map(({ person }) => person)
       .filter((person) => Object.values(ids).includes(person));
-    const { entries } = await onboardingStore(env).staffLog({
-      what: "interview.reminded",
-    });
+    const entries = await onboardingLog("interview.reminded");
     const text = JSON.stringify(events);
     expect({
       reminded,
       again: again.length,
       logged: entries
-        .filter(({ person }) => person?.id === ids.ona)
-        .map(({ actor }) => actor),
+        .filter(({ about }) => about === ids.ona)
+        .map(({ by }) => by.split(":")[0]),
       audited: events.map(({ action, detail }) => [action, detail]),
       named: text.includes(ids.ona),
     }).toStrictEqual({
@@ -191,48 +187,6 @@ describe("the interviews, as Grasp's admin sees and steers them", () => {
       off: false,
       lia: "invited",
       unknown: "onboarding.no_team",
-    });
-  });
-
-  it("show who held an interview, and the text it was held with, by its mark", async () => {
-    const { link, person } = await openedFor();
-    const store = onboardingStore(env);
-    const before = await store.interviewOf(person);
-    await answering(
-      [
-        {
-          text: "TONE: none\nSAY: Shall we start?\nPART: open\nWANTS: answer\nMORE: no\nAGREED: no\n",
-          inputTokens: 10,
-          outputTokens: 10,
-        },
-        {
-          text: '{"facts":[],"changes":[]}',
-          inputTokens: 10,
-          outputTokens: 10,
-        },
-      ],
-      async () => {
-        const turn = await routed(interviewTurnPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            ...link,
-            event: "start",
-            locale: "nl",
-            interviewer: "claire",
-            lines: [],
-            facts: [],
-            phase: "open",
-            minutes: 0,
-          }),
-        });
-        await turn.text();
-      }
-    );
-    const after = await store.interviewOf(person);
-    expect({ before: before?.texts, after: after?.texts }).toStrictEqual({
-      before: [],
-      after: [labMarks.claire.own.nl],
     });
   });
 });

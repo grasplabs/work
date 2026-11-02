@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { referred } from "../src/onboarding/referral.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { answering } from "./interview-link.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
 
 // When someone says the work they were asked about isn't theirs
@@ -46,7 +47,7 @@ describe("work someone says isn't theirs", () => {
       store.contextOf(ids.max),
       store.contextOf(ids.pim),
     ]);
-    const { entries } = await store.staffLog({ what: "interview.referred" });
+    const entries = await onboardingLog("interview.referred", store);
     expect({
       read: requests.length,
       ticketsBy: after.find(({ id }) => id === tickets.id)?.doers.toSorted(),
@@ -61,7 +62,7 @@ describe("work someone says isn't theirs", () => {
         "Max plans the rota",
         "not theirs",
       ].filter((words) => (pimContext?.known ?? "").includes(words)),
-      logged: entries.map(({ person, named }) => [person?.id, named?.id]),
+      logged: entries.map(({ about, named }) => [about, named]),
     }).toStrictEqual({
       read: 1,
       ticketsBy: [ids.mia, ids.mo, ids.pim].toSorted(),

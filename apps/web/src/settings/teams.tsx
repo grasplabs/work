@@ -42,8 +42,8 @@ import { useTeamChange } from "./use-team-change.ts";
 // Teams, for admins (GRA-1296): the organization's teams, each with how
 // many are in it; making one, renaming it, deleting it, and who is in it.
 // Everything that is shared with a team ("Chosen teams") picks from these.
-// They aren't the onboarding's roster teams (onboarding-organization.ts),
-// which are a list of their own. Better Auth checks the role on every
+// They aren't the onboarding's roster teams, which are a list of their
+// own. Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
 
 /** What the tab shows: the teams, and the members to put in them. */

@@ -238,7 +238,7 @@ describe("a content purge of the interviews", () => {
     await store.approve(mark, key, [
       { id: fact.id, revision: await factRevision(fact) },
     ]);
-    const approvedBefore = await store.interviewOf(lead);
+    const approvedBefore = await store.drawInput(lead);
 
     await purgeTerm(term);
     // The device saves again what it is given: its copy, refused, then
@@ -254,13 +254,13 @@ describe("a content purge of the interviews", () => {
     }
     const { version, progress } = refused.value;
     const saved = await store.saveInterview(mark, key, version, progress);
-    const approvedAfter = await store.interviewOf(lead);
+    const approvedAfter = await store.drawInput(lead);
 
     expect({
-      before: approvedBefore?.counts.approved,
+      before: approvedBefore?.facts.length,
       saved: saved.ok && saved.value.saved,
       holds: JSON.stringify(progress).includes(term),
-      after: approvedAfter?.counts.approved,
+      after: approvedAfter?.facts.length,
     }).toStrictEqual({ before: 1, saved: true, holds: false, after: 1 });
   });
 
@@ -526,13 +526,10 @@ describe("a content purge of the interviews", () => {
 });
 
 describe("a purge of terms in staff's own text", () => {
-  it("takes the term out of staff's notes and Stephen's setup, keeps the setup a setup, and audits no word", async () => {
+  it("takes the term out of Stephen's setup, keeps the setup a setup, and audits no word", async () => {
     const term = `Zq${unique()}`;
     const store = onboardingStore(env);
     const by = { type: "system" } as const;
-    await store.addNote(`Ask Lea about ${term}.`, by);
-    const other = `Lea is away on Friday ${unique()}.`;
-    await store.addNote(other, by);
     await store.saveStephen(
       {
         languages: ["en"],
@@ -544,7 +541,6 @@ describe("a purge of terms in staff's own text", () => {
     );
 
     await purgeTerm(term);
-    const notes = await store.notes();
     const { setup } = await store.stephen();
     const events = await allEvents();
     const purged = events.filter(
@@ -552,18 +548,10 @@ describe("a purge of terms in staff's own text", () => {
     );
 
     expect({
-      notesHold: JSON.stringify(notes).includes(term),
-      rewritten: notes.some(
-        ({ text }) => text === `Ask Lea about ${purgedMarker}.`
-      ),
-      other: notes.some(({ text }) => text === other),
       setup,
       purged: purged.length > 0,
       auditHolds: JSON.stringify(purged).includes(term),
     }).toStrictEqual({
-      notesHold: false,
-      rewritten: true,
-      other: true,
       setup: {
         languages: ["en"],
         limits: [`Leave ${purgedMarker} alone.`],
@@ -594,16 +582,19 @@ describe("a purge of terms in staff's own text", () => {
     }).toStrictEqual({ code: 0, line: 1 });
   });
 
-  it("leaves staff's text alone when a purge names a document but none of its terms are in it", async () => {
+  it("leaves Stephen's setup alone when none of a purge's terms are in it", async () => {
     const store = onboardingStore(env);
-    const by = { type: "system" } as const;
-    // It speaks of the purged document, not of what the purge takes out.
-    const note = `See note.md for the sales plan ${unique()}.`;
-    await store.addNote(note, by);
+    // It speaks of a document, not of what the purge takes out.
+    const setup = {
+      languages: ["en" as const],
+      limits: [`See note.md for the sales plan ${unique()}.`],
+      terms: [],
+    };
+    await store.saveStephen(setup, { type: "system" });
 
     await purgeTerm(`Zq${unique()}`);
-    const notes = await store.notes();
+    const kept = await store.stephen();
 
-    expect(notes.some(({ text }) => text === note)).toBeTruthy();
+    expect(kept.setup).toStrictEqual(setup);
   });
 });

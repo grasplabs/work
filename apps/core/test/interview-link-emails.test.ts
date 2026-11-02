@@ -13,6 +13,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -285,7 +286,7 @@ describe("the interview link emails", () => {
     });
     const nothingFailed = await outcome(adminCommands().sendMailAgain("ona"));
     const toldSent = await told();
-    const { entries } = await store.staffLog({ what: "mail" });
+    const entries = await onboardingLog("mail");
     const resent = audited.filter(
       ({ action }) => action === "onboarding.mail.resent"
     );
@@ -309,7 +310,7 @@ describe("the interview link emails", () => {
       failed,
       nothingFailed,
       sent: mail.sent.map(({ to }) => to),
-      log: entries.map(({ what, person: one }) => [what, one?.id]).toReversed(),
+      log: entries.map(({ what, about }) => [what, about ?? undefined]),
       resent: resent.map(({ actor, detail }) => [actor.type, detail]),
       audited: JSON.stringify(resent).includes("oli"),
     }).toStrictEqual({

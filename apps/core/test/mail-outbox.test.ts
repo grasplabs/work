@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { MailToQueue } from "../src/mail-outbox.ts";
 import { captureMail, setStoreEnv } from "./mail-capture.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring } from "./sign-in.ts";
 
@@ -43,10 +44,8 @@ const note = (key: string): MailToQueue => ({
 
 /** What the store's log has of mail, oldest first. */
 const mailLog = async (store: ReturnType<typeof newStore>) => {
-  const { entries } = await store.staffLog({ what: "mail" });
-  return entries
-    .map(({ what, person }) => ({ what, person: person?.id ?? null }))
-    .toReversed();
+  const entries = await onboardingLog("mail", store);
+  return entries.map(({ what, about }) => ({ what, person: about }));
 };
 
 describe("the mail outbox", () => {
@@ -127,9 +126,9 @@ describe("the mail outbox", () => {
       sent: 0,
       suppressed: ["failed", "E_RECIPIENT_SUPPRESSED"],
       unverified: ["failed", "E_SENDER_NOT_VERIFIED"],
-      // Oli isn't on this store's roster, so the log names nobody.
+      // Each failure is about whom the mail was about, if anyone.
       log: [
-        { what: "mail.note.failed.recipient_suppressed", person: null },
+        { what: "mail.note.failed.recipient_suppressed", person: "oli" },
         { what: "mail.note.failed.sender_not_verified", person: null },
       ],
     });
