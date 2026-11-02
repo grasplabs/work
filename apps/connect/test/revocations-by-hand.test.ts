@@ -1,4 +1,5 @@
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { revocationsListed } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -201,6 +202,46 @@ describe("the revokes to make by hand", () => {
       }).toStrictEqual({ before: [state], after: [] });
     }
   );
+
+  it("still lists one to make by hand behind more than a list's worth of older ones whose grant is in use again", async () => {
+    const admin = someone("admin");
+    const live = await connectAccount(
+      providers,
+      admin,
+      ownAccount(admin, "google")
+    );
+    const held = await env.DB.prepare(
+      "SELECT account_id AS accountId FROM connections WHERE id = ?"
+    )
+      .bind(live)
+      .first<{ accountId: string }>();
+    // Older revokes of the same Google account, connected again since: the
+    // grant they would end is the live connection's.
+    const day = 24 * 60 * 60 * 1000;
+    const older = Array.from({ length: revocationsListed + 5 }, (_, index) => ({
+      id: `old-${crypto.randomUUID()}`,
+      at: Date.now() - 2 * day + index,
+    }));
+    await env.DB.batch(
+      older.flatMap(({ id, at }) => [
+        env.DB.prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, created_at, updated_at) VALUES (?, 'google', 'personal', ?, 'disconnected', 'native', 'google-workspace', ?, ?, ?)"
+        ).bind(id, admin.userId, held?.accountId ?? "", at, at),
+        env.DB.prepare(
+          "INSERT INTO token_revocations (id, connection_id, sealed, reason, attempts, retry_at, created_at) VALUES (?, ?, 'sealed', 'disconnected', ?, ?, ?)"
+        ).bind(crypto.randomUUID(), id, stuckAttempts, Date.now() + day, at),
+      ])
+    );
+    const { connectionId } = await owedFor(someone());
+    await failed(connectionId, stuckAttempts);
+
+    const listed = await exports.default.revocationsByHand({ person: admin });
+
+    expect({
+      real: listed.some((each) => each.connectionId === connectionId),
+      inUse: listed.filter(({ connectionId: id }) => id.startsWith("old-")),
+    }).toStrictEqual({ real: true, inUse: [] });
+  });
 
   it("leaves out a stuck revoke whose token the app handed the account again when it connected again", async () => {
     const person = someone();

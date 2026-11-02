@@ -8,7 +8,7 @@ import type { RevocationByHand } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -35,7 +35,9 @@ import { grantHeldAgain, stuckAttempts } from "./revocations.ts";
 // - Cutting live access: a revoke whose grant a connection holds again
 //   (the account connected again, in any scope, on Google's account-wide
 //   grant, or handed the same refresh token) is left out, as `tryOwed`
-//   drops it: removing it by hand would end access in use.
+//   drops it: removing it by hand would end access in use. Left out
+//   while the list is read page by page, so many of them never hide a
+//   newer one still to make (`oldestStillOwed`).
 // - Alert fatigue: a revoke shows only once it is stuck (about a day of
 //   failures), not on its first failed try, and one given up shows for
 //   `givenUpShownMs`, then goes.
@@ -53,6 +55,50 @@ const filterAsync = async <T>(
 ): Promise<T[]> => {
   const kept = await mapConcurrently(items, checkedAtOnce, keep);
   return items.filter((_, index) => kept[index] === true);
+};
+
+/**
+ * Most pages of candidates one read goes through for each kind: a list's
+ * worth each, so at most this many lists' worth of revokes whose grant is
+ * in use again are passed over before the read stops where it got.
+ */
+const pagesAtMost = 5;
+
+/** Where a page of candidates ends: by age, then ID. */
+interface PageEnd {
+  at: Date;
+  id: string;
+}
+
+/**
+ * The oldest candidates `keep` keeps, a list's worth at most: page after
+ * page by age (`pageAfter`, the next after `endOf` the last), so revokes
+ * whose grant is in use again never crowd out newer ones still to make,
+ * and at most `pagesAtMost` pages.
+ */
+const oldestStillOwed = async <T>(
+  pageAfter: (after: PageEnd | undefined) => Promise<T[]>,
+  endOf: (row: T) => PageEnd,
+  keep: (row: T) => Promise<boolean>
+): Promise<T[]> => {
+  const kept: T[] = [];
+  let after: PageEnd | undefined;
+  for (let page = 0; page < pagesAtMost; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each page starts where the last ended
+    const rows = await pageAfter(after);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    kept.push(...(await filterAsync(rows, keep)));
+    const last = rows.at(-1);
+    if (
+      kept.length >= revocationsListed ||
+      last === undefined ||
+      rows.length < revocationsListed
+    ) {
+      break;
+    }
+    after = endOf(last);
+  }
+  return kept.slice(0, revocationsListed);
 };
 
 /** A connection, as the list names it: never a personal account. */
@@ -100,34 +146,62 @@ export const revocationsByHand = async (
   }
   const db = drizzle(env.DB);
   const now = Date.now();
-  const [stuck, givenUp] = await Promise.all([
-    db
-      .select({ owed: tokenRevocations, connection: connections })
-      .from(tokenRevocations)
-      .innerJoin(connections, eq(connections.id, tokenRevocations.connectionId))
-      .where(gte(tokenRevocations.attempts, stuckAttempts))
-      .orderBy(asc(tokenRevocations.createdAt))
-      .limit(revocationsListed),
-    db
-      .select({ ended: givenUpRevocations, connection: connections })
-      .from(givenUpRevocations)
-      .innerJoin(
-        connections,
-        eq(connections.id, givenUpRevocations.connectionId)
-      )
-      .where(gte(givenUpRevocations.givenUpAt, new Date(now - givenUpShownMs)))
-      .orderBy(asc(givenUpRevocations.owedAt))
-      .limit(revocationsListed),
-  ]);
-
   const [stillStuck, stillGivenUp] = await Promise.all([
-    filterAsync(
-      stuck,
+    oldestStillOwed(
+      async (after) =>
+        await db
+          .select({ owed: tokenRevocations, connection: connections })
+          .from(tokenRevocations)
+          .innerJoin(
+            connections,
+            eq(connections.id, tokenRevocations.connectionId)
+          )
+          .where(
+            and(
+              gte(tokenRevocations.attempts, stuckAttempts),
+              after === undefined
+                ? undefined
+                : or(
+                    gt(tokenRevocations.createdAt, after.at),
+                    and(
+                      eq(tokenRevocations.createdAt, after.at),
+                      gt(tokenRevocations.id, after.id)
+                    )
+                  )
+            )
+          )
+          .orderBy(asc(tokenRevocations.createdAt), asc(tokenRevocations.id))
+          .limit(revocationsListed),
+      ({ owed }) => ({ at: owed.createdAt, id: owed.id }),
       async ({ owed, connection }) =>
         !(await grantHeldAgain(env, connection, owed.sealed))
     ),
-    filterAsync(
-      givenUp,
+    oldestStillOwed(
+      async (after) =>
+        await db
+          .select({ ended: givenUpRevocations, connection: connections })
+          .from(givenUpRevocations)
+          .innerJoin(
+            connections,
+            eq(connections.id, givenUpRevocations.connectionId)
+          )
+          .where(
+            and(
+              gte(givenUpRevocations.givenUpAt, new Date(now - givenUpShownMs)),
+              after === undefined
+                ? undefined
+                : or(
+                    gt(givenUpRevocations.owedAt, after.at),
+                    and(
+                      eq(givenUpRevocations.owedAt, after.at),
+                      gt(givenUpRevocations.id, after.id)
+                    )
+                  )
+            )
+          )
+          .orderBy(asc(givenUpRevocations.owedAt), asc(givenUpRevocations.id))
+          .limit(revocationsListed),
+      ({ ended }) => ({ at: ended.owedAt, id: ended.id }),
       async ({ connection }) => !(await grantHeldAgain(env, connection))
     ),
   ]);
