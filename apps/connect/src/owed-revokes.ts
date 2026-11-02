@@ -4,7 +4,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
-import { connectionTokens, tokenRevocations } from "./db/schema.ts";
+import {
+  connectionTokens,
+  givenUpRevocations,
+  tokenRevocations,
+} from "./db/schema.ts";
 import { providerFor } from "./providers.ts";
 
 // Revokes owed at a provider (src/revocations.ts; GRA-1191, GRA-1196): how
@@ -57,19 +61,26 @@ export type OwedEnd =
   | "connection.revoke_superseded"
   | "connection.revoke_abandoned";
 
+/** Why a revoke was given up. */
+export type GivenUpReason = "expired" | "unreadable";
+
 /**
  * Ends the owed revoke `id` of connection `connectionId` as `action`, with
  * `detail`: the row, and the tokens it held, go in one write with the
- * event, once.
+ * event, once. One given up (`givenUp`, its reason) is kept as such,
+ * without them, for the company's admins to revoke by hand
+ * (src/revocations-by-hand.ts).
  */
 export const endOwedRevoke = async (
   env: Env,
   owed: { id: string; connectionId: string },
   action: OwedEnd,
-  detail: Record<string, string | number>
+  detail: Record<string, string | number>,
+  givenUp?: GivenUpReason
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const still = eq(tokenRevocations.id, owed.id);
+  const now = Date.now();
   await recordEventIf(
     env,
     {
@@ -79,6 +90,16 @@ export const endOwedRevoke = async (
       detail,
     },
     { from: tokenRevocations, where: still },
-    [db.delete(tokenRevocations).where(still)]
+    [
+      ...(givenUp === undefined
+        ? []
+        : [
+            db.insert(givenUpRevocations).select(
+              sql`SELECT ${tokenRevocations.id}, ${tokenRevocations.connectionId}, ${tokenRevocations.reason}, ${givenUp}, ${tokenRevocations.attempts}, ${tokenRevocations.createdAt}, ${now}
+                FROM ${tokenRevocations} WHERE ${still}`
+            ),
+          ]),
+      db.delete(tokenRevocations).where(still),
+    ]
   );
 };
