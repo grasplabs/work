@@ -799,11 +799,13 @@ const callModel = async (
       ),
       purpose: "workflow.step",
       trigger: { type: "system" },
-      // Its lineage's: the run and every child under it share the
-      // lineage's model requests at the gateway, whatever each one's own
-      // `maxModelCalls` allows (run-children.ts). Its spend counts against
-      // its workflow's budget too.
-      lineage: { rootRunId: run.rootRunId, workflowId: run.workflowId },
+      // Its account's: the run and every child under it share the model
+      // requests of the account they are charged to at the gateway (their
+      // lineage's root, or their workflow's account in the lineage a
+      // trigger started them in), whatever each one's own `maxModelCalls`
+      // allows (run-children.ts). Its spend counts against its workflow's
+      // budget too.
+      lineage: { rootRunId: run.accountRunId, workflowId: run.workflowId },
       work: { authority: runAuthority(run), context: runContext(run) },
       // Once the ledger admitted each provider request, the run's authority
       // decided again (it may have gone while the request waited), then its

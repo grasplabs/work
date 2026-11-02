@@ -1366,6 +1366,7 @@ describe("a JSON workflow's own actions", () => {
     const run: CallingRun = {
       runId,
       rootRunId: runId,
+      accountRunId: runId,
       workflowId: workflow.id,
       version: 1,
       principal: ada.userId,
@@ -1715,6 +1716,7 @@ export const notify = action({
         {
           runId,
           rootRunId: runId,
+          accountRunId: runId,
           workflowId: crypto.randomUUID(),
           version: 1,
           principal: crypto.randomUUID(),
