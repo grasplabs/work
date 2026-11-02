@@ -223,8 +223,9 @@ test("staff open someone's interview and see where it stands, never a word of it
 
   // The look is in the audit log, by the staff member, once the log has
   // taken it from core's outbox: a staff access of the interview, naming
-  // the kind of what was asked and never the person (GRA-1087).
-  const reader = apiOf(staff);
+  // the kind of what was asked and never the person (GRA-1087). The
+  // company's admin reads it; staff read no audit log of the client's.
+  const reader = apiOf(admin);
   try {
     await expect
       .poll(async () => {
