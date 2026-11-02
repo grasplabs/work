@@ -641,6 +641,7 @@ export const createFromBlueprint = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: now,
+    link: null,
     removedAt: null,
     removedBy: null,
     ...provisionalColumns(provisional),
@@ -710,6 +711,7 @@ export const createFromBlueprint = async (
       statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
       statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
+      link: sql<string | null>`NULL`.as("link"),
       removedAt: sql<Date | null>`NULL`.as("removed_at"),
       removedBy: sql<string | null>`NULL`.as("removed_by"),
       provisionalWorkspaceId: sql<
