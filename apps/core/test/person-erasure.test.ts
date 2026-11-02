@@ -1,6 +1,11 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import type { InterviewSession } from "@grasp-os/shared/interview-links";
+import {
+  interviewApiPath,
+  interviewProgressSchema,
+} from "@grasp-os/shared/interview-links";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
@@ -128,31 +134,29 @@ const onTheList = async (email: string) => {
   const store = onboardingStore(env);
   const by = { type: "system" } as const;
   await store.setPaused(false, by);
-  await store.saveRoster(
-    {
-      teams: [{ id: ids.team, name: "Ops", lead: null, does: "", off: false }],
-      people: [
-        {
-          id: theirs,
-          name: "Them",
-          team: ids.team,
-          // Their list address, in other letters.
-          email: email.toUpperCase(),
-          title: "",
-          away: false,
-        },
-        {
-          id: others,
-          name: "Someone else",
-          team: ids.team,
-          email: `other-${crypto.randomUUID().slice(0, 8)}@acme.test`,
-          title: "",
-          away: false,
-        },
-      ],
-    },
-    by
-  );
+  const roster = {
+    teams: [{ id: ids.team, name: "Ops", lead: null, does: "", off: false }],
+    people: [
+      {
+        id: theirs,
+        name: "Them",
+        team: ids.team,
+        // Their list address, in other letters.
+        email: email.toUpperCase(),
+        title: "",
+        away: false,
+      },
+      {
+        id: others,
+        name: "Someone else",
+        team: ids.team,
+        email: `other-${crypto.randomUUID().slice(0, 8)}@acme.test`,
+        title: "",
+        away: false,
+      },
+    ],
+  };
+  await store.saveRoster(roster, by);
   await store.savePlan(
     {
       start: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
@@ -171,8 +175,46 @@ const onTheList = async (email: string) => {
   };
   const theirSecret = await secretOf(theirs);
   const otherSecret = await secretOf(others);
-  return { theirs, others, theirSecret, otherSecret };
+  return { theirs, others, theirSecret, otherSecret, roster };
 };
+
+/** A save of an interview as the page sends one. */
+const progress = {
+  person: "progress",
+  told: true,
+  mode: "type",
+  lines: [
+    { from: "stephen", text: "What did you do this morning?" },
+    { from: "person", text: "Saved after my erasure", typed: true },
+  ],
+  facts: [],
+  phase: "story",
+  wants: "answer",
+  startedAt: Date.now(),
+  confirmed: 0,
+  adding: false,
+  addedAt: 0,
+};
+
+/** Most saves a test's page tries while their interview is erased. */
+const savesWhileErasing = 200;
+
+/** Opens a link's page with `secret` on a new device: the key it is given. */
+const keyFor = async (secret: string): Promise<string> => {
+  const response = await routed(interviewApiPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "session", secret }),
+  });
+  const session = await response.json<InterviewSession>();
+  return session.key ?? "";
+};
+
+/** A link's path in `rows`, as the admin lists them, for `id`. */
+const pathOf = (
+  rows: readonly { person: string; path: string | null }[],
+  id: string
+): string | null => rows.find((row) => row.person === id)?.path ?? null;
 
 /** How many invitations went to `address`, in any case. */
 const invitedOf = async (address: string): Promise<number> => {
@@ -749,6 +791,106 @@ describe("erasing a person", () => {
       otherEntry: 1,
       theirMail: 0,
       otherMail: 1,
+    });
+  });
+
+  it("makes their link no new code once they are erased, as the admin lists the links or saves the list again", async () => {
+    const { admin, person } = await removedPerson();
+    const { theirs, others, theirSecret, roster } = await onTheList(
+      String(person.person.email)
+    );
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const listed = await admin.api.onboarding.links();
+    await admin.api.onboarding.saveRoster(roster);
+    const again = await admin.api.onboarding.links();
+
+    const codes = await onList(
+      "SELECT person FROM link_codes WHERE person = ?",
+      theirs
+    );
+    expect({
+      listed: pathOf(listed, theirs),
+      again: pathOf(again, theirs),
+      other: typeof pathOf(again, others),
+      codes: codes.length,
+      link: await sessionWith(theirSecret),
+    }).toStrictEqual({
+      listed: null,
+      again: null,
+      other: "string",
+      codes: 0,
+      link: "interview.link_invalid",
+    });
+  });
+
+  it("refuses a save to their interview while its deletion is still cleaning up, and keeps nothing of one", async () => {
+    const { person } = await removedPerson();
+    const { theirs, theirSecret } = await onTheList(
+      String(person.person.email)
+    );
+    const key = await keyFor(theirSecret);
+    // A record the Brain was given from their interview: deleting the
+    // interview takes it out of the Brain after, as the voice's lines.
+    await onList(
+      "INSERT INTO brain_sent (record, type, team, person) VALUES (?, 'statement', 'ops', ?)",
+      `record-${crypto.randomUUID()}`,
+      theirs
+    );
+    const secretMark = await sha256Hex(theirSecret);
+    const keyMark = await sha256Hex(key);
+
+    // Their page keeps saving for as long as core erases their interview
+    // (`eraseInterviewOf`, as person-erasure.ts asks it), the cleanup
+    // after the delete included, between every step that waits.
+    const saves = await runInDurableObject(
+      onboardingStore(env),
+      async (store: Onboarding) => {
+        const erasure = { running: true };
+        const erased = store
+          .eraseInterviewOf(theirs, new Date().toISOString())
+          .finally(() => {
+            erasure.running = false;
+          });
+        const answers: string[] = [];
+        // Between each of the erasure's steps, never past a bounded count:
+        // saves alone, yielding only to it, can't hold up the I/O it waits on.
+        for (
+          let save = 0;
+          erasure.running && save < savesWhileErasing;
+          save += 1
+        ) {
+          // The page reads its version anew, then saves on it.
+          const read = store.openLink(secretMark, keyMark, keyMark);
+          const version =
+            read.ok && read.value.state === "open" ? read.value.version : 0;
+          // oxlint-disable-next-line no-await-in-loop -- one save after another
+          const answer = await store.saveInterview(
+            secretMark,
+            keyMark,
+            version,
+            interviewProgressSchema.parse(progress)
+          );
+          answers.push(answer.ok ? "saved" : answer.code);
+        }
+        await erased;
+        return answers;
+      }
+    );
+
+    const kept = await onList(
+      "SELECT person FROM interviews WHERE person = ?",
+      theirs
+    );
+    expect({
+      kept: kept.length,
+      saves: [...new Set(saves)],
+      link: await sessionWith(theirSecret),
+    }).toStrictEqual({
+      kept: 0,
+      // Every one of them, from the first.
+      saves: ["interview.link_invalid"],
+      link: "interview.link_invalid",
     });
   });
 

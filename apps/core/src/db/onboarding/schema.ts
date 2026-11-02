@@ -113,6 +113,12 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
+   * When core erased them (person-erasure.ts): their link is closed for
+   * good. No code is made for it again, so nothing is saved under the
+   * entry that stays on the list, until an admin takes them off it.
+   */
+  erasedAt: text("erased_at"),
+  /**
    * The team they led when their link went out; none when they led none.
    * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
    * making someone a lead afterwards tells nobody about their interview.
