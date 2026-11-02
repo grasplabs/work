@@ -293,6 +293,69 @@ export const accountClaimed = (
 };
 
 /**
+ * The account a run of independent workflow `workflow` is charged to,
+ * started by a trigger in the lineage of `root` (an event or a stamped
+ * message of a run there, `TriggerCause`), as SQL: its workflow's account
+ * in that lineage, which `triggeredAccountClaimed` claims.
+ */
+export const triggeredAccountOf = (root: string, workflow: string): SQL =>
+  sql`(SELECT ${runLineageAccounts.accountRunId} FROM ${runLineageAccounts} WHERE ${runLineageAccounts.rootRunId} = ${root} AND ${runLineageAccounts.appId} = ${workflow} AND ${runLineageAccounts.kind} = 'triggered')`;
+
+/**
+ * The statements that claim an account in the lineage of `root` for the
+ * runs a trigger starts there of independent workflow `workflow`, as App
+ * runs have theirs (`accountClaimed`): the first such run, `run`, is the
+ * account, claimed once by the lineage and the workflow, so starts at
+ * once agree on one. `claim` goes before the statement that writes the
+ * run's row (which names its account, `triggeredAccountOf`), only once
+ * its start's receipt `admitted` is written; `aged` after it, as a
+ * lineage's row needs its run's (migration 0093), aged as the lineage is.
+ *
+ * What it closes: one workflow's triggered runs using up the allowances
+ * of the lineage they started in (its attempts' active time, its host
+ * calls, its model requests, keyed by the account, resource-calls.ts),
+ * and so those of the run whose event or message started them, and of
+ * every other workflow triggered there. However often a workflow is
+ * triggered in a lineage, its runs there share one account. Its place
+ * stays the lineage's: it takes one of the lineage's descendant runs and
+ * sits a level deeper (`admitChild`), and the account's age is the
+ * root's, which bound workflows triggering each other back and forth:
+ * never a new root, or a loop would go on.
+ */
+export const triggeredAccountClaimed = (
+  db: DrizzleD1Database,
+  {
+    run,
+    root,
+    workflow,
+    createdAt,
+    admitted,
+  }: {
+    run: string;
+    root: string;
+    workflow: string;
+    createdAt: number;
+    admitted: SQL;
+  }
+) => {
+  const accounts = runLineageAccounts;
+  return {
+    claim: db
+      .insert(accounts)
+      .select(
+        sql`SELECT ${root}, ${workflow}, 'triggered', ${run}, ${createdAt} WHERE ${admitted}`
+      )
+      .onConflictDoNothing(),
+    aged: db
+      .insert(runLineages)
+      .select(
+        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0 FROM ${accounts} WHERE ${accounts.rootRunId} = ${root} AND ${accounts.appId} = ${workflow} AND ${accounts.kind} = 'triggered' AND ${accounts.accountRunId} = ${run} AND EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run})`
+      )
+      .onConflictDoNothing(),
+  } as const;
+};
+
+/**
  * The run whose allowances `run`'s work is charged to: its App's account
  * in its lineage (`accountClaimed`), or else its lineage's root, or the
  * run itself for a root.

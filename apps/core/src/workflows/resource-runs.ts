@@ -81,7 +81,7 @@ import {
   unadmitted,
 } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { admitAttempt } from "./quotas.ts";
+import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
@@ -155,7 +155,11 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   restart or a replay counts on, never afresh. A run its own start
 //   admitted is its lineage's root; a child its `run` task starts
 //   (run-children.ts) joins that lineage, one level deeper, admitted
-//   against its levels and descendant runs, and counts on its root. A workflow's own
+//   against its levels and descendant runs, and counts on its root. A run
+//   a trigger starts in another run's lineage (an event or a stamped
+//   message of that run) takes its place there the same way, but counts
+//   on its workflow's account in it (quotas.ts, `triggeredAccountClaimed`),
+//   as do its children. A workflow's own
 //   `limits` lower those: `maxSteps` the step limit and `maxModelCalls`
 //   the model requests a lineage may make (the lower of each and the
 //   host's, `loadedRun`, one request per call). A `maxActiveMs` isn't
@@ -220,6 +224,23 @@ export interface RunAdmission {
 }
 
 /**
+ * The account a start's run is charged to, as SQL (quotas.ts): for a run
+ * a trigger started in another run's lineage, its workflow's account
+ * there, which its start claimed just before (`triggeredAccountClaimed`);
+ * for a child, its parent's; none for a root, nor a child charged to its
+ * root.
+ */
+const accountOfAdmitted = (run: RunAdmission): SQL => {
+  const { lineage } = run;
+  if (lineage === undefined) {
+    return sql`NULL`;
+  }
+  return lineage.parentRunId === null
+    ? triggeredAccountOf(lineage.rootRunId, run.workflowId)
+    : sql`(SELECT parent_run.account_run_id FROM ${workflowResourceRuns} AS parent_run WHERE parent_run.id = ${lineage.parentRunId})`;
+};
+
+/**
  * The statement that admits a start's run, for the receipt's own batch:
  * the run's row, only once the receipt was written.
  */
@@ -256,6 +277,9 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         controlGeneration: sql<number>`0`.as("control_generation"),
         summaryRevision: sql<number>`0`.as("summary_revision"),
         compensation: sql<null>`NULL`.as("compensation"),
+        accountRunId: sql<string | null>`${accountOfAdmitted(run)}`.as(
+          "account"
+        ),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -1106,8 +1130,10 @@ export const runResourceWorkflow = async (
     run,
     output,
     owner: ownerOf(pin.workflow),
-    // Counted on its lineage's root: its own, or its parent's for a child.
-    admission: { run: runId, root: run.rootRunId ?? runId, subject },
+    // Counted on its account: its lineage's root (its own, or its
+    // parent's for a child), or its workflow's account in the lineage a
+    // trigger started it in (quotas.ts, `triggeredAccountClaimed`).
+    admission: { run: runId, root: run.calling.accountRunId, subject },
   });
 };
 
