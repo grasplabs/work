@@ -252,6 +252,25 @@ describe("guest chat rate limit", () => {
     expect(statuses).toStrictEqual([200, 200, 429, 200]);
   });
 
+  it("refuses a limited endpoint whose limiter a stage doesn't bind, never letting it through unlimited", async () => {
+    const before = cores.received.length;
+    // A stage whose config left the visitor's limit out.
+    const stage = { ...env };
+    Reflect.deleteProperty(stage, "VISITOR_RATE_LIMIT");
+    const unbound = await worker.fetch(
+      new Request("https://acme.guest.test/api/app-visitor", {
+        method: "POST",
+        headers: { "cf-connecting-ip": "192.0.2.23" },
+        body: "{}",
+      }),
+      stage
+    );
+    expect({
+      status: unbound.status,
+      reached: cores.received.length - before,
+    }).toStrictEqual({ status: 503, reached: 0 });
+  });
+
   it("limits nothing else by it, and lets guests through when it fails", async () => {
     const none = limiterAllowing(0);
     const others = await Promise.all(
