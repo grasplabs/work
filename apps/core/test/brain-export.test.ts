@@ -396,4 +396,43 @@ describe("exporting the company's Brain", setUpTime, () => {
       holds: false,
     });
   });
+
+  it("holds every collection, more than D1 binds to one statement", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const brain = brainOf(env);
+    const many = 120;
+    const ids = Array.from({ length: many }, () =>
+      collectionIdSchema.parse(crypto.randomUUID())
+    );
+    for (const id of ids) {
+      // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+      await ensureCollection(
+        brain,
+        {
+          id,
+          name: `Shelf ${id}`,
+          description: "",
+          owner: admin.userId,
+          access: "everyone",
+          sensitive: false,
+          source: "upload",
+          createdAt: new Date(),
+        },
+        { type: "system" }
+      );
+    }
+    const { token } = await admin.api.knowledge.prepareBrainExport();
+    const { exportId } = await admin.api.knowledge.startBrainExport(token);
+    const done = await finished(admin, exportId);
+    const response =
+      done.state === "complete"
+        ? await download(admin.session, exportId, "collections.jsonl")
+        : undefined;
+    const collections = (await response?.text()) ?? "";
+    expect({
+      state: done.state,
+      reason: done.reason,
+      held: ids.filter((id) => collections.includes(id)).length,
+    }).toStrictEqual({ state: "complete", reason: null, held: many });
+  });
 });

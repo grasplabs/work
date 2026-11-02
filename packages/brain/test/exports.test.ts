@@ -36,6 +36,13 @@ const manifestSchema = z.object({
 
 const idSchema = z.object({ id: z.string() });
 
+/** A line of an export's documents file, as far as these tests read it. */
+const documentRowSchema = z.object({
+  id: z.string(),
+  versions: z.array(z.object({ number: z.number() })),
+  transcript: z.object({ version: z.number() }).nullable(),
+});
+
 /** The code of what `promise` refused with, or "ok". */
 const outcome = async (promise: Promise<unknown>): Promise<string> => {
   try {
@@ -380,5 +387,77 @@ describe("exporting the company's Brain", () => {
       state: "complete",
       files: true,
     });
+  });
+
+  it("holds each document's transcript with the version it belongs to, however a save falls between its reads", async () => {
+    const { brain } = testHost();
+    const meetings = await newCollection(brain, "Meetings");
+    const first = await writeVersion(brain, admin, {
+      collection: meetings,
+      path: "standup.md",
+      text: "# Standup\nNotes.",
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    // Its first version's text, as the bucket keeps it.
+    const firstText = await env.BRAIN.prepare(
+      "SELECT payload_key AS key FROM versions WHERE document_id = ? AND number = 1"
+    )
+      .bind(first.id)
+      .first<{ key: string }>();
+    const onExport = hostWith();
+    const exportId = await begun(brain, onExport);
+    // As the export reads the document's text, a recording of the meeting
+    // is saved as its next version, with its transcript.
+    let saved = false;
+    const racing = withPorts(brain, {
+      blobs: {
+        delete: env.BLOBS.delete.bind(env.BLOBS),
+        head: env.BLOBS.head.bind(env.BLOBS),
+        list: env.BLOBS.list.bind(env.BLOBS),
+        put: env.BLOBS.put.bind(env.BLOBS),
+        get: async (key, options) => {
+          if (!saved && key === firstText?.key) {
+            saved = true;
+            await writeVersion(brain, admin, {
+              collection: meetings,
+              path: "standup.md",
+              text: "# Standup\nRecorded.",
+              ifVersion: 1,
+              message: null,
+              restoredFrom: null,
+              transcript: {
+                turns: [{ speaker: "Ada", text: "Recorded.", startMs: 0 }],
+                chapters: [],
+              },
+            });
+          }
+          return await env.BLOBS.get(key, options);
+        },
+      },
+    });
+    const ended = await ranToEnd(racing, exportId, onExport);
+    const manifest = manifestSchema.parse(
+      JSON.parse(await fileText(brain, exportId, manifestName))
+    );
+    const texts = await Promise.all(
+      manifest.files
+        .filter(({ name }) => name.startsWith("documents-"))
+        .map(async ({ name }) => await fileText(brain, exportId, name))
+    );
+    const rows = texts
+      .flatMap((text) => text.split("\n").filter((line) => line !== ""))
+      .map((line) => documentRowSchema.parse(JSON.parse(line)));
+    const row = rows.find(({ id }) => id === first.id);
+    const numbers = row?.versions.map(({ number }) => number) ?? [];
+
+    expect({
+      ended,
+      saved,
+      transcriptVersionHeld:
+        row?.transcript === null ||
+        numbers.includes(row?.transcript.version ?? -1),
+    }).toStrictEqual({ ended: "ok", saved: true, transcriptVersionHeld: true });
   });
 });

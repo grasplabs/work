@@ -536,13 +536,27 @@ const documentsFile = async <C>(
     .orderBy(asc(documents.id))
     .limit(documentsPerFile);
   const rows: Json[] = [];
-  for (const document of page) {
+  for (const listed of page) {
+    // The document, its versions and its transcript read in one batch, so
+    // as one: a save between the reads would leave a transcript without
+    // the version it belongs to.
     // oxlint-disable-next-line no-await-in-loop -- one document's versions at a time, to bound memory
-    const kept = await db
-      .select()
-      .from(versions)
-      .where(eq(versions.documentId, document.id))
-      .orderBy(asc(versions.number));
+    const [[document], kept, [transcript]] = await db.batch([
+      db.select().from(documents).where(eq(documents.id, listed.id)),
+      db
+        .select()
+        .from(versions)
+        .where(eq(versions.documentId, listed.id))
+        .orderBy(asc(versions.number)),
+      db
+        .select()
+        .from(transcripts)
+        .where(eq(transcripts.documentId, listed.id)),
+    ]);
+    // Deleted since the page was read.
+    if (document === undefined) {
+      continue;
+    }
     const texts: Json[] = [];
     for (const version of kept) {
       // oxlint-disable-next-line no-await-in-loop -- one version's text at a time
@@ -556,11 +570,6 @@ const documentsFile = async <C>(
         text: text ?? null,
       });
     }
-    // oxlint-disable-next-line no-await-in-loop -- one document at a time
-    const [transcript] = await db
-      .select()
-      .from(transcripts)
-      .where(eq(transcripts.documentId, document.id));
     rows.push({
       id: document.id,
       collectionId: document.collectionId,
