@@ -47,7 +47,14 @@ import { detailsRemoved } from "./retention.ts";
 //   asks and looks in steps of its own (`<step>:decision:<look>`) and
 //   waits for the decision's wake under core's prefix
 //   (`$grasp:decision:<step>:<wait|woken>:<round>`): the task's step,
-//   waiting until the decision has its outcome, then as its call goes.
+//   waiting until the decision has its outcome, then as its call goes;
+// - a call connect held for its person to confirm ends its round held:
+//   the host checks and waits in steps of the round's
+//   (`<step>:held:<n>:<check>:check`, `<step>:held:<n>:<check>`), then
+//   runs the step again (`<step>:held:<n>:run`), `<step>` its own name or
+//   a retry's: the task's step, waiting until its person decided, then
+//   its run again an attempt more, reached once confirmed, or
+//   failed once declined.
 //
 // Any other step adds nothing. A failure a catch took still shows as its
 // task's: it happened. Each step is shown too, in the order the run
@@ -62,7 +69,9 @@ import { detailsRemoved } from "./retention.ts";
 // whole on its page, its retries included, however far its rounds are from
 // its first: a page reads the journal from its start, and stops early
 // only once it has a step beyond its own and each of its own has reached
-// its end, which no later record changes.
+// its end, which no later record changes (but a held call's first check,
+// should another branch of a fork start a step between its round's end
+// and that check: then its page tells it reached, as it stood).
 
 /** Records per history read, the engine's own most. */
 const pageRecords = 500;
@@ -74,8 +83,14 @@ const pageRecords = 500;
 const stepName =
   /^(?<base>(?:task|enter|leave|item|catch):(?<task>[a-z][a-z0-9-]{0,63})(?:@(?<item>[a-z0-9./-]{1,600}))?)(?<part>(?::[a-z0-9]+)*)$/u;
 
-/** A retry's round of a step, and its backoff before it. */
-const retryRound = /^:retry:[1-9]\d*$/u;
+/**
+ * A retry's round of a step, or a held call's run again in one (of the
+ * step's own round, or of a retry's).
+ */
+const retryRound = /^(?::retry:[1-9]\d*)?(?::held:[1-9]\d*:run)?$/u;
+
+/** A held call's check, or its wait for its person, in a round. */
+const heldWait = /^(?::retry:[1-9]\d*)?:held:[1-9]\d*:\d+(?::check)?$/u;
 const retryBackoff = /^:retry:[1-9]\d*:wait$/u;
 
 /** A decision task's look at its decision, or its wait for its wake. */
@@ -87,17 +102,21 @@ const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
 
 /**
  * What a step is of the task step it is part of: a round of it (its own
- * attempts, or a retry's), a retry's backoff, or its decision's wait.
+ * attempts, a retry's, or a held call's run again), a retry's backoff,
+ * its decision's wait, or its held call's wait for its person.
  */
-type Role = "round" | "backoff" | "decision";
+type Role = "round" | "backoff" | "decision" | "held";
 
 /** The role of a step, by what the host added to its name (`part`). */
 const roleOf = (part: string): Role | undefined => {
-  if (part === "" || retryRound.test(part)) {
+  if (retryRound.test(part)) {
     return "round";
   }
   if (retryBackoff.test(part)) {
     return "backoff";
+  }
+  if (heldWait.test(part)) {
+    return "held";
   }
   return decisionPart.test(part) ? "decision" : undefined;
 };
@@ -191,7 +210,8 @@ const fold = (
   } else if (role === "backoff") {
     state = backoffAfter[record.type] ?? known.state;
   } else {
-    // Waiting for its decision until its call runs, unless a look failed.
+    // Waiting for its decision until its call runs, or for its person to
+    // decide its held call until it runs again, unless a check failed.
     state = record.type === "step_errored" ? "failed" : "waiting";
   }
   const ended = state === "reached" || state === "failed";

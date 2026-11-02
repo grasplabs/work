@@ -4071,6 +4071,69 @@ describe("runs started by a restricted App, waiting on a held call", () => {
       });
     });
   });
+
+  it("shows a held call in its run's trace as its task's step waiting for its person, then reached once confirmed or failed once declined", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const confirmed = await mailingWorkflow(ada, admin);
+      const declined = await mailingWorkflow(ada, admin);
+      const confirmedStarter = await startingApp(
+        ada,
+        admin,
+        confirmed.workflow.id,
+        { restricted: true }
+      );
+      const confirmedRun = await confirmedStarter.start(confirmed.serving);
+      const declinedStarter = await startingApp(
+        ada,
+        admin,
+        declined.workflow.id,
+        { restricted: true }
+      );
+      const declinedRun = await declinedStarter.start(declined.serving);
+      const toConfirm = await heldFor(ada, confirmedRun);
+      const toDecline = await heldFor(ada, declinedRun);
+      await waiting(confirmedRun);
+      await waiting(declinedRun);
+      /** The send's steps in the run's trace, as the builder reads it. */
+      const sendOf = async (id: string, runId: string) => {
+        const { steps } = await signedIn.api.workflowResources.runTrace(
+          id,
+          runId,
+          { doors: false }
+        );
+        return steps
+          .filter(({ task }) => task === "send")
+          .map(
+            ({ state, attempts, endedAt, errorCode }) =>
+              `${state} ${attempts} ${endedAt === null ? "open" : "ended"} ${errorCode ?? "-"}`
+          );
+      };
+      const whileHeld = await sendOf(confirmed.workflow.id, confirmedRun);
+
+      await signedIn.api.pendingActions.confirm(
+        toConfirm.id,
+        toConfirm.inputHash
+      );
+      await signedIn.api.pendingActions.decline(toDecline.id);
+      await ended(ada, confirmed.workflow.id, confirmedRun);
+      await ended(ada, declined.workflow.id, declinedRun);
+
+      expect({
+        whileHeld,
+        confirmed: await sendOf(confirmed.workflow.id, confirmedRun),
+        declined: await sendOf(declined.workflow.id, declinedRun),
+      }).toStrictEqual({
+        // One step: its first attempt held, then waiting for its person.
+        whileHeld: ["waiting 1 open -"],
+        // Run again once they decided: an attempt more.
+        confirmed: ["reached 2 ended -"],
+        declined: ["failed 2 ended connect.declined"],
+      });
+    });
+  });
 });
 
 /**
