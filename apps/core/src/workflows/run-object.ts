@@ -449,6 +449,40 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
+   * Marks an independent workflow's run stopped by `actor` (resource-runs.ts,
+   * `stopResourceRun`), as `markCancelled` marks an App run's cancel: from
+   * then on no attempt of it holds, and should its request not terminate
+   * it, the object does on its next alarm, seconds on. Unless the run is
+   * rolling back, which a stop doesn't cut short (spec 10.7.3): then
+   * nothing is marked. Decided and marked from the run's own journal with
+   * no await between, so no rollback starts in between. `ended` for a run
+   * that has ended, `missing` for one the engine has no journal of: neither
+   * is marked.
+   */
+  async markStopped(
+    runId: string,
+    actor: AuditActor,
+    at: number
+  ): Promise<"marked" | "rolling_back" | "ended" | "missing"> {
+    const live = this.status();
+    if (live === undefined) {
+      return "missing";
+    }
+    if (live.status === "rollingBack") {
+      return "rolling_back";
+    }
+    if (
+      live.status === "complete" ||
+      live.status === "errored" ||
+      live.status === "terminated"
+    ) {
+      return "ended";
+    }
+    await this.markCancelled(runId, actor, at);
+    return "marked";
+  }
+
+  /**
    * Finishes the cancel `mark` records, as its request does: the run's
    * row tombstoned and the
    * cancel audited, once whoever gets there first (runs.ts,
@@ -567,43 +601,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       version: latest.version,
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
-      // An independent workflow's run, or a test run of its draft: its row
-      // follows the engine's status; a screen's controls of an independent
-      // run settle from the engine's own word on them, below.
-      // Why it failed, from its own journal: kept on its row, so the code
-      // outlives the engine's record of the run.
-      const live = this.status();
-      const project =
-        pin.type === "resource" ? projectResourceRun : projectCandidateRun;
-      await project(
-        this.env,
-        latest.instanceId,
-        {
-          status: latest.status,
-          at: latest.timestamp,
-          sequence: latest.sequence,
-          ...this.#compensationOf(latest.status),
-        },
-        live?.status === "errored" ? (live.error.code ?? null) : null
-      );
-      // A screen's pause or resume of it settles from where the engine has
-      // the run now, and which controls it took, read together here from
-      // its journal, as an App run's do (resource-runs.ts).
-      if (pin.type === "resource") {
-        await settleResourceControls(
-          this.env,
-          latest.instanceId,
-          this.controlState()
-        );
-      }
-      // Then what its fenced attempts still hold of the client's shares
-      // comes back, as an App run's does: after its row, so a run that
-      // ended cancelled has its attempts charged up to their deadlines
-      // (quotas.ts, `sharesReleased`).
-      const run = this.instanceId();
-      if (run !== undefined) {
-        await this.#sharesReleased(run, false);
-      }
+      await this.#independentNotified(pin.type, latest);
       return;
     }
     if (pin?.type !== "app") {
@@ -636,6 +634,67 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     }
     if (record.status === "rejected") {
       throw record.reason;
+    }
+  }
+
+  /**
+   * Takes the status of an independent workflow's run, or a test run of
+   * its draft (`notify`): its row follows the engine's status; a screen's
+   * controls of an independent run settle from the engine's own word on
+   * them, below.
+   */
+  async #independentNotified(
+    type: "resource" | "candidate",
+    latest: RunNotification
+  ): Promise<void> {
+    // Why it failed, from its own journal: kept on its row, so the code
+    // outlives the engine's record of the run.
+    const live = this.status();
+    const project =
+      type === "resource" ? projectResourceRun : projectCandidateRun;
+    // A run marked stopped (`markStopped`) that fails before its
+    // termination lands, its attempts refused from the stop on, ended
+    // by the stop: cancelled, as a marked App run is, not failed. Unless
+    // its journal says it rolled back: then how its compensation went is
+    // what it ended with (spec 10.7.3), a failed one
+    // `workflow.compensation_failed`, never masked as a cancel. No
+    // definition Grasp builds registers a compensation yet (GRA-984), so
+    // no real path reaches that case to test it.
+    const marked = cancelMarkIn(this.ctx.storage.sql) !== undefined;
+    const rolledBack =
+      live !== undefined && "rollback" in live && live.rollback !== undefined;
+    const stoppedEnd = marked && latest.status === "errored" && !rolledBack;
+    const status = stoppedEnd ? "terminated" : latest.status;
+    await project(
+      this.env,
+      latest.instanceId,
+      {
+        status,
+        at: latest.timestamp,
+        sequence: latest.sequence,
+        ...this.#compensationOf(latest.status),
+      },
+      live?.status === "errored" && !stoppedEnd
+        ? (live.error.code ?? null)
+        : null
+    );
+    // A screen's pause or resume of it settles from where the engine has
+    // the run now, and which controls it took, read together here from
+    // its journal, as an App run's do (resource-runs.ts).
+    if (type === "resource") {
+      await settleResourceControls(
+        this.env,
+        latest.instanceId,
+        this.controlState()
+      );
+    }
+    // Then what its fenced attempts still hold of the client's shares
+    // comes back, as an App run's does: after its row, so a run that
+    // ended cancelled has its attempts charged up to their deadlines
+    // (quotas.ts, `sharesReleased`).
+    const run = this.instanceId();
+    if (run !== undefined) {
+      await this.#sharesReleased(run, marked);
     }
   }
 
