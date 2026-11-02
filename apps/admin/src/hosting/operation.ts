@@ -16,7 +16,7 @@
  * 5. `secrets`: the client's derived secrets and the shared ones its
  *    Workers need, delivered by name to each script, then observed.
  * 7. `probe`: core answers its health check as the version live, with the
- *    router secret the router will send (`smokeCheck`), then the
+ *    router secret the router will send (`smokeAnswering`), then the
  *    admin's signed probe (src/hosting/probe.ts): it runs as this
  *    client, each private binding the release gives core and connect
  *    answers, and its clock and connect's are armed.
@@ -82,7 +82,6 @@ import {
 import type { Stage } from "@grasp-os/shared/names";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
-import type { RouterTarget } from "@grasp-os/shared/router";
 import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -2185,13 +2184,13 @@ const reachableCore = (
   context: ProvisionContext,
   loaded: Loaded,
   target: ScriptTarget
-): { core: CoreAddress; entry: RouterTarget } => {
+): { core: CoreAddress; script: string } => {
   const { held } = loaded;
-  const entry: RouterTarget = { kind: "dispatch", script: target.scriptName };
+  const script = target.scriptName;
   const core =
     target.namespace === context.router.namespace
       ? coreAddressOf(
-          entry,
+          { kind: "dispatch", script },
           `${held.clientId}.${context.router.domain}`,
           context.router.dispatcher
         )
@@ -2202,7 +2201,7 @@ const reachableCore = (
       `${target.scriptName} is in namespace ${target.namespace}, which the router doesn't bind`
     );
   }
-  return { core, entry };
+  return { core, script };
 };
 
 /**
@@ -2210,32 +2209,31 @@ const reachableCore = (
  * router secret the router will send, then the admin's signed probe as
  * this client at that version, each of its private bindings answering
  * and both clocks armed, reached as the router will reach it
- * (`reachableCore`). Returns what the router's map entry names.
+ * (`reachableCore`). Returns the script the router's map entry names.
  */
 const probe = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[]
-): Promise<RouterTarget> => {
+): Promise<string> => {
   const { db } = context;
   const { held } = loaded;
   const target = targetOf(loaded, inventory, "core");
-  const { core, entry } = reachableCore(context, loaded, target);
+  const { core, script } = reachableCore(context, loaded, target);
   const { origin } = core;
   const routerSecret = await deriveRouterSecret(
     context.secrets.routerKey,
     held.clientId,
     loaded.client.generation
   );
-  const smoke = { ...context.router.smoke, fetch: core.fetch };
   // Live at once on upload, its versions not listed by the documented API,
   // so the version answering, never the one this run superseded, is the
   // one the probe is held to: an isolate of the superseded one still
   // answering is asked again until another answers. The probe then
   // answers as the same version, or the run stops: two reads apart the same.
   const { superseded } = await progressNow(db, loaded.operation.id);
-  const { version, attempts } = await smokeAnswering(origin, routerSecret, {
-    ...smoke,
+  const { version, attempts } = await smokeAnswering(core, routerSecret, {
+    ...context.router.smoke,
     refuses: superseded.core,
   });
   const asking = {
@@ -2295,34 +2293,29 @@ const probe = async (
     connect === null ? { attempts, connectUnrecorded: 1 } : { attempts },
     { ...progress, origin }
   );
-  return entry;
+  return script;
 };
 
 /** Step 8: the client's hostname in the router's map, only after the probe passed. */
 const route = async (
   context: ProvisionContext,
   loaded: Loaded,
-  target: RouterTarget
+  script: string
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
   // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
-  if (
-    target.kind === "dispatch" &&
-    !target.script.startsWith(deploymentPrefix(loaded.placement.deploymentId))
-  ) {
+  if (!script.startsWith(deploymentPrefix(loaded.placement.deploymentId))) {
     throw new ProvisionOperationError(
       "probe_unqualified",
-      `${target.script} isn't a script of ${held.clientId}'s placement`
+      `${script} isn't a script of ${held.clientId}'s placement`
     );
   }
   await registerHostname(
     context.router.hosts,
     `${held.clientId}.${context.router.domain}`,
-    target.kind === "dispatch"
-      ? { clientId: held.clientId, script: target.script, generation }
-      : { clientId: held.clientId, coreUrl: target.origin, generation },
+    { clientId: held.clientId, script, generation },
     // The last thing before the write: KV can't make it conditional.
     async () => {
       await assertHolds(context.db, held);
@@ -2572,10 +2565,10 @@ const runOperation = async (
     await deliverSecrets(context, loaded, inventory);
 
     step = "probe";
-    const target = await probe(context, loaded, inventory);
+    const script = await probe(context, loaded, inventory);
 
     step = "route";
-    await route(context, loaded, target);
+    await route(context, loaded, script);
     await complete(db, loaded);
     return undefined;
   } catch (error) {
