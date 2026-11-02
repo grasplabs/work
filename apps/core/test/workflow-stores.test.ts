@@ -269,7 +269,7 @@ describe("stores a workflow declares", () => {
     });
   });
 
-  it("are never created for Grasp staff, and a schema the records don't fit never lands", async () => {
+  it("are never created or dropped by Grasp staff, and a schema the records don't fit never lands", async () => {
     const ada = await person("builder");
     const staff = await person("admin", true);
     const { id, name } = await newWorkflow(staff);
@@ -284,6 +284,13 @@ describe("stores a workflow declares", () => {
       definition: definitionOf(other.name, "1.0.0", intake(orders())),
       basedOn: null,
     });
+    // Nor dropped by them: a version declaring none would unbind them.
+    const dropped = await outcome(
+      publishWorkflowVersion(env, staff, other.id, {
+        definition: definitionOf(other.name, "1.1.0", {}),
+        basedOn: first.version,
+      })
+    );
     // `total` becomes text: the records it has may not fit.
     const narrowed = await outcome(
       publishWorkflowVersion(env, ada, other.id, {
@@ -302,11 +309,13 @@ describe("stores a workflow declares", () => {
     expect({
       byStaff,
       staffStores,
+      dropped,
       narrowed,
       current: kept.currentVersion,
     }).toStrictEqual({
       byStaff: "role.forbidden",
       staffStores: [],
+      dropped: "role.forbidden",
       narrowed: "migration.required",
       current: first.version,
     });

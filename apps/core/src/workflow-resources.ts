@@ -2179,6 +2179,8 @@ const bindingKey = (binding: PinnedBinding): string =>
  * (data-stores.ts). Staff may still publish a version that binds the same.
  * Binding nothing is a change too, when the current version binds
  * something: dropping what a client chose is theirs to decide as well.
+ * Its stores too: staff never declare one (workflow-stores.ts), so a
+ * current version that binds a store is one staff can't replace.
  */
 const requireStaffKeepsBindings = async (
   env: Env,
@@ -2195,7 +2197,22 @@ const requireStaffKeepsBindings = async (
       ? []
       : (versions.get(workflow.currentVersion) ?? []);
   const kept = new Set(current.map(bindingKey));
+  const [store] =
+    workflow.currentVersion === null
+      ? []
+      : await drizzle(env.DB)
+          .select({ alias: sdkResourceBindings.alias })
+          .from(sdkResourceBindings)
+          .where(
+            and(
+              eq(sdkResourceBindings.resourceId, workflow.id),
+              eq(sdkResourceBindings.resourceVersion, workflow.currentVersion),
+              eq(sdkResourceBindings.kind, "store")
+            )
+          )
+          .limit(1);
   if (
+    store !== undefined ||
     current.length !== bindings.length ||
     !bindings.every((binding) => kept.has(bindingKey(binding)))
   ) {
