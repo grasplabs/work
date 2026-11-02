@@ -15,7 +15,6 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import {
@@ -135,8 +134,6 @@ export interface AppDecisionRun {
   app: string;
   workflow: string;
   version: number;
-  /** Whom it acts for, when known: a staff-started run's names them. */
-  authority?: Pick<Authority, "onBehalfOf" | "staff">;
 }
 
 /**

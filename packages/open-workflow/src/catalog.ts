@@ -44,6 +44,10 @@ export interface CatalogContract {
         output: DescriptorText;
         /** That it only reads, as its publisher states (never checked here). */
         readOnly?: boolean;
+        /** That it answers a file, as its host confirmed (never checked here). */
+        answersFile?: true;
+        /** That it attaches files, as its host confirmed (never checked here). */
+        takesFiles?: true;
       }
     >
   >;

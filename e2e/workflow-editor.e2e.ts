@@ -268,7 +268,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
 
   await page.getByLabel("Input").fill('{ "who": "Ada" }');
-  await page.getByRole("button", { name: "Start a test run" }).click();
+  await page.getByRole("button", { name: "Start a run", exact: true }).click();
   await expect(page.getByText("The run completed.")).toBeVisible({
     timeout: 30_000,
   });
@@ -299,7 +299,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   await page.getByRole("button", { name: "Publish revision 4" }).click();
   await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
   await page.getByLabel("Input").fill("{}");
-  await page.getByRole("button", { name: "Start a test run" }).click();
+  await page.getByRole("button", { name: "Start a run", exact: true }).click();
   await expect(
     page.getByText("Version 2 has no build that runs, so nothing ran", {
       exact: false,

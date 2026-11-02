@@ -93,8 +93,8 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * variable, passed to a function, spread or read by a computed name
  * can't be read, and neither can a call in a function inside the step's
  * own (loop with `for...of` instead) or between steps
- * (`checkWorkflowBindings` in `@grasp-os/sdk/describe`): the steps then
- * show as unread, and a check of an agent's draft fails.
+ * (`describeWorkflow` in `@grasp-os/sdk/describe`): the steps then show
+ * as unread.
  *
  * Once the run's App has read restricted data, each side effect waits for
  * the person the run acts for to confirm it (where the deployment has held

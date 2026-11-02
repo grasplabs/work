@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { codeResults, codeStep, configureObject, says } from "./agent-chat.ts";
+import { codeResults, codeStep, says } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { jobRowSchema } from "./build-jobs.ts";
@@ -343,7 +343,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
           };`),
         says("It was proposed.")
       );
-      await configureObject(chat.stub);
       await chat.ask("How did it go?");
     } finally {
       env.FILES = files;

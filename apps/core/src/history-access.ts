@@ -14,7 +14,7 @@ import { connectionGrants } from "./agent-connections.ts";
 import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
-import { actingPerson } from "./auth/identity.ts";
+import { memberOf } from "./auth/identity.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
 import { collectionsAllowed } from "./knowledge/access.ts";
@@ -306,7 +306,7 @@ const readableApps = async (
   }
   const [permissions, person] = await Promise.all([
     grantedPermissions(env, chatAuthority(scope)),
-    actingPerson(env, scope.personId, scope.staff),
+    memberOf(env.DB, scope.personId),
   ]);
   if (person === undefined) {
     return [];

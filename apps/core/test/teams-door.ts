@@ -10,10 +10,7 @@ import type { CryptoKey as JoseKey } from "jose";
 import { beforeAll, beforeEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
-import { configureObject } from "./agent-chat.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
@@ -273,7 +270,6 @@ export const kept = async (conversation: string) => {
  */
 export const memberAnsweredBy = async (idp: Idp, provider: FakeProvider) => {
   const signedIn = await signedInApi(idp, "user");
-  await configureObject(workspace(env, personalWorkspaceId(signedIn.userId)));
   const { oid } = signedIn.person;
   if (typeof oid !== "string") {
     throw new TypeError("Expected an Entra object id");

@@ -107,20 +107,6 @@ const timesSent = async (upload: Upload): Promise<number> => {
   ).length;
 };
 
-/** Runs `run` with `config` as the deployment's rules for model calls. */
-const withDeployment = async <T>(
-  config: unknown,
-  run: () => Promise<T>
-): Promise<T> => {
-  const { MODEL_GATEWAY: gateway } = env;
-  env.MODEL_GATEWAY = config;
-  try {
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = gateway;
-  }
-};
-
 /**
  * Runs `run` as a deployment where connect holds no key of Grasp's (on
  * premises, a stack without them).
@@ -133,11 +119,6 @@ const withoutGraspKeys = async <T>(run: () => Promise<T>): Promise<T> => {
   } finally {
     env.CONNECT = real;
   }
-};
-
-/** Rules that keep every call of the deployment in the EU. */
-const euOnly = {
-  eu: { models: ["mistral/mistral-large-latest"], deployment: true },
 };
 
 /** A collection of the person's own, normal: not sensitive. */
@@ -339,54 +320,6 @@ describe("upload routing", { timeout: 60_000 }, () => {
       status: upload.status,
       extractor: await extractorOf(upload),
     }).toStrictEqual({ sent: [], status: "ready", extractor: "local" });
-  });
-
-  it("converts an EU-only deployment's PDF at OpenAI's EU host, where Grasp's project keeps its data", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    await plan(platformOpenAiKey, [
-      converted("openai-responses", "# Expense policy\n\nFly economy."),
-    ]);
-
-    const upload = await withDeployment(
-      euOnly,
-      async () => await uploadedTo(person.api, collectionId, name)
-    );
-
-    const sent = await carrying(name);
-    expect({
-      status: upload.status,
-      extractor: await extractorOf(upload),
-      hosts: sent.map(({ host }) => host),
-    }).toStrictEqual({
-      status: "ready",
-      extractor: "platform",
-      hosts: ["eu.api.openai.com"],
-    });
-  });
-
-  it("keeps a file in the Worker while the deployment's rules don't parse", async () => {
-    const person = await signedInApi(idp, "user");
-    const collectionId = await ownCollection(person.api);
-    const name = newName("pdf");
-    let upload: Upload | undefined;
-
-    await withDeployment({ ...euOnly, eu: { deployment: "yes" } }, async () => {
-      upload = await uploadedTo(person.api, collectionId, name);
-    });
-
-    expect({
-      sent: await carrying(name),
-      status: upload?.status,
-      extractor: upload && (await extractorOf(upload)),
-      recorded: upload && (await timesSent(upload)),
-    }).toStrictEqual({
-      sent: [],
-      status: "ready",
-      extractor: "local",
-      recorded: 0,
-    });
   });
 
   it("reads a PDF in the Worker while Grasp has no key for the conversion's provider, as on-prem", async () => {

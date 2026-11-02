@@ -1,12 +1,12 @@
 import {
+  appCodeFiles,
   compilerVersion,
-  serverFiles,
   workflowPaths,
 } from "@grasp-os/compiler";
 import { readOutline } from "@grasp-os/sdk/describe";
+import { descriptorFromText } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
-  AppExports,
   AppFiles,
   ReviewChange,
   VersionReview,
@@ -22,6 +22,8 @@ import type {
   TriggerDeclaration,
   WorkflowCalls,
 } from "@grasp-os/shared/workflows";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { sealedEvidence, versionManifest } from "./app-releases.ts";
@@ -35,6 +37,10 @@ import {
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
 import { putCached, readCached } from "./cache-macs.ts";
+import {
+  appWorkflowBindings,
+  workflowResourceVersions,
+} from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
@@ -44,6 +50,7 @@ import {
   workflowIdsIn,
   workflowTestOutcome,
 } from "./workflows/code.ts";
+import { takesFile } from "./workflows/start-files.ts";
 
 // What a version changes, for the builder who reviews it before making
 // it current: worked out here from the version and the App as they are
@@ -60,6 +67,105 @@ import {
 // the App asks for that no admin granted yet, what it holds and which of
 // that making it current would ask an admin for again, and its workflows'
 // tests, kept per version's files so they run once.
+
+/** The input of a bound workflow version's contract. */
+const boundContractSchema = z.object({ input: z.json() });
+
+/**
+ * Whether any workflow App `app` binds under one of `aliases` takes a file
+ * in its input, as the bound version's contract says.
+ */
+const boundTakesFile = async (
+  env: Env,
+  app: AppId,
+  aliases: readonly string[]
+): Promise<boolean> => {
+  if (aliases.length === 0) {
+    return false;
+  }
+  // The App's active bindings, whichever aliases they are under, filtered
+  // here: a list of aliases as query parameters would pass D1's limit of
+  // 100 for an App with that many.
+  const named = new Set(aliases);
+  const active = await drizzle(env.DB)
+    .select({
+      alias: appWorkflowBindings.alias,
+      contract: workflowResourceVersions.contract,
+    })
+    .from(appWorkflowBindings)
+    .innerJoin(
+      workflowResourceVersions,
+      and(
+        eq(
+          workflowResourceVersions.workflowResourceId,
+          appWorkflowBindings.workflowResourceId
+        ),
+        eq(
+          workflowResourceVersions.version,
+          appWorkflowBindings.workflowResourceVersion
+        )
+      )
+    )
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, app),
+        eq(appWorkflowBindings.status, "active")
+      )
+    );
+  return active.some(({ alias, contract }) => {
+    if (!named.has(alias) || contract === null) {
+      return false;
+    }
+    const parsed = boundContractSchema.safeParse(JSON.parse(contract));
+    return (
+      parsed.success &&
+      takesFile(descriptorFromText(JSON.stringify(parsed.data.input)))
+    );
+  });
+};
+
+/**
+ * Whether version `proposed` may hand files people can read to the
+ * workflows it binds (`VersionReview.handsFilesToWorkflows`): a boundary
+ * its reviewer sees, whatever else changed. Null when its manifest can't
+ * be read.
+ */
+const handsFilesOf = async (
+  env: Env,
+  app: AppId,
+  proposed: { version: number; files: Readonly<Record<string, string>> }
+): Promise<boolean | null> => {
+  let manifest: AppManifest | undefined;
+  try {
+    manifest = await versionManifest(
+      env,
+      app,
+      proposed.version,
+      proposed.files
+    );
+  } catch (error) {
+    log.warn("version_review.manifest_unread", errorFields(error));
+    return null;
+  }
+  // No App layout: no App, nothing to hand.
+  if (manifest === undefined) {
+    return false;
+  }
+  const readsFiles = Object.values(manifest.browserResources).some(
+    (resource) =>
+      resource["~resource"] === "files" && resource.operations.includes("read")
+  );
+  if (!readsFiles) {
+    return false;
+  }
+  if (Object.values(manifest.workflows).some(({ input }) => takesFile(input))) {
+    return true;
+  }
+  // What a start hands is copied by the bound workflow's own input
+  // (`handFiles`), whatever the App declares for its alias: read from
+  // the version each alias is bound to.
+  return await boundTakesFile(env, app, Object.keys(manifest.workflows));
+};
 
 /**
  * The explicit migrations of version `proposed` the current version
@@ -121,7 +227,8 @@ const migrationsOf = async (
 const maxFailures = 50;
 
 /**
- * How an App's server code changed, from its files that did (`changes`)
+ * How an App's server code changed (`appCodeFiles`: what its seal
+ * builds), from its files that did (`changes`)
  * and how many there were before and are now: added from none, removed
  * to none, modified otherwise; null when none changed.
  */
@@ -348,26 +455,6 @@ const triggerChanges = (
     ];
   });
 };
-
-/**
- * How a version's exports (what other Apps may call, `app/exports.json`)
- * differ from the current version's: each by name, with its access now
- * and before.
- */
-const exportChanges = (
-  before: AppExports,
-  now: AppExports
-): VersionReview["exports"] =>
-  differences(
-    new Map(Object.entries(before)),
-    new Map(Object.entries(now)),
-    sameJson
-  ).map(({ name, change, now: after, before: was }) => ({
-    name,
-    change,
-    access: after?.access ?? null,
-    accessBefore: was?.access ?? null,
-  }));
 
 /**
  * The purpose kept test results are signed for (`putCached`). A review
@@ -710,8 +797,7 @@ export const reviewVersion = async (
   const row = await findVersion(env, found.id, version);
   const files = await versionFiles(env, found.id, row.version);
   const { currentVersion: current } = found;
-  // What the current version's row keeps, its exports and what its
-  // workflows call; the current version itself changes nothing against
+  // What the current version's row keeps, what its workflows call; the current version itself changes nothing against
   // itself.
   const currentRow =
     current === null ? undefined : await findVersion(env, found.id, current);
@@ -735,14 +821,14 @@ export const reviewVersion = async (
     changedPaths,
   });
   const serverChanges = differences(
-    new Map(Object.entries(serverFiles(before?.files ?? {}))),
-    new Map(Object.entries(serverFiles(files))),
+    new Map(Object.entries(appCodeFiles(before?.files ?? {}))),
+    new Map(Object.entries(appCodeFiles(files))),
     (one, other) => one === other
   );
   const server = serverChangeOf(
     serverChanges,
-    Object.keys(serverFiles(before?.files ?? {})).length,
-    Object.keys(serverFiles(files)).length
+    Object.keys(appCodeFiles(before?.files ?? {})).length,
+    Object.keys(appCodeFiles(files)).length
   );
   const migrations = await migrationsOf(
     env,
@@ -762,8 +848,6 @@ export const reviewVersion = async (
   // Asked for again only if not kept, as `madeCurrent` says: an App's
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
-  // What other Apps may call of the current version, from its row.
-  const exportsBefore = currentRow?.exports ?? {};
   // What the App holds, as the permissions API shows it to this reviewer.
   const held = await permissionsOpenTo(
     env,
@@ -777,13 +861,16 @@ export const reviewVersion = async (
     current,
     files: fileChanges.map(({ name, change }) => ({ path: name, change })),
     server,
-    exports: exportChanges(exportsBefore, row.exports),
     serverFiles: serverChanges.map(({ name, change }) => ({
       path: name,
       change,
     })),
     migrations,
     workflows,
+    handsFilesToWorkflows: await handsFilesOf(env, found.id, {
+      version: row.version,
+      files,
+    }),
     // As the permissions API shows them to this reviewer, no more.
     permissions: await permissionsOpenTo(
       env,

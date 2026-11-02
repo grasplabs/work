@@ -44,6 +44,13 @@ export const rolloutErrorCodes = [
    * (src/rollout/control.ts, `RingChecks`).
    */
   "ring_checks_missing",
+  /**
+   * Not a move a channel may make: a release goes Edge, then Beta, then
+   * Stable, and a channel goes back only to a release it had.
+   */
+  "promotion_not_allowed",
+  /** The channel's release changed as it was set: read it again. */
+  "channel_changed",
 ] as const;
 export type RolloutErrorCode = (typeof rolloutErrorCodes)[number];
 

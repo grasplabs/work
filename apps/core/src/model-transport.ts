@@ -14,8 +14,8 @@ import type { RouteApi } from "./model-catalog.ts";
 // How the model gateway (models.ts) reaches a model: a route through
 // connect (model-transport-connect.ts). The gateway stays the one choke
 // point: the
-// organization's chosen models and the rules (model-rules.ts), the budgets
-// (model-budgets.ts), the model ledger's admission of every provider
+// organization's chosen models and the rules (model-rules.ts), the model
+// ledger's admission of every provider
 // request before it is sent, and the audit log all run before and around
 // it, never inside it. A transport only says where a request goes and how
 // it is authenticated: the endpoint, the model's name there, the headers,
@@ -78,7 +78,7 @@ export interface TransportRoute {
  *   was taken on.
  * - `provider_down`: the endpoint failed (5xx) or didn't answer. It may
  *   have taken the request on, and billed it: never sent again.
- * - `budget`: the model ledger held it back, unsent (models.ts sets this,
+ * - `held`: the model ledger held it back, unsent (models.ts sets this,
  *   never a response).
  */
 export type TransportFailure =
@@ -87,7 +87,7 @@ export type TransportFailure =
   | { kind: "rate_limited"; status: number; retryAfterSeconds: number }
   | { kind: "refused"; status: number }
   | { kind: "provider_down"; status: number | undefined }
-  | { kind: "budget" };
+  | { kind: "held" };
 
 /**
  * What a refused response means (`TransportFailure`), from its status, the
