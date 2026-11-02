@@ -30,6 +30,7 @@ import {
   livePlacedClient,
   placedClientRecord,
   placedRelease,
+  scriptsOf,
 } from "./placed.ts";
 import { racingDb } from "./racing-db.ts";
 import { ended, followAdminRuns } from "./runs.ts";
@@ -54,12 +55,9 @@ import { useStoreSecrets } from "./secrets-store.ts";
 const token = "test-deployer-token-channels-3b7f2c";
 const cloudflare = mockCloudflareApi(token);
 
-/** A live client on `releaseId`, following `channel`, its id `id` when given. */
-const live = async (channel: Channel, releaseId: string, id?: string) =>
-  await livePlacedClient(cloudflare, 1, releaseId, {
-    channel,
-    ...(id === undefined ? {} : { id }),
-  });
+/** A live client on `releaseId`, following `channel`. */
+const live = async (channel: Channel, releaseId: string) =>
+  await livePlacedClient(cloudflare, 1, releaseId, { channel });
 
 /** The release each of the client's Workers runs, by Worker. */
 const releasesOf = async (clientId: string) => {
@@ -186,13 +184,18 @@ const promoteTo = async (channel: Channel, releaseId: string) => {
   }
 };
 
-/** Whether `matches` picks out a call to upload client `account`'s core. */
-const coreUpload =
-  (accountId: string) =>
-  (call: ApiCall): boolean =>
-    call.method === "PUT" &&
-    call.path.startsWith(`/accounts/${accountId}/`) &&
-    call.path.endsWith("-core");
+/**
+ * What picks out a call to upload client `clientId`'s core. By its script:
+ * every placed client's scripts share Grasp's account (test/placed.ts), so
+ * the account alone picks out whichever client's core uploads first.
+ */
+const coreUpload = async (
+  clientId: string
+): Promise<(call: ApiCall) => boolean> => {
+  const { core } = await scriptsOf(clientId);
+  return (call) =>
+    call.method === "PUT" && call.path.endsWith(`/scripts/${core}`);
+};
 
 /**
  * Sets aside what earlier tests left: their clients offboarded, and no
@@ -299,15 +302,15 @@ describe("release channels", () => {
 
   it("starts no new deploy on a channel once one failed, until staff retry", async () => {
     const before = await placedRelease("feat(core): before");
-    const failing = await live("stable", before, "client-a-fails");
-    const other = await live("stable", before, "client-b-goes");
-    const late = await live("stable", before, "client-c-unpinned");
+    const failing = await live("stable", before);
+    const other = await live("stable", before);
+    const late = await live("stable", before);
     await pinClient(env, staff, { clientId: late.clientId, releaseId: before });
     const release = await placedRelease("feat(core): fails on one");
     await using runs = followRuns();
     await promoteTo("beta", release);
     // The failing client's core upload is refused.
-    cloudflare.failNext(coreUpload(failing.account.id), 400);
+    cloudflare.failNext(await coreUpload(failing.clientId), 400);
 
     await promoteRelease(env, staff, { channel: "stable", releaseId: release });
     await runs.converge();
@@ -351,7 +354,7 @@ describe("release channels", () => {
     // The first deploy's core upload is held until released.
     let held = false;
     const released = Promise.withResolvers<unknown>();
-    cloudflare.afterAnswering(coreUpload(edge.account.id), async () => {
+    cloudflare.afterAnswering(await coreUpload(edge.clientId), async () => {
       held = true;
       await released.promise;
     });
