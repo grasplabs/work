@@ -1,5 +1,4 @@
-import { runActorOf } from "@grasp-os/shared/audit";
-import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { modelSpendListed } from "@grasp-os/shared/models";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,21 +8,26 @@ import type { LedgerScope } from "../src/model-ledger.ts";
 import { modelForRole, models, modelSettings } from "../src/models.ts";
 import type { ModelCall, ModelsNow } from "../src/models.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  askingTasks,
+  askingWorkflow,
+  endedRun,
+  jsonWorkflowAppsOf,
+  startedBy,
+} from "./json-workflow-apps.ts";
 import { connectModels, fakeProviderFor } from "./model-provider.ts";
-import { finished } from "./runs.ts";
 import {
   openRpc,
   outcome,
   signedIn,
-  signedInApi,
   signedInWithRole,
   staffPerson,
 } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Admins read the model gateway's settings: the models the organization
-// chose, and this month's spend, which real model calls add to. The provider behind connect is the
-// outside system: a fake (test/model-provider.ts).
+// chose, and this month's spend, which real model calls add to, a JSON
+// workflow's runs' `grasp.model` tasks among them. The provider behind
+// connect is the outside system: a fake (test/model-provider.ts).
 
 const idp = mockIdp();
 
@@ -180,59 +184,57 @@ describe("model settings", { timeout: 60_000 }, () => {
   it("show admins this month's spend: the total, and the workflows that spent most with their runs, and nobody else", async () => {
     // The month it is: workflow runs are counted in it.
     const coreEnv: Env = { ...env, MODEL_BUDGET_MONTH: undefined };
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
-    const appId = appIdSchema.parse(app);
-    const runs = [
-      await builder.api.workflows.start(app, "idle"),
-      await builder.api.workflows.start(app, "idle"),
-    ];
-    await Promise.all(
-      runs.map(async ({ id }) => {
-        await finished(id);
-      })
-    );
+    const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
+    const [admin, builder] = await Promise.all([
+      signedInPerson("admin"),
+      signedInPerson("builder"),
+    ]);
+    // Each of an independent workflow's two runs asks Claude in its
+    // `grasp.model` task, then a person's chat turn does.
     await fakeProviderFor(
       [anthropic],
-      ...Array.from({ length: 3 }, () => pricedAnswer)
+      ...Array.from({ length: 2 }, () => ({
+        ...pricedAnswer,
+        text: '{"line": "Hi."}',
+      })),
+      pricedAnswer
     );
-    const { call } = models(coreEnv);
-    const step = (runId: string): ModelCall<undefined> => ({
+    const workflow = await askingWorkflow(
+      admin,
+      builder,
+      askingTasks(),
+      anthropic
+    );
+    const runs = [
+      await startedBy(builder, workflow.id),
+      await startedBy(builder, workflow.id),
+    ];
+    const ended = await Promise.all(
+      runs.map(async (runId) => await endedRun(builder, workflow.id, runId))
+    );
+    expect(ended.map(({ status }) => status)).toStrictEqual([
+      "completed",
+      "completed",
+    ]);
+    // Where a person's chat turn works: an App of theirs.
+    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
+    const appId = appIdSchema.parse(app);
+    const chatTurn: ModelCall<undefined> = {
       model: anthropic,
       input: "Hello.",
-      purpose: "workflow.step",
-      trigger: runActorOf({ runId, app, workflow: "idle" }),
+      purpose: "chat.turn",
+      trigger: { type: "person", userId: builder.userId },
       work: {
         authority: {
           subject: { type: "app", appId },
           onBehalfOf: builder.userId,
-          mode: "workflow",
+          mode: "interactive",
           appVersion: 1,
         },
-        context: { type: "run", appId, runId: runIdSchema.parse(runId) },
+        context: { type: "app", appId },
       },
-    });
-    for (const made of [
-      step(runs[0]?.id ?? ""),
-      step(runs[1]?.id ?? ""),
-      {
-        ...step(runs[0]?.id ?? ""),
-        purpose: "chat.turn",
-        trigger: { type: "person", userId: builder.userId } as const,
-        work: {
-          authority: {
-            subject: { type: "app", appId },
-            onBehalfOf: builder.userId,
-            mode: "interactive",
-            appVersion: 1,
-          },
-          context: { type: "app", appId },
-        },
-      } satisfies ModelCall<undefined>,
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await expect(outcome(call(made))).resolves.toBe("ok");
-    }
+    };
+    await expect(outcome(models(coreEnv).call(chatTurn))).resolves.toBe("ok");
     // Workflows of an App no longer here, as many as are listed, each
     // spending less: the least is left out.
     const month = new Date().toISOString().slice(0, "yyyy-mm".length);
@@ -282,10 +284,10 @@ describe("model settings", { timeout: 60_000 }, () => {
       total: 0.0135,
       workflows: [
         {
-          appId,
-          appName: "Invoices",
-          workflowId: "idle",
-          name: "idle",
+          appId: null,
+          appName: null,
+          workflowId: workflow.id,
+          name: workflow.name,
           amount: 0.009,
           runs: 2,
         },
