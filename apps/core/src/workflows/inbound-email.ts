@@ -10,7 +10,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
-  emailTriggerPrefix,
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
   workflowErrors,
@@ -119,9 +118,12 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 //
 // Independent workflows' email triggers (trigger-resources.ts) receive
 // mail the same way, each at an address of its own (`trigger-<token>`,
-// 128 random bits, never its ID), which no App's may be: the same
+// 128 random bits, never its ID): the same
 // ingress, size limit, parser, loop refusal and input (`InboundEmail`,
-// mapped into the run's input as a connector trigger maps its event).
+// mapped into the run's input as a connector trigger maps its event). An
+// address is looked up among live, enabled email triggers first, exactly
+// as stored, and only then among Apps' addresses: a trigger's token is
+// random, so it is no App's.
 // Each message then takes the steps a connector event does
 // (connector-triggers.ts, `startOnce`): its start, its refusals and its
 // drops once each, by the message. Threat model, and how each is closed:
@@ -536,7 +538,7 @@ const emailTakerAt = async (
     .get();
 
 /**
- * Takes a message to the email trigger at `address` (its token
+ * Takes a message to `taker`, the email trigger at `address` (its token
  * `recorded`, if any, gone): starts its run, the message mapped into its
  * input, acting for its creator; bounces it, drops it (audited), or fails
  * it for now, as the threat model above says. Logs the message's hash
@@ -546,13 +548,9 @@ const receiveForTrigger = async (
   message: InboundMessage,
   env: Env,
   address: string,
+  taker: Taker,
   recorded: MailStamp | undefined
 ): Promise<void> => {
-  const taker = await emailTakerAt(env, address);
-  if (taker === undefined) {
-    message.setReject("No such address.");
-    return;
-  }
   const read = await readMessage(message, env);
   if (read === undefined) {
     return;
@@ -632,8 +630,9 @@ export const receiveEmail = async (
     local === ""
       ? { local: "", stamp: undefined }
       : await mailRecipient(env, local);
-  if (address.startsWith(emailTriggerPrefix)) {
-    await receiveForTrigger(message, env, address, recorded);
+  const taker = address === "" ? undefined : await emailTakerAt(env, address);
+  if (taker !== undefined) {
+    await receiveForTrigger(message, env, address, taker, recorded);
     return;
   }
   const receivers = address === "" ? [] : await receiversAt(env, address);

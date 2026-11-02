@@ -21,6 +21,7 @@ import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
   connectorTriggerHolds,
   permissions,
+  triggerHourSlots,
   triggerResources,
   triggerResourceVersions,
   workflowStartReceipts,
@@ -106,11 +107,14 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   (`workflow.event.refused`) and the event settled for it; anything
 //   else fails the delivery, so connect delivers it again, until held
 //   back too long, audited as dropped.
-// - Refusals writing the audit log without end. A refusal for good takes
-//   a place in the trigger's hourly room, as a start does
-//   (`hourRoomSql`), so at most `triggeredRunsPerHour` starts and
-//   refusals are written an hour; past that the event is held back as a
-//   start is, and dropped after a day, audited once.
+// - Refusals writing the audit log without end, or events at once all
+//   taking the hour's last place. Before anything that could audit (a
+//   start, a refusal for good) an event takes a place in the trigger's
+//   hourly room (`tookPlace`, `trigger_hour_slots`), in one conditional
+//   insert: at most `triggeredRunsPerHour` an hour, however many arrive
+//   together. One without a place is held back, audited by nothing, and
+//   dropped after a day, audited once; delivered again with its place, it
+//   takes no other.
 //
 // Email triggers' messages (inbound-email.ts) go through the same steps
 // (`startOnce`), each message an event of its own.
@@ -133,6 +137,8 @@ export const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.paused",
 ]);
 
+const hourMs = 60 * 60 * 1000;
+
 /** How long an event a trigger holds back at its hourly limit waits before it is dropped. */
 export const maxHeldMs = 24 * 60 * 60 * 1000;
 
@@ -154,31 +160,40 @@ const hearsSql = (id: string, event: ConnectorEvent): SQL =>
   })`;
 
 /**
- * That trigger `id` has room for another start or refusal this hour, as
- * SQL: the runs it started and the events it refused for good in the
- * last hour, together under `triggeredRunsPerHour`.
+ * Takes a place in `taker`'s hourly room for the event of key `same`, if
+ * it has none yet: in one conditional insert, only while fewer than
+ * `triggeredRunsPerHour` were taken in the last hour, so of events
+ * arriving at once no more than the room take one. Whether the event has
+ * a place now, taken by this delivery or an earlier one.
  */
-const hourRoomSql = (id: string): SQL => {
-  const since = Date.now() - 60 * 60 * 1000;
-  return sql`(((SELECT COUNT(*) FROM ${workflowStartReceipts}
-    WHERE ${workflowStartReceipts.invokerType} = 'trigger'
-      AND ${workflowStartReceipts.invokerId} = ${id}
-      AND ${workflowStartReceipts.createdAt} > ${since})
-    + (SELECT COUNT(*) FROM ${connectorTriggerHolds}
-    WHERE ${connectorTriggerHolds.triggerId} = ${id}
-      AND ${connectorTriggerHolds.settled} = 'refused'
-      AND ${connectorTriggerHolds.settledAt} > ${since})) < ${triggeredRunsPerHour})`;
+const tookPlace = async (
+  env: Env,
+  taker: Taker,
+  same: string
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const now = Date.now();
+  await db
+    .insert(triggerHourSlots)
+    .select(
+      sql`SELECT ${taker.id}, ${same}, ${now}
+        WHERE (SELECT COUNT(*) FROM ${triggerHourSlots}
+          WHERE ${triggerHourSlots.triggerId} = ${taker.id}
+            AND ${triggerHourSlots.takenAt} > ${now - hourMs}) < ${triggeredRunsPerHour}`
+    )
+    .onConflictDoNothing();
+  const place = await db
+    .select({ takenAt: triggerHourSlots.takenAt })
+    .from(triggerHourSlots)
+    .where(
+      and(
+        eq(triggerHourSlots.triggerId, taker.id),
+        eq(triggerHourSlots.eventKey, same)
+      )
+    )
+    .get();
+  return place !== undefined;
 };
-
-/**
- * That trigger `id` has room for another run this hour, or started the
- * run of `key` already, as SQL: what admitting a start of it requires.
- */
-const roomSql = (id: string, key: string): SQL =>
-  sql`(${hourRoomSql(id)} OR EXISTS (SELECT 1 FROM ${workflowStartReceipts}
-    WHERE ${workflowStartReceipts.invokerType} = 'trigger'
-      AND ${workflowStartReceipts.invokerId} = ${id}
-      AND ${workflowStartReceipts.idempotencyKey} = ${key}))`;
 
 /**
  * The live, enabled connector triggers whose current version takes
@@ -313,8 +328,7 @@ const heldBack = async (
 /**
  * Settles `arrival` for `taker` for good, as `settled`: a tombstone
  * (`connectorTriggerHolds`), so a delivery of it again starts nothing
- * here, and audited once, only by the write that settled it. A refusal
- * takes a place in the hour's room: without one, it is held back.
+ * here, and audited once, only by the write that settled it.
  */
 const settle = async (
   env: Env,
@@ -322,16 +336,8 @@ const settle = async (
   arrival: Arrival,
   settled: "dropped" | "refused",
   detail: Record<string, string | number>
-): Promise<"gone" | "retry"> => {
+): Promise<"gone"> => {
   const db = drizzle(env.DB);
-  if (settled === "refused") {
-    const now = await db.get<{ room: number }>(
-      sql`SELECT ${hourRoomSql(taker.id)} AS room`
-    );
-    if (now.room === 0) {
-      return await heldBack(env, taker, arrival);
-    }
-  }
   const at = new Date();
   await auditedBatch(env, db, [
     db
@@ -388,14 +394,12 @@ const refusalOf = async (
   }
   let { code } = error;
   if (isStaleRefusal(error)) {
-    // What the admitting statement required besides: its grant to hear,
-    // revoked for good, or its room this hour, back later.
-    const now = await drizzle(env.DB).get<{ hears: number; room: number }>(
-      sql`SELECT ${arrival.also ?? sql`1`} AS hears, ${hourRoomSql(taker.id)} AS room`
+    // What the admitting statement required besides, its grant to hear,
+    // revoked for good; or what it was decided on changed meanwhile, to be
+    // decided again.
+    const now = await drizzle(env.DB).get<{ hears: number }>(
+      sql`SELECT ${arrival.also ?? sql`1`} AS hears`
     );
-    if (now.hears === 1 && now.room === 0) {
-      return await heldBack(env, taker, arrival);
-    }
     if (now.hears === 1) {
       return "retry";
     }
@@ -439,9 +443,9 @@ const causeOf = async (
  * `taker`'s turn at `arrival`, a small state machine: started already (a
  * receipt under its key): settled, nothing asked again; settled for it
  * already (a tombstone: dropped or refused): gone; held past `maxHeldMs`:
- * dropped, checked before any try; refused without a try
- * (`refusedAs`): settled; else tried, admitted only while its room and
- * `also` hold.
+ * dropped, checked before any try; without a place in the hour's room
+ * (`tookPlace`): held back, nothing audited; refused without a try
+ * (`refusedAs`): settled; else tried, admitted only while `also` holds.
  */
 export const startOnce = async (
   env: Env,
@@ -487,6 +491,9 @@ export const startOnce = async (
       heldSince: state.heldSince.toISOString(),
     });
   }
+  if (!(await tookPlace(env, taker, same))) {
+    return await heldBack(env, taker, arrival);
+  }
   if (arrival.refusedAs !== undefined) {
     return await settle(env, taker, arrival, "refused", {
       code: arrival.refusedAs,
@@ -512,8 +519,8 @@ export const startOnce = async (
       },
       taker.workflowId,
       { version: taker.workflowVersion, input: arrival.input, key },
-      // Read again as it is admitted: its room, and what else it needs.
-      sql`(${arrival.also ?? sql`1`} AND ${roomSql(taker.id, key)})`,
+      // Read again as it is admitted: what else it needs.
+      arrival.also,
       {
         ...arrival.noted,
         ...(cause === undefined ? {} : { emittingRun: cause.runId }),
@@ -657,9 +664,14 @@ export const sweepConnectorTriggerHolds = async (
   now: Date
 ): Promise<void> => {
   const before = now.getTime() - holdsKeptMs;
-  await env.DB.prepare(
-    "DELETE FROM connector_trigger_holds WHERE rowid IN (SELECT rowid FROM connector_trigger_holds WHERE coalesce(settled_at, held_since) < ? LIMIT ?)"
-  )
-    .bind(before, holdsPerSweep)
-    .run();
+  // Places in the hourly room with them: kept as long, so every delivery
+  // of an event finds the place it took.
+  await env.DB.batch([
+    env.DB.prepare(
+      "DELETE FROM connector_trigger_holds WHERE rowid IN (SELECT rowid FROM connector_trigger_holds WHERE coalesce(settled_at, held_since) < ? LIMIT ?)"
+    ).bind(before, holdsPerSweep),
+    env.DB.prepare(
+      "DELETE FROM trigger_hour_slots WHERE rowid IN (SELECT rowid FROM trigger_hour_slots WHERE taken_at < ? LIMIT ?)"
+    ).bind(before, holdsPerSweep),
+  ]);
 };

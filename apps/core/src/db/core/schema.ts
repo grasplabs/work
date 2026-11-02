@@ -3964,8 +3964,9 @@ export const agentHeldStarts = sqliteTable(
 /**
  * Where an event stands for a connector trigger, or a message for an email
  * trigger, that didn't start its run (src/workflows/connector-triggers.ts,
- * `startOnce`), by the trigger and the event's key: held back at its hourly limit since `held_since` (`settled` null),
- * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * `startOnce`), by the trigger and the event's key: held back at its
+ * hourly limit since `held_since` (`settled` null), or settled for it for
+ * good: `dropped`, held past a day, or `refused`,
  * refused for good. A settled row is a tombstone, so the same event
  * delivered again for another trigger's sake is known and starts nothing
  * here. The clock sweeps both past their retention.
@@ -3982,6 +3983,31 @@ export const connectorTriggerHolds = sqliteTable(
     settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
+);
+
+/**
+ * The places taken in each trigger's hourly room (src/workflows/
+ * connector-triggers.ts, `startOnce`): one per event (or message) the
+ * trigger started or refused for good, taken in one conditional insert
+ * before either, so no more than `triggeredRunsPerHour` are taken an hour
+ * however many arrive at once, and an event held back for want of one
+ * writes no audit row. An event keeps its place: delivered again, it takes
+ * no other. The clock sweeps places past their hour.
+ */
+export const triggerHourSlots = sqliteTable(
+  "trigger_hour_slots",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.eventKey] }),
+    // A trigger's places this hour.
+    index("trigger_hour_slots_taken").on(table.triggerId, table.takenAt),
+  ]
 );
 
 /**

@@ -298,25 +298,15 @@ const refusalsOf = async (id: string) => {
 };
 
 /**
- * Fills trigger `id`'s hour, whose run `receipt` started: copies of its
- * receipt, each under a key of its own.
+ * Fills trigger `id`'s hourly room, but for `left` places: places taken by
+ * events of their own this hour (trigger_hour_slots).
  */
-const fillHour = async (receipt: string): Promise<void> => {
-  const columns = await env.DB.prepare(
-    "SELECT name FROM pragma_table_info('workflow_start_receipts')"
-  ).all<{ name: string }>();
-  const names = columns.results.map(({ name }) => name);
-  const copied = names.map((name) => {
-    if (name === "id") {
-      return "?1";
-    }
-    return name === "idempotency_key" ? "?2" : name;
-  });
+const fillHour = async (id: string, left = 0): Promise<void> => {
   await env.DB.batch(
-    Array.from({ length: triggeredRunsPerHour }, () =>
+    Array.from({ length: triggeredRunsPerHour - left }, () =>
       env.DB.prepare(
-        `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
-      ).bind(crypto.randomUUID(), `filler-${unique()}`, receipt)
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(id, `filler-${unique()}`, Date.now())
     )
   );
 };
@@ -741,8 +731,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
   it("hold mail past the trigger's hourly limit, refusals and loop drops included, and drop it after a day, audited once", async () => {
     const { trigger, address } = await emailTrigger();
     await post(address, invoiceMail({ to: address }));
-    const [started] = await runsOf(trigger.id);
-    await fillHour(started?.id ?? "");
+    await fillHour(trigger.id);
     const warned = vi.spyOn(console, "warn").mockReturnValue();
     const failed = vi.spyOn(console, "error").mockReturnValue();
     const late = invoiceMail({
@@ -816,5 +805,67 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     expect(
       runs.map(({ depth }) => depth).toSorted((a, b) => a - b)
     ).toStrictEqual([0, 0, 1, 1, 1, 1, 1]);
+  });
+
+  it("write no audit row for a message held back at the hourly limit, however often it is delivered again", async () => {
+    const { workflow, trigger, address } = await emailTrigger();
+    await fillHour(trigger.id);
+    const warned = vi.spyOn(console, "warn").mockReturnValue();
+    const about = async () => {
+      const logged = await allEvents();
+      return logged.filter(
+        ({ target, detail }) =>
+          target?.id === trigger.id ||
+          target?.id === workflow ||
+          JSON.stringify(detail).includes(trigger.id)
+      ).length;
+    };
+    const before = await about();
+    const held = invoiceMail({
+      to: address,
+      messageId: `held-${unique()}@acme.test`,
+    });
+    // One that may loop: refused for good, audited, given a place.
+    const looping = invoiceMail({
+      to: address,
+      headers: ["Auto-Submitted: auto-replied"],
+    });
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (const raw of [held, looping]) {
+        // oxlint-disable-next-line no-await-in-loop -- one delivery after another
+        const response = await post(address, raw);
+        statuses.push(response.status);
+      }
+    }
+    warned.mockRestore();
+
+    expect({
+      held: statuses.every((status) => status >= 500),
+      written: (await about()) - before,
+      runs: await runCount(trigger.id),
+    }).toStrictEqual({ held: true, written: 0, runs: 0 });
+  });
+
+  it("let only one of two messages arriving at once take the hour's last place", async () => {
+    const { trigger, address } = await emailTrigger();
+    await fillHour(trigger.id, 1);
+    const warned = vi.spyOn(console, "warn").mockReturnValue();
+
+    const responses = await Promise.all(
+      [`a-${unique()}`, `b-${unique()}`].map(
+        async (id) =>
+          await post(
+            address,
+            invoiceMail({ to: address, messageId: `${id}@acme.test` })
+          )
+      )
+    );
+    warned.mockRestore();
+
+    expect({
+      held: responses.filter(({ status }) => status >= 500).length,
+      runs: await runCount(trigger.id),
+    }).toStrictEqual({ held: 1, runs: 1 });
   });
 });

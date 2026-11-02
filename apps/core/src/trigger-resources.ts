@@ -19,11 +19,7 @@ import type {
   TriggerKind,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import {
-  emailTriggerPrefix,
-  maxFailedStarts,
-  nextScheduledRun,
-} from "@grasp-os/shared/workflows";
+import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -103,8 +99,9 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   who learned its ID: its address is `trigger-` and 128 random bits of
 //   its own (`emailAddressOf`), never derived from its ID (which builders,
 //   admins, staff and the audit log see), shown only to whoever may see
-//   the trigger, never audited or logged, and no App's address may start
-//   so. It is never changed: deleting the trigger and making another is
+//   the trigger, never audited or logged. Mail to it reaches the trigger
+//   first (inbound-email.ts); no App's address is that token unless
+//   copied. It is never changed: deleting the trigger and making another is
 //   how it changes. Its input is a fixed mapping as a connector trigger's
 //   is. Its mail starts runs as workflows/inbound-email.ts says.
 
@@ -269,7 +266,7 @@ const addressBytes = 16;
 
 /** A new email trigger's address, before the `@`: random, its own. */
 const emailAddressOf = (): string =>
-  `${emailTriggerPrefix}${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
+  `trigger-${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
 
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {

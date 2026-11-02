@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b082b294-669c-4648-ab5e-c3530571b707",
+  "id": "be9d1a78-4888-4dac-9561-4709bbb20386",
   "prevId": "ed7dcbd5-14de-4fc8-8516-a92293cdad0b",
   "tables": {
     "access_revocations": {
@@ -8850,6 +8850,68 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "trigger_hour_slots": {
+      "name": "trigger_hour_slots",
+      "columns": {
+        "trigger_id": {
+          "name": "trigger_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_key": {
+          "name": "event_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "trigger_hour_slots_taken": {
+          "name": "trigger_hour_slots_taken",
+          "columns": [
+            "trigger_id",
+            "taken_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "trigger_hour_slots_trigger_id_trigger_resources_id_fk": {
+          "name": "trigger_hour_slots_trigger_id_trigger_resources_id_fk",
+          "tableFrom": "trigger_hour_slots",
+          "tableTo": "trigger_resources",
+          "columnsFrom": [
+            "trigger_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "trigger_hour_slots_trigger_id_event_key_pk": {
+          "columns": [
+            "trigger_id",
+            "event_key"
+          ],
+          "name": "trigger_hour_slots_trigger_id_event_key_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
