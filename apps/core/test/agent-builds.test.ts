@@ -1309,6 +1309,58 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     }).toStrictEqual({ files: ["AGENTS.md"], copies: [] });
   });
 
+  it("proposes no draft saved with a workflow change before its writes were refused, committing nothing", async () => {
+    // The same attack through a draft saved before this release refused
+    // the write: proposing commits the saved draft, not a write.
+    const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
+    const { builder, existing, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        ${ledger}
+        const refusal = async (call) => {
+          try {
+            await call();
+            return "done";
+          } catch (error) {
+            return { message: error.message, issues: error.details?.issues ?? null };
+          }
+        };
+        return await refusal(async () => await env.build.propose(app.id, "Tampered intake"));
+      };`),
+      says("Done."),
+    ]);
+    await grant();
+    await release(builder, existing, intake);
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return instance.saveDraft(
+        chatId,
+        existing,
+        2,
+        {
+          "workflows/intake.ts": "export default 1;\n",
+          "workflows/intake.workflow-tests.ts": null,
+          "notes.md": "the agent's",
+        },
+        [],
+        0,
+        run
+      );
+    });
+
+    await chat.ask("Propose the ledger's draft");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // Named alone: deleting the builder's tests is no workflow change.
+    expect(returned(result?.text)).toStrictEqual(
+      noWorkflows(["workflows/intake.ts"])
+    );
+    const versions = await builder.api.apps.versions.list(existing);
+    expect(
+      versions.map(({ version }) => version).toSorted((a, b) => a - b)
+    ).toStrictEqual([1, 2]);
+  });
+
   it("proposes over what builders committed since, and never undoes it", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const propose = `export default async (self, env) => {

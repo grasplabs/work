@@ -6,8 +6,10 @@ import { appErrors } from "@grasp-os/shared/apps";
 // call is a binding of its validated definition that an admin approves for
 // that exact version. Code under `workflows/` would run as the App's own
 // workflow instead, its calls read out of the code. The chat's agent
-// writes none (agent-builds.ts) and creates no App from a blueprint that
-// carries any (app-blueprints.ts), refused naming the files.
+// writes none (agent-builds.ts), proposes no draft that changes one,
+// however it was saved (`draftOverLatest`, apps.ts), and creates no
+// App from a blueprint that carries any (app-blueprints.ts), refused
+// naming the files.
 
 /** Most paths the refusal names: enough to find them, bounded to send. */
 const namedPathsMax = 20;
