@@ -44,6 +44,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Kept access at the provider for an account connected again`,
   },
   {
+    action: "connection.revocations.viewed",
+    text: msg`Looked at the access to remove by hand`,
+  },
+  {
     action: "connection.revoke_abandoned",
     text: msg`Gave up revoking a disconnected account's access at its provider`,
   },
