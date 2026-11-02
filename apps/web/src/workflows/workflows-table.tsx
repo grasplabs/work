@@ -37,18 +37,20 @@ import type { ReactElement, ReactNode } from "react";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime, formatNumber } from "../format.ts";
 import { ProcessHint } from "./business-process.tsx";
-import { handledOf, listsOf } from "./lists.ts";
+import { handledOf, listsOf, workflowKey, workflowName } from "./lists.ts";
 import { WorkflowOwnerPicker } from "./owner-picker.tsx";
 import { RunResult } from "./runs.tsx";
 
 // The workflows table, one line a workflow, as the prototype draws it
 // (`components/workflows-overview.tsx`, `workflows-table.tsx`): on the
-// Workflows page, every workflow the person can open, in two lists; on an
-// engine's page, that engine's. A line on the Workflows page begins, as
-// the prototype's does, with the icon of the business process its App
-// serves (an App's workflows serve their App's), or the engine's icon
-// where the App serves none; pointed at, it names the engine and the
-// process, and it opens the engine.
+// Workflows page, every workflow the person can open, an engine's or an
+// independent one, in two lists; on an engine's page, that engine's. A
+// line on the Workflows page begins, as the prototype's does, with the
+// icon of the business process it serves (an App's workflows serve their
+// App's), or the engine's icon where the App serves none; pointed at, it
+// names the engine and the process, and it opens the engine. An
+// independent workflow's begins with a workflow's icon, naming the
+// process it serves when pointed at.
 
 /** When a workflow last ran, or that it never did. */
 const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
@@ -62,7 +64,10 @@ const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
     </span>
   );
 
-/** A count of a workflow's runs, linking to them on the Runs tab. */
+/**
+ * A count of a workflow's runs, linking to them on the Runs tab: an
+ * engine's workflow's on the overview's, an independent one's on its page's.
+ */
 const RunCount = ({
   workflow,
   status,
@@ -74,21 +79,32 @@ const RunCount = ({
   children: ReactNode;
   /** What the link opens, read out: the count and the workflow, in words. */
   label: string;
-}) => (
-  <Link
-    aria-label={label}
-    className="relative z-10 underline-offset-4 hover:underline"
-    search={{
-      tab: "runs",
-      app: workflow.app,
-      workflow: workflow.workflow,
-      status,
-    }}
-    to="/workflows"
-  >
-    {children}
-  </Link>
-);
+}) =>
+  workflow.type === "app" ? (
+    <Link
+      aria-label={label}
+      className="relative z-10 underline-offset-4 hover:underline"
+      search={{
+        tab: "runs",
+        app: workflow.app,
+        workflow: workflow.workflow,
+        status,
+      }}
+      to="/workflows"
+    >
+      {children}
+    </Link>
+  ) : (
+    <Link
+      aria-label={label}
+      className="relative z-10 underline-offset-4 hover:underline"
+      params={{ workflow: workflow.workflowId }}
+      search={{ tab: "runs" }}
+      to="/workflows/$workflow"
+    >
+      {children}
+    </Link>
+  );
 
 /**
  * Where a workflow stands: its last run's result, and the runs waiting
@@ -96,7 +112,7 @@ const RunCount = ({
  */
 const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
-  const name = workflow.workflow;
+  const name = workflowName(workflow);
   const { waiting, failed } = workflow;
   const days = failedRunDays;
   return (
@@ -136,8 +152,18 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   );
 };
 
-/** The business process each App serves, by the App's ID: null for none. */
+/**
+ * The business process each App, and each independent workflow, serves,
+ * by its ID: null for none.
+ */
 export type AppProcesses = ReadonlyMap<string, BusinessProcess | null>;
+
+/** The process `row` serves: its App's, or an independent workflow's own. */
+export const processOf = (
+  processes: AppProcesses | undefined,
+  row: WorkflowSummary
+): BusinessProcess | null =>
+  processes?.get(row.type === "app" ? row.app : row.workflowId) ?? null;
 
 /**
  * Where a line begins: its process's icon, or its engine's, which says the
@@ -153,6 +179,32 @@ const Lead = ({
   process: BusinessProcess | null;
 }) => {
   const { t } = useLingui();
+  if (workflow.type === "resource") {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="relative flex-none rounded-lg" />}
+        >
+          <span
+            aria-hidden="true"
+            className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
+          >
+            <WorkflowIcon className="size-4" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64">
+          {process === null ? (
+            <Trans>Independent workflow</Trans>
+          ) : (
+            <span className="flex flex-col gap-1">
+              <Trans>Independent workflow</Trans>
+              <ProcessHint process={process} />
+            </span>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
   const name = workflow.appName;
   return (
     <Tooltip>
@@ -190,10 +242,58 @@ const Lead = ({
   );
 };
 
+/** A workflow's name, opening it: the whole row is its link. */
+const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => {
+  const className =
+    "truncate outline-none after:absolute after:inset-0 focus-visible:underline";
+  return workflow.type === "app" ? (
+    <Link
+      className={className}
+      params={{ app: workflow.app, workflow: workflow.workflow }}
+      to="/workflows/$app/$workflow"
+    >
+      {workflow.workflow}
+    </Link>
+  ) : (
+    <Link
+      className={className}
+      params={{ workflow: workflow.workflowId }}
+      to="/workflows/$workflow"
+    >
+      {workflow.name}
+    </Link>
+  );
+};
+
+/** The version new runs run, or that none is published yet. */
+const Version = ({ version }: { version: number | null }) =>
+  version === null ? (
+    <Trans>Not published</Trans>
+  ) : (
+    <Trans>Version {version}</Trans>
+  );
+
+/** Where a workflow is: its engine, opening it, or that it stands alone. */
+const Place = ({ workflow }: { workflow: WorkflowSummary }) =>
+  workflow.type === "app" ? (
+    <Link
+      className="relative z-10 truncate underline-offset-4 hover:underline"
+      params={{ engine: workflow.app }}
+      to="/domains/$engine"
+    >
+      {workflow.appName}
+    </Link>
+  ) : (
+    <span className="truncate">
+      <Trans>Independent</Trans>
+    </span>
+  );
+
 /**
- * A workflow's row: its name, the App it is in and its version under it,
- * its owner, when it last ran and where it stands. The whole row opens
- * it; the owner is changed in place, above the row's link.
+ * A workflow's row: its name, the App it is in (or that it is independent)
+ * and its version under it, its owner, when it last ran and where it
+ * stands. The whole row opens it; the owner is changed in place, above
+ * the row's link.
  */
 const WorkflowRow = ({
   workflow,
@@ -204,7 +304,8 @@ const WorkflowRow = ({
   withEngine: boolean;
   process: BusinessProcess | null;
 }) => {
-  const { version, appName } = workflow;
+  const { version } = workflow;
+  const place = workflow.type === "app" ? workflow.appName : null;
   return (
     <TableRow className="relative">
       <TableCell variant="roomy">
@@ -212,29 +313,21 @@ const WorkflowRow = ({
           {withEngine ? <Lead process={process} workflow={workflow} /> : null}
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 items-center gap-2">
-              <Link
-                className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-                params={{ app: workflow.app, workflow: workflow.workflow }}
-                to="/workflows/$app/$workflow"
-              >
-                {workflow.workflow}
-              </Link>
-              {workflow.scheduleStopped ? (
+              <WorkflowLink workflow={workflow} />
+              {workflow.type === "app" && workflow.scheduleStopped ? (
                 <Badge variant="attention">
                   <Trans>Schedule stopped</Trans>
                 </Badge>
               ) : null}
             </span>
             {/* Narrow, the engine's cell is hidden: its name and version here. */}
-            {withEngine ? (
+            {withEngine && place !== null ? (
               <span className="text-muted-foreground truncate @lg:hidden">
-                <Trans>
-                  {appName} · Version {version}
-                </Trans>
+                {place} · <Version version={version} />
               </span>
             ) : (
               <span className="text-muted-foreground">
-                <Trans>Version {version}</Trans>
+                <Version version={version} />
               </span>
             )}
             {/* Narrow, the status's cell is hidden too, as the prototype
@@ -248,15 +341,9 @@ const WorkflowRow = ({
       {withEngine ? (
         <TableCell className="hidden @lg:table-cell" variant="roomy">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <Link
-              className="relative z-10 truncate underline-offset-4 hover:underline"
-              params={{ engine: workflow.app }}
-              to="/domains/$engine"
-            >
-              {workflow.appName}
-            </Link>
+            <Place workflow={workflow} />
             <span className="text-muted-foreground">
-              <Trans>Version {version}</Trans>
+              <Version version={version} />
             </span>
           </div>
         </TableCell>
@@ -376,8 +463,8 @@ export const WorkflowsTable = ({
         <TableBody>
           {rows.map((row) => (
             <WorkflowRow
-              key={`${row.app}/${row.workflow}`}
-              process={processes?.get(row.app) ?? null}
+              key={workflowKey(row)}
+              process={processOf(processes, row)}
               withEngine={withEngine}
               workflow={row}
             />

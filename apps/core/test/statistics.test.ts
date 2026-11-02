@@ -24,7 +24,7 @@ import {
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { endLiveRuns, finished, seedResourceRun } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
@@ -1012,6 +1012,92 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       narrowRuns: [{ dimensions: {}, count: 3, sum: 3, min: 1, max: 1 }],
       othersGrant: "resource.target_invalid",
       revoked: { error: "resource.unavailable" },
+    });
+  });
+
+  it("count an independent workflow's runs under each App's alias for it, never through a binding removed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const reader = await boundApp(builder);
+    await grantPlatform(builder, reader);
+    const watched = await countedApp(admin);
+    // Two independent workflows: `intake` bound to the App now, `old` once.
+    const workflowOf = async (name: string): Promise<string> => {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
+      )
+        .bind(id, `${name}-${unique()}`, admin.userId, Date.now())
+        .run();
+      return id;
+    };
+    const [intake, old] = await Promise.all([
+      workflowOf("intake"),
+      workflowOf("old"),
+    ]);
+    const boundAs = async (
+      workflow: string,
+      alias: string,
+      status: "active" | "removed"
+    ) => {
+      await env.DB.prepare(
+        "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at, removed_by, removed_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          watched,
+          alias,
+          workflow,
+          status,
+          admin.userId,
+          Date.now(),
+          status === "removed" ? admin.userId : null,
+          status === "removed" ? Date.now() : null
+        )
+        .run();
+    };
+    await boundAs(intake, "intake", "active");
+    await boundAs(old, "old", "removed");
+    const at = holdClock();
+    await seedRun(watched, "pay");
+    for (const workflow of [intake, intake, old]) {
+      // oxlint-disable-next-line no-await-in-loop -- one run after another
+      await seedResourceRun({
+        workflow,
+        principal: admin.userId,
+        status: "completed",
+        createdAt: at,
+      });
+    }
+    const runs = async (change: Record<string, unknown>) =>
+      answerSchema
+        .parse(
+          await platformRead(reader, admin.userId, {
+            measure: "platform.workflow_runs",
+            days: 7,
+            where: { app: watched },
+            ...change,
+          })
+        )
+        .ok.groups.map(({ dimensions, count: n }) => ({ dimensions, n }));
+
+    expect({
+      byWorkflow: await runs({ groupBy: ["workflow"] }),
+      byAlias: await runs({
+        where: { app: watched, workflow: "intake" },
+        groupBy: [],
+      }),
+      removed: await runs({
+        where: { app: watched, workflow: "old" },
+        groupBy: [],
+      }),
+    }).toStrictEqual({
+      byWorkflow: [
+        { dimensions: { workflow: "intake" }, n: 2 },
+        { dimensions: { workflow: "pay" }, n: 1 },
+      ],
+      byAlias: [{ dimensions: {}, n: 2 }],
+      removed: [],
     });
   });
 
