@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fa6b25bd-4dce-40e4-b8c1-abb9d07957d1",
+  "id": "f5393f9e-0635-4028-b718-06e74fc3ee29",
   "prevId": "219636a8-cf68-48b8-b90a-e4b0134a0ec4",
   "tables": {
     "access_revocations": {
@@ -1864,14 +1864,6 @@
         },
         "workflow_calls": {
           "name": "workflow_calls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'{}'"
-        },
-        "exports": {
-          "name": "exports",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -12985,60 +12977,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "workflow_stores": {
-      "name": "workflow_stores",
-      "columns": {
-        "workflow_id": {
-          "name": "workflow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "workflow_stores_store_id_unique": {
-          "name": "workflow_stores_store_id_unique",
-          "columns": [
-            "store_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "workflow_stores_workflow_id_name_pk": {
-          "columns": [
-            "workflow_id",
-            "name"
-          ],
-          "name": "workflow_stores_workflow_id_name_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

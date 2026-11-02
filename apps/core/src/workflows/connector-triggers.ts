@@ -9,6 +9,8 @@ import type { Json } from "@grasp-os/shared/json";
 import { valueAtPointer } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
+import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
+import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -24,8 +26,6 @@ import {
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
-import { inputMappingSchema } from "../trigger-resources.ts";
-import type { InputMapping } from "../trigger-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 import type { TriggerCause } from "../workflow-starts.ts";
 import type { StampedRun } from "./mail-stamps.ts";
