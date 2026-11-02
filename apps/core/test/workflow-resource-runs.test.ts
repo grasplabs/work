@@ -1210,6 +1210,7 @@ const evaluatedWith = async (
       calling: {
         runId,
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -1321,6 +1322,7 @@ describe("an activation's share of core's CPU", () => {
           calling: {
             runId,
             rootRunId: runId,
+            accountRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
@@ -1448,6 +1450,7 @@ describe("an activation's share of core's CPU", () => {
           calling: {
             runId,
             rootRunId: runId,
+            accountRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
@@ -2268,6 +2271,7 @@ describe(
             calling: {
               runId,
               rootRunId: runId,
+              accountRunId: runId,
               workflowId: workflow.id,
               version: 1,
               principal: by.userId,
@@ -2714,6 +2718,7 @@ describe(
           calling: {
             runId,
             rootRunId: runId,
+            accountRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
