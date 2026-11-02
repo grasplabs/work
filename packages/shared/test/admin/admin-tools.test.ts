@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { adminSnapshotSchema } from "../../src/admin-snapshot.ts";
-import type { Rollout } from "../../src/admin/admin-platform.ts";
 import { adminOrgOf } from "../../src/admin/admin-snapshot-adapter.ts";
 import { ADMIN_SOURCES } from "../../src/admin/admin-sources.ts";
 import {
@@ -44,23 +43,12 @@ const views = [bakkerij, molen].map(({ org, state }) =>
 );
 const call = (name: string, input: Record<string, unknown> = {}) =>
   callAdminTool(name, input, views, today);
-const rollout: Rollout = {
-  id: "ro",
-  kind: "release",
-  release: "r418-3f9c2ab",
-  status: "waiting",
-  ring: 1,
-  by: "Nick",
-  at: "2026-10-14",
-  targets: [],
-};
 const fleet: Fleet = {
   platforms: Object.entries(SAMPLE_PLATFORMS).map(([org, platform]) => ({
     org,
     platform,
   })),
   releases: SAMPLE_RELEASES,
-  rollout,
 };
 /** Whether `name` stands in `within` as a word of its own, not inside another ("Sales" in "Salesforce"). */
 const named = (within: string, name: string): boolean =>
@@ -331,16 +319,13 @@ describe("the apps asked for, in a chat", () => {
 });
 
 describe("every company’s platform, in a chat", () => {
-  it("says how each company’s platform stands, what needs a look, and the release going out", () => {
+  it("says how each company’s platform stands and what needs a look", () => {
     const answer = callAdminTool("platforms", {}, views, today, [], fleet);
     expect(answer.failed).toBeUndefined();
-    // Each ring by the name staff use for it.
-    expect(answer.text).toContain("hartog: attention; in Alpha;");
+    // Each channel by the name staff use for it.
+    expect(answer.text).toContain("hartog: attention; on Edge;");
     expect(answer.text).toContain("needs a look: failed, errors, secrets");
     expect(answer.text).toContain("vanrijn: not set up yet.");
-    expect(answer.text).toContain(
-      "waiting for someone at Grasp to approve Production"
-    );
   });
 
   it("goes into what the admin’s chat reads, when it is given them", () => {

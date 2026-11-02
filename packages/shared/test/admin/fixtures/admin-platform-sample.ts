@@ -142,7 +142,7 @@ export const SAMPLE_PLATFORMS: Record<
       name: "Grasp · Hartog Groothandel",
     },
     workersDev: "grasp-hartog",
-    ring: 0,
+    channel: "edge",
     pinned: null,
     provisioning: null,
     signIn: {
@@ -182,21 +182,21 @@ export const SAMPLE_PLATFORMS: Record<
         "d-hg-6",
         "r418-3f9c2ab",
         "2026-10-14T08:02:00Z",
-        "Rollout r418, ring 0",
+        "Promotion of r418",
         6
       ),
       deploy(
         "d-hg-5",
         "r412-91d0e47",
         "2026-10-07T08:05:00Z",
-        "Rollout r412, ring 0",
+        "Rollout r412",
         5
       ),
       deploy(
         "d-hg-4",
         "r405-c27b18f",
         "2026-09-30T08:04:00Z",
-        "Rollout r405, ring 0",
+        "Rollout r405",
         7
       ),
     ],
@@ -217,7 +217,7 @@ export const SAMPLE_PLATFORMS: Record<
       name: "Grasp · Noordkade Finance",
     },
     workersDev: "grasp-noordkade",
-    ring: 1,
+    channel: "beta",
     pinned: null,
     provisioning: null,
     signIn: {
@@ -251,14 +251,14 @@ export const SAMPLE_PLATFORMS: Record<
         "d-nk-3",
         "r418-3f9c2ab",
         "2026-10-14T13:40:00Z",
-        "Rollout r418, ring 1",
+        "Promotion of r418",
         5
       ),
       deploy(
         "d-nk-2",
         "r412-91d0e47",
         "2026-10-08T09:10:00Z",
-        "Rollout r412, ring 1",
+        "Rollout r412",
         4
       ),
       deploy(
@@ -286,7 +286,7 @@ export const SAMPLE_PLATFORMS: Record<
       name: "Grasp · Veldkamp Installatie",
     },
     workersDev: "grasp-veldkamp",
-    ring: 2,
+    channel: "stable",
     pinned: null,
     provisioning: null,
     signIn: {
@@ -320,7 +320,7 @@ export const SAMPLE_PLATFORMS: Record<
         "d-vk-2",
         "r412-91d0e47",
         "2026-10-09T08:20:00Z",
-        "Rollout r412, ring 2",
+        "Rollout r412",
         4
       ),
       deploy(
@@ -345,7 +345,7 @@ export const SAMPLE_PLATFORMS: Record<
     address: "vanrijn.joingrasp.com",
     account: null,
     workersDev: null,
-    ring: 2,
+    channel: "stable",
     pinned: null,
     provisioning: null,
     signIn: null,

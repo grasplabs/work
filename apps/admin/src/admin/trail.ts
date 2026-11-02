@@ -2,7 +2,7 @@
  * What a person at Grasp did to an organization in this admin, as the
  * prototype's admin kept it by hand (its trail, `TrailEntry`), read from
  * the admin's own audit log. Of everything the admin records, only
- * adding the client has an entry there (`made`): its deploys, rollouts and
+ * adding the client has an entry there (`made`): its deploys and
  * settings are the setup's, not the onboarding's.
  */
 import type { TrailEntry } from "@grasp-os/shared/admin/trail";

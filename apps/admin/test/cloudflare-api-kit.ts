@@ -144,13 +144,6 @@ export interface AccountState {
         noConnectVersion?: boolean;
       };
   /**
-   * The platform update notices its core took, signed with the key its
-   * live version's auth secret gives (@grasp-os/shared/platform-change).
-   */
-  notices: unknown[];
-  /** The status its core answers notices with instead, as an older core would. */
-  noticeStatus?: number;
-  /**
    * What its core answers the admin's signed onboarding summary request
    * with (@grasp-os/shared/onboarding-summary): none begun unless set, or
    * `absent` for a core from before the summary, which answers 404.

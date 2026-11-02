@@ -1,11 +1,12 @@
 /**
- * `vp run seed:admin [waiting|running]`: fills the admin's local
+ * `vp run seed:admin [running|done]`: fills the admin's local
  * database (`vp -C apps/admin dev`) with the prototype's sample platform
  * (grasplabs/prototype `data/admin-platform-sample.ts`), so the admin's
  * Platform page shows what the prototype's does: four releases, four
- * companies on rings 0 to 2 (one still being provisioned, one whose last
- * deploy failed), and the rollout of the newest release, waiting for
- * approval of ring 2 or, with `running`, rolling it out. Each company is
+ * companies on Edge, Beta and Stable (one still being provisioned, one
+ * whose last deploy failed), and the newest release promoted through Edge
+ * and Beta to Stable, its Stable company deploying it or, with `done`,
+ * done. Each company is
  * placed in one made-up dedicated destination, its release recorded as
  * its operation (src/hosting/operation.ts) left it: done, failed, or still
  * provisioning.
@@ -23,9 +24,9 @@ import path from "node:path";
 
 const adminDir = path.join(import.meta.dirname, "../apps/admin");
 
-const mode = process.argv[2] ?? "waiting";
-if (mode !== "waiting" && mode !== "running") {
-  throw new Error("Usage: vp run seed:admin [waiting|running]");
+const mode = process.argv[2] ?? "running";
+if (mode !== "running" && mode !== "done") {
+  throw new Error("Usage: vp run seed:admin [running|done]");
 }
 
 /** A day of October 2026 at `time`, as the admin stores it: ms since the epoch. */
@@ -67,7 +68,7 @@ const companies = [
   {
     id: "hartog",
     name: "Hartog Groothandel",
-    ring: 0,
+    channel: "edge",
     status: "active",
     release: "26.10.4",
     // Its last change, its settings and new secrets, failed at its probe.
@@ -76,7 +77,7 @@ const companies = [
   {
     id: "noordkade",
     name: "Noordkade Finance",
-    ring: 1,
+    channel: "beta",
     status: "active",
     release: "26.10.4",
     lastDeploy: { status: "done", kind: "release", day: 14 },
@@ -84,7 +85,7 @@ const companies = [
   {
     id: "veldkamp",
     name: "Veldkamp Installatietechniek",
-    ring: 2,
+    channel: "stable",
     status: "active",
     release: "26.10.3",
     lastDeploy: { status: "done", kind: "release", day: 9 },
@@ -92,7 +93,7 @@ const companies = [
   {
     id: "vanrijn",
     name: "Van Rijn Advocaten",
-    ring: 2,
+    channel: "stable",
     status: "provisioning",
     release: null,
     lastDeploy: null,
@@ -106,7 +107,9 @@ const provisioning = "26.10.4";
 const destinationId = "seed-eu-dedicated";
 
 const staff = "nick@grasp.test";
-const rolloutId = "00000000-0000-4000-8000-000000000418";
+
+/** The newest release, on every channel: the one promoted through them. */
+const promoted = "26.10.4";
 
 const sqlString = (value: string | null): string =>
   value === null ? "NULL" : `'${value.replaceAll("'", "''")}'`;
@@ -125,8 +128,8 @@ const companyIds = companies.map(({ id }) => sqlString(id)).join(", ");
 const statements = [
   // What the last run wrote, children first.
   `DELETE FROM audit_events WHERE id LIKE 'seed-%'`,
-  `DELETE FROM rollout_targets WHERE rollout_id = ${sqlString(rolloutId)}`,
-  `DELETE FROM rollouts WHERE id = ${sqlString(rolloutId)}`,
+  `DELETE FROM client_deploys WHERE client_id IN (${companyIds})`,
+  `DELETE FROM channels`,
   `DELETE FROM client_provisions WHERE client_id IN (${companyIds})`,
   `DELETE FROM client_placements WHERE client_id IN (${companyIds})`,
   // The companies, releases and workers in place, as anything else a local
@@ -157,13 +160,13 @@ const statements = [
       at(1),
     ]
   )} ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, account_id = excluded.account_id, namespace = excluded.namespace, policies = excluded.policies, capabilities = excluded.capabilities, updated_at = excluded.updated_at`,
-  `INSERT INTO clients (id, name, ring, status, created_by, created_at, updated_at) VALUES ${companies
-    .map(({ id, name, ring, status }) =>
-      row([id, name, ring, status, staff, at(1), at(1)])
+  `INSERT INTO clients (id, name, channel, status, created_by, created_at, updated_at) VALUES ${companies
+    .map(({ id, name, channel, status }) =>
+      row([id, name, channel, status, staff, at(1), at(1)])
     )
     .join(
       ", "
-    )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, ring = excluded.ring, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
+    )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, channel = excluded.channel, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
   `INSERT INTO client_placements (client_id, deployment_id, destination_id, policy_id, placed_by, placed_at) VALUES ${companies
     .map(({ id }) =>
       row([id, `seed${id}`, destinationId, "eu-storage", staff, at(1)])
@@ -229,48 +232,60 @@ const statements = [
       ]);
     })
     .join(", ")}`,
-  `INSERT INTO rollouts (id, kind, release_id, status, ring, started_by, created_at, updated_at) VALUES ${row(
+  `INSERT INTO channels (id, release_id, updated_at) VALUES ${[
+    "edge",
+    "beta",
+    "stable",
+  ]
+    .map((channel) => row([channel, promoted, at(14)]))
+    .join(", ")}`,
+  `INSERT INTO client_deploys (client_id, release_id, run_id, status, error, started_at, ended_at) VALUES ${row(
     [
-      rolloutId,
-      "release",
-      "26.10.4",
-      mode,
-      mode === "running" ? 2 : 1,
-      staff,
-      at(14),
+      "veldkamp",
+      promoted,
+      "seed-deploy-veldkamp",
+      mode === "running" ? "deploying" : "done",
+      null,
       at(14, "09:00"),
+      mode === "running" ? null : at(14, "09:10"),
     ]
   )}`,
-  `INSERT INTO rollout_targets (rollout_id, client_id, ring, status, updated_at) VALUES ${[
-    row([rolloutId, "hartog", 0, "done", at(14)]),
-    row([rolloutId, "noordkade", 1, "done", at(14)]),
-    row([
-      rolloutId,
-      "veldkamp",
-      2,
-      mode === "running" ? "deploying" : "pending",
-      at(14),
-    ]),
-  ].join(", ")}`,
   `INSERT INTO audit_events (id, at, actor, action, client_id, target, detail) VALUES ${[
-    row(["seed-start", at(14), staff, "rollout.start", null, rolloutId, null]),
     row([
-      "seed-approve",
-      at(14, "08:30"),
-      staff,
-      "rollout.approve",
+      "seed-promote-edge",
+      at(13),
+      "system",
+      "channel.promote",
       null,
-      rolloutId,
-      JSON.stringify({ ring: 1 }),
+      promoted,
+      JSON.stringify({ channel: "edge", back: false }),
     ]),
     row([
-      "seed-ring",
+      "seed-promote-beta",
+      at(13, "12:00"),
+      staff,
+      "channel.promote",
+      null,
+      promoted,
+      JSON.stringify({ channel: "beta", back: false }),
+    ]),
+    row([
+      "seed-promote-stable",
+      at(14),
+      staff,
+      "channel.promote",
+      null,
+      promoted,
+      JSON.stringify({ channel: "stable", back: false }),
+    ]),
+    row([
+      "seed-channel",
       at(12),
       staff,
-      "client.ring",
+      "client.channel",
       "veldkamp",
       null,
-      JSON.stringify({ ring: 2 }),
+      JSON.stringify({ channel: "stable" }),
     ]),
     row(["seed-create", at(1), staff, "client.create", "vanrijn", null, null]),
   ].join(", ")}`,

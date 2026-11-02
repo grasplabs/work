@@ -4,7 +4,7 @@
  * sender at the client's sending domain (`onboardingSender`), and
  * `RUNTIME_PROFILE`, `cloudflare`: every client runs on Cloudflare, which
  * enforces Code Mode's CPU limit, so its run records say so (core's
- * src/code-mode.ts). Derived on every deploy, so rollouts keep them. And
+ * src/code-mode.ts). Derived on every deploy, so each one keeps them. And
  * the check every deploy makes of the config it is about to set before it
  * changes anything (`checkDeployedConfig`).
  */

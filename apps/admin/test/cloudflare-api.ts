@@ -48,12 +48,7 @@ import {
   onboardingSummaryRequestSchema,
 } from "@grasp-os/shared/onboarding-summary";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
-import {
-  platformUpdateNoticeSchema,
-  platformUpdatePath,
-  platformUpdatePurpose,
-  platformUpdateSignatureHeader,
-} from "@grasp-os/shared/platform-change";
+import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPath,
   connectVersionPurpose,
@@ -95,43 +90,6 @@ const subdomainOf = (account: AccountState): Response =>
   account.subdomain === undefined
     ? notFound()
     : envelope({ subdomain: account.subdomain });
-
-/**
- * What a client's core answers a platform update notice with, as core
- * does (core's src/platform-updates.ts): 204 once the signature checks
- * out, with the key its live version's auth secret gives, and the notice
- * parses; 403 otherwise. An account can have its core answer otherwise,
- * as one from before the endpoint would (`noticeStatus`).
- */
-const takeNotice = async (
-  account: AccountState,
-  live: VersionState,
-  request: Request
-): Promise<Response> => {
-  if (account.noticeStatus !== undefined) {
-    return new Response(null, { status: account.noticeStatus });
-  }
-  const body = await request.text();
-  const key = await hkdfHmacKey(
-    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
-    platformUpdatePurpose,
-    ["sign"]
-  );
-  const expected = toHex(
-    new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
-    )
-  );
-  const notice = platformUpdateNoticeSchema.safeParse(JSON.parse(body));
-  if (
-    request.headers.get(platformUpdateSignatureHeader) !== expected ||
-    !notice.success
-  ) {
-    return new Response("Forbidden", { status: 403 });
-  }
-  account.notices.push(notice.data);
-  return new Response(null, { status: 204 });
-};
 
 /** What core answers a path it has no route for: its frontend's page. */
 const frontendPage = (): Response =>
@@ -597,7 +555,6 @@ const signedPosts: ReadonlyMap<
     request: Request
   ) => Promise<Response>
 > = new Map([
-  [platformUpdatePath, takeNotice],
   [onboardingSummaryPath, answerSummary],
   [provisionProbePath, answerProbe],
   [connectVersionPath, answerConnectVersion],
@@ -930,7 +887,6 @@ export const fakeCloudflareApi = (token: string) => {
       sessions: new Map(),
       completions: new Set(),
       scriptUploads: [],
-      notices: [],
       adminReaders: [],
       kickoffAsks: [],
     };
@@ -1149,8 +1105,8 @@ export const fakeCloudflareApi = (token: string) => {
   /**
    * What a Worker on an account's workers.dev subdomain answers: its live
    * version's `/health`, as core answers it, to a request carrying the
-   * router secret that version has, the platform update notices it
-   * takes, and the admin's signed requests it answers, its
+   * router secret that version has, and the admin's signed requests it
+   * answers, its
    * provisioning probe among them. Undefined for any other host.
    */
   /**
