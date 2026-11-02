@@ -7408,10 +7408,6 @@ msgstr "It opens for the member who created it, the admins, and whoever it is sh
 msgid "It reads no Knowledge."
 msgstr "It reads no Knowledge."
 
-#: src/workflows/traces.tsx
-msgid "It recorded more steps than one read shows: the latest are left out."
-msgstr "It recorded more steps than one read shows: the latest are left out."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "It rests on nothing you can see."
@@ -12847,6 +12843,10 @@ msgstr "Showing the first {pageMaxLimit} files."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "Showing the first {runsPageSize} runs of more."
+
+#: src/workflows/traces.tsx
+msgid "Showing the first part of this run"
+msgstr "Showing the first part of this run"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."
