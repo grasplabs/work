@@ -19,7 +19,6 @@ import {
   auditEvents,
   clientProvisions,
   clients,
-  hostingDestinations,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -277,12 +276,12 @@ describe("a company being set up, on the grid", () => {
   it("says it hasn't started and why, or that it stopped, each with the next step", async () => {
     const id = `setup-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date();
-    await db.update(hostingDestinations).set({ accountId: null });
     await db
       .insert(clients)
       .values({ id, name: id, createdAt: now, updatedAt: now });
 
-    const grid = await clientGrid(env);
+    // An admin whose STAGE names no stage has nowhere to place it.
+    const grid = await clientGrid({ ...env, STAGE: "" });
     const setup = grid.find((each) => each.id === id)?.setup;
     const words = [
       needWords({ kind: "not_started", why: "no_destination" }),

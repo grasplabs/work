@@ -1,10 +1,8 @@
 /**
  * Adding a client (spec 40.1): staff record it, with no account of its
  * own, then place it in a hosting destination and provision it there
- * from its Setup (src/hosting/placement.ts). Destination allocation is
- * automatic; a dedicated destination is an explicit choice staff make
- * there. No account is adopted or created for a client: a destination
- * holds the account, shared or dedicated.
+ * from its Setup (src/hosting/placement.ts), in its stage's one shared
+ * destination. No account is adopted or created for a client.
  */
 import { newClientIdSchema } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";

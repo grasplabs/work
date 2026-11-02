@@ -32,7 +32,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { cloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -43,14 +42,15 @@ import {
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
-import {
-  deployerToken,
-  deploySecrets,
-  MissingStoreSecretError,
-} from "../deploy/context.ts";
+import { deploySecrets, MissingStoreSecretError } from "../deploy/context.ts";
 import { sharedSecretPrints } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
-import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
+import {
+  defaultLiveReadLimits,
+  eachLimited,
+  stoppedBy,
+  within,
+} from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
@@ -353,9 +353,6 @@ export const checkRevocation = async (
     .from(clients)
     .innerJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
     .where(eq(clients.status, "active"));
-  // Read once: every client's reads make their API from it, each stopped
-  // by its own deadline.
-  const token = await deployerToken(env);
   const live = await eachLimited(
     active,
     limits.concurrency,
@@ -364,22 +361,16 @@ export const checkRevocation = async (
         id,
         await within(
           limits.rowDeadlineMs,
-          async (signal) => {
-            const api = cloudflareApi({
-              token,
-              waitBudgetMs: limits.waitBudgetMs,
-              signal,
-            });
-            return await liveMatches(
+          async (signal) =>
+            await liveMatches(
               db,
-              await driftOf(api, db, id, {
-                fetch,
+              await driftOf(db, id, {
+                fetch: stoppedBy(signal, fetch),
                 secrets,
               }),
               holders,
               now
-            );
-          },
+            ),
           // No answer in time: it runs none of them, as far as is known.
           await liveMatches(db, null, holders, now)
         ),

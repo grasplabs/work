@@ -18,12 +18,12 @@ const liveClient = async () => {
   const release = await placedRelease("feat(core): the details");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Acme ${clientId}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 /** A company with its list of people in: three people in two teams. */
@@ -84,7 +84,7 @@ describe("an organization's details", () => {
 
   it("shows the company as core has it, its people counted, and every part core doesn't hold as not known yet", async () => {
     const acme = await liveClient();
-    acme.account.admin = listedSnapshot("Noordkade");
+    acme.core.admin = listedSnapshot("Noordkade");
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/details`
@@ -145,7 +145,7 @@ describe("an organization's details", () => {
 
   it("says a company's people aren't known before its list is in", async () => {
     const acme = await liveClient();
-    acme.account.admin = emptyAdminSnapshot("Noordkade");
+    acme.core.admin = emptyAdminSnapshot("Noordkade");
 
     const { html } = await page(`/organizations/${acme.clientId}/details`);
 
