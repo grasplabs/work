@@ -555,12 +555,49 @@ const openScreen = async (
 };
 
 /**
- * The first screen of a published App's current version, for a visitor
- * (app-visitors.ts): built and staged as `openScreen` does, once its build
- * gets the App's data now, and leased to `visitor` (`visitor:<session>`),
- * a name no member's session has, so the lease opens none of the App's
- * functions (app-function-route.ts needs a member's session too). Null
- * while the App runs no version or has no screen.
+ * Where a visitor's visit opens, chosen by route before by screen: the
+ * route at `/`, else the first route the App declares with no parameters
+ * whose input is complete with none, and that route's screen. A version
+ * that routes nothing opens its first screen by name. Undefined when
+ * nothing opens without input: a visitor has no link to give one.
+ */
+const visitorEntry = (
+  manifest: AppManifest | undefined,
+  screens: readonly string[]
+): { file: string; route: string | null; input: Json } | undefined => {
+  const routes = Object.values(manifest?.screens ?? {});
+  if (routes.length === 0) {
+    const [file] = screens;
+    return file === undefined ? undefined : { file, route: null, input: {} };
+  }
+  const candidates = [
+    ...routes.filter(({ path }) => path === "/"),
+    ...routes.filter(({ path }) => path !== "/" && !path.includes("/:")),
+  ];
+  for (const route of candidates) {
+    const file = screenPath.exec(route.source)?.groups?.name;
+    if (file !== undefined && screens.includes(file)) {
+      try {
+        return { file, route: route.name, input: routeInput(route) };
+      } catch (error) {
+        // A route whose input needs more than none: the next one.
+        if (!isExpectedError(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The entry screen of a published App's current version, for a visitor
+ * (app-visitors.ts, `visitorEntry`): built and staged as `openScreen`
+ * does, once its build gets the App's data now, and leased to `visitor`
+ * (`visitor:<session>`), a name no member's session has, so the lease
+ * opens none of the App's functions (app-function-route.ts needs a
+ * member's session too). Null while the App runs no version or has no
+ * screen that opens without input.
  */
 export const visitorScreen = async (
   env: Env,
@@ -572,12 +609,15 @@ export const visitorScreen = async (
     return null;
   }
   const raw = await versionFiles(env, id, version);
-  const [file] = screensIn(new Map(Object.entries(raw)));
-  if (file === undefined) {
+  const source = await routeSourceOf(env, id, version, raw);
+  const opened = visitorEntry(
+    source?.manifest,
+    screensIn(new Map(Object.entries(raw)))
+  );
+  if (opened === undefined) {
     return null;
   }
-  const source = await routeSourceOf(env, id, version, raw);
-  const opened = routedOpen(source?.manifest, file);
+  const { file } = opened;
   const built = await (
     await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
   )(file);

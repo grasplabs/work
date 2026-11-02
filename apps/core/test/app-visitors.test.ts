@@ -101,14 +101,47 @@ export default app({
 `,
 };
 
-/** Makes the Notes files the App's current version, its screen approved. */
-const releasedNotes = async (builder: Person, app: string): Promise<void> => {
+/**
+ * The Notes App routed: `detail` at `/items/:id`, which sorts first and
+ * needs an ID, and `home` at `/`, which needs nothing.
+ */
+const routedNotesFiles: Record<string, string> = {
+  ...notesFiles,
+  "app.ts": (notesFiles["app.ts"] ?? "")
+    .replace(
+      'import { app } from "@grasp-os/sdk";',
+      'import { app, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      "  screens: [],",
+      `  screens: [
+    {
+      name: "detail",
+      path: "/items/:id",
+      source: "screens/detail.tsx",
+      input: v.object({ id: v.string() }),
+    },
+    { name: "home", path: "/", source: "screens/home.tsx" },
+  ],`
+    ),
+  "screens/detail.tsx": `export default function Detail() {
+  return <p>Detail</p>;
+}
+`,
+  "screens/home.tsx": `export default function Home() {
+  return <p>Home</p>;
+}
+`,
+};
+
+/** Makes `files` the App's current version, its screens approved. */
+const releasedNotes = async (
+  builder: Person,
+  app: string,
+  files: Record<string, string> = notesFiles
+): Promise<void> => {
   const admin = await signedInApi(idp, "admin");
-  const { version } = await builder.api.apps.files.commit(
-    app,
-    notesFiles,
-    "First"
-  );
+  const { version } = await builder.api.apps.files.commit(app, files, "First");
   await builder.api.apps.versions.setCurrent(app, version);
   const review = await admin.api.screenTrust.review(app);
   await admin.api.screenTrust.approve(app, {
@@ -812,6 +845,77 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       })),
       sent: [listed],
     });
+  });
+
+  it("refuse a save that raced another, so the audit names exactly what the winner replaced", async () => {
+    const [kept, joined, instead] = [newDomain(), newDomain(), newDomain()];
+    const { builder, app } = await visitedApp([
+      { kind: "domain", value: kept },
+    ]);
+    const lists = {
+      // Adds `joined`, keeping `kept`.
+      grow: [kept, joined],
+      // Takes `kept` off, adding `instead`.
+      swap: [instead],
+    };
+    const save = async (domains: string[]) =>
+      await outcome(
+        builder.api.apps.setVisitors(
+          app,
+          domains.map((value) => ({ kind: "domain" as const, value }))
+        )
+      );
+
+    let outcomes: unknown[] = [];
+    const events = await auditedDuring(async () => {
+      // At once: both read the list as it was before either saves.
+      outcomes = await Promise.all([save(lists.grow), save(lists.swap)]);
+    });
+    const refused = outcomes.filter((each) => each === "visitor.list_changed");
+    const winner = outcomes[0] === "visitor.list_changed" ? "swap" : "grow";
+    const expected = {
+      grow: { listed: [joined], unlisted: [] },
+      swap: { listed: [instead], unlisted: [kept] },
+    }[winner];
+    const list = await builder.api.apps.visitors(app);
+    const named = (action: string) =>
+      visitorEvents(events, app)
+        .filter((event) => event.action === action)
+        .map(
+          ({ detail }) => z.object({ value: z.string() }).parse(detail).value
+        )
+        .toSorted();
+
+    expect({
+      refused,
+      list: list.map(({ value }) => value),
+      listed: named("app.visitor_listed"),
+      unlisted: named("app.visitor_unlisted"),
+    }).toStrictEqual({
+      refused: ["visitor.list_changed"],
+      list: lists[winner].toSorted(),
+      listed: expected.listed,
+      unlisted: expected.unlisted,
+    });
+  });
+
+  it("opens a visitor at the route that needs no input, whichever screen sorts first", async () => {
+    const domain = newDomain();
+    const { builder, app, link } = await visitedApp([
+      { kind: "domain", value: domain },
+    ]);
+    await releasedNotes(builder, app, routedNotesFiles);
+    const mail = await mailbox();
+    const visitor = `ro@${domain}`;
+    await ask(link, visitor);
+    const token = await signIn(link, visitor, await lastCode(mail, visitor));
+    const opened = await open(token);
+
+    expect(
+      typeof opened === "string"
+        ? opened
+        : { screen: opened.screen?.screen, route: opened.screen?.route }
+    ).toStrictEqual({ screen: "home", route: "home" });
   });
 
   it("forgets codes an hour on and sessions once expired", async () => {

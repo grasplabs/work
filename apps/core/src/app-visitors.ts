@@ -17,7 +17,7 @@ import type {
   AppVisitorSession,
 } from "@grasp-os/shared/app-visitors";
 import type { App } from "@grasp-os/shared/apps";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
@@ -48,11 +48,13 @@ import { editableApp, toApp } from "./apps.ts";
 import {
   auditedBatch,
   keepAuditEvent,
-  outboxed,
+  outboxedEventWhere,
   outboxedIfChanged,
+  storedEvent,
 } from "./audit-outbox.ts";
 import {
   apps,
+  auditOutbox,
   appVisitorCodes,
   appVisitorEntries,
   appVisitorSessions,
@@ -193,36 +195,51 @@ export const setAppVisitors = async (
   const has = new Set(wanted.map(entryKey));
   const added = wanted.filter((entry) => !had.has(entryKey(entry)));
   const removed = before.filter((entry) => !has.has(entryKey(entry)));
-  if (added.length === 0 && removed.length === 0) {
-    return before;
-  }
   const db = drizzle(env.DB);
-  const now = new Date();
-  await auditedBatch(env, db, [
-    db.delete(appVisitorEntries).where(eq(appVisitorEntries.appId, found.id)),
-    ...wanted.map((entry) =>
-      db.insert(appVisitorEntries).values({
-        appId: found.id,
-        kind: entry.kind,
-        value: entry.value,
-        addedBy: by.userId,
-        addedAt: now,
-      })
-    ),
-    // One event per entry: an entry fits an audit value (an address is at
-    // most 254 characters), a whole list of them doesn't.
-    ...[
-      ...added.map((entry) => ["app.visitor_listed", entry] as const),
-      ...removed.map((entry) => ["app.visitor_unlisted", entry] as const),
-    ].map(([action, entry]) =>
-      outboxed(db, {
+  const now = Date.now();
+  // One event per entry: an entry fits an audit value (an address is at
+  // most 254 characters), a whole list of them doesn't.
+  const [first, ...rest] = [
+    ...added.map((entry) => ["app.visitor_listed", entry] as const),
+    ...removed.map((entry) => ["app.visitor_unlisted", entry] as const),
+  ].map(([action, entry]) =>
+    createAuditEvent(
+      {
         actor: actorOf(by),
         action,
         target: appTarget(found.id),
         detail: { kind: entry.kind, value: entry.value },
-      })
+      },
+      "core"
+    )
+  );
+  if (first === undefined) {
+    // Nothing to change.
+    return before;
+  }
+  // Compare and set: the first event goes in only while the list is still
+  // the one read above, and everything else only if it went in. So a save
+  // that raced another changes nothing, and the events always name what
+  // was replaced.
+  const unchanged = sql`(SELECT coalesce(group_concat(${sql.raw("entry")}, ' '), '') FROM (SELECT ${appVisitorEntries.kind} || ':' || ${appVisitorEntries.value} AS ${sql.raw("entry")} FROM ${appVisitorEntries} WHERE ${eq(appVisitorEntries.appId, found.id)} ORDER BY ${appVisitorEntries.kind}, ${appVisitorEntries.value})) = ${before.map(entryKey).join(" ")}`;
+  const won = storedEvent(first.id);
+  const [stored] = await auditedBatch(env, db, [
+    outboxedEventWhere(db, first, unchanged).returning({ id: auditOutbox.id }),
+    db
+      .delete(appVisitorEntries)
+      .where(and(eq(appVisitorEntries.appId, found.id), won)),
+    ...wanted.map((entry) =>
+      db
+        .insert(appVisitorEntries)
+        .select(
+          sql`SELECT ${found.id}, ${entry.kind}, ${entry.value}, ${by.userId}, ${now} WHERE ${won}`
+        )
     ),
+    ...rest.map((event) => outboxedEventWhere(db, event, won)),
   ]);
+  if (stored.length === 0) {
+    throw appVisitorErrors.create("visitor.list_changed");
+  }
   return await listOf(env, found.id);
 };
 
