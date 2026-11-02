@@ -1654,13 +1654,11 @@ export const workflowRuns = sqliteTable(
     version: integer().notNull(),
     startedBy: text("started_by"),
     /**
-     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
-     * then their user ID, not a member's. Written once, by `startRun`,
-     * from the starter's own session, never from what it was asked; never
-     * for a run another run, a trigger or an agent started. The run's
-     * authority carries it, so its person passes the active-member gate
-     * only while they are still staff, and what it does is audited as
-     * started by "(Grasp staff)".
+     * Unused: nothing reads or writes it any more, and every new row takes
+     * the default. Grasp staff start no work in a client's workspace (a
+     * staff session reaches the onboarding alone), so no run is marked as
+     * staff-started. Kept because the release before this one still reads
+     * and writes it (expand, then contract); drop it in a later release.
      */
     startedByStaff: integer("started_by_staff", { mode: "boolean" })
       .notNull()
