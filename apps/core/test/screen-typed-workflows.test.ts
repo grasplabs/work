@@ -59,7 +59,7 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
-import { runInstance, sleeping, woken } from "./runs.ts";
+import { runInstance, sleeping, whileEngineRefuses, woken } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
 
@@ -2369,6 +2369,70 @@ describe(
           {
             actor: { type: "app", appId: app, part: "screen" },
             onBehalfOf: builder.userId,
+          },
+        ],
+      });
+    });
+
+    it("cancels a run the engine refuses to terminate at once: it runs nothing more, and ends cancelled with its receipt applied, with no repair", async () => {
+      // Its wait is over well before a minute's repair would come.
+      const { builder, app, reference } = await boundApp({ hold: "PT2S" });
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await sleeping(handle.runId, "task:hold");
+      const events = await auditedDuring(async () => {
+        const answered = await whileEngineRefuses(
+          (method) => method === "terminate",
+          async () =>
+            await channel.control(read, handle.runId, "cancel", () => {
+              // Never recovering.
+            })
+        );
+        expect(staged(answered)).toStrictEqual({
+          kind: "cancel",
+          state: "admitted",
+        });
+        // No repair of core's runs: the run's own object ends it.
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            "cancelled"
+          );
+        }, settles);
+        // And past its wait again: it never comes back.
+        await scheduler.wait(2500);
+      });
+      const shown = channel.peekRun(read, handle.runId).value;
+      stop();
+      expect({
+        shown: { status: shown?.status, output: shown?.output },
+        receipt: await env.DB.prepare(
+          "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+        )
+          .bind(handle.runId)
+          .first<string>("state"),
+        ended: events
+          .filter(
+            ({ action, target }) =>
+              [
+                "workflow.run.completed",
+                "workflow.run.cancelled",
+                "workflow.run.terminated",
+              ].includes(action) && target?.id === handle.runId
+          )
+          .map(({ action, actor }) => ({ action, actor })),
+      }).toStrictEqual({
+        shown: { status: "cancelled", output: undefined },
+        receipt: "applied",
+        ended: [
+          { action: "workflow.run.cancelled", actor: { type: "system" } },
+          {
+            action: "workflow.run.terminated",
+            actor: { type: "app", appId: app, part: "screen" },
           },
         ],
       });
