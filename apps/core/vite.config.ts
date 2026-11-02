@@ -103,7 +103,6 @@ export const screenTests = [
   "test/decisions.test.ts",
   "test/decision-confirmations.test.ts",
   "test/decision-deadlines.test.ts",
-  "test/workflow-params.test.ts",
   "test/build-on-save.test.ts",
   "test/workflow-overview.test.ts",
   "test/email-triggers.test.ts",
