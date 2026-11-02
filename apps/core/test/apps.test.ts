@@ -15,7 +15,8 @@ import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 // An App's code is versioned as a whole: builders commit changes over its
 // latest version as the next version, which never changes afterwards. One
 // version runs (current) and another can wait for review (pending). Every
-// commit and every change of version is audited.
+// commit and every change of version is audited. Gone with App
+// workflows: the workflows an App's own version names.
 
 const idp = mockIdp();
 
@@ -349,7 +350,7 @@ describe("App code", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("names the screens and workflows of the version that runs, and only those", async () => {
+  it("names the screens of the version that runs, and only those", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
@@ -357,23 +358,8 @@ describe("App code", { timeout: 60_000 }, () => {
     await apps.versions.setCurrent(app.id, 1);
     await commit(apps, app.id, {
       "screens/archive.tsx": "export default () => null;\n",
-      // Neither is a screen or a workflow: code they share.
+      // Not a screen: code the screens share.
       "screens/parts/row.tsx": "export const Row = () => null;\n",
-      "workflows/lib/dates.ts": "export const today = () => 0;\n",
-      "workflows/report.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "report",
-  { input: z.unknown(), params: {} },
-  async (step) => await step.do("count", { description: "Count" }, async () => 1)
-);
-`,
-      "workflows/report.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import report from "./report.ts";
-
-export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, expect: { output: 1 } }]);
-`,
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);
@@ -386,11 +372,7 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
     }).toStrictEqual({
       none: { version: null, screens: [], workflows: [] },
       beforeCurrent: { version: 1, screens: ["inbox"], workflows: [] },
-      current: {
-        version: 2,
-        screens: ["archive", "inbox"],
-        workflows: ["report"],
-      },
+      current: { version: 2, screens: ["archive", "inbox"], workflows: [] },
     });
     await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
       "app.not_found"
