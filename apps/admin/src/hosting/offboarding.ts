@@ -30,7 +30,8 @@
  * - Anyone but staff: the server functions are behind Access.
  */
 import { deploymentPrefix } from "@grasp-os/shared/names";
-import { and, asc, count, eq, isNull } from "drizzle-orm";
+import { and, asc, count, eq, isNotNull, isNull } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import {
@@ -43,7 +44,12 @@ import type { CloudflareApi } from "../cloudflare/api.ts";
 import { deleteTargetScript } from "../cloudflare/workers.ts";
 import { actIfChanged, adminDatabase, audit } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientPlacements, clientResources, clients } from "../db/schema.ts";
+import {
+  auditEvents,
+  clientPlacements,
+  clientResources,
+  clients,
+} from "../db/schema.ts";
 import { clientDomain, deployerApi } from "../deploy/context.ts";
 import { DeployError } from "../deploy/errors.ts";
 import { unregisterHostname } from "../deploy/router.ts";
@@ -530,6 +536,20 @@ export const deletePlacedClient = async (
   return deletion;
 };
 
+/**
+ * How long a bucket's objects take to expire once it's emptied: its
+ * lifecycle rule deletes each a day old (src/cloudflare/accounts.ts,
+ * `expireAllObjects`).
+ */
+const emptyingMs = 24 * 60 * 60 * 1000;
+
+/** A bucket a deletion emptied rather than deleted, still in its destination. */
+export interface EmptyingBucket {
+  physicalName: string;
+  /** When its objects have all expired, and deleting again deletes it. */
+  emptyBy: Date;
+}
+
 /** An offboarded placed client, as Platform's Offboarded page lists it. */
 export interface OffboardedClient {
   clientId: string;
@@ -538,13 +558,106 @@ export interface OffboardedClient {
   offboardedAt: Date;
   /** When its resources may be deleted: `retentionMs` after it was offboarded. */
   deletableFrom: Date;
+  /** Whether that time has come, as of the read. */
+  deletable: boolean;
   /** Its resources still in its destination, as its inventory records them. */
   remaining: number;
+  /**
+   * Its buckets a deletion found holding objects and emptied, still
+   * recorded in its destination: read from what was audited
+   * (`client.empty_bucket`), so a reload says it as the deletion did.
+   */
+  emptying: EmptyingBucket[];
 }
 
-/** Every offboarded placed client, the longest offboarded first. */
-export const offboardedClients = async (
+/** `detail` of a `client.empty_bucket` event: the bucket it emptied. */
+const emptiedSchema = z.object({ physicalName: z.string() });
+
+/** The bucket a `client.empty_bucket` event's `detail` names, or null. */
+const emptiedBucketOf = (detail: string | null): string | null => {
+  if (detail === null) {
+    return null;
+  }
+  try {
+    const parsed = emptiedSchema.safeParse(JSON.parse(detail));
+    return parsed.success ? parsed.data.physicalName : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The buckets of offboarded clients a deletion emptied and that are still
+ * recorded in their destination, by client: each with when its objects
+ * have expired, from the latest time it was emptied.
+ */
+const emptyingBuckets = async (
   db: AdminDatabase
+): Promise<Map<string, EmptyingBucket[]>> => {
+  // Joined to the offboarded clients rather than binding each one's id:
+  // D1 takes at most 100 bound values, and offboarded clients only grow.
+  const offboarded = and(
+    eq(clients.status, "offboarded"),
+    isNotNull(clients.offboardedAt)
+  );
+  const [events, buckets] = await Promise.all([
+    db
+      .select({
+        clientId: auditEvents.clientId,
+        at: auditEvents.at,
+        detail: auditEvents.detail,
+      })
+      .from(auditEvents)
+      .innerJoin(clients, eq(clients.id, auditEvents.clientId))
+      .where(and(eq(auditEvents.action, "client.empty_bucket"), offboarded)),
+    db
+      .select({
+        clientId: clientResources.clientId,
+        physicalName: clientResources.physicalName,
+      })
+      .from(clientResources)
+      .innerJoin(clients, eq(clients.id, clientResources.clientId))
+      .where(
+        and(
+          eq(clientResources.kind, "r2_bucket"),
+          isNull(clientResources.deletedAt),
+          offboarded
+        )
+      ),
+  ]);
+  const left = new Set(
+    buckets.map(({ clientId, physicalName }) => `${clientId}/${physicalName}`)
+  );
+  const latest = new Map<
+    string,
+    { clientId: string; bucket: EmptyingBucket }
+  >();
+  for (const { clientId, at, detail } of events) {
+    const physicalName = emptiedBucketOf(detail);
+    if (clientId === null || physicalName === null) {
+      continue;
+    }
+    const key = `${clientId}/${physicalName}`;
+    if (!left.has(key)) {
+      continue;
+    }
+    const emptyBy = new Date(at.getTime() + emptyingMs);
+    const known = latest.get(key);
+    if (known === undefined || known.bucket.emptyBy < emptyBy) {
+      latest.set(key, { clientId, bucket: { physicalName, emptyBy } });
+    }
+  }
+  const byClient = new Map<string, EmptyingBucket[]>();
+  for (const { clientId, bucket } of latest.values()) {
+    byClient.set(clientId, [...(byClient.get(clientId) ?? []), bucket]);
+  }
+  return byClient;
+};
+
+/** Every offboarded placed client, the longest offboarded first, as of `now`. */
+export const offboardedClients = async (
+  db: AdminDatabase,
+  now = new Date()
 ): Promise<OffboardedClient[]> => {
   const rows = await db
     .select({
@@ -563,16 +676,21 @@ export const offboardedClients = async (
     .where(isNull(clientResources.deletedAt))
     .groupBy(clientResources.clientId);
   const left = new Map(remaining.map(({ clientId, left: n }) => [clientId, n]));
-  return rows.flatMap(({ offboardedAt, ...row }) =>
-    offboardedAt === null
-      ? []
-      : [
-          {
-            ...row,
-            offboardedAt,
-            deletableFrom: new Date(offboardedAt.getTime() + retentionMs),
-            remaining: left.get(row.clientId) ?? 0,
-          },
-        ]
-  );
+  const emptying = await emptyingBuckets(db);
+  return rows.flatMap(({ offboardedAt, ...row }) => {
+    if (offboardedAt === null) {
+      return [];
+    }
+    const deletableFrom = new Date(offboardedAt.getTime() + retentionMs);
+    return [
+      {
+        ...row,
+        offboardedAt,
+        deletableFrom,
+        deletable: now >= deletableFrom,
+        remaining: left.get(row.clientId) ?? 0,
+        emptying: emptying.get(row.clientId) ?? [],
+      },
+    ];
+  });
 };

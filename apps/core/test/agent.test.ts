@@ -40,7 +40,6 @@ import {
   codeStatuses,
   codeStep,
   readApiStep,
-  configureObject,
   model,
   pausedReply,
   says,
@@ -364,7 +363,6 @@ describe("chat agent", () => {
     });
     await evictDurableObject(stub);
     const later = await fakeProvider(says("What six times seven is."));
-    await configureObject(stub);
     await stub.ask(chat.id, { text: "What did I ask?", model });
 
     // What each request sent, in Anthropic's wire format.
@@ -467,7 +465,6 @@ describe("chat agent", () => {
       "teams"
     );
     await fakeProvider(says("Hello."));
-    await configureObject(stub);
 
     await stub.ask(chat.id, { text: "Hi.", model });
 
@@ -1178,39 +1175,6 @@ describe("chat agent turns", () => {
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
   });
 
-  it("keeps a chat in restricted mode to the models the client's data rule allows", async () => {
-    const euModel = "mistral/mistral-large-latest";
-    const { stub, chat, personId, provider, ask } = await newChatOn(
-      [model, euModel],
-      says("Hi.")
-    );
-    await configureObject(stub, {
-      rules: { sensitive: { models: [euModel] } },
-    });
-    // The chat has read restricted data: everything it sends is sensitive.
-    await stub.restrictChat(chat.id);
-
-    await expect(codeOf(ask("Hi."))).resolves.toBe("model.sensitive_data");
-    expect(provider.requests).toStrictEqual([]);
-    await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
-    await vi.waitFor(
-      async () => {
-        const events = await allEvents();
-        expect(
-          events.filter(
-            ({ action, actor }) =>
-              action === "model.refused" &&
-              actor.type === "agent" &&
-              actor.onBehalfOf === personId
-          )
-        ).toMatchObject([
-          { detail: { reason: "model.sensitive_data", because: "restricted" } },
-        ]);
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-  });
-
   it("stops acting for a person who has left", async () => {
     const { personId, provider, ask } = await newChat(says("Hi."));
     await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
@@ -1633,7 +1597,6 @@ describe("chat agent after a restart", () => {
 
     await evictDurableObject(stub);
     const provider = await fakeProvider(says("You asked which chat this is."));
-    await configureObject(stub);
     const reply = await ask("What did I ask before?");
 
     expect(reply.answer).toBe("You asked which chat this is.");
@@ -1671,7 +1634,6 @@ describe("chat agent after a restart", () => {
 
     await evictDurableObject(stub);
     const after = await fakeProvider(says("It was 42."));
-    await configureObject(stub);
     const reply = await ask("So?");
 
     const sent = JSON.stringify(after.requests[0]?.body);
@@ -2499,7 +2461,6 @@ describe("chat agent code output", () => {
       ),
       says("Done.")
     );
-    await configureObject(stub);
 
     await withRevocationReads(
       stub,

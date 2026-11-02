@@ -197,7 +197,6 @@ const needSections: Record<Need["kind"], OrgSection> = {
   paused: "steps",
   transcript: "steps",
   ask: "steps",
-  research: "steps",
   conflict: "steps",
   agreement: "steps",
   lead: "steps",

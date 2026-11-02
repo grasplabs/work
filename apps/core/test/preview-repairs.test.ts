@@ -14,7 +14,6 @@ import {
   model,
   openTestRun,
   pausedReply,
-  configureObject,
   says,
 } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
@@ -324,7 +323,6 @@ const setUp = async (replies: ProviderReply[], agentBuilds = true) => {
   const chat = await builder.api.chats.create("Invoice desk");
   const stub = workspace(env, personalWorkspaceId(builder.userId));
   const provider = await fakeProvider(...replies);
-  await configureObject(stub);
   return { builder, app, chatId: chat.id, stub, provider };
 };
 
@@ -954,7 +952,6 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
     // The stub before the restart is broken with it: a fresh one.
     const restarted = workspace(env, personalWorkspaceId(builder.userId));
-    await configureObject(restarted);
 
     await restarted.ask(chat, { text: "Try the invoice desk's notes", model });
 

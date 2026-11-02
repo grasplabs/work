@@ -110,7 +110,6 @@ const waysIn = async (person: Person, app: string) => {
   return {
     get: await outcome(person.api.apps.get(app)),
     contents: await outcome(person.api.apps.contents(app)),
-    exports: await outcome(person.api.apps.exports(app)),
     open: await outcome(person.api.screens.open(app, "desk")),
     version: await outcome(
       firstVersion(
@@ -131,7 +130,6 @@ const waysIn = async (person: Person, app: string) => {
 const noSuchApp = {
   get: "app.not_found",
   contents: "app.not_found",
-  exports: "app.not_found",
   open: "app.not_found",
   version: "app.not_found",
   start: "app.not_found",
@@ -199,7 +197,6 @@ describe("an App's status", () => {
       published: {
         get: "ok",
         contents: "ok",
-        exports: "ok",
         open: "ok",
         version: "ok",
         start: "ok",
@@ -225,7 +222,6 @@ describe("an App's status", () => {
       archived: {
         get: "ok",
         contents: "ok",
-        exports: "ok",
         open: "app.archived",
         version: "app.archived",
         start: "app.archived",

@@ -29,6 +29,7 @@ const view: OnboardingView = {
   context: noContext,
   waiting: 0,
   mailSends: true,
+  mailDomain: null,
 };
 
 const gate: GateView = {

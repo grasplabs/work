@@ -46,6 +46,7 @@ import type { Names } from "../workflows/activity-bar.tsx";
 import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
+import { DeleteWorkflow } from "../workflows/delete-workflow.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
 import type { DiagramPart } from "../workflows/diagram-parts.ts";
@@ -54,13 +55,20 @@ import { ListedCount } from "../workflows/listed-count.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
+import { ShareWorkflow } from "../workflows/share-workflow.tsx";
+import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
+import { VersionSource } from "../workflows/version-source.tsx";
 import {
   GoLiveDecision,
   WorkflowStatus,
 } from "../workflows/workflow-status.tsx";
+import {
+  TriggersTabContent,
+  TriggersTabTrigger,
+} from "../workflows/workflow-triggers-tab.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
 // its definition as a draft they edit, check and publish; for everyone
@@ -317,6 +325,8 @@ const WorkflowHeader = ({
             </Link>
           ) : null}
         </div>
+        <StartIndependentRun workflow={resource.id} />
+        <ShareWorkflow resource={resource} />
         {resource.owner === me && askable.state === "ready" ? (
           <AskStephen askable={askable.data} workflow={resource.id} />
         ) : null}
@@ -342,7 +352,8 @@ type WorkflowTab =
   | "runs"
   | "files"
   | "parameters"
-  | "versions";
+  | "versions"
+  | "triggers";
 
 /** The tabs of a workflow's page, as the reader has them. */
 const WorkflowTabs = ({
@@ -379,6 +390,7 @@ const WorkflowTabs = ({
         <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     )}
+    <TriggersTabTrigger />
     <TabsTrigger value="files">
       <Trans context="tab of a workflow">Files and apps</Trans>
     </TabsTrigger>
@@ -458,7 +470,10 @@ const WorkflowResourceView = ({
   names: Names;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
-  /** The tab it opens on, if a link asked for one (a run count's: `runs`). */
+  /**
+   * The tab it opens on, if a link asked for one (a run count's: `runs`;
+   * an inbox item's: `triggers`).
+   */
   opens: WorkflowSearch["tab"];
 }) => {
   const router = useRouter();
@@ -586,6 +601,11 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
+        <TriggersTabContent
+          builder={builder}
+          me={names.me}
+          workflow={resource.id}
+        />
         {/* Files and apps reads what no other tab needs: only while it
             shows, afresh each time it is opened. */}
         <TabsContent value="files">
@@ -618,6 +638,12 @@ const WorkflowResourceView = ({
             ) : (
               <NotLoadedState page={versions} />
             )}
+            <VersionSource
+              builder={builder}
+              versions={versions}
+              workflow={resource.id}
+            />
+            <DeleteWorkflow admin={admin} resource={resource} />
           </div>
         </TabsContent>
       </Tabs>
@@ -723,12 +749,14 @@ const WorkflowResourcePage = () => {
 
 /** What a link to a workflow's page may ask of it: the tab it opens on. */
 interface WorkflowSearch {
-  tab?: "runs";
+  tab?: "runs" | "triggers";
 }
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   validateSearch: (search: Record<string, unknown>): WorkflowSearch =>
-    search.tab === "runs" ? { tab: "runs" } : {},
+    search.tab === "runs" || search.tab === "triggers"
+      ? { tab: search.tab }
+      : {},
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
     // Names only, and not waited for: IDs stand in until they come.

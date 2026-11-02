@@ -1,5 +1,3 @@
-// Teams' adapter sends through axios, which needs the fix in first (door.ts).
-import "@grasp-os/chat/workerd";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { lastWeeks, weekOf } from "@grasp-os/shared/stephen-requests";
 import type { WeeklySummary } from "@grasp-os/shared/stephen-requests";

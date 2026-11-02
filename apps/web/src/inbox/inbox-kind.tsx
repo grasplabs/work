@@ -10,11 +10,13 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
+  MailWarningIcon,
   PackageIcon,
   PencilLineIcon,
   PlayIcon,
   RocketIcon,
   ScaleIcon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   SparklesIcon,
   SplitIcon,
@@ -66,6 +68,14 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  revokedPackage: msg({
+    message: "Malware",
+    context: "inbox item kind: packages revoked as malware",
+  }),
+  stoppedEvents: msg({
+    message: "Not hearing",
+    context: "inbox item kind: a mailbox or drive connect stopped hearing",
+  }),
   bindingApproval: msg({
     message: "Bindings",
     context:
@@ -93,6 +103,8 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
+  revokedPackage: ShieldAlertIcon,
+  stoppedEvents: MailWarningIcon,
   bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };

@@ -30,7 +30,7 @@ import { z } from "zod";
 
 import { appFor } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { teamsOf } from "./auth/identity.ts";
+import { memberRole, teamsOf } from "./auth/identity.ts";
 import {
   apps as appsTable,
   appStatistics,
@@ -39,7 +39,7 @@ import {
   improvementSignals,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { authorize, personRole } from "./permissions.ts";
+import { authorize } from "./permissions.ts";
 import { runView } from "./workflows/run-view.ts";
 
 // Statistics (@grasp-os/shared/statistics): an App's functions record
@@ -497,9 +497,7 @@ const unavailableCodes: ReadonlySet<string> = new Set([
  * Of the Apps `apps`, those whose runs the person `authority` acts for
  * may see added up (an admin, or a builder of it, `appFor`), and the rest,
  * which they may not see or which no longer exist. `permission.person_inactive`
- * for someone no longer a member, or, for work a Grasp staff member
- * started, once their staff session ended (`personRole`, GRA-1088): the
- * read is audited as that work's, staff mark and all (`auditPlatformRead`).
+ * for someone no longer a member.
  */
 const runsVisible = async (
   env: Env,
@@ -507,7 +505,7 @@ const runsVisible = async (
   apps: readonly string[]
 ): Promise<{ visible: string[]; unavailable: string[] }> => {
   const userId = authority.onBehalfOf;
-  const role = await personRole(env, userId, authority.staff);
+  const role = await memberRole(env.DB, userId);
   if (!role) {
     throw permissionErrors.create("permission.person_inactive");
   }

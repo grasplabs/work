@@ -101,13 +101,7 @@ describe("Stephen's eval against a real model", () => {
         exchanges.push(exchange);
       }),
       providerName: settings.model.slice(0, settings.model.indexOf("/")),
-      modelSetup: {
-        model: settings.model,
-        // The run's budget, as the ledger enforces it on every request.
-        rules: {
-          budgets: { deployment: { limit: settings.budgetUsd, alertAt: 99 } },
-        },
-      },
+      modelSetup: { model: settings.model },
       build: settings.build,
     });
     const spent = await charged();

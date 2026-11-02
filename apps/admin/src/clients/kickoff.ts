@@ -34,11 +34,7 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { deploySecrets, ifStored } from "../deploy/context.ts";
-import { clientAuthSecret } from "../deploy/secrets.ts";
-import type { DeploySecrets } from "../deploy/secrets.ts";
-import type { CoreAddress } from "./core-address.ts";
-import { clientGrid, routeOf } from "./grid.ts";
+import { clientCore } from "./client-core.ts";
 
 /**
  * How long the company's core may take: reading a long conversation takes
@@ -97,42 +93,6 @@ const isKickoffCode = (code: string): code is KickoffRefusal =>
   kickoffCodes.has(code);
 
 const encoder = new TextEncoder();
-
-/** Where client `clientId`'s core is, and the secret to sign for it with; null when it can't be asked. */
-const clientCore = async (
-  env: Env,
-  clientId: string
-): Promise<{
-  address: CoreAddress;
-  routerSecret: string;
-  authSecret: string;
-} | null> => {
-  const grid = await clientGrid(env);
-  const row = grid.find(
-    ({ id, status }) => id === clientId && status === "active"
-  );
-  const secrets = await ifStored(
-    async (): Promise<DeploySecrets> => await deploySecrets(env)
-  );
-  if (row === undefined || secrets === null) {
-    return null;
-  }
-  const route = await routeOf(
-    env.ROUTER_HOSTS,
-    secrets.routerKey,
-    row.id,
-    row.hostname,
-    env.DISPATCHER
-  );
-  if (route === "no_route" || route === "unknown") {
-    return null;
-  }
-  return {
-    address: route.core,
-    routerSecret: route.secret,
-    authSecret: await clientAuthSecret(secrets, row.id, route.generation),
-  };
-};
 
 /** Core's error code in an answer that isn't OK, if it gave one. */
 const codeOf = async (response: Response): Promise<string | null> => {
