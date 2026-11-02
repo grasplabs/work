@@ -7408,10 +7408,6 @@ msgstr "Het opent voor het lid dat het maakte, de beheerders en iedereen met wie
 msgid "It reads no Knowledge."
 msgstr "Hij leest geen Kennis."
 
-#: src/workflows/traces.tsx
-msgid "It recorded more steps than one read shows: the latest are left out."
-msgstr "Er zijn meer stappen vastgelegd dan één keer lezen toont: de nieuwste ontbreken."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "Het berust op niets dat je kunt zien."
@@ -12847,6 +12843,10 @@ msgstr "De eerste {pageMaxLimit} bestanden worden getoond."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "De eerste {runsPageSize} van meer runs worden getoond."
+
+#: src/workflows/traces.tsx
+msgid "Showing the first part of this run"
+msgstr "Het eerste deel van deze run wordt getoond"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."
