@@ -1,6 +1,6 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { addMember } from "../src/app-members.ts";
@@ -14,66 +14,54 @@ import {
 } from "../src/apps.ts";
 import { shareStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
-import { repairStarts, startRun } from "../src/workflows/runs.ts";
+import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
 import { ordinaryData, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  called,
+  endLiveResourceRuns,
+  jsonWorkflowAppsOf,
+  runFor,
+  runOnce,
+  screenOf,
+  startCommand,
+  startedOf,
+} from "./json-workflow-apps.ts";
+import type { Person as Signed } from "./json-workflow-apps.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { endLiveRuns, finished, sleeping, whileEngineRefuses } from "./runs.ts";
+import { notesFiles } from "./notes-client-app.ts";
+import { runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
-import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
 // An App is a draft, published or archived (app-status.ts). These tests
 // start from the ways that can fail: someone who only uses an App reaching
 // a draft or an archived one by any way in, or learning a draft exists;
 // a trigger or a run outliving the archive; a transition by someone who
 // lost their role, or one nobody audited; and an App restored straight
-// back to the people who use it.
+// back to the people who use it. The runs are of an independent JSON
+// workflow bound to the App, started from its screen over core's
+// function route. Gone with App workflows: a schedule an App's own
+// workflow declares, firing only while the App is published, and its own
+// workflows' detail and parameters read, never set, once archived.
+// Already covered: a start refused for someone who may no longer use the
+// App once it is decided (workflow-starts.test.ts, "acts only for someone
+// who may use the App now, each with keys of their own").
 
 const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** A weekly schedule, Mondays at 8:00, as its workflow declares it. */
-const weekly = {
-  "workflows/weekly.ts": `import { schedule, workflow } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "weekly",
-  { params: { every: schedule({ label: "Runs", default: "0 8 * * 1" }) }, triggers: [{ type: "schedule", param: "every", timeZone: "Europe/Amsterdam" }] },
-  async (step) => await step.do("report", { description: "Write the report" }, async () => "sent")
-);
-`,
-  "workflows/weekly.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./weekly.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { report: "sent" }, expect: { output: "sent" } }]);
-`,
-};
-
-/** A workflow that sleeps a day: a run that stays unfinished. */
-const nap = workflowFiles(
-  "nap",
-  `  await step.sleep("rest", { description: "Rest", duration: "1 day" });
-  return null;`
-);
-
 /**
- * A builder's App with a screen, a scheduled workflow and a sleeping one,
- * its first version current, left a draft; shared with `user` to use.
+ * A builder's App with a screen, its first version current, left a draft;
+ * shared with `user` to use.
  */
 const draftApp = async (builder: Person, user?: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
   const { version } = await builder.api.apps.files.commit(
     id,
-    {
-      ...sampleApp(),
-      ...weekly,
-      ...nap,
-      "screens/desk.tsx": "export default () => null;\n",
-    },
+    { ...notesFiles, "screens/desk.tsx": "export default () => null;\n" },
     "First version"
   );
   await builder.api.apps.versions.setCurrent(id, version);
@@ -88,25 +76,9 @@ const draftApp = async (builder: Person, user?: Person): Promise<string> => {
   return id;
 };
 
-/** When the App's schedule next fires, as core has it. */
-const nextRunOf = async (app: string): Promise<Date> => {
-  const row = await env.DB.prepare(
-    "SELECT next_run_at FROM workflow_triggers WHERE app_id = ?"
-  )
-    .bind(app)
-    .first<{ next_run_at: number }>();
-  if (!row) {
-    throw new Error(`App ${app} has no schedule`);
-  }
-  return new Date(row.next_run_at);
-};
-
 /** What `person` gets at each way into App `app`. */
 const waysIn = async (person: Person, app: string) => {
-  const [listed, overview] = await Promise.all([
-    person.api.apps.list(),
-    person.api.workflows.overview(),
-  ]);
+  const listed = await person.api.apps.list();
   return {
     get: await outcome(person.api.apps.get(app)),
     contents: await outcome(person.api.apps.contents(app)),
@@ -117,12 +89,7 @@ const waysIn = async (person: Person, app: string) => {
           await person.api.screens.watchVersion(app, onVersion)
       )
     ),
-    start: await outcome(person.api.workflows.start(app, "nap")),
-    runs: await outcome(person.api.workflows.list(app)),
     listed: listed.some(({ id }) => id === app),
-    overview: overview.some(
-      (summary) => summary.type === "app" && summary.app === app
-    ),
   };
 };
 
@@ -132,40 +99,64 @@ const noSuchApp = {
   contents: "app.not_found",
   open: "app.not_found",
   version: "app.not_found",
-  start: "app.not_found",
-  runs: "app.not_found",
   listed: false,
-  overview: false,
 };
+
+const { boundApp } = jsonWorkflowAppsOf(idp);
 
 /**
- * A start core stopped in the middle of, never sent to the engine: a
- * trigger's (no person) or a person's, written ten minutes ago.
+ * An App of a builder's, published, its screen approved, with an
+ * independent workflow bound that holds an hour, and the App's grant to
+ * start it.
  */
-const orphan = async (app: string, startedBy: string | null) => {
-  const id = crypto.randomUUID();
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'nap', 1, ?, 'starting', ?, ?, '{}')"
-  )
-    .bind(
-      id,
+const holdingApp = async () => await boundApp({ hold: "PT1H" });
+
+type Holding = Awaited<ReturnType<typeof holdingApp>>;
+
+/** A run of the App's workflow `person` starts from its screen. */
+const startedFrom = async (
+  { app, reference }: Holding,
+  person: Signed
+): Promise<string> =>
+  startedOf(
+    await called(
+      person,
       app,
-      startedBy,
-      Date.now() - 600_000,
-      startedBy === null ? `schedule:${id}` : null
+      await screenOf(person, app),
+      startCommand(reference)
     )
-    .run();
-  return id;
+  ).runId;
+
+/** A run of the App's workflow, started from its screen, asleep in its hold. */
+const holdingRun = async (holding: Holding): Promise<string> => {
+  const runId = await startedFrom(holding, holding.builder);
+  await sleeping(runId, "task:hold");
+  return runId;
 };
 
-/** A run's status as its row has it. */
-const statusOf = async (run: string) =>
-  await env.DB.prepare("SELECT status FROM workflow_runs WHERE id = ?")
-    .bind(run)
-    .first("status");
+/** Run `runId`'s status, as the workflow's builder reads it. */
+const statusOf = async ({ builder, workflow }: Holding, runId: string) => {
+  const { status } = await runFor(builder, workflow, runId);
+  return status;
+};
+
+/** Once run `runId` says `status`, as the workflow's builder reads it. */
+const reached = async (
+  { builder, workflow }: Holding,
+  runId: string,
+  status: string
+): Promise<string> => {
+  const run = await runOnce(
+    builder,
+    workflow,
+    runId,
+    (read) => read.status === status
+  );
+  return run.status;
+};
 
 describe("an App's status", () => {
-  afterEach(endLiveRuns);
+  afterEach(endLiveResourceRuns);
 
   it("opens a published App to those who only use it, and keeps a draft and an archived App from them, as an App that isn't there", async () => {
     const [builder, user] = await Promise.all([
@@ -199,10 +190,7 @@ describe("an App's status", () => {
         contents: "ok",
         open: "ok",
         version: "ok",
-        start: "ok",
-        runs: "ok",
         listed: true,
-        overview: true,
       },
       archived: noSuchApp,
     });
@@ -212,7 +200,7 @@ describe("an App's status", () => {
     const builder = await signedInApi(idp, "builder");
     const app = await draftApp(builder);
 
-    const draft = await outcome(builder.api.workflows.start(app, "nap"));
+    const draft = await outcome(builder.api.screens.open(app, "desk"));
     await builder.api.apps.archive(app);
     const archived = await waysIn(builder, app);
 
@@ -224,10 +212,7 @@ describe("an App's status", () => {
         contents: "ok",
         open: "app.archived",
         version: "app.archived",
-        start: "app.archived",
-        runs: "ok",
         listed: true,
-        overview: true,
       },
     });
   });
@@ -312,79 +297,13 @@ describe("an App's status", () => {
     });
   });
 
-  it("fires a schedule only while the App is published", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    const due = await nextRunOf(app);
-    const runs = async (): Promise<number> => {
-      const listed = await builder.api.workflows.list(app);
-      return listed.filter(({ workflow }) => workflow === "weekly").length;
-    };
-
-    await runMinuteTasks({}, due);
-    const asDraft = await runs();
-    const deliveredToDraft = await outcome(
-      startRun(env, {
-        app: appIdSchema.parse(app),
-        workflow: workflowIdSchema.parse("weekly"),
-        input: undefined,
-        startedBy: null,
-        actor: { type: "system" },
-        trigger: {
-          type: "schedule",
-          key: `schedule:${crypto.randomUUID()}`,
-          version: 1,
-        },
-      })
-    );
-    await builder.api.apps.publish(app);
-    await runMinuteTasks({}, due);
-    const asPublished = await runs();
-    const next = await nextRunOf(app);
-    await builder.api.apps.archive(app);
-    await runMinuteTasks({}, next);
-    const asArchived = await runs();
-    // A trigger's delivery that raced past the schedule's query is refused
-    // at the start too.
-    const delivered = await outcome(
-      startRun(env, {
-        app: appIdSchema.parse(app),
-        workflow: workflowIdSchema.parse("weekly"),
-        input: undefined,
-        startedBy: null,
-        actor: { type: "system" },
-        trigger: {
-          type: "schedule",
-          key: `schedule:${crypto.randomUUID()}`,
-          version: 1,
-        },
-      })
-    );
-
-    expect({
-      asDraft,
-      deliveredToDraft,
-      asPublished,
-      asArchived,
-      delivered,
-    }).toStrictEqual({
-      asDraft: 0,
-      deliveredToDraft: "workflow.trigger_gone",
-      asPublished: 1,
-      asArchived: 1,
-      delivered: "app.archived",
-    });
-  });
-
   it("cancels the runs an archive finds, and those it raced, each audited", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    await builder.api.apps.publish(app);
-    const found = await builder.api.workflows.start(app, "nap");
-    await sleeping(found.id, "rest");
+    const holding = await holdingApp();
+    const { builder, app } = holding;
+    const found = await holdingRun(holding);
 
     await builder.api.apps.archive(app);
-    await finished(found.id);
+    const foundStatus = await reached(holding, found, "cancelled");
     const archivedAt = await env.DB.prepare(
       "SELECT status_changed_at AS at FROM apps WHERE id = ?"
     )
@@ -394,8 +313,7 @@ describe("an App's status", () => {
     // started on the published App, then archived without that look.
     await builder.api.apps.restore(app);
     await builder.api.apps.publish(app);
-    const raced = await builder.api.workflows.start(app, "nap");
-    await sleeping(raced.id, "rest");
+    const raced = await holdingRun(holding);
     // A cancel of that archive, late, leaves the run started since alone.
     const { asked: late } = await cancelRunsOf(
       env,
@@ -407,28 +325,26 @@ describe("an App's status", () => {
       .bind(app)
       .run();
     await runMinuteTasks({}, new Date());
-    await finished(raced.id);
+    const racedStatus = await reached(holding, raced, "cancelled");
     const logged = await allEvents();
     const cancelled = logged
       .filter(
         ({ action, target }) =>
-          action === "workflow.run.cancelled" &&
-          (target?.id === found.id || target?.id === raced.id)
+          action === "workflow.run.terminated" &&
+          (target?.id === found || target?.id === raced)
       )
       .map(({ target, actor }) => ({ run: target?.id, actor }));
-    const statuses = await Promise.all(
-      [found.id, raced.id].map(async (run) => {
-        const { status } = await builder.api.workflows.status(run);
-        return status;
-      })
-    );
 
-    expect({ late, statuses, cancelled }).toStrictEqual({
+    expect({
+      late,
+      statuses: [foundStatus, racedStatus],
+      cancelled,
+    }).toStrictEqual({
       late: 0,
       statuses: ["cancelled", "cancelled"],
       cancelled: [
-        { run: found.id, actor: { type: "person", userId: builder.userId } },
-        { run: raced.id, actor: { type: "person", userId: builder.userId } },
+        { run: found, actor: { type: "person", userId: builder.userId } },
+        { run: raced, actor: { type: "person", userId: builder.userId } },
       ],
     });
   });
@@ -458,41 +374,10 @@ describe("an App's status", () => {
     });
   });
 
-  it("starts no run for someone who may no longer use the App once its row is written", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    const user = await acting("user");
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    // As their start reads it once it is written: the App was published
-    // when they asked, and is a draft again now.
-    const refused = await outcome(
-      startRun(env, {
-        app: appIdSchema.parse(app),
-        workflow: workflowIdSchema.parse("nap"),
-        input: undefined,
-        startedBy: user.userId,
-        actor: { type: "person", userId: user.userId },
-        starter: user,
-      })
-    );
-    const runs = await builder.api.workflows.list(app);
-
-    expect({
-      refused,
-      runs: runs.map(({ status }) => status),
-    }).toStrictEqual({ refused: "app.not_found", runs: ["failed"] });
-  });
-
   it("cancels only an archived App's runs, and finishes the archive's cancels before it is restored", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    await builder.api.apps.publish(app);
-    const left = await builder.api.workflows.start(app, "nap");
-    await sleeping(left.id, "rest");
+    const holding = await holdingApp();
+    const { builder, app } = holding;
+    const left = await holdingRun(holding);
     // Archived without its cancels yet: their pass hasn't come.
     // Archived, its start having overlapped the archive's write: created
     // after the archive's time, which no cutoff at that time reaches.
@@ -505,16 +390,19 @@ describe("an App's status", () => {
     // While a cancel it owes fails, the restore is refused, and the App
     // stays archived for the clock to ask again.
     const refused = await whileEngineRefuses(
-      (method) => method === "markCancelled",
+      (method) => method === "terminate",
       async () => await outcome(builder.api.apps.restore(app))
     );
     const { status: stillArchived } = await builder.api.apps.get(app);
-    await builder.api.apps.restore(app);
-    await finished(left.id);
-    const { status: leftStatus } = await builder.api.workflows.status(left.id);
+    // Asked again once the engine takes stops: the restore goes through
+    // once the stop has ended the run (`app.stops_pending` until then).
+    const restored = await vi.waitFor(
+      async () => await builder.api.apps.restore(app),
+      { timeout: 30_000, interval: 200 }
+    );
+    const leftStatus = await statusOf(holding, left);
     await builder.api.apps.publish(app);
-    const own = await builder.api.workflows.start(app, "nap");
-    await sleeping(own.id, "rest");
+    await holdingRun(holding);
     // A sweep asked of the restored App, however late its cutoff, finds none.
     const { asked: swept } = await cancelRunsOf(
       env,
@@ -523,9 +411,16 @@ describe("an App's status", () => {
       new Date(Date.now() + 60_000)
     );
 
-    expect({ refused, stillArchived, leftStatus, swept }).toStrictEqual({
+    expect({
+      refused,
+      stillArchived,
+      restored: restored.status,
+      leftStatus,
+      swept,
+    }).toStrictEqual({
       refused: "app.conflict",
       stillArchived: "archived",
+      restored: "draft",
       leftStatus: "cancelled",
       swept: 0,
     });
@@ -580,12 +475,6 @@ describe("an App's status", () => {
           id: user.userId,
         })
       ),
-      // Read as ever, never changed.
-      detail: await outcome(builder.api.workflows.get(app, "weekly")),
-      params: await outcome(builder.api.workflows.params.list(app, "weekly")),
-      param: await outcome(
-        builder.api.workflows.params.set(app, "weekly", "every", "0 9 * * 1")
-      ),
       // Taking access away is never blocked.
       unshare: await outcome(
         builder.api.apps.members.remove(app, {
@@ -599,9 +488,6 @@ describe("an App's status", () => {
       bind: "app.archived",
       commit: "app.archived",
       store: "app.archived",
-      detail: "ok",
-      params: "ok",
-      param: "app.archived",
       unshare: "ok",
     });
   });
@@ -731,76 +617,48 @@ describe("an App's status", () => {
     });
   });
 
-  it("sends no start the repair finds for an App that may no longer run it", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const draft = await draftApp(builder);
-    const archived = await draftApp(builder);
-    await builder.api.apps.archive(archived);
-    const user = await signedInApi(idp, "user");
-    const shared = await draftApp(builder, user);
-    const trigger = await orphan(draft, null);
-    const person = await orphan(archived, builder.userId);
-    // A user's start on an App published then, a draft now: they may no
-    // longer use it, whatever their start's row says.
-    const usersStart = await orphan(shared, user.userId);
+  it("sends no start for an App archived since: the archive cancels it, and the repair has nothing to send", async () => {
+    const holding = await holdingApp();
+    const { builder, app } = holding;
+    // A start the engine never took: its run is still starting.
+    const runId = await whileEngineRefuses(
+      () => true,
+      async () => await startedFrom(holding, builder)
+    );
+    const starting = await statusOf(holding, runId);
+    await builder.api.apps.archive(app);
 
-    await repairStarts(env, trigger);
-    await repairStarts(env, person);
-    await repairStarts(env, usersStart);
+    // Past when the repair first looks at it.
+    await repairResourceStarts(env, new Date(Date.now() + 2 * 60_000));
+    const engine = await runObject(runId).status();
     expect({
-      trigger: await statusOf(trigger),
-      person: await statusOf(person),
-      usersStart: await statusOf(usersStart),
+      starting,
+      repaired: await statusOf(holding, runId),
+      engine,
     }).toStrictEqual({
-      trigger: "failed",
-      person: "failed",
-      usersStart: "failed",
+      starting: "starting",
+      repaired: "cancelled",
+      engine: undefined,
     });
   });
 
   it("lets a start the engine took go on when the repair finds its App unpublished", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    await builder.api.apps.publish(app);
-    // A trigger's: the repair would refuse its start on a draft.
-    const { id } = await startRun(env, {
-      app: appIdSchema.parse(app),
-      workflow: workflowIdSchema.parse("nap"),
-      input: undefined,
-      startedBy: null,
-      actor: { type: "system" },
-      trigger: {
-        type: "schedule",
-        key: `schedule:${crypto.randomUUID()}`,
-        version: 1,
-      },
-    });
-    await sleeping(id, "rest");
+    const holding = await holdingApp();
+    const { app } = holding;
+    const runId = await holdingRun(holding);
     // Its confirmation was never recorded, and the App went back to a
     // draft since: the engine has the run, in flight.
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE workflow_runs SET status = 'starting', pending_start = '{}', created_at = ? WHERE id = ?"
-      ).bind(Date.now() - 600_000, id),
+        "UPDATE workflow_resource_runs SET status = 'starting' WHERE id = ?"
+      ).bind(runId),
       env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?").bind(app),
     ]);
 
-    await repairStarts(env, id);
-    const pendingNow = await env.DB.prepare(
-      "SELECT pending_start IS NOT NULL AS pending FROM workflow_runs WHERE id = ?"
-    )
-      .bind(id)
-      .first("pending");
+    // Past when the repair first looks at it.
+    await repairResourceStarts(env, new Date(Date.now() + 2 * 60_000));
 
-    // The engine's own notification may move it from starting to running
-    // at any moment; what matters is that it goes on, confirmed.
-    expect({
-      goesOn: ["starting", "running"].includes(String(await statusOf(id))),
-      pendingNow,
-    }).toStrictEqual({
-      goesOn: true,
-      pendingNow: 0,
-    });
+    await expect(statusOf(holding, runId)).resolves.toBe("running");
   });
 
   it("keeps an archived App's screen data and sharing as they are, an archive raced in included", async () => {
