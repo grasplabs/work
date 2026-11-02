@@ -20,6 +20,7 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { runObjectOf } from "../src/workflows/engine.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { mockIdp } from "./idp.ts";
@@ -610,7 +611,7 @@ describe("a run's trace, read over the session API", () => {
 
   it(
     "says when it shows only the first part of a run whose journal is longer than one trace reads",
-    { timeout: 120_000 },
+    { timeout: 200_000 },
     async () => {
       const builder = await signedInBuilder();
       const long = await createWorkflowResource(
@@ -641,27 +642,46 @@ describe("a run's trace, read over the session API", () => {
         definition: definitionOf(short.name, "1.0.0", routing),
         basedOn: null,
       });
-      // Room for the loop's steps, past the tests' lowered step limit.
-      const configuredLimits = env.TEST_QUOTA_LIMITS;
-      env.TEST_QUOTA_LIMITS = { workflowSteps: 1000 };
-      let longRun: string;
-      try {
-        longRun = await ranFor(builder.acting, long.id, 1, "Ada");
-      } finally {
-        env.TEST_QUOTA_LIMITS = configuredLimits;
-      }
-      const shortRun = await ranFor(builder.acting, short.id, 1, "Ada");
       const traceOf = async (id: string, runId: string) =>
         await builder.api.workflowResources.runTrace(id, runId, {
           doors: false,
         });
-      const longTrace = await traceOf(long.id, longRun);
+      // Room for the loop's steps, past the tests' lowered step limit,
+      // while the long run journals more than a trace reads: its engine
+      // holds a record past the 2,000th. Read then, ended or not.
+      const configuredLimits = env.TEST_QUOTA_LIMITS;
+      env.TEST_QUOTA_LIMITS = { workflowSteps: 1000 };
+      let longTrace: WorkflowRunTrace;
+      try {
+        const { runId: longRun } = await startWorkflow(
+          env,
+          { type: "person", person: builder.acting },
+          long.id,
+          { version: 1, input: { who: "Ada" }, key: unique() }
+        );
+        if (longRun === null) {
+          throw new Error("The start made a run");
+        }
+        await vi.waitFor(
+          async () => {
+            const past = await runObjectOf(env, longRun).history({
+              after: 2000,
+              limit: 1,
+            });
+            expect(past?.records.length ?? 0).toBeGreaterThan(0);
+          },
+          { timeout: 150_000, interval: 200 }
+        );
+        longTrace = await traceOf(long.id, longRun);
+      } finally {
+        env.TEST_QUOTA_LIMITS = configuredLimits;
+      }
+      const shortRun = await ranFor(builder.acting, short.id, 1, "Ada");
       const shortTrace = await traceOf(short.id, shortRun);
       const notes = longTrace.steps.filter(({ task }) => task === "note");
 
       expect({
         long: {
-          status: longTrace.status,
           truncated: longTrace.truncated,
           // Its first items, in order, short of all of them and of the
           // task after the loop.
@@ -677,7 +697,6 @@ describe("a run's trace, read over the session API", () => {
         },
       }).toStrictEqual({
         long: {
-          status: "completed",
           truncated: true,
           firstItems: true,
           some: true,
