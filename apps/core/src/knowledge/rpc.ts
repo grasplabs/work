@@ -316,9 +316,10 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   // Entity matches (GRA-1080), as the signed-in person alone reads them
   // (`#asReader`: never a reader a request names). The Brain asks the
   // recall grant first and records each call, a read or an audited
-  // decision; Grasp's staff are read as the person they are, open and
-  // audited (GRA-1087). Nothing here reaches a model, and neither takes a
-  // name to look for: a filter on a name would make probing targeted.
+  // decision. Grasp's staff never get here: the session's full-access
+  // check refuses them before either call. Nothing here reaches a model,
+  // and neither takes a name to look for: a filter on a name would make
+  // probing targeted.
 
   async entityMatches(options?: unknown): Promise<EntityMatch[]> {
     return await this.#asReader(
