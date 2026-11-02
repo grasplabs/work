@@ -1648,7 +1648,8 @@ describe("entity linking", () => {
     ]);
   });
 
-  it("restricts a delegate that reads a match whose evidence is in a sensitive collection", async () => {
+  /** Ada twice, decided one by a note in a sensitive HR collection. */
+  const sensitiveSame = async () => {
     const { host, pair, sales, support } = await adaTwice();
     const hr = await ensureCollection(
       host.brain,
@@ -1665,26 +1666,54 @@ describe("entity linking", () => {
       { type: "person", userId: "owner" }
     );
     const note = await save(host, hr, "note.md", "Both calls were hers.");
-    const all = [sales.id, support.id, hr.id];
     await decideEntityMatch(
       host.brain,
-      { userId: "hr-lead", reads: all },
+      { userId: "hr-lead", reads: [sales.id, support.id, hr.id] },
       {
         entities: pair,
         decision: "same",
         evidence: { documentId: note.id, version: 1 },
       }
     );
+    return { host, pair, sales, support, hr };
+  };
+
+  it("restricts a delegate that reads a match whose evidence is in a sensitive collection, shown or left out", async () => {
+    const { host, pair, sales, support, hr } = await sensitiveSame();
     // An agent granted both sides and the HR note.
-    const delegate: Caller = { userId: "agent", reads: all };
-    const before = host.restricted.has("agent");
-    const matched = await sameAsFor(host.brain, delegate, pair[0]);
+    const both: Caller = {
+      userId: "agent",
+      reads: [sales.id, support.id, hr.id],
+    };
+    // One granted one side and the HR note: the match is left out.
+    const oneSide: Caller = { userId: "other", reads: [sales.id, hr.id] };
+    const matched = await sameAsFor(host.brain, both, pair[0]);
+    const leftOut = await sameAsFor(host.brain, oneSide, pair[0]);
 
     expect({
-      before,
       matched,
-      after: host.restricted.has("agent"),
-    }).toStrictEqual({ before: false, matched: [pair[1]], after: true });
+      leftOut,
+      restricted: [...host.restricted].toSorted(),
+    }).toStrictEqual({
+      matched: [pair[1]],
+      leftOut: [],
+      restricted: ["agent", "other"],
+    });
+  });
+
+  it("restricts a delegate whose proposals a decision on sensitive evidence left out", async () => {
+    const { host, sales, support, hr } = await sensitiveSame();
+    const delegate: Caller = {
+      userId: "agent",
+      reads: [sales.id, support.id, hr.id],
+    };
+    // Decided, so nothing is left to propose: its absence says as much.
+    const proposals = await entityMatchProposals(host.brain, delegate);
+
+    expect({
+      proposals,
+      restricted: host.restricted.has("agent"),
+    }).toStrictEqual({ proposals: [], restricted: true });
   });
 
   it("forgets a `same` whose evidence a purge rewrites, though both entities stay, and keeps it through a purge that changes nothing", async () => {

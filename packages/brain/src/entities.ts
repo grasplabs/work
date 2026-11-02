@@ -1,4 +1,4 @@
-import { and, eq, exists, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -1936,24 +1936,70 @@ const pairKey = (a: string, b: string): string =>
 const decisionBatch = 40;
 
 /**
- * Whether a decision's evidence is a document `allowed` reads now: a
- * `same` is honoured only for such a reader, so an identification never
- * reaches anyone who can't read what it rests on (initials in one
- * collection matched to a named person by a note in another).
+ * The decisions matching `where` that `allowed` may be told of: every
+ * `different`, and a `same` only where its evidence is a document
+ * `allowed` reads now, so an identification never reaches anyone who
+ * can't read what it rests on (initials in one collection matched to a
+ * named person by a note in another). Each with the evidence it rests
+ * on, its collection and that collection's sensitivity: a read whose
+ * result any of them shaped, what it shows or what it leaves out, records
+ * them all (`noteRead`, `evidenceOf`), so sensitive evidence restricts
+ * the reader as reading it would. The one way the Brain reads decisions.
  */
-const readableEvidence = <C>(brain: Brain<C>, allowed: Allowed): SQL =>
-  exists(
-    brain.db
-      .select({ one: sql`1` })
-      .from(documents)
-      .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .where(
-        and(
-          eq(documents.id, brainEntityMatches.evidenceDocumentId),
-          allowed.documents()
-        )
+const honouredDecisions = async <C>(
+  brain: Brain<C>,
+  allowed: Allowed,
+  where: SQL | undefined,
+  page?: { after?: { a: string; b: string }; limit: number }
+): Promise<
+  {
+    a: string;
+    b: string;
+    evidence: ReadEvidence | null;
+  }[]
+> => {
+  const query = brain.db
+    .select({
+      a: brainEntityMatches.entityA,
+      b: brainEntityMatches.entityB,
+      documentId: documents.id,
+      collectionId: collections.id,
+      sensitive: collections.sensitive,
+    })
+    .from(brainEntityMatches)
+    .leftJoin(
+      documents,
+      eq(documents.id, brainEntityMatches.evidenceDocumentId)
+    )
+    .leftJoin(collections, eq(collections.id, documents.collectionId))
+    .where(
+      and(
+        where,
+        or(
+          eq(brainEntityMatches.decision, "different"),
+          and(isNotNull(collections.id), allowed.documents())
+        ),
+        page?.after === undefined
+          ? undefined
+          : sql`(${brainEntityMatches.entityA}, ${brainEntityMatches.entityB}) > (${page.after.a}, ${page.after.b})`
       )
-  );
+    )
+    .orderBy(brainEntityMatches.entityA, brainEntityMatches.entityB);
+  const rows = await (page === undefined ? query : query.limit(page.limit));
+  return rows.map(({ a, b, documentId, collectionId, sensitive }) => ({
+    a,
+    b,
+    evidence:
+      documentId === null || collectionId === null || sensitive === null
+        ? null
+        : { documentId, collectionId, sensitive },
+  }));
+};
+
+/** The evidence `decisions` rest on, for the read's record (`noteRead`). */
+const evidenceOf = (
+  decisions: readonly { evidence: ReadEvidence | null }[]
+): ReadEvidence[] => decisions.flatMap(({ evidence }) => evidence ?? []);
 
 /**
  * Whether the reader sees the two sides in different collections: two
@@ -1966,36 +2012,33 @@ const acrossCollections = (
 ): boolean =>
   [...one.collections].some((a) => [...other.collections].some((b) => a !== b));
 
-/** The pairs among `ids` that have a decision, either way, as `pairKey`s. */
+/**
+ * The pairs among `ids` that have a decision, either way, as `pairKey`s,
+ * and the evidence of every decision consulted for them, for the read's
+ * record: a pair it hides says as much as one it shows.
+ */
 const decidedPairs = async <C>(
   brain: Brain<C>,
   allowed: Allowed,
   ids: readonly string[]
-): Promise<Set<string>> => {
+): Promise<{ keys: Set<string>; evidence: ReadEvidence[] }> => {
   const keys = new Set<string>();
+  const evidence: ReadEvidence[] = [];
   for (let start = 0; start < ids.length; start += decisionBatch) {
     const chunk = ids.slice(start, start + decisionBatch);
     // oxlint-disable-next-line no-await-in-loop -- a chunk at a time, bounded by readRowsMax
-    const rows = await brain.db
-      .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
-      .from(brainEntityMatches)
-      .where(
-        and(
-          inArray(brainEntityMatches.entityA, chunk),
-          // A `same` only for a reader of its evidence (`honoured`).
-          or(
-            eq(brainEntityMatches.decision, "different"),
-            readableEvidence(brain, allowed)
-          )
-        )
-      );
-    for (const { a, b } of rows) {
-      if (ids.includes(b)) {
-        keys.add(pairKey(a, b));
-      }
+    const rows = await honouredDecisions(
+      brain,
+      allowed,
+      inArray(brainEntityMatches.entityA, chunk)
+    );
+    const consulted = rows.filter(({ b }) => ids.includes(b));
+    for (const { a, b } of consulted) {
+      keys.add(pairKey(a, b));
     }
+    evidence.push(...evidenceOf(consulted));
   }
-  return keys;
+  return { keys, evidence };
 };
 
 /** One entity of a match proposal, as the reader sees it. */
@@ -2088,7 +2131,7 @@ export const entityMatchProposals = async <C>(
       byName.set(key, entry);
     }
   }
-  const decided = await decidedPairs(
+  const { keys: decided, evidence } = await decidedPairs(
     brain,
     await allowedFor(brain.ports, reader),
     [...byEntity.keys()]
@@ -2141,11 +2184,14 @@ export const entityMatchProposals = async <C>(
   const shown = new Set(
     page.flatMap(({ entities }) => entities.map(({ id }) => id))
   );
+  // With the evidence of every decision consulted, those of the pairs it
+  // left out too, however few proposals are left: an empty page as well.
   await noteRead(
     brain,
     reader,
     "entity_match_proposals",
-    rows.filter(({ entityId }) => entityId !== null && shown.has(entityId))
+    rows.filter(({ entityId }) => entityId !== null && shown.has(entityId)),
+    evidence
   );
   return page;
 };
@@ -2430,40 +2476,24 @@ export const sameAsFor = async <C>(
   // the visibility check.
   const readable: string[] = [];
   // What the read showed, for the host's record of it (`noteRead`): the
-  // mentions, and the evidence each shown match rests on.
+  // mentions, and the evidence of every decision it consulted.
   const shown: ReadableMention[] = [];
   const evidence: ReadEvidence[] = [];
   const allowed = await allowedFor(brain.ports, reader);
   let after: { a: string; b: string } | undefined;
+  // `entityId` itself unreadable to them: nothing shown.
+  let unreadable = false;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, keyset-ordered
-    const page = await brain.db
-      .select({
-        a: brainEntityMatches.entityA,
-        b: brainEntityMatches.entityB,
-        documentId: documents.id,
-        collectionId: collections.id,
-        sensitive: collections.sensitive,
-      })
-      .from(brainEntityMatches)
-      // A `same` only for a reader of its evidence (`readableEvidence`).
-      .innerJoin(
-        documents,
-        eq(documents.id, brainEntityMatches.evidenceDocumentId)
-      )
-      .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .where(
-        and(
-          eq(brainEntityMatches.decision, "same"),
-          sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`,
-          allowed.documents(),
-          after === undefined
-            ? undefined
-            : sql`(${brainEntityMatches.entityA}, ${brainEntityMatches.entityB}) > (${after.a}, ${after.b})`
-        )
-      )
-      .orderBy(brainEntityMatches.entityA, brainEntityMatches.entityB)
-      .limit(decisionBatch);
+    const page = await honouredDecisions(
+      brain,
+      allowed,
+      and(
+        eq(brainEntityMatches.decision, "same"),
+        sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`
+      ),
+      { after, limit: decisionBatch }
+    );
     if (page.length === 0) {
       break;
     }
@@ -2473,33 +2503,35 @@ export const sameAsFor = async <C>(
       entityId,
       ...others,
     ]);
+    // Every decision consulted, those it leaves out too.
+    evidence.push(...evidenceOf(page));
     if (!sides.has(entityId)) {
-      return [];
+      unreadable = true;
+      break;
     }
     const counterparts = others.filter((id) => sides.has(id));
     readable.push(...counterparts);
-    evidence.push(
-      ...page
-        .filter(({ a, b }) => sides.has(a === entityId ? b : a))
-        .map(({ documentId, collectionId, sensitive }) => ({
-          documentId,
-          collectionId,
-          sensitive,
-        }))
-    );
     const read = new Set([entityId, ...counterparts]);
     shown.push(
       ...rows.filter((row) => row.entityId !== null && read.has(row.entityId))
     );
-    after = page.at(-1);
+    const last = page.at(-1);
+    after = last === undefined ? undefined : { a: last.a, b: last.b };
     if (page.length < decisionBatch) {
       break;
     }
   }
   // Recorded as the other entity reads are: who read which identification,
   // from which collections.
-  await noteRead(brain, reader, "entity_matches", shown, evidence);
-  return readable.toSorted();
+  // Recorded also when nothing is shown, with every decision consulted.
+  await noteRead(
+    brain,
+    reader,
+    "entity_matches",
+    unreadable ? [] : shown,
+    evidence
+  );
+  return unreadable ? [] : readable.toSorted();
 };
 
 /** How far linking is over what a reader may read. */
