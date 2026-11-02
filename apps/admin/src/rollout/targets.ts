@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import type { AdminDatabase } from "../db/act.ts";
 import {
+  channels,
   clientPlacements,
   clientProvisions,
   clients,
@@ -22,6 +23,9 @@ import {
   releases,
   rolloutTargets,
 } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
+import { targetOf } from "./desired.ts";
+import type { ChannelReleases } from "./desired.ts";
 
 /** The ring every rollout reaches first: Grasp's own deployments. */
 export const firstRing = 0;
@@ -355,4 +359,41 @@ export const parsePrevious = (previous: string | null): PreviousRun | null => {
   }
   const parsed = previousRunSchema.safeParse(JSON.parse(previous));
   return parsed.success ? parsed.data : null;
+};
+
+/** The release each channel points at now. */
+export const channelReleases = async (
+  db: AdminDatabase
+): Promise<ChannelReleases> => {
+  const rows = await db
+    .select({ id: channels.id, releaseId: channels.releaseId })
+    .from(channels);
+  const of = (channel: Channel) =>
+    rows.find(({ id }) => id === channel)?.releaseId ?? null;
+  return { edge: of("edge"), beta: of("beta"), stable: of("stable") };
+};
+
+/**
+ * The release client `clientId` should run (`targetOf`), with its channel;
+ * undefined when there's no such client.
+ */
+export const targetReleaseOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<{ channel: Channel; releaseId: string | null } | undefined> => {
+  const client = await db
+    .select({
+      channel: clients.channel,
+      pinnedReleaseId: clients.pinnedReleaseId,
+    })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client === undefined) {
+    return undefined;
+  }
+  return {
+    channel: client.channel,
+    releaseId: targetOf(client, await channelReleases(db)),
+  };
 };
