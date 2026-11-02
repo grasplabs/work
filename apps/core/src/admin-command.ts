@@ -84,6 +84,17 @@ const applyChange = async (
 ): Promise<void> => {
   const store = onboardingStore(env);
   switch (command.type) {
+    case "onboarding.agreements": {
+      // Once the team is told, what was agreed stays as it was agreed
+      // (the store checks it in the same transaction as the save).
+      refuseUnless(
+        await store.setAgreements(command.payload.agreements, by),
+        "onboarding.agreements_kept"
+      );
+      // The links that are due go out now, not at the store's next alarm.
+      await store.releaseDue();
+      return;
+    }
     case "onboarding.remind": {
       await store.remind(command.payload.people, by);
       return;
