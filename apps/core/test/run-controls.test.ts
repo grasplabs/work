@@ -251,13 +251,13 @@ describe(
       });
     });
 
-    it("supersedes a pause of a run still starting once its start is given up, leaving none admitted behind the failed run", async () => {
+    it("supersedes a pause of a run still starting the moment its start is given up, leaving none admitted behind the failed run", async () => {
       const { builder, workflow, screen, runId } = await neverStarted();
       await screen.control("pause", runId);
 
-      // The engine never takes the start: the repair gives it up.
+      // The engine never takes the start: the repair gives it up, and
+      // settles the pause with it, no other repair after.
       await repairResourceStarts(env, pastStarting());
-      await repairResourceTerminations(env, pastStarting());
 
       expect({
         status: await rowStatus(builder, workflow, runId),

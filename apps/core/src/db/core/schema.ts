@@ -4051,9 +4051,10 @@ export const workflowStartReceipts = sqliteTable(
       table.workflowResourceId,
       table.createdAt
     ),
-    // The receipts retention has yet to reach, oldest first.
-    index("workflow_start_receipts_due")
-      .on(table.createdAt)
+    // The receipts retention has yet to reach, oldest first, by ID within
+    // a time: the order the sweep pages them in (workflows/retention.ts).
+    index("workflow_start_receipts_due_idx")
+      .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
   ]
 );
@@ -4567,6 +4568,11 @@ export const workflowResourceParams = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+    // The revisions whose values retention has yet to reach, oldest first
+    // (workflows/retention.ts).
+    index("workflow_resource_params_values_kept_idx")
+      .on(table.setAt)
+      .where(sql`${table.valuesRemovedAt} IS NULL`),
   ]
 );
 
