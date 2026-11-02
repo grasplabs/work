@@ -14,7 +14,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { sweepAppVisitors } from "../src/app-visitors.ts";
+import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -230,6 +230,51 @@ const visitorEvents = (
       actor: event.actor.type,
       detail: event.detail,
     }));
+
+/**
+ * Addresses as long as people's get: 25 of them make far more than one
+ * audit value holds.
+ */
+const longAddresses = (prefix: string): string[] =>
+  Array.from(
+    { length: 25 },
+    (_, index) =>
+      `${prefix}.firstname.lastname-${index}@department-${unique()}.example.test`
+  );
+
+/** `list` as entries by address. */
+const addressEntries = (list: string[]) =>
+  list.map((value) => ({ kind: "address" as const, value }));
+
+/** `list`'s entries as an audit event's detail, each as JSON, sorted. */
+const addressDetails = (list: string[]): string[] =>
+  list.map((value) => JSON.stringify({ kind: "address", value })).toSorted();
+
+/** Asks, and whether the work it left was still going when it answered. */
+const askDeferred = async (link: string, address: string) => {
+  const deferred: Promise<unknown>[] = [];
+  const response = await appVisitorResponse(
+    new Request(`https://core.test${appVisitorApiPath}`, {
+      method: "POST",
+      body: JSON.stringify({ action: "ask", link, address }),
+    }),
+    env,
+    crypto.randomUUID(),
+    {
+      waitUntil: (work) => {
+        deferred.push(work);
+      },
+    }
+  );
+  const pending = await Promise.all(
+    deferred.map(
+      async (work) =>
+        await Promise.race([work.then(() => false), Promise.resolve(true)])
+    )
+  );
+  await Promise.all(deferred);
+  return { status: response.status, pending };
+};
 
 describe("an App's visitors", { timeout: 120_000 }, () => {
   it("are mailed a code only when listed, by address or domain, for a published App, and asking answers the same whatever happened", async () => {
@@ -548,7 +593,12 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     const mail = await mailbox();
     const visitor = `vo@${domain}`;
     const signedInAs = async (): Promise<string> => {
+      const sentBefore = mail.sent.length;
       await ask(link, visitor);
+      // This ask's own code, not the one before it.
+      await vi.waitFor(() => {
+        expect(mail.sent.length).toBeGreaterThan(sentBefore);
+      });
       return await signIn(link, visitor, await lastCode(mail, visitor));
     };
 
@@ -592,9 +642,9 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
         "app.visitor_code_sent",
         "app.visitor_signed_in",
         // The builder takes the domain off the list, then puts it back.
-        "app.visitors_set",
+        "app.visitor_unlisted",
         "app.visitor_refused:not_listed",
-        "app.visitors_set",
+        "app.visitor_listed",
         "app.visitor_code_sent",
         "app.visitor_signed_in",
         "app.visitor_signed_out",
@@ -653,8 +703,12 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       read: await builder.api.apps.visitors(app),
       refused,
       events: events
-        .filter((event) => event.action === "app.visitors_set")
-        .map((event) => ({ actor: event.actor.type, detail: event.detail })),
+        .filter((event) => event.action.startsWith("app.visitor_"))
+        .map((event) => ({
+          action: event.action,
+          actor: event.actor.type,
+          detail: event.detail,
+        })),
     }).toStrictEqual({
       // Lower case, once.
       set: [{ kind: "domain", value: domain }],
@@ -669,10 +723,94 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       ],
       events: [
         {
+          action: "app.visitor_listed",
           actor: "person",
-          detail: { added: `domain:${domain}`, removed: "" },
+          detail: { kind: "domain", value: domain },
         },
       ],
+    });
+  });
+
+  it("saves a long list of long addresses, and audits every entry added and removed in full", async () => {
+    const { builder, app } = await visitedApp([]);
+    const first = longAddresses("a");
+    const second = longAddresses("b");
+    let saved: unknown;
+    let replaced: unknown;
+    const events = await auditedDuring(async () => {
+      saved = await builder.api.apps.setVisitors(app, addressEntries(first));
+      replaced = await builder.api.apps.setVisitors(
+        app,
+        addressEntries(second)
+      );
+    });
+    const changes = (action: string) =>
+      events
+        .filter((event) => event.action === action && event.target?.id === app)
+        .map((event) => JSON.stringify(event.detail))
+        .toSorted();
+    expect({
+      saved,
+      replaced,
+      listed: changes("app.visitor_listed"),
+      unlisted: changes("app.visitor_unlisted"),
+    }).toStrictEqual({
+      saved: addressEntries(first.toSorted()),
+      replaced: addressEntries(second.toSorted()),
+      listed: addressDetails([...first, ...second]),
+      unlisted: addressDetails(first),
+    });
+  });
+
+  it("keeps only the domain of an address nobody listed that tries a code", async () => {
+    const { app, link } = await visitedApp([
+      { kind: "domain", value: newDomain() },
+    ]);
+    const stranger = `eve@${unique()}.test`;
+
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      refused = await signIn(link, stranger, "12345678");
+    });
+
+    expect({
+      refused,
+      events: visitorEvents(events, app),
+      kept: JSON.stringify(events).includes(stranger),
+    }).toStrictEqual({
+      refused: "visitor.code_invalid",
+      events: [
+        {
+          action: "app.visitor_refused",
+          actor: "visitor",
+          detail: { reason: "not_listed", domain: stranger.split("@")[1] },
+        },
+      ],
+      kept: false,
+    });
+  });
+
+  it("answers asking for a code before looking anything up, so its timing tells nothing", async () => {
+    const domain = newDomain();
+    const { link } = await visitedApp([{ kind: "domain", value: domain }]);
+    const mail = await mailbox();
+    const listed = `al@${domain}`;
+    const stranger = `st@${unique()}.test`;
+
+    const answers = [
+      await askDeferred(link, listed),
+      await askDeferred(link, stranger),
+      await askDeferred(newLink(), listed),
+    ];
+
+    expect({ answers, sent: recipients(mail) }).toStrictEqual({
+      // Whether listed, not listed, or no App at the link: answered while
+      // the lookup was still to be done.
+      answers: Array.from({ length: 3 }, () => ({
+        status: 202,
+        pending: [true],
+      })),
+      sent: [listed],
     });
   });
 

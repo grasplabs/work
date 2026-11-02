@@ -153,6 +153,14 @@
             "period": 60,
           },
         },
+        {
+          "name": "VISITOR_RATE_LIMIT",
+          "namespace_id": "2007",
+          "simple": {
+            "limit": 20,
+            "period": 60,
+          },
+        },
       ],
       "kv_namespaces": [
         {

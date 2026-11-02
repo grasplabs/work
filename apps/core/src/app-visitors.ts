@@ -23,7 +23,7 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
@@ -75,7 +75,10 @@ import { requireNotStaff } from "./sharing.ts";
 // - Anyone asking for a code. Only an address the App's builders listed,
 //   or one at a domain they listed, is sent one, and only while the App
 //   is published. The answer is the same whether a code went out or not
-//   (and whatever the link names), so asking tells nobody what is listed.
+//   (and whatever the link names), and it comes once the request's form
+//   is checked, before anything is looked up (`ctx.waitUntil` does the
+//   rest), so neither it nor how long it takes tells anyone what is
+//   listed.
 // - A look-alike domain, or an address made to read as a listed one.
 //   Addresses and domains are ASCII and lower case only
 //   (`appVisitorAddressSchema`): a name in another script must be listed
@@ -112,7 +115,9 @@ import { requireNotStaff } from "./sharing.ts";
 // - Unseen. Every code sent and every refusal (an address not listed,
 //   too many codes, a wrong or used-up code), every sign-in and sign-out
 //   is audited as the visitor; setting the list is audited as the
-//   builder. A refusal of an address not listed keeps only its domain.
+//   builder, one event per entry added or removed, so a long list is kept
+//   in full. A refusal of an address not listed, asking or signing in,
+//   keeps only its domain.
 //
 // Codes are deleted an hour after they were sent, once they can't count
 // towards the hour's limits; sessions once they expire (`sweepAppVisitors`).
@@ -204,15 +209,19 @@ export const setAppVisitors = async (
         addedAt: now,
       })
     ),
-    outboxed(db, {
-      actor: actorOf(by),
-      action: "app.visitors_set",
-      target: appTarget(found.id),
-      detail: {
-        added: added.map(entryKey).join(" "),
-        removed: removed.map(entryKey).join(" "),
-      },
-    }),
+    // One event per entry: an entry fits an audit value (an address is at
+    // most 254 characters), a whole list of them doesn't.
+    ...[
+      ...added.map((entry) => ["app.visitor_listed", entry] as const),
+      ...removed.map((entry) => ["app.visitor_unlisted", entry] as const),
+    ].map(([action, entry]) =>
+      outboxed(db, {
+        actor: actorOf(by),
+        action,
+        target: appTarget(found.id),
+        detail: { kind: entry.kind, value: entry.value },
+      })
+    ),
   ]);
   return await listOf(env, found.id);
 };
@@ -326,21 +335,15 @@ const audited = async (
 
 /**
  * Sends a code to `address` for the App at `link`, if it is listed and
- * the hour's limits allow. Answers nothing either way; the mail goes out
- * after the answer (`later`), so how long asking takes tells nothing of
- * whether a code was sent.
+ * the hour's limits allow. It runs after the visitor is answered
+ * (`appVisitorResponse`), so nothing it looks up or sends changes the
+ * answer or how long it takes.
  */
 const askForCode = async (
   env: Env,
   link: string,
-  raw: string,
-  later: (work: Promise<unknown>) => void
+  address: string
 ): Promise<void> => {
-  const parsed = appVisitorAddressSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw appVisitorErrors.create("visitor.invalid");
-  }
-  const address = parsed.data;
   const found = await publishedAt(env, link);
   if (found === undefined) {
     return;
@@ -400,25 +403,28 @@ const askForCode = async (
     });
     return;
   }
-  later(
-    (async () => {
-      const sent = await sendMail(env, codeMail(address, found.name, code));
-      if (sent.outcome !== "sent") {
-        // Never the address or the code: only that one wasn't sent.
-        log.error("visitor.code_not_sent", { reason: sent.reason });
-      }
-    })()
-  );
+  const sent = await sendMail(env, codeMail(address, found.name, code));
+  if (sent.outcome !== "sent") {
+    // Never the address or the code: only that one wasn't sent.
+    log.error("visitor.code_not_sent", { reason: sent.reason });
+  }
 };
 
-/** The refusal of a code, the same whatever was wrong. */
+/**
+ * The refusal of a code, the same whatever was wrong. A listed address is
+ * kept; one nobody listed only by its domain.
+ */
 const codeRefused = async (
   env: Env,
   app: AppId,
   address: string,
   reason: string
 ): Promise<never> => {
-  await audited(env, app, "app.visitor_refused", { reason, address });
+  const detail: Record<string, string> =
+    reason === "not_listed"
+      ? { reason, domain: appVisitorDomainOf(address) }
+      : { reason, address };
+  await audited(env, app, "app.visitor_refused", detail);
   throw appVisitorErrors.create("visitor.code_invalid");
 };
 
@@ -729,9 +735,22 @@ export const appVisitorResponse = async (
     const body = parsed.data;
     switch (body.action) {
       case "ask": {
-        await askForCode(env, body.link, body.address, (work) => {
-          ctx.waitUntil(work);
-        });
+        const address = appVisitorAddressSchema.safeParse(body.address);
+        if (!address.success) {
+          throw appVisitorErrors.create("visitor.invalid");
+        }
+        // Answered before anything is looked up: the same answer, as fast,
+        // whether the link names an App, the address is listed, or a code
+        // goes out.
+        ctx.waitUntil(
+          (async () => {
+            try {
+              await askForCode(env, body.link, address.data);
+            } catch (error) {
+              log.error("visitor.ask_failed", errorFields(error));
+            }
+          })()
+        );
         return Response.json({ asked: true }, { status: 202 });
       }
       case "sign_in": {
