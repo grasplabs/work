@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -307,7 +308,9 @@ export const replaceTranscript = (
   db: DrizzleD1Database,
   documentId: string,
   at: ReadAt,
-  transcript: Transcript
+  transcript: Transcript,
+  /** Only while it holds (a purge's hold, say). */
+  condition: SQL = sql`1`
 ) =>
   db
     .update(transcripts)
@@ -317,7 +320,8 @@ export const replaceTranscript = (
         eq(transcripts.documentId, documentId),
         eq(transcripts.version, at.version),
         eq(transcripts.turns, at.turns),
-        eq(transcripts.chapters, at.chapters)
+        eq(transcripts.chapters, at.chapters),
+        condition
       )
     );
 
