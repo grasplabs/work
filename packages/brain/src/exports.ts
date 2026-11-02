@@ -7,10 +7,12 @@ import {
   inArray,
   isNull,
   lt,
+  lte,
   ne,
   or,
   sql,
 } from "drizzle-orm";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
@@ -83,8 +85,15 @@ export const exportLifetimeMs = 24 * 60 * 60 * 1000;
 /** How long a run holds an export before another may take it over. */
 export const exportLeaseMs = 10 * 60 * 1000;
 
-/** Documents in one file of the export: each with every version's text. */
+/** Documents begun in one file of the export, at most. */
 export const documentsPerFile = 25;
+
+/**
+ * The text one file of documents holds before it is closed: a version
+ * holds 1 MiB at most, so a file is never far past it, and a document
+ * whose history is longer goes on in the next file (`documentsFile`).
+ */
+export const documentsFileBytes = 8 * 1024 * 1024;
 
 /** The export's format, as its manifest names it. */
 export const exportFormat = "grasp-brain-export";
@@ -517,15 +526,227 @@ const writeFile = async <C>(
   }
 };
 
-/** The next file of documents after `after`, with each version's text. */
-const documentsFile = async <C>(
+// A documents file is JSON Lines, a document at a time in ID order. A
+// document's first line holds the document, its transcript and its first
+// versions, in order:
+//
+//   {"id", "collectionId", "path", …, "currentVersion", "versions": [...],
+//    "transcript"}
+//
+// A document whose versions don't fit in what is left of the file
+// (`documentsFileBytes`) goes on in lines of their own, in this file or
+// the next, each with the versions that follow, in order:
+//
+//   {"continues": "<document ID>", "versions": [...]}
+//
+// A restore appends each line's versions to the document it continues.
+// Where a file stops is its cursor (`brain_export_files.cursor`): after a
+// document, or within one, after a version.
+
+/** Where the next file of documents goes on from. */
+type DocumentsCursor =
+  | { after: string }
+  | {
+      /** Within this document, after version `afterVersion`. */
+      document: string;
+      afterVersion: number;
+      /** Its current version as its first line was read: the last one. */
+      upTo: number;
+    };
+
+const documentsCursorSchema = z.union([
+  z.object({ after: z.string() }),
+  z.object({
+    document: z.string(),
+    afterVersion: z.int(),
+    upTo: z.int(),
+  }),
+]);
+
+/** A version as a documents file holds it, with its text. */
+const versionEntry = async <C>(
+  brain: Brain<C>,
+  version: typeof versions.$inferSelect
+): Promise<Json> => {
+  const text = await versionText(
+    brain,
+    brain.db,
+    version.documentId,
+    version.number
+  );
+  return {
+    number: version.number,
+    author: version.author,
+    message: version.message,
+    restoredFrom: version.restoredFrom,
+    createdAt: version.createdAt.toISOString(),
+    text: text ?? null,
+  };
+};
+
+/** The bytes `value` takes as JSON. */
+const jsonBytes = (value: Json): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+/**
+ * Versions of `kept`, in order, while they fit in `room` bytes (one at
+ * least when `atLeastOne`): with the bytes they take.
+ */
+const versionsFitting = async <C>(
+  brain: Brain<C>,
+  kept: readonly (typeof versions.$inferSelect)[],
+  room: number,
+  atLeastOne: boolean
+): Promise<{ entries: Json[]; bytes: number; last: number | null }> => {
+  const entries: Json[] = [];
+  let bytes = 0;
+  let last: number | null = null;
+  for (const version of kept) {
+    // oxlint-disable-next-line no-await-in-loop -- one version's text at a time, to bound memory
+    const entry = await versionEntry(brain, version);
+    const size = jsonBytes(entry);
+    const first = entries.length === 0 && atLeastOne;
+    if (!first && bytes + size > room) {
+      break;
+    }
+    entries.push(entry);
+    bytes += size;
+    last = version.number;
+  }
+  return { entries, bytes, last };
+};
+
+/**
+ * A piece of a document: its line, if any versions fit (or it is the
+ * document's first line), the bytes it takes, and where the file goes on.
+ * `full`: the file is closed after it.
+ */
+interface Piece {
+  row: Json | null;
+  bytes: number;
+  next: DocumentsCursor;
+  full: boolean;
+}
+
+/**
+ * The next piece of a document a file stopped within (`cursor`): its
+ * versions after the last one written, up to its current version as its
+ * first line read it. Versions change only by a purge, which fails the
+ * export.
+ */
+const continuedPiece = async <C>(
+  brain: Brain<C>,
+  cursor: Extract<DocumentsCursor, { document: string }>,
+  room: number,
+  atLeastOne: boolean
+): Promise<Piece> => {
+  const { document, afterVersion, upTo } = cursor;
+  const kept = await brain.db
+    .select()
+    .from(versions)
+    .where(
+      and(
+        eq(versions.documentId, document),
+        gt(versions.number, afterVersion),
+        lte(versions.number, upTo)
+      )
+    )
+    .orderBy(asc(versions.number));
+  const piece = await versionsFitting(brain, kept, room, atLeastOne);
+  const full = piece.entries.length < kept.length;
+  return {
+    row:
+      piece.entries.length === 0
+        ? null
+        : { continues: document, versions: piece.entries },
+    bytes: piece.bytes,
+    next: full
+      ? { document, afterVersion: piece.last ?? afterVersion, upTo }
+      : { after: document },
+    full,
+  };
+};
+
+/**
+ * The first piece of document `id`: the document, its versions and its
+ * transcript read in one batch, so as one (a save between the reads would
+ * leave a transcript without the version it belongs to), with as many of
+ * its versions as fit. Null when it was deleted since it was listed, or
+ * when not even its first version fits in a file already begun.
+ */
+const firstPiece = async <C>(
+  brain: Brain<C>,
+  id: string,
+  room: number,
+  atLeastOne: boolean
+): Promise<Piece | null> => {
+  const { db } = brain;
+  const [[document], kept, [transcript]] = await db.batch([
+    db.select().from(documents).where(eq(documents.id, id)),
+    db
+      .select()
+      .from(versions)
+      .where(eq(versions.documentId, id))
+      .orderBy(asc(versions.number)),
+    db.select().from(transcripts).where(eq(transcripts.documentId, id)),
+  ]);
+  if (document === undefined) {
+    return { row: null, bytes: 0, next: { after: id }, full: false };
+  }
+  const head = {
+    id: document.id,
+    collectionId: document.collectionId,
+    path: document.path,
+    title: document.title,
+    type: document.type,
+    description: document.description,
+    owner: document.owner,
+    tags: document.tags,
+    reviewDate: document.reviewDate,
+    currentVersion: document.currentVersion,
+    createdAt: document.createdAt.toISOString(),
+    transcript:
+      transcript === undefined
+        ? null
+        : {
+            version: transcript.version,
+            turns: transcript.turns,
+            chapters: transcript.chapters,
+          },
+  };
+  const headBytes = jsonBytes(head);
+  const piece = await versionsFitting(
+    brain,
+    kept,
+    room - headBytes,
+    atLeastOne
+  );
+  if (piece.entries.length === 0 && kept.length > 0) {
+    return null;
+  }
+  const full = piece.entries.length < kept.length;
+  return {
+    row: { ...head, versions: piece.entries },
+    bytes: headBytes + piece.bytes,
+    next: full
+      ? {
+          document: document.id,
+          afterVersion: piece.last ?? 0,
+          upTo: kept.at(-1)?.number ?? 0,
+        }
+      : { after: document.id },
+    full,
+  };
+};
+
+/** The ID of the first exported document after `after` (null: the first). */
+const nextDocument = async <C>(
   brain: Brain<C>,
   collectionIds: readonly string[],
   after: string | null
-): Promise<{ rows: Json[]; last: string | null }> => {
-  const { db } = brain;
-  const page = await db
-    .select()
+): Promise<string | undefined> => {
+  const [next] = await brain.db
+    .select({ id: documents.id })
     .from(documents)
     .where(
       and(
@@ -534,69 +755,68 @@ const documentsFile = async <C>(
       )
     )
     .orderBy(asc(documents.id))
-    .limit(documentsPerFile);
+    .limit(1);
+  return next?.id;
+};
+
+/**
+ * The next file of documents from `from` (null: the first), each version
+ * with its text, closed at `documentsFileBytes` or `documentsPerFile`
+ * documents begun: its lines, and where the next goes on (null: none).
+ */
+const documentsFile = async <C>(
+  brain: Brain<C>,
+  collectionIds: readonly string[],
+  from: string | null
+): Promise<{ rows: Json[]; last: string | null }> => {
   const rows: Json[] = [];
-  for (const listed of page) {
-    // The document, its versions and its transcript read in one batch, so
-    // as one: a save between the reads would leave a transcript without
-    // the version it belongs to.
-    // oxlint-disable-next-line no-await-in-loop -- one document's versions at a time, to bound memory
-    const [[document], kept, [transcript]] = await db.batch([
-      db.select().from(documents).where(eq(documents.id, listed.id)),
-      db
-        .select()
-        .from(versions)
-        .where(eq(versions.documentId, listed.id))
-        .orderBy(asc(versions.number)),
-      db
-        .select()
-        .from(transcripts)
-        .where(eq(transcripts.documentId, listed.id)),
-    ]);
-    // Deleted since the page was read.
-    if (document === undefined) {
-      continue;
+  let bytes = 0;
+  let begun = 0;
+  let cursor: DocumentsCursor | null =
+    from === null ? null : documentsCursorSchema.parse(JSON.parse(from));
+  for (;;) {
+    const within = cursor !== null && "document" in cursor;
+    if (!within && (begun >= documentsPerFile || bytes >= documentsFileBytes)) {
+      return { rows, last: JSON.stringify(cursor) };
     }
-    const texts: Json[] = [];
-    for (const version of kept) {
-      // oxlint-disable-next-line no-await-in-loop -- one version's text at a time
-      const text = await versionText(brain, db, document.id, version.number);
-      texts.push({
-        number: version.number,
-        author: version.author,
-        message: version.message,
-        restoredFrom: version.restoredFrom,
-        createdAt: version.createdAt.toISOString(),
-        text: text ?? null,
-      });
+    const id =
+      cursor !== null && "document" in cursor
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop -- one document at a time
+          await nextDocument(brain, collectionIds, cursor?.after ?? null);
+    if (!within && id === undefined) {
+      return { rows, last: null };
     }
-    rows.push({
-      id: document.id,
-      collectionId: document.collectionId,
-      path: document.path,
-      title: document.title,
-      type: document.type,
-      description: document.description,
-      owner: document.owner,
-      tags: document.tags,
-      reviewDate: document.reviewDate,
-      currentVersion: document.currentVersion,
-      createdAt: document.createdAt.toISOString(),
-      versions: texts,
-      transcript:
-        transcript === undefined
-          ? null
-          : {
-              version: transcript.version,
-              turns: transcript.turns,
-              chapters: transcript.chapters,
-            },
-    });
+    const piece =
+      cursor !== null && "document" in cursor
+        ? // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
+          await continuedPiece(
+            brain,
+            cursor,
+            documentsFileBytes - bytes,
+            rows.length === 0
+          )
+        : // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
+          await firstPiece(
+            brain,
+            id ?? "",
+            documentsFileBytes - bytes,
+            rows.length === 0
+          );
+    // Not even its first version fits: it begins the next file.
+    if (piece === null) {
+      return { rows, last: JSON.stringify(cursor) };
+    }
+    if (piece.row !== null) {
+      rows.push(piece.row);
+      bytes += piece.bytes;
+      begun += within ? 0 : 1;
+    }
+    cursor = piece.next;
+    if (piece.full) {
+      return { rows, last: JSON.stringify(cursor) };
+    }
   }
-  return {
-    rows,
-    last: page.length < documentsPerFile ? null : (page.at(-1)?.id ?? null),
-  };
 };
 
 /**

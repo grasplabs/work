@@ -7,67 +7,17 @@ import { beforeEach } from "vite-plus/test";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
-import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import {
-  appWith as serverAppWith,
-  modelRegistration,
-} from "./workflow-apps.ts";
+import { signedInApi } from "./sign-in.ts";
 
 // What the tests of the client's rules for model calls share
-// (model-rules.test.ts, ai-step-answers.test.ts): the rules as a test
+// (model-rules.test.ts): the rules as a test
 // sets them, calls that meet them, and what the audit log says of each.
 // The model provider behind connect is the outside system
 // (test/model-provider.ts).
-
-/**
- * A new App with the sample server and `files`, declaring the model
- * resources its workflows' AI steps go through, which a test binds.
- */
-export const appWith = async (
-  builder: Parameters<typeof serverAppWith>[0],
-  files: Record<string, string>
-): Promise<string> =>
-  await serverAppWith(builder, {
-    ...modelRegistration({ reader: 32_768, anywhere: 6000, eu: 32_768 }),
-    ...files,
-  });
-
-/** An AI step reading a total through the App's `reader`, with `retries`. */
-export const llm = (retries: string) => `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    ${retries}
-  });`;
-
-/**
- * Commits `files` over App `app` and makes them current behind
- * activation's back, as no API does: activation seals the release, then
- * refuses AI steps through models it doesn't declare. What activation
- * said, for the run-time gate to be tested past it.
- */
-export const currentPastActivation = async (
-  builder: Awaited<ReturnType<typeof signedInApi>>,
-  app: string,
-  files: Record<string, string>
-): Promise<string> => {
-  const { version } = await builder.api.apps.files.commit(app, files, "Past");
-  const activation = await outcome(
-    builder.api.apps.versions.setCurrent(app, version)
-  );
-  await verifiedCandidate(app, version);
-  await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
-    .bind(version, app)
-    .run();
-  return activation;
-};
 
 /** A model that doesn't think: the organization's default in these tests. */
 export const mistral = "mistral/mistral-large-latest";
@@ -116,31 +66,6 @@ export const withRules = async (
 /** A person no other test uses, so their audit events are this test's. */
 const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
-
-/**
- * What `run` returns, for the workflow runs it starts, with the provider
- * answering with `replies`, for the `chosen` models, and spend counted in
- * a month of its own.
- */
-export const withDeploymentRules = async <Result>(
-  replies: ProviderReply[],
-  run: () => Promise<Result>
-) => {
-  const { MODEL_BUDGET_MONTH: month } = env;
-  const fake = await fakeProviderFor(chosen, ...replies);
-  try {
-    env.MODEL_BUDGET_MONTH = newMonth();
-    return { fake, result: await run() };
-  } finally {
-    env.MODEL_BUDGET_MONTH = month;
-  }
-};
-
-/** The model gateway's actions among `events`, in order. */
-export const modelActions = (events: AuditEvent[]): string[] =>
-  events
-    .map(({ action }) => action)
-    .filter((action) => action.startsWith("model."));
 
 /**
  * The audit events `actor` triggered, the model ledger's alerts included:
