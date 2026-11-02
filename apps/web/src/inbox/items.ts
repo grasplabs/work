@@ -59,6 +59,7 @@ export type InboxKind =
   | "failedRun"
   | "stoppedSchedule"
   | "revokedPackage"
+  | "stoppedEvents"
   | "bindingApproval"
   | "decision";
 
@@ -92,6 +93,7 @@ export type InboxSource =
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "revoked"; notification: PackageRevokedNotification }
+  | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -141,6 +143,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   failedRun: "workflows",
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
+  stoppedEvents: "workflows",
   bindingApproval: "workflows",
   decision: "workflows",
 };
@@ -604,6 +607,70 @@ const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** Connect stopped hearing a source: what the notification says of it. */
+type EventsStoppedNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "events_stopped" }
+>;
+
+/** The title of a stopped source: what it stopped hearing, at whose account when the feed named it. */
+const stoppedTitle = (mail: boolean, name: string | undefined): string => {
+  if (name === undefined) {
+    return mail
+      ? t`Your triggers stopped hearing new mail`
+      : t`Your triggers stopped hearing new files`;
+  }
+  return mail
+    ? t`Your triggers stopped hearing new mail at ${name}`
+    : t`Your triggers stopped hearing new files at ${name}`;
+};
+
+/** A mailbox or drive the person's triggers listen to, which connect stopped hearing. */
+const stoppedEventsItems = (
+  failed: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "events_stopped") {
+      return [];
+    }
+    const { at, reason, resource } = notification;
+    const mail = notification.event.endsWith(".mail.received");
+    const account = failed.accounts?.get(notification.connection);
+    const name = account?.name ?? undefined;
+    return [
+      {
+        id: `stoppedEvents:${notification.id}`,
+        kind: "stoppedEvents",
+        title: stoppedTitle(mail, name),
+        context: name ?? (mail ? t`Mail` : t`Files`),
+        body: [
+          reason === "refused"
+            ? t`The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day.`
+            : t`Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection.`,
+        ],
+        facts: [
+          ...(resource === null
+            ? []
+            : [{ label: mail ? t`Mailbox` : t`Drive`, value: resource }]),
+          { label: t`Stopped`, value: formatDateTime(at) },
+        ],
+        ...(account === undefined
+          ? {}
+          : {
+              about: {
+                kind: "integration",
+                integration: integrationKey(account.source, account.provider),
+              },
+            }),
+        forWhom: { person: me },
+        date: at,
+        urgent: true,
+        source: { type: "stoppedEvents", notification },
+      },
+    ];
+  });
+
 /** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
 const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -748,6 +815,7 @@ export const inboxItems = (
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
     ...(failed === undefined ? [] : revokedItems(failed, me)),
+    ...(failed === undefined ? [] : stoppedEventsItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };

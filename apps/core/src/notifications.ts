@@ -54,13 +54,16 @@ import { rowsOf } from "./sharing.ts";
 // questions (`gap_asked`, written by brain-gaps.ts in the batch that
 // records the ask), or that a schedule trigger they own stopped
 // (`trigger_stopped`, written by workflows/schedule-triggers.ts in the
-// batch that stops it), or that packages of an App or workflow they build
-// or approved were revoked as malware (`package_revoked`, written by
-// dependencies/requests.ts in the batch that revokes them). A question is
-// listed while it is open: once anyone answers or closes it, it goes from
-// the list by itself; a stopped trigger while it is still theirs and not
-// deleted; a revocation while they can still open the App or workflow, or
-// approve packages, who see every App's and workflow's approvals anyway.
+// batch that stops it), or that connect stopped hearing a mailbox or
+// drive their triggers listen to (`events_stopped`, written by
+// connector-source-notices.ts as connect's audit events reach core), or
+// that packages of an App or workflow they build or approved were revoked
+// as malware (`package_revoked`, written by dependencies/requests.ts in
+// the batch that revokes them). A question is listed while it is open:
+// once anyone answers or closes it, it goes from the list by itself; a
+// stopped trigger while it is still theirs and not deleted; a revocation
+// while they can still open the App or workflow, or approve packages, who
+// see every App's and workflow's approvals anyway.
 //
 // A workflow's failure tells who it acted for (who started the run, or,
 // for a run a trigger started, the App's owner when it failed), while
@@ -115,7 +118,7 @@ export const failureNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL WHERE ${told}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${told}`
       )
       .onConflictDoUpdate({
         target: [
@@ -156,8 +159,39 @@ export const stopNoticed = (
   return db
     .insert(notifications)
     .select(
-      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
     );
+};
+
+/** A source connect stopped hearing, and whom it tells. */
+export interface EventsStopNotice {
+  /** Its own ID, the same however often it is written. */
+  id: string;
+  personId: string;
+  /** When connect stopped hearing it. */
+  at: Date;
+  connection: string;
+  type: string;
+  resource: string | null;
+  reason: "refused" | "failed";
+}
+
+/**
+ * The statement that tells `personId` connect stopped hearing a source
+ * their triggers listen to, once (by its ID), only while they are a
+ * member of the organization.
+ */
+export const eventsStopNoticed = (
+  db: DrizzleD1Database,
+  notice: EventsStopNotice
+) => {
+  const at = notice.at.getTime();
+  return db
+    .insert(notifications)
+    .select(
+      sql`SELECT ${notice.id}, ${notice.personId}, 'events_stopped', NULL, NULL, NULL, NULL, NULL, ${at}, ${at}, NULL, NULL, NULL, NULL, NULL, ${notice.connection}, ${notice.type}, ${notice.resource}, ${notice.reason} WHERE ${activeMember(notice.personId)}`
+    )
+    .onConflictDoNothing({ target: notifications.id });
 };
 
 /**
@@ -189,7 +223,7 @@ export const revocationNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory} WHERE ${recorded} AND ${activeMember(personId)}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
       )
   );
 };
@@ -206,8 +240,9 @@ const workflowFoundBy = (person: Identity): SQL =>
 
 /**
  * `person`'s notifications: of Apps they can still open, of gaps still
- * open, of triggers still theirs, and of revocations of Apps or workflows
- * they can still open, or of any while they approve packages. Read with `apps`, `brain_records` and `brain_gap_states`
+ * open, of triggers still theirs, of the sources connect stopped hearing
+ * for them, and of revocations of Apps or workflows they can still open,
+ * or of any while they approve packages. Read with `apps`, `brain_records` and `brain_gap_states`
  * joined on the row (`appOn`, `gapOn`, `gapStateOn`).
  */
 const visibleTo = (env: Env, person: Identity): SQL | undefined =>
@@ -229,6 +264,7 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
         eq(triggerResources.ownerId, person.userId),
         isNull(triggerResources.deletedAt)
       ),
+      eq(notifications.type, "events_stopped"),
       and(
         eq(notifications.type, "package_revoked"),
         or(
@@ -270,7 +306,12 @@ const workflowOn = and(
 /** A notification as `listNotifications` reads its row. */
 interface ListedRow {
   id: string;
-  type: "run_failed" | "gap_asked" | "trigger_stopped" | "package_revoked";
+  type:
+    | "run_failed"
+    | "gap_asked"
+    | "trigger_stopped"
+    | "package_revoked"
+    | "events_stopped";
   app: string | null;
   appName: string | null;
   workflow: string | null;
@@ -283,6 +324,10 @@ interface ListedRow {
   packageName: string | null;
   packageVersion: string | null;
   advisory: string | null;
+  connection: string | null;
+  eventType: string | null;
+  eventResource: string | null;
+  stopReason: "refused" | "failed" | null;
   updatedAt: Date;
   readAt: Date | null;
 }
@@ -352,6 +397,23 @@ const notificationOf = (row: ListedRow): Notification[] => {
             gap: row.gap,
             question: gap.question,
             owner: gap.owner,
+            at,
+            read,
+          },
+        ];
+  }
+  if (row.type === "events_stopped") {
+    const { connection, eventType, eventResource, stopReason } = row;
+    return connection === null || eventType === null || stopReason === null
+      ? []
+      : [
+          {
+            id: row.id,
+            type: "events_stopped",
+            connection,
+            event: eventType,
+            resource: eventResource,
+            reason: stopReason,
             at,
             read,
           },
@@ -445,6 +507,10 @@ export const listNotifications = async (
         packageName: notifications.packageName,
         packageVersion: notifications.packageVersion,
         advisory: notifications.advisory,
+        connection: notifications.connectionId,
+        eventType: notifications.eventType,
+        eventResource: notifications.eventResource,
+        stopReason: notifications.stopReason,
         updatedAt: notifications.updatedAt,
         readAt: notifications.readAt,
       })

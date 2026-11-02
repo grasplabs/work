@@ -10,6 +10,7 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
+  MailWarningIcon,
   PackageIcon,
   PencilLineIcon,
   PlayIcon,
@@ -71,6 +72,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Malware",
     context: "inbox item kind: packages revoked as malware",
   }),
+  stoppedEvents: msg({
+    message: "Not hearing",
+    context: "inbox item kind: a mailbox or drive connect stopped hearing",
+  }),
   bindingApproval: msg({
     message: "Bindings",
     context:
@@ -99,6 +104,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,
+  stoppedEvents: MailWarningIcon,
   bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };

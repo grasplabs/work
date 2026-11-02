@@ -94,9 +94,17 @@ export const readWaiting = async (
       item.kind === "failedRun" ||
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
-      item.kind === "revokedPackage"
+      item.kind === "revokedPackage" ||
+      item.kind === "stoppedEvents"
         ? [item.notification]
         : []
+    );
+    const accounts = new Map(
+      read.items.flatMap((item) =>
+        item.kind === "stoppedEvents" && item.account !== null
+          ? [[item.notification.connection, item.account] as const]
+          : []
+      )
     );
     return {
       page: {
@@ -105,6 +113,7 @@ export const readWaiting = async (
         more: read.moreNotifications,
       },
       model: read.fixModel ?? undefined,
+      accounts,
     };
   });
   // Marked read as shown; one that couldn't be stays unread, and shows all the same.

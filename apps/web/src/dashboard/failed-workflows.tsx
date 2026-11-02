@@ -4,6 +4,7 @@ import type {
   NotificationCursor,
   NotificationPage,
 } from "@grasp-os/shared/notifications";
+import type { StoppedEventsItem } from "@grasp-os/shared/waiting";
 import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
@@ -30,7 +31,15 @@ export interface NotificationsPage {
    * chats are off, or no model is set up, and nobody is offered to ask.
    */
   model: string | undefined;
+  /**
+   * The accounts of the connections the page's stopped sources are at,
+   * by connection ID, as the feed named them; none where it couldn't.
+   */
+  accounts?: ReadonlyMap<string, StoppedAccount>;
 }
+
+/** A connection's account and catalog entry, as the feed names it. */
+export type StoppedAccount = NonNullable<StoppedEventsItem["account"]>;
 
 /**
  * Marks read the unread ones of the notifications a page shows, only as
