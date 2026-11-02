@@ -13,7 +13,6 @@ import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { streamText } from "./model-provider.ts";
 import {
   carrying,
   connectWithoutGraspKeys,
@@ -21,6 +20,7 @@ import {
   plan,
   sentCount,
 } from "./platform-providers.ts";
+import { streamText } from "./provider-streams.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Which extractor reads an uploaded file: Grasp's own document conversion

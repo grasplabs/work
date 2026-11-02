@@ -4,10 +4,12 @@
  * machine. Connect sends every fixed provider's request here instead of
  * the provider's own host (its `AI_PROVIDER_ORIGIN`, set by
  * e2e/connect-config.ts), its path unchanged and the provider's host in
- * `x-forwarded-host`. It refuses every key, as a provider refuses one it
- * doesn't know (401, in the provider's own error shape), which the chat
- * tests show as the model failing to answer (e2e/chat.e2e.ts). The global
- * setup proves the stack's requests land here (`expectModelRequestsHere`).
+ * `x-forwarded-host`. It answers an agent's turn in a chat a script opens
+ * (e2e/model-scripts.ts), streamed as the provider's API streams it, and
+ * refuses every other request's key, as a provider refuses one it doesn't
+ * know (401, in the provider's own error shape), which the chat tests show
+ * as the model failing to answer (e2e/chat.e2e.ts). The global setup
+ * proves the stack's requests land here (`expectModelRequestsHere`).
  *
  * Started by Playwright beside the stack (playwright.config.ts), on the
  * checkout's port for it (e2e/stack.ts):
@@ -17,6 +19,8 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { streamText } from "../apps/core/test/provider-streams.ts";
+import { scriptedAnswer } from "./model-scripts.ts";
 import { modelFakeOrigin, modelFakePort } from "./stack.ts";
 
 /** Where the fake lists the requests it got: GET, as JSON. */
@@ -39,6 +43,27 @@ const refusalOf = (path: string): unknown =>
       }
     : { message: "Unauthorized", type: "invalid_request_error" };
 
+/** The API a request's path names, of those a script answers through. */
+const apiOf = (
+  path: string
+): "anthropic-messages" | "openai-completions" | undefined => {
+  if (path.startsWith("/v1/messages")) {
+    return "anthropic-messages";
+  }
+  return path.startsWith("/v1/chat/completions")
+    ? "openai-completions"
+    : undefined;
+};
+
+/** A request's body as JSON, or `undefined` if it isn't any. */
+const parsed = (body: string): unknown => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+};
+
 const serve = (): void => {
   const got: FakeModelRequest[] = [];
   const answer = (request: IncomingMessage, response: ServerResponse) => {
@@ -55,8 +80,21 @@ const serve = (): void => {
       forwardedHost: typeof forwarded === "string" ? forwarded : null,
     });
     // Read whole first: a refusal mid-upload resets the connection.
-    request.resume();
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
     request.on("end", () => {
+      const api = apiOf(path);
+      const scripted =
+        api === undefined
+          ? undefined
+          : scriptedAnswer(parsed(Buffer.concat(chunks).toString("utf-8")));
+      if (api !== undefined && scripted !== undefined) {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(streamText(api, scripted));
+        return;
+      }
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify(refusalOf(path)));
     });
