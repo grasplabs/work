@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6121ccae-5d10-4797-aac5-6871ae860f1f",
+  "id": "b94dd9c2-3611-486f-a540-2ed1dfadff9e",
   "prevId": "9bc4dcf1-0e88-4046-af5c-1edbbdd6f8d6",
   "tables": {
     "access_revocations": {
@@ -8688,75 +8688,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "trigger_hour_slots": {
-      "name": "trigger_hour_slots",
-      "columns": {
-        "trigger_id": {
-          "name": "trigger_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_key": {
-          "name": "event_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "taken_at": {
-          "name": "taken_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "trigger_hour_slots_taken": {
-          "name": "trigger_hour_slots_taken",
-          "columns": [
-            "trigger_id",
-            "taken_at"
-          ],
-          "isUnique": false
-        },
-        "trigger_hour_slots_taken_at": {
-          "name": "trigger_hour_slots_taken_at",
-          "columns": [
-            "taken_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "trigger_hour_slots_trigger_id_trigger_resources_id_fk": {
-          "name": "trigger_hour_slots_trigger_id_trigger_resources_id_fk",
-          "tableFrom": "trigger_hour_slots",
-          "tableTo": "trigger_resources",
-          "columnsFrom": [
-            "trigger_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "trigger_hour_slots_trigger_id_event_key_pk": {
-          "columns": [
-            "trigger_id",
-            "event_key"
-          ],
-          "name": "trigger_hour_slots_trigger_id_event_key_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "trigger_resource_versions": {
       "name": "trigger_resource_versions",
       "columns": {
@@ -8977,24 +8908,9 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "email_address": {
-          "name": "email_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
-      "indexes": {
-        "trigger_resources_email_address_unique": {
-          "name": "trigger_resources_email_address_unique",
-          "columns": [
-            "email_address"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -11577,6 +11493,13 @@
         },
         "stop_requested_at": {
           "name": "stop_requested_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_taken_at": {
+          "name": "stop_taken_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
