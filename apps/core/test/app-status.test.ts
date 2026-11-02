@@ -15,6 +15,7 @@ import {
 import { shareStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
+import { repairStarts } from "../src/workflows/runs.ts";
 import { ordinaryData, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -31,9 +32,15 @@ import {
 import type { Person as Signed } from "./json-workflow-apps.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { notesFiles } from "./notes-client-app.ts";
-import { runObject, sleeping, whileEngineRefuses } from "./runs.ts";
+import {
+  endLiveRuns,
+  runObject,
+  sleeping,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
+import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
 // An App is a draft, published or archived (app-status.ts). These tests
 // start from the ways that can fail: someone who only uses an App reaching
@@ -45,6 +52,9 @@ import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
 // function route. Gone with App workflows: a schedule an App's own
 // workflow declares, firing only while the App is published, and its own
 // workflows' detail and parameters read, never set, once archived.
+// Kept as an App run until a JSON run's start repair shows it: the repair
+// re-checking that the person a start acts for may still use the App,
+// whatever the start's row says.
 // Already covered: a start refused for someone who may no longer use the
 // App once it is decided (workflow-starts.test.ts, "acts only for someone
 // who may use the App now, each with keys of their own").
@@ -698,6 +708,100 @@ describe("an App's status", () => {
       shared: "app.archived",
       members: [],
       classified: "app.archived",
+    });
+  });
+});
+
+/** A workflow that sleeps a day: a run that stays unfinished. */
+const nap = workflowFiles(
+  "nap",
+  `  await step.sleep("rest", { description: "Rest", duration: "1 day" });
+  return null;`
+);
+
+/**
+ * A builder's App with a screen and its own workflow `nap`, its first
+ * version current, left a draft; shared with `user` to use.
+ */
+const napApp = async (builder: Person, user?: Person): Promise<string> => {
+  const { id } = await builder.api.apps.create({ name: "Invoices" });
+  const { version } = await builder.api.apps.files.commit(
+    id,
+    {
+      ...sampleApp(),
+      ...nap,
+      "screens/desk.tsx": "export default () => null;\n",
+    },
+    "First version"
+  );
+  await builder.api.apps.versions.setCurrent(id, version);
+  await ordinaryData(id);
+  if (user !== undefined) {
+    await builder.api.apps.members.add(id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+  }
+  return id;
+};
+
+/**
+ * A start of the App's own `nap` core stopped in the middle of, never
+ * sent to the engine: a trigger's (no person) or a person's, written ten
+ * minutes ago.
+ */
+const orphan = async (app: string, startedBy: string | null) => {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'nap', 1, ?, 'starting', ?, ?, '{}')"
+  )
+    .bind(
+      id,
+      app,
+      startedBy,
+      Date.now() - 600_000,
+      startedBy === null ? `schedule:${id}` : null
+    )
+    .run();
+  return id;
+};
+
+/** An App run's status as its row has it. */
+const appRunStatusOf = async (run: string) =>
+  await env.DB.prepare("SELECT status FROM workflow_runs WHERE id = ?")
+    .bind(run)
+    .first("status");
+
+// Kept until a JSON run's start repair re-checks its person: an App's own
+// workflow's runs, as before.
+describe("an App's status, for its own workflows' runs", () => {
+  afterEach(endLiveRuns);
+
+  it("sends no start the repair finds for an App that may no longer run it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const draft = await napApp(builder);
+    const archived = await napApp(builder);
+    await builder.api.apps.archive(archived);
+    const user = await signedInApi(idp, "user");
+    const shared = await napApp(builder, user);
+    const trigger = await orphan(draft, null);
+    const person = await orphan(archived, builder.userId);
+    // A user's start on an App published then, a draft now: they may no
+    // longer use it, whatever their start's row says.
+    const usersStart = await orphan(shared, user.userId);
+
+    await repairStarts(env, trigger);
+    await repairStarts(env, person);
+    await repairStarts(env, usersStart);
+    expect({
+      trigger: await appRunStatusOf(trigger),
+      person: await appRunStatusOf(person),
+      usersStart: await appRunStatusOf(usersStart),
+    }).toStrictEqual({
+      trigger: "failed",
+      person: "failed",
+      usersStart: "failed",
     });
   });
 });
