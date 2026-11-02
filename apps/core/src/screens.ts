@@ -727,7 +727,8 @@ export const checkAppCode = async (
  * Type-checks a draft's server code of spec 8's layout as a seal does
  * (`checkAppCode`, with every gate), but with the host's generated modules
  * as the seal's first inspection has them: the constructors, and stand-ins
- * for the references. The real ones are generated from what the App's
+ * for the references, typed `any` (`untyped`), so a draft's reference to
+ * its own operation (`internal.notes.count`) checks. The real ones are generated from what the App's
  * registration answers when it runs, and a check runs none of a draft's
  * code: so a draft that passes may still fail its seal, as its preview
  * then reports. Whatever the draft holds under `.grasp/` is dropped, as
@@ -748,7 +749,7 @@ export const checkDraftAppCode = async (
           ([path]) => !path.startsWith(generatedFolder)
         )
       ),
-      ...symbolicModules(),
+      ...symbolicModules({ untyped: true }),
       [generatedPaths.server]: serverModuleSource,
     },
     whose,

@@ -1414,7 +1414,37 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
   });
 
   it("type-checks a draft's server code as its seal would, with no preview open, and proposes nothing that fails it", async () => {
-    const operations = notesFiles["operations/notes.ts"] ?? "";
+    // Calls an internal operation by its reference, as the seal's real
+    // references type it: the check's stand-ins must not refuse it.
+    const operations = `${(notesFiles["operations/notes.ts"] ?? "").replace(
+      "import { action, doc, mutation, query }",
+      'import { internal } from "#grasp/server-references";\nimport { action, doc, internalQuery, mutation, query }'
+    )}
+export const count = internalQuery({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
+});
+
+export const tally = action({
+  args: {},
+  returns: v.number(),
+  uses: [internal.notes.count],
+  handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
+});
+`;
+    const registration = (notesFiles["app.ts"] ?? "")
+      .replace("import { big,", "import { big, count, tally,")
+      .replace("stamp, big }", "stamp, big, tally }")
+      .replace(
+        "internalOperations: {}",
+        "internalOperations: { notes: { count } }"
+      );
+    const sound = {
+      ...notesFiles,
+      "operations/notes.ts": operations,
+      "app.ts": registration,
+    };
     const mistyped = operations.replace(
       "import { AppError,",
       'const total: number = "seven";\nvoid total;\nimport { AppError,'
@@ -1426,7 +1456,7 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
           const checked = await env.build.check(app.id);
           return { passed: checked.passed, status: checked.server.status, diagnostics: checked.server.diagnostics.map(({ file, rule, category }) => ({ file, rule, category })) };
         };
-        await env.build.write(app.id, ${JSON.stringify(notesFiles)});
+        await env.build.write(app.id, ${JSON.stringify(sound)});
         const sound = await server();
         await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })});
         const mistyped = await server();
