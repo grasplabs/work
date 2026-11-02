@@ -1,0 +1,1 @@
+ALTER TABLE `oauth_flows` ADD `finishing_until` integer;
