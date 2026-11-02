@@ -143,15 +143,13 @@ export interface WorkflowRunTrace {
   /** The diagram of the run's own version, as it was published. */
   diagram: WorkflowDiagram;
   tasks: { task: string; state: TraceState; attempts: number }[];
-  /**
-   * Its tasks' steps on this page, in the order the run reached them;
-   * `tasks` are of this page's steps.
-   */
+  /** Each of its tasks' steps, in the order the run reached them. */
   steps: TraceStep[];
-  /** False when more steps follow on a page after this one. */
-  complete: boolean;
-  /** Where the next page goes on from (`runTrace`'s `cursor`); null on the last. */
-  nextCursor: string | null;
+  /**
+   * True when its journal holds more than one trace reads: what it shows
+   * is the first part of the run.
+   */
+  truncated: boolean;
   /**
    * The run's retention is over, or its
    * details were swept: nothing of what it reached is shown.
@@ -175,6 +173,6 @@ export interface WorkflowCandidateTrace {
   draftRevision: number;
   status: WorkflowRunStatus;
   steps: TraceStep[];
-  /** False when the journal held more than one read takes. */
-  complete: boolean;
+  /** True when its journal holds more than one trace reads. */
+  truncated: boolean;
 }

@@ -168,12 +168,12 @@ describe("a JSON workflow run's history", () => {
 
     expect({
       steps: told(after),
-      complete: after.complete,
+      truncated: after.truncated,
       // The steps around it, to the millisecond.
       around: after.steps.filter(({ task }) => task !== "second"),
     }).toStrictEqual({
       steps: told(before),
-      complete: true,
+      truncated: false,
       around: before.steps.filter(({ task }) => task !== "second"),
     });
   });

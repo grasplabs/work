@@ -7,14 +7,12 @@ import type {
 } from "@grasp-os/shared/workflow-diagrams";
 import {
   workflowResourceErrors,
-  workflowRunTraceMaxPageSize,
   workflowRunTraceOptionsSchema,
 } from "@grasp-os/shared/workflow-resources";
 import { decisionPollStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   HistoryRecord,
   ReadableHistoryRecord,
-  StepIdentity,
 } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -65,22 +63,11 @@ import { detailsRemoved } from "./retention.ts";
 // trace, and a failure only by a code the platform defines. For the
 // workflow's builders, who read its definitions.
 //
-// A trace is read a page of steps at a time, in the order the run reached
-// them, from at most `maxRecords` of its journal's records: each page goes
-// on from the engine event before the first step the page before didn't
-// tell, leaving out what it did (the cursor, `<event>.<ordinal>`: the
-// event, and the last step told). No step is left out or told twice. A
-// step is told whole on its page, its retries and waits included, as far
-// as its page's records go: a page stops early only once it has a step
-// beyond its own and each of its own has reached its end, which no later
-// record changes; one read to its cap tells its steps only up to the
-// first still going (but its first), which the next page tells whole. A
-// step still going when its page was read is told as it stood: a held
-// call's first check, should another branch of a fork start a step
-// between its round's end and that check, and a step still going past a
-// page's cap.
+// A trace reads the first `maxRecords` of the run's journal's records,
+// and says so (`truncated`) when the journal holds more: the steps those
+// records tell, each as far as they go.
 
-/** The most records of a run's journal one page of its trace reads. */
+/** The most records of a run's journal one trace reads. */
 const maxRecords = 2000;
 
 /** Records per history read, the engine's own most. */
@@ -186,18 +173,14 @@ interface Folded {
   rounds: Map<number, number>;
   /** Whether its own step (not a decision's wait before it) was reached. */
   own: boolean;
-  /** The engine event its first record is. */
-  readonly firstEventId: number;
 }
 
-/** A page of the steps of tasks one trace read. */
+/** The steps of tasks one trace read. */
 interface TracedSteps {
-  /** The page's steps, in the order the run reached them. */
+  /** In the order the run reached them. */
   steps: TraceStep[];
-  /** False when more steps follow on a page after this one. */
-  complete: boolean;
-  /** Where the next page goes on from, when more follow. */
-  nextCursor: string | null;
+  /** Whether the journal holds more records than one trace reads. */
+  truncated: boolean;
 }
 
 /**
@@ -292,63 +275,22 @@ const fold = (
   };
 };
 
-/**
- * One page's read of a run's journal: the task steps it folded, by their
- * first engine step's ordinal, and what it leaves out as a page before
- * told it.
- */
+/** One trace's read of a run's journal: the task steps it folded. */
 interface Reading {
-  /** The last task step the pages before told, by ordinal; 0 for none. */
-  readonly told: number;
+  /** By their first engine step's ordinal. */
   readonly folded: Map<number, Folded>;
-  /** The task step each engine step it folded is part of. */
+  /** The task step each engine step is part of. */
   readonly byOrdinal: Map<number, Folded>;
-  /** The latest task step it folded of each step name. */
+  /** The latest task step of each step name. */
   readonly current: Map<string, Folded>;
   /** The task step each round's waits are of, by the round's key. */
   readonly byKey: Map<string, Folded>;
-  /** Engine steps of task steps a page before told, left out. */
-  readonly skipped: Set<number>;
-  /**
-   * Step names whose latest task step a page before told, and whether
-   * that one reached its own step.
-   */
-  readonly toldOwn: Map<string, boolean>;
-  /** The engine steps named `base`, or core's decision waits of it. */
-  readonly stepsOf: (base: string) => Promise<readonly StepIdentity[]>;
 }
 
 /**
- * Whether the latest task step of name `base` before engine step
- * `ordinal` is one a page before told, and then whether it reached its
- * own step; undefined when it isn't.
- */
-const toldBefore = async (
-  reading: Reading,
-  base: string,
-  ordinal: number
-): Promise<boolean | undefined> => {
-  let latest: { ordinal: number; role: Role } | undefined;
-  for (const step of await reading.stepsOf(base)) {
-    const place = placeOf(step.name);
-    if (
-      place?.kind === "task" &&
-      place.base === base &&
-      step.ordinal < ordinal &&
-      step.ordinal > (latest?.ordinal ?? 0)
-    ) {
-      latest = { ordinal: step.ordinal, role: place.role };
-    }
-  }
-  return latest === undefined || latest.ordinal > reading.told
-    ? undefined
-    : latest.role !== "decision";
-};
-
-/**
  * The task step engine step `ordinal`, first read in `record` at `place`,
- * is part of: one this page folded, or a new one; undefined for one a page
- * before told.
+ * is part of: one already folded, or a new one; undefined for a wait of a
+ * round no record read.
  */
 const placed = async (
   reading: Reading,
@@ -356,8 +298,6 @@ const placed = async (
   place: Place
 ): Promise<Folded | undefined> => {
   if (place.kind === "wait") {
-    // A round's waits follow the round: one this page didn't fold is of a
-    // task step a page before told.
     return reading.byKey.get(place.key);
   }
   const { ordinal } = record.step;
@@ -367,19 +307,8 @@ const placed = async (
   const own = place.role === "round" && place.part === "";
   const starts = own || place.role === "decision";
   const latest = reading.current.get(place.base);
-  let into: Folded | undefined;
-  if (latest !== undefined && !(starts && latest.own)) {
-    into = latest;
-  } else if (latest === undefined && reading.told > 0) {
-    const toldOwn =
-      reading.toldOwn.get(place.base) ??
-      (await toldBefore(reading, place.base, ordinal));
-    if (toldOwn !== undefined && !(starts && toldOwn)) {
-      reading.toldOwn.set(place.base, toldOwn || own);
-      return undefined;
-    }
-  }
-  if (into === undefined) {
+  let into = latest;
+  if (into === undefined || (starts && into.own)) {
     into = {
       step: {
         ordinal,
@@ -393,11 +322,9 @@ const placed = async (
       },
       rounds: new Map(),
       own: false,
-      firstEventId: record.eventId,
     };
     reading.folded.set(ordinal, into);
     reading.current.set(place.base, into);
-    reading.toldOwn.delete(place.base);
   }
   into.own ||= own;
   // A round's waits for its turn or its AI provider are named by its key.
@@ -415,21 +342,16 @@ const foldRecord = async (
   if (record.unreadable || record.step === null) {
     return;
   }
-  const { ordinal } = record.step;
-  // An engine step of a task step a page before told: its own record.
-  if (ordinal <= reading.told || reading.skipped.has(ordinal)) {
-    return;
-  }
   const place = placeOf(record.step.name);
   if (place === undefined) {
     return;
   }
+  const { ordinal } = record.step;
   const step = { ...record, step: record.step };
   let into = reading.byOrdinal.get(ordinal);
   if (into === undefined) {
     into = await placed(reading, step, place);
     if (into === undefined) {
-      reading.skipped.add(ordinal);
       return;
     }
     reading.byOrdinal.set(ordinal, into);
@@ -437,61 +359,27 @@ const foldRecord = async (
   fold(into, step, place.role);
 };
 
-/** A trace's cursor: the engine event a page goes on after, and its last step. */
-const cursorOf = (cursor: string | null): { after: number; told: number } => {
-  const [after = 0, told = 0] = (cursor ?? "0.0").split(".").map(Number);
-  return { after, told };
-};
-
 /**
- * A page of the steps of tasks that run `id`'s journal holds, in the order
- * it reached them: at most `pageSize`, going on from `cursor` (from the
- * first when null), read from at most `maxRecords` of its records. Read
- * from the engine's own history, so a test run's as a run's.
+ * The steps of tasks that run `id`'s journal holds, in the order it
+ * reached them, as far as its first `maxRecords` records tell, and whether
+ * it holds more. Read from the engine's own history, so a test run's as a
+ * run's.
  */
 export const tracedSteps = async (
   env: Env,
-  id: string,
-  {
-    pageSize = workflowRunTraceMaxPageSize,
-    cursor = null,
-  }: { pageSize?: number; cursor?: string | null } = {}
+  id: string
 ): Promise<TracedSteps> => {
   const stub = runObjectOf(env, id);
-  const start = cursorOf(cursor);
   const reading: Reading = {
-    told: start.told,
     folded: new Map(),
     byOrdinal: new Map(),
     current: new Map(),
     byKey: new Map(),
-    skipped: new Set(),
-    toldOwn: new Map(),
-    stepsOf: async (base) => {
-      const found = await stub.history({
-        after: 0,
-        limit: 1,
-        steps: [
-          { kind: null, prefix: base },
-          { kind: null, prefix: `${decisionPollStepPrefix}${base}:` },
-        ],
-      });
-      return found?.steps.flat() ?? [];
-    },
   };
-  const shownOf = () =>
-    [...reading.folded.values()].toSorted(
-      (a, b) => a.step.ordinal - b.step.ordinal
-    );
-  let { after } = start;
+  let after = 0;
   let read = 0;
   let more = true;
-  let capped = false;
-  while (more) {
-    if (read >= maxRecords) {
-      capped = true;
-      break;
-    }
+  while (more && read < maxRecords) {
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the one before
     const page = await stub.history({
       after,
@@ -499,11 +387,11 @@ export const tracedSteps = async (
     });
     if (page === undefined) {
       // Still starting: the engine has no record of it yet.
-      return { steps: [], complete: true, nextCursor: null };
+      return { steps: [], truncated: false };
     }
     ({ more } = page);
     // A page that says there is more but holds nothing would ask again
-    // for the same page forever: what was read stands.
+    // for the same page forever: what was read stands, as truncated.
     if (page.records.length === 0) {
       break;
     }
@@ -513,41 +401,13 @@ export const tracedSteps = async (
       // oxlint-disable-next-line no-await-in-loop -- in the order the run journaled them
       await foldRecord(reading, record);
     }
-    // Its own steps all at their end, and one beyond them: no later
-    // record changes this page.
-    const shown = shownOf();
-    if (
-      shown.length > pageSize &&
-      shown.slice(0, pageSize).every(({ step }) => step.state === "reached")
-    ) {
-      break;
-    }
-  }
-  const shown = shownOf();
-  // Read to its cap, a page tells its steps up to the first still going,
-  // whose later records the cap may have cut off, unless that is its first:
-  // the next page tells it whole. Otherwise its steps as they stand.
-  let count = shown.length;
-  if (capped) {
-    const going = shown.findIndex(({ step }) => step.state !== "reached");
-    count = going === -1 ? shown.length : Math.max(going, 1);
-  }
-  const told = shown.slice(0, Math.min(count, pageSize));
-  const untold = shown.slice(told.length);
-  const end = told.at(-1)?.step.ordinal ?? reading.told;
-  // The next page goes on before the first record of the first step this
-  // one didn't tell, leaving out what this one did.
-  let nextCursor: string | null = null;
-  if (untold.length > 0) {
-    const first = Math.min(...untold.map(({ firstEventId }) => firstEventId));
-    nextCursor = `${first - 1}.${end}`;
-  } else if (capped) {
-    nextCursor = `${after}.${end}`;
   }
   return {
-    steps: told.map(({ step }) => step),
-    complete: nextCursor === null,
-    nextCursor,
+    // A step's ordinal is its place in the run.
+    steps: [...reading.folded.values()]
+      .map(({ step }) => step)
+      .toSorted((a, b) => a.ordinal - b.ordinal),
+    truncated: more,
   };
 };
 
@@ -562,7 +422,7 @@ export const resourceRunTrace = async (
   runId: unknown,
   options?: unknown
 ): Promise<WorkflowRunTrace> => {
-  const { doors, pageSize, cursor } = workflowResourceErrors.parse(
+  const { doors } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowRunTraceOptionsSchema,
     options
@@ -599,17 +459,13 @@ export const resourceRunTrace = async (
       diagram,
       tasks: [],
       steps: [],
-      complete: true,
-      nextCursor: null,
+      truncated: false,
       detailsRemoved: true,
     };
   }
-  const { steps, complete, nextCursor } = await tracedSteps(env, run.id, {
-    pageSize,
-    cursor,
-  });
-  // A task's steps together, this page's: the most telling of their
-  // states, the most attempts any made.
+  const { steps, truncated } = await tracedSteps(env, run.id);
+  // A task's steps together: the most telling of their states, the most
+  // attempts any made.
   const tasks = new Map<string, WorkflowRunTrace["tasks"][number]>();
   for (const step of steps) {
     const known = tasks.get(step.task);
@@ -629,8 +485,7 @@ export const resourceRunTrace = async (
     diagram,
     tasks: [...tasks.values()],
     steps,
-    complete,
-    nextCursor,
+    truncated,
     detailsRemoved: false,
     ...(run.aiProvider === undefined ? {} : { aiProvider: run.aiProvider }),
   };

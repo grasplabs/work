@@ -1,14 +1,8 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
-import type {
-  TraceStep,
-  WorkflowRunTrace,
-} from "@grasp-os/shared/workflow-diagrams";
-import {
-  workflowNamespace,
-  workflowRunTraceMaxPageSize,
-} from "@grasp-os/shared/workflow-resources";
+import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -384,9 +378,8 @@ describe("a run's trace", () => {
 // workflow's pages read it. What could go wrong, tried below: a try's
 // retry of a failed step told as steps of no task, or left out, or as a
 // second step; a decision's wait left out, so its task shows nothing
-// while it waits, or told as done before it was answered; a page leaving
-// a step out, or telling one twice, or a step's retries split across
-// pages.
+// while it waits, or told as done before it was answered; a run longer
+// than a trace reads shown as though it were all of it.
 
 const idp = mockIdp();
 
@@ -402,62 +395,12 @@ const signedInBuilder = async () => {
   return { ...session, acting };
 };
 
-type Builder = Awaited<ReturnType<typeof signedInBuilder>>;
-
-/** Every step of run `runId`'s trace, `pageSize` at a time, and its pages. */
-const pagedTrace = async (
-  builder: Builder,
-  id: string,
-  runId: string,
-  pageSize: number
-) => {
-  const pages: WorkflowRunTrace[] = [];
-  let cursor: string | null = null;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
-    const page: WorkflowRunTrace = await builder.api.workflowResources.runTrace(
-      id,
-      runId,
-      {
-        doors: false,
-        pageSize,
-        cursor,
-      }
-    );
-    pages.push(page);
-    ({ nextCursor: cursor } = page);
-  } while (cursor !== null);
-  return { steps: pages.flatMap(({ steps }) => steps), pages };
-};
-
 /** A trace's steps as lines: task, state, attempts and failure's code. */
 const toldOf = ({ steps }: Pick<WorkflowRunTrace, "steps">) =>
   steps.map(
     ({ task, state, attempts, errorCode }) =>
       `${task} ${state} ${attempts} ${errorCode ?? "-"}`
   );
-
-/** Starts version 1 of workflow `id` as `by`: its run's ID. */
-const liveRunOf = async (by: Acting, id: string): Promise<string> => {
-  const { runId } = await startWorkflow(
-    env,
-    { type: "person", person: by },
-    id,
-    {
-      version: 1,
-      input: { who: "Ada" },
-      key: unique(),
-    }
-  );
-  if (runId === null) {
-    throw new Error("The start made a run");
-  }
-  return runId;
-};
-
-/** The steps of a loop's `note` task in `trace`. */
-const notesOf = ({ steps }: { steps: TraceStep[] }) =>
-  steps.filter(({ task }) => task === "note");
 
 /** A compute module whose `fail` always fails, as a flaky dependency's. */
 const failingModule = `import { compute, v } from "@grasp-os/sdk/compute";
@@ -474,7 +417,7 @@ export const fail = compute({
 describe("a run's trace, read over the session API", () => {
   afterEach(endLiveRuns);
 
-  it("tells a try's retries of a failed step as that one step's attempts, on whichever page", async () => {
+  it("tells a try's retries of a failed step as that one step's attempts", async () => {
     const builder = await signedInBuilder();
     const workflow = await createWorkflowResource(
       env,
@@ -519,14 +462,11 @@ describe("a run's trace, read over the session API", () => {
       runId,
       { doors: false }
     );
-    const paged = await pagedTrace(builder, workflow.id, runId, 1);
 
     expect({
       status: whole.status,
       steps: toldOf(whole),
       task: whole.tasks.find(({ task }) => task === "fetch-rates"),
-      complete: whole.complete,
-      paged: paged.steps,
     }).toStrictEqual({
       status: "completed",
       // One step of three attempts in all, failed at the last, which the
@@ -538,8 +478,6 @@ describe("a run's trace, read over the session API", () => {
         "fell-back reached 1 -",
       ],
       task: { task: "fetch-rates", state: "failed", attempts: 3 },
-      complete: true,
-      paged: whole.steps,
     });
   });
 
@@ -670,170 +608,83 @@ describe("a run's trace, read over the session API", () => {
     });
   });
 
-  it("reads a run longer than a page in pages, each step once and none left out", async () => {
-    const builder = await signedInBuilder();
-    const workflow = await createWorkflowResource(
-      env,
-      builder.acting,
-      `traced-${unique()}`
-    );
-    const names = Array.from({ length: 12 }, (_, index) => `n${index}`);
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", [
-        { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
-        {
-          "each-name": {
-            for: {
-              each: "name",
-              in: `\${ ${JSON.stringify(names)} }`,
-              at: "i",
-            },
-            do: [
-              {
-                note: {
-                  set: "${ . }",
-                  export: { as: "${ {seen: ($context.seen + [$name])} }" },
-                },
-              },
-            ],
-          },
-        },
-        { finished: { set: '${ {status: ($context.seen | join(","))} }' } },
-      ]),
-      basedOn: null,
-    });
-    const runId = await ranFor(builder.acting, workflow.id, 1, "Ada");
-
-    const whole = await builder.api.workflowResources.runTrace(
-      workflow.id,
-      runId,
-      { doors: false }
-    );
-    const paged = await pagedTrace(builder, workflow.id, runId, 5);
-
-    expect({
-      steps: paged.steps.map(
-        ({ task, item }) => `${task}${item === null ? "" : `@${item}`}`
-      ),
-      pages: paged.pages.map(({ steps, complete }) => ({
-        steps: steps.length,
-        complete,
-      })),
-      // The same steps as one page holds, told the same.
-      same: paged.steps,
-    }).toStrictEqual({
-      steps: [
-        "init",
-        "each-name",
-        ...names.map((_, index) => `note@each-name.${index}`),
-        "finished",
-      ],
-      // Fifteen steps: three pages, the last full, and none after it.
-      pages: [
-        { steps: 5, complete: false },
-        { steps: 5, complete: false },
-        { steps: 5, complete: true },
-      ],
-      same: whole.steps,
-    });
-  });
-
   it(
-    "reads a live run's journal a bounded share per page, its waiting branch beside a long loop, each step once and none left out",
-    { timeout: 240_000 },
+    "says when it shows only the first part of a run whose journal is longer than one trace reads",
+    { timeout: 120_000 },
     async () => {
       const builder = await signedInBuilder();
-      const workflow = await createWorkflowResource(
+      const long = await createWorkflowResource(
         env,
         builder.acting,
         `traced-${unique()}`
       );
-      // More records than a page reads: some four an item's step.
+      // More records than a trace reads: some four an item's step.
       const items = 600;
-      await publishWorkflowVersion(env, builder.acting, workflow.id, {
-        definition: definitionOf(workflow.name, "1.0.0", [
+      await publishWorkflowVersion(env, builder.acting, long.id, {
+        definition: definitionOf(long.name, "1.0.0", [
           {
-            pick: {
-              fork: {
-                branches: [
-                  { hold: { wait: "PT1H" } },
-                  {
-                    "each-name": {
-                      for: { in: `\${ [range(0; ${items})] }` },
-                      do: [{ note: { set: "${ . }" } }],
-                    },
-                  },
-                ],
-              },
-              metadata: { grasp: { concurrency: 2 } },
+            "each-name": {
+              for: { in: `\${ [range(0; ${items})] }` },
+              do: [{ note: { set: "${ . }" } }],
             },
           },
+          { finished: { set: { status: "done" } } },
         ]),
+        basedOn: null,
+      });
+      const short = await createWorkflowResource(
+        env,
+        builder.acting,
+        `traced-${unique()}`
+      );
+      await publishWorkflowVersion(env, builder.acting, short.id, {
+        definition: definitionOf(short.name, "1.0.0", routing),
         basedOn: null,
       });
       // Room for the loop's steps, past the tests' lowered step limit.
       const configuredLimits = env.TEST_QUOTA_LIMITS;
       env.TEST_QUOTA_LIMITS = { workflowSteps: 1000 };
+      let longRun: string;
       try {
-        const runId = await liveRunOf(builder.acting, workflow.id);
-        const pageSize = workflowRunTraceMaxPageSize;
-        // Once the loop is done, while its other branch still waits.
-        const paged = await vi.waitFor(
-          async () => {
-            const read = await pagedTrace(
-              builder,
-              workflow.id,
-              runId,
-              pageSize
-            );
-            if (notesOf(read).length < items) {
-              throw new Error("The loop hasn't run every item yet");
-            }
-            return read;
-          },
-          { timeout: 200_000, interval: 2000 }
-        );
-        const run = await resourceRunFor(
-          env,
-          builder.acting,
-          workflow.id,
-          runId
-        );
-        await builder.api.workflowResources.terminateRun(workflow.id, runId);
-        const ordinals = paged.steps.map(({ ordinal }) => ordinal);
-
-        expect({
-          status: run.status,
-          // Each item's step once, every one of them.
-          notes: notesOf(paged)
-            .map(({ item }) => Number(item?.split(".").at(-1)))
-            .toSorted((a, b) => a - b),
-          hold: paged.steps
-            .filter(({ task }) => task === "hold")
-            .map(({ state }) => state),
-          // In the order the run reached them: none told twice.
-          ordered: ordinals.every(
-            (ordinal, index) =>
-              index === 0 || (ordinals[index - 1] ?? 0) < ordinal
-          ),
-          // A page stopped at its share of the journal, short of a full
-          // page, and the next went on from it.
-          bounded: paged.pages.some(
-            ({ steps, nextCursor }) =>
-              nextCursor !== null && steps.length < pageSize
-          ),
-          last: paged.pages.at(-1)?.complete,
-        }).toStrictEqual({
-          status: "running",
-          notes: Array.from({ length: items }, (_, index) => index),
-          hold: ["waiting"],
-          ordered: true,
-          bounded: true,
-          last: true,
-        });
+        longRun = await ranFor(builder.acting, long.id, 1, "Ada");
       } finally {
         env.TEST_QUOTA_LIMITS = configuredLimits;
       }
+      const shortRun = await ranFor(builder.acting, short.id, 1, "Ada");
+      const traceOf = async (id: string, runId: string) =>
+        await builder.api.workflowResources.runTrace(id, runId, {
+          doors: false,
+        });
+      const longTrace = await traceOf(long.id, longRun);
+      const shortTrace = await traceOf(short.id, shortRun);
+      const notes = longTrace.steps.filter(({ task }) => task === "note");
+
+      expect({
+        long: {
+          status: longTrace.status,
+          truncated: longTrace.truncated,
+          // Its first items, in order, short of all of them and of the
+          // task after the loop.
+          firstItems: notes.every(
+            ({ item }, index) => item === `each-name.${index}`
+          ),
+          some: notes.length > 0 && notes.length < items,
+          finished: longTrace.steps.some(({ task }) => task === "finished"),
+        },
+        short: {
+          truncated: shortTrace.truncated,
+          steps: shortTrace.steps.length,
+        },
+      }).toStrictEqual({
+        long: {
+          status: "completed",
+          truncated: true,
+          firstItems: true,
+          some: true,
+          finished: false,
+        },
+        short: { truncated: false, steps: 3 },
+      });
     }
   );
 });

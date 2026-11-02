@@ -7361,10 +7361,6 @@ msgstr "Il ne s’exécute plus."
 msgid "It reads no Knowledge."
 msgstr "Il ne lit aucune Connaissance."
 
-#: src/workflows/traces.tsx
-msgid "It recorded more steps than one read shows: the latest are left out."
-msgstr "Plus d’étapes ont été enregistrées qu’une lecture n’en montre : les plus récentes manquent."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "Il ne repose sur rien que vous puissiez voir."
@@ -12703,6 +12699,10 @@ msgstr "Affichage des {pageMaxLimit} premiers fichiers."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "Affichage des {runsPageSize} premières exécutions sur davantage."
+
+#: src/workflows/traces.tsx
+msgid "Showing the first part of this run"
+msgstr "Affichage de la première partie de cette exécution"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."

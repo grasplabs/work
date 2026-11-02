@@ -712,13 +712,13 @@ export const candidateRunTrace = async (
   ) {
     throw workflowResourceErrors.create("workflow.candidate_unavailable");
   }
-  const { steps, complete } = await tracedSteps(env, row.id);
+  const { steps, truncated } = await tracedSteps(env, row.id);
   return {
     runId: row.id,
     draftRevision: row.draftRevision,
     status: row.status,
     steps,
-    complete,
+    truncated,
   };
 };
 
