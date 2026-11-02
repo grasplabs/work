@@ -3123,8 +3123,20 @@ export class ResourceRunHost
       }
     );
     if (ended === "timed_out") {
-      // Its wait ends with the throw (`#rounds`).
-      throw toStepError(keyTimedOut(stepName, marker.trouble));
+      // Its failure a step of its own (`<round>:timed_out`), failed as the
+      // engine fails any step: journaled with its error (`step_errored`),
+      // as a trace and a history read a step's failure, and failed again
+      // on replay. Its wait ends with the throw (`#rounds`).
+      return await this.#step.do(
+        `${prefix}:timed_out`,
+        {
+          retries: { ...stepConfig.retries, limit: 0 },
+          timeout: stepConfig.timeout,
+        },
+        () => {
+          throw toStepError(keyTimedOut(stepName, marker.trouble));
+        }
+      );
     }
     await this.#requirePerson();
     return await this.#step.do(
