@@ -407,16 +407,18 @@ const NeedsAttention = ({
         </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
-      {workflows.state === "ready" && domainsUnchecked(apps, process) ? (
+      {workflows.state === "ready" && domainsGone ? (
         <NotLoadedState page={apps} />
       ) : null}
-      {domainsGone || rows.length === 0 ? null : (
+      <IndependentUnread
+        gone={independentGone}
+        independent={independent}
+        listed={workflows.state === "ready" || goLives.state === "ready"}
+      />
+      {domainsGone || independentGone || rows.length === 0 ? null : (
         <WorkflowLists processes={processes} rows={rows} />
       )}
       {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
-      {goLives.state === "ready" && domainsUnchecked(independent, process) ? (
-        <NotLoadedState page={independent} />
-      ) : null}
       {goLives.state !== "ready" || independentGone ? null : (
         <GoLivesWaiting names={{ people, me }} waiting={waiting} />
       )}
@@ -535,6 +537,23 @@ const WorkflowCount = ({ count }: { count: number | undefined }) => {
  * Whether `read`, which says which process each workflow serves, failed
  * while a process is chosen: then which serve it can't be told.
  */
+/**
+ * The independent workflows' processes place rows and go-lives alike:
+ * unread under a process, neither list shows, and this says why.
+ */
+const IndependentUnread = ({
+  gone,
+  listed,
+  independent,
+}: {
+  gone: boolean;
+  listed: boolean;
+  independent: Loaded<WorkflowResource[]>;
+}) =>
+  gone && listed && independent.state !== "ready" ? (
+    <NotLoadedState page={independent} />
+  ) : null;
+
 const domainsUnchecked = (
   read: Loaded<unknown>,
   process: BusinessProcess | undefined
