@@ -60,6 +60,7 @@ export {
   workflowFiles,
   workflowIdOf,
   workflowPaths,
+  workflowsFolder,
 } from "./inputs.ts";
 export {
   appModuleName,

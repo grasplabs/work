@@ -14,6 +14,7 @@
  * sorted, as the test derives them.
  */
 export const familyNamespaces = [
+  "admin",
   "agent",
   "ai_key",
   "ai_provider",
