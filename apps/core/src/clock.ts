@@ -251,16 +251,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sendStephenSummaries,
   },
-  // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
-  // Loaded when it runs, not as core starts: it brings the Chat SDK.
-  {
-    name: "channels.gmail_watch",
-    period: "quarterHour",
-    run: async (env) => {
-      const { renewGmailWatch } = await import("./channels/gmail.ts");
-      await renewGmailWatch(env);
-    },
-  },
   {
     name: "workflows.run_details",
     period: "quarterHour",

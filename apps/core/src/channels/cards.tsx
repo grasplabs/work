@@ -18,10 +18,9 @@ import type { ChannelLocale, LineName } from "./words.ts";
 
 // What Stephen sends in a chat app, written once as Chat SDK cards: each
 // adapter renders a card natively (an Adaptive Card in Teams, Block Kit in
-// Slack, buttons in WhatsApp and Telegram, an embed in Discord), with a
-// text fallback where there is none. The words are his lines (words.ts),
-// in the person's language. A press on a button reaches the channel layer
-// as `onAction` with the button's id and value.
+// Slack), with a text fallback where there is none. The words are his
+// lines (words.ts), in the person's language. A press on a button reaches
+// the channel layer as `onAction` with the button's id and value.
 //
 // A card holds what other people wrote: an answer, a document's title, the
 // values of a change. Each platform caps what one message may carry, and a
