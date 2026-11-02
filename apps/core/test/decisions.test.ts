@@ -1,64 +1,68 @@
-import { maxDeciders } from "@grasp-os/shared/decisions";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  approvalApp,
-  approvalNaming,
-  approvalReadable,
-  asking,
-  asksOf,
-  confirmedAnswer,
-  linkOf,
-  outputOf,
-  reminding,
-  week,
-} from "./decisions.ts";
-import type { Ask, Person } from "./decisions.ts";
+import { confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  decidingWorkflow,
+  decisionOf,
+  endedRun,
+  endLiveResourceRuns,
+  jsonWorkflowAppsOf,
+  startedBy,
+} from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import {
-  aroundEngine,
-  endLiveRuns,
-  finished,
-  resumed,
-  runInstance,
-  stopped,
-  whileEngineRefuses,
-} from "./runs.ts";
+import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
   entraPerson,
   openRpc,
   outcome,
-  signedIn,
-  signedInApi,
+  signedIn as staffSignedIn,
   signIn,
   staffPerson,
-  unique,
   whoami,
 } from "./sign-in.ts";
 
-// `step.decision`, from its threat model (R8, WF1 to WF4): a run waits for
-// a person's answer, which only the people the decision is from can give,
-// signed in, as they are when they answer, and never the run's starter,
-// unless `from` is exactly `person:<them>`. A decision link only leads
-// them there. Each case below is a way it could go wrong, most of them on
-// purpose: someone else answering, the starter answering their own
-// request, two answers, a late one, people who changed since they were
-// asked, and workflow code or anyone with the Workflows API trying to
-// answer in their place.
+// A decision a run waits on, from its threat model (R8, WF1 to WF4): a
+// run waits for a person's answer, which only the people the decision
+// asks can give, signed in, as they are when they answer, never the run's
+// own person. A decision link only leads them there. Each case below is a
+// way it could go wrong: two answers, a late one, an answer to a run that
+// was cancelled, people who changed since they were asked, Grasp staff,
+// and an answer that isn't one. Each run is an independent JSON
+// workflow's (`grasp.decision`), started and answered through people's
+// sessions.
+//
+// Covered elsewhere, so not here (workflow-decisions.test.ts):
+// - an answer whose wake is lost while the run is down: "goes on with the
+//   answer once when its wake is lost and the run restarts, asking
+//   nothing twice";
+// - anyone but its recipient answering, the run's own person among them,
+//   and an event of the decision's wake type sent to the run: "is only its
+//   recipient, confirmed: not the run's person, an admin, another member,
+//   nor an event of its type".
+// Gone with App-owned TypeScript workflows (`step.decision`): its
+// `from: "person:<starter>"` exception for the run's own person, asking
+// the App's owner for a run a trigger started, its cap on how many people
+// one decision is from, and its reminders (`remindAfter`). An independent
+// workflow's decision never asks its run's person, asks a team past one
+// ask's list ("asks more people than one ask lists without failing the
+// run, audited by count, and one of them answers"), and has no reminder.
 
 const idp = mockIdp();
 
-const personApi = async (role: Role): Promise<Person> =>
-  await signedInApi(idp, role);
+const { signedIn } = jsonWorkflowAppsOf(idp);
+
+/** Who publishes, approves and starts the decision workflows here. */
+const owners = async () => ({
+  admin: await signedIn("admin"),
+  builder: await signedIn("builder"),
+});
 
 const joinTeam = async (
   admin: Person,
@@ -86,117 +90,108 @@ const leaveTeam = async (
   expect(response.ok).toBeTruthy();
 };
 
-/** Adds `count` new members to `team`, as the IdP would bring them in. */
-const addMembers = async (team: string, count: number): Promise<void> => {
-  const now = Date.now();
-  const ids = Array.from({ length: count }, () => `member-${unique()}`);
-  await env.DB.batch(
-    ids.flatMap((id) => [
-      env.DB.prepare(
-        "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Member', ?, 1, ?, ?)"
-      ).bind(id, `${id}@acme.test`, now, now),
-      env.DB.prepare(
-        "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
-      ).bind(`membership-${id}`, id, now),
-      env.DB.prepare(
-        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(`team-member-${id}`, team, id, now),
-    ])
-  );
+/**
+ * A run of a new decision workflow of `builder`'s asking `recipient`,
+ * waiting `timeout` seconds at most if given, once its decision waits in
+ * `asked`'s inbox: the workflow, the run and the decision.
+ */
+const asking = async (
+  people: { admin: Person; builder: Person },
+  asked: Person,
+  recipient: string,
+  timeout?: number
+) => {
+  const workflow = await decidingWorkflow(people, { recipient, timeout });
+  const runId = await startedBy(people.builder, workflow.id);
+  const decision = await decisionOf(asked, runId);
+  return { workflow, runId, decision };
 };
 
-/** Whom an ask went to, by user ID. */
-const askedTo = (ask: Ask): string[] =>
-  ask.recipients.map(({ userId }) => userId);
+/** How a run ended: its status, and its output's status or its error's code. */
+const endOf = async (by: Person, workflow: string, runId: string) => {
+  const run = await endedRun(by, workflow, runId);
+  return run.status === "completed"
+    ? { status: run.status, output: run.output }
+    : { status: run.status, code: run.error?.code };
+};
 
 /**
  * The audit events about `decision`, in log order. A decision's events are
  * written with the change they record (opening, asking, an answer, timing
  * out), and `allEvents` drains the outboxes before it reads, so a test
- * reads them once that change is done, without waiting for them: a wait
- * with a deadline can only fail when one read of the log is slow.
+ * reads them once that change is done, without waiting for them.
  */
 const eventsOf = async (decision: string) => {
   const events = await allEvents();
   return events.filter(({ target }) => target?.id === decision);
 };
 
-/** How many wakes core still owes run `run` (workflows/wakes.ts). */
-const owed = async (run: string): Promise<number> => {
+/** How many wakes core still owes run `runId` (workflows/wakes.ts). */
+const owed = async (runId: string): Promise<number> => {
   const row = await env.DB.prepare(
-    "SELECT count(*) AS owed FROM workflow_run_wakes WHERE run_id = ?"
+    "SELECT count(*) AS owed FROM workflow_run_wakes WHERE resource_run_id = ?"
   )
-    .bind(run)
+    .bind(runId)
     .first<{ owed: number }>();
   return row?.owed ?? 0;
 };
 
 describe("decisions", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
+  afterEach(endLiveResourceRuns);
 
-  it("wait durably across a restart and go on with the real answer, audited under the person who decided", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { run, ask, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    const { link } = linkOf(ask, decider.userId);
+  it("wait durably across a restart and go on with the real answer and what it carries, audited under the person who decided", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { workflow, runId, decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`
+    );
     const seen = await decider.api.decisions.get(decision);
     // The run is stopped while it waits, as a deploy or a crash does, and
-    // the answer comes in while it's down, days before the deadline.
-    await stopped(run.id);
+    // the answer comes in while it's down.
+    await stopped(runId);
     const answered = await confirmedAnswer(decider, decision, {
       approved: true,
       payload: { comment: "Matches the PO" },
     });
-    await resumed(run.id);
+    await resumed(runId);
 
     expect({
-      recipients: ask.recipients.map(({ userId, email }) => ({
-        userId,
-        email,
-      })),
-      // A plain link to the decision: it grants nothing by itself.
-      link: { path: link.pathname, search: link.search },
       seen,
       answered,
-      output: await outputOf(builder, run.id),
+      end: await endOf(people.builder, workflow.id, runId),
     }).toMatchObject({
-      recipients: [{ userId: decider.userId, email: decider.person.email }],
-      link: { path: `/decisions/${decision}`, search: "" },
       seen: {
         id: decision,
-        run: run.id,
-        workflow: "approval",
-        description: "Approve the invoice",
+        run: runId,
+        workflowResource: { id: workflow.id, name: workflow.name },
+        description: "Greet them?",
+        input: { who: "Ada" },
         status: "open",
       },
       answered: {
         status: "approved",
         decided: { by: { userId: decider.userId } },
       },
-      output: {
-        timedOut: false,
-        approved: true,
-        by: decider.userId,
-        payload: { comment: "Matches the PO" },
+      end: {
+        status: "completed",
+        output: { status: `approved by ${decider.userId}: Matches the PO` },
       },
     });
     const audited = await eventsOf(decision);
-    const [opened, asked, confirmed, approved] = audited;
+    const approved = audited.find(
+      ({ action }) => action === "workflow.decision.approved"
+    );
     expect({
       actions: audited.map(({ action }) => action),
-      openedBy: opened?.actor,
-      opened: opened?.detail,
-      askedBy: asked?.actor,
-      asked: asked?.detail,
-      // Whom the ask went to, by ID: never their names or emails.
-      askedWhom: asked?.provenance,
-      confirmedBy: confirmed?.actor,
+      askedWhom: audited.find(
+        ({ action }) => action === "workflow.decision.asked"
+      )?.provenance,
       approvedBy: approved?.actor,
-      approved: approved?.detail,
-    }).toMatchObject({
+      // Who, never what they wrote (R16).
+      saysWhatTheyWrote: JSON.stringify(audited).includes("Matches the PO"),
+    }).toStrictEqual({
       actions: [
         "workflow.decision.opened",
         "workflow.decision.asked",
@@ -204,122 +199,28 @@ describe("decisions", { timeout: 60_000 }, () => {
         "workflow.decision.confirmed",
         "workflow.decision.approved",
       ],
-      openedBy: { type: "workflow", runId: run.id },
-      opened: { run: run.id, step: "review", from: `person:${decider.userId}` },
-      askedBy: { type: "workflow", runId: run.id },
-      asked: { recipients: 1, reminder: false },
+      // Whom the ask went to, by ID: never their names or emails.
       askedWhom: [decider.userId],
-      confirmedBy: { type: "person", userId: decider.userId },
       approvedBy: { type: "person", userId: decider.userId },
-      approved: { run: run.id, step: "review" },
-    });
-    // Who, never what they wrote (R16).
-    expect(Object.keys(approved?.detail ?? {}).toSorted()).toStrictEqual([
-      "app",
-      "run",
-      "step",
-      "version",
-      "workflow",
-    ]);
-  });
-
-  it("go on with the answer once, when the wake that answer owes is lost and the run restarts", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    // Down while it waits, as a deploy or a crash leaves it, and the
-    // engine can't be reached as the answer comes in: the answer is
-    // recorded, and the event that would wake the run is lost.
-    await stopped(run.id);
-    const answered = await whileEngineRefuses(
-      (method) => method === "sendEvent",
-      async () =>
-        await confirmedAnswer(decider, decision, {
-          approved: true,
-          payload: { comment: "Matches the PO" },
-        })
-    );
-    // The same answer sent again, as after an acknowledgement that never
-    // came: it is the decision already taken, given back without asking
-    // for another confirmation, and owes nothing more. Another answer
-    // finds the decision closed.
-    const again = await outcome(
-      decider.api.decisions.answer(decision, {
-        approved: true,
-        payload: { comment: "Matches the PO" },
-      })
-    );
-    const other = await outcome(
-      decider.api.decisions.answer(decision, { approved: true })
-    );
-    // The minute's repair sends the wake while the run is down, and the
-    // next ones find nothing left to send; the run takes it once it is
-    // back, days before the deadline.
-    const minute = 60_000;
-    await runMinuteTasks({}, new Date(Date.now() + minute));
-    await runMinuteTasks({}, new Date(Date.now() + 2 * minute));
-    await resumed(run.id);
-    const output = await outputOf(builder, run.id);
-    await runMinuteTasks({}, new Date(Date.now() + 3 * minute));
-    const logged = await allEvents();
-    const answers = logged.filter(
-      ({ action, target }) =>
-        target?.id === decision &&
-        ["workflow.decision.approved", "workflow.decision.rejected"].includes(
-          action
-        )
-    );
-    const completions = logged.filter(
-      ({ action, target }) =>
-        action === "workflow.run.completed" && target?.id === run.id
-    );
-
-    expect({
-      answered: answered.status,
-      again,
-      other,
-      output,
-      answers: answers.length,
-      completions: completions.length,
-    }).toStrictEqual({
-      answered: "approved",
-      again: "ok",
-      other: "decision.closed",
-      output: {
-        timedOut: false,
-        approved: true,
-        by: decider.userId,
-        payload: { comment: "Matches the PO" },
-      },
-      answers: 1,
-      completions: 1,
+      saysWhatTheyWrote: false,
     });
   });
 
   it("give up a wake the engine refuses for good, or can't be reached for, and leave the run to read its answer at the deadline", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
+    const people = await owners();
+    const decider = await signedIn("user");
     // The run's inbox is full: the engine will never take the wake, so
     // it is given up at once, rather than sent again for ever.
-    const full = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: 4000,
-    });
+    const full = await asking(people, decider, `person:${decider.userId}`, 4);
     await aroundEngine(
       async (method, call) => (method === "sendEvent" ? "full" : await call()),
       async () =>
         await confirmedAnswer(decider, full.decision, { approved: true })
     );
-    const owedWhenFull = await owed(full.run.id);
+    const owedWhenFull = await owed(full.runId);
     // The engine can't be reached at all: the repair tries a bounded
     // number of times (20), then gives the wake up.
-    const down = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
+    const down = await asking(people, decider, `person:${decider.userId}`);
     const owedAfter = await whileEngineRefuses(
       (method) => method === "sendEvent",
       async () => {
@@ -331,7 +232,7 @@ describe("decisions", { timeout: 60_000 }, () => {
           await runMinuteTasks({}, new Date(Date.now() + repair * 2 * hours));
           if (repair >= 20) {
             // oxlint-disable-next-line no-await-in-loop -- one repair at a time
-            counts.push(await owed(down.run.id));
+            counts.push(await owed(down.runId));
           }
         }
         return counts;
@@ -341,71 +242,28 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect({
       owedWhenFull,
       // The run still goes on with the answer, at the decision's deadline.
-      output: await outputOf(builder, full.run.id),
+      end: await endOf(people.builder, full.workflow.id, full.runId),
       owedAfter,
     }).toStrictEqual({
       owedWhenFull: 0,
-      output: {
-        timedOut: false,
-        approved: true,
-        by: decider.userId,
-        payload: null,
+      end: {
+        status: "completed",
+        output: { status: `approved by ${decider.userId}` },
       },
       owedAfter: [1, 0],
     });
   });
 
-  it("refuse anyone the decision isn't from", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const outsider = await personApi("admin");
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-
-    await expect(
-      Promise.all([
-        outcome(outsider.api.decisions.get(decision)),
-        outcome(outsider.api.decisions.answer(decision, { approved: true })),
-        // Starting the run doesn't make its starter a decider.
-        outcome(builder.api.decisions.answer(decision, { approved: true })),
-      ])
-    ).resolves.toStrictEqual(
-      Array.from({ length: 3 }, () => "decision.forbidden")
-    );
-    // Still open: the decider answers.
-    await confirmedAnswer(decider, decision, { approved: false });
-    await expect(outputOf(builder, run.id)).resolves.toMatchObject({
-      approved: false,
-      by: decider.userId,
-    });
-    // The two refused answers are audited under who tried; looking isn't.
-    const events = await eventsOf(decision);
-    const refused = events.filter(
-      ({ action }) => action === "workflow.decision.answer_refused"
-    );
-    expect({
-      actors: new Set(refused.map(({ actor }) => actor)),
-      codes: refused.map(({ detail }) => detail.errorCode),
-    }).toStrictEqual({
-      actors: new Set([
-        { type: "person", userId: outsider.userId },
-        { type: "person", userId: builder.userId },
-      ]),
-      codes: ["decision.forbidden", "decision.forbidden"],
-    });
-  });
-
   it("take the first answer only, whether someone answers twice or two people at once", async () => {
-    const admin = await personApi("admin");
-    const anna = await personApi("user");
-    const ben = await personApi("user");
-    const team = await newTeam(admin, [anna, ben]);
-    const { run, decision } = await asking(admin, {
-      from: `team:${team}`,
-      timeout: week,
-    });
+    const people = await owners();
+    const anna = await signedIn("user");
+    const ben = await signedIn("user");
+    const team = await newTeam(people.admin, [anna, ben]);
+    const { workflow, runId, decision } = await asking(
+      people,
+      anna,
+      `team:${team}`
+    );
     const racing = await Promise.all([
       outcome(confirmedAnswer(anna, decision, { approved: true })),
       outcome(confirmedAnswer(ben, decision, { approved: false })),
@@ -416,7 +274,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       outcome(confirmedAnswer(anna, decision, { approved: false })),
       outcome(confirmedAnswer(ben, decision, { approved: true })),
     ]);
-    const output = await outputOf(admin, run.id);
+    const end = await endOf(people.builder, workflow.id, runId);
     const logged = await eventsOf(decision);
     const answers = logged.filter(({ action }) =>
       ["workflow.decision.approved", "workflow.decision.rejected"].includes(
@@ -427,119 +285,99 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect({
       racing: racing.toSorted(),
       again,
-      output,
+      end,
       auditedBy: answers.map(({ actor }) => actor),
     }).toStrictEqual({
       racing: ["decision.closed", "ok"],
       again: ["decision.closed", "decision.closed"],
-      output: {
-        timedOut: false,
-        approved: winner === anna,
-        by: winner.userId,
-        payload: null,
+      end: {
+        status: "completed",
+        output: {
+          status: `${winner === anna ? "approved" : "declined"} by ${winner.userId}`,
+        },
       },
       auditedBy: [{ type: "person", userId: winner.userId }],
     });
   });
 
   it("time out, and refuse an answer after the timeout", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: 1500,
-    });
-    const output = await outputOf(builder, run.id);
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { workflow, runId, decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`,
+      2
+    );
+    const end = await endOf(people.builder, workflow.id, runId);
 
     expect({
-      output,
+      end,
       late: await outcome(
         decider.api.decisions.answer(decision, { approved: true })
       ),
       seen: await decider.api.decisions.get(decision),
     }).toMatchObject({
-      output: { timedOut: true },
+      // No outcome is made up for it.
+      end: { status: "failed", code: "workflow.decision_timed_out" },
       late: "decision.closed",
       seen: { status: "timed_out" },
     });
     const events = await eventsOf(decision);
-    expect(
-      events.map(({ action, actor }) => [action, actor.type])
-    ).toContainEqual(["workflow.decision.timed_out", "workflow"]);
+    expect(events.map(({ action }) => action)).toContain(
+      "workflow.decision.timed_out"
+    );
   });
 
   it("refuse an answer once the run is cancelled", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    await builder.api.workflows.cancel(run.id);
-    // A second run, whose cancel is admitted while the engine can't be
-    // reached to stop it: its row shows it running until the cancel's
-    // repair gets through, and its decision must take no answer meanwhile.
-    const second = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    await whileEngineRefuses(
-      (method) => method === "terminate",
-      async () => await outcome(builder.api.workflows.cancel(second.run.id))
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { workflow, runId, decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`
     );
+    await people.builder.api.workflowResources.terminateRun(workflow.id, runId);
+    await endedRun(people.builder, workflow.id, runId);
 
-    const answers = await Promise.all([
-      outcome(decider.api.decisions.answer(decision, { approved: true })),
-      outcome(
-        decider.api.decisions.answer(second.decision, { approved: true })
-      ),
-    ]);
-    const statuses = await Promise.all([
-      decider.api.decisions.get(decision),
-      decider.api.decisions.get(second.decision),
-    ]);
-
-    const refusals = await Promise.all(
-      [decision, second.decision].map(async (id) => {
-        const events = await eventsOf(id);
-        return events
-          .filter(({ action }) => action === "workflow.decision.answer_refused")
-          .map(({ actor, detail }) => ({
-            actor,
-            keys: Object.keys(detail).toSorted(),
-            run: detail.run,
-            errorCode: detail.errorCode,
-          }));
-      })
+    const answer = await outcome(
+      decider.api.decisions.answer(decision, { approved: true })
     );
+    const { status } = await decider.api.decisions.get(decision);
+    const events = await eventsOf(decision);
+    const refusals = events
+      .filter(({ action }) => action === "workflow.decision.answer_refused")
+      .map(({ actor, detail }) => ({
+        actor,
+        run: detail.run,
+        errorCode: detail.errorCode,
+        // Why, never what they answered.
+        saysWhatTheyAnswered: "approved" in detail,
+      }));
 
-    expect({
-      answers,
-      statuses: statuses.map(({ status }) => status),
-      refusals,
-    }).toStrictEqual({
-      answers: ["decision.closed", "decision.closed"],
-      statuses: ["closed", "closed"],
-      // Each refusal audited under who tried, and why: never what they
-      // answered.
-      refusals: [run.id, second.run.id].map((runId) => [
+    expect({ answer, status, refusals }).toStrictEqual({
+      answer: "decision.closed",
+      status: "closed",
+      // The refusal audited under who tried, and why.
+      refusals: [
         {
           actor: { type: "person", userId: decider.userId },
-          keys: ["app", "errorCode", "run", "step", "version", "workflow"],
           run: runId,
           errorCode: "decision.closed",
+          saysWhatTheyAnswered: false,
         },
-      ]),
+      ],
     });
   });
 
   it("refuse an answer past the deadline, even before the run closed the decision", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`
+    );
     // The run hasn't come round to closing it yet; the deadline has passed.
     await env.DB.prepare(
       "UPDATE workflow_decisions SET expires_at = ? WHERE id = ?"
@@ -552,172 +390,20 @@ describe("decisions", { timeout: 60_000 }, () => {
     ).resolves.toBe("decision.closed");
   });
 
-  it("don't let whoever started the run answer it, unless its code names exactly them", async () => {
-    const admin = await personApi("admin");
-    const anna = await personApi("user");
-    const otherAdmin = await personApi("admin");
-    const team = await newTeam(admin, [admin, anna]);
-    const byTeam = await asking(admin, { from: `team:${team}`, timeout: week });
-    const byRole = await asking(admin, { from: "role:admin", timeout: week });
-    // Named in the workflow's code, as its review shows: their own
-    // confirmation stands.
-    const byThemselves = await asking(
-      admin,
-      { from: "role:admin", timeout: week },
-      approvalNaming(`person:${admin.userId}`)
-    );
-    // Named by the run's input, which its starter wrote: never (R8).
-    const byTheirInput = await asking(
-      admin,
-      { from: `person:${admin.userId}`, timeout: week },
-      approvalReadable
-    );
-
-    expect({
-      team: {
-        asked: askedTo(byTeam.ask),
-        starter: await outcome(
-          admin.api.decisions.answer(byTeam.decision, { approved: true })
-        ),
-      },
-      role: {
-        askedStarter: askedTo(byRole.ask).includes(admin.userId),
-        askedOther: askedTo(byRole.ask).includes(otherAdmin.userId),
-        starter: await outcome(
-          admin.api.decisions.answer(byRole.decision, { approved: true })
-        ),
-      },
-      themselves: {
-        asked: askedTo(byThemselves.ask),
-        starter: await outcome(
-          confirmedAnswer(admin, byThemselves.decision, { approved: true })
-        ),
-      },
-      theirInput: {
-        asked: askedTo(byTheirInput.ask),
-        starter: await outcome(
-          confirmedAnswer(admin, byTheirInput.decision, { approved: true })
-        ),
-      },
-    }).toStrictEqual({
-      team: { asked: [anna.userId], starter: "decision.forbidden" },
-      role: {
-        askedStarter: false,
-        askedOther: true,
-        starter: "decision.forbidden",
-      },
-      themselves: { asked: [admin.userId], starter: "ok" },
-      theirInput: { asked: [], starter: "decision.forbidden" },
-    });
-    // Anyone else the decision is from still answers, and the audit log
-    // has their answer, never one under the starter.
-    await confirmedAnswer(otherAdmin, byRole.decision, { approved: false });
-    await expect(outputOf(admin, byRole.run.id)).resolves.toMatchObject({
-      approved: false,
-      by: otherAdmin.userId,
-    });
-    const logged = await eventsOf(byRole.decision);
-    const answers = logged.filter(({ action }) =>
-      ["workflow.decision.approved", "workflow.decision.rejected"].includes(
-        action
-      )
-    );
-    expect(
-      answers.map(({ action, actor }) => ({ action, actor }))
-    ).toStrictEqual([
-      {
-        action: "workflow.decision.rejected",
-        actor: { type: "person", userId: otherAdmin.userId },
-      },
-    ]);
-  });
-
-  it("hold back nobody on a run a trigger started, so its App's owner is asked and answers", async () => {
-    const owner = await personApi("builder");
-    const admin = await personApi("admin");
-    const anna = await personApi("user");
-    const team = await newTeam(admin, [owner, anna]);
-    const app = await approvalApp(owner);
-    // As a trigger starts it: no starter, and it acts for the App's owner.
-    const run = await startRun(env, {
-      app: appIdSchema.parse(app),
-      workflow: workflowIdSchema.parse("approval"),
-      input: { from: `team:${team}`, timeout: week },
-      startedBy: null,
-      actor: { type: "system" },
-    });
-    const [ask] = await asksOf(app);
-    if (!ask) {
-      throw new Error("No ask");
-    }
-    const { decision } = linkOf(ask, owner.userId);
-
-    expect({
-      asked: askedTo(ask).toSorted(),
-      answer: await outcome(
-        confirmedAnswer(owner, decision, { approved: true })
-      ),
-    }).toStrictEqual({
-      asked: [owner.userId, anna.userId].toSorted(),
-      answer: "ok",
-    });
-    await expect(outputOf(owner, run.id)).resolves.toMatchObject({
-      approved: true,
-      by: owner.userId,
-    });
-  });
-
-  it("count only who may answer toward the cap, so a starter in a team of 51 leaves it within it", async () => {
-    const admin = await personApi("admin");
-    const fits = await newTeam(admin, [admin]);
-    await addMembers(fits, maxDeciders);
-    const tooMany = await newTeam(admin, [admin]);
-    await addMembers(tooMany, maxDeciders + 1);
-
-    const { ask } = await asking(admin, {
-      from: `team:${fits}`,
-      timeout: week,
-    });
-    const app = await approvalApp(admin);
-    const refused = await admin.api.workflows.start(app, "approval", {
-      from: `team:${tooMany}`,
-      timeout: week,
-    });
-    await finished(refused.id);
-    const { status, failure } = await admin.api.workflows.status(refused.id);
-
-    expect({
-      asked: askedTo(ask).length,
-      askedStarter: askedTo(ask).includes(admin.userId),
-      refused: { status, code: failure?.error.code },
-    }).toStrictEqual({
-      asked: maxDeciders,
-      askedStarter: false,
-      refused: { status: "failed", code: "decision.too_many_deciders" },
-    });
-  });
-
   it("never take an answer from Grasp staff, even on an admins' decision", async () => {
-    const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const { ask, decision } = await asking(builder, {
-      from: "role:admin",
-      timeout: week,
-    });
-    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const people = await owners();
+    const { decision } = await asking(people, people.admin, "role:admin");
+    const staffSession = await staffSignedIn(idp, "grasp-staff", staffPerson());
     const staff = await whoami(staffSession);
     const { core } = await openRpc(staffSession);
     const { decisions } = core.authenticate();
 
     expect({
       role: staff.role,
-      // The decision is the client admins' to answer.
-      asked: askedTo(ask).includes(admin.userId),
       get: await outcome(decisions.get(decision)),
       answer: await outcome(decisions.answer(decision, { approved: true })),
     }).toStrictEqual({
       role: "admin",
-      asked: true,
       // A staff session reaches no decision at all, only the onboarding.
       get: "role.forbidden",
       answer: "role.forbidden",
@@ -734,47 +420,17 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect(location?.endsWith(page)).toBeTruthy();
   });
 
-  it("remind by asking again, whoever is in the team then", async () => {
-    const admin = await personApi("admin");
-    const anna = await personApi("user");
-    const ben = await personApi("user");
-    const team = await newTeam(admin, [anna]);
-    const { app, run } = await asking(admin, {
-      from: `team:${team}`,
-      ...reminding,
-    });
-    // Ben joins the team before the reminder goes out.
-    await joinTeam(admin, team, ben);
-    const asks = await asksOf(app, 2);
-
-    expect({
-      asks: asks.map(({ recipients, reminder }) => ({
-        reminder,
-        to: recipients.map(({ userId }) => userId).toSorted(),
-      })),
-      output: await outputOf(admin, run.id),
-    }).toStrictEqual({
-      asks: [
-        { reminder: false, to: [anna.userId] },
-        { reminder: true, to: [anna.userId, ben.userId].toSorted() },
-      ],
-      output: { timedOut: true },
-    });
-  });
-
   it("check who may answer as they are when they answer, not when they were asked", async () => {
-    const admin = await personApi("admin");
-    const leaves = await personApi("user");
-    const joins = await personApi("user");
+    const people = await owners();
+    const { admin } = people;
+    const leaves = await signedIn("user");
+    const joins = await signedIn("user");
     const team = await newTeam(admin, [leaves]);
-    const inTeam = await asking(admin, { from: `team:${team}`, timeout: week });
-    const demoted = await personApi("builder");
-    const byRole = await asking(admin, { from: "role:builder", timeout: week });
-    const removed = await personApi("user");
-    const byPerson = await asking(admin, {
-      from: `person:${removed.userId}`,
-      timeout: week,
-    });
+    const inTeam = await asking(people, leaves, `team:${team}`);
+    const demoted = await signedIn("builder");
+    const byRole = await asking(people, demoted, "role:builder");
+    const removed = await signedIn("user");
+    const byPerson = await asking(people, removed, `person:${removed.userId}`);
 
     await leaveTeam(admin, team, leaves);
     await joinTeam(admin, team, joins);
@@ -788,8 +444,12 @@ describe("decisions", { timeout: 60_000 }, () => {
       demoted: await outcome(
         demoted.api.decisions.answer(byRole.decision, { approved: true })
       ),
-      removed: await outcome(
-        removed.api.decisions.answer(byPerson.decision, { approved: true })
+      // Refused by their session, or, while the connection still holds
+      // it, by the decision: either way before anything is taken.
+      removed: ["auth.unauthenticated", "decision.forbidden"].includes(
+        await outcome(
+          removed.api.decisions.answer(byPerson.decision, { approved: true })
+        )
       ),
       // Asked before they joined, so they weren't asked, but may answer.
       joinedTheTeam: await outcome(
@@ -798,74 +458,25 @@ describe("decisions", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       leftTheTeam: "decision.forbidden",
       demoted: "decision.forbidden",
-      removed: "auth.unauthenticated",
+      removed: true,
       joinedTheTeam: "ok",
     });
-    await expect(outputOf(admin, inTeam.run.id)).resolves.toMatchObject({
-      by: joins.userId,
-    });
-  });
-
-  it("don't take an answer from an event sent to the run, nor end its wait for one", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    // Approving events sent straight to a waiting run, as anyone with the
-    // engine's API could send them: each wakes it, but answers nothing,
-    // and closes nothing before its deadline. The run waits again, as
-    // often as it is woken, and spends none of its steps (60 in tests)
-    // on it: each wake is a wait and a look.
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
-    const instance = runInstance(run.id);
-    using events = await instance.subscribe({
-      filter: ["wait_started", "wait_completed"],
-    });
-    let woken = 0;
-    await vi.waitFor(
-      async () => {
-        const { done, value } = await events.next();
-        if (done === true) {
-          throw new Error(`Run ${run.id} ended while it waited`);
-        }
-        // Another forged answer each time the run waits again.
-        if (value.type === "wait_started") {
-          await instance.sendEvent({
-            type: `grasp-decision-${decision}`,
-            payload: { answered: true, approved: true, by: builder.userId },
-          });
-        } else {
-          woken += 1;
-        }
-        expect(woken).toBeGreaterThanOrEqual(35);
-      },
-      { timeout: 20_000, interval: 0 }
-    );
-    const { status } = await decider.api.decisions.get(decision);
-    await confirmedAnswer(decider, decision, { approved: false });
-
-    expect({
-      status,
-      output: await outputOf(builder, run.id),
-    }).toStrictEqual({
-      status: "open",
-      output: {
-        timedOut: false,
-        approved: false,
-        by: decider.userId,
-        payload: null,
-      },
+    await expect(
+      endOf(people.builder, inTeam.workflow.id, inTeam.runId)
+    ).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: `approved by ${joins.userId}` },
     });
   });
 
   it("refuse an answer that is too large or not of the right shape", async () => {
-    const builder = await personApi("builder");
-    const decider = await personApi("user");
-    const { run, decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { workflow, runId, decision } = await asking(
+      people,
+      decider,
+      `person:${decider.userId}`
+    );
     const answer = async (value: unknown) =>
       await outcome(
         decider.api.decisions.answer(
@@ -880,10 +491,10 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect({
       tooLarge: await answer({
         approved: true,
-        payload: { note: "x".repeat(5000) },
+        payload: { comment: "x".repeat(5000) },
       }),
       // Who answers comes from the session, never from the request.
-      naming: await answer({ approved: true, by: builder.userId }),
+      naming: await answer({ approved: true, by: people.builder.userId }),
       notYesOrNo: await answer({ approved: "yes" }),
       missing: await answer({}),
       notAnObject: await answer("approve"),
@@ -901,10 +512,13 @@ describe("decisions", { timeout: 60_000 }, () => {
     // None of it counted: the decision is still open.
     await confirmedAnswer(decider, decision, {
       approved: true,
-      payload: ["a", 1, null, { nested: true }],
+      payload: { comment: "Fits" },
     });
-    await expect(outputOf(builder, run.id)).resolves.toMatchObject({
-      payload: ["a", 1, null, { nested: true }],
+    await expect(
+      endOf(people.builder, workflow.id, runId)
+    ).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: `approved by ${decider.userId}: Fits` },
     });
   });
 });

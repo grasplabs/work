@@ -94,26 +94,6 @@ ${remember}
 );
 `;
 
-/**
- * The approval workflow written so its review reads every step: no spread
- * of options (and so no reminder), its reviewer and deadline still taken
- * from the run's input (`StepOutline.dynamic`).
- */
-export const approvalReadable = approval.replace(
-  "      ...(input.remindAfter === undefined ? {} : { remindAfter: input.remindAfter }),\n",
-  ""
-);
-
-/**
- * `approvalReadable` with its reviewer written in its code, as `deciders`,
- * not taken from the run's input: the review reads who it is.
- */
-export const approvalNaming = (deciders: string): string =>
-  approvalReadable.replace(
-    "from: input.from as Person,",
-    `from: ${JSON.stringify(deciders)} as Person,`
-  );
-
 export const approvalTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
 import approval from "./approval.ts";
@@ -129,15 +109,6 @@ export default workflowTests(approval, [
 `;
 
 export const week = 7 * 86_400_000;
-
-/**
- * A decision a test acts on while it waits for the reminder: the reminder
- * is due five seconds after the ask, which leaves a slow runner room for
- * what a test does first (change a team, switch a feature off, stop the
- * run). The deadline, ten seconds after the decision opened, leaves room
- * to switch back on before it, where a test does that.
- */
-export const reminding = { timeout: 10_000, remindAfter: 5000 };
 
 /** Who released each approval App (`approvalApp`), who reads its asks. */
 const builders = new Map<string, Person>();
@@ -214,17 +185,6 @@ export const asksOf = async (app: string, count = 1): Promise<Ask[]> => {
   );
 };
 
-/** The link the ask sent to `userId`, and the decision it leads to. */
-export const linkOf = (ask: Ask | undefined, userId: string) => {
-  const recipient = ask?.recipients.find((person) => person.userId === userId);
-  if (!recipient) {
-    throw new Error(`The ask went to ${JSON.stringify(ask?.recipients)}`);
-  }
-  const url = new URL(recipient.link);
-  const decision = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
-  return { link: url, decision };
-};
-
 /** Starts the approval workflow and waits until it has asked. */
 export const asking = async (
   builder: Person,
@@ -265,16 +225,6 @@ export const outputOf = async (
   await finished(run);
   const { output } = await builder.api.workflows.status(run);
   return output;
-};
-
-/** Whether `decision`'s deadline has passed, by the database's clock. */
-export const deadlinePassed = async (decision: string): Promise<boolean> => {
-  const row = await env.DB.prepare(
-    "SELECT (julianday('now') - 2440587.5) * 86400000 > expires_at AS past FROM workflow_decisions WHERE id = ?"
-  )
-    .bind(decision)
-    .first<{ past: number }>();
-  return row?.past === 1;
 };
 
 /** An answer to a decision, as a person gives it. */

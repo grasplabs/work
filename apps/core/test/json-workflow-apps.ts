@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/sdk";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   declaredWorkflows,
@@ -183,6 +184,98 @@ export const endedRun = async (
   runId: string
 ): Promise<WorkflowResourceRun> =>
   await runOnce(by, id, runId, ({ endedAt }) => endedAt !== null);
+
+/**
+ * The tasks of a workflow that asks `recipient` its `approval` decision
+ * about `{ who }`, waiting `timeout` seconds at most if given,
+ * then ends saying how it was answered and by whom, with the comment the
+ * answer carried, if any.
+ */
+export const decisionTasks = (
+  recipient: string,
+  timeout?: number
+): unknown[] => [
+  {
+    ask: {
+      call: "grasp.decision",
+      with: {
+        binding: "approval",
+        recipients: [recipient],
+        prompt: "Greet them?",
+        input: { who: "${ $workflow.input.who }" },
+      },
+      ...(timeout === undefined
+        ? {}
+        : { timeout: { after: { seconds: timeout } } }),
+      export: { as: "${ $context + {review: .} }" },
+    },
+  },
+  {
+    answered: {
+      set: {
+        status:
+          '${ (if $context.review.approved then "approved" else "declined" end) + " by " + $context.review.by + (if $context.review.value == null then "" else ": " + $context.review.value.comment end) }',
+      },
+    },
+  },
+];
+
+/**
+ * A workflow of `builder`'s that asks `recipient` a decision
+ * (`decisionTasks`), its `approval` binding to a decision contract `admin`
+ * published, approved by `admin` for `deciders`, all through their
+ * sessions. A decision's context is `{ who }`; its answer carries a
+ * comment, or nothing.
+ */
+export const decidingWorkflow = async (
+  { admin, builder }: { readonly admin: Person; readonly builder: Person },
+  {
+    recipient,
+    deciders = [recipient],
+    timeout,
+  }: { recipient: string; deciders?: string[]; timeout?: number }
+) => {
+  const contract = `approval-${unique()}`;
+  await admin.api.workflowResources.publishContract({
+    key: contract,
+    kind: "decision",
+    input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+    response: JSON.stringify(
+      v.union(v.null(), v.object({ comment: v.string() })).descriptor
+    ),
+  });
+  const workflow = await publishedWorkflow(builder, (name) =>
+    definitionOf(name, decisionTasks(recipient, timeout), {
+      bindings: { approval: { kind: "decision", contract } },
+    })
+  );
+  const approval = await admin.api.workflowResources.approveBinding(
+    workflow.id,
+    {
+      alias: "approval",
+      target: { kind: "decision", deciders },
+      reviewed: { version: 1 },
+    }
+  );
+  return { ...workflow, approval: approval.id };
+};
+
+/**
+ * The decision run `runId` asks `recipient`, once it waits in their inbox
+ * (`decisions.waiting`): its ID, as the decision's link names it.
+ */
+export const decisionOf = async (
+  recipient: Person,
+  runId: string
+): Promise<string> =>
+  await vi.waitFor(async () => {
+    const waiting = await recipient.api.decisions.waiting();
+    const asked = waiting.find(({ run }) => run === runId);
+    if (asked === undefined) {
+      throw new Error("No decision yet");
+    }
+    return asked.id;
+  }, settles);
 
 /**
  * Ends every JSON workflow run a test left live in the engine: a run held
