@@ -4260,6 +4260,93 @@ describe("runs started by a restricted App, waiting on a held call", () => {
       });
     });
   });
+
+  it("go on once their person confirms, though connect couldn't say for a moment whether it still waited", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Connect fails the run's first question of whether it still waits:
+    // the check is asked again, never taken as an answer.
+    const { CONNECT: connect } = env;
+    let failures = 1;
+    env.CONNECT = new Proxy(connect, {
+      get: (target, name) => {
+        if (name === "anyPending" && failures > 0) {
+          failures -= 1;
+          return async () => {
+            await Promise.resolve();
+            throw new Error("Connect didn't answer");
+          };
+        }
+        const real: unknown = Reflect.get(target, name);
+        return real;
+      },
+    });
+    try {
+      await waiting(runId);
+      await confirmPendingAction(env, ada, held.id, held.inputHash);
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+      expect({ failures, end: endOf(run), sent: sent.calls }).toStrictEqual({
+        failures: 0,
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    } finally {
+      env.CONNECT = connect;
+    }
+  });
+
+  it("go on as soon as connect decided their person's confirmation, though its answer was lost", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+      const starter = await startingApp(ada, admin, workflow.id, {
+        restricted: true,
+      });
+      const runId = await starter.start(serving);
+      const held = await heldFor(ada, runId);
+      await waiting(runId);
+      // Connect confirms and sends, and its answer never reaches core.
+      const { CONNECT: connect } = env;
+      env.CONNECT = new Proxy(connect, {
+        get: (target, name) => {
+          const real: unknown = Reflect.get(target, name);
+          if (name !== "confirmAction" || typeof real !== "function") {
+            return real;
+          }
+          return async (...args: unknown[]): Promise<never> => {
+            await Reflect.apply(real, target, args);
+            throw new Error("Connect's answer was lost");
+          };
+        },
+      });
+      let confirmed: unknown;
+      try {
+        confirmed = await settledCode(
+          signedIn.api.pendingActions.confirm(held.id, held.inputHash)
+        );
+      } finally {
+        env.CONNECT = connect;
+      }
+      // Only the wake core owed before it asked connect ends the wait
+      // within the test: its next timed check is minutes away.
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+      expect({ confirmed, end: endOf(run), sent: sent.calls }).toStrictEqual({
+        confirmed: "internal.unexpected",
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    });
+  });
 });
 
 /**
