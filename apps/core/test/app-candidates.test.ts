@@ -27,7 +27,6 @@ import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Candidates (app-candidates.ts), from their threat model: a version is
 // made current only from a candidate verified with its report, over the
@@ -35,7 +34,8 @@ import { workflowFiles } from "./workflow-apps.ts";
 // change, and it moves forward only; a person's newer commit supersedes
 // it, and a run that lost it writes nothing more; a crash leaves it to be
 // taken over; each failure ends it in its outcome with the current
-// version untouched.
+// version untouched. Gone with App workflows: the report naming an App's
+// own workflow tests its verification ran.
 
 /** An App of spec 8's layout answering `greeting`. */
 const helloFiles = (greeting = "hello"): Record<string, string> => ({
@@ -283,7 +283,7 @@ describe(
       ]);
     });
 
-    it("reports the App and workflow tests its verification ran", async () => {
+    it("reports the App tests its verification ran", async () => {
       const { owner, app } = await appWith({
         ...helloFiles(),
         "tests/fixtures/people.json": JSON.stringify({
@@ -302,11 +302,6 @@ export default appTest({
   },
 });
 `,
-        ...workflowFiles(
-          "count",
-          '  return await step.do("one", { description: "One" }, async () => 1);',
-          { one: 1 }
-        ),
       });
       await activateVersion(env, owner, app, 1);
       const [made] = await candidatesOf(app);
@@ -326,7 +321,7 @@ export default appTest({
           .parse(JSON.parse(row?.report ?? "{}")).selected
       ).toStrictEqual({
         appTests: ["tests/hello.test.ts"],
-        workflowTests: ["count"],
+        workflowTests: [],
       });
     });
 

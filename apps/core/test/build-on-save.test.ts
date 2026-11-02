@@ -6,16 +6,16 @@ import { describe, expect, it } from "vite-plus/test";
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave } from "../src/save-builds.ts";
 import { reviewScreens } from "../src/screen-trust-rpc.ts";
-import { buildScreens, buildWorkflows, screenCode } from "../src/screens.ts";
+import { buildScreens, screenCode } from "../src/screens.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Saving an App's files builds them at once, so the version opens without
 // building, and whoever saved (an agent, most of all) hears what doesn't
 // build in the same call. A build never fails the save, and one that
-// can't finish is reported as such within a bound.
+// can't finish is reported as such within a bound. Gone with App
+// workflows: a save building an App's own workflows.
 
 const idp = mockIdp();
 
@@ -54,7 +54,7 @@ const newApp = async (
 };
 
 describe("building on save", { timeout: 60_000 }, () => {
-  it("builds a saved version's screens and workflows, so it opens without building", async () => {
+  it("builds a saved version's screens, so it opens without building", async () => {
     const builder = await signedInApi(idp, "builder");
     // Files no other test builds, so nothing is in the cache before.
     const unique = crypto.randomUUID();
@@ -62,10 +62,7 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     const { version, builds } = await builder.api.apps.files.commit(
       app,
-      {
-        ...screen(unique),
-        ...workflowFiles("saved", `  return "${unique}";`),
-      },
+      screen(unique),
       "Save"
     );
     const files = await versionFiles(env, appIdSchema.parse(app), version);
@@ -73,16 +70,11 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     expect(builds).toStrictEqual({
       screens: { status: "ok", diagnostics: [] },
-      workflows: { status: "ok", diagnostics: [] },
+      workflows: { status: "none", diagnostics: [] },
     });
-    // Opening and running it load what the save built.
+    // Opening it loads what the save built.
     await expect(
       buildScreens(unbuilt, files, "app-test")
-    ).resolves.toMatchObject({
-      ok: true,
-    });
-    await expect(
-      buildWorkflows(unbuilt, files, "app-test", {})
     ).resolves.toMatchObject({
       ok: true,
     });
