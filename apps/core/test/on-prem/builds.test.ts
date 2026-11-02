@@ -1,4 +1,3 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { packageLimitsOf } from "@grasp-os/shared/packages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env, exports } from "cloudflare:workers";
@@ -9,16 +8,17 @@ import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
 import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
-import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens } from "../../src/screens.ts";
 import { probeModule } from "../isolate-probe.ts";
-import { workflowFiles } from "../workflow-apps.ts";
 
 // The App compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
 // Loader here throws if a build reaches for it. A type built to recurse
 // holds TypeScript's checker for good: the supervisor ends it at its
-// deadline, and core answers meanwhile.
+// deadline, and core answers meanwhile. Gone with App workflows: a save
+// compiling its screens and its workflows at once, in the App's part of
+// the builders' share; a build waiting for its part is "builds once a
+// place held a moment … comes free" below.
 
 /** A Loader core never reaches on-prem: compiling here would hold core. */
 const noLoader: WorkerLoader = {
@@ -310,33 +310,6 @@ describe("the App compiler on-prem", () => {
       built: built.status === "fulfilled" && built.value.ok,
     }).toStrictEqual({ heldToItsDeadline: true, built: true });
   }, 60_000);
-
-  it("builds a fresh save's screens and workflows, its compiles waiting for the App's part of the builders' share", async () => {
-    // Fresh, so nothing is read from the cache: two compiles at once,
-    // where the App's part of the share is one place.
-    const fresh = crypto.randomUUID();
-    const saved = await buildOnSave(
-      onPrem,
-      {
-        app: appIdSchema.parse("app-on-prem-save"),
-        version: 1,
-        files: {
-          ...screen(`// ${fresh}`),
-          ...workflowFiles(
-            "single",
-            `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
-          ),
-        },
-        bindings: {},
-      },
-      { profile: "production" }
-    );
-
-    expect({
-      screens: saved.screens.status,
-      workflows: saved.workflows.status,
-    }).toStrictEqual({ screens: "ok", workflows: "ok" });
-  }, 90_000);
 
   it("asks again while refused, and builds another App's same files in its own part", async () => {
     // A sandbox that refuses every session as busy, a moment after each

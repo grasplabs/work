@@ -4,44 +4,36 @@ import {
   handledRunDays,
   runsPageSize,
 } from "@grasp-os/shared/workflows";
-import type {
-  ListedRun,
-  OutlineNode,
-  RunsPage,
-  WorkflowDetail,
-  WorkflowDryRun,
-} from "@grasp-os/shared/workflows";
+import type { ListedRun, RunsPage } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
-import { release, requestGranted } from "./apps.ts";
+import { release } from "./apps.ts";
 import {
   connectHubspot,
   connectingAdmin,
   crmWorkflow,
 } from "./hubspot-workflow.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection } from "./mail-connection.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
 import { sleeping } from "./runs.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
-import { mailer, workflowFiles } from "./workflow-apps.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { workflowFiles } from "./workflow-apps.ts";
 
-// The Workflows page: every workflow of every App a person can open, the
-// runs across them, and one workflow's view. What could go wrong: a
-// workflow or run of an App someone can't open showing up, counts that
-// count the wrong runs, a waiting run lost below the others, parameters
-// shown to or set by someone who doesn't build the App, and a Test that
-// changes something.
+// The Workflows page: every workflow of every App a person can open, and
+// the runs across them; and the workflows that use a connection. What
+// could go wrong: a workflow or run of an App someone can't open showing
+// up, counts that count the wrong runs, a waiting run lost below the
+// others, or a workflow listed to someone it isn't shared with, or still
+// listed once its approval goes. An independent workflow's use of a
+// connection runs as a JSON workflow. Kept as App runs until independent
+// workflows have a Workflows page: the page's list, the Runs tab (its
+// order, filters, paging, queued runs and index reads), each read from
+// App versions and runs only. Gone with App workflows, which read them
+// from an App's code: a workflow's view of its steps and parameters, its
+// Test, and the App workflows calling their App's permission on a
+// connection.
 
 const idp = mockIdp();
 
@@ -126,29 +118,6 @@ export default workflowTests(definition, [
 `,
 };
 
-/**
- * A workflow whose steps its code can't list: one inside a `try`, which
- * runs, but can't be read as a step list.
- */
-const hiddenFiles = {
-  "workflows/hidden.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("hidden", { params: {}, input: z.unknown() }, async (step) => {
-  try {
-    return await step.do("inside", { description: "Hidden" }, async () => 1);
-  } catch {
-    return 0;
-  }
-});
-`,
-  "workflows/hidden.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./hidden.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { inside: 1 }, expect: { output: 1 } }]);
-`,
-};
-
 /** A new App of `owner`'s named `name`, with `files` as its current version. */
 const appOf = async (
   owner: Person,
@@ -176,10 +145,6 @@ const workflowsUsing = async (
     workflow.kind === "app" ? [workflow.app, workflow.workflow] : [workflow.id]
   );
 };
-
-/** Why `hidden`'s steps can't be listed, as the SDK's describer says. */
-const hiddenReason =
-  "Line 4: Steps can sit in `if`/`else` and `for`/`for...of` loops only; move this step out of the construct around it";
 
 /** Whether a query groups what it reads (the overview's counts). */
 const grouped = (query: string): boolean => /group by/iu.test(query);
@@ -211,32 +176,6 @@ const byRun = (
   new Map<string, ReturnType<typeof queueOf>>(
     runs.map((run) => [run.id, queueOf(run)])
   );
-
-/**
- * The code an outline shows: conditions, loop heads, keys, parameters
- * read and literal options, in the order they come.
- */
-const codeOf = (nodes: OutlineNode[]): string[] =>
-  nodes.flatMap((node) => {
-    if (node.type === "step") {
-      return [
-        ...(node.key === undefined ? [] : [`key ${node.key}`]),
-        ...node.params.map((param) => `param ${param}`),
-        ...Object.keys(node.options).map((option) => `option ${option}`),
-      ];
-    }
-    const head = node.type === "loop" ? node.header : node.condition;
-    return [
-      ...(head === "" ? [] : [head]),
-      ...node.params.map((param) => `param ${param}`),
-      ...codeOf(node.steps),
-      ...(node.type === "branch" ? codeOf(node.otherwise) : []),
-    ];
-  });
-
-/** The code a workflow's outline shows (`codeOf`); none without one. */
-const codeIn = (steps: WorkflowDetail["steps"]): string[] =>
-  steps.ok ? codeOf(steps.outline.steps) : [];
 
 const minute = 60_000;
 const day = 24 * 60 * minute;
@@ -976,201 +915,6 @@ describe("the Workflows page", buildTime, () => {
       sorts: [],
       walks: [],
     });
-  });
-
-  it("shows a workflow's steps as its code reads, and its parameters only to its builders", async () => {
-    const [owner, user] = await Promise.all([
-      personApi("builder"),
-      personApi("user"),
-    ]);
-    const app = await appOf(owner, `Invoices ${unique()}`, {
-      ...approveFiles,
-      ...hiddenFiles,
-    });
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    const { core } = await openRpc(
-      await signedIn(idp, "grasp-staff", staffPerson())
-    );
-    const staff = core.authenticate();
-
-    const detail = await owner.api.workflows.get(app, "approve");
-    expect(detail).toMatchObject({
-      summary: { app, workflow: "approve", version: 1 },
-      steps: {
-        ok: true,
-        outline: {
-          steps: [
-            { type: "step", name: "extract", kind: "ai" },
-            {
-              type: "branch",
-              condition: "extracted.total > params.limit",
-              params: ["limit"],
-              steps: [{ type: "step", name: "review", kind: "decision" }],
-              otherwise: [],
-            },
-            { type: "step", name: "book", kind: "exact", sideEffect: true },
-          ],
-        },
-      },
-      setsParams: true,
-    });
-    expect(
-      detail.params?.map(({ name, sensitive }) => [name, sensitive])
-    ).toStrictEqual([
-      ["limit", true],
-      ["reviewer", false],
-    ]);
-
-    const [asUser, asStaff, hiddenSteps, missing] = await Promise.all([
-      user.api.workflows.get(app, "approve"),
-      outcome(staff.workflows.get(app, "approve")),
-      owner.api.workflows.get(app, "hidden"),
-      outcome(owner.api.workflows.get(app, "missing")),
-    ]);
-    expect({
-      userSees: asUser.params,
-      userSets: asUser.setsParams,
-      userCode: codeIn(asUser.steps),
-      ownerCode: codeIn(detail.steps),
-      // A staff session reaches no workflow, only the onboarding.
-      asStaff,
-      hidden: hiddenSteps.steps.ok ? "listed" : hiddenSteps.steps.message,
-      missing,
-    }).toStrictEqual({
-      userSees: null,
-      userSets: false,
-      userCode: [],
-      ownerCode: [
-        "option binding",
-        "option instructions",
-        "extracted.total > params.limit",
-        "param limit",
-        "param reviewer",
-        "option timeout",
-      ],
-      asStaff: "role.forbidden",
-      hidden: hiddenReason,
-      missing: "workflow.not_found",
-    });
-  });
-
-  it("never runs a side effect in a Test, even where the workflow's test asks for it", async () => {
-    const owner = await personApi("builder");
-    const app = await appOf(owner, `Cards ${unique()}`, {
-      "workflows/charge.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("charge", { params: {}, input: z.unknown() }, async (step) =>
-  await step.do(
-    "charge",
-    { description: "Charge the card", sideEffect: true, input: { amount: 5 } },
-    async () => "charged"
-  )
-);
-`,
-      // Its test asks for its side effects to run, as the SDK's test
-      // engine can: no test or dry run of a workflow's own does.
-      "workflows/charge.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./charge.ts";
-
-export default workflowTests(definition, [
-  { name: "charges", sideEffects: "run", expect: {} },
-] as never);
-`,
-    });
-    const { runs } = await owner.api.workflows.test(app, "charge");
-    const [charges] = runs;
-    expect({
-      recorded: charges?.report.includes(
-        '- charge {"amount":5}: would change something, not run'
-      ),
-      ran: charges?.report.includes('"charged"'),
-    }).toStrictEqual({ recorded: true, ran: false });
-  });
-
-  it("tests a workflow with the values set now, changing nothing, for its builders only", async () => {
-    const [owner, user] = await Promise.all([
-      personApi("builder"),
-      personApi("user"),
-    ]);
-    const app = await appOf(owner, `Invoices ${unique()}`, approveFiles);
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-
-    const tests: WorkflowDryRun[] = [];
-    const events = await auditedDuring(async () => {
-      tests.push(await owner.api.workflows.test(app, "approve"));
-    });
-    // Above the invoice's total, no review is asked for.
-    await owner.api.workflows.params.set(app, "approve", "limit", 1_000_000);
-    tests.push(await owner.api.workflows.test(app, "approve"));
-    const [first, raised] = tests.map(({ version, runs }) => ({
-      version,
-      runs: runs.map(({ name, status, report }) => ({
-        name,
-        status,
-        asks: report.includes("review#ask"),
-        books: report.includes('- book {"total":800000}'),
-      })),
-    }));
-    const run = {
-      name: "books a large invoice once approved",
-      status: "completed",
-      books: true,
-    };
-    expect({ events, first, raised }).toStrictEqual({
-      events: [],
-      first: { version: 1, runs: [{ ...run, asks: true }] },
-      raised: { version: 1, runs: [{ ...run, asks: false }] },
-    });
-    await expect(
-      outcome(user.api.workflows.test(app, "approve"))
-    ).resolves.toBe("role.forbidden");
-  });
-
-  it("lists the App workflows that use a connection: those calling the binding of their App's active permission on it, of Apps the person can open", async () => {
-    const [owner, other, user] = await Promise.all([
-      personApi("builder"),
-      personApi("builder"),
-      personApi("user"),
-    ]);
-    const [mail, otherMail] = await Promise.all([
-      mailConnection(),
-      mailConnection(),
-    ]);
-    // Its mailer calls MAIL; its idle workflow calls nothing.
-    const invoices = await appOf(owner, `Invoices ${unique()}`, {
-      ...mailer(""),
-      ...workflowFiles("idle", "  return 1;"),
-    });
-    // A mailer too, but with no permission on the connection.
-    await appOf(other, `Payroll ${unique()}`, mailer(""));
-    const granted = await requestGranted(idp, owner, {
-      subject: { type: "app", appId: invoices },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
-      binding: "MAIL",
-    });
-
-    await expect(
-      Promise.all([
-        workflowsUsing(owner, mail.id),
-        workflowsUsing(other, mail.id),
-        workflowsUsing(user, mail.id),
-        workflowsUsing(owner, otherMail.id),
-      ])
-    ).resolves.toStrictEqual([[[invoices, "mailer"]], [], [], []]);
-
-    const admin = await personApi("admin");
-    await admin.api.permissions.revoke(granted);
-    await expect(workflowsUsing(owner, mail.id)).resolves.toStrictEqual([]);
   });
 
   it("lists an independent workflow that uses a connection through its approved binding, for those who can open it, until the approval goes", async () => {
