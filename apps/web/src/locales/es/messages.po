@@ -722,10 +722,6 @@ msgstr "{label} no responde desde {since}."
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, en el sitio de soporte de Grasp, en una pestaña nueva"
 
-#: src/activity/audit-log.tsx
-msgid "{label}, started by {name} (Grasp staff)"
-msgstr "{label}, a petición de {name} (personal de Grasp)"
-
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -6002,6 +5998,10 @@ msgstr "Finanzas y contabilidad"
 msgid "Find a team or a person"
 msgstr "Buscar un equipo o una persona"
 
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Encontrarás a Stephen en Aplicaciones, en tu espacio de trabajo de Slack."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Hallazgos"
@@ -10144,6 +10144,7 @@ msgstr "Solo los administradores de tu organización pueden abandonar un cambio 
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Abrir"
 
@@ -10195,6 +10196,10 @@ msgstr "Abrir"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "Abrir {name}"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Abre un chat con Stephen o búscalo entre las aplicaciones de Teams."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -10268,6 +10273,10 @@ msgstr "Abierta desde el {date}. Hasta que se responda, el dato sigue siendo des
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Abierta desde el visto bueno de Grasp el {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Abrir a Stephen en {app}, en una pestaña nueva"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -16706,6 +16715,10 @@ msgstr "Dónde pasa el trabajo"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Dónde están los flujos de trabajo"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Dónde encontrar a Stephen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"

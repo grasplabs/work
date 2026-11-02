@@ -12,7 +12,6 @@ import { BuildJobRecords, jobRecordsKept } from "../src/build-job-records.ts";
 import { personOf } from "../src/connections.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
-  chatOf,
   codeResults,
   codeStep,
   model,
@@ -20,7 +19,7 @@ import {
   says,
   transcript,
 } from "./agent-chat.ts";
-import { published, release, requestGranted } from "./apps.ts";
+import { published, requestGranted } from "./apps.ts";
 import type { jobRowSchema } from "./build-jobs.ts";
 import {
   appName,
@@ -45,7 +44,7 @@ import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { runInstance } from "./runs.ts";
-import { signedIn, signedInApi, staffPerson, whoami } from "./sign-in.ts";
+import { signedInApi } from "./sign-in.ts";
 
 // A build a chat's code hands to a durable job (`env.build.submit`): it
 // goes on after the code run that submitted it ends, as a workflow of
@@ -61,51 +60,6 @@ import { signedIn, signedInApi, staffPerson, whoami } from "./sign-in.ts";
 
 const idp = mockIdp();
 const { setUp } = buildJobsOf(idp);
-
-/**
- * A chat of a Grasp staff member's (GRA-1088) whose turn writes a draft of
- * an admin's App and submits its check, its agent allowed to build Apps,
- * and the turn sent as core sends a staff member's: marked.
- */
-const staffCheck = async () => {
-  const admin = await signedInApi(idp, "admin");
-  const { id: app } = await admin.api.apps.create({ name: "Staffed" });
-  await published(app);
-  // Released, so the Apps collection is there to grant.
-  await release(admin, app, { "AGENTS.md": "# Staffed\n" });
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { userId: staffId } = await whoami(session);
-  const chat = await chatOf(
-    staffId,
-    codeStep(`export default async (self, env) => {
-      await env.build.write(${JSON.stringify(app)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
-      return await env.build.submit(${JSON.stringify(app)}, { kind: "check" });
-    };`),
-    says("Submitted.")
-  );
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "collection", collectionId: "apps" },
-    actions: ["read", "write"],
-    binding: "APP_LIBRARY",
-  });
-  const send = async () => {
-    await chat.stub.send(
-      chat.chat.id,
-      staffId,
-      { text: "Check the desk", model },
-      true
-    );
-  };
-  return { chat, staffId, send };
-};
-
-/** Ends every staff session of `userId`, as their sign-out or expiry would. */
-const staffSessionsEnd = async (userId: string): Promise<void> => {
-  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND staff = 1")
-    .bind(userId)
-    .run();
-};
 
 /** Code that finds the App the agent created, by its name, as `app`. */
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
@@ -428,44 +382,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
       status: "failed",
       result: null,
       code: "role.forbidden",
-    });
-  });
-
-  it("runs a job a Grasp staff member's turn submitted as them", async () => {
-    const { chat, send } = await staffCheck();
-    await send();
-    const job = await submittedJob(chat.stub, chat.chat.id);
-    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
-
-    expect({
-      status: ended.status,
-      code: errorCode(ended.error),
-    }).toStrictEqual({ status: "completed", code: null });
-  });
-
-  it("fails a staff member's job once their staff session has ended", async () => {
-    const { chat, staffId, send } = await staffCheck();
-    const checking = holdFiles(screenBuilds);
-    let job: z.infer<typeof jobRowSchema>;
-    try {
-      await send();
-      job = await submittedJob(chat.stub, chat.chat.id);
-      // After its only step was admitted: its last step finds it.
-      await checking.reached();
-      await staffSessionsEnd(staffId);
-    } finally {
-      checking.restore();
-    }
-    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
-
-    expect({
-      status: ended.status,
-      result: ended.result,
-      code: errorCode(ended.error),
-    }).toStrictEqual({
-      status: "failed",
-      result: null,
-      code: "permission.person_inactive",
     });
   });
 
