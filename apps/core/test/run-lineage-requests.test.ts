@@ -1,180 +1,169 @@
-import { runActorOf } from "@grasp-os/shared/audit";
-import { runIdSchema } from "@grasp-os/shared/ids";
+import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { models } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  allAtOnce,
-  appWith,
-  callFor,
-  cheapAnswer,
-  countOf,
-  dearTotal,
-  eventsNow,
-  failedWith,
-  inTurn,
-  llmStep,
-  newMonth,
-  refusalsOf,
-  startChild,
-  statusOf,
-  times,
-  withProvider,
-} from "./run-lineages.ts";
-import { finished } from "./runs.ts";
-import { signedInApi } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
+import { jsonWorkflowAppsOf, liveLineage } from "./json-workflow-apps.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import { outcome } from "./sign-in.ts";
 
-// A run lineage's provider requests: 100 a lineage, its root's and its
-// children's together, however many ask at once, retries included.
-// The helpers it shares with the other run lineage files: run-lineages.ts.
+// A run lineage's provider requests: 100 a lineage, all its runs'
+// together, however many ask at once, for the lineage's whole life. The
+// calls are made as an independent JSON workflow's run makes them
+// (resource-calls.ts): its lineage, from its run's row, by its root. The
+// model provider behind connect is the outside system
+// (test/model-provider.ts); the gateway and the model ledger are real.
+//
+// Covered elsewhere for JSON runs, and so not tried here:
+// - A child's requests counted with its parent's, so children never start
+//   the lineage's count afresh: workflow-children's "count every run of
+//   the lineage against its model requests…".
+// - A run's lineage taken from core's own row, never from its input: a
+//   JSON start's input is held to its workflow's schema, and
+//   workflow-resource-runs' "admits each attempt against the run's own
+//   lineage…" shows the root a run's attempts count on.
+// A step retried after the provider refused it went with App workflows:
+// a JSON workflow's model task is tried once (resource-calls.ts,
+// `askAgain`).
 
 const idp = mockIdp();
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
-describe("run lineages", { timeout: 90_000 }, () => {
-  it("count a retried step's requests on top of its lineage's, so its retry can't start the count afresh", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      ...workflowFiles("idle", "  return null;"),
-      ...workflowFiles("reader", llmStep("retries: { limit: 2, delay: 1 },"), {
-        extract: { total: 1234 },
-      }),
-    });
-    const work = { app, person: builder.userId };
-    const root = await builder.api.workflows.start(app, "idle");
-    await finished(root.id);
-    const rootActor = runActorOf({ runId: root.id, app, workflow: "idle" });
+/** The model the calls go through: Mistral Large, which doesn't think. */
+const lineageModel = "mistral/mistral-large-latest";
 
-    const result = await withProvider(
-      [
-        ...times(97, cheapAnswer),
-        // Each of the step's attempts sends one request and two retries:
-        // its first is refused for the provider's rate each time, and is
-        // tried again.
-        ...times(3, { status: 429, headers: { "retry-after": "1" } }),
-        ...times(6, dearTotal),
-      ],
-      async (fake) => {
-        // The root used 97 of its lineage's 100 requests.
-        const before = await inTurn(times(97, rootActor), work);
-        const child = await startChild(app, "reader", root.id, builder.userId);
-        await finished(child);
-        return {
-          before: countOf(before, "ok"),
-          sentByChild: fake.requests.length - 97,
-          child: await failedWith(child),
-          refused: await refusalsOf(child),
-        };
-      }
-    );
+/** An answer that costs next to nothing. */
+const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
 
-    expect(result).toStrictEqual({
-      before: 97,
-      sentByChild: 3,
-      child: "model.run_limit",
-      refused: [["model.run_limit", "requests"]],
-    });
-  });
+let monthsUsed = 0;
 
+/** A month no other file counts spend in. */
+const newMonth = (): string => {
+  monthsUsed += 1;
+  return `${2600 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
+};
+
+/** A run, the root of its lineage, of workflow `workflow`, for `person`. */
+interface Lineage {
+  root: string;
+  workflow: string;
+  person: string;
+}
+
+/** A call of a run of `lineage`, capped at 100 tokens, as its host makes it. */
+const callOf = ({ root, workflow, person }: Lineage): ModelCall<undefined> => {
+  const workflowId = workflowResourceIdSchema.parse(workflow);
+  return {
+    model: lineageModel,
+    maxTokens: 100,
+    input: "Hello.",
+    purpose: "workflow.step",
+    trigger: { type: "system" },
+    lineage: { rootRunId: root, workflowId: workflow },
+    work: {
+      authority: {
+        subject: { type: "workflow", workflowId },
+        onBehalfOf: person,
+        mode: "workflow",
+      },
+      context: {
+        type: "workflowRun",
+        workflowId,
+        runId: runIdSchema.parse(root),
+      },
+    },
+  };
+};
+
+/** The outcome of one call of `lineage`, counted in `month` if given. */
+const callFor = async (lineage: Lineage, month?: string): Promise<string> => {
+  const before = env.MODEL_BUDGET_MONTH;
+  env.MODEL_BUDGET_MONTH = month ?? before;
+  try {
+    return await outcome(models(env).call(callOf(lineage)));
+  } finally {
+    env.MODEL_BUDGET_MONTH = before;
+  }
+};
+
+/**
+ * The outcome of a call of `lineage`, asked again each time it is told it
+ * is queued for a share of the model requests in flight, as its host
+ * would: more at once than the shares and the queue's places hold are
+ * told so at once (model-admission.ts), and nothing else of them counts.
+ */
+const callUntilServed = async (lineage: Lineage): Promise<string> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- asked again once told it is queued
+    const told = await callFor(lineage);
+    if (told !== "model.queued") {
+      return told;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a moment before asking again
+    await scheduler.wait(50);
+  }
+};
+
+/** How many of `outcomes` are `one`. */
+const countOf = (outcomes: readonly string[], one: string): number =>
+  outcomes.filter((each) => each === one).length;
+
+describe("run lineages", () => {
   // A person's share admits four requests in flight a round, each round
   // five seconds on, and the provider behind connect answers in its own
   // time: 101 at once take about a minute, so this test has three.
   it(
-    "admit 100 provider requests a lineage, its root's and its children's together, however many ask at once, and no more",
+    "admit 100 provider requests a lineage, however many of its runs ask at once, and no more, in any month",
     { timeout: 180_000 },
     async () => {
-      const builder = await signedInApi(idp, "builder");
-      const { id: app } = await builder.api.apps.create({ name: "Lineages" });
-      const work = { app, person: builder.userId };
-      const root = `run-${crypto.randomUUID()}`;
-      const rootActor = runActorOf({ runId: root, app, workflow: "reader" });
-      const childActor = runActorOf({
-        runId: `run-${crypto.randomUUID()}`,
-        app,
-        workflow: "reader",
-        rootRunId: root,
-      });
-      const otherLineage = runActorOf({
-        runId: `run-${crypto.randomUUID()}`,
-        app,
-        workflow: "reader",
-      });
-
-      const result = await withProvider(
-        times(110, cheapAnswer),
-        async (fake) => {
-          const lineage = await allAtOnce(
-            Array.from({ length: 101 }, (_, index) =>
-              index % 2 === 0 ? rootActor : childActor
-            ),
-            work
-          );
-          return {
-            ok: countOf(lineage, "ok"),
-            refused: countOf(lineage, "model.run_limit"),
-            // In the next month too: a lineage is counted for its whole life.
-            again: await callFor(work, childActor, newMonth()),
-            other: await callFor(work, otherLineage),
-            sent: fake.requests.length,
-          };
-        }
+      const builder = await signedIn("builder");
+      const runs = [await liveLineage(builder), await liveLineage(builder)];
+      const [lineage, otherLineage] = runs.map(({ run, workflow }) => ({
+        root: run,
+        workflow,
+        person: builder.userId,
+      }));
+      if (lineage === undefined || otherLineage === undefined) {
+        throw new Error("No runs");
+      }
+      const fake = await fakeProviderFor(
+        [lineageModel],
+        ...Array.from({ length: 110 }, () => cheapAnswer)
       );
+      const { MODEL_BUDGET_MONTH: month } = env;
+      env.MODEL_BUDGET_MONTH = newMonth();
+      try {
+        const asked = await Promise.all(
+          Array.from(
+            { length: 101 },
+            async () => await callUntilServed(lineage)
+          )
+        );
 
-      expect(result).toStrictEqual({
-        ok: 100,
-        refused: 1,
-        again: "model.run_limit",
-        other: "ok",
-        sent: 101,
-      });
+        expect({
+          ok: countOf(asked, "ok"),
+          refused: countOf(asked, "model.run_limit"),
+          // In the next month too: a lineage is counted for its whole life.
+          again: await callFor(lineage, newMonth()),
+          other: await callFor(otherLineage),
+          sent: fake.requests.length,
+        }).toStrictEqual({
+          ok: 100,
+          refused: 1,
+          again: "model.run_limit",
+          other: "ok",
+          sent: 101,
+        });
+      } finally {
+        env.MODEL_BUDGET_MONTH = month;
+        await Promise.all(
+          runs.map(async ({ end }) => {
+            await end();
+          })
+        );
+      }
     }
   );
-
-  it("count a run's calls against its own lineage, whatever lineage or root its input names", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(
-      builder,
-      workflowFiles("reader", llmStep(), { extract: { total: 1234 } })
-    );
-    const work = { app, person: builder.userId };
-    const victim = runIdSchema.parse(`run-${crypto.randomUUID()}`);
-    const victimActor = runActorOf({ runId: victim, app, workflow: "reader" });
-
-    const result = await withProvider(
-      [...times(100, cheapAnswer), dearTotal],
-      async () => {
-        // The victim's lineage used all of its requests.
-        const used = await inTurn(times(100, victimActor), work);
-        const forged = await builder.api.workflows.start(app, "reader", {
-          rootRunId: victim,
-          root: victim,
-          parent: victim,
-          lineage: victim,
-          parentRunId: victim,
-        });
-        await finished(forged.id);
-        const events = await eventsNow();
-        return {
-          used: countOf(used, "ok"),
-          forged: await statusOf(builder, forged.id),
-          // Its own root: no `rootRunId` at all.
-          ownActor: runActorOf({ runId: forged.id, app, workflow: "reader" }),
-          actor: events.find(
-            ({ action, actor }) =>
-              action === "model.call" &&
-              actor.type === "workflow" &&
-              actor.runId === forged.id
-          )?.actor,
-          victimAgain: await callFor(work, victimActor),
-        };
-      }
-    );
-
-    expect(result).toMatchObject({
-      used: 100,
-      forged: "completed",
-      victimAgain: "model.run_limit",
-    });
-    expect(result.actor).toStrictEqual(result.ownActor);
-  });
 });
