@@ -112,8 +112,46 @@ export const documentsPerFile = 25;
  */
 export const exportFileBytes = 8 * 1024 * 1024;
 
-/** Rows one page of a part reads at a time. */
+/** Rows one page of a part reads at a time: one D1 query. */
 const pageRows = 100;
+
+/**
+ * Reads one file's rows may take, each a subrequest (a D1 query or an R2
+ * read): a file closes before the next would pass it, as before
+ * `exportFileBytes`, so a step never runs out of the subrequests one
+ * invocation may make (Workers allow 1,000) however small what it reads.
+ * A document's version costs two (its payload's row, then its text); a
+ * page of another part's rows, one.
+ */
+export const exportFileReads = 200;
+
+/**
+ * Subrequests a step makes besides its file's rows: whether a purge ran,
+ * the export's file records, an upload cut short removed, the file's
+ * record, upload and marking stored; or the manifest's upload and the
+ * export's completion.
+ */
+const exportStepOverhead = 20;
+
+/**
+ * Subrequests one call writing an export makes at most: it writes files
+ * while another step's worst case still fits (`exportFileReads` and
+ * `exportStepOverhead`), then lets the next go on. Room is left for its
+ * claim and release, and for the host's own work in the same invocation.
+ */
+export const exportInvocationReads = 800;
+
+/** The reads a file of the export has made so far (`exportFileReads`). */
+interface FileReads {
+  used: number;
+}
+
+/** Subrequests one version of a document costs to read. */
+const versionReads = 2;
+
+/** Whether `cost` more reads still fit in the file `reads` counts. */
+const readsFit = (reads: FileReads, cost: number): boolean =>
+  reads.used + cost <= exportFileReads;
 
 /** The export's format, as its manifest names it. */
 export const exportFormat = "grasp-brain-export";
@@ -595,23 +633,28 @@ const jsonBytes = (value: Json): number =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
 /**
- * Versions of `kept`, in order, while they fit in `room` bytes (one at
- * least when `atLeastOne`): with the bytes they take.
+ * Versions of `kept`, in order, while they fit in `room` bytes and the
+ * file's reads (one at least when `atLeastOne`): with the bytes they take.
  */
 const versionsFitting = async <C>(
   brain: Brain<C>,
   kept: readonly (typeof versions.$inferSelect)[],
   room: number,
-  atLeastOne: boolean
+  atLeastOne: boolean,
+  reads: FileReads
 ): Promise<{ entries: Json[]; bytes: number; last: number | null }> => {
   const entries: Json[] = [];
   let bytes = 0;
   let last: number | null = null;
   for (const version of kept) {
+    const first = entries.length === 0 && atLeastOne;
+    if (!(first || readsFit(reads, versionReads))) {
+      break;
+    }
+    reads.used += versionReads;
     // oxlint-disable-next-line no-await-in-loop -- one version's text at a time, to bound memory
     const entry = await versionEntry(brain, version);
     const size = jsonBytes(entry);
-    const first = entries.length === 0 && atLeastOne;
     if (!first && bytes + size > room) {
       break;
     }
@@ -644,9 +687,11 @@ const continuedPiece = async <C>(
   brain: Brain<C>,
   cursor: Extract<DocumentsCursor, { document: string }>,
   room: number,
-  atLeastOne: boolean
+  atLeastOne: boolean,
+  reads: FileReads
 ): Promise<Piece> => {
   const { document, afterVersion, upTo } = cursor;
+  reads.used += 1;
   const kept = await brain.db
     .select()
     .from(versions)
@@ -658,7 +703,7 @@ const continuedPiece = async <C>(
       )
     )
     .orderBy(asc(versions.number));
-  const piece = await versionsFitting(brain, kept, room, atLeastOne);
+  const piece = await versionsFitting(brain, kept, room, atLeastOne, reads);
   const full = piece.entries.length < kept.length;
   return {
     row:
@@ -684,9 +729,11 @@ const firstPiece = async <C>(
   brain: Brain<C>,
   id: string,
   room: number,
-  atLeastOne: boolean
+  atLeastOne: boolean,
+  reads: FileReads
 ): Promise<Piece | null> => {
   const { db } = brain;
+  reads.used += 1;
   const [[document], kept, [transcript]] = await db.batch([
     db.select().from(documents).where(eq(documents.id, id)),
     db
@@ -725,7 +772,8 @@ const firstPiece = async <C>(
     brain,
     kept,
     room - headBytes,
-    atLeastOne
+    atLeastOne,
+    reads
   );
   if (piece.entries.length === 0 && kept.length > 0) {
     return null;
@@ -749,8 +797,10 @@ const firstPiece = async <C>(
 const nextDocument = async <C>(
   brain: Brain<C>,
   collectionIds: readonly string[],
-  after: string | null
+  after: string | null,
+  reads: FileReads
 ): Promise<string | undefined> => {
+  reads.used += 1;
   const [next] = await brain.db
     .select({ id: documents.id })
     .from(documents)
@@ -765,53 +815,91 @@ const nextDocument = async <C>(
   return next?.id;
 };
 
+/** One file of a part: its rows, where the next goes on, the reads it took. */
+interface PartFile {
+  rows: Json[];
+  /** The key or cursor the next file goes on after; null: none left. */
+  last: string | null;
+  reads: number;
+}
+
+/**
+ * The next piece of documents from `cursor`: within a document, its next
+ * versions; else the next document's first. "done" when no document is
+ * left; null when what is next doesn't fit in the file begun.
+ */
+const nextPiece = async <C>(
+  brain: Brain<C>,
+  collectionIds: readonly string[],
+  cursor: DocumentsCursor | null,
+  room: number,
+  atLeastOne: boolean,
+  reads: FileReads
+): Promise<Piece | null | "done"> => {
+  if (cursor !== null && "document" in cursor) {
+    return await continuedPiece(brain, cursor, room, atLeastOne, reads);
+  }
+  const id = await nextDocument(
+    brain,
+    collectionIds,
+    cursor?.after ?? null,
+    reads
+  );
+  if (id === undefined) {
+    return "done";
+  }
+  return await firstPiece(brain, id, room, atLeastOne, reads);
+};
+
 /**
  * The next file of documents from `from` (null: the first), each version
- * with its text, closed at `exportFileBytes` or `documentsPerFile`
- * documents begun: its lines, and where the next goes on (null: none).
+ * with its text, closed at `exportFileBytes`, `exportFileReads` or
+ * `documentsPerFile` documents begun: its lines, and where the next goes
+ * on (null: none).
  */
 const documentsFile = async <C>(
   brain: Brain<C>,
   collectionIds: readonly string[],
   from: string | null
-): Promise<{ rows: Json[]; last: string | null }> => {
+): Promise<PartFile> => {
   const rows: Json[] = [];
   let bytes = 0;
   let begun = 0;
+  const reads: FileReads = { used: 0 };
   let cursor: DocumentsCursor | null =
     from === null ? null : documentsCursorSchema.parse(JSON.parse(from));
+  const closed = (last: string | null): PartFile => ({
+    rows,
+    last,
+    reads: reads.used,
+  });
   for (;;) {
     const within = cursor !== null && "document" in cursor;
-    if (!within && (begun >= documentsPerFile || bytes >= exportFileBytes)) {
-      return { rows, last: JSON.stringify(cursor) };
+    // What the next piece reads at least: within a document, its next
+    // versions and one of them; else the next document, its batch and
+    // one of its versions.
+    const leastReads = within ? 1 + versionReads : 2 + versionReads;
+    if (
+      (!within && (begun >= documentsPerFile || bytes >= exportFileBytes)) ||
+      (rows.length > 0 && !readsFit(reads, leastReads))
+    ) {
+      return closed(JSON.stringify(cursor));
     }
-    const id =
-      cursor !== null && "document" in cursor
-        ? undefined
-        : // oxlint-disable-next-line no-await-in-loop -- one document at a time
-          await nextDocument(brain, collectionIds, cursor?.after ?? null);
-    if (!within && id === undefined) {
-      return { rows, last: null };
+    // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
+    const piece = await nextPiece(
+      brain,
+      collectionIds,
+      cursor,
+      exportFileBytes - bytes,
+      rows.length === 0,
+      reads
+    );
+    if (piece === "done") {
+      return closed(null);
     }
-    const piece =
-      cursor !== null && "document" in cursor
-        ? // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
-          await continuedPiece(
-            brain,
-            cursor,
-            exportFileBytes - bytes,
-            rows.length === 0
-          )
-        : // oxlint-disable-next-line no-await-in-loop -- one piece at a time, to bound memory
-          await firstPiece(
-            brain,
-            id ?? "",
-            exportFileBytes - bytes,
-            rows.length === 0
-          );
     // Not even its first version fits: it begins the next file.
     if (piece === null) {
-      return { rows, last: JSON.stringify(cursor) };
+      return closed(JSON.stringify(cursor));
     }
     if (piece.row !== null) {
       rows.push(piece.row);
@@ -820,7 +908,7 @@ const documentsFile = async <C>(
     }
     cursor = piece.next;
     if (piece.full) {
-      return { rows, last: JSON.stringify(cursor) };
+      return closed(JSON.stringify(cursor));
     }
   }
 };
@@ -828,25 +916,32 @@ const documentsFile = async <C>(
 /**
  * The rows `page` reads from `from` (null: the first), as one file of a
  * part: closed once the next row would take it past `exportFileBytes`,
- * with the key it goes on after (null: none left).
+ * or the next page past `exportFileReads` (a page is one read: at most
+ * that many pages, of `pageRows` rows each), with the key it goes on
+ * after (null: none left).
  */
 const pagedFile = async (
   page: ExportPage,
   from: string | null
-): Promise<{ rows: Json[]; last: string | null }> => {
+): Promise<PartFile> => {
   const rows: Json[] = [];
+  const reads: FileReads = { used: 0 };
   let bytes = 0;
   let after = from;
   for (;;) {
+    if (rows.length > 0 && !readsFit(reads, 1)) {
+      return { rows, last: after, reads: reads.used };
+    }
+    reads.used += 1;
     // oxlint-disable-next-line no-await-in-loop -- one page at a time, to bound memory
     const keyed = await page(after);
     if (keyed.length === 0) {
-      return { rows, last: null };
+      return { rows, last: null, reads: reads.used };
     }
     for (const { row, key } of keyed) {
       const size = jsonBytes(row) + 1;
       if (rows.length > 0 && bytes + size > exportFileBytes) {
-        return { rows, last: after };
+        return { rows, last: after, reads: reads.used };
       }
       rows.push(row);
       bytes += size;
@@ -1014,7 +1109,7 @@ const erasuresPage =
 interface ExportPart {
   prefix: string;
   /** Its next file from `from` (null: its first), and where it goes on. */
-  file: (from: string | null) => Promise<{ rows: Json[]; last: string | null }>;
+  file: (from: string | null) => Promise<PartFile>;
 }
 
 /** The export's parts, in the order they are written. */
@@ -1053,13 +1148,14 @@ const exportParts = <C>(
 
 /**
  * Writes the next file `run`'s export owes, or its manifest when none is
- * left. Whether more is left to write.
+ * left. Whether more is left to write, and the reads its rows took
+ * (`exportFileReads`).
  */
 const writeNext = async <C>(
   brain: Brain<C>,
   run: ExportRun,
   onExport: OnExport
-): Promise<boolean> => {
+): Promise<{ more: boolean; reads: number }> => {
   const { exportId, collectionIds } = run;
   const hostNames = onExport.files.map(({ name }) => name);
   if (
@@ -1089,7 +1185,7 @@ const writeNext = async <C>(
     const last = files.at(-1);
     if (last === undefined || last.cursor !== null) {
       // oxlint-disable-next-line no-await-in-loop -- one file per step
-      const { rows, last: next } = await part.file(last?.cursor ?? null);
+      const { rows, last: next, reads } = await part.file(last?.cursor ?? null);
       // oxlint-disable-next-line no-await-in-loop -- one file per step
       await writeFile(
         brain,
@@ -1100,7 +1196,7 @@ const writeNext = async <C>(
         rows.length,
         next
       );
-      return true;
+      return { more: true, reads };
     }
   }
   const body = {
@@ -1158,7 +1254,7 @@ const writeNext = async <C>(
   if (completed === undefined || completed.length === 0) {
     throw new ClaimLostError();
   }
-  return false;
+  return { more: false, reads: 0 };
 };
 
 /**
@@ -1186,8 +1282,10 @@ const deleteFiles = async <C>(
 };
 
 /**
- * Goes on with the running export `exportId` until it is complete or
- * `until` passes: one run at a time, under a claim with a lease. A
+ * Goes on with the running export `exportId` until it is complete, or
+ * `until` passes, or another file could take it past the subrequests one
+ * invocation may make (`exportInvocationReads`), for the next call to go
+ * on with: one run at a time, under a claim with a lease. A
  * failure fails it with a stable code and deletes what it wrote.
  * Whether it is complete.
  */
@@ -1228,12 +1326,20 @@ export const advanceExport = async <C>(
     purgeMark: held.purgeMark,
   };
   try {
-    while (brain.ports.clock().getTime() < until.getTime()) {
+    // Its claim so far, and its release or failure to come; then each
+    // step's, while another's most still fits.
+    let reads = 2;
+    const stepReads = exportFileReads + exportStepOverhead;
+    while (
+      brain.ports.clock().getTime() < until.getTime() &&
+      reads + stepReads <= exportInvocationReads
+    ) {
       // oxlint-disable-next-line no-await-in-loop -- one file after another
-      const more = await writeNext(brain, run, onExport);
-      if (!more) {
+      const step = await writeNext(brain, run, onExport);
+      if (!step.more) {
         return true;
       }
+      reads += step.reads + exportStepOverhead;
     }
     await brain.db
       .update(brainExports)

@@ -15,6 +15,7 @@ import {
   advanceExport,
   exportFile,
   exportFileBytes,
+  exportFileReads,
   exportLeaseMs,
   exportStatus,
   manifestName,
@@ -99,19 +100,31 @@ const begun = async (brain: Brain<Caller>, onExport: OnExport) => {
   return exportId;
 };
 
-/** `exportId` advanced until it is complete or refuses. */
+/**
+ * `exportId` advanced until it is complete or refuses, a call at a time
+ * as the host's clock calls it (each within `exportInvocationReads`).
+ */
 const ranToEnd = async (
   brain: Brain<Caller>,
   exportId: string,
   onExport: OnExport
 ): Promise<string> =>
   await outcome(
-    advanceExport(
-      brain,
-      exportId,
-      onExport,
-      new Date(brain.ports.clock().getTime() + 60_000)
-    )
+    (async () => {
+      for (let call = 0; call < 100; call += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one call after another
+        const complete = await advanceExport(
+          brain,
+          exportId,
+          onExport,
+          new Date(brain.ports.clock().getTime() + 60_000)
+        );
+        if (complete) {
+          return;
+        }
+      }
+      throw new Error(`Export ${exportId} is still running`);
+    })()
   );
 
 /** File `name` of a complete export, as text. */
@@ -569,6 +582,75 @@ describe("exporting the company's Brain", () => {
       numbers: Array.from({ length: versionCount }, (_, index) => index + 1),
     });
   });
+
+  it(
+    "splits a document of many small versions across files by the reads they take, losing and repeating no version",
+    { timeout: 60_000 },
+    async () => {
+      const { brain } = testHost();
+      const notes = await newCollection(brain, "Notes");
+      // More versions than one file reads (two reads each), each tiny.
+      const versionCount = exportFileReads + 50;
+      let id = "";
+      for (let number = 1; number <= versionCount; number += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one version after another
+        const saved = await writeVersion(brain, admin, {
+          collection: notes,
+          path: "log.md",
+          text: `# Log\nEntry ${String(number)}.`,
+          ifVersion: number - 1,
+          message: null,
+          restoredFrom: null,
+        });
+        ({ id } = saved);
+      }
+      // The bucket reads each file of documents makes before it is written.
+      let gets = 0;
+      let mostGets = 0;
+      const counting = withPorts(brain, {
+        blobs: {
+          delete: env.BLOBS.delete.bind(env.BLOBS),
+          head: env.BLOBS.head.bind(env.BLOBS),
+          list: env.BLOBS.list.bind(env.BLOBS),
+          get: async (key, options) => {
+            gets += 1;
+            return await env.BLOBS.get(key, options);
+          },
+          put: async (key, value, options) => {
+            if (key.includes("-documents-")) {
+              mostGets = Math.max(mostGets, gets);
+            }
+            gets = 0;
+            return await env.BLOBS.put(key, value, options);
+          },
+        },
+      });
+      const onExport = hostWith();
+      const exportId = await begun(brain, onExport);
+      const ended = await ranToEnd(counting, exportId, onExport);
+      const files = await partRows(brain, exportId, "documents");
+      const pieces = files.flatMap(({ file, rows }) =>
+        rows.flatMap((row) => {
+          const piece = pieceSchema.parse(row);
+          return piece.id === id || piece.continues === id
+            ? [{ file, numbers: piece.versions.map(({ number }) => number) }]
+            : [];
+        })
+      );
+
+      expect({
+        ended,
+        files: new Set(pieces.map(({ file }) => file)).size > 1,
+        withinReads: mostGets <= exportFileReads,
+        numbers: pieces.flatMap(({ numbers }) => numbers),
+      }).toStrictEqual({
+        ended: "ok",
+        files: true,
+        withinReads: true,
+        numbers: Array.from({ length: versionCount }, (_, index) => index + 1),
+      });
+    }
+  );
 
   it("refuses a download a purge began during, and deletes the export", async () => {
     const { brain } = testHost();
