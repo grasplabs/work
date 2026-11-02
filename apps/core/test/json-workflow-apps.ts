@@ -590,13 +590,14 @@ export const askingTasks = (): unknown[] => [
 /**
  * A workflow of `builder`'s, published as version 1, running `tasks`
  * (`askingTasks` unless said) with a model binding `reader`, which
- * `admin` approves to `askedModel`: catalog contract, definition and
- * approval each through their session.
+ * `admin` approves to `model` (`askedModel` unless said): catalog
+ * contract, definition and approval each through their session.
  */
 export const askingWorkflow = async (
   admin: Person,
   builder: Person,
-  tasks: unknown[] = askingTasks()
+  tasks: unknown[] = askingTasks(),
+  model: string = askedModel
 ): Promise<{ id: string; name: string; contract: string }> => {
   const contract = `reader-${unique()}`;
   await admin.api.workflowResources.publishContract({
@@ -610,7 +611,7 @@ export const askingWorkflow = async (
   );
   await admin.api.workflowResources.approveBinding(workflow.id, {
     alias: "reader",
-    target: { kind: "model", model: askedModel },
+    target: { kind: "model", model },
     reviewed: { version: 1 },
   });
   return { ...workflow, contract };

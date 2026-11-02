@@ -1,11 +1,7 @@
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -19,10 +15,9 @@ import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  askingWorkflow,
   endedRun,
-  greetingTasks,
   jsonWorkflowAppsOf,
-  publishedWorkflow,
   startedBy,
 } from "./json-workflow-apps.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -38,8 +33,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // behind connect is the outside system (test/model-provider.ts). The
 // ledger, the audit log and the runs are real; where a test needs the
 // ledger to fail, its binding fails, as an unreachable Durable Object
-// would. A run's calls are made as a JSON workflow's run makes them
-// (resource-calls.ts). An App workflow's run making a call on Grasp's own
+// would. A run's calls are a JSON workflow's run's real `grasp.model`
+// tasks (resource-calls.ts). An App workflow's run making a call on Grasp's own
 // key, counted as a request of its lineage, went with App workflows: no
 // JSON workflow's run makes one.
 
@@ -333,41 +328,37 @@ describe("model spend", { timeout: 60_000 }, () => {
   });
 
   it("count the calls an agent or a run makes for a person as that person's spend", async () => {
-    const builder = await jsonWorkflowAppsOf(idp).signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks());
-    const run = await startedBy(builder, id);
-    await endedRun(builder, id, run);
-    const workflowId = workflowResourceIdSchema.parse(id);
-    const { call, month } = withProvider(times(3, pricedAnswer));
+    const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
+    const [admin, builder] = await Promise.all([
+      signedInPerson("admin"),
+      signedInPerson("builder"),
+    ]);
+    // Counted in the month it is: a run's call counts in it.
+    const { call } = withProvider(
+      [
+        // The run's `grasp.model` task, which answers in its schema.
+        { ...pricedAnswer, text: '{"line": "Hi."}' },
+        ...times(2, pricedAnswer),
+      ],
+      { MODEL_BUDGET_MONTH: undefined }
+    );
+    const month = new Date().toISOString().slice(0, "yyyy-mm".length);
     const ada = { type: "person", userId: builder.userId } as const;
+    // A run of an independent workflow Ada started, asking Mistral Large
+    // for her.
+    const { id } = await askingWorkflow(admin, builder);
+    const run = await endedRun(builder, id, await startedBy(builder, id));
     const forAda = [
       hello({
         trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
-      }),
-      // As a JSON workflow's run makes it, for whom it acts.
-      hello({
-        purpose: "workflow.step",
-        trigger: { type: "system" },
-        lineage: { rootRunId: run, workflowId: id },
-        work: {
-          authority: {
-            subject: { type: "workflow", workflowId },
-            onBehalfOf: ada.userId,
-            mode: "workflow",
-          },
-          context: {
-            type: "workflowRun",
-            workflowId,
-            runId: runIdSchema.parse(run),
-          },
-        },
       }),
       hello({ trigger: ada }),
     ];
 
     await expect(
       inTurn(forAda.map((made) => async () => await call(made)))
-    ).resolves.toStrictEqual(["ok", "ok", "ok"]);
+    ).resolves.toStrictEqual(["ok", "ok"]);
+    expect(run.status).toBe("completed");
     await expect(ledgerOf(month, ada.userId)).resolves.toBe(3 * pricedMicros);
   });
 
