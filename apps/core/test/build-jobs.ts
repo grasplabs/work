@@ -9,7 +9,6 @@ import type { WorkspaceStub } from "./agent-chat.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { configuredLimits } from "./quota-limits.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The chat, the App and the ways the build jobs tests (build-job-*.test.ts)
@@ -265,15 +264,6 @@ export const jobEvents = async (
       ? [{ index, content: JSON.stringify(message.content) }]
       : []
   );
-};
-
-/** What a job's own code reads of it while it waits for the client's share. */
-export const queuedForClient =
-  /"status":\s*"queued",\s*"waitingFor":\s*"client"/u;
-
-/** Sets the quota limits to the deployment's, with `limits` lowered. */
-export const policyWith = (limits: Record<string, number>): void => {
-  env.TEST_QUOTA_LIMITS = { ...configuredLimits, ...limits };
 };
 
 /** What the tests do as people of `idp`'s organization. */

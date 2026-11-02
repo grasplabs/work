@@ -802,7 +802,8 @@ describe("a run's host, against a forged module at once", () => {
     const raced = Promise.withResolvers<null>();
     const host = await hostOf(by, workflow.id, {
       admitAttempt: async (attempt) => {
-        if (attempt.step === "task:slow-done@pick.0") {
+        // The engine keys a step's attempt by its name (json-workflows.ts).
+        if (attempt.key.startsWith("key:task:slow-done@pick.0:")) {
           await raced.promise;
         }
         return await admittedFreely();

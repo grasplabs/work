@@ -15853,10 +15853,6 @@ msgid "Waiting for a share of the organization's runs; tries again by {time}"
 msgstr "En attente d’une part des exécutions de l’organisation ; réessaie au plus tard le {time}"
 
 #: src/workflows/runs.tsx
-msgid "Waiting for a share of this domain's runs; tries again by {time}"
-msgstr "En attente d’une part des exécutions de ce domaine ; réessaie au plus tard le {time}"
-
-#: src/workflows/runs.tsx
 msgid "Waiting for a share of this person's runs; tries again by {time}"
 msgstr "En attente d’une part des exécutions de cette personne ; réessaie au plus tard le {time}"
 

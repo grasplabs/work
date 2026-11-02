@@ -76,27 +76,19 @@ export const platformLimits = {
   /** A run lineage's age, from its root's start: its deadline and retention agree. */
   workflowAgeMs: 365 * day,
   /**
-   * Workflow attempts running at once in the whole client deployment: the
-   * tenant's share of its core (core's workflows/admission.ts).
+   * Workflow attempts running at once in the whole client deployment
+   * (core's workflows/admission.ts).
    */
   workflowClientAttempts: 32,
   /**
-   * Workflow attempts running at once for one person: those of the runs
-   * that act for them. One run's branches fit.
+   * Workflow attempts running at once of one App's runs: fewer than the
+   * whole deployment's, so one busy App leaves room for others. One run's
+   * branches fit.
    */
-  workflowPersonAttempts: 8,
-  /** Workflow attempts running at once of one App's runs. One run's branches fit. */
   workflowAppAttempts: 8,
   /**
-   * Workflow steps waiting at once for a share of the attempts running at
-   * once, for one person: past it, a step's attempt is refused, not queued.
-   */
-  workflowQueuedPerPerson: 64,
-  /** Workflow steps waiting at once for a share, of one App's runs. */
-  workflowQueuedPerApp: 64,
-  /**
-   * How long one workflow step waits in all for a share, or for its busy
-   * lineage, before it fails (`workflow.queue_timeout`).
+   * How long one workflow step waits in all for a free slot, or for its
+   * busy lineage, before it fails (`workflow.queue_timeout`).
    */
   workflowQueuedStepMs: 1 * day,
 
@@ -109,22 +101,10 @@ export const platformLimits = {
   triggerResourcesPerPerson: 100,
 
   // Model requests in flight (core's model ledger, model-admission.ts).
-  /**
-   * Provider requests to models in flight at once in the whole client
-   * deployment: the tenant's share of its model gateway.
-   */
+  /** Provider requests to models in flight at once in the whole deployment. */
   modelClientRequests: 16,
   /** Provider requests in flight at once for one person. */
   modelPersonRequests: 4,
-  /** Provider requests in flight at once of one App. */
-  modelAppRequests: 8,
-  /**
-   * Model calls waiting at once for a share of the requests in flight, for
-   * one person: past it, a call is refused (`model.queued`), not queued.
-   */
-  modelQueuedPerPerson: 32,
-  /** Model calls waiting at once for a share, of one App. */
-  modelQueuedPerApp: 64,
 
   // Calls a run lineage makes.
   /** Provider requests of one run lineage, retries included. */
@@ -186,15 +166,6 @@ export const platformLimits = {
    * as lost and is sent again.
    */
   appFileChunkSendMs: 1 * minute,
-
-  // Builds (core's build-admission.ts).
-  /** Build jobs one tenant has building at once: the client's share. */
-  tenantBuildJobs: 2,
-  /**
-   * Build jobs one resource or content key has building at once: for an
-   * App's build jobs, the App.
-   */
-  keyBuildJobs: 1,
 
   // Dependencies.
   /** Resolved packages in one dependency graph. */

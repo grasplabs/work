@@ -29,17 +29,12 @@ import { detailsRemoved, removedText } from "./retention.ts";
 // than the host would admit. During a compensation nothing may be paused,
 // resumed or cancelled from an App.
 //
-// A run whose step waits in the client's queue for a share of the
-// attempts running at once shows as `queued`, with the share and when it
-// asks again (admission.ts): each time it joins, asks again or leaves the
-// queue its revision moves on. One whose step stopped asking (its
-// activation died while it waited) stops showing queued once its place
-// lapses, a minute and a half on, before anything writes its row: the next
-// admission that drops the place moves its revision on. A run whose step's
-// model call waits for a share of the model requests in flight shows the
-// same way (model-waits.ts), and so does one whose step's model call
-// failed on the organization's own AI provider key
-// (`aiProvider`: the provider, what it showed and since when, ai-waits.ts).
+// A run whose step's model call waits for a share of the model requests
+// in flight shows as `queued`, with the share and when it asks again
+// (model-waits.ts), and so does one whose step's model call failed on the
+// organization's own AI provider key (`aiProvider`: the provider, what it
+// showed and since when, ai-waits.ts). A step waiting for a free slot of
+// the attempts running at once (admission.ts) shows as running.
 
 /** What the one read of a run's summary returns. */
 const rowSchema = z.object({
@@ -71,9 +66,9 @@ const rowSchema = z.object({
   ai_wait: z.string().nullable(),
 });
 
-/** A step of the run waiting in the client's queue (admission.ts). */
+/** A step of the run whose model call waits for a share (model-waits.ts). */
 const queuedSchema = z.object({
-  waitingFor: z.enum(["client", "person", "app"]),
+  waitingFor: z.enum(["client", "person"]),
   retryAt: z.number(),
 });
 
@@ -139,8 +134,8 @@ const calls = (
 
 /**
  * The run's status as the summary shows it: `queued` while it is starting,
- * or while a step of a running run waits in the client's queue for a
- * share of the attempts running at once (`queued`).
+ * or while a step's model call of a running run waits for a share of
+ * the model requests in flight (`queued`).
  */
 const statusOf = (
   status: z.infer<typeof rowSchema>["status"],
@@ -322,16 +317,11 @@ export const runSummary = async (
           WHERE c.run_id = r.id AND c.state = 'admitted'
           ORDER BY CASE c.kind WHEN 'cancel' THEN 0 ELSE 1 END
           LIMIT 1) AS pending,
-       (SELECT json_object('waitingFor', q.waiting_for, 'retryAt', q.retry_at)
-          FROM (
-            SELECT p.waiting_for, p.retry_at FROM workflow_admission_queue p
-              WHERE p.run_id = r.id AND p.seen_at > ?1
-            UNION ALL
-            SELECT m.waiting_for, m.retry_at FROM workflow_model_waits m
-              WHERE m.run_id = r.id AND m.seen_at > ?1
-                AND m.waiting_for IS NOT NULL
-          ) q
-          ORDER BY q.retry_at
+       (SELECT json_object('waitingFor', m.waiting_for, 'retryAt', m.retry_at)
+          FROM workflow_model_waits m
+          WHERE m.run_id = r.id AND m.seen_at > ?1
+            AND m.waiting_for IS NOT NULL
+          ORDER BY m.retry_at
           LIMIT 1) AS queued,
        (SELECT json_object('since', w.since, 'provider', w.provider, 'trouble', w.trouble)
           FROM workflow_ai_waits w WHERE w.run_id = r.id
@@ -339,9 +329,8 @@ export const runSummary = async (
      FROM workflow_runs r
      WHERE r.id = ?2 AND r.app_id = ?3`
   )
-    // A place that stopped asking no longer holds the run in the queue
-    // (admission.ts), nor does a step's model call that stopped asking
-    // for a share (model-waits.ts): the run is no longer waiting there.
+    // A step's model call that stopped asking for a share no longer holds
+    // the run queued (model-waits.ts): the run is no longer waiting there.
     .bind(Date.now() - queueLiveMs, id.data, found.id)
     .first();
   if (read === null) {

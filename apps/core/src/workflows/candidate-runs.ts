@@ -57,7 +57,6 @@ import {
   requireWorkflowRole,
 } from "../workflow-resources.ts";
 import { acceptedInput } from "../workflow-starts.ts";
-import { runDequeued } from "./admission.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
@@ -459,7 +458,6 @@ const loadedCandidateRun = async (
 ): Promise<{
   run: HostedResourceRun;
   output: string;
-  subject: string;
   owner: string;
 }> => {
   const row = await rowOf(env, runId);
@@ -541,9 +539,6 @@ const loadedCandidateRun = async (
       maxSleepMs: maxCandidateWaitMs,
     },
     output: JSON.stringify(sealed.contract.output),
-    // Its attempts take its person's share, as their own runs' do, in its
-    // workflow's test runs' queue.
-    subject: row.principalId,
     owner: candidateOwnerOf(pin.workflow),
   };
 };
@@ -556,17 +551,13 @@ export const runCandidateWorkflow = async (
   engineStep: RunStep,
   memory: ResourceRunMemory
 ): Promise<unknown> => {
-  const { run, output, subject, owner } = await loadedCandidateRun(
-    env,
-    pin,
-    runId
-  );
+  const { run, output, owner } = await loadedCandidateRun(env, pin, runId);
   return await runActivation(env, engineStep, memory, {
     run,
     output,
     owner,
     // The root of its own lineage, as an independent run is.
-    admission: { run: runId, root: runId, subject },
+    admission: { run: runId, root: runId },
   });
 };
 
@@ -585,9 +576,8 @@ export const projectCandidateRun = async (
   if (row === undefined) {
     return;
   }
-  // A row already ended (core cancelled it while starting) still gives up
-  // its places in the admission queue below; its update changes nothing,
-  // so nothing more is audited.
+  // A row already ended (core cancelled it while starting): its update
+  // changes nothing, so nothing more is audited.
   const status = projected[engine.status];
   const ended = !unended.includes(status);
   const entry = endEntry(row, status, failureCode);
@@ -615,17 +605,6 @@ export const projectCandidateRun = async (
     // Its end, audited with the change, once: a notification that changed
     // nothing records nothing.
     ...(entry === undefined ? [] : [outboxedIfChanged(db, entry)]),
-    // Ended, its places in the admission queue go now, as a run's do.
-    // After the audit entry, which reads what the row's update changed.
-    ...(ended
-      ? [
-          runDequeued(
-            db,
-            id,
-            sql`EXISTS (SELECT 1 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${id} AND ${workflowCandidateRuns.status} = ${status})`
-          ),
-        ]
-      : []),
   ]);
 };
 

@@ -96,7 +96,6 @@ import type { StepModel } from "../resource-bindings.ts";
 import { tokensOfBound } from "../resource-model.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
 import { askAgainMs } from "./admission.ts";
-import type { Share } from "./admission.ts";
 import { aiWaitEnded, aiWaitStarted, aiWakeType } from "./ai-waits.ts";
 import type { AiWait } from "./ai-waits.ts";
 import { AttemptHost } from "./attempt-host.ts";
@@ -110,7 +109,6 @@ import {
   recordRunEvidence,
   requireRunEvidenceReadable,
 } from "./run-evidence.ts";
-import { shareWakeType } from "./share-wakes.ts";
 import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
@@ -311,18 +309,13 @@ interface StepAttempt {
  * Why a run waits before running a step again: a side effect held for its
  * person (`held`); a side effect of unknown outcome, until its person says
  * what became of it (`outcome_unknown`, listed for them with their held
- * actions); or its step queued for a share of the client's attempts
- * running at once (admission.ts), with the share and the seconds until it
- * comes free at the latest, as the refusal said: the step asks again after
- * its backoff all the same (admission.ts, `askAgainMs`); or its model call
- * failed on the organization's own AI provider key
- * (`ai_provider`, `keyRound`).
+ * actions); or its model call failed on the organization's own AI
+ * provider key (`ai_provider`, `keyRound`).
  */
 export type WaitReason =
   | { reason: "held" }
   | { reason: "outcome_unknown" }
-  | ({ reason: "ai_provider" } & AiWait)
-  | { reason: "queued"; waitingFor: Share; retryAfterSeconds: number };
+  | ({ reason: "ai_provider" } & AiWait);
 
 /** The code a held side effect answers a run's call with (connect). */
 const heldCode = "connect.held";
@@ -363,20 +356,14 @@ const heldKeysKept = 32;
 /** The field of a step's result that says its lineage was busy (`busyMarker`). */
 const busyField = `${coreStepPrefix}busy`;
 
-/** The field of a busy step's result that says it was queued, for which share. */
-const queuedField = `${coreStepPrefix}queued`;
-
 /** The field of a busy step's result that says how long a step may wait. */
 const busyMaxField = `${coreStepPrefix}busyMaxMs`;
-
-/** The field of a busy step's result that says it joined the queue then. */
-const joinedField = `${coreStepPrefix}joined`;
 
 /**
  * What an attempt of a step answers when its run lineage's active time is
  * all held by attempts under way (quotas.ts, `workflow.lineage_busy`), or
- * the client's shares of attempts running at once are full for it
- * (admission.ts, `workflow.queued`): recorded as the step's result, with
+ * no slot of the attempts running at once is free for it (admission.ts,
+ * `workflow.queued`): recorded as the step's result, with
  * the seconds to wait, so the run waits durably, holding no compute, and
  * runs the step again under a step of its own, as a held step does. The
  * refusal spends none of the step's attempts, and its wait none of the
@@ -385,32 +372,19 @@ const joinedField = `${coreStepPrefix}joined`;
  * `LoadWait`), then fail (`workflow.queue_timeout`). Workflow code can't
  * return it (`do` refuses it).
  */
-export const busyMarker = ({
-  busyFor,
-  queuedFor,
-  maxWaitMs,
-  joined,
-}: Busy) => ({
+export const busyMarker = ({ busyFor, maxWaitMs }: Busy) => ({
   [busyField]: busyFor,
   [busyMaxField]: maxWaitMs,
-  ...(queuedFor === undefined ? {} : { [queuedField]: queuedFor }),
-  ...(joined === true ? { [joinedField]: true } : {}),
 });
 
 /**
- * An attempt refused for now: the seconds to wait, the share it was
- * queued for, when it was (`workflow.queued`), not its lineage busy, and
- * how long a step may wait in all, as the quota limits said then.
+ * An attempt refused for now: the seconds to wait, and how long a step
+ * may wait in all, as the quota limits said then.
  */
 export interface Busy {
   busyFor: number;
-  queuedFor?: Share;
   maxWaitMs: number;
-  /** Whether the refusal took it a place in the queue (admission.ts). */
-  joined?: boolean;
 }
-
-const shareSchema = z.enum(["client", "person", "app"]);
 
 /** The field of a step's result that says its AI provider failed it (`keyMarkerOf`). */
 const keyField = `${coreStepPrefix}aiWait`;
@@ -470,17 +444,13 @@ export const isCoreMarker = (value: unknown): boolean =>
 const busyRecordSchema = z.object({
   busyFor: z.number(),
   maxWaitMs: z.number(),
-  queuedFor: shareSchema.optional(),
-  joined: z.boolean(),
 });
 
 /**
  * One of core's markers, as a step's recorded result says it: a step held
  * for its person (`heldMarkerOf`), on an unknown outcome or not, with the
  * keys it waits on; or refused for load (`busyMarker`), with the seconds
- * to wait, when it was refused, how long a step may wait in all, and the
- * share it was queued for and whether it joined the queue then; or its
- * model call failed for what its AI provider showed (`keyMarkerOf`), and when.
+ * to wait and how long a step may wait in all; or its model call failed for what its AI provider showed (`keyMarkerOf`), and when.
  */
 export type CoreMarker =
   | { kind: "held"; keys: string[]; unknown: boolean }
@@ -514,8 +484,6 @@ export const markerOf = (value: unknown): CoreMarker | undefined => {
     ...busyRecordSchema.parse({
       busyFor: field(busyField),
       maxWaitMs: field(busyMaxField),
-      queuedFor: field(queuedField),
-      joined: field(joinedField) === true,
     }),
   };
 };
@@ -537,7 +505,7 @@ export const unadmitted: AttemptAdmission = {
 
 /**
  * What a `workflow.lineage_busy` or `workflow.queued` refusal says: the
- * seconds to wait, at least one, and the share a queued one waits for.
+ * seconds to wait, at least one, and how long a step may wait in all.
  */
 export const busyOf = (error: unknown): Busy | undefined => {
   if (
@@ -551,22 +519,11 @@ export const busyOf = (error: unknown): Busy | undefined => {
   const most = error.details?.maxWaitMs;
   const maxWaitMs =
     typeof most === "number" ? most : platformLimits.workflowQueuedStepMs;
-  if (error.code === "workflow.lineage_busy") {
-    return { busyFor, maxWaitMs };
-  }
-  return {
-    busyFor,
-    maxWaitMs,
-    queuedFor:
-      shareSchema.safeParse(error.details?.waitingFor).data ?? "client",
-    joined: error.details?.joined === true,
-  };
+  return { busyFor, maxWaitMs };
 };
 
 /** What a step waited for load before an attempt (`#admit`). */
 interface WaitedSoFar {
-  /** The rounds it waited in a row. */
-  waited: number;
   /**
    * How long its rounds waited since it was last admitted: none if it
    * wasn't refused for load since (`LoadWait`).
@@ -587,8 +544,7 @@ interface WaitedSoFar {
  *
  * Only an admission that ended in a hold is journaled as one. An attempt
  * admitted that then fails, whose retry by the engine in the same round is
- * refused for load, keeps counting from before its admission. A round a
- * share given back cut short (`loadRound`) counts in full too. Both err
+ * refused for load, keeps counting from before its admission. That errs
  * safe: such a step times out sooner, never later.
  */
 export interface LoadWait {
@@ -971,39 +927,6 @@ const timedOut = /^(?:WorkflowTimeoutError: )?Execution timed out\b/u;
 export const isTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === "WorkflowTimeoutError" || timedOut.test(error.message));
-
-/**
- * Waits round `prefix` of the step `step`'s wait for load, `sleepMs`
- * long, as its refusal `marker` says: one queued for a share wakes early
- * when a share is given back that it would now take (share-wakes.ts),
- * and asks again; one whose lineage is busy sleeps it out.
- *
- * A queued round was a plain sleep of the same name before; there is no
- * branch for a run suspended in one, as `#waitWhileHeld` has none for its
- * own: Grasp has no release yet, so no such run outlives a deploy.
- */
-export const loadRound = async (
-  run: Pick<RunStep, "sleep" | "waitForEvent">,
-  prefix: string,
-  step: string,
-  marker: { queuedFor?: Share },
-  sleepMs: number
-): Promise<void> => {
-  if (marker.queuedFor === undefined) {
-    await run.sleep(prefix, sleepMs);
-    return;
-  }
-  try {
-    await run.waitForEvent(prefix, {
-      type: shareWakeType(await sha256Hex(step)),
-      timeout: sleepMs,
-    });
-  } catch (error) {
-    if (!isTimeout(error)) {
-      throw error;
-    }
-  }
-};
 
 /**
  * The steps a run waits in while a side effect is held. They are core's
@@ -1974,10 +1897,10 @@ export class RunHost extends RpcTarget {
    */
   async #admit(
     attempt: StepAttempt,
-    { waited, waitedMs, maxWaitMs }: WaitedSoFar
+    { waitedMs, maxWaitMs }: WaitedSoFar
   ): Promise<AttemptAdmission | Busy> {
     if (this.#hooks.admitAttempt === undefined) {
-      // Waited as long as a step may: it fails, though a share came free
+      // Waited as long as a step may: it fails, though a slot came free
       // as it slept, and none of its code runs. With an admission, the
       // admission decides (quotas.ts), by the cap as it is now, not the
       // one the step's last refusal named: an operator may have raised it
@@ -1990,9 +1913,7 @@ export class RunHost extends RpcTarget {
     try {
       const admission = await this.#hooks.admitAttempt({
         key: attempt.key,
-        waited,
         ...(waitedMs === undefined ? {} : { waitedMs }),
-        step: attempt.step,
         number: attempt.number,
         ...(attempt.ordinal === undefined ? {} : { ordinal: attempt.ordinal }),
         generation: attempt.generation,
@@ -2016,10 +1937,7 @@ export class RunHost extends RpcTarget {
    * Waits durably before the step `step` runs again, its attempt having
    * answered `marker`, in round `round`: until the person decided on its
    * held side effect (`#waitWhileHeld`), or the seconds its busy lineage
-   * said, as long as `sleepMs` (a sleep, which holds no attempt). A step
-   * queued for a share of the client's attempts running at once records
-   * that the run waits each time it joins the queue: when its refusal
-   * took it a place (`joined`), as after a pause gave its place up.
+   * said, as long as `sleepMs` (a sleep, which holds no attempt).
    * `unknown` carries when the step was first held on its current unknown
    * outcome across rounds. Answers the prefix of the steps it waited in,
    * which the step's next run is named after.
@@ -2071,14 +1989,7 @@ export class RunHost extends RpcTarget {
       return prefix;
     }
     const prefix = waitStep(key, "busy", round);
-    if (marker.queuedFor !== undefined && marker.joined) {
-      await this.#recordWaiting(`${prefix}:waiting:queued`, {
-        reason: "queued",
-        waitingFor: marker.queuedFor,
-        retryAfterSeconds: marker.busyFor,
-      });
-    }
-    await loadRound(this.#step, prefix, step, marker, sleepMs);
+    await this.#step.sleep(prefix, sleepMs);
     return prefix;
   }
 
@@ -2173,7 +2084,6 @@ export class RunHost extends RpcTarget {
         const admitted = await settle(
           async () =>
             await this.#admit(attempt, {
-              waited: load.rounds,
               waitedMs: load.rounds === 0 ? undefined : load.waitedMs,
               maxWaitMs: load.maxWaitMs,
             })

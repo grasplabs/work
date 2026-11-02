@@ -75,9 +75,9 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   maxAskAgainSeconds,
   modelSharesOf,
-  shareIdentity,
+  shareSubjectOf,
 } from "./model-admission.ts";
-import type { Fairness, ModelShare, ShareIdentity } from "./model-admission.ts";
+import type { Fairness, ModelShare } from "./model-admission.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import {
@@ -701,10 +701,6 @@ interface Route extends Admitted {
   }>;
   /** Core's env, for the model ledger. */
   env: Env;
-  /** The call's ID: its place in the queue while it waits for a share. */
-  place: string;
-  /** What its refusals may tell it of others' calls (model-admission.ts). */
-  disclose: ShareIdentity["disclose"];
   /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
   beforeSend?: () => void;
   /** The caller's authority, decided again (`ModelCall.reauthorize`). */
@@ -747,11 +743,9 @@ type Admitting = Partial<Pick<Route, "way">> &
     | "call"
     | "price"
     | "scopesNow"
-    | "disclose"
     | "beforeSend"
     | "onQueued"
     | "notes"
-    | "place"
     | "bound"
     | "leaseMs"
   >;
@@ -987,8 +981,8 @@ const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
 
 /**
  * The longest the gateway waits for a caller's `onQueued` before going on
- * without it: a best-effort note, which never holds up an admission, a
- * place given up or a request admitted.
+ * without it: a best-effort note, which never holds up an admission or a
+ * request admitted.
  */
 const queuedHookMs = 2000;
 
@@ -1031,15 +1025,6 @@ const told = async (
     ]);
   } finally {
     timer.abort();
-  }
-};
-
-/** Gives up `route`'s call's place in the queue; its place lapses should this fail. */
-const leaveQueue = async (route: Admitting): Promise<void> => {
-  try {
-    await modelLedger(route.env).leaveQueue(route.place);
-  } catch (error) {
-    log.warn("model.leave_queue_failed", errorFields(error));
   }
 };
 
@@ -1120,31 +1105,21 @@ const scopesRead = async (
   }
 };
 
-/**
- * Why the ledger's refusal `admitted` holds back a request of `call`, as
- * its share identity may be told (`disclose`, model-admission.ts).
- */
+/** Why the ledger's refusal `admitted` holds back a request of `call`. */
 const heldBecause = (
   call: Session,
   admitted: Exclude<
     LedgerAdmitted,
     { ok: true } | { policyBehind: true; highest: number }
-  >,
-  disclose: ShareIdentity["disclose"]
+  >
 ): Refusal => {
-  // A guest is told nothing shaped by anyone else's calls.
-  const fixed = disclose === "fixed";
   if ("queued" in admitted) {
-    const { queued } = admitted;
-    // Never which person's share is full, nor a wait from leases.
-    const waitingFor =
-      fixed && queued.waitingFor === "person" ? "client" : queued.waitingFor;
+    const { waitingFor, retryAfterSeconds } = admitted.queued;
     return {
       code: "model.queued",
       because: waitingFor,
       waitingFor,
-      retryAfterSeconds: fixed ? maxAskAgainSeconds : queued.retryAfterSeconds,
-      placed: queued.placed,
+      retryAfterSeconds,
     };
   }
   if ("reused" in admitted) {
@@ -1269,7 +1244,7 @@ const admitRequest = async (
         answerCap: bound.outputTokens,
       };
     }
-    return { held: heldBecause(call, admitted, route.disclose) };
+    return { held: heldBecause(call, admitted) };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
@@ -1280,16 +1255,14 @@ const admitRequest = async (
   }
 };
 
-/** How a call's wait for a share went, for its one way out (`admitWaiting`). */
+/** How a call's wait for a slot went, for its one way out (`admitWaiting`). */
 interface Waiting {
   /** The rounds it waited. */
   rounds: number;
-  /** Whether the ledger ever gave it a place in the queue. */
-  placed: boolean;
 }
 
 /**
- * The rounds of `admitWaiting`: asks the ledger, and while a share is full
+ * The rounds of `admitWaiting`: asks the ledger, and while a limit is full
  * and its call may wait, waits and asks again. Cancellation is checked
  * before every ask after the first, right after each wait too, so a call
  * cancelled while it waits asks nothing more.
@@ -1306,9 +1279,7 @@ const askUntilServed = async (
 ): Promise<Admission | { held: Refusal }> => {
   const startedAt = Date.now();
   // Every moment since it began counts, its asks and notes too, not only
-  // its sleeps. A call waits in memory, journaling nothing, so it asks
-  // again as soon as the ledger says a share comes free, its backoff at
-  // most.
+  // its sleeps. A call waits in memory, journaling nothing.
   const msLeft = (hintSeconds: number): number =>
     Math.min(
       askAgainMs({
@@ -1321,7 +1292,7 @@ const askUntilServed = async (
   let last: { held: Refusal } | undefined = undefined;
   for (;;) {
     // Cancelled since it last asked: it asks no more, and stops as
-    // cancelled, not as queued (its place given up on the way out).
+    // cancelled, not as queued.
     if (last !== undefined) {
       signal.throwIfAborted();
     }
@@ -1331,31 +1302,23 @@ const askUntilServed = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
     const admitted = await admitRequest(route, body, endsAt);
-    // A ledger whose answer was lost may have kept a place for it all the
-    // same: given up on the way out, as one it was told of.
-    waiting.placed ||=
-      "held" in admitted && admitted.held.code === "model.ledger_unavailable";
     if (!("held" in admitted) || admitted.held.code !== "model.queued") {
       return admitted;
     }
     last = admitted;
-    waiting.placed ||= admitted.held.placed === true;
     const retryAfter = admitted.held.retryAfterSeconds ?? maxAskAgainSeconds;
     // The caller's word: a workflow attempt let go of stops waiting (it
     // throws).
     route.beforeSend?.();
     // Cancelled: it stops as cancelled.
     signal.throwIfAborted();
-    // Out of time, or given no place (its person's, its App's or the
-    // client's places all taken): told so at once, and the ledger asked
-    // nothing more for it.
-    if (msLeft(retryAfter) <= 0 || admitted.held.placed === false) {
+    // Out of time: told so at once, and the ledger asked nothing more.
+    if (msLeft(retryAfter) <= 0) {
       return admitted;
     }
     const { waitingFor = "client" } = admitted.held;
     // When it asks again at the latest, as others who see it waiting (a
-    // run's viewers) are told: the fixed wait, never one taken from its
-    // person's leases, which would tell when their other calls were sent.
+    // run's viewers) are told.
     // oxlint-disable-next-line no-await-in-loop -- each round
     await told(route, {
       waitingFor,
@@ -1370,19 +1333,13 @@ const askUntilServed = async (
 };
 
 /**
- * `admitRequest`, waiting in the queue while a share of the requests in
- * flight is full: the call keeps its place and asks again, as soon as the
- * ledger says (`askAgainMs`), until admitted, refused for anything else, or
+ * `admitRequest`, waiting while a limit of the requests in flight is full:
+ * the call asks again (`askAgainMs`, at most every
+ * {@link maxAskAgainSeconds}) until admitted, refused for anything else, or
  * out of the time it may wait (`queueWaitMs`); then refused as
  * `model.queued`. It stops early when its caller says so (`beforeSend`,
  * which throws) or it is cancelled. Its caller is told where it stands each
- * round (`onQueued`).
- *
- * One way out, however the wait ends (admitted, refused for anything, out
- * of time, cancelled, stopped by its caller, scopes that can't be read,
- * a ledger that throws): a call that held a place and wasn't admitted
- * gives it up, so no abandoned place holds others back while it lapses,
- * and a caller told it waited is told it stopped.
+ * round (`onQueued`), and that it stopped, however the wait ends.
  */
 const admitWaiting = async (
   route: Admitting,
@@ -1393,24 +1350,15 @@ const admitWaiting = async (
     queueWaitMs,
     Math.max(0, Math.floor((endsAt - Date.now()) / 2))
   );
-  const waiting: Waiting = { rounds: 0, placed: false };
-  let admission: Admission | undefined = undefined;
+  const waiting: Waiting = { rounds: 0 };
   try {
-    const answered = await askUntilServed(
+    return await askUntilServed(
       route,
       body,
       { endsAt, signal, maxWaitMs },
       waiting
     );
-    if (!("held" in answered)) {
-      admission = answered;
-    }
-    return answered;
   } finally {
-    // An admission took its place out of the queue itself.
-    if (admission === undefined && waiting.placed) {
-      await leaveQueue(route);
-    }
     if (waiting.rounds > 0) {
       await told(route, null);
     }
@@ -2342,10 +2290,9 @@ const parseCall = <Schema extends z.ZodType>(
 const scopesNowOf = (
   env: Env,
   call: Session,
-  place: string,
   whose: "organization" | "platform"
 ): Route["scopesNow"] => {
-  const { subject, resource } = shareIdentity(call);
+  const subject = shareSubjectOf(call);
   return async () => {
     await Promise.resolve();
     const limits = quotaLimits(env);
@@ -2361,7 +2308,7 @@ const scopesNowOf = (
                 ? []
                 : bindingScopes(call.binding)),
             ],
-      fair: { place, subject, resource, shares: modelSharesOf(limits) },
+      fair: { subject, shares: modelSharesOf(limits) },
     };
   };
 };
@@ -2553,10 +2500,6 @@ const admit = async (
   const price = await pinnedPrice(
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
-  // Whose shares of the requests in flight the call takes, from its
-  // trigger and work context, which core's host sets: never from App code.
-  const { disclose } = shareIdentity(call);
-  const place = crypto.randomUUID();
   const { model } = endpoint;
   return {
     call,
@@ -2568,14 +2511,11 @@ const admit = async (
     fallbacks: routing.fallbacks,
     bound: (body) => textBound(call, model, body),
     price,
-    place,
-    disclose,
     notes: Promise.resolve(),
     // Grasp's own key: none of the organization's spend (`platformScopes`).
     scopesNow: scopesNowOf(
       env,
       call,
-      place,
       routing.way.credential === "platform" ? "platform" : "organization"
     ),
     env,
@@ -3467,7 +3407,6 @@ const admitSpeech = async (
     // Never expected: the voice catalog's prices are ours.
     return await refuse(env, call, { code: "model.unpriced" });
   }
-  const place = crypto.randomUUID();
   const characters = charactersOf(call.text);
   const query = new URLSearchParams({
     // ElevenLabs keeps neither the line nor the audio.
@@ -3508,10 +3447,8 @@ const admitSpeech = async (
     // sent: the most it can cost is what the ledger charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
     // Grasp's own key: none of the organization's spend (`platformScopes`).
-    scopesNow: scopesNowOf(env, call, place, "platform"),
-    disclose: shareIdentity(call).disclose,
+    scopesNow: scopesNowOf(env, call, "platform"),
     notes: Promise.resolve(),
-    place,
   };
 };
 
@@ -3909,7 +3846,6 @@ const listenThrough = async (
     // Never expected: the transcription catalog's prices are ours.
     return await refuse(env, call, { code: "model.unpriced" });
   }
-  const place = crypto.randomUUID();
   const admitting: Admitting = {
     env,
     call,
@@ -3918,10 +3854,8 @@ const listenThrough = async (
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
     // Grasp's own key: none of the organization's spend (`platformScopes`).
-    scopesNow: scopesNowOf(env, call, place, "platform"),
-    disclose: shareIdentity(call).disclose,
+    scopesNow: scopesNowOf(env, call, "platform"),
     notes: Promise.resolve(),
-    place,
     leaseMs: listeningLeaseMs,
   };
   const endsAt = Date.now() + call.openMs;

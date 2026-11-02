@@ -4,7 +4,6 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { executionErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
@@ -36,12 +35,11 @@ import type { Acting } from "./auth/identity.ts";
 import { actingPerson } from "./auth/identity.ts";
 import {
   admitBuild,
-  buildDequeued,
   buildSeqOf,
   holding,
   maxBuildWaitMs,
 } from "./build-admission.ts";
-import type { BuildLease, BuildShare, BuildStep } from "./build-admission.ts";
+import type { BuildLease, BuildStep } from "./build-admission.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
@@ -111,11 +109,9 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //   as an in-call check does, and settles it as it ends (workspace.ts), so
 //   jobs can't get the agent past the checks failed in a row it may make.
 // - Builds of other chats and Apps: each step that builds (its check, its
-//   commit) holds a lease on a share of the client's build jobs and of
-//   its App's while it runs (build-admission.ts), so one App's jobs never
-//   take every build slot, and one App never builds twice at once. A step
-//   with no share waits in the queue, journaled, its job queued, not
-//   failed, and asks again; it holds no lease while it waits.
+//   commit) holds one of the few leases of builds running at once while
+//   it runs (build-admission.ts). A step with none free sleeps, journaled,
+//   not failed, and asks again; it holds no lease while it waits.
 // - Exhaustion: a chat has at most three jobs running at once, and keeps
 //   the records of its latest hundred (build-job-records.ts). A job whose
 //   instance ended or is gone while its record says it runs is failed,
@@ -196,10 +192,9 @@ const admitJob = async (
   }
 };
 
-/** A round a step of a job waited for a share in, as its step journals it. */
+/** A round a step of a job waited for a lease in, as its step journals it. */
 interface Queued {
   queued: {
-    waitingFor: BuildShare;
     retryAfterSeconds: number;
     /** How long the job sleeps before it asks again. */
     sleepMs: number;
@@ -238,22 +233,20 @@ interface JobStep {
   scope: Omit<AgentScope, "runId">;
   app: AppId;
   by: Acting;
-  /** The lease on its share of builds the step holds while it runs. */
-  lease: BuildLease;
   /** Aborted once the lease is lost: the step starts nothing more. */
   lost: AbortSignal;
 }
 
-/** What a step of a job asks its admission to a share with. */
+/** What a step of a job asks its admission to a lease with. */
 interface Asking {
   step: BuildStep;
   /** The engine's context for the step's attempt. */
   context: unknown;
   /** The rounds this step waited in a row. */
   waited: number;
-  /** How long the job waited for a share in its steps before this one. */
+  /** How long the job waited for a lease in its steps before this one. */
   waitedBefore: number;
-  /** When this step first waited for its share, if it has. */
+  /** When this step first waited for its lease, if it has. */
   queuedSince: number | null;
 }
 
@@ -297,13 +290,9 @@ const authorize = async (
 };
 
 /**
- * A lease for the step `asking` names of job `job` on its share of the
- * client's builds and its App's (build-admission.ts), or the round it
- * waits, journaled by its step; the join recorded in the audit log, once
- * each time it joins the queue. A job that may wait no more, or whose
- * person or App has as many places as it may, ends failed. An attempt the
- * job has gone on without is thrown, for the engine, which takes only its
- * step's latest attempt.
+ * A lease for the step `asking` names of job `job` (build-admission.ts),
+ * or the round it waits, journaled by its step. A job that may wait no
+ * more ends failed.
  */
 const admittedToBuild = async (
   env: Env,
@@ -320,28 +309,15 @@ const admittedToBuild = async (
   const askedAt = Date.now();
   const waitedMs =
     waitedBefore + (queuedSince === null ? 0 : askedAt - queuedSince);
-  const owner = {
-    job: input.jobId,
-    subject: job.personId,
-    resource: job.appId,
-  };
   const method = `build.job.${step}`;
   try {
-    const admitted = await admitBuild(env, owner, { seq, waited, waitedMs });
+    const admitted = await admitBuild(env, input.jobId, { seq, waitedMs });
     if ("lease" in admitted) {
       return admitted;
     }
-    const { wait } = admitted;
-    if (wait.joined) {
-      await auditAgentCall(env, scope, {
-        method: "build.job.queued",
-        detail: { job: job.id, app: job.appId, waitingFor: wait.waitingFor },
-      });
-    }
     return {
       queued: {
-        waitingFor: wait.waitingFor,
-        retryAfterSeconds: wait.retryAfterSeconds,
+        retryAfterSeconds: admitted.retryAfterSeconds,
         sleepMs: askAgainMs({
           waited,
           waitedMs,
@@ -351,16 +327,11 @@ const admittedToBuild = async (
       },
     };
   } catch (error) {
-    // A stale attempt is the engine's; an unexpected error (the database
-    // out of reach for a moment) is retried by it, the job keeping its
-    // place. Only a refusal ends the job here.
-    if (
-      executionErrors.codeOf(error) === "execution.stale_attempt" ||
-      !isExpectedError(error)
-    ) {
+    // An unexpected error (the database out of reach for a moment) is
+    // retried by the engine. Only a refusal ends the job here.
+    if (!isExpectedError(error)) {
       throw error;
     }
-    await buildDequeued(env, owner, seq);
     await auditAgentCall(
       env,
       scope,
@@ -396,8 +367,6 @@ const asJob = async <T>(
     await admitJob(env, scope, job.id);
   } catch (error) {
     const end = endFor(error);
-    // Ended while it waited: it waits for a share no more.
-    await buildDequeued(env, { job: input.jobId }, seqOf(asking));
     await auditAgentCall(
       env,
       scope,
@@ -427,7 +396,7 @@ const asJob = async <T>(
           },
           async () => {
             const { by, app } = await authorize(env, scope, job);
-            return await run({ job, scope, app, by, lease, lost });
+            return await run({ job, scope, app, by, lost });
           }
         )
     );
@@ -555,12 +524,7 @@ const commitStep = async (
         await authorize(env, scope, job);
         await submittedDraft(env, step);
         await admitJob(env, scope, job.id);
-      },
-      // Its lease lapsed (it stalled): another job of the App may build
-      // now, so the database refuses its commit, in the commit's own
-      // transaction; the engine tries the step again, which waits for its
-      // share.
-      step.lease.fence()
+      }
     );
     ({ version, tree } = proposed);
   }

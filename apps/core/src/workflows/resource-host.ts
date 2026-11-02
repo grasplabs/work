@@ -77,7 +77,6 @@ import {
   keyTimedOut,
   keyWaitStart,
   unbilledAiWaitOf,
-  loadRound,
   busyOf,
   cpuLimitKill,
   forIsolate,
@@ -3055,7 +3054,7 @@ export class ResourceRunHost
         }
         const prefix = waitStep(waitKey, "busy", round);
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await loadRound(this.#step, prefix, stepName, busy, run.wait.sleepMs);
+        await this.#step.sleep(prefix, run.wait.sleepMs);
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         recorded = await this.#step.do(
           `${prefix}:run`,
@@ -3407,8 +3406,7 @@ export class ResourceRunHost
       this.#activationFuel -= attemptFuel;
     }
     const admitted = await settle(
-      async () =>
-        await this.#admit(told, lease, run.name, run.wait, run.collecting)
+      async () => await this.#admit(told, lease, run.wait, run.collecting)
     );
     if (admitted.ok && "settle" in admitted.value) {
       return admitted.value;
@@ -3648,16 +3646,15 @@ export class ResourceRunHost
   }
 
   /**
-   * Admits the attempt the engine `told` of, holding `lease`, of step
-   * `step` that has waited `wait` for load, against its run's lineage
-   * quotas and the client's shares (`ResourceHostHooks.admitAttempt`):
-   * its admission, or, refused for load, how long to wait. Any other
-   * refusal is thrown.
+   * Admits the attempt the engine `told` of, holding `lease`, of a step
+   * that has waited `wait` for load, against its run's lineage quotas and
+   * the attempts running at once (`ResourceHostHooks.admitAttempt`): its
+   * admission, or, refused for load, how long to wait. Any other refusal
+   * is thrown.
    */
   async #admit(
     told: z.infer<typeof attemptContextSchema>,
     lease: AttemptLease,
-    step: string,
     wait: LoadWait,
     collecting: boolean
   ): Promise<AttemptAdmission | Busy> {
@@ -3665,14 +3662,12 @@ export class ResourceRunHost
       return await this.#hooks.admitAttempt({
         ...(collecting ? { collecting: true } : {}),
         key: told.idempotencyKey,
-        step,
         number: told.attempt,
         ...(told.stepOrdinal === undefined
           ? {}
           : { ordinal: told.stepOrdinal }),
         generation: lease.generation,
         deadline: lease.deadline,
-        waited: wait.rounds,
         ...(wait.rounds === 0 ? {} : { waitedMs: wait.waitedMs }),
       });
     } catch (error) {

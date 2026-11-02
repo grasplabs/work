@@ -89,8 +89,8 @@ import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 // by itself, and counts as running.
 //
 // A run that goes on without a decision to wait for, while a step of it
-// waits in the client's queue for a share of the attempts running at
-// once, shows as queued (admission.ts, `queuedRuns`), with the share and
+// waits for a share of the model requests in flight (model-waits.ts),
+// shows as queued (admission.ts, `queuedRuns`), with the share and
 // when it asks again: its own place alone, never who else waits. The
 // Running filter lists it: throttling, not a failure.
 //
