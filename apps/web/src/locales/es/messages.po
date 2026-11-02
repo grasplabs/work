@@ -5950,6 +5950,10 @@ msgstr "Archivos y documentos"
 msgid "Files its runs wrote"
 msgstr "Archivos que escribieron sus ejecuciones"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Archivos a flujos de trabajo"
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Rellena este campo."
@@ -7469,6 +7473,10 @@ msgstr "Sus apps y flujos de trabajo funcionan con ella a partir de ahora. Grasp
 msgid "Its bindings"
 msgstr "Sus vínculos"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "No se puede leer su código: sus pantallas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7585,6 +7593,10 @@ msgstr "Sus ejecuciones no lograban iniciarse, así que ya no inicia ninguna. Co
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Su programación se detuvo: su ejecución no pudo empezar {maxFailedStarts} veces seguidas. Vuelve a empezar cuando se configura la programación en Parámetros o cuando una nueva versión del dominio pasa a ser la actual."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Sus pantallas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
