@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "813847aa-919e-417a-addd-78ab3740dcb7",
-  "prevId": "ad0d6a6c-ef91-48dd-b29a-3af74bf48b1b",
+  "id": "e72cda4c-ea54-459f-b318-b9a434e353ae",
+  "prevId": "81cffd04-f241-4a3d-aee2-1e52cee80a2d",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -2113,74 +2113,6 @@
             "value"
           ],
           "name": "app_visitor_entries_app_id_kind_value_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "app_visitor_grants": {
-      "name": "app_visitor_grants",
-      "columns": {
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "function": {
-          "name": "function",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "app_visitor_grants_app_id_apps_id_fk": {
-          "name": "app_visitor_grants_app_id_apps_id_fk",
-          "tableFrom": "app_visitor_grants",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "app_visitor_grants_app_id_version_function_pk": {
-          "columns": [
-            "app_id",
-            "version",
-            "function"
-          ],
-          "name": "app_visitor_grants_app_id_version_function_pk"
         }
       },
       "uniqueConstraints": {},
@@ -12172,6 +12104,15 @@
           "isUnique": false,
           "where": "\"workflow_resource_runs\".\"status\" = 'starting'"
         },
+        "workflow_resource_runs_status_ended_idx": {
+          "name": "workflow_resource_runs_status_ended_idx",
+          "columns": [
+            "status",
+            "ended_at",
+            "id"
+          ],
+          "isUnique": false
+        },
         "workflow_resource_runs_newest_idx": {
           "name": "workflow_resource_runs_newest_idx",
           "columns": [
@@ -12194,7 +12135,8 @@
         "workflow_resource_runs_created_idx": {
           "name": "workflow_resource_runs_created_idx",
           "columns": [
-            "created_at"
+            "created_at",
+            "id"
           ],
           "isUnique": false
         }

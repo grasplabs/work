@@ -6,9 +6,7 @@ import { createD1Database } from "../src/cloudflare/accounts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import {
   applyD1Migrations,
-  putSchedules,
   queryD1,
-  setScriptSubdomain,
   uploadTargetScript,
 } from "../src/cloudflare/workers.ts";
 import type {
@@ -68,12 +66,22 @@ const assetsOf = (metadata: Record<string, unknown>) => {
   return { config, completed: jwt.startsWith("complete-") };
 };
 
-/** The account's own script `grasp-os-core`. */
+/** The namespace a client's scripts are uploaded to. */
+const namespace = "grasp-clients";
+
+/** Script `grasp-os-core` in the account's namespace. */
 const core = (accountId: string): ScriptTarget => ({
   accountId,
   scriptName: "grasp-os-core",
-  namespace: null,
+  namespace,
 });
+
+/** A new account with the namespace in it. */
+const namespaced = () => {
+  const account = cloudflare.addAccount();
+  account.namespaces.set(namespace, new Map());
+  return account;
+};
 
 /** A new D1 database `name` in the account, in the EU. */
 const database = async (accountId: string, name: string) =>
@@ -81,7 +89,7 @@ const database = async (accountId: string, name: string) =>
 
 describe("static assets", () => {
   it("uploads only the files the account lacks, and names them in each upload", async () => {
-    const account = cloudflare.addAccount();
+    const account = namespaced();
     const files = [
       file("/index.html", "<!doctype html>"),
       file("/app.js", "console.log(1)"),
@@ -107,7 +115,8 @@ describe("static assets", () => {
     for (const { headers } of allUploads) {
       expect(headers.get("authorization")).not.toBe(`Bearer ${token}`);
     }
-    const versions = account.scripts.get("grasp-os-core")?.versions ?? [];
+    const versions =
+      account.namespaces.get(namespace)?.get("grasp-os-core")?.versions ?? [];
     expect(versions.map(({ metadata }) => assetsOf(metadata))).toStrictEqual(
       versions.map(() => ({
         config: { run_worker_first: true },
@@ -117,7 +126,7 @@ describe("static assets", () => {
   });
 
   it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256), dot-files included", async () => {
-    const account = cloudflare.addAccount();
+    const account = namespaced();
     await uploadTargetScript(
       api,
       core(account.id),
@@ -170,7 +179,7 @@ describe("static assets", () => {
   });
 
   it("names files the account already holds by the session's token", async () => {
-    const account = cloudflare.addAccount();
+    const account = namespaced();
     const files = [file("/index.html", "<!doctype html>")];
     await uploadTargetScript(api, core(account.id), release("26.01.1", files));
     await uploadTargetScript(api, core(account.id), release("26.01.2", files));
@@ -178,7 +187,8 @@ describe("static assets", () => {
       path.endsWith("/workers/assets/upload")
     );
     expect(uploads).toHaveLength(1);
-    const [, second] = account.scripts.get("grasp-os-core")?.versions ?? [];
+    const [, second] =
+      account.namespaces.get(namespace)?.get("grasp-os-core")?.versions ?? [];
     expect(assetsOf(second?.metadata ?? {})).toMatchObject({
       completed: false,
     });
@@ -187,7 +197,7 @@ describe("static assets", () => {
 
 describe("uploads that fail part way", () => {
   it("uploads asset buckets three at a time, retrying one after a server error", async () => {
-    const account = cloudflare.addAccount();
+    const account = namespaced();
     const files = Array.from({ length: 15 }, (_, index) =>
       file(`/file-${index}.js`, `export default ${index};`)
     );
@@ -204,7 +214,7 @@ describe("uploads that fail part way", () => {
   });
 
   it("retries a script upload after a server error, unless it migrates Durable Objects", async () => {
-    const account = cloudflare.addAccount();
+    const account = namespaced();
     // The upload fails once.
     cloudflare.failCall(1, 500);
     await uploadTargetScript(api, core(account.id), release("26.01.1"));
@@ -225,34 +235,6 @@ describe("uploads that fail part way", () => {
       })
     ).rejects.toMatchObject({ status: 500 });
     expect(cloudflare.calls).toHaveLength(3);
-  });
-});
-
-describe("schedules and workers.dev", () => {
-  it("serves a Worker on workers.dev without preview URLs", async () => {
-    const account = cloudflare.addAccount();
-    await uploadTargetScript(api, core(account.id), release("26.01.1"));
-    await setScriptSubdomain(api, account.id, "grasp-os-core", {
-      enabled: true,
-      previewsEnabled: false,
-    });
-    expect(account.scripts.get("grasp-os-core")?.subdomain).toStrictEqual({
-      enabled: true,
-      previews_enabled: false,
-    });
-  });
-
-  it("sets cron schedules", async () => {
-    const account = cloudflare.addAccount();
-    await uploadTargetScript(api, core(account.id), release("26.01.1"));
-    await putSchedules(api, account.id, "grasp-os-core", [
-      "* * * * *",
-      "*/15 * * * *",
-    ]);
-    expect(account.scripts.get("grasp-os-core")?.schedules).toStrictEqual([
-      "* * * * *",
-      "*/15 * * * *",
-    ]);
   });
 });
 

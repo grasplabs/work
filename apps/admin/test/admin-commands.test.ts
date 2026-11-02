@@ -34,13 +34,13 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 const liveClient = async () => {
   const release = await placedRelease("feat(core): commands");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, 1, release, {
     id: clientId,
     name: `Noordkade ${clientId}`,
     signIn: null,
   });
-  account.admin = emptyAdminSnapshot("Noordkade");
-  return { clientId, account };
+  core.admin = emptyAdminSnapshot("Noordkade");
+  return { clientId, core };
 };
 
 const pause: AdminCommand = { type: "onboarding.pause", payload: {} };
@@ -66,7 +66,7 @@ describe("commands from an organization's pages", () => {
   });
 
   it("go to no core for a caller Access doesn't vouch for, a command the admin can't make, an id that isn't one, or an organization not deployed", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     const offboarded = await liveClient();
     await db
       .update(clients)
@@ -98,7 +98,7 @@ describe("commands from an organization's pages", () => {
     ]);
     expect({
       outcomes,
-      sent: account.commands.length + offboarded.account.commands.length,
+      sent: core.commands.length + offboarded.core.commands.length,
     }).toStrictEqual({
       outcomes: [
         "refused",
@@ -137,16 +137,16 @@ describe("commands from an organization's pages", () => {
     );
     expect({
       answers: [reminded, paused, again].map(({ refused }) => refused),
-      commands: asked.account.commands.map(({ type, payload, staff: by }) => ({
+      commands: asked.core.commands.map(({ type, payload, staff: by }) => ({
         type,
         payload,
         by: by.email,
       })),
-      ids: asked.account.commands.map(({ id }) => id),
+      ids: asked.core.commands.map(({ id }) => id),
       // Issued by the admin as it delivered them, the retry when its first was.
-      issued: asked.account.commands.map(({ issuedAt }) => issuedAt),
+      issued: asked.core.commands.map(({ issuedAt }) => issuedAt),
       byAdmin: Date.parse(paused.issuedAt) >= before,
-      other: other.account.commands.length,
+      other: other.core.commands.length,
     }).toStrictEqual({
       answers: [null, null, null],
       commands: [
@@ -162,14 +162,14 @@ describe("commands from an organization's pages", () => {
   });
 
   it("say why the company's core didn't apply one", async () => {
-    const { clientId, account } = await liveClient();
+    const { clientId, core } = await liveClient();
     const askIn: AdminCommand = {
       type: "onboarding.ask_in",
       payload: { team: "labs" },
     };
     /** What the page is told when core refuses with `refusal`. */
     const toldFor = async (refusal: { status: number; code: string }) => {
-      account.commandRefusal = refusal;
+      core.commandRefusal = refusal;
       const { refused } = await give(clientId, askIn);
       return { refused };
     };

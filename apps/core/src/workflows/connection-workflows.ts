@@ -17,7 +17,7 @@ import {
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { workflowOverview } from "./overview.ts";
+import { appWorkflowOverview } from "./overview.ts";
 
 // Which workflows use each connection, for Integrations: of the current
 // version of an App that holds an active permission on it, those whose
@@ -242,7 +242,7 @@ export const connectionWorkflows = async (
   const [summaries, resources] = await Promise.all([
     appKeys.size === 0
       ? []
-      : workflowOverview(env, by, (app, workflow) =>
+      : appWorkflowOverview(env, by, (app, workflow) =>
           appKeys.has(keyOf(app, workflow))
         ),
     independentUses.size === 0 ? [] : listWorkflowResources(env, by),

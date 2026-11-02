@@ -145,10 +145,6 @@ msgstr "{app} aún no está conectado."
 msgid "{app} needs someone to sign in again"
 msgstr "{app} necesita que alguien vuelva a iniciar sesión"
 
-#: src/workflows/workflows-table.tsx
-msgid "{appName} · Version {version}"
-msgstr "{appName} · Versión {version}"
-
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "{approvals, plural, one {# approval} other {# approvals}}"
 msgstr "{approvals, plural, one {# aprobación} other {# aprobaciones}}"
@@ -980,6 +976,10 @@ msgstr "{name}: {hours, plural, one {# hora a la semana} other {# horas a la sem
 msgid "{name}: {outOfTen} in 10"
 msgstr "{name}: {outOfTen} de 10"
 
+#: src/dashboard/report.ts
+msgid "{name}: {started} started, {completed} completed, {failed} failed"
+msgstr "{name}: {started} iniciados, {completed} completados, {failed} fallidos"
+
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
 msgstr "{name}: versión {version} pendiente de revisión"
@@ -1398,7 +1398,7 @@ msgstr "{team} · aún no disponible"
 msgid "{team} · our email didn’t reach them"
 msgstr "{team} · nuestro correo no les llegó"
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 msgid "{team} (team)"
 msgstr "{team} (equipo)"
 
@@ -2129,6 +2129,7 @@ msgstr "Cuenta"
 msgid "Action"
 msgstr "Acción"
 
+#: src/engines/app-sharing.tsx
 #: src/engines/app-versions.tsx
 #: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
@@ -3686,6 +3687,7 @@ msgstr "No se puede leer"
 #: src/decision-confirmation.tsx
 #: src/engines/app-access-requests.tsx
 #: src/engines/app-remove.tsx
+#: src/engines/app-sharing.tsx
 #: src/engines/app-status.tsx
 #: src/engines/app-versions.tsx
 #: src/engines/app-workflows.tsx
@@ -4757,13 +4759,9 @@ msgstr "Creó una colección"
 msgid "Created a team"
 msgstr "Creó un equipo"
 
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "Created by the member {owner}."
-msgstr "Creada por el miembro {owner}."
-
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "Created by you."
-msgstr "Creada por ti."
+#: src/engines/app-sharing.tsx
+msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
+msgstr "Creado por ti. Se abre para ti, los administradores y quienes tengan acceso compartido."
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -4782,10 +4780,6 @@ msgstr "Actual"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Plan actual"
-
-#: src/workflows/independent-workflows.tsx
-msgid "Current version"
-msgstr "Versión actual"
 
 #: src/frame/person-menu.tsx
 msgid "Dark"
@@ -7148,9 +7142,15 @@ msgstr "En tu bandeja de entrada"
 msgid "Inbox"
 msgstr "Bandeja de entrada"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Independent workflows"
-msgstr "Flujos de trabajo independientes"
+#: src/dashboard/runs-widget.tsx
+#: src/workflows/runs.tsx
+#: src/workflows/workflows-table.tsx
+msgid "Independent"
+msgstr "Independiente"
+
+#: src/workflows/workflows-table.tsx
+msgid "Independent workflow"
+msgstr "Flujo independiente"
 
 #: src/workflows/test-run.tsx
 msgid "Input"
@@ -7371,13 +7371,13 @@ msgstr "No se ofrece a tu organización: ofrécelo en su Resumen antes de conect
 msgid "It isn't offered to your organization."
 msgstr "No se ofrece a tu organización."
 
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "It isn't shared with anyone."
-msgstr "No está compartida con nadie."
-
 #: src/workflows/share-workflow.tsx
 msgctxt "a workflow"
 msgid "It isn't shared with anyone."
+msgstr "No está compartido con nadie."
+
+#: src/engines/app-sharing.tsx
+msgid "It isn’t shared with anyone."
 msgstr "No está compartido con nadie."
 
 #: src/onboarding/setup-steps.tsx
@@ -7399,6 +7399,10 @@ msgstr "Ya no se ejecuta (podía cambiar cosas)."
 #: src/chat/builds.tsx
 msgid "It no longer runs."
 msgstr "Ya no se ejecuta."
+
+#: src/engines/app-sharing.tsx
+msgid "It opens for the member who created it, the admins, and whoever it is shared with."
+msgstr "Se abre para el miembro que lo creó, los administradores y quienes tengan acceso compartido."
 
 #: src/workflows/files-and-apps.tsx
 msgid "It reads no Knowledge."
@@ -8995,14 +8999,6 @@ msgstr "Aún no hay objetivos."
 msgid "No group"
 msgstr "Sin grupo"
 
-#: src/workflows/independent-workflows.tsx
-msgid "No independent workflow is shared with you yet."
-msgstr "Todavía no se ha compartido contigo ningún flujo de trabajo independiente."
-
-#: src/workflows/independent-workflows.tsx
-msgid "No independent workflow of yours serves this process."
-msgstr "Ninguno de sus flujos de trabajo independientes sirve a este proceso."
-
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
@@ -9236,13 +9232,13 @@ msgstr "Ningún flujo de trabajo coincide."
 msgid "No workflow needs attention: nothing waits for a decision or to go live, nothing failed lately."
 msgstr "Ningún flujo de trabajo requiere atención: nada espera una decisión ni su publicación, nada ha fallado últimamente."
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow of a domain serves this process."
-msgstr "Ningún flujo de trabajo de un dominio sirve a este proceso."
-
 #: src/dashboard/report.ts
 msgid "No workflow ran in this time."
 msgstr "Ningún flujo de trabajo se ejecutó en este tiempo."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow serves this process."
+msgstr "Ningún flujo de trabajo sirve a este proceso."
 
 #: src/connections/workflows-using.tsx
 msgid "No workflow uses {app} yet."
@@ -9305,6 +9301,10 @@ msgstr "No interviene nadie: Grasp lo hace todo."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "No hay nadie más que añadir."
+
+#: src/engines/app-sharing.tsx
+msgid "Nobody else to share with."
+msgstr "No hay nadie más con quien compartir."
 
 #: src/settings/staff-access.tsx
 msgid "Nobody from Grasp can sign in to this workspace now."
@@ -9600,7 +9600,7 @@ msgid "Not planned yet"
 msgstr "Aún sin planificar"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/workflows/independent-workflows.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Not published"
 msgstr "No publicado"
 
@@ -10231,7 +10231,6 @@ msgctxt "column: a button that opens a run"
 msgid "Open"
 msgstr "Abrir"
 
-#: src/workflows/independent-workflows.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
 msgid "Open"
@@ -10756,6 +10755,7 @@ msgstr "PDF, Word, Excel, PowerPoint o texto"
 msgid "Pending"
 msgstr "Pendiente"
 
+#: src/engines/app-sharing.tsx
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx
@@ -11370,6 +11370,7 @@ msgstr "Repaso"
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "La lectura ha fallado una y otra vez, así que tus disparadores ahí no inician nada nuevo por ahora. Grasp sigue intentándolo; si no vuelve, revisa la conexión."
 
+#: src/engines/app-sharing.tsx
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
 msgstr "Leyendo personas y equipos…"
@@ -11988,11 +11989,15 @@ msgctxt "business process"
 msgid "Risk-to-Compliance"
 msgstr "Risk-to-Compliance"
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
+
+#: src/engines/app-sharing.tsx
+msgid "Role of {name}"
+msgstr "Rol de {name}"
 
 #: src/workflows/share-workflow.tsx
 msgid "Role of {shown}"
@@ -12002,6 +12007,7 @@ msgstr "Rol de {shown}"
 msgid "Role of {who}"
 msgstr "Rol de {who}"
 
+#: src/engines/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Role to share with"
 msgstr "Rol con el que compartir"
@@ -12416,6 +12422,7 @@ msgstr "Buscar miembros"
 msgid "Search people"
 msgstr "Buscar personas"
 
+#: src/engines/app-sharing.tsx
 #: src/settings/package-approvers.tsx
 msgid "Search people and teams"
 msgstr "Buscar personas y equipos"
@@ -12663,6 +12670,7 @@ msgstr "Resuelto: {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Varios flujos funcionan con IA, en la mayor parte del trabajo manual."
 
+#: src/engines/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share"
 msgstr "Compartir"
@@ -12675,6 +12683,10 @@ msgstr "Compartir"
 #: src/workflows/share-workflow.tsx
 msgid "Share {name}"
 msgstr "Compartir {name}"
+
+#: src/engines/app-sharing.tsx
+msgid "Share as"
+msgstr "Compartir como"
 
 #: src/brain/share-record.tsx
 msgid "Share it"
@@ -12709,7 +12721,7 @@ msgstr "Buzones compartidos, calendarios de compañeros y los archivos de la emp
 msgid "Shared mailboxes, registers and the company's records, after they press a card."
 msgstr "Buzones compartidos, registros y los datos de la empresa, después de pulsar una tarjeta."
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Shared with"
 msgstr "Compartida con"
@@ -13481,6 +13493,18 @@ msgstr "Parar y preguntar"
 msgid "Stop for now"
 msgstr "Parar aquí"
 
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing"
+msgstr "Dejar de compartir"
+
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing with {name}"
+msgstr "Dejar de compartir con {name}"
+
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing with {name}?"
+msgstr "¿Dejar de compartir con {name}?"
+
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
 msgstr "Dejar de compartir con {shown}"
@@ -13819,6 +13843,7 @@ msgid "Team: {name}"
 msgstr "Equipo: {name}"
 
 #: src/brain/brain.ts
+#: src/engines/app-sharing.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/routes/_shell.settings.brain.tsx
@@ -14861,6 +14886,10 @@ msgstr "Su enlace deja de funcionar, y lo que dijo se va con él."
 msgid "Their numbers show once the first person starts their interview."
 msgstr "Las cifras aparecen en cuanto la primera persona empieza su entrevista."
 
+#: src/engines/app-sharing.tsx
+msgid "Their open screens of it stop within seconds, and they can no longer open it. You can share it with them again."
+msgstr "Sus pantallas abiertas se detienen en segundos y ya no pueden abrirlo. Puedes volver a compartirlo con ellos."
+
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Su propio correo, calendario y archivos. Se ejecuta al momento."
@@ -15741,6 +15770,7 @@ msgstr "Evento ilegible"
 msgid "Unsaved changes"
 msgstr "Cambios sin guardar"
 
+#: src/engines/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Unshare"
 msgstr "Dejar de compartir"
@@ -17221,7 +17251,6 @@ msgstr "Calculó lo que podría mejorarse"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
-#: src/workflows/independent-workflows.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"
