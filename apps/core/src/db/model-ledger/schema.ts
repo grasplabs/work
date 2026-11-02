@@ -86,12 +86,6 @@ export const requests = sqliteTable(
     reconcileFailures: integer("reconcile_failures").notNull().default(0),
     settledAt: integer("settled_at"),
     /**
-     * The generation of the quota policy whose run lineage limit it was
-     * admitted under; null for a request with no lineage, or one admitted
-     * before it was recorded.
-     */
-    policyGeneration: integer("policy_generation"),
-    /**
      * Whose share of the requests in flight it takes: the person it counts
      * for (model-admission.ts). Null for one admitted before shares were
      * kept, which holds none.
@@ -174,22 +168,6 @@ export const queue = sqliteTable(
     // A person's places in an App, and an App's: their caps and turns.
     index("queue_subject").on(table.subject, table.resource, table.seenAt),
     index("queue_resource").on(table.resource, table.seenAt),
-  ]
-);
-
-/**
- * The highest quota policy generation an admission carried, one row: no
- * admission under a lower one is admitted after it (model-ledger.ts).
- */
-export const policy = sqliteTable(
-  "policy",
-  {
-    id: integer().primaryKey(),
-    generation: integer().notNull(),
-  },
-  (table) => [
-    check("policy_one_row", sql`${table.id} = 0`),
-    check("policy_generation", sql`${table.generation} >= 0`),
   ]
 );
 

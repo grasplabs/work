@@ -21,7 +21,6 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
   "model.ledger_unavailable": msg`Grasp can't count model spend right now. Try again later.`,
   "model.quota_policy_unavailable": msg`Grasp can't read your organization's model limits right now. Try again later.`,
-  "model.quota_policy_behind": msg`Your organization's model limits need a check. Ask your admin to have Grasp look at them.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
 };

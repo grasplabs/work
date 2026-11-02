@@ -512,49 +512,6 @@ describe("the model ledger", () => {
     expect(delivered).toBeTruthy();
   });
 
-  it("refuses an admission under an older quota policy than one it already admitted under, counting nothing", async () => {
-    const ledger = newLedger();
-    const run = lineageOf(`root-${crypto.randomUUID()}`);
-    const newer = admission(10, [{ ...run, limitRequests: 2 }], {
-      policyGeneration: 7,
-    });
-    // Read before generation 7 was recorded, with the limit it had then.
-    const older = admission(10, [run], { policyGeneration: 6 });
-
-    const admitted = [
-      await ledger.admit(newer),
-      await ledger.admit(older),
-      // A request with no lineage carries no generation: never refused for it.
-      await ledger.admit(admission(10, [person(`ivo-${crypto.randomUUID()}`)])),
-      await ledger.admit(
-        admission(10, [{ ...run, limitRequests: 2 }], { policyGeneration: 7 })
-      ),
-      await ledger.admit(
-        admission(10, [{ ...run, limitRequests: 2 }], { policyGeneration: 8 })
-      ),
-    ];
-    const generations = await runInDurableObject(ledger, (_instance, state) =>
-      state.storage.sql
-        .exec<{ id: string; generation: number | null }>(
-          "SELECT id, policy_generation AS generation FROM requests WHERE id IN (?, ?)",
-          newer.id,
-          older.id
-        )
-        .toArray()
-    );
-    expect({ admitted, generations }).toStrictEqual({
-      admitted: [
-        { ok: true },
-        { ok: false, policyBehind: true, highest: 7 },
-        { ok: true },
-        { ok: true },
-        // Two of its two requests made, under the newest policy too.
-        { ok: false, scope: "run", requests: true },
-      ],
-      generations: [{ id: newer.id, generation: 7 }],
-    });
-  });
-
   it("refuses an admission with more scopes than the gateway counts, counting nothing", async () => {
     const ledger = newLedger();
     const scopes: LedgerScope[] = [

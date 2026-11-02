@@ -17451,10 +17451,6 @@ msgstr "Tu organización lo usa mediante los permisos que concedes."
 msgid "Your organization’s account"
 msgstr "La cuenta de tu organización"
 
-#: src/chat/failure.ts
-msgid "Your organization's model limits need a check. Ask your admin to have Grasp look at them."
-msgstr "Hay que revisar los límites de modelos de tu organización. Pide a tu administrador que Grasp los revise."
-
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
 msgstr "Primero tu gente, tus documentos y tus herramientas. Después, dos semanas de conversaciones cortas con tu equipo. Al {threshold} %, tu equipo puede empezar."

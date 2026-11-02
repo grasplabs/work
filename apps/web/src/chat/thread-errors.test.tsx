@@ -42,7 +42,6 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.answer_too_long": true,
   "model.ledger_unavailable": true,
   "model.quota_policy_unavailable": true,
-  "model.quota_policy_behind": true,
   "model.failed": true,
   "model.invalid_output": true,
 };

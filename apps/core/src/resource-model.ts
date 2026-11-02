@@ -205,7 +205,6 @@ const generate = async (
       // A run's: whose share its requests take (BindingCaller).
       ...(shareSubject === undefined ? {} : { shareSubject }),
       provenance: [...caller.sources.snapshot().collectionIds],
-      connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
       binding: { app: caller.app, alias: record.alias },

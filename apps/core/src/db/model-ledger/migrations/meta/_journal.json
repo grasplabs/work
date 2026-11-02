@@ -92,6 +92,13 @@
       "when": 1793527510414,
       "tag": "0012_drop_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793579293599,
+      "tag": "0013_drop_quota_policy",
+      "breakpoints": true
     }
   ]
 }

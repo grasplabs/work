@@ -28,7 +28,6 @@ import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
   auditOutbox,
-  policy,
   providerHealth,
   queue,
   requests,
@@ -62,12 +61,6 @@ import { queueLiveMs } from "./workflows/admission.ts";
 //   restart counts against the same requests as the rest of the lineage,
 //   and its count is kept under one period (`lineagePeriod`), so a new
 //   month doesn't start it afresh either.
-// - A lineage's request limit kept past a policy change: each admission
-//   carries the limit of the policy in force (model-spend.ts) and is
-//   checked against it; the lineage's row keeps only its count. An
-//   admission under an older generation than one this ledger already saw
-//   is refused (`policyBehind`), so nothing is admitted under an older
-//   policy once an admission came under a newer one.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
 //   may have committed: the gateway settles it as `unsent` only if it
@@ -276,11 +269,6 @@ const admissionSchema = z
      * `listen`). {@link maxLeaseMs} without one.
      */
     leaseMs: z.int().min(0).max(maxLeaseMs).optional(),
-    /**
-     * The generation of the quota policy its run lineage's request limit
-     * comes from; none for a request with no lineage.
-     */
-    policyGeneration: z.int().min(0).optional(),
     /** Whose shares of the requests in flight it takes, and how many there are. */
     fair: fairnessSchema,
     /** The way it goes (`routeSchema`); none for a voice model's. */
@@ -298,11 +286,6 @@ export type Admitted =
   | { ok: true }
   /** Its scope admitted as many requests as it may: refused, for good. */
   | { ok: false; scope: LedgerScopeName; requests: true }
-  /**
-   * Its quota policy generation is lower than one an admission already
-   * carried: refused, to be asked again under the policy in force.
-   */
-  | { ok: false; policyBehind: true; highest: number }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused.
@@ -495,13 +478,6 @@ export class ModelLedger extends DurableObject<Env> {
           ? { ok: true }
           : { ok: false, reused: true };
       }
-      const highest =
-        admission.policyGeneration === undefined
-          ? undefined
-          : this.#policyAhead(admission.policyGeneration);
-      if (highest !== undefined) {
-        return { ok: false, policyBehind: true, highest };
-      }
       const { scopes } = admission;
       // No request comes back but one never sent: a scope out of requests
       // is refused for good.
@@ -535,7 +511,6 @@ export class ModelLedger extends DurableObject<Env> {
           dispatchedAt: now,
           deadline: admission.deadline,
           reconcileAt: admission.reconcileAt,
-          policyGeneration: admission.policyGeneration ?? null,
           subject: admission.fair.subject,
           resource: admission.fair.resource,
           leaseEndsAt: Math.min(
@@ -943,30 +918,6 @@ export class ModelLedger extends DurableObject<Env> {
       .from(providerHealth)
       .orderBy(asc(providerHealth.provider), asc(providerHealth.credential))
       .all();
-  }
-
-  /**
-   * The higher quota policy generation an earlier admission carried, which
-   * an admission under `generation` is behind; none when it may go on, and
-   * then it is recorded as the highest. Inside a transaction.
-   */
-  #policyAhead(generation: number): number | undefined {
-    const highest = this.#db
-      .select({ generation: policy.generation })
-      .from(policy)
-      .where(eq(policy.id, 0))
-      .get()?.generation;
-    if (highest !== undefined && highest > generation) {
-      return highest;
-    }
-    if (highest === undefined || highest < generation) {
-      this.#db
-        .insert(policy)
-        .values({ id: 0, generation })
-        .onConflictDoUpdate({ target: policy.id, set: { generation } })
-        .run();
-    }
-    return undefined;
   }
 
   /**
