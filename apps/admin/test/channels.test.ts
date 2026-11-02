@@ -17,6 +17,7 @@ import {
   pinClient,
   promoteRelease,
   retryChannel,
+  retryClient,
   setClientChannel,
 } from "../src/rollout/channels.ts";
 import { parallelDeploys } from "../src/rollout/desired.ts";
@@ -345,6 +346,52 @@ describe("release channels", () => {
       },
       failing: on(release),
       late: on(release),
+    });
+  });
+
+  it("retries a pinned client whose deploy failed when staff retry it, its channel going on meanwhile", async () => {
+    const before = await placedRelease("feat(core): before");
+    await releaseToEdge(env, [before]);
+    const pinned = await live("edge", before);
+    const other = await live("edge", before);
+    const pin = await placedRelease("feat(core): pinned to");
+    await using runs = followRuns();
+    // The pinned client's core upload is refused once.
+    cloudflare.failNext(await coreUpload(pinned.clientId), 400);
+    await pinClient(env, staff, { clientId: pinned.clientId, releaseId: pin });
+    await runs.converge();
+    const failed = await deployOf(pinned.clientId);
+    // A pinned client's failure never stops its channel: Edge's next
+    // release reaches the other client.
+    const next = await placedRelease("feat(core): next on edge");
+    await releaseToEdge(env, [next]);
+    await runs.converge();
+    const otherWhileFailed = await releasesOf(other.clientId);
+    const stillFailed = await deployOf(pinned.clientId);
+
+    await retryClient(env, staff, { clientId: pinned.clientId });
+    await runs.converge();
+
+    expect({
+      failed: failed?.status,
+      stillFailed: stillFailed?.status,
+      otherWhileFailed,
+      pinned: await releasesOf(pinned.clientId),
+      deploy: await deployOf(pinned.clientId),
+      retried: await db.$count(
+        auditEvents,
+        and(
+          eq(auditEvents.clientId, pinned.clientId),
+          eq(auditEvents.action, "client.retry")
+        )
+      ),
+    }).toStrictEqual({
+      failed: "failed",
+      stillFailed: "failed",
+      otherWhileFailed: on(next),
+      pinned: on(pin),
+      deploy: { releaseId: pin, status: "done", error: null },
+      retried: 1,
     });
   });
 

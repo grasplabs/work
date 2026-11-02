@@ -20,6 +20,8 @@ import {
   promoteRelease,
   promoteSchema,
   retryChannel,
+  retryClient,
+  retryClientSchema,
   retrySchema,
   setClientChannel,
 } from "./channels.ts";
@@ -79,6 +81,15 @@ export const retryChannelFn = createServerFn({ method: "POST" })
     async ({ data, context }) =>
       await change(async () => {
         await retryChannel(env, context.staff, data);
+      })
+  );
+
+export const retryClientFn = createServerFn({ method: "POST" })
+  .validator(retryClientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await retryClient(env, context.staff, data);
       })
   );
 

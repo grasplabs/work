@@ -74,8 +74,9 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
-import { fetchDrift } from "../rollout/functions.ts";
+import { fetchDrift, retryClientFn } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
+import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import { aiStatusLine } from "./ai-status-words.ts";
 import { attentionWords } from "./platform-parts.tsx";
@@ -312,12 +313,12 @@ const needWords = (need: PlatformNeed): ReactNode => {
     const { deploy } = need;
     const what = `Its deploy of ${deploy.releaseId} failed`;
     return deploy.error === null ? (
-      `${what}: retry its channel on Platform.`
+      `${what}: retry it once what stopped it is fixed.`
     ) : (
       <>
         {`${what}: `}
         <ErrorCode code={deploy.error} />
-        {" Retry its channel on Platform."}
+        {" Retry it once what stopped it is fixed."}
       </>
     );
   }
@@ -708,6 +709,38 @@ const RetryNow = ({ clientId }: { clientId: string }) => {
   );
 };
 
+/**
+ * Retry its deploy: clears its failed deploy as the staff member
+ * (`retryClientFn`), so the reconciler deploys it again, pinned or not.
+ */
+const RetryDeploy = ({ clientId }: { clientId: string }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useRolloutAction();
+  const retry = () => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await retryClientFn({ data: { clientId } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+        Retry
+      </Button>
+      {failure === null ? null : (
+        <span className="text-destructive text-sm" role="alert">
+          {failure}
+        </span>
+      )}
+    </span>
+  );
+};
+
 /** Where what a need says is seen to: Platform, or the tab it is done on. */
 const NeedAction = ({
   clientId,
@@ -718,16 +751,7 @@ const NeedAction = ({
 }) => {
   switch (need.kind) {
     case "deploy": {
-      return (
-        <Button
-          nativeButton={false}
-          render={<Link to="/platform" />}
-          size="sm"
-          variant="ghost"
-        >
-          Platform
-        </Button>
-      );
+      return <RetryDeploy clientId={clientId} />;
     }
     case "secrets":
     case "settings":
