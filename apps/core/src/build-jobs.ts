@@ -4,6 +4,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
@@ -327,9 +328,13 @@ const admittedToBuild = async (
       },
     };
   } catch (error) {
-    // An unexpected error (the database out of reach for a moment) is
-    // retried by the engine. Only a refusal ends the job here.
-    if (!isExpectedError(error)) {
+    // A stale attempt is the engine's: the job went on without it. An
+    // unexpected error (the database out of reach for a moment) is retried
+    // by the engine. Only a refusal ends the job here.
+    if (
+      executionErrors.codeOf(error) === "execution.stale_attempt" ||
+      !isExpectedError(error)
+    ) {
       throw error;
     }
     await auditAgentCall(

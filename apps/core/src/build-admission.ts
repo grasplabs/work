@@ -1,5 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -29,6 +30,12 @@ import { busyRetryAfterSeconds } from "./workflows/admission.ts";
 // lease was taken after it would have ended (`stillHolds`), so a late
 // renewal never takes back a lease that lapsed. A step whose lease is
 // lost stops (`holding`), for the engine to try again.
+//
+// A job's steps and attempts are ordered by its own sequence (`seq`: its
+// step, the round it asks in, and the engine's attempt). Once the job took
+// a lease at a newer one, an older attempt (one that timed out while it
+// waited, or was still building) takes no lease and renews none
+// (`newerThan`): one job never builds twice at once.
 
 /** Build jobs building at once in the whole deployment. */
 export const buildsAtOnce = 2;
@@ -90,6 +97,13 @@ const literal = (value: number): SQL => sql.raw(String(Math.trunc(value)));
 const leaseIs = (job: string, seq: number) =>
   and(eq(buildLeases.jobId, job), eq(buildLeases.seq, seq));
 
+/**
+ * That job `job` took a lease at a step or an attempt newer than `seq`:
+ * one at `seq` is late, and the job has gone on without it.
+ */
+const newerThan = (job: string, seq: number): SQL =>
+  sql`EXISTS (SELECT 1 FROM build_leases AS n WHERE n.job_id = ${job} AND n.seq > ${literal(seq)})`;
+
 /** The database's clock as the statement runs, in milliseconds. */
 const databaseNow = sql`CAST(unixepoch('subsec') * 1000 AS INTEGER)`;
 
@@ -105,7 +119,8 @@ const stillHolds = (job: string, seq: number) =>
     leaseIs(job, seq),
     isNull(buildLeases.settledAt),
     sql`${buildLeases.admittedAt} + ${buildLeases.reservedMs} > ${databaseNow}`,
-    sql`NOT EXISTS (SELECT 1 FROM build_leases AS o WHERE o.admitted_at >= ${buildLeases.admittedAt} + ${buildLeases.reservedMs} AND NOT (o.job_id = ${job} AND o.seq = ${literal(seq)}))`
+    sql`NOT EXISTS (SELECT 1 FROM build_leases AS o WHERE o.admitted_at >= ${buildLeases.admittedAt} + ${buildLeases.reservedMs} AND NOT (o.job_id = ${job} AND o.seq = ${literal(seq)}))`,
+    sql`NOT ${newerThan(job, seq)}`
   );
 
 /** How long a settled or lapsed lease is kept before it is dropped. */
@@ -290,7 +305,8 @@ export interface BuildAsk {
  * {@link buildsAtOnce} are held, until it settles or stops renewing, never
  * past {@link maxLeaseMs}; the same step admitted again holds the one
  * lease. Else the seconds to wait before it asks again. Throws, holding
- * nothing, `agent.build_queue_timeout` once it has waited
+ * nothing, `execution.stale_attempt` for a step the job has gone on
+ * without, or `agent.build_queue_timeout` once it has waited
  * {@link maxBuildWaitMs}.
  */
 export const admitBuild = async (
@@ -318,7 +334,7 @@ export const admitBuild = async (
     db
       .insert(buildLeases)
       .select(
-        sql`SELECT ${job}, ${seq}, ${now}, ${renewedForMs}, NULL WHERE ${held} < ${literal(buildsAtOnce)}`
+        sql`SELECT ${job}, ${seq}, ${now}, ${renewedForMs}, NULL WHERE NOT ${newerThan(job, seq)} AND ${held} < ${literal(buildsAtOnce)}`
       )
       .onConflictDoNothing(),
     db
@@ -328,12 +344,20 @@ export const admitBuild = async (
         and(
           leaseIs(job, seq),
           isNull(buildLeases.settledAt),
-          sql`${buildLeases.admittedAt} + ${buildLeases.reservedMs} > ${literal(now)}`
+          sql`${buildLeases.admittedAt} + ${buildLeases.reservedMs} > ${literal(now)}`,
+          sql`NOT ${newerThan(job, seq)}`
         )
       ),
+    db
+      .select({ stale: sql<number>`${newerThan(job, seq)}` })
+      .from(sql`(SELECT 1)`),
   ]);
   // Held now: taken by this call, or by an earlier one of the same step.
-  return written[2].length > 0
-    ? { lease: leaseOf(db, job, seq) }
-    : { retryAfterSeconds: busyRetryAfterSeconds };
+  if (written[2].length > 0) {
+    return { lease: leaseOf(db, job, seq) };
+  }
+  if (written[3][0]?.stale === 1) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
+  return { retryAfterSeconds: busyRetryAfterSeconds };
 };

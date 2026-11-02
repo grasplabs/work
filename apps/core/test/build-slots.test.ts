@@ -67,6 +67,32 @@ describe("build jobs building at once", { timeout: 60_000 }, () => {
     });
   });
 
+  it("refuse an attempt of a job whose retry took a lease since: it takes no slot, and a lease it held renews no more", async () => {
+    // An attempt that timed out while it waited, arriving after its retry
+    // was admitted: it takes no lease, and the slot stays free.
+    const waited = aJob();
+    const retry = leaseOf(await admit(waited, checkAt(1, 2)));
+    const late = shown(await admit(waited, checkAt(1, 1)));
+    const heldAfterLate = await leasesHeld();
+    const other = leaseOf(await admit(aJob()));
+    await Promise.all([retry.settle(), other.settle()]);
+    // An attempt still building when its retry is admitted loses its lease.
+    const building = aJob();
+    const first = leaseOf(await admit(building, checkAt(1, 1)));
+    const second = leaseOf(await admit(building, checkAt(1, 2)));
+    expect({
+      late,
+      heldAfterLate,
+      firstRenews: await first.renew(),
+      secondRenews: await second.renew(),
+    }).toStrictEqual({
+      late: "execution.stale_attempt",
+      heldAfterLate: 1,
+      firstRenews: "lost",
+      secondRenews: "held",
+    });
+  });
+
   it("give a dead step's lease back once it stops renewing, and no sooner", async () => {
     await allButOne();
     const dead = aJob();
