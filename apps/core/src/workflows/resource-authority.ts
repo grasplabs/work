@@ -22,6 +22,7 @@ import {
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
 import { workflowRoleSql } from "../workflow-roles.ts";
+import { accountOf } from "./quotas.ts";
 
 // The authority behind each named call of a run of an independent workflow
 // (platform specification 13.2, 13.6): what its start froze names the
@@ -108,12 +109,16 @@ export const frozenBindingsOf = (
 /** What a call of a run needs to know of it, from its row and receipt. */
 export interface CallingRun {
   readonly runId: string;
-  /**
-   * Its lineage's root, as its row pins it: the run itself for a root.
-   * What its model requests count against at the gateway, with every
-   * other run of its lineage's (resource-calls.ts, `callModel`).
-   */
+  /** Its lineage's root, as its row pins it: the run itself for a root. */
   readonly rootRunId: string;
+  /**
+   * The run whose allowances it is charged to, as its row pins it
+   * (quotas.ts, `accountOf`): its lineage's root, or its workflow's account
+   * in the lineage a trigger started it in. What its attempts and its model
+   * requests count against at the gateway, with every other run charged
+   * there (resource-calls.ts, `callModel`).
+   */
+  readonly accountRunId: string;
   readonly workflowId: string;
   readonly version: number;
   /** Whom it acts for: the person its start acted for. */
@@ -330,6 +335,7 @@ const runRowOf = async (env: Env, runId: string) =>
       status: workflowResourceRuns.status,
       restricted: workflowResourceRuns.restricted,
       rootRunId: workflowResourceRuns.rootRunId,
+      accountRunId: workflowResourceRuns.accountRunId,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
@@ -357,6 +363,7 @@ const callingRunFrom = (
 ): CallingRun => ({
   runId,
   rootRunId: row.rootRunId ?? runId,
+  accountRunId: accountOf({ id: runId, ...row }),
   workflowId: row.workflowId,
   version: row.version,
   principal: row.principal,

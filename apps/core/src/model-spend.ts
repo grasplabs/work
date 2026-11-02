@@ -37,7 +37,10 @@ import { microsPerDollar } from "./model-prices.ts";
 // root's (a run's own mail starts other Apps' runs under it), or of the
 // root's App under another App's run, counts under its account in the
 // lineage instead (`accountRunId` on its actor, from its row too,
-// workflows/quotas.ts `accountClaimed`). A lineage makes at most the
+// workflows/quotas.ts `accountClaimed`); so does an independent
+// workflow's run a trigger started in another run's lineage, under its
+// workflow's account there (`triggeredAccountClaimed`, which its run's
+// `lineage` names). A lineage makes at most the
 // platform's provider requests (`lineageModelRequests`, 100), which stops
 // a runaway run. From the threat model:
 //
