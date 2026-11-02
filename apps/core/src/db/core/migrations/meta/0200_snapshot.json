@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b16e3598-f923-45aa-8e3d-64052fc8c141",
+  "id": "81cffd04-f241-4a3d-aee2-1e52cee80a2d",
   "prevId": "330c32b1-9c50-482f-863f-26fdfd603558",
   "tables": {
     "access_revocations": {
@@ -8868,75 +8868,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "trigger_hour_slots": {
-      "name": "trigger_hour_slots",
-      "columns": {
-        "trigger_id": {
-          "name": "trigger_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_key": {
-          "name": "event_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "taken_at": {
-          "name": "taken_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "trigger_hour_slots_taken": {
-          "name": "trigger_hour_slots_taken",
-          "columns": [
-            "trigger_id",
-            "taken_at"
-          ],
-          "isUnique": false
-        },
-        "trigger_hour_slots_taken_at": {
-          "name": "trigger_hour_slots_taken_at",
-          "columns": [
-            "taken_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "trigger_hour_slots_trigger_id_trigger_resources_id_fk": {
-          "name": "trigger_hour_slots_trigger_id_trigger_resources_id_fk",
-          "tableFrom": "trigger_hour_slots",
-          "tableTo": "trigger_resources",
-          "columnsFrom": [
-            "trigger_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "trigger_hour_slots_trigger_id_event_key_pk": {
-          "columns": [
-            "trigger_id",
-            "event_key"
-          ],
-          "name": "trigger_hour_slots_trigger_id_event_key_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "trigger_resource_versions": {
       "name": "trigger_resource_versions",
       "columns": {
@@ -9157,24 +9088,9 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "email_address": {
-          "name": "email_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
-      "indexes": {
-        "trigger_resources_email_address_unique": {
-          "name": "trigger_resources_email_address_unique",
-          "columns": [
-            "email_address"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -11934,6 +11850,15 @@
           "isUnique": false,
           "where": "\"workflow_resource_runs\".\"status\" = 'starting'"
         },
+        "workflow_resource_runs_status_ended_idx": {
+          "name": "workflow_resource_runs_status_ended_idx",
+          "columns": [
+            "status",
+            "ended_at",
+            "id"
+          ],
+          "isUnique": false
+        },
         "workflow_resource_runs_newest_idx": {
           "name": "workflow_resource_runs_newest_idx",
           "columns": [
@@ -11956,7 +11881,8 @@
         "workflow_resource_runs_created_idx": {
           "name": "workflow_resource_runs_created_idx",
           "columns": [
-            "created_at"
+            "created_at",
+            "id"
           ],
           "isUnique": false
         }
