@@ -15,6 +15,7 @@ import {
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
+import { formatList } from "../format.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
 // admin grants or rejects on the dashboard's pile (`dashboard/pile-cards.tsx`).
@@ -79,9 +80,51 @@ export const subjectOf = (
     ? appName(directory, subject.appId)
     : holderName(subject);
 
+/**
+ * A workflow's store a permission asks for, in plain words: what its
+ * operations reach, as the list read them (`reach`).
+ */
+const storeObject = (storeId: string, reach: Permission["reach"]): string => {
+  if (reach?.length === 0) {
+    // A workflow's store whose operations can't be read now, or that
+    // serves none of these: consent can't be given in plain words yet.
+    return i18n._(
+      msg`Store ${ph({ store: storeId })}, a workflow's. What these operations reach can't be shown now`
+    );
+  }
+  if (reach !== undefined) {
+    // Consent in plain words: a workflow's store, whose operations reach
+    // every record of their tables, whoever owns it.
+    const reads = formatList([
+      ...new Set(
+        reach.filter(({ changes }) => !changes).map(({ table }) => table)
+      ),
+    ]);
+    const changes = formatList([
+      ...new Set(
+        reach.filter(({ changes: writes }) => writes).map(({ table }) => table)
+      ),
+    ]);
+    const store = ph({ store: storeId });
+    if (changes === "") {
+      return i18n._(
+        msg`Store ${store}, a workflow's. This can read every record of ${reads}, whoever owns it`
+      );
+    }
+    return reads === ""
+      ? i18n._(
+          msg`Store ${store}, a workflow's. This can read and change every record of ${changes}, whoever owns it`
+        )
+      : i18n._(
+          msg`Store ${store}, a workflow's. This can read every record of ${reads}, and read and change every record of ${changes}, whoever owns it`
+        );
+  }
+  return i18n._(msg`Store ${ph({ store: storeId })}`);
+};
+
 /** What it asks for, by ID: connections and collections have no names here. */
 export const objectOf = (
-  { object, actions }: Permission,
+  { object, actions, reach }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -130,7 +173,7 @@ export const objectOf = (
     );
   }
   if (object.type === "store") {
-    return i18n._(msg`Store ${ph({ store: object.storeId })}`);
+    return storeObject(object.storeId, reach);
   }
   return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
 };
