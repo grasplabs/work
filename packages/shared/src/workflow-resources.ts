@@ -932,10 +932,33 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
 /** A task's body: its single key's value, as the profile reads it. */
 const stepBodySchema = z.record(z.string(), z.json());
 
-/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
+/** Most steps one page of a run's trace holds. */
+export const workflowRunTraceMaxPageSize = 500;
+
+/**
+ * How a run's trace is read (`runTrace`): with its doors unless `doors` is
+ * false, a page of at most `pageSize` steps, going on from `cursor`, the
+ * `nextCursor` of the page before (null for the first).
+ */
 export const workflowRunTraceOptionsSchema = z
-  .strictObject({ doors: z.boolean().default(true) })
-  .default({ doors: true });
+  .strictObject({
+    doors: z.boolean().default(true),
+    pageSize: z
+      .int()
+      .min(1)
+      .max(workflowRunTraceMaxPageSize)
+      .default(workflowRunTraceMaxPageSize),
+    cursor: z
+      .string()
+      .regex(/^(?:0|[1-9]\d{0,15})$/u)
+      .nullable()
+      .default(null),
+  })
+  .default({
+    doors: true,
+    pageSize: workflowRunTraceMaxPageSize,
+    cursor: null,
+  });
 
 /**
  * One step of a draft edited from the canvas (`editStep`), as the next
@@ -1323,6 +1346,8 @@ export interface WorkflowResourcesApi {
    * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
    * without its doors: a trace followed while the run goes keeps the
    * diagram its first read drew, as the run's version never changes.
+   * Read a page at a time: each page's `nextCursor`, as the next read's
+   * `cursor`, reads on to the next, with no step left out or told twice.
    */
   runTrace: (
     id: string,

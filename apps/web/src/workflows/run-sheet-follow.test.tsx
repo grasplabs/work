@@ -53,6 +53,7 @@ const traceOf = (waiting: boolean): WorkflowRunTrace => ({
   tasks: [],
   steps: [],
   complete: true,
+  nextCursor: null,
   detailsRemoved: false,
   ...(waiting ? { aiProvider: wait } : {}),
 });

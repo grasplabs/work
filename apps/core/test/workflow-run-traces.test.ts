@@ -1,11 +1,19 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  reviewDecision,
+} from "../src/decisions/decisions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -14,7 +22,10 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { mockIdp } from "./idp.ts";
+import { endLiveRuns } from "./runs.ts";
+import { person as identityOf } from "./sealed-apps.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A run laid over its version's diagram (resource-run-trace.ts): the
 // tasks its own journal reached, each step of them in order, with its loop
@@ -49,7 +60,12 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
-const definitionOf = (name: string, version: string, tasks: unknown[]) =>
+const definitionOf = (
+  name: string,
+  version: string,
+  tasks: unknown[],
+  bindings: Record<string, unknown> = {}
+) =>
   JSON.stringify({
     document: {
       dsl: "1.0.3",
@@ -58,7 +74,7 @@ const definitionOf = (name: string, version: string, tasks: unknown[]) =>
       version,
       title: name,
       metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
       },
     },
     input: { schema: objectSchema({ who: { type: "string" } }) },
@@ -354,6 +370,343 @@ describe("a run's trace", () => {
     }).toStrictEqual({
       user: "role.forbidden",
       elsewhere: "workflow.run_unavailable",
+    });
+  });
+});
+
+// Read over the session API (`workflowResources.runTrace`), as the
+// workflow's pages read it. What could go wrong, tried below: a try's
+// retry of a failed step told as steps of no task, or left out, or as a
+// second step; a decision's wait left out, so its task shows nothing
+// while it waits, or told as done before it was answered; a page leaving
+// a step out, or telling one twice, or a step's retries split across
+// pages.
+
+const idp = mockIdp();
+
+/** A builder signed in, and as core's own calls take them. */
+const signedInBuilder = async () => {
+  const session = await signedInApi(idp, "builder");
+  const acting: Acting = {
+    userId: session.userId,
+    role: "builder",
+    teams: [],
+    staff: false,
+  };
+  return { ...session, acting };
+};
+
+type Builder = Awaited<ReturnType<typeof signedInBuilder>>;
+
+/** Every step of run `runId`'s trace, `pageSize` at a time, and its pages. */
+const pagedTrace = async (
+  builder: Builder,
+  id: string,
+  runId: string,
+  pageSize: number
+) => {
+  const pages: WorkflowRunTrace[] = [];
+  let cursor: string | null = null;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+    const page: WorkflowRunTrace = await builder.api.workflowResources.runTrace(
+      id,
+      runId,
+      {
+        doors: false,
+        pageSize,
+        cursor,
+      }
+    );
+    pages.push(page);
+    ({ nextCursor: cursor } = page);
+  } while (cursor !== null);
+  return { steps: pages.flatMap(({ steps }) => steps), pages };
+};
+
+/** A trace's steps as lines: task, state, attempts and failure's code. */
+const toldOf = ({ steps }: Pick<WorkflowRunTrace, "steps">) =>
+  steps.map(
+    ({ task, state, attempts, errorCode }) =>
+      `${task} ${state} ${attempts} ${errorCode ?? "-"}`
+  );
+
+/** A compute module whose `fail` always fails, as a flaky dependency's. */
+const failingModule = `import { compute, v } from "@grasp-os/sdk/compute";
+
+export const fail = compute({
+  input: v.string(),
+  output: v.string(),
+  handler: () => {
+    throw new Error("The rates service didn't answer.");
+  },
+});
+`;
+
+describe("a run's trace, read over the session API", () => {
+  afterEach(endLiveRuns);
+
+  it("tells a try's retries of a failed step as that one step's attempts, on whichever page", async () => {
+    const builder = await signedInBuilder();
+    const workflow = await createWorkflowResource(
+      env,
+      builder.acting,
+      `traced-${unique()}`
+    );
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition: definitionOf(
+        workflow.name,
+        "1.0.0",
+        [
+          {
+            guard: {
+              try: [
+                {
+                  "fetch-rates": {
+                    call: "grasp.compute",
+                    with: { binding: "rates", arguments: "${ .who }" },
+                  },
+                },
+              ],
+              catch: {
+                retry: {
+                  delay: { milliseconds: 50 },
+                  backoff: { constant: {} },
+                  limit: { attempt: { count: 3 } },
+                },
+                do: [{ "fell-back": { set: { status: "fallback" } } }],
+              },
+            },
+          },
+        ],
+        { rates: { kind: "compute", contract: "local:code/rates.ts#fail" } }
+      ),
+      basedOn: null,
+      modules: { "code/rates.ts": failingModule },
+    });
+    const runId = await ranFor(builder.acting, workflow.id, 1, "Ada");
+
+    const whole = await builder.api.workflowResources.runTrace(
+      workflow.id,
+      runId,
+      { doors: false }
+    );
+    const paged = await pagedTrace(builder, workflow.id, runId, 1);
+
+    expect({
+      status: whole.status,
+      steps: toldOf(whole),
+      task: whole.tasks.find(({ task }) => task === "fetch-rates"),
+      complete: whole.complete,
+      paged: paged.steps,
+    }).toStrictEqual({
+      status: "completed",
+      // One step of three attempts in all, failed at the last, which the
+      // catch took: the try's enter and catch steps around it.
+      steps: [
+        "guard reached 1 -",
+        "fetch-rates failed 3 workflow.compute_failed",
+        "guard reached 1 -",
+        "fell-back reached 1 -",
+      ],
+      task: { task: "fetch-rates", state: "failed", attempts: 3 },
+      complete: true,
+      paged: whole.steps,
+    });
+  });
+
+  it("tells a decision's wait by the decision's task: waiting until it is answered, then reached", async () => {
+    const admin = await identityOf("admin");
+    const reviewer = await identityOf("user");
+    const builder = await signedInBuilder();
+    const contract = `approval-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contract,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      builder.acting,
+      `traced-${unique()}`
+    );
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition: definitionOf(
+        workflow.name,
+        "1.0.0",
+        [
+          {
+            ask: {
+              call: "grasp.decision",
+              with: {
+                binding: "approval",
+                recipients: [`person:${reviewer.userId}`],
+                prompt: "Greet them?",
+                input: { who: "${ $workflow.input.who }" },
+              },
+            },
+          },
+          { finish: { set: { status: "done" } } },
+        ],
+        { approval: { kind: "decision", contract } }
+      ),
+      basedOn: null,
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "approval",
+      target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },
+      reviewed: { version: 1 },
+    });
+    const { runId } = await startWorkflow(
+      env,
+      { type: "person", person: builder.acting },
+      workflow.id,
+      { version: 1, input: { who: "Ada" }, key: unique() }
+    );
+    if (runId === null) {
+      throw new Error("The start made a run");
+    }
+    const traceNow = async () =>
+      await builder.api.workflowResources.runTrace(workflow.id, runId, {
+        doors: false,
+      });
+    const waiting = await vi.waitFor(
+      async () => {
+        const trace = await traceNow();
+        if (!trace.steps.some(({ state }) => state === "waiting")) {
+          throw new Error("The run isn't waiting for its decision yet");
+        }
+        return trace;
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const decision = await env.DB.prepare(
+      "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
+    )
+      .bind(runId)
+      .first<{ id: string }>();
+    if (decision === null) {
+      throw new Error("The run opened no decision");
+    }
+    const answer = { approved: true, payload: { comment: "Looks right" } };
+    const review = await reviewDecision(env, reviewer, decision.id, answer);
+    if (review.state !== "review") {
+      throw new Error("Nothing to review");
+    }
+    const { confirmation } = await confirmDecision(
+      env,
+      reviewer,
+      decision.id,
+      review.decision.revision,
+      review.response
+    );
+    await answerDecision(
+      env,
+      reviewer,
+      decision.id,
+      review.response,
+      confirmation
+    );
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(
+          env,
+          builder.acting,
+          workflow.id,
+          runId
+        );
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const answered = await traceNow();
+    const asked = answered.steps.filter(({ task }) => task === "ask");
+
+    expect({
+      waiting: toldOf(waiting),
+      waitingTask: waiting.tasks.find(({ task }) => task === "ask")?.state,
+      waitingEnd: waiting.steps.at(-1)?.endedAt,
+      answered: toldOf(answered),
+      ended: asked.every(
+        ({ startedAt, endedAt }) =>
+          endedAt !== null && Date.parse(startedAt) <= Date.parse(endedAt)
+      ),
+    }).toStrictEqual({
+      // Its enter step opened the decision; its call step waits on it.
+      waiting: ["ask reached 1 -", "ask waiting 0 -"],
+      waitingTask: "waiting",
+      waitingEnd: null,
+      answered: ["ask reached 1 -", "ask reached 1 -", "finish reached 1 -"],
+      ended: true,
+    });
+  });
+
+  it("reads a run longer than a page in pages, each step once and none left out", async () => {
+    const builder = await signedInBuilder();
+    const workflow = await createWorkflowResource(
+      env,
+      builder.acting,
+      `traced-${unique()}`
+    );
+    const names = Array.from({ length: 12 }, (_, index) => `n${index}`);
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", [
+        { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
+        {
+          "each-name": {
+            for: {
+              each: "name",
+              in: `\${ ${JSON.stringify(names)} }`,
+              at: "i",
+            },
+            do: [
+              {
+                note: {
+                  set: "${ . }",
+                  export: { as: "${ {seen: ($context.seen + [$name])} }" },
+                },
+              },
+            ],
+          },
+        },
+        { finished: { set: '${ {status: ($context.seen | join(","))} }' } },
+      ]),
+      basedOn: null,
+    });
+    const runId = await ranFor(builder.acting, workflow.id, 1, "Ada");
+
+    const whole = await builder.api.workflowResources.runTrace(
+      workflow.id,
+      runId,
+      { doors: false }
+    );
+    const paged = await pagedTrace(builder, workflow.id, runId, 5);
+
+    expect({
+      steps: paged.steps.map(
+        ({ task, item }) => `${task}${item === null ? "" : `@${item}`}`
+      ),
+      pages: paged.pages.map(({ steps, complete }) => ({
+        steps: steps.length,
+        complete,
+      })),
+      // The same steps as one page holds, told the same.
+      same: paged.steps,
+    }).toStrictEqual({
+      steps: [
+        "init",
+        "each-name",
+        ...names.map((_, index) => `note@each-name.${index}`),
+        "finished",
+      ],
+      // Fifteen steps: three pages, the last full, and none after it.
+      pages: [
+        { steps: 5, complete: false },
+        { steps: 5, complete: false },
+        { steps: 5, complete: true },
+      ],
+      same: whole.steps,
     });
   });
 });
