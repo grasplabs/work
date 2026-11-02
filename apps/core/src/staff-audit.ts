@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { currentCall } from "./call-context.ts";
+import { reachesWorkspace } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // Every view and action of Grasp's staff on a client's deployment is in
@@ -322,4 +323,25 @@ export const auditStaffRoute = async (
       ...namedBy(Object.values(parts), names),
     });
   }
+};
+
+/**
+ * `person` (as `identify` read them) for a route outside the onboarding,
+ * once their ask of `route` is in the audit log if they are staff
+ * (`auditStaffRoute`): then `undefined` for staff, who reach no such route
+ * (session-check.ts `reachesWorkspace`), as for nobody signed in. A staff
+ * attempt is on record even though it is refused, as a refused call over
+ * `/rpc` is (`staffAudited` runs before `fullAccess`).
+ */
+export const routeMember = async (
+  env: Env,
+  person: Identity | undefined,
+  route: string,
+  parts: Readonly<Record<string, unknown>> = {}
+): Promise<Identity | undefined> => {
+  if (person === undefined) {
+    return undefined;
+  }
+  await auditStaffRoute(env, person, route, parts);
+  return reachesWorkspace(person) ? person : undefined;
 };

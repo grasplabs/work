@@ -635,8 +635,11 @@ export const ChatDock = () => {
   // App's and the chat's take each other's place between pages, and each
   // read them again when it did. Chat is the chat at full size, and a
   // project's page has its own box, which starts a chat in the project:
-  // neither shows a dock, nor reads its models.
-  const shown = !(pathname === "/" || pathname.startsWith("/projects/"));
+  // neither shows a dock, nor reads its models. Nor does Grasp staff's
+  // session, which reaches the onboarding alone: core refuses it chats.
+  const shown =
+    identity.onboardingOnly !== true &&
+    !(pathname === "/" || pathname.startsWith("/projects/"));
   const { value: models, readAgain } = useFrameRead(readModels, shown);
   if (!shown) {
     return null;
