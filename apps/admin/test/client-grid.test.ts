@@ -138,7 +138,7 @@ describe("the client grid", () => {
     });
   });
 
-  it("reaches a core in the clients' dispatch namespace through it, by the script its hostname's entry names, and no other", async () => {
+  it("reaches a core in the clients' dispatch namespace through it, by the script its hostname's entry names, and no other, never a core's own workers.dev", async () => {
     const release = await importedRelease("feat(core): in the namespace");
     const acme = await liveClient(release);
     const host = `${acme.clientId}.grasp.test`;
@@ -157,21 +157,44 @@ describe("the client grid", () => {
       })
     );
     const gone = await gridLive(env, uncached);
+    // Then its entry names a core on its own workers.dev, over the internet.
+    const ownOrigin = "https://grasp-core.grasp-own.workers.dev";
+    await env.ROUTER_HOSTS.put(
+      host,
+      JSON.stringify({
+        clientId: acme.clientId,
+        coreUrl: ownOrigin,
+        generation,
+      })
+    );
+    const own = await gridLive(env, uncached);
 
     const dispatched = cloudflare.dispatched();
+    const overTheInternet = vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        ([input]) =>
+          new URL(input instanceof Request ? input.url : input).origin ===
+          ownOrigin
+      );
     expect({
       reached: reached[acme.clientId]?.reach,
       gone: gone[acme.clientId]?.reach,
+      own: own[acme.clientId]?.reach,
       // To its own script, at its hostname, and never anywhere else.
       reachedIt: dispatched.some(
         ({ script: to, url }) => to === script && new URL(url).host === host
       ),
       onlyIt: dispatched.every(({ script: to }) => to === script),
+      overTheInternet: overTheInternet.length,
     }).toStrictEqual({
       reached: "reachable",
       gone: "unreachable",
+      // Never asked: only the namespace reaches a core.
+      own: "unknown",
       reachedIt: true,
       onlyIt: true,
+      overTheInternet: 0,
     });
   });
 
