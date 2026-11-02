@@ -5,8 +5,7 @@
 // `keepAfter` schedules work for after its call, `late` writes after a
 // wait longer than a short deadline, and `poison` leaves what
 // it can for the next caller, which `probe` reports. Shared by every path
-// that calls an App's functions: a screen's, an agent's and a workflow
-// run's (app-invocation-isolation.test.ts, run-functions.test.ts).
+// that calls an App's functions (app-invocation-isolation.test.ts).
 
 /** The App's files, its `notes` table readable and writable by its members. */
 export const isolationFiles: Record<string, string> = {

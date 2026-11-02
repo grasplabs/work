@@ -73,7 +73,7 @@ const quietRounds = 25;
 
 /**
  * The quiet wait's hook timeout: rounds that each fire over a second late
- * still end within it (on CI, `orphaned-runs.test.ts` took more than the
+ * still end within it (on CI, a file of App runs took more than the
  * default 10 seconds).
  */
 export const quietHookMs = 30_000;
