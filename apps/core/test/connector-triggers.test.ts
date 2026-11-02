@@ -780,6 +780,25 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuse an event that isn't one", async () => {
+    const shared = await connection();
+
+    expect({
+      unshaped: await outcome(
+        deliverConnectorEvent(env, { id: "e", type: "x" })
+      ),
+      tooLarge: await outcome(
+        deliverConnectorEvent(
+          env,
+          mailEvent(shared, { payload: { body: "x".repeat(64 * 1024) } })
+        )
+      ),
+    }).toStrictEqual({
+      unshaped: "workflow.invalid",
+      tooLarge: "workflow.invalid",
+    });
+  });
+
   it("drop an event held back at the hourly limit for over a day, audited", async () => {
     const admin = await person("admin");
     const workflow = await filing(admin);

@@ -35,6 +35,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import type { ProvisionalOrigin, AppRow, VersionRow } from "./apps.ts";
 import {
@@ -599,6 +600,11 @@ export const createFromBlueprint = async (
   // A blueprint marked from a version holding the v1 server's files: no
   // App is created from it as none is committed with them.
   refuseV1Server(files.keys());
+  // A chat's agent writes no workflow into an App, so it creates none from
+  // a blueprint whose code carries one (app-no-workflows.ts).
+  if (provisional !== undefined) {
+    refuseAppWorkflows(files.keys());
+  }
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);

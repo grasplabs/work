@@ -53,6 +53,7 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
+import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import {
   auditedBatch,
@@ -1072,6 +1073,15 @@ export const draftOverLatest = async (
   app: AppId,
   { base, changes }: DraftChanges
 ): Promise<DraftOverLatest> => {
+  // A draft saved before its agent was refused writes under `workflows/`
+  // may hold such a change still: it goes over the latest version, to be
+  // proposed, no more than it is written. A builder's workflow it doesn't change, or deletes,
+  // stands (app-no-workflows.ts).
+  refuseAppWorkflows(
+    Object.entries(changes).flatMap(([path, content]) =>
+      content === null ? [] : [path]
+    )
+  );
   const { latest, files } = await latestFiles(env, app);
   const parent = latest?.version ?? null;
   if (parent !== base) {

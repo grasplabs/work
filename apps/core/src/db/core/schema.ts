@@ -2700,6 +2700,21 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
 });
 
 /**
+ * Every command from Grasp's admin this core took, by its id
+ * (`@grasp-os/shared/admin-command`): a command delivered again applies
+ * once. Claimed before it applies and marked once it did; one that failed
+ * is let go, so delivering it again applies it, and one claimed by a run
+ * that died can be claimed again after a while.
+ */
+export const adminCommands = sqliteTable("admin_commands", {
+  id: text().primaryKey(),
+  type: text().notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+  /** When it applied; null while it is being applied. */
+  appliedAt: timestamp("applied_at"),
+});
+
+/**
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
  * each time who holds `dependencies.approve` changes. A decision lands
@@ -3896,9 +3911,10 @@ export const workflowStartReceipts = sqliteTable(
       table.workflowResourceId,
       table.createdAt
     ),
-    // The receipts retention has yet to reach, oldest first.
-    index("workflow_start_receipts_due")
-      .on(table.createdAt)
+    // The receipts retention has yet to reach, oldest first, by ID within
+    // a time: the order the sweep pages them in (workflows/retention.ts).
+    index("workflow_start_receipts_due_idx")
+      .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
   ]
 );
@@ -4412,6 +4428,11 @@ export const workflowResourceParams = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+    // The revisions whose values retention has yet to reach, oldest first
+    // (workflows/retention.ts).
+    index("workflow_resource_params_values_kept_idx")
+      .on(table.setAt)
+      .where(sql`${table.valuesRemovedAt} IS NULL`),
   ]
 );
 

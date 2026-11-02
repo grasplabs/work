@@ -1,61 +1,105 @@
-import type { RunSummary } from "@grasp-os/shared/workflows";
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
-import { projectStatus } from "../src/workflows/runs.ts";
-import { approvalApp, confirmedAnswer, week } from "./decisions.ts";
-import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished } from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, hitsCall, workflowFiles } from "./workflow-apps.ts";
+import {
+  called,
+  controlCommand,
+  definitionOf,
+  following,
+  jsonWorkflowAppsOf,
+  runFor,
+  screenOf,
+  settles,
+  startCommand,
+  startedOf,
+  wireOf,
+} from "./json-workflow-apps.ts";
+import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
 
-// A run's summary, as an App's screens read it (summary.ts): one read, of
-// one revision of the run, whose every change takes the next revision in
-// its own write. What could go wrong, tried below: fields of different
-// moments mixed, a change that leaves the revision as it was, waits lost
-// while paused or kept once answered, an ended run still offering
-// controls, controls offered to someone the host would refuse, a pending
-// cancel hidden, and another App's run read.
+// A JSON workflow run's snapshot, as the App's screen that started it
+// follows it (screen-workflows.ts `runSnapshot`): one read of one moment
+// of the run, under a revision every change moves on. What could go wrong,
+// tried below: what the run waits for lost while it is paused, a change
+// that leaves the revision as it was, an ended run still offering
+// controls, when it started and ended missing or out of order, the
+// snapshot naming another run or version than the one started, and a
+// failed run past its retention saying something else of why than the run
+// itself, or anything of what it read. Waits, controls, pending controls,
+// failures within retention, who sees a run and another App's runs are
+// covered in screen-typed-workflows.test.ts.
 
 const idp = mockIdp();
 
-const personApi = async (role: "admin" | "builder" | "user") =>
-  await signedInApi(idp, role);
+const { boundApp } = jsonWorkflowAppsOf(idp);
 
-/** The approval workflow's input: a decision any admin answers, for a week. */
-const byAdmins = { from: "role:admin", timeout: week };
+/** A day past a run's retention (30 days), in milliseconds. */
+const pastRetention = 31 * 24 * 60 * 60 * 1000;
 
-/** The run's summary once `check` holds of it, as `person` reads it. */
-const summaryWhen = async (
+/** A run's snapshot, as much of it as the tests here read. */
+const snapshotSchema = z.object({
+  runId: z.string(),
+  workflowId: z.string(),
+  workflowVersion: z.number(),
+  status: z.string(),
+  startedAt: z.number().nullable(),
+  finishedAt: z.number().nullable(),
+  waits: z.array(z.looseObject({ kind: z.string(), key: z.string() })),
+  control: z.object({
+    canPause: z.boolean(),
+    canResume: z.boolean(),
+    canCancel: z.boolean(),
+    pendingControl: z.unknown(),
+  }),
+  error: z.object({ code: z.string(), message: z.string() }).optional(),
+});
+
+type Snapshot = z.infer<typeof snapshotSchema> & { revision: number };
+
+/** Follows run `runId` on `person`'s screen: each snapshot it was shown. */
+const followedRun = async (
   person: Person,
   app: string,
-  run: string,
-  check: (summary: RunSummary) => boolean
-): Promise<RunSummary> =>
-  await vi.waitFor(
-    async () => {
-      const summary = await person.api.screens.frame(app, "").summary(run);
-      if (!check(summary)) {
-        throw new Error(`The run is ${summary.status}`);
+  lease: string,
+  reference: WorkflowReference,
+  runId: string
+) => {
+  const followed = await following(person, app, lease, {
+    workflow: wireOf(reference),
+    watch: "run",
+    runId,
+  });
+  const shown = (): Snapshot[] =>
+    followed.received.flatMap(({ revision, outcome }) => {
+      const parsed = snapshotSchema.safeParse(outcome);
+      return parsed.success ? [{ ...parsed.data, revision }] : [];
+    });
+  /** The latest snapshot once `holds` says so of it. */
+  const once = async (holds: (snapshot: Snapshot) => boolean) =>
+    await vi.waitFor(() => {
+      const latest = shown().at(-1);
+      if (latest === undefined || !holds(latest)) {
+        throw new Error(`The run is ${latest?.status ?? "unseen"}`);
       }
-      return summary;
+      return latest;
+    }, settles);
+  return {
+    once,
+    release: async () => {
+      await followed.subscription.release();
     },
-    { timeout: 20_000, interval: 100 }
-  );
+  };
+};
 
-/** What a summary says, without its times and IDs. */
-const shape = ({
+/** What a snapshot says, without its times, IDs and revision. */
+const shape = ({ status, waits, control }: Snapshot) => ({
   status,
-  waits,
+  waits: waits.map(({ kind, key }) => ({ kind, key })),
   control,
-  error,
-}: RunSummary): Partial<RunSummary> => ({
-  status,
-  waits: waits.map(({ kind, name }) => ({ kind, name, expiresAt: 0 })),
-  control,
-  ...(error === undefined ? {} : { error }),
 });
 
 const none = {
@@ -65,84 +109,56 @@ const none = {
   pendingControl: null,
 };
 
-describe("a run's summary", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
-
-  it("say where a run is, what it waits for and what its builder may do, of one revision each, as it waits, is paused, is answered and ends", async () => {
-    const builder = await personApi("builder");
-    const admin = await personApi("admin");
-    const app = await approvalApp(builder);
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("approval", byAdmins);
-
-    const waiting = await summaryWhen(
-      builder,
-      app,
-      run,
-      ({ status, waits }) => status === "waiting" && waits.length === 1
-    );
-    await builder.api.screens.frame(app, "").control(run, "pause");
-    const paused = await summaryWhen(
-      builder,
-      app,
-      run,
-      ({ status }) => status === "paused"
-    );
-    // Answered while paused: taken, and run once resumed.
-    const decision = await vi.waitFor(async () => {
-      const found = await env.DB.prepare(
-        "SELECT id FROM workflow_decisions WHERE run_id = ?"
-      )
-        .bind(run)
-        .first<{ id: string }>();
-      if (found === null) {
-        throw new Error("No decision yet");
-      }
-      return found.id;
+describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
+  it("says where a run is, what it waits for and when it started and ended, its sleep kept while paused, each change at a newer revision", async () => {
+    const { builder, app, workflow, reference } = await boundApp({
+      hold: "PT1H",
     });
-    await confirmedAnswer(admin, decision, { approved: true });
-    const answered = await summaryWhen(
+    const lease = await screenOf(builder, app);
+    const { runId } = startedOf(
+      await called(builder, app, lease, startCommand(reference))
+    );
+    const run = await followedRun(builder, app, lease, reference, runId);
+    const asleep = await run.once(
+      ({ status, waits }) => status === "running" && waits.length === 1
+    );
+    await called(
       builder,
       app,
-      run,
-      ({ waits }) => waits.length === 0
+      lease,
+      controlCommand(reference, "pause", runId)
     );
-    await builder.api.screens.frame(app, "").control(run, "resume");
-    await finished(run);
-    const done = await summaryWhen(
+    const paused = await run.once(({ status }) => status === "paused");
+    await called(
       builder,
       app,
-      run,
-      ({ status }) => status === "completed"
+      lease,
+      controlCommand(reference, "cancel", runId)
     );
+    const ended = await run.once(({ status }) => status === "cancelled");
+    await run.release();
 
     expect({
-      waiting: shape(waiting),
+      asleep: shape(asleep),
       paused: shape(paused),
-      answered: shape(answered),
-      done: shape(done),
-      newer: [waiting, paused, answered, done].every(
-        ({ revision }, index, all) =>
-          index === 0 || revision > (all[index - 1]?.revision ?? Infinity)
-      ),
-      started: waiting.startedAt !== null && waiting.finishedAt === null,
+      ended: shape(ended),
+      newer:
+        paused.revision > asleep.revision && ended.revision > paused.revision,
+      started: asleep.startedAt !== null && asleep.finishedAt === null,
       finished:
-        done.finishedAt !== null && done.finishedAt >= (done.startedAt ?? 0),
-      identity: [waiting, done].map(
-        ({ runId, workflowId, workflowVersion }) => ({
-          runId,
+        ended.finishedAt !== null &&
+        ended.finishedAt >= (ended.startedAt ?? Infinity),
+      identity: [asleep, ended].map(
+        ({ runId: id, workflowId, workflowVersion }) => ({
+          runId: id,
           workflowId,
           workflowVersion,
         })
       ),
     }).toStrictEqual({
-      // The approval workflow asks whoever its input names, so its review
-      // can't read its steps, and names none (a keyed decision of a
-      // workflow its review reads is named, below).
-      waiting: {
-        status: "waiting",
-        waits: [{ kind: "decision", name: "", expiresAt: 0 }],
+      asleep: {
+        status: "running",
+        waits: [{ kind: "timer", key: "hold" }],
         control: {
           canPause: true,
           canResume: false,
@@ -153,7 +169,7 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       // Pausing keeps what it waits for.
       paused: {
         status: "paused",
-        waits: [{ kind: "decision", name: "", expiresAt: 0 }],
+        waits: [{ kind: "timer", key: "hold" }],
         control: {
           canPause: false,
           canResume: true,
@@ -161,402 +177,68 @@ describe("a run's summary", { timeout: 60_000 }, () => {
           pendingControl: null,
         },
       },
-      answered: {
-        status: "paused",
-        waits: [],
-        control: {
-          canPause: false,
-          canResume: true,
-          canCancel: true,
-          pendingControl: null,
-        },
-      },
-      done: { status: "completed", waits: [], control: none },
+      ended: { status: "cancelled", waits: [], control: none },
       newer: true,
       started: true,
       finished: true,
       identity: [
-        { runId: run, workflowId: "approval", workflowVersion: 1 },
-        { runId: run, workflowId: "approval", workflowVersion: 1 },
+        { runId, workflowId: workflow, workflowVersion: 1 },
+        { runId, workflowId: workflow, workflowVersion: 1 },
       ],
     });
   });
 
-  it("offer no control to someone who doesn't build the App, and keep another App's run from them", async () => {
-    const builder = await personApi("builder");
-    const user = await personApi("user");
-    const app = await approvalApp(builder);
-    const other = await approvalApp(builder);
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
+  it("says why a failed run failed past its retention as the run itself does, in the platform's words, never what it read", async () => {
+    const { builder, app, workflow, reference } = await boundApp({
+      // Fails on its input, which it reads: "Ada" isn't a number.
+      definition: (name) =>
+        definitionOf(name, [
+          {
+            greet: {
+              set: { status: "${ $workflow.input.who | tonumber | tostring }" },
+            },
+          },
+        ]),
     });
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("approval", byAdmins);
-    const seen = await summaryWhen(
-      user,
-      app,
-      run,
-      ({ status }) => status === "waiting"
+    const lease = await screenOf(builder, app);
+    const { runId } = startedOf(
+      await called(builder, app, lease, startCommand(reference))
     );
-
-    expect({
-      control: seen.control,
-      otherApp: await outcome(
-        builder.api.screens.frame(other, "").summary(run)
-      ),
-    }).toStrictEqual({
-      control: none,
-      otherApp: "workflow.run_not_found",
-    });
-  });
-
-  it("name a decision it waits for as the version's review does, without the key it is asked under", async () => {
-    const builder = await personApi("builder");
-    const user = await personApi("user");
-    const invoice = `invoice-${crypto.randomUUID()}`;
-    const app = await appWith(builder, {
-      "workflows/keyed.ts": `import { person, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "keyed",
-  {
-    params: { reviewer: person({ label: "Reviewer", default: "role:admin" }) },
-    input: z.object({ invoice: z.string() }),
-  },
-  async (step, { input, params }) =>
-    await step.decision("review", {
-      key: input.invoice,
-      description: "Approve the invoice",
-      from: params.reviewer,
-      ask: async () => {},
-      timeout: "7 days",
-    })
-);
-`,
-      "workflows/keyed.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./keyed.ts";
-
-export default workflowTests(definition, [
-  { name: "waits", input: { invoice: "i" }, decisions: { review: { approved: true, by: "anna" } }, expect: {} },
-]);
-`,
-    });
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("keyed", {
-        invoice,
-      });
-
-    const waiting = await summaryWhen(
-      user,
-      app,
-      run,
-      ({ waits }) => waits.length === 1
-    );
-
-    expect(waiting.waits.map(({ name }) => name)).toStrictEqual(["review"]);
-    expect(JSON.stringify(waiting)).not.toContain(invoice);
-  });
-
-  it("name every step of a workflow whose reviewer and deadline come from its input, which its page shows as dynamic and its runs are held to by name", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, {
-      "workflows/routed.ts": `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "routed",
-  { params: {}, input: z.object({ reviewer: z.string(), days: z.number() }) },
-  async (step, { input }) => {
-    await step.do("fetch", { description: "Fetch the invoice" }, async () => 1);
-    return await step.decision("review", {
-      description: "Approve the invoice",
-      from: input.reviewer as Person,
-      ask: async () => {},
-      timeout: input.days * 86_400_000,
-    });
-  }
-);
-`,
-      "workflows/routed.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./routed.ts";
-
-export default workflowTests(definition, [
-  { name: "waits", input: { reviewer: "role:admin", days: 7 }, decisions: { review: { approved: true, by: "anna" } }, expect: {} },
-]);
-`,
-    });
-    const kept = await env.DB.prepare(
-      "SELECT workflow_calls FROM app_versions WHERE app_id = ? AND version = 1"
+    const within = await followedRun(builder, app, lease, reference, runId);
+    const failed = await within.once(({ status }) => status === "failed");
+    await within.release();
+    // The retention sweep, a day past the run's retention, removes its
+    // details; read after at the real time, only the sweep's mark says so.
+    await sweepRunDetails(env, new Date(Date.now() + pastRetention));
+    const swept = await env.DB.prepare(
+      "SELECT details_removed_at FROM workflow_start_receipts WHERE id = ?"
     )
-      .bind(app)
-      .first<{ workflow_calls: string }>();
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("routed", { reviewer: "role:admin", days: 7 });
-
-    const waiting = await summaryWhen(
-      builder,
-      app,
-      run,
-      ({ waits }) => waits.length === 1
-    );
-
-    const detail = await builder.api.workflows.get(app, "routed");
-    const keptCalls: unknown = JSON.parse(kept?.workflow_calls ?? "null");
+      .bind(runId)
+      .first<{ details_removed_at: number | null }>();
+    const past = await followedRun(builder, app, lease, reference, runId);
+    const removed = await past.once(({ status }) => status === "failed");
+    await past.release();
+    const run = await runFor(builder, workflow, runId);
+    const platform = {
+      code: "expression.failed",
+      message: expectedMessageOf("expression.failed"),
+    };
 
     expect({
-      // The workflow's page shows which options are read only at run time.
-      outline: detail.steps.ok
-        ? detail.steps.outline.steps.map((step) =>
-            step.type === "step"
-              ? {
-                  name: step.name,
-                  dynamic: step.dynamic,
-                  options: step.options,
-                }
-              : step.type
-          )
-        : detail.steps.message,
-      // Held to its steps by name, as any workflow whose steps read.
-      kept: keptCalls,
-      waits: waiting.waits.map(({ name }) => name),
-    }).toStrictEqual({
-      outline: [
-        { name: "fetch", dynamic: undefined, options: {} },
-        { name: "review", dynamic: ["from", "timeout"], options: {} },
-      ],
-      kept: {
-        routed: {
-          steps: { fetch: [], review: [] },
-          kinds: { fetch: "exact", review: "decision" },
-          models: {},
-          keyed: [],
-          all: [],
-          dynamic: { review: ["from", "timeout"] },
-        },
-      },
-      waits: ["review"],
-    });
-  });
-
-  it("show a pause still being applied, which leaves cancelling open, and a failed run's error", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(builder, {
-      ...workflowFiles(
-        "gated",
-        `  await step.do("first", { description: "First" }, async () => {
-    while ((await ${hitsCall(`"gate"`)}) === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    return null;
-  });
-  return await step.do("after", { description: "After" }, async () => null);`,
-        { first: null, after: null }
-      ),
-      ...workflowFiles(
-        "failing",
-        `  return await step.do("fail", { description: "Fail", retries: { limit: 0 } }, async () => {
-    throw Object.assign(new Error("No such invoice"), { code: "invoice.missing" });
-  });`,
-        { fail: null }
-      ),
-    });
-    const { id: gated } = await builder.api.screens
-      .frame(app, "")
-      .startRun("gated");
-    await summaryWhen(
-      builder,
-      app,
-      gated,
-      ({ status }) => status === "running"
-    );
-    await builder.api.screens.frame(app, "").control(gated, "pause");
-    const pausing = await builder.api.screens.frame(app, "").summary(gated);
-    await builder.api.screens.frame(app, "").control(gated, "cancel");
-    const cancelled = await summaryWhen(
-      builder,
-      app,
-      gated,
-      ({ status }) => status === "cancelled"
-    );
-    const { id: failing } = await builder.api.screens
-      .frame(app, "")
-      .startRun("failing");
-    const failed = await summaryWhen(
-      builder,
-      app,
-      failing,
-      ({ status }) => status === "failed"
-    );
-
-    expect({
-      pausing: pausing.control,
-      cancelled: shape(cancelled),
-      failed: shape(failed),
-    }).toStrictEqual({
-      pausing: {
-        canPause: false,
-        canResume: false,
-        canCancel: true,
-        pendingControl: { kind: "pause", stage: "applying" },
-      },
-      cancelled: { status: "cancelled", waits: [], control: none },
-      failed: {
-        status: "failed",
-        waits: [],
-        control: none,
-        error: { code: "invoice.missing", message: "No such invoice" },
-      },
-    });
-  });
-
-  it("show a failed run's error to its person and admins only, its message gone once its details are removed", async () => {
-    const builder = await personApi("builder");
-    const user = await personApi("user");
-    const admin = await personApi("admin");
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "failing",
-        `  return await step.do("fail", { description: "Fail", retries: { limit: 0 } }, async () => {
-    throw Object.assign(new Error("Invoice INV-7 of Acme is missing"), { code: "invoice.missing" });
-  });`,
-        { fail: null }
-      )
-    );
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: user.userId,
-      role: "user",
-    });
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("failing");
-    const own = await summaryWhen(
-      builder,
-      app,
-      run,
-      ({ status }) => status === "failed"
-    );
-    const other = await user.api.screens.frame(app, "").summary(run);
-    const byAdmin = await admin.api.screens.frame(app, "").summary(run);
-    await env.DB.prepare(
-      "UPDATE workflow_runs SET details_removed_at = ? WHERE id = ?"
-    )
-      .bind(Date.now(), run)
-      .run();
-    const removed = await builder.api.screens.frame(app, "").summary(run);
-    const { failure } = await builder.api.workflows.status(run);
-
-    expect({
-      own: own.error,
-      other: other.error,
-      byAdmin: byAdmin.error,
+      swept: swept?.details_removed_at !== null,
+      within: failed.error,
       removed: removed.error,
+      // The run read in full says why with the code its row kept, and that
+      // its words are gone; the snapshot says the same code, in the
+      // platform's own words, as it always does (`failureOf`).
+      run: run.error,
+      leaks: JSON.stringify(removed).includes("Ada"),
     }).toStrictEqual({
-      own: {
-        code: "invoice.missing",
-        message: "Invoice INV-7 of Acme is missing",
-      },
-      other: undefined,
-      byAdmin: {
-        code: "invoice.missing",
-        message: "Invoice INV-7 of Acme is missing",
-      },
-      // As the run's status says it.
-      removed: { code: "invoice.missing", message: failure?.error.message },
+      swept: true,
+      within: platform,
+      removed: { code: run.error?.code, message: platform.message },
+      run: { code: "expression.failed", message: removedText },
+      leaks: false,
     });
-  });
-
-  it("hide an expired failed run's message before its details are swept, and give the sweep a revision of its own", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "failing",
-        `  return await step.do("fail", { description: "Fail", retries: { limit: 0 } }, async () => {
-    throw Object.assign(new Error("Invoice INV-7 of Acme is missing"), { code: "invoice.missing" });
-  });`,
-        { fail: null }
-      )
-    );
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("failing");
-    await summaryWhen(builder, app, run, ({ status }) => status === "failed");
-    // Ended longer ago than the run retention (30 days): the sweep hasn't
-    // been by yet.
-    const longAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
-    await env.DB.prepare("UPDATE workflow_runs SET ended_at = ? WHERE id = ?")
-      .bind(longAgo, run)
-      .run();
-    const expired = await builder.api.screens.frame(app, "").summary(run);
-    await sweepRunDetails(env, new Date());
-    const swept = await builder.api.screens.frame(app, "").summary(run);
-
-    expect({
-      expired: expired.error,
-      swept: swept.error,
-      revised: swept.revision > expired.revision,
-    }).toStrictEqual({
-      expired: { code: "invoice.missing", message: removedText },
-      swept: { code: "invoice.missing", message: removedText },
-      revised: true,
-    });
-  });
-
-  it("keep when a run first ran, though the engine's batch skips past running to its end", async () => {
-    const builder = await personApi("builder");
-    const app = await appWith(
-      builder,
-      workflowFiles("quick", "  return null;", {})
-    );
-    const { id: run } = await builder.api.screens
-      .frame(app, "")
-      .startRun("quick");
-    const done = await summaryWhen(
-      builder,
-      app,
-      run,
-      ({ status }) => status === "completed"
-    );
-    // A row whose engine's first notification it takes is its end, with
-    // when the run first ran, as a batch that went from running to waiting
-    // to complete hands it over; then a later one, which can't move it.
-    const skipped = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'quick', 1, ?, 'starting', ?)"
-    )
-      .bind(skipped, app, builder.userId, Date.now() - 5000)
-      .run();
-    const firstRan = Date.now() - 4000;
-    await projectStatus(env, skipped, {
-      status: "complete",
-      at: Date.now(),
-      sequence: 4,
-      startedAt: firstRan,
-    });
-    await projectStatus(env, skipped, {
-      status: "complete",
-      at: Date.now(),
-      sequence: 5,
-      startedAt: Date.now(),
-    });
-    const projected = await builder.api.screens.frame(app, "").summary(skipped);
-
-    expect({
-      ran: done.startedAt !== null && done.startedAt <= (done.finishedAt ?? 0),
-      skipped: projected.startedAt,
-    }).toStrictEqual({ ran: true, skipped: firstRan });
   });
 });
