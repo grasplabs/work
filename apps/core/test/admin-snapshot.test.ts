@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
+import { failingAuditLog } from "./failing-audit-log.ts";
 import {
   backFromProvider,
   connectHubspot,
@@ -202,24 +203,6 @@ const running = async () => {
   // A model of its own, as the store's usage adds up over this file's tests.
   return { ids, secret, model: `claude-opus-${id}` };
 };
-
-/** An audit log that takes nothing: every call to it fails. */
-const failingAuditLog = (): Env["AUDIT_LOG"] =>
-  new Proxy(env.AUDIT_LOG, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName" && name !== "get") {
-        return Reflect.get(namespace, name, namespace);
-      }
-      return () =>
-        new Proxy(
-          {},
-          {
-            get: () => async () =>
-              await Promise.reject(new Error("Unavailable")),
-          }
-        );
-    },
-  });
 
 /** The snapshot reads `events` recorded. */
 const snapshotReads = <T extends { action: string }>(events: T[]): T[] =>
@@ -424,7 +407,8 @@ describe("the admin snapshot", () => {
       usage: snapshot.usage.find(({ day }) => day === today)?.use.interviews?.[
         model
       ],
-      unknown: [snapshot.contacts, snapshot.works, snapshot.contract],
+      unknown: [snapshot.contacts, snapshot.contract],
+      works: snapshot.works.works,
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
@@ -465,7 +449,9 @@ describe("the admin snapshot", () => {
         tokensOut: 400,
         seconds: 0,
       },
-      unknown: [null, null, null],
+      unknown: [null, null],
+      // Nobody named the team's work yet.
+      works: [],
     });
     expect(text).not.toContain(sentinel);
     expect(text).not.toContain("Their own sheet");
@@ -583,7 +569,7 @@ describe("the admin snapshot", () => {
             goals: { text: "Fewer handovers", quote: sentinel },
           },
           ask: { pain: `${sentinel}?` },
-          teams: [{ name: sentinel, does: sentinel }],
+          teams: [{ name: "Boatyard", does: sentinel }],
         },
       },
       by,
@@ -604,6 +590,9 @@ describe("the admin snapshot", () => {
       kickoff: { at: saved.transcript?.at, known: 0.3 },
     });
     expect(text).not.toContain(sentinel);
+    // The teams it named are words Stephen has to know: the one thing of
+    // it the admin sees, as the setup staff steer from there.
+    expect(snapshot.setup.suggested.terms).toStrictEqual(["Boatyard"]);
   });
 });
 
