@@ -722,10 +722,6 @@ msgstr "{label} isn't answering since {since}."
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, on Grasp’s support site, in a new tab"
 
-#: src/activity/audit-log.tsx
-msgid "{label}, started by {name} (Grasp staff)"
-msgstr "{label}, started by {name} (Grasp staff)"
-
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -6006,6 +6002,10 @@ msgstr "Finance and accounting"
 msgid "Find a team or a person"
 msgstr "Find a team or a person"
 
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Find Stephen under Apps in your Slack workspace."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Findings"
@@ -10148,6 +10148,7 @@ msgstr "Only your organization's admins can abandon a change to a store."
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Open"
 
@@ -10199,6 +10200,10 @@ msgstr "Open"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Open a chat with Stephen, or search for him in Teams’ apps."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -10272,6 +10277,10 @@ msgstr "Open since {date}. Until it is answered, this stays unknown, never zero.
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Open since Grasp's go on {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Open Stephen in {app}, in a new tab"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -16730,6 +16739,10 @@ msgstr "Where the work passes on"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Where the workflows stand"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Where to reach Stephen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"

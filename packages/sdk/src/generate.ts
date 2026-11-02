@@ -846,8 +846,11 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part}`).join(",\n")}\n${indent(1)}>`;
 };
 
-/** The reference to `workflow`, as the data a generated module holds. */
-const workflowReferenceOf = async (
+/**
+ * The reference to `workflow`, as the data a generated module holds: what
+ * a screen's `#grasp` imports under `workflows.<alias>`.
+ */
+export const workflowReferenceOf = async (
   identity: ReleaseIdentity,
   workflow: BoundWorkflow
 ) => {

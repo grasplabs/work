@@ -8,6 +8,7 @@ import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
 import {
+  brainEntityMatches,
   brainPayloads,
   collections,
   documents,
@@ -498,6 +499,11 @@ const purgePersonal = async <C>(
       // The entities only its documents name, with their keys, before the
       // documents take their mentions with them.
       forgetCollectionEntities(db, collectionId),
+      // The matches its documents were evidence for, as a content purge
+      // forgets them (`forgetMatchesOn`): entities named elsewhere stay.
+      db
+        .delete(brainEntityMatches)
+        .where(inArray(brainEntityMatches.evidenceDocumentId, inCollection)),
       db.delete(sections).where(inArray(sections.documentId, inCollection)),
       db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
       db
@@ -1203,6 +1209,17 @@ const replacedEntry = (
  * rewritten text, and rewrites its message, in one batch that marks the
  * payloads left unreferenced for collecting.
  */
+/**
+ * The entity matches document `documentId` is the evidence for: forgotten
+ * in each batch that rewrites its text, so one decided on that text while
+ * it was rewritten goes with the rewrite (one decided after is refused, as
+ * it reads the evidence it cites again, entities.ts).
+ */
+const forgetMatchesOn = (db: DrizzleD1Database, documentId: string) =>
+  db
+    .delete(brainEntityMatches)
+    .where(eq(brainEntityMatches.evidenceDocumentId, documentId));
+
 const repointVersions = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
@@ -1267,6 +1284,9 @@ const repointVersions = async <C>(
       ...updates,
       ...released.after,
       ...replaced,
+      // With the rewrite itself: a match decided on this text meanwhile
+      // goes with it, even should the purge stop right after.
+      forgetMatchesOn(db, document.id),
     ]);
   };
   // A payload it reuses can be let go of and collected before the batch
@@ -1467,6 +1487,10 @@ const purgeDocument = async <C>(
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
   await onErase.forgetFiles(by, filesNamed(document));
+  // An entity match it was the evidence for goes only with a batch that
+  // rewrites its text (earlier versions, the transcript, the version it
+  // saves), to be decided again on what is left: a purge that changes
+  // nothing of it, or one run again, keeps the decisions on it.
   const at = document.currentVersion;
   const { actor } = by;
   const earlier = await rewriteVersions(
@@ -1501,6 +1525,7 @@ const purgeDocument = async <C>(
         target: { type: "document", id: document.id },
         detail: { purgeId, version: transcript.version },
       }),
+      forgetMatchesOn(db, document.id),
     ]);
   }
   if (current === undefined || changedVersions === 0) {
@@ -1551,7 +1576,8 @@ const purgeDocument = async <C>(
     // longer knows, or whose frontmatter no longer fits its type, is
     // purged all the same (`parseBaseFields`).
     purge: true,
-    also: pointCurrent,
+    // The version it saves forgets the matches on its text, as above.
+    also: [...pointCurrent, forgetMatchesOn(db, document.id)],
     // Kept with the version the purge saves, its terms removed: a save
     // without one would take it away.
     ...(transcript?.version === at

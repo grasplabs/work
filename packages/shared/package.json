@@ -6,6 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./admin-command": "./src/admin-command.ts",
     "./admin-kickoff": "./src/admin-kickoff.ts",
     "./admin-snapshot": "./src/admin-snapshot.ts",
     "./admin/admin-account": "./src/admin/admin-account.ts",

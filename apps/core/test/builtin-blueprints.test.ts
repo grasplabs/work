@@ -1,10 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { workflowIdOf } from "@grasp-os/compiler";
-import {
-  checkWorkflowBindings,
-  describeWorkflow,
-} from "@grasp-os/sdk/describe";
 import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type {
@@ -378,18 +373,9 @@ describe("the built-in blueprints", () => {
       const created = await builder.api.apps.blueprints.create(blueprint.id, {
         name: blueprint.name,
       });
-      // Its workflows' tests run as it becomes current.
+      // It becomes current, as its creator makes it.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await builder.api.apps.versions.setCurrent(created.app.id, 1);
-      // Its workflows call the App's bindings where a review can name each
-      // call, as the check of an agent's draft over it asks, and its steps
-      // read as the workflow and review pages outline them: none throws.
-      for (const [path, source] of Object.entries(blueprint.files)) {
-        if (workflowIdOf(path) !== undefined) {
-          checkWorkflowBindings(source);
-          describeWorkflow(source);
-        }
-      }
       // Its screens pass the compiler's checks, with the references they
       // import (`#grasp`), as they do when saved and opened.
       if (

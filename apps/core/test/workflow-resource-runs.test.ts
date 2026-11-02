@@ -1,3 +1,4 @@
+import type { EndedRuns } from "@grasp-os/shared/connect";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
@@ -30,7 +31,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled } from "../src/workflows/code.ts";
-import { runEngine } from "../src/workflows/engine.ts";
+import { runEngine, runRetentionDays } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
@@ -44,9 +45,15 @@ import {
   settleControl,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
-import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
+import {
+  removedText,
+  sweepRunDetails,
+  sweptPerBatch,
+  sweepWorkflowStartDetails,
+} from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
+import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import {
   admittedFreely,
@@ -599,6 +606,158 @@ const runEvents = async (runId: string | null, action: string) => {
   );
 };
 
+/** A year ago: long past any run retention. */
+const yearAgo = (): number => Date.now() - 365 * 86_400_000;
+
+/**
+ * `count` starts of workflow `workflowId` by `by`, admitted a year ago:
+ * each with a run that ended then (`ran`), or none (its version had no
+ * executable build). Answers their IDs.
+ */
+const oldStarts = async (
+  by: Acting,
+  workflowId: string,
+  count: number,
+  ran: boolean
+): Promise<string[]> => {
+  const prefix = `old-${unique()}`;
+  await env.DB.batch([
+    env.DB.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+      INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, created_at, restricted)
+      SELECT ? || '-' || i, 'person', ?, ? || '-' || i, ?, 1, 'manifest', ?, 0, '{}', 'hash', '{}', 0, '[]', '', ?, 0 FROM n`
+    ).bind(count, prefix, by.userId, prefix, workflowId, by.userId, yearAgo()),
+    ...(ran
+      ? [
+          env.DB.prepare(
+            `INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, ended_at, restricted)
+            SELECT id, workflow_resource_id, 1, 'manifest', 'build', principal_id, 'completed', created_at, created_at, 0
+            FROM workflow_start_receipts WHERE id LIKE ? || '-%'`
+          ).bind(prefix),
+        ]
+      : []),
+  ]);
+  return Array.from({ length: count }, (_, at) => `${prefix}-${at + 1}`);
+};
+
+/** Which of `ids` have their start's details removed. */
+const startsSwept = async (ids: readonly string[]): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM workflow_start_receipts WHERE id IN (SELECT value FROM json_each(?)) AND details_removed_at IS NOT NULL"
+  )
+    .bind(JSON.stringify(ids))
+    .all<{ id: string }>();
+  return results.map(({ id }) => id).toSorted();
+};
+
+describe("the retention of what starts of JSON workflows kept", () => {
+  it("asks connect to drop only what runs that ended held, never about a start that ran nothing, though another run is live", async () => {
+    const by = await builder();
+    const workflow = await waitingWorkflow(by);
+    const [ranNothing = ""] = await oldStarts(by, workflow.id, 1, false);
+    const [endedLongAgo = ""] = await oldStarts(by, workflow.id, 1, true);
+    // A run of the workflow live now, its start not yet due.
+    const live = await start(by, workflow.id);
+    const asked: string[] = [];
+    const recording: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown =>
+          name === "dropForEndedRuns"
+            ? async (request: EndedRuns) => {
+                asked.push(...request.runs.map(({ runId }) => runId));
+                await target.dropForEndedRuns(request);
+              }
+            : Reflect.get(target, name),
+      }),
+    };
+
+    await sweepWorkflowStartDetails(
+      recording,
+      new Date(Date.now() - runRetentionDays * 86_400_000),
+      new Date()
+    );
+
+    expect({
+      asked,
+      swept: await startsSwept([ranNothing, endedLongAgo, live.id]),
+    }).toStrictEqual({
+      asked: [endedLongAgo],
+      swept: [ranNothing, endedLongAgo].toSorted(),
+    });
+  });
+
+  it("finds the starts and parameter values to sweep by an index, a page at a time, reading no table whole and sorting nothing", async () => {
+    const by = await builder();
+    const workflow = await waitingWorkflow(by);
+    // More than a page, so the sweep pages on from its first; and a
+    // parameter revision replaced long ago.
+    const starts = await oldStarts(by, workflow.id, sweptPerBatch + 3, true);
+    await env.DB.prepare(
+      "INSERT INTO workflow_resource_params (workflow_resource_id, revision, \"values\", set_by, set_at) VALUES (?, 1, '{}', ?, ?), (?, 2, '{}', ?, ?)"
+    )
+      .bind(
+        workflow.id,
+        by.userId,
+        yearAgo(),
+        workflow.id,
+        by.userId,
+        yearAgo() + 1
+      )
+      .run();
+    // A fresh D1 has no statistics: SQLite goes by the queries alone.
+    const stats = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
+    ).all();
+
+    const queries = await recordedQueries(async () => {
+      await sweepWorkflowStartDetails(
+        env,
+        new Date(Date.now() - runRetentionDays * 86_400_000),
+        new Date()
+      );
+    });
+    const plans = await Promise.all(
+      queries
+        .filter(({ query }) =>
+          /workflow_start_receipts|workflow_resource_params/u.test(query)
+        )
+        .map(async (recorded) => await planOf(recorded))
+    );
+    const steps = plans.flat();
+    const replaced = await env.DB.prepare(
+      "SELECT values_removed_at IS NOT NULL AS removed FROM workflow_resource_params WHERE workflow_resource_id = ? ORDER BY revision"
+    )
+      .bind(workflow.id)
+      .all<{ removed: number }>();
+
+    const swept = await startsSwept(starts);
+    expect({
+      stats: stats.results,
+      swept: swept.length,
+      removed: replaced.results.map(({ removed }) => removed),
+      // The first page, and the next from past its last start.
+      pages: steps.filter((step) =>
+        step.includes("workflow_start_receipts_due_idx")
+      ).length,
+      params: steps.some((step) =>
+        step.includes("workflow_resource_params_values_kept_idx")
+      ),
+      scans: steps.filter((step) => fullScan.test(step)),
+      sorts: steps.filter((step) => step.includes("TEMP B-TREE")),
+    }).toStrictEqual({
+      stats: [],
+      swept: sweptPerBatch + 3,
+      // The revision replaced, never the one in force.
+      removed: [1, 0],
+      pages: 2,
+      params: true,
+      scans: [],
+      sorts: [],
+    });
+  });
+});
+
 describe("the bounds on runs of JSON workflows", () => {
   it("fails an attempt whose expressions spend more than its budget together, each one within its own", async () => {
     const by = await builder();
@@ -773,6 +932,64 @@ describe("the bounds on runs of JSON workflows", () => {
       stopped: "ok",
       inEngine: "terminated",
       audited: [{ type: "person", userId: ada.userId }],
+    });
+  });
+
+  it("stops a run the engine refuses to terminate from the stop on: it runs nothing more, and ends cancelled with no repair", async () => {
+    const ada = await builder();
+    // Its wait is over well before a minute's repair would come.
+    const workflow = await published(ada, (name) =>
+      definitionOf(name, [
+        { pause: { wait: "PT2S" } },
+        { finish: { set: { status: "done" } } },
+      ])
+    );
+    const { runId } = await start(ada, workflow.id);
+    await settledInEngine(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(runColumn(runId, "status")).resolves.toBe("running");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    const stopped = await whileEngineRefuses(
+      (method) => method === "terminate",
+      async () =>
+        await outcome(terminateResourceRun(env, ada, workflow.id, runId))
+    );
+    const meanwhile = await engineStatus(runId);
+    // No repair of core's runs: the run's own object ends it.
+    const run = await ended(ada, workflow.id, runId);
+    // And past its wait again: it never comes back.
+    await scheduler.wait(2500);
+    const after = await resourceRunFor(env, ada, workflow.id, runId);
+    const asked = await runEvents(runId, "workflow.run.stop_requested");
+    const terminated = await runEvents(runId, "workflow.run.terminated");
+    const cancelled = await runEvents(runId, "workflow.run.cancelled");
+    expect({
+      stopped,
+      meanwhile,
+      status: run.status,
+      after: after.status,
+      inEngine: await engineStatus(runId),
+      completed: await runEvents(runId, "workflow.run.completed"),
+      asked: asked.map(({ actor }) => actor),
+      terminated: terminated.length,
+      cancelled: cancelled.map(({ actor }) => actor),
+    }).toStrictEqual({
+      // Answered: the stop is the run's, whatever the engine said.
+      stopped: "ok",
+      meanwhile: "waiting",
+      status: "cancelled",
+      after: "cancelled",
+      inEngine: "terminated",
+      completed: [],
+      // The stop audited as asked, under Ada, never as a termination
+      // before anything terminated; the termination as it happened, when
+      // the run's object ended it.
+      asked: [{ type: "person", userId: ada.userId }],
+      terminated: 0,
+      cancelled: [{ type: "system" }],
     });
   });
 

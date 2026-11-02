@@ -436,6 +436,21 @@ export const markRunCancelled = async (
   };
 };
 
+/**
+ * Marks an independent workflow's run `id` stopped in its object by
+ * `actor` (run-object.ts, `markStopped`), the first step of its stop, as
+ * `markRunCancelled` is of an App run's cancel: no attempt of it holds
+ * from then on, and the object terminates it itself should the stop's
+ * request not. Answers whether it was marked, or why not. Throws when the
+ * object can't be told, so a stop fails before anything else of it.
+ */
+export const markResourceRunStopped = async (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string,
+  actor: AuditActor
+): Promise<"marked" | "rolling_back" | "ended" | "missing"> =>
+  await runObjectOf(env, id).markStopped(id, actor, Date.now());
+
 /** Records that run `id`'s cancel is done (`markRunCancelled`). */
 export const settleRunCancel = async (
   env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,

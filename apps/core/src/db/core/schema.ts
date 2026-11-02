@@ -1654,13 +1654,11 @@ export const workflowRuns = sqliteTable(
     version: integer().notNull(),
     startedBy: text("started_by"),
     /**
-     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
-     * then their user ID, not a member's. Written once, by `startRun`,
-     * from the starter's own session, never from what it was asked; never
-     * for a run another run, a trigger or an agent started. The run's
-     * authority carries it, so its person passes the active-member gate
-     * only while they are still staff, and what it does is audited as
-     * started by "(Grasp staff)".
+     * Unused: nothing reads or writes it any more, and every new row takes
+     * the default. Grasp staff start no work in a client's workspace (a
+     * staff session reaches the onboarding alone), so no run is marked as
+     * staff-started. Kept because the release before this one still reads
+     * and writes it (expand, then contract); drop it in a later release.
      */
     startedByStaff: integer("started_by_staff", { mode: "boolean" })
       .notNull()
@@ -2839,6 +2837,21 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
    * window the admin opened before then lets nobody in.
    */
   staffEndedAt: timestamp("staff_ended_at"),
+});
+
+/**
+ * Every command from Grasp's admin this core took, by its id
+ * (`@grasp-os/shared/admin-command`): a command delivered again applies
+ * once. Claimed before it applies and marked once it did; one that failed
+ * is let go, so delivering it again applies it, and one claimed by a run
+ * that died can be claimed again after a while.
+ */
+export const adminCommands = sqliteTable("admin_commands", {
+  id: text().primaryKey(),
+  type: text().notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+  /** When it applied; null while it is being applied. */
+  appliedAt: timestamp("applied_at"),
 });
 
 /**
@@ -4038,9 +4051,10 @@ export const workflowStartReceipts = sqliteTable(
       table.workflowResourceId,
       table.createdAt
     ),
-    // The receipts retention has yet to reach, oldest first.
-    index("workflow_start_receipts_due")
-      .on(table.createdAt)
+    // The receipts retention has yet to reach, oldest first, by ID within
+    // a time: the order the sweep pages them in (workflows/retention.ts).
+    index("workflow_start_receipts_due_idx")
+      .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
   ]
 );
@@ -4554,6 +4568,11 @@ export const workflowResourceParams = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+    // The revisions whose values retention has yet to reach, oldest first
+    // (workflows/retention.ts).
+    index("workflow_resource_params_values_kept_idx")
+      .on(table.setAt)
+      .where(sql`${table.valuesRemovedAt} IS NULL`),
   ]
 );
 

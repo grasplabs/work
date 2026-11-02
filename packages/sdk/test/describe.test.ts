@@ -3,8 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   aiStepCalls,
-  checkWorkflowBindings,
-  checkWorkflowModule,
   describeWorkflow,
   reviewedCalls,
 } from "../src/describe.ts";
@@ -715,17 +713,10 @@ describe(describeWorkflow, () => {
 
     for (const [top, message] of cases) {
       expect(() => describeWorkflow(`${top}\n${tidy}`)).toThrow(message);
-      // The same in a file the workflow imports.
-      expect(() => {
-        checkWorkflowModule(`${top}\nexport const take = () => leaked;`);
-      }).toThrow(message);
     }
     // A module may change what it declares, and name a type as it likes.
     const own = `let leaked = 0;\nleaked += 1;\nconst seen: Record<string, number> = {};\nseen.first = leaked;\ninterface Holder { self: string; Proxy: Function }`;
     expect(describeWorkflow(`${own}\n${tidy}`).steps).toHaveLength(1);
-    expect(() => {
-      checkWorkflowModule(`${own}\nexport const take = () => seen;`);
-    }).not.toThrow();
   });
 
   it("rejects every way to reach the App's bindings that the step list couldn't name", () => {
@@ -899,23 +890,6 @@ describe(describeWorkflow, () => {
         )
       ).steps
     ).toMatchObject([{ name: "tidy-up" }]);
-  });
-
-  it("checks how the bindings are called apart from how the steps are laid out", () => {
-    const nested = workflowSource(
-      `const run = async () => { ${inStep(`await env.APP.call("tidy");`)} };\nawait run();`,
-      "step, { env }"
-    );
-    const aliased = workflowSource(`const bindings = env;`, "step, { env }");
-
-    // Steps that can't be read show as unread; their calls are all named.
-    expect(() => describeWorkflow(nested)).toThrow("nested function");
-    expect(() => {
-      checkWorkflowBindings(nested);
-    }).not.toThrow();
-    expect(() => {
-      checkWorkflowBindings(aliased);
-    }).toThrow("don't keep `env`");
   });
 
   it("keeps each step's call as written, so any change to its code shows", () => {

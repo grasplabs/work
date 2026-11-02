@@ -35,9 +35,9 @@ const molen = adminOrgOf(
     ...bothTalked,
     company: { ...bothTalked.company, name: "Molen Zuid" },
     gate: { ...bothTalked.gate, known: 85, ready: true },
+    works: { works: [orders], rules: STARTING_ORG_RULES, counted: [] },
   }),
-  { id: "molen", name: "Molen", created: client.created },
-  { works: [orders], rules: STARTING_ORG_RULES, counted: [] }
+  { id: "molen", name: "Molen", created: client.created }
 );
 const views = [bakkerij, molen].map(({ org, state }) =>
   adminViewOf(org, state, today)

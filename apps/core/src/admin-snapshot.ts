@@ -14,8 +14,11 @@ import { dayOf, METER_PURPOSES } from "@grasp-os/shared/admin/org-record";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Plan } from "@grasp-os/shared/onboarding";
+import { staffWorksSchema } from "@grasp-os/shared/onboarding-staff";
+import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 
 import { adminIntegrationsOf } from "./admin-integrations.ts";
+import { staffLetIn } from "./admin-kickoff.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -160,6 +163,35 @@ const usageOf = (
 };
 
 /**
+ * The drawn work as the snapshot sends it, and only while the company
+ * lets Grasp's staff in, as the staff area shows it (a staff session
+ * needs the window open): outside it, every piece of work goes without
+ * its drawing, and the admin can't say how far it is known. Within it,
+ * what each person told of it as counts and yes or no, never the example
+ * they shared or a fact of theirs (`out`), which are in their own words.
+ */
+const worksFor = (works: StaffWorks, letIn: boolean): StaffWorks => ({
+  ...works,
+  works: works.works.map((work) => {
+    if (work.drawn === null || !letIn) {
+      return { ...work, drawn: null };
+    }
+    return {
+      ...work,
+      drawn: {
+        ...work.drawn,
+        told: Object.fromEntries(
+          Object.entries(work.drawn.told).map(([person, told]) => [
+            person,
+            { ...told, example: null, out: [] },
+          ])
+        ),
+      },
+    };
+  }),
+});
+
+/**
  * What the company connected and what its workflows still need, or null
  * when connect doesn't answer: the rest of the snapshot is core's own and
  * still worth reading.
@@ -195,6 +227,8 @@ const stephenOf = async (
  * Everything the admin reads of this client, from what core holds, at
  * `now`: for the admin's read below, and staff's in the onboarding area
  * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
+ * It is all the admin shows of the onboarding it steers: a command's
+ * effect (admin-command.ts) shows in the next one.
  */
 export const snapshotOf = async (
   env: Env,
@@ -213,6 +247,10 @@ export const snapshotOf = async (
     integrations,
     asked,
     stephen,
+    works,
+    setup,
+    failedMails,
+    letIn,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -224,6 +262,10 @@ export const snapshotOf = async (
     integrationsOf(env),
     appsAsked(env),
     stephenOf(env, now),
+    store.staffWorks(),
+    store.stephen(),
+    store.failedMails(),
+    staffLetIn(env),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -237,6 +279,7 @@ export const snapshotOf = async (
       remindedAt: link?.remindedAt ?? null,
       deletedAt: link?.deletedAt ?? null,
       state: linkStateOf(link, held.get(id), view.plan, now),
+      failedMail: failedMails.get(id) ?? null,
     };
   });
   return {
@@ -261,7 +304,14 @@ export const snapshotOf = async (
     mapped: facts.mapped,
     links,
     interviews: facts.interviews.map(interviewOf),
-    works: null,
+    works: worksFor(staffWorksSchema.parse(works), letIn),
+    // What the kickoff said it rests on stays out: the admin never gets
+    // the kickoff's words (`adminKickoffViewOf`).
+    setup: {
+      setup: setup.setup,
+      changed: setup.changed,
+      suggested: setup.suggested,
+    },
     kickoff,
     gate: {
       open: gate.open,
