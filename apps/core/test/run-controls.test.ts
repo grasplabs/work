@@ -13,9 +13,11 @@ import { mockIdp } from "./idp.ts";
 import {
   called,
   controlCommand,
+  endedRun,
   jsonWorkflowAppsOf,
   keyOf,
   outcomeOf,
+  wireOf,
   runFor,
   screenOf,
   settles,
@@ -24,7 +26,15 @@ import {
   startedOf,
 } from "./json-workflow-apps.ts";
 import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
-import { liveStatus, runObject, sleeping, whileEngineRefuses } from "./runs.ts";
+import {
+  aroundEngine,
+  liveStatus,
+  runObject,
+  runObjectId,
+  sleeping,
+  whileEngineRefuses,
+} from "./runs.ts";
+import { auditedDuring } from "./sign-in.ts";
 
 // Pausing, resuming and cancelling an independent JSON workflow's run from
 // an App's screen, as the host admits each request with a durable receipt
@@ -38,8 +48,11 @@ import { liveStatus, runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 // by a row that lags behind the engine; a control of a run the engine has
 // ended; a pause delivered late undoing a newer resume; a receipt settled
 // from a stale read or a late notification rather than the engine's
-// fence; and receipts that never settle crowding a live run's out of the
-// repair. Runs are real, on the engine.
+// fence; a receipt of a run that has ended sent to the engine anyway; a
+// control verb the host doesn't know admitted; and receipts that never
+// settle crowding a live run's out of the repair. Runs are real, on the
+// engine. Moved elsewhere, not dropped: a cancelled run's calls refused
+// from the cancel on, and never coming back: covered by GRA-1460's tests.
 
 const idp = mockIdp();
 
@@ -125,7 +138,7 @@ const rowStatus = async (
   workflow: string,
   run: string
 ): Promise<string> => {
-  const { status } = await runFor(person.acting, workflow, run);
+  const { status } = await runFor(person, workflow, run);
   return status;
 };
 
@@ -373,6 +386,101 @@ describe(
           ["pause", "admitted"],
         ],
         paused: false,
+      });
+    });
+
+    it("refuses a control verb the host doesn't know as invalid, keeping no receipt and auditing nothing of the run", async () => {
+      const { builder, app, reference, screen, runId } = await holding();
+      const lease = await screenOf(builder, app);
+      let answer: unknown;
+      const events = await auditedDuring(async () => {
+        answer = outcomeOf(
+          await called(
+            builder,
+            app,
+            lease,
+            JSON.stringify({
+              workflow: wireOf(reference),
+              command: "restart",
+              runId,
+              idempotencyKey: keyOf(),
+            })
+          )
+        );
+      });
+
+      expect({
+        answer,
+        receipts: await receiptStates(runId),
+        audited: events.filter(({ target }) => target?.id === runId),
+        stillPaused: await pausedInEngine(runId),
+        // The screen's real controls still work after it.
+        pause: staged(await screen.control("pause", runId)),
+      }).toStrictEqual({
+        answer: "contract.invalid_request",
+        receipts: [],
+        audited: [],
+        stillPaused: false,
+        pause: { kind: "pause", state: "applied" },
+      });
+    });
+
+    it("supersedes at the repair a pause and a resume of a run that has ended, sending neither to the engine", async () => {
+      const { builder, app, reference, workflow } = await boundApp();
+      const screen = await screenAsking(builder, app, reference);
+      const runId = await screen.start();
+      await endedRun(builder, workflow, runId);
+      // Receipts admitted under the run's newest generation, never
+      // overtaken, left behind its end and due at the repair.
+      const old = Date.now() - 120_000;
+      await env.DB.batch(
+        (["pause", "resume"] as const).map((kind) =>
+          env.DB.prepare(
+            "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, ?, 'admitted', control_generation + 1, ?, ? FROM workflow_resource_runs WHERE id = ?"
+          ).bind(
+            crypto.randomUUID(),
+            app,
+            builder.userId,
+            keyOf(),
+            kind,
+            old,
+            old,
+            runId
+          )
+        )
+      );
+      const sent: string[] = [];
+      const run = runObjectId(runId);
+
+      await aroundEngine(
+        async (method, call, object) => {
+          if (object.equals(run)) {
+            sent.push(method);
+          }
+          return await call();
+        },
+        async () => {
+          await repairResourceTerminations(env, new Date());
+        }
+      );
+
+      // Admitted together, in either order: by kind.
+      const settled = await receiptStates(runId);
+      const byKind = Object.fromEntries(
+        settled.map(([kind, state]): [string, string | undefined] => [
+          String(kind),
+          state,
+        ])
+      );
+
+      expect({
+        receipts: byKind,
+        sent: sent.filter(
+          (method) => method === "pause" || method === "resume"
+        ),
+      }).toStrictEqual({
+        receipts: { pause: "superseded", resume: "superseded" },
+        sent: [],
       });
     });
 

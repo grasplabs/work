@@ -5,7 +5,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   cancelRepairAfterMs,
   repairResourceTerminations,
-  terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { triedOnceIn } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
@@ -43,6 +42,8 @@ import {
 //   the stop): its receipt stays admitted, never shown as done, and is
 //   finished by the cancel asked again or by the clock's repair, the stop
 //   audited once whichever finishes it, the run terminated in the engine.
+// - A cancelled run's calls refused from the cancel on, even when the
+//   engine fails to terminate it: covered by GRA-1460's tests.
 
 const idp = mockIdp();
 const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
@@ -81,11 +82,8 @@ const receiptOf = async (run: string) =>
 describe("an independent workflow's run object", { timeout: 60_000 }, () => {
   it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(
-      builder.acting,
-      greetingTasks("PT1H")
-    );
-    const run = await startedBy(builder.acting, id);
+    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const run = await startedBy(builder, id);
     await sleeping(run, "task:hold");
 
     const kept = await runInDurableObject(runObject(run), (_object, state) => {
@@ -109,8 +107,8 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
         otherStep: marks.unstarted("key:other", 1),
       };
     });
-    await terminateResourceRun(env, builder.acting, id, run);
-    await endedRun(builder.acting, id, run);
+    await builder.api.workflowResources.terminateRun(id, run);
+    await endedRun(builder, id, run);
     await finished(run);
     await runInDurableObject(runObject(run), (_object, state) => {
       state.storage.sql.exec("UPDATE run SET purge_at = ?", Date.now() - 1);
@@ -178,7 +176,7 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
     const retried = await runIn();
     const retriedRefused = await refusedCancel(retried);
     const retriedAgain = await cancelled(retried);
-    const retriedEnd = await endedRun(builder.acting, workflow, retried);
+    const retriedEnd = await endedRun(builder, workflow, retried);
     // Refused, and never asked again: the repair, once it is due, does.
     const repaired = await runIn();
     const repairedRefused = await refusedCancel(repaired);
@@ -186,7 +184,7 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
       env,
       new Date(Date.now() + cancelRepairAfterMs + 1000)
     );
-    const repairedEnd = await endedRun(builder.acting, workflow, repaired);
+    const repairedEnd = await endedRun(builder, workflow, repaired);
     // A repair again, well after: nothing more is stopped or audited.
     await repairResourceTerminations(env, new Date(Date.now() + 3_600_000));
 

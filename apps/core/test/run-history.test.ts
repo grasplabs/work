@@ -29,7 +29,9 @@ import { outcome } from "./sign-in.ts";
 // taken away reading on; an event the engine can't read back breaking
 // the trace, or changing how the rest is told. Who reads which run, the
 // path through branches, loop items, failures' codes and retention are
-// workflow-run-traces.test.ts's.
+// workflow-run-traces.test.ts's. A task's retries and their backoffs, a
+// decision's wait, and paging a long trace are not tried here: the trace
+// doesn't tell them yet, and GRA-1460's tests cover them as it does.
 
 const idp = mockIdp();
 const { signedIn } = jsonWorkflowAppsOf(idp);
@@ -51,23 +53,17 @@ const told = ({ steps }: WorkflowRunTrace) =>
 describe("a JSON workflow run's history", () => {
   it("tells a wait as waiting while the run sleeps, and as reached, with its end, once it slept", async () => {
     const builder = await signedIn("builder");
-    const sleeping = await publishedWorkflow(
-      builder.acting,
-      greetingTasks("PT1H")
-    );
-    const slept = await publishedWorkflow(
-      builder.acting,
-      greetingTasks("PT1S")
-    );
-    const sleepingRun = await startedBy(builder.acting, sleeping.id);
-    const sleptRun = await startedBy(builder.acting, slept.id);
+    const sleeping = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const slept = await publishedWorkflow(builder, greetingTasks("PT1S"));
+    const sleepingRun = await startedBy(builder, sleeping.id);
+    const sleptRun = await startedBy(builder, slept.id);
     await runOnce(
-      builder.acting,
+      builder,
       sleeping.id,
       sleepingRun,
       ({ status }) => status === "running"
     );
-    await endedRun(builder.acting, slept.id, sleptRun);
+    await endedRun(builder, slept.id, sleptRun);
 
     const waiting = await vi.waitFor(async () => {
       const trace = await traceOf(builder, sleeping.id, sleepingRun);
@@ -96,7 +92,7 @@ describe("a JSON workflow run's history", () => {
     const builder = await signedIn("builder");
     const secret = `secret-${crypto.randomUUID()}`;
     // Greets with the input, then exports it where a number belongs.
-    const workflow = await publishedWorkflow(builder.acting, [
+    const workflow = await publishedWorkflow(builder, [
       { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
       {
         mark: {
@@ -108,10 +104,10 @@ describe("a JSON workflow run's history", () => {
         },
       },
     ]);
-    const runId = await startedBy(builder.acting, workflow.id, {
+    const runId = await startedBy(builder, workflow.id, {
       who: secret,
     });
-    const run = await endedRun(builder.acting, workflow.id, runId);
+    const run = await endedRun(builder, workflow.id, runId);
     const trace = await traceOf(builder, workflow.id, runId);
 
     expect({ status: run.status, steps: told(trace) }).toStrictEqual({
@@ -125,14 +121,14 @@ describe("a JSON workflow run's history", () => {
     const owner = await signedIn("builder");
     const shared = await signedIn("builder");
     const admin = await signedIn("admin");
-    const workflow = await publishedWorkflow(owner.acting, greetingTasks());
+    const workflow = await publishedWorkflow(owner, greetingTasks());
     await owner.api.workflowResources.share(workflow.id, {
       type: "person",
       id: shared.userId,
       role: "builder",
     });
-    const runId = await startedBy(owner.acting, workflow.id);
-    await endedRun(owner.acting, workflow.id, runId);
+    const runId = await startedBy(owner, workflow.id);
+    await endedRun(owner, workflow.id, runId);
 
     const byOwner = told(await traceOf(owner, workflow.id, runId));
     const byAdmin = told(await traceOf(admin, workflow.id, runId));
@@ -153,13 +149,13 @@ describe("a JSON workflow run's history", () => {
 
   it("leaves out an event the engine can't read back, and tells the rest as it was", async () => {
     const builder = await signedIn("builder");
-    const workflow = await publishedWorkflow(builder.acting, [
+    const workflow = await publishedWorkflow(builder, [
       { first: { set: { status: "first" } } },
       { second: { set: { status: "second" } } },
       { third: { set: { status: "third" } } },
     ]);
-    const runId = await startedBy(builder.acting, workflow.id);
-    await endedRun(builder.acting, workflow.id, runId);
+    const runId = await startedBy(builder, workflow.id);
+    await endedRun(builder, workflow.id, runId);
     const before = await traceOf(builder, workflow.id, runId);
     // The start of `second` as nothing the engine knows how to read.
     await runInDurableObject(runObjectOf(env, runId), (_, state) => {

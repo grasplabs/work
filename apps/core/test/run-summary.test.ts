@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
 import { mockIdp } from "./idp.ts";
 import {
   called,
@@ -35,6 +36,9 @@ import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
 const idp = mockIdp();
 
 const { boundApp } = jsonWorkflowAppsOf(idp);
+
+/** A day past a run's retention (30 days), in milliseconds. */
+const pastRetention = 31 * 24 * 60 * 60 * 1000;
 
 /** A run's snapshot, as much of it as the tests here read. */
 const snapshotSchema = z.object({
@@ -203,30 +207,37 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
     const within = await followedRun(builder, app, lease, reference, runId);
     const failed = await within.once(({ status }) => status === "failed");
     await within.release();
-    // Its details removed, as the retention sweep removes them.
-    await env.DB.prepare(
-      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    // The retention sweep, a day past the run's retention, removes its
+    // details; read after at the real time, only the sweep's mark says so.
+    await sweepRunDetails(env, new Date(Date.now() + pastRetention));
+    const swept = await env.DB.prepare(
+      "SELECT details_removed_at FROM workflow_start_receipts WHERE id = ?"
     )
-      .bind(Date.now(), runId)
-      .run();
+      .bind(runId)
+      .first<{ details_removed_at: number | null }>();
     const past = await followedRun(builder, app, lease, reference, runId);
     const removed = await past.once(({ status }) => status === "failed");
     await past.release();
-    const { error } = await runFor(builder.acting, workflow, runId);
+    const run = await runFor(builder, workflow, runId);
     const platform = {
       code: "expression.failed",
       message: expectedMessageOf("expression.failed"),
     };
 
     expect({
+      swept: swept?.details_removed_at !== null,
       within: failed.error,
       removed: removed.error,
-      run: error?.code,
+      // The run read in full says why with the code its row kept, and that
+      // its words are gone; the snapshot says the same code, in the
+      // platform's own words, as it always does (`failureOf`).
+      run: run.error,
       leaks: JSON.stringify(removed).includes("Ada"),
     }).toStrictEqual({
+      swept: true,
       within: platform,
-      removed: platform,
-      run: "expression.failed",
+      removed: { code: run.error?.code, message: platform.message },
+      run: { code: "expression.failed", message: removedText },
       leaks: false,
     });
   });

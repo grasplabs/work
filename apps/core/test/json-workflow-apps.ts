@@ -1,14 +1,13 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
-  decisionFingerprint,
   declaredWorkflows,
   GraspClient,
-  workflowFingerprint,
+  workflowReferenceOf,
 } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
@@ -18,48 +17,42 @@ import {
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { expect, vi } from "vite-plus/test";
+import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
-import type { Release } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
-import type { Acting } from "../src/auth/identity.ts";
-import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
-import { startWorkflow } from "../src/workflow-starts.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { published } from "./apps.ts";
+import { signedInSession } from "../src/auth/identity.ts";
+import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
-import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 
-// Independent JSON workflows as run tests drive them, through the paths
-// people and Apps take: a workflow published as its builder publishes it,
-// bound to an App under an alias the App's app.ts declares, the App's
-// `start` grant given by an admin, and its runs started, followed and
-// controlled by a person or by the App's screen over core's function
-// route. What replaces an App's own workflow (workflow-apps.ts) in a test:
+// Independent JSON workflows as run tests drive them, through the public
+// paths people and Apps take, each over a real session's RPC: a workflow
+// created and published as its builder does it, bound to an App under an
+// alias the App's app.ts declares, the App's version made current, its
+// `start` grant asked for by its builder and granted by an admin, its
+// screen approved, and its runs started, followed and controlled by a
+// person or by the App's screen over core's function route. What replaces
+// an App's own workflow (workflow-apps.ts) in a test:
 //
 //   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
 //   const { builder, app, workflow, reference } = await boundApp({ hold: "PT1H" });
 //   const lease = await screenOf(builder, app);
 //   const { runId } = startedOf(await called(builder, app, lease, startCommand(reference)));
 //   await called(builder, app, lease, controlCommand(reference, "pause", runId));
-//   const run = await runFor(builder.acting, workflow, runId);
+//   const run = await runFor(builder, workflow, runId);
 //
 // or, for a run a person starts without an App:
 //
 //   const builder = await signedIn("builder");
-//   const { id } = await publishedWorkflow(builder.acting, greetingTasks("PT1H"));
-//   const runId = await startedBy(builder.acting, id);
-//   const run = await endedRun(builder.acting, id, runId);
+//   const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+//   const runId = await startedBy(builder, id);
+//   const run = await endedRun(builder, id, runId);
+//
+// `person.acting` is who the session is, as core reads it from the
+// session's cookie: for a test that must reach past the public paths, as
+// a fault it injects does.
 
 /** How long a push or a run's change may take, and how often to look. */
 export const settles = { timeout: 30_000, interval: 50 };
@@ -123,15 +116,16 @@ export const greetingOf = (
 ): string => definitionOf(name, greetingTasks(hold), { semver });
 
 /**
- * A workflow of `by`'s, created and published as version 1: running
- * `tasks`, or the definition `definition` makes of its name.
+ * A workflow of `by`'s, created and published as version 1 through their
+ * session: running `tasks`, or the definition `definition` makes of its
+ * name.
  */
 export const publishedWorkflow = async (
-  by: Acting,
+  by: Person,
   tasks: unknown[] | ((name: string) => string)
 ): Promise<{ id: string; name: string }> => {
-  const workflow = await createWorkflowResource(env, by, `flow-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
+  const workflow = await by.api.workflowResources.create(`flow-${unique()}`);
+  await by.api.workflowResources.publish(workflow.id, {
     definition:
       typeof tasks === "function"
         ? tasks(workflow.name)
@@ -142,34 +136,33 @@ export const publishedWorkflow = async (
 };
 
 /**
- * Starts a run of version 1 of workflow `id` as `by`, a person with a role
- * in it: its ID.
+ * Starts a run of version 1 of workflow `id` through `by`'s session, as a
+ * person with a role in it starts one: its ID.
  */
 export const startedBy = async (
-  by: Acting,
+  by: Person,
   id: string,
   input?: unknown
 ): Promise<string> => {
-  const { runId } = await startWorkflow(
-    env,
-    { type: "person", person: by },
-    id,
-    { version: 1, input: input ?? { who: "Ada" }, key: unique() }
-  );
-  expect(runId).not.toBeNull();
+  const { runId } = await by.api.workflowResources.start(id, {
+    version: 1,
+    input: input ?? { who: "Ada" },
+    key: unique(),
+  });
   return z.string().parse(runId);
 };
 
-/** Run `runId` of workflow `id`, as `by` reads it. */
+/** Run `runId` of workflow `id`, as `by`'s session reads it. */
 export const runFor = async (
-  by: Acting,
+  by: Person,
   id: string,
   runId: string
-): Promise<WorkflowResourceRun> => await resourceRunFor(env, by, id, runId);
+): Promise<WorkflowResourceRun> =>
+  await by.api.workflowResources.run(id, runId);
 
 /** Run `runId` of workflow `id` once `holds` says so of it, polling. */
 export const runOnce = async (
-  by: Acting,
+  by: Person,
   id: string,
   runId: string,
   holds: (run: WorkflowResourceRun) => boolean
@@ -184,7 +177,7 @@ export const runOnce = async (
 
 /** Run `runId` of workflow `id` once it has ended. */
 export const endedRun = async (
-  by: Acting,
+  by: Person,
   id: string,
   runId: string
 ): Promise<WorkflowResourceRun> =>
@@ -224,57 +217,26 @@ export default app({
 `,
 });
 
-/** What `by` may hand a permission request: their App and resource roles. */
-export const rolesOf = (by: Identity) => ({
-  app: async (named: string, role: "user" | "builder") =>
-    await appFor(env, by, named, role),
-  resource: async (
-    ref: Parameters<typeof requireResourceRole>[2],
-    needed: Parameters<typeof requireResourceRole>[3]
-  ) => {
-    await requireResourceRole(env, by, ref, needed);
-  },
-});
-
-/** The reference to `alias` as `#grasp` generates it from `release`. */
-export const workflowReference = async (release: Release, alias: string) => {
-  const declared = declaredWorkflows(release.app, release.workflows).find(
+/**
+ * The reference to `alias` that the `#grasp` generator writes into the
+ * screens' references of version 1 of `app`, from its sealed release.
+ */
+const workflowReference = async (app: string, alias: string) => {
+  const sealed = await loadRelease(env, appIdSchema.parse(app), 1);
+  // The workflows as `generateModules` reads them for the references.
+  const declared = declaredWorkflows(sealed.app, sealed.workflows).find(
     (workflow) => workflow.alias === alias
   );
   if (declared === undefined) {
     throw new Error(`No workflow ${alias}`);
   }
-  const fingerprint = await workflowFingerprint(declared);
-  // Its decisions as the generator writes them (generate.ts).
-  const decisions: Record<string, unknown> = {};
-  for (const [key, decision] of Object.entries(declared.decisions)) {
-    decisions[key] = {
-      kind: "workflowDecision",
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      workflow: `workflows.${alias}`,
-      workflowFingerprint: fingerprint,
-      key,
-      // oxlint-disable-next-line no-await-in-loop -- one digest at a time
-      fingerprint: await decisionFingerprint(decision),
-      valueSchema: { kind: "descriptor", descriptor: decision.value },
-      context: decision.context,
-    };
-  }
-  return {
-    kind: "workflow",
-    visibility: "public",
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    alias,
-    contractId: `workflows.${alias}`,
-    fingerprint,
-    input: declared.input,
-    output: declared.output,
-    events: {},
-    listens: {},
-    decisions,
-  };
+  return await workflowReferenceOf(
+    {
+      resourceId: sealed.manifest.resourceId,
+      resourceVersion: sealed.manifest.resourceVersion,
+    },
+    declared
+  );
 };
 
 /** A workflow reference, as `#grasp` generates it for a screen. */
@@ -348,19 +310,20 @@ export const staged = (receipt: unknown) => {
   return { kind, state };
 };
 
-/** Someone signed in through `idp`, and as core's own calls take them. */
+/**
+ * Someone of `role` signed in through `idp`, with their session's RPC, and
+ * who the session is as core reads it from its cookie (`acting`).
+ */
 const signedInAs = async (idp: Idp, role: Role) => {
   const session = await signedInApi(idp, role);
-  const acting: Acting & Identity = {
-    userId: session.userId,
-    email: z.string().parse(session.person.email),
-    name: "Person",
-    role,
-    teams: [],
-    staff: false,
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-  };
-  return { ...session, acting };
+  const read = await signedInSession(
+    env,
+    new Headers({ cookie: session.session })
+  );
+  if (read === undefined) {
+    throw new Error("The session isn't signed in");
+  }
+  return { ...session, acting: read.person };
 };
 
 /** Someone signed in, as `jsonWorkflowAppsOf`'s `signedIn` has them. */
@@ -401,50 +364,39 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
     const workflow =
       sharing?.workflow ??
       (await publishedWorkflow(
-        builder.acting,
+        builder,
         definition ?? ((name) => greetingOf(name, hold))
       ));
-    const fixture = await appWith(
-      boundAppFiles(alias),
-      "Requests",
-      builder.acting
-    );
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
+    const { id: app } = await builder.api.apps.create({ name: "Requests" });
+    await builder.api.workflowResources.bindToApp(workflow.id, {
+      app,
       alias,
       version: 1,
     });
-    await seal(fixture);
-    await setCurrentVersion(env, builder.acting, fixture.app, 1);
-    await published(fixture.app);
-    const asked = await requestPermission(
-      env,
-      builder.acting,
-      {
-        subject: { type: "app", appId: fixture.app },
-        object: { type: "workflow", workflowId: workflow.id },
-        actions: ["start"],
-        binding: "FOLLOW_UP",
-      },
-      rolesOf(builder.acting)
-    );
-    await grantPermission(env, admin.acting, asked.id, { version: 1 });
-    const review = await admin.api.screenTrust.review(fixture.app);
-    await admin.api.screenTrust.approve(fixture.app, {
+    // Committed, sealed as it is made current, and published.
+    await release(builder, app, boundAppFiles(alias));
+    const { id: grant } = await builder.api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    });
+    await grantReviewed(admin.api, grant);
+    const review = await admin.api.screenTrust.review(app);
+    await admin.api.screenTrust.approve(app, {
       version: review.version,
       generation: review.generation,
       artifacts: builtArtifacts(review.screens),
     });
-    const release = await loadRelease(env, fixture.app, 1);
     return {
       admin,
       builder,
-      app: fixture.app,
+      app,
       workflow: workflow.id,
       workflowName: workflow.name,
       sharing: { admin, builder, workflow },
-      grant: asked.id,
-      reference: await workflowReference(release, alias),
+      grant,
+      reference: await workflowReference(app, alias),
     };
   };
 

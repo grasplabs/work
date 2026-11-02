@@ -32,12 +32,14 @@ import {
   objectSchema,
   publishedWorkflow,
   runFor,
+  runOnce,
   settles,
   startedBy,
 } from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
 import { racingDb } from "./racing-db.ts";
-import { runObject } from "./runs.ts";
+import { runObject, sleeping, stopped, woken } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 
 // Retention of independent (JSON) workflow runs, from its threat model
@@ -49,7 +51,8 @@ import { unique } from "./sign-in.ts";
 // (every run is admitted with the retention as its own), and the 15-minute
 // clock empties the receipt and the decisions and marks the receipt; the
 // run's row stays. Each case below is a way that could go wrong:
-// - details removed too early, or while the run still waits on them;
+// - details removed too early, or while the run still waits on them
+//   (paused, or asleep), or taken from a run that goes on after a sweep;
 // - a reader handed a swept run as if nothing were missing;
 // - a sweep stopped half-way, or two at once, leaving a run half swept or
 //   marked twice;
@@ -66,7 +69,8 @@ import { unique } from "./sign-in.ts";
 // workflow-resource-runs.test.ts (a live run's receipt kept; attempt
 // receipts removed, one still held settled; reads past retention, swept
 // or not) and workflow-bindings.test.ts (a swept start sent again is the
-// same start).
+// same start). The sweep found by an index with nothing read whole:
+// covered by GRA-1460's tests.
 
 const idp = mockIdp();
 const { signedIn } = jsonWorkflowAppsOf(idp);
@@ -111,13 +115,13 @@ const inputOf = async (id: string): Promise<string | null> => {
 };
 
 /** What run `runId` of workflow `workflow` returned, as `by` reads it. */
-const outputOf = async (by: Identity, workflow: string, runId: string) => {
+const outputOf = async (by: Person, workflow: string, runId: string) => {
   const run = await runFor(by, workflow, runId);
   return run.output;
 };
 
 /** A run of a workflow of `by`'s running `tasks`, reading the transcript, once ended. */
-const endedReading = async (by: Identity, tasks: unknown[]) => {
+const endedReading = async (by: Person, tasks: unknown[]) => {
   const { id } = await publishedWorkflow(by, tasks);
   const runId = await startedBy(by, id, { who: transcript });
   await endedRun(by, id, runId);
@@ -237,9 +241,9 @@ const confirmedAnswer = async (
 };
 
 /**
- * Start receipts of workflow `workflow` admitted `daysAgo` days ago that
- * admitted no run, `count` of them, each a copy of receipt `of` under its
- * own ID and key: their IDs.
+ * Start receipts that admitted no run, `count` of them, each a copy of
+ * receipt `of` under its own ID and key, the first admitted `daysAgo`
+ * days ago and each next a millisecond later: their IDs, oldest first.
  */
 const oldReceipts = async (
   of: string,
@@ -254,24 +258,26 @@ const oldReceipts = async (
   );
   const createdAt = Date.now() - daysAgo * day;
   await env.DB.batch(
-    ids.map((id) => statement.bind(id, `old-${id}`, createdAt, of))
+    ids.map((id, index) =>
+      statement.bind(id, `old-${id}`, createdAt + index, of)
+    )
   );
   return ids;
 };
 
-/** How many of start receipts `ids` the sweep marked. */
-const sweptOf = async (ids: readonly string[]): Promise<number> => {
+/** Of start receipts `ids`, the ones the sweep hasn't marked. */
+const unsweptOf = async (ids: readonly string[]): Promise<string[]> => {
   const { results } = await env.DB.prepare(
     "SELECT id FROM workflow_start_receipts WHERE details_removed_at IS NOT NULL"
   ).all<{ id: string }>();
   const swept = new Set(results.map(({ id }) => id));
-  return ids.filter((id) => swept.has(id)).length;
+  return ids.filter((id) => !swept.has(id));
 };
 
 describe("JSON run retention", { timeout: 60_000 }, () => {
   it("removes what an ended run read and returned once its retention is over, not a day before, says so when read, and keeps the run", async () => {
     const builder = await signedIn("builder");
-    const by = builder.acting;
+    const by = builder;
     const done = await endedReading(by, greetingTasks());
     const failed = await endedReading(by, failingTasks);
     const read = async () => ({
@@ -334,10 +340,56 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     });
   });
 
+  it("never touches a run that hasn't ended, paused or not, and one a sweep passed goes on to keep all it did", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const runId = await startedBy(builder, id, { who: transcript });
+    await sleeping(runId, "task:hold");
+    const started = await receiptOf(runId);
+
+    // While it sleeps, long after it started.
+    await runQuarterHourTasks({}, daysOn(400));
+    const asleep = await receiptOf(runId);
+    // While it is paused, as by a deploy or a crash.
+    await stopped(runId);
+    const paused = await runOnce(
+      builder,
+      id,
+      runId,
+      ({ status }) => status === "paused"
+    );
+    await runQuarterHourTasks({}, daysOn(400));
+    const whilePaused = await receiptOf(runId);
+    // Resumed, it finishes as if no sweep had come by.
+    await woken(runId, "task:hold");
+    const ended = await endedRun(builder, id, runId);
+
+    expect({
+      asleep,
+      paused: paused.status,
+      whilePaused,
+      ended: { status: ended.status, output: ended.output },
+      kept: await receiptOf(runId),
+    }).toStrictEqual({
+      asleep: started,
+      paused: "paused",
+      whilePaused: started,
+      ended: {
+        status: "completed",
+        output: { status: `Hello, ${transcript}` },
+      },
+      kept: {
+        input: JSON.stringify({ who: transcript }),
+        params: JSON.stringify({}),
+        removed: null,
+      },
+    });
+  });
+
   it("has the engine keep each run's record for the retention, and no longer", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder.acting, greetingTasks());
-    const runId = await startedBy(builder.acting, id, { who: transcript });
+    const { id } = await publishedWorkflow(builder, greetingTasks());
+    const runId = await startedBy(builder, id, { who: transcript });
     const asked = await vi.waitFor(
       async () =>
         await runInDurableObject(runObject(runId), (_object, state) =>
@@ -349,7 +401,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
         ),
       settles
     );
-    await endedRun(builder.acting, id, runId);
+    await endedRun(builder, id, runId);
     expect(asked).toStrictEqual({ success: 30 * day, error: 30 * day });
   });
 
@@ -382,7 +434,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       values: { reviewer: reviewer.userId },
       expectedRevision: 0,
     });
-    const runId = await startedBy(owner.acting, workflow.id, {
+    const runId = await startedBy(owner, workflow.id, {
       who: transcript,
     });
     const asked = await decisionOf(runId);
@@ -396,7 +448,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       approved: true,
       payload: { comment: transcript },
     });
-    const ended = await endedRun(owner.acting, workflow.id, runId);
+    const ended = await endedRun(owner, workflow.id, runId);
     const answered = await decisionOf(runId);
     await runQuarterHourTasks({}, daysOn(31));
     const after = await decisionFor(env, reviewer.acting, decision);
@@ -434,7 +486,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
 
   it("marks a run once when two sweeps run at once, and changes nothing when one runs again", async () => {
     const builder = await signedIn("builder");
-    const { runId } = await endedReading(builder.acting, greetingTasks());
+    const { runId } = await endedReading(builder, greetingTasks());
     const [early, late] = [daysOn(31), daysOn(32)];
 
     await Promise.all([
@@ -452,7 +504,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
 
   it("finishes a sweep that stopped before it marked the run, which until then reads in full", async () => {
     const builder = await signedIn("builder");
-    const by = builder.acting;
+    const by = builder;
     const { workflow, runId } = await endedReading(by, greetingTasks());
 
     // The database fails as the run's details are removed, as D1 can.
@@ -496,17 +548,18 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
 
   it("sweeps a bounded number of starts at a time, oldest first, and the rest the next time", async () => {
     const builder = await signedIn("builder");
-    const { runId } = await endedReading(builder.acting, greetingTasks());
+    const { runId } = await endedReading(builder, greetingTasks());
     const starts = await oldReceipts(runId, startDetailsPerSweep + 1, 40);
     const now = new Date();
 
     await sweepWorkflowStartDetails(env, now, now);
-    const first = await sweptOf(starts);
+    const first = await unsweptOf(starts);
     await sweepWorkflowStartDetails(env, now, now);
 
-    expect({ first, second: await sweptOf(starts) }).toStrictEqual({
-      first: startDetailsPerSweep,
-      second: startDetailsPerSweep + 1,
+    expect({ first, second: await unsweptOf(starts) }).toStrictEqual({
+      // All but the one admitted last.
+      first: starts.slice(startDetailsPerSweep),
+      second: [],
     });
   });
 });

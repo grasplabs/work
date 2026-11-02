@@ -19,11 +19,7 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appHost } from "../src/durable-objects.ts";
-import {
-  grantPermission,
-  requestPermission,
-  revokePermission,
-} from "../src/permissions.ts";
+import { revokePermission } from "../src/permissions.ts";
 import {
   answerWorkflowCommand,
   failureOf,
@@ -42,6 +38,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { WorkflowRuns } from "../src/workflows/run-object.ts";
+import { grantReviewed } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
@@ -53,7 +50,6 @@ import {
   keyOf,
   objectSchema,
   outcomeOf,
-  rolesOf,
   screenClient,
   screenOf,
   settles,
@@ -1752,18 +1748,13 @@ describe(
       await vi.waitFor(() => {
         expect(canCancel()).toBeFalsy();
       }, settles);
-      const asked = await requestPermission(
-        env,
-        builder.acting,
-        {
-          subject: { type: "app", appId: appIdSchema.parse(app) },
-          object: { type: "workflow", workflowId: fixture.workflow },
-          actions: ["start"],
-          binding: "FOLLOW_UP",
-        },
-        rolesOf(builder.acting)
-      );
-      await grantPermission(env, admin.acting, asked.id, { version: 1 });
+      const asked = await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "workflow", workflowId: fixture.workflow },
+        actions: ["start"],
+        binding: "FOLLOW_UP",
+      });
+      await grantReviewed(admin.api, asked.id);
       await vi.waitFor(() => {
         expect(canCancel()).toBeTruthy();
       }, settles);
