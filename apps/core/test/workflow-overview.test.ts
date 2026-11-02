@@ -1,32 +1,138 @@
 import type { Role } from "@grasp-os/shared/roles";
+import {
+  failedRunDays,
+  handledRunDays,
+  runsPageSize,
+} from "@grasp-os/shared/workflows";
+import type { ListedRun, RunsPage } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
+import { release } from "./apps.ts";
 import {
   connectHubspot,
   connectingAdmin,
   crmWorkflow,
 } from "./hubspot-workflow.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
+import { fullScan, recordedQueries } from "./query-plans.ts";
+import { sleeping } from "./runs.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { workflowFiles } from "./workflow-apps.ts";
 
-// The workflows that use a connection, as the connection's page lists
-// them: an independent workflow, through its approved binding, for those
-// who can open it. What could go wrong: a workflow listed to someone it
-// isn't shared with, or still listed once its approval goes. Gone with App
-// workflows, each read from an App's versions and runs only: the Workflows
-// page's list of every App workflow with its latest, waiting, failed and
-// handled runs; the Runs tab's order, filters, paging, queued runs and
-// index reads; a workflow's view of its steps and parameters; its Test;
-// and the App workflows calling their App's permission on a connection.
+// The Workflows page: every workflow of every App a person can open, and
+// the runs across them; and the workflows that use a connection. What
+// could go wrong: a workflow or run of an App someone can't open showing
+// up, counts that count the wrong runs, a waiting run lost below the
+// others, or a workflow listed to someone it isn't shared with, or still
+// listed once its approval goes. An independent workflow's use of a
+// connection runs as a JSON workflow. Kept as App runs until independent
+// workflows have a Workflows page: the page's list, the Runs tab (its
+// order, filters, paging, queued runs and index reads), each read from
+// App versions and runs only. Gone with App workflows, which read them
+// from an App's code: a workflow's view of its steps and parameters, its
+// Test, and the App workflows calling their App's permission on a
+// connection.
 
 const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
-/** The workflows using `connection`, as `person` lists them. */
+/**
+ * An invoice workflow that reads the total with a model, asks a reviewer
+ * above a limit, and books the invoice; its test approves the review.
+ */
+const approveFiles = {
+  // The text model resource its AI step goes through: a version whose
+  // steps go through one it doesn't declare isn't made current.
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+
+export default app({
+  name: "Invoices",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [reader],
+});
+`,
+  "workflows/approve.ts": `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow(
+  "approve",
+  {
+    input: z.object({ text: z.string() }),
+    params: {
+      limit: money({ label: "Review invoices above", currency: "EUR", default: 500_000, sensitive: true }),
+      reviewer: person({ label: "Reviewer", default: "role:admin" }),
+    },
+  },
+  async (step, { input, params }) => {
+    const extracted = await step.llm("extract", {
+      description: "Read the invoice's total",
+      binding: "reader",
+      instructions: "Read the total in cents.",
+      input: input.text,
+      schema: z.object({ total: z.int() }),
+    });
+    if (extracted.total > params.limit) {
+      await step.decision("review", {
+        description: "Ask the reviewer to approve it",
+        from: params.reviewer,
+        ask: async () => {},
+        timeout: "7 days",
+      });
+    }
+    return await step.do(
+      "book",
+      { description: "Book the invoice", sideEffect: true, input: { total: extracted.total } },
+      async () => "booked"
+    );
+  }
+);
+`,
+  "workflows/approve.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./approve.ts";
+
+export default workflowTests(definition, [
+  {
+    name: "books a large invoice once approved",
+    input: { text: "Total €8,000" },
+    mocks: { extract: { total: 800_000 } },
+    decisions: { review: { approved: true, by: "anna" } },
+    expect: {},
+  },
+]);
+`,
+};
+
+/** A new App of `owner`'s named `name`, with `files` as its current version. */
+const appOf = async (
+  owner: Person,
+  name: string,
+  files: Record<string, string>
+): Promise<string> => {
+  const { id } = await owner.api.apps.create({ name });
+  await release(owner, id, files);
+  return id;
+};
+
+/**
+ * The workflows `person` is told use `connection`: an App's as its App and
+ * workflow, an independent one as its ID.
+ */
 const workflowsUsing = async (
   person: {
     api: { workflows: Pick<Person["api"]["workflows"], "byConnection"> };
@@ -40,7 +146,789 @@ const workflowsUsing = async (
   );
 };
 
-describe("the workflows that use a connection", { timeout: 60_000 }, () => {
+/** Whether a query groups what it reads (the overview's counts). */
+const grouped = (query: string): boolean => /group by/iu.test(query);
+
+/** The IDs of `runs`, in order. */
+const idsOf = async (page: Promise<RunsPage>): Promise<string[]> => {
+  const { runs } = await page;
+  return runs.map(({ id }) => id);
+};
+
+/** What the Runs list shows of a run, and the step its report names. */
+const shown = (run: ListedRun) => ({
+  id: run.id,
+  status: run.status,
+  decision: run.decision ?? null,
+  failedAt: run.failure?.step ?? null,
+});
+
+/** A run's status, and the share it waits for while queued. */
+const queueOf = (run: { status: string; queued?: unknown }) => ({
+  status: run.status,
+  queued: run.queued ?? null,
+});
+
+/** What `queueOf` shows of each of `runs`, by run. */
+const byRun = (
+  runs: readonly { id: string; status: string; queued?: unknown }[]
+) =>
+  new Map<string, ReturnType<typeof queueOf>>(
+    runs.map((run) => [run.id, queueOf(run)])
+  );
+
+const minute = 60_000;
+const day = 24 * 60 * minute;
+
+interface SeededRun {
+  workflow: string;
+  status: "running" | "paused" | "completed" | "failed" | "cancelled";
+  createdAt: number;
+  endedAt?: number;
+  /** A decision of the run's, open unless it says otherwise. */
+  decision?: "open" | "approved";
+  /** Who answers the decision; the admins unless it says otherwise. */
+  deciders?: string;
+  /** The decision's deadline; a week after the run started unless given. */
+  expiresAt?: number;
+  /** When a cancel of it was admitted, which the engine hasn't applied. */
+  cancelRequestedAt?: number;
+}
+
+/**
+ * A run of `app`'s as core keeps it, started by a trigger (so it acts for
+ * the App's owner), and its decision; returns the run's ID and the
+ * decision's.
+ */
+const seedRun = async (
+  app: string,
+  run: SeededRun
+): Promise<{ id: string; decision: string }> => {
+  const id = `run-${unique()}`;
+  const decision = `decision-${unique()}`;
+  const failure =
+    run.status === "failed"
+      ? JSON.stringify({
+          run: id,
+          app,
+          workflow: run.workflow,
+          version: 1,
+          step: "book",
+          input: null,
+          error: { code: "workflow.step_failed", message: "It failed" },
+          failedAt: new Date(run.endedAt ?? run.createdAt).toISOString(),
+        })
+      : null;
+  await env.DB.prepare(
+    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, failure, cancel_requested_at) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?, ?)"
+  )
+    .bind(
+      id,
+      app,
+      run.workflow,
+      run.status,
+      run.createdAt,
+      run.endedAt ?? null,
+      failure,
+      run.cancelRequestedAt ?? null
+    )
+    .run();
+  if (run.decision !== undefined) {
+    await env.DB.prepare(
+      "INSERT INTO workflow_decisions (id, run_id, step, deciders, description, status, opened_at, expires_at) VALUES (?, ?, 'review', ?, 'Approve it', ?, ?, ?)"
+    )
+      .bind(
+        decision,
+        id,
+        run.deciders ?? "role:admin",
+        run.decision,
+        run.createdAt,
+        run.expiresAt ?? run.createdAt + 7 * day
+      )
+      .run();
+  }
+  return { id, decision };
+};
+
+// Releasing a version compiles its workflows and runs their tests, and a
+// Test runs them again in an isolate: on a loaded runner that takes
+// longer than the default five seconds. Sixty is room for a slow runner,
+// not for a hang.
+const buildTime = { timeout: 60_000 };
+
+describe("the Workflows page", buildTime, () => {
+  it("lists every workflow of every App the person can open, with its latest run, its waiting and failed runs and those it handled this week", async () => {
+    const [owner, other, user, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+      personApi("admin"),
+    ]);
+    const appName = `Invoices ${unique()}`;
+    const invoices = await appOf(owner, appName, {
+      ...approveFiles,
+      ...workflowFiles("chase", "  return 1;"),
+      ...workflowFiles("remind", "  return 1;"),
+    });
+    const payroll = await appOf(
+      other,
+      `Payroll ${unique()}`,
+      workflowFiles("pay", "  return 1;")
+    );
+    await owner.api.apps.members.add(invoices, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "failed",
+      createdAt: now - 2 * day,
+      endedAt: now - day,
+    });
+    // Failed before the window: not counted.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "failed",
+      createdAt: now - (failedRunDays + 2) * day,
+      endedAt: now - (failedRunDays + 1) * day,
+    });
+    // Completed this week, though started before it: handled.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 1) * day,
+      endedAt: now - 2 * day,
+    });
+    // Completed before the week: not counted.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 3) * day,
+      endedAt: now - (handledRunDays + 1) * day,
+    });
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "running",
+      createdAt: now - 3 * minute,
+      decision: "open",
+    });
+    // Its decision is still open, but it has ended: it waits no more.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "cancelled",
+      createdAt: now - 2 * minute,
+      endedAt: now - 2 * minute,
+      decision: "open",
+    });
+    const latest = await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - minute,
+      endedAt: now,
+    });
+    // Its latest run waits.
+    const chasing = await seedRun(invoices, {
+      workflow: "chase",
+      status: "running",
+      createdAt: now - minute,
+      decision: "open",
+    });
+
+    const listed = async (person: Person) => {
+      const all = await person.api.workflows.overview();
+      return all.filter(({ app }) => app === invoices || app === payroll);
+    };
+    const owned = {
+      app: invoices,
+      appName,
+      version: 1,
+      owner: { userId: owner.userId, name: owner.person.name },
+      // No team owns them (workflow-teams.test.ts).
+      team: null,
+      scheduleStopped: false,
+    };
+    const invoiceWorkflows = [
+      {
+        ...owned,
+        workflow: "approve",
+        lastRun: {
+          id: latest.id,
+          status: "completed",
+          createdAt: new Date(now - minute).toISOString(),
+        },
+        waiting: 1,
+        failed: 1,
+        handled: 2,
+      },
+      {
+        ...owned,
+        workflow: "chase",
+        lastRun: {
+          id: chasing.id,
+          status: "waiting",
+          createdAt: new Date(now - minute).toISOString(),
+        },
+        waiting: 1,
+        failed: 0,
+        handled: 0,
+      },
+      {
+        ...owned,
+        workflow: "remind",
+        lastRun: null,
+        waiting: 0,
+        failed: 0,
+        handled: 0,
+      },
+    ];
+    // Only its builders may change who owns each.
+    await expect(listed(owner)).resolves.toStrictEqual(
+      invoiceWorkflows.map((row) => ({ ...row, changesOwner: true }))
+    );
+    await expect(listed(user)).resolves.toStrictEqual(
+      invoiceWorkflows.map((row) => ({ ...row, changesOwner: false }))
+    );
+    const asAdmin = await listed(admin);
+    expect(asAdmin.map(({ app, workflow }) => [app, workflow])).toStrictEqual([
+      [invoices, "approve"],
+      [invoices, "chase"],
+      [invoices, "remind"],
+      [payroll, "pay"],
+    ]);
+  });
+
+  it("lists workflows from their versions' rows, reading no App's files", async () => {
+    const owner = await personApi("builder");
+    const id = unique();
+    const first = await appOf(
+      owner,
+      `A first ${id}`,
+      workflowFiles("pay", "  return 1;")
+    );
+    const second = await appOf(
+      owner,
+      `B second ${id}`,
+      workflowFiles("remind", "  return 1;")
+    );
+    // Both Apps' files as stored no longer match the hashes that name
+    // them: a read of them would fail.
+    await Promise.all(
+      [first, second].map(async (app) => {
+        const { tree } = await owner.api.apps.versions.get(app, 1);
+        await env.FILES.put(`apps/${app}/trees/${tree}.json`, "damaged");
+      })
+    );
+    const rows = await owner.api.workflows.overview();
+    expect(rows.map(({ app, workflow }) => [app, workflow])).toStrictEqual([
+      [first, "pay"],
+      [second, "remind"],
+    ]);
+  });
+
+  it("lists runs waiting first, then failed, then the rest, newest first, as filtered", async () => {
+    const [owner, other, user] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const app = await appOf(owner, `Invoices ${unique()}`, {
+      ...approveFiles,
+      ...workflowFiles("remind", "  return 1;"),
+    });
+    const hidden = await appOf(
+      other,
+      `Payroll ${unique()}`,
+      workflowFiles("pay", "  return 1;")
+    );
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const at = (minutes: number) => now - minutes * minute;
+    const cancelled = await seedRun(app, {
+      workflow: "remind",
+      status: "cancelled",
+      createdAt: at(7),
+      endedAt: at(7),
+    });
+    // Asking the owner: they may answer it, the App's user may not.
+    const waiting = await seedRun(app, {
+      workflow: "approve",
+      status: "paused",
+      createdAt: at(6),
+      decision: "open",
+      deciders: `person:${owner.userId}`,
+    });
+    // Its decision was answered: it runs on.
+    const answered = await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: at(5.5),
+      decision: "approved",
+    });
+    // Its decision is still open, but it has ended: it waits no more.
+    const completed = await seedRun(app, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: at(5),
+      endedAt: at(4),
+      decision: "open",
+    });
+    const failedLast = await seedRun(app, {
+      workflow: "approve",
+      status: "failed",
+      createdAt: at(4),
+      endedAt: at(1),
+    });
+    const failedFirst = await seedRun(app, {
+      workflow: "remind",
+      status: "failed",
+      createdAt: at(3),
+      endedAt: at(2),
+    });
+    const running = await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: at(0),
+    });
+    const hiddenRun = await seedRun(hidden, {
+      workflow: "pay",
+      status: "running",
+      createdAt: now,
+    });
+
+    const { runs, more } = await owner.api.workflows.runs({ app });
+    expect({ more, runs: runs.map(shown) }).toStrictEqual({
+      more: false,
+      runs: [
+        {
+          id: waiting.id,
+          status: "waiting",
+          decision: waiting.decision,
+          failedAt: null,
+        },
+        // A failed run's report, for the person it acts for: here the owner.
+        {
+          id: failedLast.id,
+          status: "failed",
+          decision: null,
+          failedAt: "book",
+        },
+        {
+          id: failedFirst.id,
+          status: "failed",
+          decision: null,
+          failedAt: "book",
+        },
+        { id: running.id, status: "running", decision: null, failedAt: null },
+        {
+          id: completed.id,
+          status: "completed",
+          decision: null,
+          failedAt: null,
+        },
+        { id: answered.id, status: "running", decision: null, failedAt: null },
+        {
+          id: cancelled.id,
+          status: "cancelled",
+          decision: null,
+          failedAt: null,
+        },
+      ],
+    });
+    // The same runs for a user of the App, without the failure reports,
+    // and waiting without the decision they may not answer.
+    const asUser = await user.api.workflows.runs({ app });
+    expect(asUser.runs.map(shown)).toStrictEqual(
+      runs.map((run) => ({ ...shown(run), decision: null, failedAt: null }))
+    );
+
+    const everything = await idsOf(owner.api.workflows.runs());
+    await expect(
+      Promise.all([
+        idsOf(owner.api.workflows.runs({ app, status: "waiting" })),
+        idsOf(owner.api.workflows.runs({ app, status: "failed" })),
+        idsOf(owner.api.workflows.runs({ app, status: "running" })),
+        idsOf(owner.api.workflows.runs({ app, status: "done" })),
+        idsOf(owner.api.workflows.runs({ app, workflow: "remind" })),
+        idsOf(other.api.workflows.runs()),
+      ])
+    ).resolves.toStrictEqual([
+      [waiting.id],
+      [failedLast.id, failedFirst.id],
+      [running.id, answered.id],
+      [completed.id, cancelled.id],
+      [failedFirst.id, cancelled.id],
+      [hiddenRun.id],
+    ]);
+    // Across the owner's Apps, waiting first, and none of another's App.
+    expect({
+      first: everything[0],
+      hidden: everything.includes(hiddenRun.id),
+    }).toStrictEqual({ first: waiting.id, hidden: false });
+
+    await expect(
+      Promise.all([
+        outcome(owner.api.workflows.runs({ app: hidden })),
+        outcome(
+          owner.api.workflows.runs(
+            // SAFETY: invalid on purpose: anything a client can send, as
+            // Cap'n Web checks no types, so core must.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            { status: "stuck" } as never
+          )
+        ),
+      ])
+    ).resolves.toStrictEqual(["app.not_found", "workflow.invalid"]);
+  });
+
+  it("counts a run whose open decision is past its deadline, or whose cancel is admitted, as running, with nothing to decide", async () => {
+    const owner = await personApi("builder");
+    const app = await appOf(owner, `Invoices ${unique()}`, approveFiles);
+    const now = Date.now();
+    // Its deadline has passed, and the run hasn't timed it out yet: nobody
+    // can answer it any more, its owner neither.
+    const expired = await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: now - 8 * day,
+      decision: "open",
+      deciders: `person:${owner.userId}`,
+      expiresAt: now - day,
+    });
+    // Its cancel is admitted, and the engine hasn't stopped it yet: its
+    // decision takes no answer any more (decisions.ts, `runUnended`).
+    const cancelling = await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: now - 9 * day,
+      decision: "open",
+      deciders: `person:${owner.userId}`,
+      expiresAt: now + day,
+      cancelRequestedAt: now - 60_000,
+    });
+    const [all, waiting, running, overview] = await Promise.all([
+      owner.api.workflows.runs({ app }),
+      owner.api.workflows.runs({ app, status: "waiting" }),
+      owner.api.workflows.runs({ app, status: "running" }),
+      owner.api.workflows.overview(),
+    ]);
+    const approve = overview.find((row) => row.app === app);
+    expect({
+      all: all.runs.map(shown),
+      waiting: waiting.runs.length,
+      running: running.runs.map(({ id }) => id),
+      counted: approve?.waiting,
+      last: approve?.lastRun?.status,
+    }).toStrictEqual({
+      all: [
+        { id: expired.id, status: "running", decision: null, failedAt: null },
+        {
+          id: cancelling.id,
+          status: "running",
+          decision: null,
+          failedAt: null,
+        },
+      ],
+      waiting: 0,
+      // Being cancelled, it isn't among the runs going on.
+      running: [expired.id],
+      counted: 0,
+      last: "running",
+    });
+  });
+
+  it("shows a run waiting for a share as queued, with the share and when it asks again, wherever runs are listed, and nothing of who else waits", async () => {
+    const [owner, user] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const app = await appOf(owner, `Invoices ${unique()}`, {
+      ...approveFiles,
+      ...workflowFiles("remind", "  return 1;"),
+      ...workflowFiles(
+        "idle",
+        `  await step.sleep("idle", { description: "Wait", duration: "1 day" });
+  return 1;`
+      ),
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const at = (minutes: number) => now - minutes * minute;
+    const retryAt = now + 30_000;
+    const seeded = {
+      // Its step asks for a share of its App's attempts: queued.
+      queued: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(1),
+      }),
+      // Its step stopped asking two minutes ago: its place lapsed.
+      lapsed: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(2),
+      }),
+      // Paused before its place lapses: it waits for no share.
+      paused: await seedRun(app, {
+        workflow: "remind",
+        status: "paused",
+        createdAt: at(3),
+      }),
+      // A decision someone may answer comes first.
+      deciding: await seedRun(app, {
+        workflow: "approve",
+        status: "running",
+        createdAt: at(4),
+        decision: "open",
+        deciders: `person:${owner.userId}`,
+      }),
+    };
+    // The run's engine sleeps between asks, as a step waiting for a share
+    // does: the engine calls it waiting, though no decision is open.
+    const sleeper = await owner.api.workflows.start(app, "idle");
+    await sleeping(sleeper.id, "idle");
+    const place = async (
+      run: string,
+      waitingFor: "client" | "person" | "app",
+      seenAt: number,
+      asksAt = retryAt
+    ) =>
+      await env.DB.prepare(
+        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)"
+      )
+        .bind(
+          run,
+          `step-${unique()}`,
+          owner.userId,
+          app,
+          seenAt,
+          seenAt,
+          waitingFor,
+          asksAt,
+          now + minute
+        )
+        .run();
+    await place(seeded.queued.id, "app", now);
+    await place(seeded.lapsed.id, "app", now - 2 * minute);
+    await place(seeded.paused.id, "app", now);
+    await place(seeded.deciding.id, "app", now);
+    await place(sleeper.id, "person", now);
+    // Another run waits for another share: each run shows its own, and
+    // only which share and when (`toStrictEqual` below), never who else
+    // waits, how many, or where in the queue. Two of its steps wait, for
+    // different shares: the one that asks again first supplies both the
+    // share and when, whichever took its place first.
+    const other = await seedRun(app, {
+      workflow: "remind",
+      status: "running",
+      createdAt: at(5),
+    });
+    await place(other.id, "person", now, retryAt + minute);
+    await place(other.id, "client", now);
+
+    const asked = async (person: Person) => {
+      const [page, appRuns, overview, status, screenRuns] = await Promise.all([
+        person.api.workflows.runs({ app }),
+        person.api.workflows.list(app),
+        person.api.workflows.overview(),
+        person.api.workflows.status(sleeper.id),
+        person.api.screens.frame(app, "").runs("remind"),
+      ]);
+      const byId = byRun(page.runs);
+      const listed = byRun(appRuns);
+      const onScreen = byRun(screenRuns);
+      const last = (workflow: string) => {
+        const found = overview.find(
+          (row) => row.app === app && row.workflow === workflow
+        )?.lastRun;
+        return found === undefined || found === null ? null : queueOf(found);
+      };
+      return {
+        runs: Object.fromEntries(
+          Object.entries(seeded).map(([name, { id }]) => [name, byId.get(id)])
+        ),
+        appRuns: {
+          queued: listed.get(seeded.queued.id),
+          lapsed: listed.get(seeded.lapsed.id),
+          paused: listed.get(seeded.paused.id),
+        },
+        other: byId.get(other.id),
+        onScreen: onScreen.get(seeded.queued.id),
+        lastRemind: last("remind"),
+        lastIdle: last("idle"),
+        status: queueOf(status),
+      };
+    };
+    const queuedFor = (waitingFor: string) => ({
+      status: "queued",
+      queued: { waitingFor, retryAt: new Date(retryAt).toISOString() },
+    });
+    const expected = {
+      runs: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+        deciding: { status: "waiting", queued: null },
+      },
+      appRuns: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+      },
+      other: queuedFor("client"),
+      onScreen: queuedFor("app"),
+      lastRemind: queuedFor("app"),
+      lastIdle: queuedFor("person"),
+      status: queuedFor("person"),
+    };
+    try {
+      // The App's owner and one of its users see the same: the share, and
+      // when it asks again, of each run on its own.
+      await expect(asked(owner)).resolves.toStrictEqual(expected);
+      await expect(asked(user)).resolves.toStrictEqual(expected);
+      // Queued runs are among those going on, never among the failed.
+      const [running, failed] = await Promise.all([
+        idsOf(owner.api.workflows.runs({ app, status: "running" })),
+        idsOf(owner.api.workflows.runs({ app, status: "failed" })),
+      ]);
+      expect(running).toContain(seeded.queued.id);
+      expect(failed).not.toContain(seeded.queued.id);
+    } finally {
+      await owner.api.workflows.cancel(sleeper.id);
+      await env.DB.prepare(
+        "DELETE FROM workflow_admission_queue WHERE resource = ?"
+      )
+        .bind(app)
+        .run();
+    }
+  });
+
+  it("returns a page of runs, and says when more matched", async () => {
+    const owner = await personApi("builder");
+    const app = await appOf(
+      owner,
+      `Invoices ${unique()}`,
+      workflowFiles("remind", "  return 1;")
+    );
+    const now = Date.now();
+    const seeded = (count: number, from: number) =>
+      Array.from({ length: count }, (_, index) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'remind', 1, NULL, 'completed', ?, ?)"
+        ).bind(`run-${unique()}`, app, now - from - index, now)
+      );
+    await env.DB.batch(seeded(runsPageSize, 0));
+    const full = await owner.api.workflows.runs({ app });
+    await env.DB.batch(seeded(1, runsPageSize));
+    const past = await owner.api.workflows.runs({ app });
+    expect({
+      full: [full.runs.length, full.more],
+      past: [past.runs.length, past.more],
+    }).toStrictEqual({
+      full: [runsPageSize, false],
+      past: [runsPageSize, true],
+    });
+  });
+
+  it("reads runs by an index in the order they are listed, with no statistics to go by", async () => {
+    const owner = await personApi("admin");
+    const app = await appOf(owner, `Invoices ${unique()}`, approveFiles);
+    const now = Date.now();
+    await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: now,
+      decision: "open",
+    });
+    await seedRun(app, {
+      workflow: "approve",
+      status: "failed",
+      createdAt: now,
+      endedAt: now,
+    });
+    // A fresh D1 has no statistics: SQLite goes by the queries alone.
+    const stats = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
+    ).all();
+    const { api } = owner;
+    // Each call, and the plans of its statements that read runs or
+    // triggers.
+    const calls = {
+      all: async () => await api.workflows.runs(),
+      done: async () => await api.workflows.runs({ status: "done" }),
+      overview: async () => await api.workflows.overview(),
+      // Narrow: none of them may walk every run newest first.
+      app: async () => await api.workflows.runs({ app }),
+      appWorkflow: async () =>
+        await api.workflows.runs({ app, workflow: "approve" }),
+      appDone: async () => await api.workflows.runs({ app, status: "done" }),
+      running: async () => await api.workflows.runs({ status: "running" }),
+    };
+    const narrow = new Set(["app", "appWorkflow", "appDone", "running"]);
+    const plans = [];
+    for (const [call, run] of Object.entries(calls)) {
+      // oxlint-disable-next-line no-await-in-loop -- one call's statements at a time
+      const queries = await recordedQueries(run);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const planned = await Promise.all(
+        queries
+          .filter(
+            ({ query }) =>
+              query.includes('"workflow_runs"') ||
+              query.includes('"workflow_triggers"')
+          )
+          .map(async ({ query, values }) => {
+            const { results } = await env.DB.prepare(
+              `EXPLAIN QUERY PLAN ${query}`
+            )
+              .bind(...values)
+              .all<{ detail: string }>();
+            return { call, query, plan: results.map(({ detail }) => detail) };
+          })
+      );
+      plans.push(...planned);
+    }
+    // A list reads no table whole, and sorts nothing but the runs that
+    // haven't ended: it reads an index in its own order and stops at a
+    // page. The overview's counts group what they count, which the open
+    // decisions and the failed runs since the window already bound. A
+    // narrow list reads its own runs, never every run newest first until
+    // enough of them match.
+    expect({
+      stats: stats.results,
+      calls: [...new Set(plans.map(({ call }) => call))],
+      fullScans: plans.filter(({ plan }) =>
+        plan.some((step) => fullScan.test(step))
+      ),
+      sorts: plans.filter(
+        ({ call, query, plan }) =>
+          call !== "running" &&
+          !grouped(query) &&
+          plan.some((step) => step.includes("TEMP B-TREE"))
+      ),
+      walks: plans.filter(
+        ({ call, plan }) =>
+          narrow.has(call) &&
+          plan.some((step) => step.includes("workflow_runs_created_idx"))
+      ),
+    }).toStrictEqual({
+      stats: [],
+      calls: Object.keys(calls),
+      fullScans: [],
+      sorts: [],
+      walks: [],
+    });
+  });
+
   it("lists an independent workflow that uses a connection through its approved binding, for those who can open it, until the approval goes", async () => {
     const by = await connectingAdmin(idp);
     const [hubspot, builder] = await Promise.all([
