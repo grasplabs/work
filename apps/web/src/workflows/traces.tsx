@@ -230,14 +230,11 @@ const RunTraceDetail = ({
                 ))}
               </ol>
             )}
-            {trace.complete ? null : (
+            {trace.truncated ? (
               <p className="text-muted-foreground">
-                <Trans>
-                  It recorded more steps than one read shows: the latest are
-                  left out.
-                </Trans>
+                <Trans>Showing the first part of this run</Trans>
               </p>
-            )}
+            ) : null}
           </section>
         </>
       )}
