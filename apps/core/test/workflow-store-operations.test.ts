@@ -24,12 +24,14 @@ import {
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
+  deleteWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { commit } from "./pending-stores.ts";
 import { person } from "./sealed-apps.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { newRecordId } from "./store-schemas.ts";
 
 // A standalone workflow's store, its generated operations called by
@@ -41,6 +43,8 @@ import { newRecordId } from "./store-schemas.ts";
 // replayed under its step's key written once.
 
 type Person = Awaited<ReturnType<typeof person>>;
+
+const idp = mockIdp();
 
 const objectSchema = (properties: Record<string, unknown>) => ({
   format: "json",
@@ -362,6 +366,36 @@ describe("a workflow's store, called by another workflow", () => {
       unnoted: [{ customer: "acme", total: 1, owner: ada.userId }],
       noted: [{ customer: "acme", total: 2, owner: ada.userId }],
     });
+  });
+
+  it("lists a request for a workflow's store to the organization's admins while that workflow is live, and none once it is deleted", async () => {
+    const ada = await person("builder");
+    const owner = await ownerOf(ada);
+    const consumer = await createWorkflowResource(env, ada, `desk-${unique()}`);
+    const asked = await requestPermission(
+      env,
+      ada,
+      {
+        subject: { type: "workflow", workflowId: consumer.id },
+        object: { type: "store", storeId: owner.storeId },
+        actions: ["getOrder"],
+        binding: "ORDERS",
+      },
+      rolesOf(ada)
+    );
+    const { api } = await signedInApi(idp, "admin");
+    const ids = async () => {
+      const listed = await api.permissions.list(undefined, "requested");
+      return listed.map(({ id }) => id);
+    };
+    const whileLive = await ids();
+    await deleteWorkflowResource(env, ada, owner.id);
+    const afterDelete = await ids();
+
+    expect({
+      whileLive: whileLive.includes(asked.id),
+      afterDelete: afterDelete.includes(asked.id),
+    }).toStrictEqual({ whileLive: true, afterDelete: false });
   });
 
   it("tells the admin reviewing its permission that each operation reaches every record of its table", async () => {

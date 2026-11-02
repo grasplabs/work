@@ -1741,8 +1741,10 @@ export const listPermissions = async (
             ne(permissions.objectType, "app"),
             inArray(permissions.objectId, open)
           ),
-          // A store's permission names the App that owns it, as its
-          // operations are that App's: listed only where that App is open.
+          // A store's permission names the App or the workflow that owns
+          // it, as its operations are its owner's: listed only where that
+          // App is open, or while that workflow is live (whose roles
+          // permissions-open.ts checks).
           or(
             ne(permissions.objectType, "store"),
             inArray(
@@ -1750,7 +1752,18 @@ export const listPermissions = async (
               db
                 .select({ id: sdkStoreOwners.storeId })
                 .from(sdkStoreOwners)
-                .where(inArray(sdkStoreOwners.appId, open))
+                .where(
+                  or(
+                    inArray(sdkStoreOwners.appId, open),
+                    inArray(
+                      sdkStoreOwners.workflowId,
+                      db
+                        .select({ id: workflowResources.id })
+                        .from(workflowResources)
+                        .where(isNull(workflowResources.deletedAt))
+                    )
+                  )
+                )
             )
           )
         );
