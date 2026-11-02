@@ -487,7 +487,10 @@ const WorkflowResourceView = ({
     savedHere
   );
   const start: WorkflowTab = draft === undefined ? "versions" : "definition";
-  const [tab, setTab] = useState<WorkflowTab>(opens ?? start);
+  // A builder reads runs on Traces (its runs part), so a link asking for
+  // runs opens there.
+  const opened = opens === "runs" && builder ? "traces" : opens;
+  const [tab, setTab] = useState<WorkflowTab>(opened ?? start);
   const [part, setPart] = useState<TracesPart>("runs");
   // The draft as its editor last saved or read it, beside the page's read:
   // whichever is at the later revision is the draft the page goes by.
