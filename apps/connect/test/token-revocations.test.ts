@@ -117,7 +117,7 @@ const recorded = async (action: string) => {
 };
 
 describe("a disconnect's revoke at the provider, owed until it goes", () => {
-  it("keeps a disconnected connection's sealed token while its provider won't revoke, and nothing calls with it", async () => {
+  it("owes the revoke with a sealed copy of the token while its provider won't revoke, and nothing calls with it", async () => {
     const person = someone();
     const { connectionId, refreshToken } = await connected(person);
     providerDown(() => true);
@@ -143,7 +143,7 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
       said: await recorded("connection.disconnect"),
     }).toMatchObject({
       disconnected: { revoked: false },
-      kept: { status: "disconnected", tokens: 1, owed: true },
+      kept: { status: "disconnected", tokens: 0, owed: true },
       call: "connect.connection_inactive",
       live: true,
       said: [{ detail: { revoked: false, revokePending: true } }],
@@ -183,7 +183,7 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
     }).toMatchObject({
       asked: 1,
       waitsLonger: true,
-      meanwhile: { tokens: 1, owed: true },
+      meanwhile: { tokens: 0, owed: true },
       after: { status: "disconnected", tokens: 0, owed: false },
       live: false,
       ended: [
@@ -363,14 +363,14 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
     });
   });
 
-  it("gives up, never counting as revoked, an owed revoke whose kept token no longer opens", async () => {
+  it("gives up, never counting as revoked, an owed revoke whose token copy no longer opens", async () => {
     const person = someone();
     const { connectionId, refreshToken } = await connected(person);
     let down = true;
     providerDown(() => down);
     await exports.default.disconnect({ person, connectionId });
     await env.DB.prepare(
-      "UPDATE connection_tokens SET sealed = 'changed at rest' WHERE connection_id = ?"
+      "UPDATE token_revocations SET sealed = 'changed at rest' WHERE connection_id = ?"
     )
       .bind(connectionId)
       .run();
@@ -403,7 +403,7 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
     await exports.default.disconnect({ person, connectionId });
     // Sealed under a key the deployment doesn't hold now (a rotation slip).
     await env.DB.prepare(
-      "UPDATE connection_tokens SET sealed = 'v1.0123456789abcdef.AAAAAAAAAAAAAAAA.AAAA' WHERE connection_id = ?"
+      "UPDATE token_revocations SET sealed = 'v1.0123456789abcdef.AAAAAAAAAAAAAAAA.AAAA' WHERE connection_id = ?"
     )
       .bind(connectionId)
       .run();
@@ -420,7 +420,7 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
       live: apps.holds(refreshToken),
       ended: await recorded("connection.revoke_abandoned"),
     }).toMatchObject({
-      kept: { tokens: 1, owed: true },
+      kept: { owed: true },
       retried: true,
       live: true,
       ended: [],
@@ -449,6 +449,39 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
     }).toMatchObject({
       kept: { tokens: 0, owed: false },
       ended: [{ detail: { reason: "expired" } }],
+    });
+  });
+
+  it("leaves the token a provider handed the account again when it connected again, the same refresh token being its live grant", async () => {
+    const person = someone();
+    const { account, connectionId, refreshToken } = await connected(person);
+    apps.options.sameRefreshToken = true;
+    let down = true;
+    providerDown(() => down);
+    await exports.default.disconnect({ person, connectionId });
+    const again = await connectApp(apps, person, account);
+    down = false;
+
+    await due(connectionId);
+    await runMaintenance();
+
+    expect({
+      live: apps.holds(refreshToken),
+      current: await keptOf(again),
+      old: await keptOf(connectionId),
+      superseded: await recorded("connection.revoke_superseded"),
+      revoked: await recorded("connection.revoked"),
+    }).toMatchObject({
+      live: true,
+      current: { status: "active", tokens: 1 },
+      old: { owed: false },
+      superseded: [
+        {
+          target: { type: "connection", id: connectionId },
+          detail: { reason: "same_token" },
+        },
+      ],
+      revoked: [],
     });
   });
 });
