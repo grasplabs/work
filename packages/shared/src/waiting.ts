@@ -16,6 +16,7 @@ import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
+  EventsStoppedNotification,
   GapAskedNotification,
   RunFailedNotification,
   PackageRevokedNotification,
@@ -165,6 +166,23 @@ export interface RevokedPackageItem extends ItemBase {
 }
 
 /**
+ * A mailbox or drive the person's triggers listen to, which connect
+ * stopped hearing: their triggers there start nothing new until it
+ * answers again.
+ */
+export interface StoppedEventsItem extends ItemBase {
+  kind: "stoppedEvents";
+  verdicts: never[];
+  notification: EventsStoppedNotification;
+  /** The connection's account and catalog entry, while the person may see it. */
+  account: {
+    name: string | null;
+    source: CatalogSource;
+    provider: string;
+  } | null;
+}
+
+/**
  * A workflow version, live or asked to go live, whose bindings no admin
  * approved, so its starts are refused: for the organization's own admins,
  * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
@@ -203,6 +221,7 @@ export type WaitingItem =
   | OpenQuestionItem
   | StoppedScheduleItem
   | RevokedPackageItem
+  | StoppedEventsItem
   | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
