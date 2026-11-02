@@ -179,10 +179,11 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 });
 
 /**
- * The read of a person's teams, as a model request's scopes are read just
- * before the ledger admits it (model-budgets.ts, `limitedPersonOf`).
+ * The read of the organization's chosen models, as the gateway routes a
+ * call, after the call was authorized and before the ledger admits its
+ * request (ai-model-choice.ts, `readModelChoice`).
  */
-const scopesRead = /from "team_members"/iu;
+const modelChoiceRead = /from "org_settings"/iu;
 
 /** A call's read of its run's authority (resource-authority.ts). */
 const authorityRead = /approval\.alias/iu;
@@ -445,15 +446,38 @@ describe("time, randomness and deadlines of JSON workflows", () => {
   });
 });
 
-/** A catalog contract of mail.send: `{ to, subject }` in, `{ messageId }` out. */
-const mailContract = async (admin: Identity): Promise<string> => {
+/** What mail.send takes: `{ to, subject }`. */
+const mailInput = v.object({ to: v.string(), subject: v.string() });
+
+/**
+ * What a mail.send of its own takes that also names `attachments`, as a
+ * native write that takes files does, though it takes none (GRA-887).
+ */
+const mailInputWithAttachments = v.object({
+  to: v.string(),
+  subject: v.string(),
+  attachments: v.array(
+    v.object({
+      name: v.string(),
+      type: v.string(),
+      size: v.number(),
+      sha256: v.string(),
+    })
+  ),
+});
+
+/** A catalog contract of mail.send: `input` in, `{ messageId }` out. */
+const mailContract = async (
+  admin: Identity,
+  input: { descriptor: unknown } = mailInput
+): Promise<string> => {
   const key = `mail-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "connector",
     operations: {
       "mail.send": {
-        input: descriptorOf(v.object({ to: v.string(), subject: v.string() })),
+        input: descriptorOf(input),
         output: descriptorOf(v.object({ messageId: v.string() })),
       },
     },
@@ -462,18 +486,14 @@ const mailContract = async (admin: Identity): Promise<string> => {
 };
 
 /** `env`, its connect serving `contract` as that connection's contract. */
-const servingMail = (): Env => {
+const servingMail = (input: { descriptor: unknown } = mailInput): Env => {
   const contract: ConnectorContract = {
     contract: "composio.mail@1",
     actions: {
       send: {
         tool: "mail.send",
         readOnly: false,
-        input: JSON.stringify(
-          shapeOf(
-            descriptorOf(v.object({ to: v.string(), subject: v.string() }))
-          )
-        ),
+        input: JSON.stringify(shapeOf(descriptorOf(input))),
         output: JSON.stringify(
           shapeOf(descriptorOf(v.object({ messageId: v.string() })))
         ),
@@ -508,6 +528,7 @@ const mailingWorkflow = async (
     sharing,
     plain = false,
     retry,
+    attachments,
   }: {
     before?: unknown[];
     to?: string;
@@ -521,16 +542,24 @@ const mailingWorkflow = async (
     plain?: boolean;
     /** A retry policy of a try's catch around the send. */
     retry?: Record<string, unknown>;
+    /** Files it names to attach, to an operation that takes none. */
+    attachments?: unknown[];
   } = {}
 ) => {
-  const key = await mailContract(admin);
+  const input =
+    attachments === undefined ? mailInput : mailInputWithAttachments;
+  const key = await mailContract(admin, input);
   const send = {
     send: {
       call: "grasp.connector",
       with: {
         binding: "mail",
         operation: "mail.send",
-        arguments: { to, subject: "${ $params.token }" },
+        arguments: {
+          to,
+          subject: "${ $params.token }",
+          ...(attachments === undefined ? {} : { attachments }),
+        },
       },
       ...(plain
         ? { output: { as: "${ {status: .messageId} }" } }
@@ -587,7 +616,7 @@ const mailingWorkflow = async (
     actions: ["mail.send"],
     binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
   });
-  const serving = servingMail();
+  const serving = servingMail(input);
   const approval = await approveWorkflowBinding(serving, admin, workflow.id, {
     alias: "mail",
     target: { kind: "connector", permissionId, contract: "composio.mail@1" },
@@ -745,6 +774,31 @@ describe("grasp.connector calls of JSON workflows", () => {
       hostCalls: 3,
       // Each attempt made its call; the mail's went no further.
       byAttempt: [1, 1, 1],
+    });
+  });
+
+  it("refuses files named to attach to an operation whose contract takes none, sending nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      attachments: [
+        {
+          name: "a.txt",
+          type: "text/plain",
+          size: 1,
+          sha256: "0".repeat(64),
+        },
+      ],
+    });
+    const runId = await started(ada, workflow.id, serving);
+    const run = await ended(ada, workflow.id, runId);
+    const sent = await mail.did();
+    expect({
+      end: endOf(run),
+      calls: sent.calls,
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_invalid" },
+      calls: 0,
     });
   });
 
@@ -1471,7 +1525,7 @@ describe("grasp.model calls of JSON workflows", () => {
     });
     const provider = await providerAnswering(answer('{"line":"Never sent"}'));
     const run = await started(ada, workflow.id);
-    // The approval is revoked as the ledger admits the request, after the
+    // The approval is revoked as the gateway routes the call, after the
     // call was authorized.
     const db = env.DB;
     const prepare = db.prepare.bind(db);
@@ -1482,7 +1536,7 @@ describe("grasp.model calls of JSON workflows", () => {
       if (
         authorized.once &&
         revoking.length === 0 &&
-        scopesRead.test(statement)
+        modelChoiceRead.test(statement)
       ) {
         revoking.push(
           prepare(
@@ -1588,42 +1642,18 @@ describe("grasp.model calls of JSON workflows", () => {
   });
 });
 
-let budgetMonths = 0;
+/** This month, as admins read spend in it, such as `2026-11`. */
+const thisMonth = (): string =>
+  new Date().toISOString().slice(0, "yyyy-mm".length);
 
-/** A month no other file counts budgets in: from 3300, clear of the others. */
-const newBudgetMonth = (): string => {
-  budgetMonths += 1;
-  return `${3300 + Math.floor(budgetMonths / 12)}-${String((budgetMonths % 12) + 1).padStart(2, "0")}`;
-};
-
-/**
- * What `run` returns, with `budgets` in the deployment's model rules,
- * counting in `month`: by default, one no other file counts in.
- */
-const withBudgets = async <Result>(
-  budgets: Record<string, unknown>,
-  run: () => Promise<Result>,
-  month = newBudgetMonth()
-): Promise<Result> => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: was } = env;
-  try {
-    env.MODEL_GATEWAY = { budgets };
-    env.MODEL_BUDGET_MONTH = month;
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = before;
-    env.MODEL_BUDGET_MONTH = was;
-  }
-};
-
-/**
- * An answer of some $1: a $0.50 budget holds the most one request may
- * use, and nothing after this answer.
- */
-const dearGreeting = {
-  text: '{"line":"Hello Ada"}',
-  inputTokens: 2_000_000,
-  outputTokens: 20,
+/** What the models settings say an independent workflow spent this month. */
+const workflowSpend = async (workflowId: string) => {
+  const { session } = await signedInWithRole(idp, "admin");
+  const { core } = await openRpc(session, {
+    coreEnv: { ...env, MODEL_BUDGET_MONTH: thisMonth() },
+  });
+  const spend = await core.authenticate().models.spend();
+  return spend.workflows.filter((each) => each.workflowId === workflowId);
 };
 
 describe("an independent workflow's model spend", () => {
@@ -1633,7 +1663,7 @@ describe("an independent workflow's model spend", () => {
     vi.restoreAllMocks();
   });
 
-  it("counts against its workflow's budget, every run of it, as admins read it with its name and runs", async () => {
+  it("counts every run of it, as admins read it with its name and runs", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
@@ -1641,50 +1671,23 @@ describe("an independent workflow's model spend", () => {
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hello again"}')
     );
-    // This month: what admins read counts the runs started in it.
-    const read = await withBudgets(
-      { workflow: { limit: 5 } },
-      async () => {
-        for (const _ of [1, 2]) {
-          // oxlint-disable-next-line no-await-in-loop -- one after another
-          await ended(ada, workflow.id, await started(ada, workflow.id));
-        }
-        const { session } = await signedInWithRole(idp, "admin");
-        const { core } = await openRpc(session, { coreEnv: env });
-        const { models } = core.authenticate();
-        const [settings, spend] = await Promise.all([
-          models.settings(),
-          models.spend(),
-        ]);
-        const budgets =
-          settings.rules.state === "on" ? settings.rules.budgets : [];
-        return {
-          budget: budgets
-            .filter(({ scope }) => scope === "workflow")
-            .flatMap(({ spent }) => spent)
-            .filter(
-              ({ of }) =>
-                of.type === "workflow" && of.workflowId === workflow.id
-            ),
-          spend: spend.workflows.filter(
-            ({ workflowId }) => workflowId === workflow.id
-          ),
-        };
-      },
-      new Date().toISOString().slice(0, "yyyy-mm".length)
-    );
-    const named = {
-      appId: null,
-      appName: null,
-      workflowId: workflow.id,
-      name: workflow.name,
-    };
-    const amount = read.budget[0]?.amount ?? 0;
+    for (const _ of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ended(ada, workflow.id, await started(ada, workflow.id));
+    }
+    const read = await workflowSpend(workflow.id);
+    const amount = read[0]?.amount ?? 0;
     expect(amount).toBeGreaterThan(0);
-    expect(read).toStrictEqual({
-      budget: [{ of: { type: "workflow", ...named }, amount }],
-      spend: [{ ...named, amount, runs: 2 }],
-    });
+    expect(read).toStrictEqual([
+      {
+        appId: null,
+        appName: null,
+        workflowId: workflow.id,
+        name: workflow.name,
+        amount,
+        runs: 2,
+      },
+    ]);
   });
 
   it("keeps a deleted workflow's spend for admins, by its ID, with no name to link it by", async () => {
@@ -1692,27 +1695,14 @@ describe("an independent workflow's model spend", () => {
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
     await providerAnswering(answer('{"line":"Hello Ada"}'));
-    const read = await withBudgets(
-      { workflow: { limit: 5 } },
-      async () => {
-        await ended(ada, workflow.id, await started(ada, workflow.id));
-        // Deleted since: its row stays, marked.
-        await env.DB.prepare(
-          "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
-        )
-          .bind(Date.now(), workflow.id)
-          .run();
-        const { session } = await signedInWithRole(idp, "admin");
-        const { core } = await openRpc(session, { coreEnv: env });
-        const { models } = core.authenticate();
-        const spend = await models.spend();
-        return spend.workflows.filter(
-          ({ workflowId }) => workflowId === workflow.id
-        );
-      },
-      new Date().toISOString().slice(0, "yyyy-mm".length)
-    );
-
+    await ended(ada, workflow.id, await started(ada, workflow.id));
+    // Deleted since: its row stays, marked.
+    await env.DB.prepare(
+      "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), workflow.id)
+      .run();
+    const read = await workflowSpend(workflow.id);
     expect(
       read.map(({ name, amount, runs }) => ({
         name,
@@ -1720,31 +1710,6 @@ describe("an independent workflow's model spend", () => {
         runs,
       }))
     ).toStrictEqual([{ name: null, spent: true, runs: 1 }]);
-  });
-
-  it("is refused once its workflow's budget is spent, sending nothing, while another workflow's runs go on", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const spent = await greetingWorkflow(ada, admin);
-    const other = await greetingWorkflow(ada, admin);
-    const provider = await providerAnswering(
-      dearGreeting,
-      dearGreeting,
-      dearGreeting
-    );
-    const ends = await withBudgets({ workflow: { limit: 0.5 } }, async () => {
-      const runOf = async (id: string) =>
-        endOf(await ended(ada, id, await started(ada, id)));
-      const first = await runOf(spent.workflow.id);
-      const second = await runOf(spent.workflow.id);
-      return { first, second, other: await runOf(other.workflow.id) };
-    });
-    expect({ ...ends, sent: provider.requests.length }).toStrictEqual({
-      first: { status: "completed", output: { status: "Hello Ada" } },
-      second: { status: "failed", code: "model.over_budget" },
-      other: { status: "completed", output: { status: "Hello Ada" } },
-      sent: 2,
-    });
   });
 });
 
@@ -1798,9 +1763,6 @@ describe("grasp.operation calls of JSON workflows", () => {
     });
   });
 });
-
-/** A model the organization also chose, which may take sensitive data. */
-const sensitiveModel = "anthropic/claude-sonnet-4-5";
 
 /**
  * An App of `by`'s, version 1 approved, binding version 1 of workflow
@@ -2339,44 +2301,6 @@ describe("runs started by a restricted App", () => {
     });
   });
 
-  it("are judged by the model gateway's data rules as restricted", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await greetingWorkflow(ada, admin);
-    const provider = await fakeProviderFor(
-      [allowedModel, sensitiveModel],
-      answer('{"line":"Hello Ada"}'),
-      answer('{"line":"Hello Ada"}')
-    );
-    const starter = await startingApp(ada, admin, workflow.id, {
-      restricted: true,
-    });
-    const { MODEL_GATEWAY: before } = env;
-    // Only another model may take sensitive data.
-    env.MODEL_GATEWAY = {
-      sensitive: { models: [sensitiveModel], connections: [] },
-    };
-    let restricted: WorkflowResourceRun;
-    let own: WorkflowResourceRun;
-    try {
-      const restrictedRun = await starter.start();
-      restricted = await ended(ada, workflow.id, restrictedRun);
-      // The same workflow, started by Ada herself: not restricted.
-      own = await ended(ada, workflow.id, await started(ada, workflow.id));
-    } finally {
-      env.MODEL_GATEWAY = before;
-    }
-    expect({
-      restricted: endOf(restricted),
-      own: endOf(own),
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      restricted: { status: "failed", code: "model.sensitive_data" },
-      own: { status: "completed", output: { status: "Hello Ada" } },
-      requests: 1,
-    });
-  });
-
   it("start restricted from an agent's restricted chat, or one that names none, and not from an open chat", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -2551,6 +2475,9 @@ const keptMarks = (): TriedOnceMarks => {
   return {
     markUnstarted: (key, attempt) => {
       unstarted.add(`${attempt}:${key}`);
+    },
+    markStarted: (key, attempt) => {
+      unstarted.delete(`${attempt}:${key}`);
     },
     unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
     keepFailure: (key, attempt, error) => {
@@ -2763,6 +2690,74 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
         { name: "TimeoutError", code: null },
       ],
       ran: ["first", "greet, next activation"],
+      requests: 1,
+    });
+  });
+
+  it("makes once, in the next activation, a call whose attempt waited for a slot as its activation died", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const busy = Array.from({ length: 8 }, (_, index) => ({
+      [`busy-${index}`]: { set: { stage: "busy" } },
+    }));
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold, ...busy],
+    });
+    const runId = await started(ada, workflow.id);
+    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
+    const runKey = unique();
+    const marks = keptMarks();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      bindings,
+      failed,
+    });
+    // Eight attempts hold every slot of the activation, and never end.
+    for (const index of busy.keys()) {
+      void first.do(
+        `task:busy-${index}`,
+        adaData,
+        async () => await Promise.withResolvers<never>().promise
+      );
+    }
+    // The call's first attempt waits for a slot as its activation dies.
+    void first.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, first activation");
+      return await called(attempt);
+    });
+    await scheduler.wait(100);
+    const second = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await second.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, next activation");
+      return await called(attempt);
+    });
+    // (What the forged module then answers for its record isn't this
+    // test's: only that its call went out, once, in the next activation,
+    // never refused as left open.)
+    expect({
+      leftOpen: failed.filter(
+        (failure) =>
+          failure instanceof Object &&
+          "name" in failure &&
+          failure.name === "TimeoutError"
+      ),
+      ran,
+      requests: provider.requests.length,
+    }).toStrictEqual({
+      leftOpen: [],
+      ran: ["greet, next activation"],
       requests: 1,
     });
   });

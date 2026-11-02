@@ -35,7 +35,6 @@ import {
   keptAt,
   listeningOf,
   reachedOf,
-  sendingDomainOf,
   settledAs,
   stepIndex,
   steps,
@@ -377,7 +376,7 @@ const Setup = () => {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
   }
   const admin = identity.name.split(" ")[0] ?? identity.name;
-  const sendingDomain = sendingDomainOf(window.location.hostname);
+  const sendingDomain = data.view.mailDomain;
   return (
     <SetupFrame
       knowledge={{ parts, percent, threshold: data.gate.threshold }}

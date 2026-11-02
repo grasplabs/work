@@ -1392,50 +1392,6 @@ const readContext = (
 };
 
 /**
- * Throws when a file a workflow may import (any under `workflows/`) could
- * change, as it loads, what a run is built from: it names a global object
- * (`globalThis`, `self`) or a built-in the run's bindings are made with
- * (`Proxy`, `Reflect`, `Function`, `eval`), or assigns to anything it
- * doesn't declare itself, by destructuring too: a global, a built-in, or
- * what it imports.
- * `checkWorkflowBindings` asks the same of the workflow's own file.
- */
-export const checkWorkflowModule = (source: string): void => {
-  checkModuleScope(parseModule(source));
-};
-
-/**
- * Throws unless every call a workflow's code makes to the App's bindings
- * can be read from its TypeScript source, so the step list names each
- * under the step that makes it. The workflow is the file's default
- * export, made by the SDK's `workflow`, and its function an arrow
- * function that destructures its context in its parameter list: the
- * context has no other name. `env` appears only in a call made where it
- * is written, `env.NAME.method(…)` or `appFunctions(env).query(…)`, and
- * only in a step's own function
- * (`step.do`'s, or an option such as a decision's `ask`), not between
- * steps and not in a function inside it, which another step could run.
- * `this`, `arguments`, and `env`, a binding or an SDK stub that is
- * renamed, kept in a variable, passed on, spread or read by a computed
- * name are errors, and so is anything else in the file named as the
- * context's `env` is (a callback's parameter, say: rename it), and so is what `checkWorkflowModule` refuses, each
- * saying how to write it instead.
- *
- * It is the part of `describeWorkflow` that isn't about how steps are laid
- * out: a workflow that passes may still have steps that can't be read (a
- * step in a `try`, say), which a review then shows as unread.
- *
- * It reads one file's source, so it closes what that source can say, not
- * what code does as it runs: a module that reaches a built-in some other
- * way and changes it may still take a binding from a step that calls one.
- * Every binding call is checked against the App's permissions and audited
- * where it lands, in core, whatever the step list says.
- */
-export const checkWorkflowBindings = (source: string): void => {
-  readContext(source);
-};
-
-/**
  * Reads a workflow's steps from its TypeScript source, in source order, with
  * the `if`/`else` branches and `for`/`for...of` loops they sit in. Step
  * names and options must be written as literals in each call, so the list is
@@ -1443,7 +1399,7 @@ export const checkWorkflowBindings = (source: string): void => {
  * inside a `switch`, `try`, `while` or nested function, options built
  * elsewhere, a step in a loop without a `key`) is an error that says how to
  * write it instead, and so is any call to the App's bindings that can't be
- * read (`checkWorkflowBindings`): each step names the bindings it calls.
+ * read (`readContext`): each step names the bindings it calls.
  *
  * Pure JavaScript, so it runs inside workerd, e.g. when a workflow is saved.
  */
@@ -1793,7 +1749,7 @@ const outlineModelsOf = (
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,
- * say) still has its calls read (`checkWorkflowBindings`), and each of its
+ * say) still has its calls read (`readContext`), and each of its
  * steps is held to all of them. When even those can't be read (a binding
  * kept in a variable, code not written with the SDK's `workflow`), it
  * calls none: no review could show one, so its runs may make none, as a

@@ -290,6 +290,11 @@ export interface OnboardingView {
    * yet. Links then go out by hand alone.
    */
   mailSends: boolean;
+  /**
+   * The domain Grasp's mail comes from (`MAIL_FROM`'s address), for the
+   * admin to let through their mail filter; null while no sender is set.
+   */
+  mailDomain: string | null;
 }
 
 /**
@@ -554,4 +559,6 @@ export const onboardingErrors = defineErrorFamily({
     "Nothing about that piece of work needs settling.",
   "onboarding.nothing_to_draw":
     "Nobody who does that work has agreed to anything yet.",
+  "onboarding.agreements_kept":
+    "The team is told: what was agreed stays as it was agreed.",
 });

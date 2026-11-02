@@ -1,31 +1,22 @@
-import { addDays, addMonths, monthOf } from "./admin-account.ts";
-import type { MemberView } from "./admin-account.ts";
+import { addMonths, monthOf } from "./admin-account.ts";
 import { valuePerMonth, WEEKS_PER_MONTH } from "./hours.ts";
 import { TALK_SHARE } from "./interviews.ts";
-import {
-  dateOn,
-  listenDays,
-  RESEARCH_SOURCES,
-  unit,
-} from "./onboarding-admin.ts";
+import { dateOn, listenDays, RESEARCH_SOURCES } from "./onboarding-admin.ts";
 import type {
   Interview,
   Org,
   OrgView,
   Telling,
-  Work,
   WorkEvidence,
   WorkRun,
 } from "./onboarding-admin.ts";
-import { present } from "./present.ts";
 
 /**
  * What an organization costs Grasp in AI, and what its work is worth in hours. Both follow from
  * what the admin already knows: every interview, the first conversation, who is in the platform,
- * and the work that runs there. Nothing is typed in as a total. At an organization onboarded for
- * real, what the Worker counted as it happened takes the place of the sample's amounts. The
- * amounts one of each kind of use takes, and the prices, are samples: the same for every
- * organization, and in one place. Pure.
+ * and the work that runs there. Nothing is typed in as a total. What the Worker counted as it
+ * happened takes the place of the amounts worked out. The amounts one of each kind of use takes,
+ * and the prices, are samples: the same for every organization, and in one place. Pure.
  */
 
 /**
@@ -112,16 +103,6 @@ const DRAW = {
   work: { tokensIn: 6000, tokensOut: 1800 },
   map: { tokensIn: 5000, tokensOut: 1400 },
 };
-/** One message to the chat, with what Grasp knows about the company around it. */
-const CHAT = { tokensIn: 5500, tokensOut: 450 };
-/** How many messages someone who is in sends a week. */
-const CHATS_A_WEEK = 14;
-/** Which model answers a chat message: most go to the quick one, a hard question to the careful one. */
-const CHAT_BY: Partial<Record<Model, number>> = { sonnet: 0.8, opus: 0.2 };
-/** One step of a workflow, run once: what it works on goes to the model with what the step is told to do. */
-const RUN_STEP = { tokensIn: 4600, tokensOut: 560 };
-/** Which model runs a step: the small one where it can, the quick one where the step needs judgement. */
-const RUN_BY: Partial<Record<Model, number>> = { haiku: 0.6, sonnet: 0.4 };
 
 const nothing = (): Use => ({
   tokensIn: 0,
@@ -213,12 +194,6 @@ export const asOf = (view: OrgView, today: string): string => {
 export const isOpen = (view: OrgView): boolean =>
   view.knowledge.opened !== null && view.knowledge.opened <= view.day;
 
-/** How many of one piece of work a single person handles in a week. */
-const itemsAWeek = (work: Work): number =>
-  (work.volume[0] + work.volume[1]) /
-  2 /
-  (work.per === "month" ? WEEKS_PER_MONTH : 1);
-
 export interface Usage {
   /** Everything so far, by what it was used for. */
   purposes: Record<Purpose, Use>;
@@ -262,16 +237,12 @@ const spendOf = (models: Record<Model, number>): number => {
 };
 
 /**
- * The AI an organization used up to `day`: Stephen reading the first conversation and looking the
- * company up, every interview he held and the work drawn from it, and once Grasp is open the chat
- * and the workflows that run.
+ * The AI an organization used up to `day`: what the Worker counted, and before it counted, Stephen
+ * reading the first conversation and looking the company up, and every interview he held and the
+ * work drawn from it, worked out.
  */
 // oxlint-disable-next-line complexity -- ported as the prototype has it, every source of use in one place; the admin's tests pin what it counts
-export const usageOf = (
-  view: OrgView,
-  day: string,
-  members: MemberView[]
-): Usage => {
+export const usageOf = (view: OrgView, day: string): Usage => {
   const { org, state } = view;
   const months = new Map<string, Record<Purpose, Record<Model, Use>>>();
   const days = new Map<
@@ -308,30 +279,11 @@ export const usageOf = (
   ) => {
     took(on, purpose, model, priced(model, amount));
   };
-  /** An amount shared out over the models that do it, each its part. */
-  const shared = (
-    on: string,
-    purpose: Purpose,
-    by: Partial<Record<Model, number>>,
-    amount: { tokensIn: number; tokensOut: number }
-  ) => {
-    for (const model of MODELS) {
-      const part = by[model] ?? 0;
-      if (part > 0) {
-        usedOn(on, purpose, model, {
-          tokensIn: amount.tokensIn * part,
-          tokensOut: amount.tokensOut * part,
-        });
-      }
-    }
-  };
-
-  // Counted as it happened: every call the Worker made for this organization, by what it was for and which model did it.
-  const metered = org.real?.metered ?? [];
+  const { metered } = org.real;
   for (const each of metered) {
     took(each.day, each.purpose, each.model, each.use);
   }
-  // From the first day the Worker counted, its count is what was used. What happened before that day, and at a sample, is worked out.
+  // From the first day the Worker counted, its count is what was used. What happened before that day is worked out.
   let countedFrom: string | null = null;
   for (const each of metered) {
     if (countedFrom === null || each.day < countedFrom) {
@@ -368,10 +320,7 @@ export const usageOf = (
     const { minutes } = interview;
     if (!counted) {
       // Every interview, the ones that stopped halfway too, and the drawing that follows one that was agreed to.
-      const length =
-        minutes === null
-          ? 0
-          : minutes * (0.85 + 0.3 * unit(`${org.id}/${interview.id}/tokens`));
+      const length = minutes ?? 0;
       for (const model of MODELS) {
         const minute = INTERVIEW_MINUTE[model];
         if (minute && length > 0) {
@@ -402,72 +351,6 @@ export const usageOf = (
     usedOn(on, "interviews", "ears", {
       heard: minutes * (1 - TALK_SHARE),
     });
-  }
-
-  // Once Grasp is open: the chat of everyone who is in, and each workflow from the day it went live.
-  // Worked out at a sample only: at a real organization, what the Worker counted is all there was.
-  if (
-    org.real === undefined &&
-    isOpen(view) &&
-    view.knowledge.opened !== null
-  ) {
-    const opened = dateOn(org, view.knowledge.opened);
-    const each = (
-      from: string,
-      purpose: Purpose,
-      by: Partial<Record<Model, number>>,
-      aDay: { tokensIn: number; tokensOut: number }
-    ) => {
-      for (
-        let on = from > opened ? from : opened;
-        on <= day;
-        on = addDays(on, 1)
-      ) {
-        shared(on, purpose, by, aDay);
-      }
-    };
-    for (const member of members) {
-      if (member.state !== "active" || !present(member.joined)) {
-        continue;
-      }
-      each(member.joined, "chat", CHAT_BY, {
-        tokensIn: (CHAT.tokensIn * CHATS_A_WEEK) / 7,
-        tokensOut: (CHAT.tokensOut * CHATS_A_WEEK) / 7,
-      });
-    }
-    for (const work of view.works) {
-      const run = org.running?.[work.id];
-      if (run?.stage !== "live" || !present(run.since)) {
-        continue;
-      }
-      const runs = (itemsAWeek(work.work) * work.doers) / 7;
-      const aDay = {
-        tokensIn: runs * work.work.steps.length * RUN_STEP.tokensIn,
-        tokensOut: runs * work.work.steps.length * RUN_STEP.tokensOut,
-      };
-      each(run.since, "runs", RUN_BY, aDay);
-      // The same days again, for this workflow alone.
-      const from = run.since > opened ? run.since : opened;
-      const count =
-        from > day
-          ? 0
-          : Math.round(
-              (Date.parse(`${day}T12:00:00Z`) -
-                Date.parse(`${from}T12:00:00Z`)) /
-                86_400_000
-            ) + 1;
-      if (count > 0) {
-        const all = added(
-          MODELS.map((model) =>
-            priced(model, {
-              tokensIn: aDay.tokensIn * count * (RUN_BY[model] ?? 0),
-              tokensOut: aDay.tokensOut * count * (RUN_BY[model] ?? 0),
-            })
-          )
-        );
-        works.push({ id: work.id, runs: runs * count, use: all });
-      }
-    }
   }
 
   const sorted = [...months.entries()].toSorted(([a], [b]) =>
@@ -597,20 +480,15 @@ export interface Value {
 }
 
 /**
- * What `interview` told about the piece of work `id`. At a real organization,
- * everyone who told about it counts, whatever they were asked about, as its
- * record counts them (`recordOf`); in a sample, only who was asked about it.
+ * What `interview` told about the piece of work `id`. Everyone who told about
+ * it counts, whatever they were asked about, as its record counts them
+ * (`recordOf`).
  */
 const tellingAbout = (
   org: Org,
   interview: Interview,
   id: string
-): Telling | null => {
-  if (org.real) {
-    return org.real.told.get(`${interview.person.id}/${id}`) ?? null;
-  }
-  return interview.work?.id === id ? interview.telling : null;
-};
+): Telling | null => org.real.told.get(`${interview.person.id}/${id}`) ?? null;
 
 /**
  * The hours in each piece of work, from what the people who do it said: how many they handle a

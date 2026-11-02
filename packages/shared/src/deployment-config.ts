@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { appIdSchema, connectionIdSchema, workflowIdSchema } from "./ids.ts";
 import { relayedClientOf } from "./oauth-relay.ts";
 import { roleSchema } from "./roles.ts";
 import { loopbackHosts } from "./router.ts";
@@ -164,15 +163,7 @@ export const staffWindowOpen = (
   return opened <= now && now < until && until - opened <= staffWindowMaxMs;
 };
 
-// MODEL_GATEWAY (core's src/models.ts and src/model-rules.ts)
-//
-// The client's rules for model calls: which models may take a call kept
-// in the EU or one that carries sensitive data, and what calls may cost.
-// Which models a call may use at all is the organization's own choice,
-// among the providers it connected (core's src/ai-model-choice.ts), never
-// this var. Its model references are checked against the models the
-// gateway offers, which only core knows (its provider catalogs): each
-// schema here takes that check as `modelRef`.
+// Model roles (core's src/models.ts)
 
 /**
  * What core's own features ask the gateway for, rather than a model:
@@ -183,75 +174,6 @@ export const staffWindowOpen = (
  */
 export const modelRoles = ["quick", "careful"] as const;
 export type ModelRole = (typeof modelRoles)[number];
-
-const budgetSchema = z.strictObject({
-  /**
-   * US dollars a month (a run lineage's: for its whole life): a cent at
-   * least, and well within an integer.
-   */
-  limit: z.number().min(0.01).max(1_000_000_000),
-  /** The percent of the limit at which admins are alerted. */
-  alertAt: z.int().min(1).max(99).default(80),
-});
-
-/** The budgets' part of the gateway config (core's src/model-budgets.ts). */
-export const budgetsSchema = z
-  .strictObject({
-    /** All the deployment's calls together. */
-    deployment: budgetSchema.optional(),
-    /** Each workflow's AI steps, each workflow on its own. */
-    workflow: budgetSchema.optional(),
-    /** The calls made by or for each person, each on their own. */
-    user: budgetSchema.optional(),
-    /**
-     * Each run lineage on its own: a run and every run started under it,
-     * all its steps and retries, for the lineage's whole life, never reset
-     * by a new month. No limit when absent: the lineage is still counted.
-     */
-    run: budgetSchema.optional(),
-  })
-  .optional();
-
-/**
- * The rules' part of the gateway config: `modelRef` checks one
- * `<provider>/<model>` the gateway offers.
- */
-const modelRulesShape = (modelRef: z.ZodType<string>) => ({
-  eu: z
-    .strictObject({
-      /** The models hosted in the EU. */
-      models: z.array(modelRef).min(1),
-      /** Every call of the deployment must stay in the EU. */
-      deployment: z.boolean().default(false),
-      /** Workflows whose AI steps must stay in the EU. */
-      workflows: z
-        .array(z.strictObject({ app: appIdSchema, workflow: workflowIdSchema }))
-        .default([]),
-      /** Connections whose data must stay in the EU. */
-      connections: z.array(connectionIdSchema).default([]),
-    })
-    .optional(),
-  sensitive: z
-    .strictObject({
-      /** The models that may take sensitive data. */
-      models: z.array(modelRef).min(1),
-      /** Connections whose data is sensitive. */
-      connections: z.array(connectionIdSchema).default([]),
-    })
-    .optional(),
-  budgets: budgetsSchema,
-});
-
-export type ModelRules = z.output<
-  z.ZodObject<ReturnType<typeof modelRulesShape>>
->;
-
-/**
- * The `MODEL_GATEWAY` var: the client's rules. A rule that doesn't parse
- * refuses every call (core's src/models.ts).
- */
-export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
-  z.object(modelRulesShape(modelRef));
 
 // MAIL_FROM (core's src/mail.ts)
 

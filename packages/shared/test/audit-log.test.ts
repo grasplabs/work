@@ -170,25 +170,13 @@ describe("audit event types", () => {
         "connection.needs_reauth",
         "connection.reconnected",
         "workflow.param.updated",
-        "model.budget.alert",
-        "model.budget.exhausted",
-        "model.limit.set",
       ].map((action) => typeOf(action))
-    ).toStrictEqual([
-      "config",
-      "config",
-      "config",
-      "config",
-      "config",
-      "config",
-      "config",
-    ]);
+    ).toStrictEqual(["config", "config", "config", "config"]);
   });
 
-  it("files a model call as one, and a budget crossing as config, not a call", () => {
+  it("files a model call as one, and a refused one too", () => {
     expect(typeOf("model.call")).toBe("model_call");
     expect(typeOf("model.refused")).toBe("model_call");
-    expect(typeOf("model.budget.alert")).toBe("config");
   });
 
   it("files a restricted context and a staff sign-in under permissions", () => {

@@ -95,6 +95,7 @@ const toldSnapshot = (name: string): AdminSnapshot => {
       openedAt: null,
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: person === "lisa" ? "completed" : "waiting",
     })),
     interviews: [

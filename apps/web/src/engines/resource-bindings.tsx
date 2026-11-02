@@ -4,7 +4,6 @@ import type {
   BindingChoices,
   BindingState,
   DeclaredResource,
-  ModelBindingBudget,
   PublishedTemplate,
   ResourceBinding,
   ResourceBindingsReview,
@@ -21,15 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -54,21 +45,15 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { dollars, percent } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
-  alerts,
   allChosen,
-  budgetFieldsOf,
-  budgetOf,
-  problemsAfter,
   firstChoice,
   formKey,
   noChoice,
   targetOf,
   templateKey,
 } from "./binding-form.ts";
-import type { BudgetFields, BudgetProblem } from "./binding-form.ts";
 
 // What an engine's actions reach through its declared resources (core's
 // resource-bindings.ts): the models, integrations, knowledge and templates
@@ -106,7 +91,6 @@ const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
   contract_changed: msg`Not served`,
   grant_lost: msg`Not served`,
   unchecked: msg`Not checked`,
-  budget_damaged: msg`Not served`,
 };
 
 /** Why a binding no longer serves its resource, by its state. */
@@ -117,7 +101,6 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
     unchecked: msg`The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
-    budget_damaged: msg`Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh.`,
   };
 
 /** One term of a definition list and what it says. */
@@ -127,30 +110,6 @@ const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
     <dd>{children}</dd>
   </div>
 );
-
-/** A model binding's caps, in US dollars, and when admins are alerted. */
-const Budget = ({ budget }: { budget: ModelBindingBudget }) => {
-  const { perRequest, perDay, perMonth } = budget;
-  const alertAt = percent(budget.alertAt);
-  return (
-    <dl className="flex flex-col gap-0.5">
-      {perRequest === undefined ? null : (
-        <Term term={<Trans>Per request</Trans>}>{dollars(perRequest)}</Term>
-      )}
-      {perDay === undefined ? null : (
-        <Term term={<Trans>Per day</Trans>}>{dollars(perDay)}</Term>
-      )}
-      {perMonth === undefined ? null : (
-        <Term term={<Trans>Per month</Trans>}>{dollars(perMonth)}</Term>
-      )}
-      {perDay === undefined && perMonth === undefined ? null : (
-        <Term term={<Trans>Alert at</Trans>}>
-          <Trans>{alertAt} of a cap</Trans>
-        </Term>
-      )}
-    </dl>
-  );
-};
 
 /** A change to what core holds, then the page read again. */
 type Decide = (change: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -346,117 +305,6 @@ const NothingToChoose = ({
   );
 };
 
-/** What a budget field that doesn't hold what it may says, by why. */
-const budgetProblemText = (problem: BudgetProblem): MessageDescriptor => {
-  if (problem === "alert") {
-    return msg`Enter a whole percent from 1 to 99.`;
-  }
-  const least = dollars(0.01);
-  const most = dollars(1_000_000_000);
-  return msg`Enter an amount in US dollars from ${least} to ${most}, such as 2.50.`;
-};
-
-/** One field of a model binding's budget, with why it can't be sent. */
-const BudgetInput = ({
-  label,
-  value,
-  onChange,
-  problem,
-  disabled = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  problem: BudgetProblem | undefined;
-  disabled?: boolean;
-}) => {
-  const { i18n } = useLingui();
-  const id = useId();
-  const errorId = useId();
-  return (
-    <Field data-invalid={problem !== undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        aria-describedby={problem === undefined ? undefined : errorId}
-        aria-invalid={problem !== undefined}
-        disabled={disabled}
-        id={id}
-        inputMode="decimal"
-        onChange={(event) => {
-          onChange(event.target.value);
-        }}
-        value={value}
-      />
-      {problem === undefined ? null : (
-        <FieldError id={errorId}>
-          {i18n._(budgetProblemText(problem))}
-        </FieldError>
-      )}
-    </Field>
-  );
-};
-
-/**
- * A model binding's own caps, all optional: on top of the deployment's
- * budgets, for the requests the engine's actions make through it.
- */
-const BudgetFieldSet = ({
-  fields,
-  problems,
-  onChange,
-}: {
-  fields: BudgetFields;
-  problems: Partial<Record<keyof BudgetFields, BudgetProblem>>;
-  onChange: (fields: BudgetFields) => void;
-}) => {
-  const { t } = useLingui();
-  const set = (field: keyof BudgetFields) => (value: string) => {
-    onChange({ ...fields, [field]: value });
-  };
-  return (
-    <FieldSet className="w-full max-w-prose">
-      <FieldLegend variant="label">
-        <Trans>Budget (optional)</Trans>
-      </FieldLegend>
-      <FieldDescription>
-        <Trans>
-          What the domain&apos;s actions may spend through this binding, on top
-          of the deployment&apos;s budgets. Leave a cap empty for none. A
-          workflow&apos;s own AI steps don&apos;t go through it.
-        </Trans>
-      </FieldDescription>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <BudgetInput
-          label={t`Per request, in US dollars`}
-          onChange={set("perRequest")}
-          problem={problems.perRequest}
-          value={fields.perRequest}
-        />
-        <BudgetInput
-          label={t`Per day (UTC), in US dollars`}
-          onChange={set("perDay")}
-          problem={problems.perDay}
-          value={fields.perDay}
-        />
-        <BudgetInput
-          label={t`Per month (UTC), in US dollars`}
-          onChange={set("perMonth")}
-          problem={problems.perMonth}
-          value={fields.perMonth}
-        />
-        <BudgetInput
-          // Admins are alerted on a day's or a month's cap only.
-          disabled={!alerts(fields)}
-          label={t`Alert admins at, in percent of a day's or month's cap`}
-          onChange={set("alertAt")}
-          problem={problems.alertAt}
-          value={fields.alertAt}
-        />
-      </div>
-    </FieldSet>
-  );
-};
-
 /** An admin's choice of what serves `resource`, and the approval of it. */
 const BindForm = ({
   app,
@@ -487,13 +335,6 @@ const BindForm = ({
       ])
     )
   );
-  // A replaced binding's caps stay unless the admin changes them.
-  const [budget, setBudget] = useState(() =>
-    budgetFieldsOf(binding?.budget ?? null)
-  );
-  const [problems, setProblems] = useState<
-    Partial<Record<keyof BudgetFields, BudgetProblem>>
-  >({});
   if (noChoice(choices)) {
     return (
       <NothingToChoose resource={resource} truncated={choices.truncated} />
@@ -509,16 +350,6 @@ const BindForm = ({
     if (target === undefined) {
       return;
     }
-    // Only a model binding has a budget; core checks it again.
-    const read =
-      choices.kind === "model"
-        ? budgetOf(budget)
-        : { ok: true as const, budget: undefined };
-    if (!read.ok) {
-      setProblems(read.problems);
-      return;
-    }
-    setProblems({});
     void decide(
       async (session) =>
         await session.resourceBindings.approve({
@@ -526,7 +357,6 @@ const BindForm = ({
           alias,
           target,
           reviewed: { version },
-          ...(read.budget === undefined ? {} : { budget: read.budget }),
         })
     );
   };
@@ -547,18 +377,6 @@ const BindForm = ({
             </NativeSelectOption>
           ))}
         </Choice>
-      ) : null}
-      {choices.kind === "model" ? (
-        <BudgetFieldSet
-          fields={budget}
-          onChange={(next) => {
-            // A refusal no longer stands once its field changes, or once
-            // the alert is off.
-            setProblems(problemsAfter(problems, budget, next));
-            setBudget(next);
-          }}
-          problems={problems}
-        />
       ) : null}
       {choices.kind === "connector" ? (
         <Choice label={t`Connection`} onChange={setPicked} value={picked}>
@@ -894,9 +712,6 @@ const ResourceCard = ({
               <Trans>Bound to</Trans>
             </span>
             <BoundTo binding={binding} />
-            {binding.budget === null ? null : (
-              <Budget budget={binding.budget} />
-            )}
           </div>
           {choices === null ? null : (
             <Revoke

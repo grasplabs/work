@@ -696,8 +696,8 @@ export const addSignalTally = (
  *
  * A run started before the window counts neither as a run nor for what it
  * spent, so the cost and `costliest` name the same runs. The window rolls
- * (the last `signalWindowDays` days), while model budgets
- * (model-budgets.ts) count a UTC calendar month: the two don't match.
+ * (the last `signalWindowDays` days), while model spend
+ * (model-spend.ts) counts a UTC calendar month: the two don't match.
  */
 const costSignals = (
   { costs }: SignalTotals,

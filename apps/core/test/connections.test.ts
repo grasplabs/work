@@ -273,10 +273,7 @@ describe("connecting an account", () => {
           await outcome(connections.start({ provider: "microsoft", scope }))
       )
     );
-    expect(started).toStrictEqual([
-      "connection.staff_not_allowed",
-      "connection.staff_not_allowed",
-    ]);
+    expect(started).toStrictEqual(["role.forbidden", "role.forbidden"]);
   });
 
   it("of a shared account is for admins only", async () => {

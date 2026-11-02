@@ -718,8 +718,9 @@ describe("decisions", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       role: "admin",
       asked: true,
-      get: "decision.forbidden",
-      answer: "decision.forbidden",
+      // A staff session reaches no decision at all, only the onboarding.
+      get: "role.forbidden",
+      answer: "role.forbidden",
     });
   });
 
