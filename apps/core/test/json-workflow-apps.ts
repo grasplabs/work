@@ -527,3 +527,35 @@ export const following = async (
     .watchQuery(JSON.stringify(request), callback);
   return { received, subscription };
 };
+
+/**
+ * A run of `by`'s that waits an hour, once the engine has journaled its
+ * wait: the root of a lineage of its own, still live, for a test to ask
+ * the lineage's quotas as the run's activations ask them (`owner`), and
+ * to `end` once done. An ended run's attempts are fenced (quotas.ts).
+ */
+export const liveLineage = async (by: Person) => {
+  const { id } = await publishedWorkflow(by, greetingTasks("PT1H"));
+  const run = await startedBy(by, id);
+  await vi.waitFor(async () => {
+    const trace = await by.api.workflowResources.runTrace(id, run, {
+      doors: false,
+    });
+    if (trace.steps.length === 0) {
+      throw new Error("The engine hasn't journaled the wait yet");
+    }
+  }, settles);
+  return {
+    workflow: id,
+    run,
+    owner: {
+      run,
+      root: run,
+      subject: by.userId,
+      resource: `workflow-resource:${id}`,
+    },
+    end: async (): Promise<void> => {
+      await by.api.workflowResources.terminateRun(id, run);
+    },
+  };
+};

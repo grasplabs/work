@@ -282,9 +282,9 @@ export const listMembers = async (
 /**
  * Whom `by` may share an App with: the organization's people, members now,
  * and its teams, each by name and ID alone. For whoever may share it
- * (`addMember`): a builder of the App, while it isn't archived, never
- * Grasp staff. A builder isn't an admin, so this, not the organization's
- * member list, is what they pick from; it says no more than a share names.
+ * (`addMember`): a builder of the App, while it isn't archived. A builder
+ * isn't an admin, so this, not the organization's member list, is what
+ * they pick from; it says no more than a share names.
  */
 export const shareCandidates = async (
   env: Env,
@@ -292,7 +292,6 @@ export const shareCandidates = async (
   app: unknown
 ): Promise<ShareCandidates> => {
   await editableApp(env, by, app);
-  requireNotStaff(by);
   const db = drizzle(env.DB);
   const [people, organizationTeams] = await Promise.all([
     db

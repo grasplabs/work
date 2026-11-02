@@ -649,7 +649,7 @@ export interface AppMembersApi {
   /**
    * Whom its builders may share the App with: the organization's people
    * and teams, by name and ID alone (no address, no role, no team's
-   * members). For whoever may share it (`add`), never Grasp staff.
+   * members). For whoever may share it (`add`).
    */
   candidates: (app: string) => Promise<ShareCandidates>;
 }

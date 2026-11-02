@@ -73,7 +73,9 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   run joins the stamping run's lineage, one level deeper, admitted
 //   against its nesting and descendant limits (quotas.ts, `admitChild`),
 //   so the lineage's limits end the loop (`workflow.lineage_limit`,
-//   refused for good). An App run's mail can't join an independent
+//   refused for good). Its work is charged to its workflow's own account
+//   in that lineage (quotas.ts, `triggeredAccountClaimed`), so a busy
+//   workflow's runs never use up the stamping run's allowances. An App run's mail can't join an independent
 //   lineage (their runs are kept apart), so a stamped event of an App run
 //   is refused for good, audited (`lineage.unjoinable`), never started as a
 //   new root. Deliberately so, until the two lineages can be joined: an

@@ -742,11 +742,6 @@ describe("App roles", { timeout: 60_000 }, () => {
       id: user.userId,
       role: "user",
     });
-    const { core } = await openRpc(
-      await signedIn(idp, "grasp-staff", staffPerson())
-    );
-    const staff = core.authenticate();
-
     const offered = await owner.api.apps.members.candidates(app);
     const person = offered.people.find(({ id }) => id === colleague.userId);
     const offeredTeam = offered.teams.find(({ id }) => id === team);
@@ -768,7 +763,6 @@ describe("App roles", { timeout: 60_000 }, () => {
         outcome(user.api.apps.members.candidates(app)),
         // Someone without a role in it, who doesn't learn it exists.
         outcome(stranger.api.apps.members.candidates(app)),
-        outcome(staff.apps.members.candidates(app)),
       ])
     ).resolves.toStrictEqual([
       await outcome(
@@ -779,7 +773,6 @@ describe("App roles", { timeout: 60_000 }, () => {
         })
       ),
       "app.not_found",
-      "role.forbidden",
     ]);
   });
 

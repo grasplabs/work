@@ -68,9 +68,10 @@ export const connectConfig = path.join(
  * the composer offers how hard it thinks. Both have list prices, so AI
  * spend shows what they cost. Connect sends
  * their requests to the stack's fake providers, never to Mistral or
- * Anthropic (e2e/model-fake.ts), which refuse the key (401), as a
- * provider refuses one it doesn't know: the chat test shows that as the
- * model failing to answer (e2e/chat.e2e.ts).
+ * Anthropic (e2e/model-fake.ts), which answer an agent's turn in a chat
+ * a script opens (e2e/model-scripts.ts) and refuse the key of any other
+ * request (401), as a provider refuses one it doesn't know: the chat test
+ * shows both, the refusal as the model failing to answer (e2e/chat.e2e.ts).
  */
 export const e2eModel = "mistral/mistral-large-latest";
 export const e2eThinkingModel = "anthropic/claude-sonnet-4-6";

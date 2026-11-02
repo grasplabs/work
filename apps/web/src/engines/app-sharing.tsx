@@ -69,7 +69,7 @@ import { buildsApp } from "./app-role.ts";
 // `apps.members.candidates`: the organization's people and teams by name,
 // for whoever may share the App, since a builder isn't an admin and can't
 // list the organization's members. Core checks every change (a builder of
-// the App, not archived, never Grasp staff, and that everyone it would
+// the App, not archived, and that everyone it would
 // reach may read what the App has read) and records it in the audit log.
 
 /** Whether `identity` may share `app`: a builder of it, while it isn't archived. */

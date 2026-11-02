@@ -41,6 +41,7 @@ import {
 } from "../engines/app-status.tsx";
 import { AppVersions } from "../engines/app-versions.tsx";
 import { AppWorkflows } from "../engines/app-workflows.tsx";
+import { SaveAsBlueprint } from "../engines/blueprints.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
@@ -511,6 +512,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         <div className="flex flex-wrap items-center gap-2">
           <ExportDefinition app={app} identity={identity} />
           <ShareOnBar app={app} identity={identity} members={members} />
+          {canBuild(identity.role) && version !== null ? (
+            <SaveAsBlueprint app={app.id} name={app.name} version={version} />
+          ) : null}
           {/* On its bar, as the prototype's Publish: for who builds. */}
           <AppStatusControls app={app} identity={identity} />
           <RemoveApp app={app} identity={identity} />

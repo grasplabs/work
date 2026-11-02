@@ -743,8 +743,8 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       { clientId, exportConfirmed: true },
       { email: caller }
     );
-    // Offboarded, it has no page among the organizations: its deletion is
-    // on Platform's Offboarded page.
+    // Offboarded, its page says so and nothing more, pointing to Platform's
+    // Offboarded page, where its deletion is.
     const gone = await page(`/organizations/${clientId}/setup`, caller);
     const after = await page("/platform/offboarded", caller);
     const listed = offboardedOf(after.html, clientId);
@@ -754,7 +754,12 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: refused.map((answer) => answer.includes("answered 403")),
       offboarded,
       early,
-      gone: gone.status,
+      gone: {
+        status: gone.status,
+        said: gone.html.includes("was offboarded"),
+        toOffboarded: gone.html.includes('href="/platform/offboarded"'),
+        offer: gone.html.includes("Offboard it"),
+      },
       // Offered, but off until its retention is over, saying from when.
       deleteOff: buttonOff(listed, "Delete its resources"),
       confirm: confirmOff(listed),
@@ -765,7 +770,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: [true, true],
       offboarded: { refused: null, deletion: null },
       early: { refused: "retention_running", deletion: null },
-      gone: 404,
+      gone: { status: 200, said: true, toOffboarded: true, offer: false },
       deleteOff: true,
       confirm: true,
       from: true,
