@@ -1173,7 +1173,7 @@ export class Onboarding extends DurableObject<Env> {
       .run();
   }
 
-  /** A link code for everyone on `roster` who has none yet. */
+  /** A link code for everyone on `roster` who has none yet and wasn't erased. */
   async #freshCodes(
     roster: Roster
   ): Promise<{ person: string; linkId: string; mark: string }[]> {
@@ -1184,9 +1184,10 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map(({ person }) => person)
     );
+    const erased = this.#erasedPeople();
     return await Promise.all(
       roster.people
-        .filter(({ id }) => !coded.has(id))
+        .filter(({ id }) => !coded.has(id) && !erased.has(id))
         .map(async ({ id }) => {
           const linkId = randomToken();
           const mark = await sha256Hex(await linkSecretOf(this.env, linkId));
@@ -1264,7 +1265,10 @@ export class Onboarding extends DurableObject<Env> {
         .values({ ...person, position })
         .run();
     }
-    for (const code of fresh) {
+    // Checked again here: someone erased since their code was made
+    // (`#freshCodes` waits) gets none.
+    const closed = this.#erasedPeople();
+    for (const code of fresh.filter(({ person }) => !closed.has(person))) {
       this.#db.insert(linkCodes).values(code).onConflictDoNothing().run();
     }
     // Whoever left keeps nothing: no link, nothing said, no state.
@@ -1528,13 +1532,37 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
+  /** Whoever core erased whose entry is still on the list (`closeLinkOf`). */
+  #erasedPeople(): Set<string> {
+    return new Set(
+      this.#db
+        .select({ person: links.person })
+        .from(links)
+        .where(isNotNull(links.erasedAt))
+        .all()
+        .map(({ person }) => person)
+    );
+  }
+
+  /** Whether core erased `person`, and their link is closed for good. */
+  #erased(person: string): boolean {
+    return (
+      this.#db
+        .select({ person: links.person })
+        .from(links)
+        .where(and(eq(links.person, person), isNotNull(links.erasedAt)))
+        .all().length > 0
+    );
+  }
+
   /**
    * The path of someone's link, its secret after the `#`; none for anyone
-   * not on the roster. Someone on it without a code yet (on the roster
-   * before links were, or added by a save that raced another) gets one now.
+   * not on the roster, or erased. Someone on it without a code yet (on the
+   * roster before links were, or added by a save that raced another) gets
+   * one now.
    */
   async linkOf(person: string): Promise<string | null> {
-    if (!this.#onRoster(person)) {
+    if (!this.#onRoster(person) || this.#erased(person)) {
       return null;
     }
     const codeOf = () =>
@@ -1547,9 +1575,10 @@ export class Onboarding extends DurableObject<Env> {
     if (code === undefined) {
       const linkId = randomToken();
       const mark = await sha256Hex(await linkSecretOf(this.env, linkId));
-      // Unless someone made one meanwhile, or they left the roster.
+      // Unless someone made one meanwhile, they left the roster, or they
+      // were erased.
       this.ctx.storage.transactionSync(() => {
-        if (this.#onRoster(person)) {
+        if (this.#onRoster(person) && !this.#erased(person)) {
           this.#db
             .insert(linkCodes)
             .values({ person, linkId, mark })
@@ -4955,6 +4984,71 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Closes `person`'s link for good, as core asks as it erases them,
+   * before their interview is deleted (person-erasure.ts): its code goes,
+   * so it answers `interview.link_invalid`, it is marked erased, so no
+   * code is made for it again, and the device it opened on is forgotten.
+   * Unlike a delete on their own request, no new interview can be saved
+   * under it. Their entry on the list stays, an admin's to remove; taken
+   * off the list, the mark goes with the link.
+   */
+  closeLinkOf(person: string, now: string = new Date().toISOString()): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      // Mail still to go about them (a reminder, say) goes nowhere now.
+      // Sent mail stays: the company's record, as the roster is.
+      dropMailAbout(this.ctx.storage.sql, person);
+      // Marked erased for good, so no code is made for the link again
+      // (`linkOf`, `#writeRoster`): a missing code alone is a link not
+      // made yet.
+      this.#db
+        .update(links)
+        .set({
+          keyMark: null,
+          erasedAt: sql`coalesce(${links.erasedAt}, ${now})`,
+        })
+        .where(eq(links.person, person))
+        .run();
+    });
+  }
+
+  /**
+   * Deletes `person`'s interview and closes their link for good, as core
+   * asks once it erased whoever had their address (person-erasure.ts), but
+   * only a link that went out by `sentBy`, when the erasure was asked for:
+   * one sent after it went to someone the address was released to, whose
+   * interview stays. Whether it deleted one.
+   */
+  async eraseInterviewOf(person: string, sentBy: string): Promise<boolean> {
+    const [link] = this.#db
+      .select({ sentAt: links.sentAt })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined || link.sentAt > sentBy) {
+      return false;
+    }
+    // Their link answers nothing any more, before anything waits: no new
+    // interview is saved under the entry that stays, even while the
+    // delete waits on the Brain's and the voice's cleanup.
+    this.closeLinkOf(person);
+    await this.deleteOnRequest(person, { type: "system" });
+    return true;
+  }
+
+  /**
+   * Who is on the list, by their ID and email, for core to find someone it
+   * erases by the address that was theirs (person-erasure.ts): only core
+   * asks, and nothing of it leaves core.
+   */
+  rosterEmails(): { id: string; email: string }[] {
+    return this.#db
+      .select({ id: people.id, email: people.email })
+      .from(people)
+      .all();
+  }
+
+  /**
    * Deletes someone's interview because they asked Grasp to: what they
    * said is gone at once, a copy left open can't save it back, and their
    * link opens a new one on the device it is on. False when no link of
@@ -5019,7 +5113,7 @@ export class Onboarding extends DurableObject<Env> {
     mapped: string[];
     links: Omit<
       typeof links.$inferSelect,
-      "keyMark" | "version" | "ledTeam" | "takenAt"
+      "keyMark" | "version" | "ledTeam" | "takenAt" | "erasedAt"
     >[];
     interviews: AdminInterviewFacts[];
   } {
@@ -7067,6 +7161,9 @@ export class Onboarding extends DurableObject<Env> {
       .from(links)
       .where(eq(links.person, person.id))
       .all();
+    if (link !== undefined && link.erasedAt !== null) {
+      return refused("interview.link_invalid");
+    }
     const row = this.#row();
     if (link === undefined || row.plan === null) {
       return refused("interview.not_yet");

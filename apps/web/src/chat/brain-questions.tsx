@@ -19,7 +19,8 @@ import { useCore } from "../use-core.ts";
 // inbox, and refuses when nobody can receive it, so "asked" only shows
 // once someone was. Both go through core's brain (`brain.answerGap`,
 // `brain.askAboutGap`), which decides who may: any member answers, never
-// Grasp's staff; only the company's own admins ask. The buttons follow what core allows, but
+// Grasp's staff; only the company's own admins ask, or close one that
+// needs no answer (`brain.closeGap`). The buttons follow what core allows, but
 // core is what refuses. An answer is the person's own act here: the
 // chat's agent only reads the questions, never answers them.
 
@@ -35,13 +36,16 @@ const Question = ({
   busy,
   onAnswer,
   onAsk,
+  onClose,
 }: {
   gap: Gap;
   canAnswer: boolean;
+  /** Asking its owner, and closing it without an answer: the company's admins. */
   canAsk: boolean;
   busy: boolean;
   onAnswer: (answer: string) => Promise<boolean>;
   onAsk: () => Promise<void>;
+  onClose: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const [writing, setWriting] = useState(false);
@@ -123,6 +127,18 @@ const Question = ({
               <Trans>Ask {gap.owner}</Trans>
             </Button>
           ) : null}
+          {canAsk ? (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void onClose();
+              }}
+              size="xs"
+              variant="ghost"
+            >
+              <Trans>Close without an answer</Trans>
+            </Button>
+          ) : null}
         </div>
       )}
     </li>
@@ -191,6 +207,11 @@ export const BrainQuestions = ({
             onAsk={async () => {
               await change(
                 async (session) => await session.brain.askAboutGap(gap.id)
+              );
+            }}
+            onClose={async () => {
+              await change(
+                async (session) => await session.brain.closeGap(gap.id)
               );
             }}
           />

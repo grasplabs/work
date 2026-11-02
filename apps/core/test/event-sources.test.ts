@@ -1,30 +1,37 @@
-import type { Role } from "@grasp-os/shared/roles";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { invoiceMail } from "../../connect/test/fixtures/graph-events.ts";
-import { release, requestGranted } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphControlUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  endedRun,
+  jsonWorkflowAppsOf,
+  objectSchema,
+  publishedWorkflow,
+} from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
-import { routed, signedInApi } from "./sign-in.ts";
+import { routed, unique } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
-import { appWith } from "./workflow-apps.ts";
 
-// Connector events end to end: a builder's App listens for new mail on
-// their Microsoft 365 connection; core's clock tells the real
-// connect where to listen, connect reads Graph's recorded delta answers
-// (the stand-in behind it, test/connect-providers.ts), and core delivers
-// what it read to the workflow.
+// Connector events end to end: a builder's connector trigger listens for
+// new mail on their Microsoft 365 connection and starts their independent
+// workflow; core's clock tells the real connect where to listen, connect
+// reads Graph's recorded delta answers (the stand-in behind it,
+// test/connect-providers.ts), and core delivers what it read to the
+// trigger. connector-triggers.test.ts delivers events straight to core,
+// for who hears what.
 
 const idp = mockIdp();
-
-const personApi = async (role: Role) => await signedInApi(idp, role);
-type Person = Awaited<ReturnType<typeof personApi>>;
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
@@ -63,41 +70,74 @@ const connectOwn = async (person: Person): Promise<string> => {
   return connection.id;
 };
 
-/** The inbox workflow, on `triggers`: it returns the event it started with. */
-const inbox = (
-  triggers = `[{ type: "event", event: "m365.mail.received", filter: { folder: "inbox" } }]`
-): Record<string, string> => ({
-  "workflows/inbox.ts": `import { connectorEvent, workflow } from "@grasp-os/sdk/workflow";
+const mailFields = { id: { type: "string" }, subject: { type: "string" } };
 
-export default workflow(
-  "inbox",
-  { params: {}, input: connectorEvent, triggers: ${triggers} },
-  async (step, { input }) =>
-    await step.do("read", { description: "Read the mail event" }, async () => ({ id: input.id, subject: (input.payload as { subject: string }).subject }))
-);
-`,
-  "workflows/inbox.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+/** The inbox workflow: it hands back the mail's ID and subject it started with. */
+const inboxOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema(mailFields) },
+    output: { schema: objectSchema(mailFields) },
+    do: [
+      {
+        read: {
+          set: {
+            id: "${ $workflow.input.id }",
+            subject: "${ $workflow.input.subject }",
+          },
+        },
+      },
+    ],
+  });
 
-import definition from "./inbox.ts";
-
-const input = { id: "e", connection: "c", owner: null, action: "mail.list", type: "m365.mail.received", payload: { subject: "x" } };
-
-export default workflowTests(definition, [{ name: "runs", input, mocks: { read: null }, expect: { output: null } }]);
-`,
-});
-
-/** A builder's App listening for new mail on their own connection. */
+/**
+ * A builder's inbox workflow, started by their connector trigger on new
+ * mail in their own connection's mailbox, which an admin let start the
+ * workflow and hear the connection.
+ */
 const listening = async () => {
-  const builder = await personApi("builder");
+  const builder = await signedIn("builder");
   const connection = await connectOwn(builder);
-  const app = await appWith(builder, inbox());
+  const workflow = await publishedWorkflow(builder, inboxOf);
+  const trigger = await builder.api.workflowResources.triggers.create({
+    kind: "connector",
+    workflowId: workflow.id,
+    version: 1,
+    config: {
+      connection: { connectionId: connection },
+      event: "m365.mail.received",
+      input: { fields: { id: "/id", subject: "/payload/subject" } },
+    },
+  });
+  const subject = { type: "trigger", triggerId: trigger.id } as const;
   await requestGranted(idp, builder, {
-    subject: { type: "app", appId: app },
+    subject,
+    object: { type: "workflow", workflowId: workflow.id },
+    actions: ["start"],
+    binding: `START_${unique().toUpperCase()}`,
+  });
+  await requestGranted(idp, builder, {
+    subject,
     object: { type: "connection", connectionId: connection },
     actions: ["mail.list"],
-    binding: "OUTLOOK",
+    binding: `HEAR_${unique().toUpperCase()}`,
   });
-  return { builder, connection, app, mailbox: String(builder.person.oid) };
+  return {
+    builder,
+    connection,
+    workflow: workflow.id,
+    trigger: trigger.id,
+    mailbox: String(builder.person.oid),
+  };
 };
 
 /** Where connect listens on `connection`: the event types. */
@@ -117,11 +157,24 @@ const aMinuteLater = async (): Promise<void> => {
   await connectDb().prepare("UPDATE event_sources SET poll_at = 0").run();
 };
 
-describe("connector events", () => {
-  afterEach(endLiveRuns);
+/** Every run of `workflow` so far, once each has ended. */
+const endedRuns = async (
+  builder: Person,
+  workflow: string
+): Promise<WorkflowResourceRun[]> => {
+  const runs = await builder.api.workflowResources.runs(workflow);
+  return await Promise.all(
+    runs.map(async ({ id }) => await endedRun(builder, workflow, id))
+  );
+};
 
+/** Outputs in the order of their mail's ID. */
+const byId = (a: unknown, b: unknown): number =>
+  JSON.stringify(a).localeCompare(JSON.stringify(b));
+
+describe("connector events", () => {
   it("start the listening workflow once for a new mail in its mailbox", async () => {
-    const { builder, connection, app, mailbox } = await listening();
+    const { builder, connection, workflow, mailbox } = await listening();
     await runMinuteTasks();
     const mail = invoiceMail(mailbox, 7, new Date().toISOString());
     await receive(mailbox, mail);
@@ -131,49 +184,83 @@ describe("connector events", () => {
     await receive(mailbox, { ...mail, isRead: true });
     await aMinuteLater();
     await runMinuteTasks();
-    const runs = await builder.api.workflows.list(app);
-
-    expect(runs).toHaveLength(1);
-    await finished(runs[0]?.id ?? "");
-    const { output } = await builder.api.workflows.status(runs[0]?.id ?? "");
-
-    expect(output).toStrictEqual({ id: mail.id, subject: "Invoice INV-7" });
+    const runs = await endedRuns(builder, workflow);
     const events = await allEvents();
 
-    expect(
-      events
+    expect({
+      runs: runs.map(({ status, output }) => ({ status, output })),
+      reads: events
         .filter(
           ({ action, target }) =>
             action.startsWith("connection.events.") && target?.id === connection
         )
-        .map(({ action, provenance }) => [action, provenance])
-    ).toStrictEqual([
-      ["connection.events.started", []],
-      ["connection.events.read", [mail.id]],
-      ["connection.events.read", [mail.id]],
-    ]);
+        .map(({ action, provenance }) => [action, provenance]),
+    }).toStrictEqual({
+      runs: [
+        {
+          status: "completed",
+          output: { id: mail.id, subject: "Invoice INV-7" },
+        },
+      ],
+      reads: [
+        ["connection.events.started", []],
+        ["connection.events.read", [mail.id]],
+        ["connection.events.read", [mail.id]],
+      ],
+    });
   });
 
   it("deliver only so many events a run, and the rest the next", async () => {
-    const { builder, app, mailbox } = await listening();
+    const { builder, workflow, mailbox } = await listening();
     await runMinuteTasks();
     await receive(mailbox, invoiceMail(mailbox, 1, new Date().toISOString()));
     await receive(mailbox, invoiceMail(mailbox, 2, new Date().toISOString()));
     await aMinuteLater();
     await runMinuteTasks({ CONNECTOR_EVENTS_PER_RUN: "1" });
-    const first = await builder.api.workflows.list(app);
+    const first = await endedRuns(builder, workflow);
     await runMinuteTasks({ CONNECTOR_EVENTS_PER_RUN: "1" });
-    const second = await builder.api.workflows.list(app);
+    const second = await endedRuns(builder, workflow);
 
-    expect([first.length, second.length]).toStrictEqual([1, 2]);
+    expect({
+      first: first.length,
+      second: second.map(({ output }) => output).toSorted(byId),
+    }).toStrictEqual({
+      first: 1,
+      second: [1, 2]
+        .map((n) => {
+          const { id, subject } = invoiceMail(mailbox, n, "");
+          return { id, subject };
+        })
+        .toSorted(byId),
+    });
   });
 
-  it("stop listening once the workflow no longer listens", async () => {
-    const { builder, connection, app } = await listening();
+  it("stop listening once the trigger is disabled, and listen again once it's enabled", async () => {
+    const { builder, connection, trigger } = await listening();
     await runMinuteTasks();
     const before = await sources(connection);
-    // The same workflow, started only by hand.
-    await release(builder, app, inbox(`[{ type: "manual" }]`));
+    await builder.api.workflowResources.triggers.setEnabled(trigger, false);
+    await runMinuteTasks();
+    const disabled = await sources(connection);
+    await builder.api.workflowResources.triggers.setEnabled(trigger, true);
+    await runMinuteTasks();
+
+    expect({
+      before,
+      disabled,
+      enabled: await sources(connection),
+    }).toStrictEqual({
+      before: ["m365.mail.received"],
+      disabled: [],
+      enabled: ["m365.mail.received"],
+    });
+  });
+
+  it("stop listening once the trigger is deleted", async () => {
+    const { builder, connection, trigger } = await listening();
+    await runMinuteTasks();
+    const before = await sources(connection);
+    await builder.api.workflowResources.triggers.delete(trigger);
     await runMinuteTasks();
 
     expect({ before, after: await sources(connection) }).toStrictEqual({
@@ -190,7 +277,7 @@ describe("connector events", () => {
     });
     const lookups = recorded.filter(
       ({ query }) =>
-        query.includes('"workflow_triggers"."event"') &&
+        query.includes('"trigger_resource_versions"."event_type"') &&
         query.includes('json_each("permissions"."actions")')
     );
     const plans = await Promise.all(

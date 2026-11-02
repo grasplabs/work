@@ -57,6 +57,12 @@ import {
   requireWorkflowRole,
 } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
+import { storeAlias } from "./workflow-store-host.ts";
+import {
+  callWorkflowStoreOperation,
+  workflowStoreOperationFor,
+} from "./workflow-store-operations.ts";
+import type { ServedWorkflowStoreOperation } from "./workflow-store-operations.ts";
 import { envelopedSchemaText } from "./workflows/connector-schemas.ts";
 
 // Approved bindings of independent workflows (platform specification 13.2):
@@ -379,13 +385,20 @@ const requireStoreOperationServes = async (
   key: string,
   target: Extract<WorkflowBindingTarget, { kind: "storeOperation" }>,
   version: number
-): Promise<{ served: ServedStoreOperation; consumer: StoreConsumer }> => {
+): Promise<{
+  served: ServedStoreOperation | ServedWorkflowStoreOperation;
+  consumer: StoreConsumer;
+}> => {
   const forWorkflow: StoreConsumer = {
     version,
     subject: { type: "workflow", id },
     permissionId: target.permissionId,
   };
-  const served = await storeOperationFor(env, forWorkflow, target.operation);
+  // An App's store, or a standalone workflow's (GRA-682): the same grant,
+  // the same exact contract, whichever owns it.
+  const served =
+    (await storeOperationFor(env, forWorkflow, target.operation)) ??
+    (await workflowStoreOperationFor(env, forWorkflow, target.operation));
   if (served === undefined) {
     throw invalid(
       "target.operation: The workflow holds no store permission listing it, or the store serves no such public query or mutation."
@@ -501,6 +514,33 @@ export const callApprovedStoreOperation = async (
     }
     throw error;
   }
+  const stillAllowed = async (): Promise<void> => {
+    await requireApprovalActive(env, id, version, approval.id);
+    await caller.stillAllowed?.();
+  };
+  if (!("release" in resolved.served)) {
+    // A workflow's store keeps no restricted flag of its own, so nothing
+    // would follow what a restricted run writes into it to the consumers
+    // that read it: a restricted run's call is refused, and recorded.
+    if (restrictedRun !== null) {
+      await auditStoreRefusal(env, {
+        actor: caller.actor,
+        consumer: resolved.consumer,
+        operation: target.operation,
+        storeId: resolved.served.storeId,
+        reason: "store.restricted_caller",
+        requestId: caller.requestId,
+      });
+      throw operationErrors.create("resource.unavailable");
+    }
+    return await callWorkflowStoreOperation(
+      env,
+      resolved.consumer,
+      resolved.served,
+      args,
+      { ...caller, stillAllowed }
+    );
+  }
   // A run that isn't restricted may not hold what a restricted store App
   // read: refused while the store's App is restricted, before the call
   // and again before its answer, or refusal, reaches the workflow (where
@@ -549,10 +589,7 @@ export const callApprovedStoreOperation = async (
         // Before each protected step, the approval as it stands now, then
         // the caller's own gate (its step's lease): one revoked or replaced
         // since the run froze it stops the next commit.
-        stillAllowed: async () => {
-          await requireApprovalActive(env, id, version, approval.id);
-          await caller.stillAllowed?.();
-        },
+        stillAllowed,
       }
     );
   } catch (error) {
@@ -713,6 +750,30 @@ const unprojected = (
     .where(and(eq(sdkResourceBindings.approvalId, approval), when));
 
 /**
+ * The definition of the store that serves `served` now, for the binding
+ * inventory: an App's default store as the App's current version binds it,
+ * or a standalone workflow's store as its owner's current version binds it
+ * (workflow-stores.ts, `store:<name>`).
+ */
+const servedDefinitionSql = (
+  served: ServedStoreOperation | ServedWorkflowStoreOperation
+): SQL =>
+  "owner" in served
+    ? sql`(SELECT store.target_version
+        FROM sdk_resource_bindings AS store
+        JOIN apps ON apps.id = store.resource_id
+          AND apps.current_version = store.resource_version
+        WHERE store.resource_id = ${served.owner}
+          AND store.kind = 'store' AND store.alias = 'default')`
+    : sql`(SELECT store.target_version
+        FROM sdk_resource_bindings AS store
+        JOIN workflow_resources ON workflow_resources.id = store.resource_id
+          AND workflow_resources.current_version = store.resource_version
+        WHERE store.resource_id = ${served.server.workflowId}
+          AND store.kind = 'store'
+          AND store.alias = ${storeAlias(served.server.name)})`;
+
+/**
  * Approves `input` for workflow `id`, for `by`, one of the organization's
  * own admins: the alias, its target and the version they reviewed, which
  * must declare the alias as a catalog binding of the target's kind, and
@@ -825,12 +886,7 @@ export const approveWorkflowBinding = async (
             .update(sdkResourceBindings)
             .set({
               targetId: served.storeId,
-              targetVersion: sql`(SELECT store.target_version
-                FROM sdk_resource_bindings AS store
-                JOIN apps ON apps.id = store.resource_id
-                  AND apps.current_version = store.resource_version
-                WHERE store.resource_id = ${served.owner}
-                  AND store.kind = 'store' AND store.alias = 'default')`,
+              targetVersion: servedDefinitionSql(served),
               targetPath: target.operation,
               approvalId: row.id,
             })
