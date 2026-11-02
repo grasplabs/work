@@ -44,9 +44,9 @@ import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
-import { streamText } from "./model-provider.ts";
 import type { Answer } from "./model-provider.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
+import { streamText } from "./provider-streams.ts";
 import {
   openRpc,
   outcome,
