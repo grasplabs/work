@@ -197,6 +197,7 @@ const RuleField = ({
   value,
   min,
   max,
+  step = 1,
   onChange,
 }: {
   label: string;
@@ -204,6 +205,8 @@ const RuleField = ({
   value: number;
   min: number;
   max: number;
+  /** A share in percent takes one decimal; counts stay whole. */
+  step?: number;
   onChange: (value: number) => void;
 }) => {
   const id = useId();
@@ -218,6 +221,7 @@ const RuleField = ({
         onChange={(event) => {
           onChange(event.target.valueAsNumber);
         }}
+        step={step}
         type="number"
         value={Number.isNaN(value) ? "" : value}
       />
@@ -313,6 +317,7 @@ const Rules = ({
             onChange={(share) => {
               set({ stopShare: share / 100 });
             }}
+            step={0.1}
             value={Math.round(draft.stopShare * 1000) / 10}
           />
           <RuleField
