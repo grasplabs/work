@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7fca4242-f635-4c86-ae29-458f0bb2db0f",
+  "id": "330c32b1-9c50-482f-863f-26fdfd603558",
   "prevId": "8b2800ed-df11-4e09-9a4a-5fefb1d3a14a",
   "tables": {
     "access_revocations": {
@@ -2179,6 +2179,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "link": {
+          "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "removed_at": {
           "name": "removed_at",
           "type": "integer",
@@ -2208,7 +2215,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "apps_link": {
+          "name": "apps_link",
+          "columns": [
+            "link"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -11835,15 +11850,6 @@
           "isUnique": false,
           "where": "\"workflow_resource_runs\".\"status\" = 'starting'"
         },
-        "workflow_resource_runs_status_ended_idx": {
-          "name": "workflow_resource_runs_status_ended_idx",
-          "columns": [
-            "status",
-            "ended_at",
-            "id"
-          ],
-          "isUnique": false
-        },
         "workflow_resource_runs_newest_idx": {
           "name": "workflow_resource_runs_newest_idx",
           "columns": [
@@ -11866,8 +11872,7 @@
         "workflow_resource_runs_created_idx": {
           "name": "workflow_resource_runs_created_idx",
           "columns": [
-            "created_at",
-            "id"
+            "created_at"
           ],
           "isUnique": false
         }
