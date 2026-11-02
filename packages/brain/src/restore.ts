@@ -64,7 +64,11 @@ import { citedCollectionsOf, citesWrite } from "./memories.ts";
 // the source's purge ledger after the export's `createdAt` (GRA-333) or
 // accepts only a manifest Grasp signed. Its caller must also be an admin,
 // never staff, claim the empty target atomically, and audit who restored
-// what.
+// what. It must also run the restore as a job that goes on across calls,
+// as an export does (exports.ts `exportInvocationReads`): this runs in one
+// call, and each version it saves takes several subrequests (the save's
+// D1 statements, its text's upload, its time), so a company of any size
+// passes what one invocation may make.
 
 const manifestSchema = z.object({
   signature: z.string(),

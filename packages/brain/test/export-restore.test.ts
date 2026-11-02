@@ -16,6 +16,7 @@ import { sha256Hex, toBase64Url } from "../src/encoding.ts";
 import {
   advanceExport,
   exportFile,
+  exportFileReads,
   exportStatus,
   manifestName,
   prepareExport,
@@ -41,22 +42,28 @@ const noHost = {
   files: [],
 };
 
-/** An export of `brain`, written whole; its ID. */
+/**
+ * An export of `brain`, written whole, a call at a time as the host's
+ * clock calls it (each within `exportInvocationReads`); its ID.
+ */
 const exported = async (
   brain: ReturnType<typeof testHost>["brain"]
 ): Promise<string> => {
   const { token } = await prepareExport(brain, admin, noHost);
   const { exportId } = await startExport(brain, admin, token, noHost);
-  const done = await advanceExport(
-    brain,
-    exportId,
-    noHost,
-    new Date(Date.now() + 60_000)
-  );
-  if (!done) {
-    throw new Error("The export didn't finish");
+  for (let call = 0; call < 100; call += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after another
+    const done = await advanceExport(
+      brain,
+      exportId,
+      noHost,
+      new Date(Date.now() + 60_000)
+    );
+    if (done) {
+      return exportId;
+    }
   }
-  return exportId;
+  throw new Error("The export didn't finish");
 };
 
 /** Export `exportId`'s files, as its admin downloads them, by name. */
@@ -484,6 +491,64 @@ describe("restoring an export of the company's Brain", () => {
         currentVersion: versionCount,
         whole: true,
         transcript: { version: versionCount, holds: true },
+      });
+    }
+  );
+
+  it(
+    "restores a document of many small versions the export split by reads whole",
+    { timeout: 60_000 },
+    async () => {
+      const source = testHost().brain;
+      const u = crypto.randomUUID().slice(0, 8);
+      const notes = await newCollection(source, `Notes ${u}`);
+      // More versions than one file of the export reads (`exportFileReads`).
+      const versionCount = exportFileReads + 50;
+      const textOf = (number: number) => `# Log ${u}\nEntry ${String(number)}.`;
+      let sourceId = "";
+      for (let number = 1; number <= versionCount; number += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one version after another
+        const saved = await writeVersion(source, admin, {
+          collection: notes,
+          path: `log-${u}.md`,
+          text: textOf(number),
+          ifVersion: number - 1,
+          message: null,
+          restoredFrom: null,
+        });
+        sourceId = saved.id;
+      }
+      const exportId = await exported(source);
+      const bundle = await bundleOf(source, exportId);
+      const split = [...bundle].filter(
+        ([name, text]) =>
+          name.startsWith("documents-") && text.includes(sourceId)
+      ).length;
+
+      const target = testHost(undefined, {}, env.RESTORED).brain;
+      await target.db.delete(brainMemoryCites);
+      await target.db.delete(brainMemories);
+      await target.db.delete(collections);
+      await restoreExport(target, admin, readerOf(bundle));
+      const [document] = await target.db
+        .select()
+        .from(documents)
+        .where(eq(documents.path, `log-${u}.md`));
+      const texts = await Promise.all(
+        Array.from(
+          { length: versionCount },
+          async (_, index) =>
+            await versionText(target, target.db, document?.id ?? "", index + 1)
+        )
+      );
+      expect({
+        split: split > 1,
+        currentVersion: document?.currentVersion,
+        whole: texts.every((text, index) => text === textOf(index + 1)),
+      }).toStrictEqual({
+        split: true,
+        currentVersion: versionCount,
+        whole: true,
       });
     }
   );
