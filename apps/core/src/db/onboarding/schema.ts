@@ -329,18 +329,6 @@ export const events = sqliteTable("events", {
 });
 
 /**
- * Grasp's staff's own notes on the onboarding, which nothing reads or
- * writes any more. Kept while the release before still uses it (expand,
- * then contract); dropped in a follow-up once this one is deployed.
- */
-export const notes = sqliteTable("notes", {
-  id: integer().primaryKey({ autoIncrement: true }),
-  at: text().notNull(),
-  by: text().notNull(),
-  text: text().notNull(),
-});
-
-/**
  * The kickoff, one row: Grasp's first conversation with the sponsor, as
  * staff brought it in, Stephen's reading of it (JSON, `KickoffReading`),
  * and the sponsor's answers to what it left open (JSON, by field). Only
