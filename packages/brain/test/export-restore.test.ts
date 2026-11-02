@@ -9,6 +9,7 @@ import {
   brainMemoryCites,
   collections,
   documents,
+  transcripts,
 } from "../src/db/schema.ts";
 import { versionText, writeVersion } from "../src/documents.ts";
 import { sha256Hex, toBase64Url } from "../src/encoding.ts";
@@ -81,6 +82,10 @@ const readerOf =
   (bundle: ReadonlyMap<string, string>) =>
   async (name: string): Promise<string | null> =>
     await Promise.resolve(bundle.get(name) ?? null);
+
+/** Version `number` of a long ledger: near the most a version holds. */
+const ledgerText = (number: number) =>
+  `# Ledger ${String(number)}\n${"x".repeat(1_000_000)}`;
 
 /** A refusal's code, or `ok`. */
 const codeOf = async (call: Promise<unknown>): Promise<string> => {
@@ -405,4 +410,81 @@ describe("restoring an export of the company's Brain", () => {
       written: 0,
     });
   });
+
+  // Nine versions of a megabyte each, written and restored one by one.
+  it(
+    "restores a document whose history the export split across files whole, with every version and its transcript",
+    { timeout: 60_000 },
+    async () => {
+      const source = testHost().brain;
+      const u = crypto.randomUUID().slice(0, 8);
+      const archive = await newCollection(source, `Archive ${u}`);
+      // More history than one file of the export holds (`documentsFileBytes`).
+      const versionCount = 9;
+      let sourceId = "";
+      for (let number = 1; number <= versionCount; number += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one version after another
+        const saved = await writeVersion(source, admin, {
+          collection: archive,
+          path: `ledger-${u}.md`,
+          text: ledgerText(number),
+          ifVersion: number - 1,
+          message: null,
+          restoredFrom: null,
+          ...(number === versionCount
+            ? {
+                transcript: {
+                  turns: [{ speaker: "Ada", text: `Closed ${u}.`, startMs: 0 }],
+                  chapters: [],
+                },
+              }
+            : {}),
+        });
+        sourceId = saved.id;
+      }
+      const exportId = await exported(source);
+      const bundle = await bundleOf(source, exportId);
+      const split = [...bundle].filter(
+        ([name, text]) =>
+          name.startsWith("documents-") && text.includes(sourceId)
+      ).length;
+
+      const target = testHost(undefined, {}, env.RESTORED).brain;
+      // Emptied of what a restore before this one wrote.
+      await target.db.delete(brainMemoryCites);
+      await target.db.delete(brainMemories);
+      await target.db.delete(collections);
+      await restoreExport(target, admin, readerOf(bundle));
+      const [document] = await target.db
+        .select()
+        .from(documents)
+        .where(eq(documents.path, `ledger-${u}.md`));
+      const id = document?.id ?? "";
+      const texts = await Promise.all(
+        Array.from(
+          { length: versionCount },
+          async (_, index) =>
+            await versionText(target, target.db, id, index + 1)
+        )
+      );
+      const [transcript] = await target.db
+        .select()
+        .from(transcripts)
+        .where(eq(transcripts.documentId, id));
+      expect({
+        split: split > 1,
+        currentVersion: document?.currentVersion,
+        whole: texts.every((text, index) => text === ledgerText(index + 1)),
+        transcript: {
+          version: transcript?.version,
+          holds: transcript?.turns.includes(`Closed ${u}.`),
+        },
+      }).toStrictEqual({
+        split: true,
+        currentVersion: versionCount,
+        whole: true,
+        transcript: { version: versionCount, holds: true },
+      });
+    }
+  );
 });

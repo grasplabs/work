@@ -89,21 +89,21 @@ const collectionRowSchema = z.object({
   createdAt: z.iso.datetime(),
 });
 
+const versionRowSchema = z.object({
+  number: z.int().min(1),
+  author: z.string(),
+  message: z.string().nullable(),
+  restoredFrom: z.int().nullable(),
+  createdAt: z.iso.datetime(),
+  text: z.string().nullable(),
+});
+
 const documentRowSchema = z.object({
   id: z.string(),
   collectionId: z.string(),
   path: z.string(),
   createdAt: z.iso.datetime(),
-  versions: z.array(
-    z.object({
-      number: z.int().min(1),
-      author: z.string(),
-      message: z.string().nullable(),
-      restoredFrom: z.int().nullable(),
-      createdAt: z.iso.datetime(),
-      text: z.string().nullable(),
-    })
-  ),
+  versions: z.array(versionRowSchema),
   transcript: z
     .object({
       version: z.int(),
@@ -112,6 +112,15 @@ const documentRowSchema = z.object({
     })
     .nullable(),
 });
+
+/**
+ * A line of a documents file: a document's first, or one that continues
+ * it with the versions that follow (exports.ts `documentsFile`).
+ */
+const documentsLineSchema = z.union([
+  z.object({ continues: z.string(), versions: z.array(versionRowSchema) }),
+  documentRowSchema,
+]);
 
 const memoryRowSchema = z.object({
   id: z.string(),
@@ -254,6 +263,34 @@ const replayed = (
 
 type DocumentRow = z.infer<typeof documentRowSchema>;
 type CollectionRow = z.infer<typeof collectionRowSchema>;
+
+/**
+ * The documents of the bundle's documents files, in order, each with the
+ * versions of every line that continues it, in this file or a later one.
+ * A line that continues no document before it is refused; versions lost
+ * or repeated on the way are refused after (`restoreExport`).
+ */
+const documentsOf = (files: ReadonlyMap<string, string>): DocumentRow[] => {
+  const lines = [...files]
+    .filter(([name]) => name.startsWith("documents-"))
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .flatMap(([, text]) => rowsOf(text, documentsLineSchema));
+  const byId = new Map<string, DocumentRow>();
+  for (const line of lines) {
+    if ("continues" in line) {
+      const document = byId.get(line.continues);
+      if (document === undefined) {
+        throw refused();
+      }
+      document.versions.push(...line.versions);
+    } else if (byId.has(line.id)) {
+      throw refused();
+    } else {
+      byId.set(line.id, { ...line, versions: [...line.versions] });
+    }
+  }
+  return [...byId.values()];
+};
 
 /**
  * Restores `document`'s versions in order, each with its author and
@@ -434,9 +471,7 @@ export const restoreExport = async <C>(
     collectionRowSchema
   );
   const known = new Map(restoredCollections.map((row) => [row.id, row]));
-  const documentRows = [...files]
-    .filter(([name]) => name.startsWith("documents-"))
-    .flatMap(([, text]) => rowsOf(text, documentRowSchema));
+  const documentRows = documentsOf(files);
   if (documentRows.some(({ collectionId }) => !known.has(collectionId))) {
     throw refused();
   }
