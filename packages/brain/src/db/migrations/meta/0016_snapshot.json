@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e836a430-f36f-47f8-a69e-fd6e26c9e30d",
+  "id": "9ea47a8c-234d-4228-883a-ae280c1daa3b",
   "prevId": "036914b9-eb2f-47fa-a6f0-674bc77f082e",
   "tables": {
     "audit_outbox": {
@@ -809,6 +809,13 @@
     "brain_erased_documents": {
       "name": "brain_erased_documents",
       "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
         "purge_id": {
           "name": "purge_id",
           "type": "text",
@@ -846,6 +853,14 @@
         }
       },
       "indexes": {
+        "brain_erased_documents_purge_document_idx": {
+          "name": "brain_erased_documents_purge_document_idx",
+          "columns": [
+            "purge_id",
+            "document_id"
+          ],
+          "isUnique": true
+        },
         "brain_erased_documents_place_idx": {
           "name": "brain_erased_documents_place_idx",
           "columns": [
@@ -855,15 +870,7 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "brain_erased_documents_purge_id_document_id_pk": {
-          "columns": [
-            "purge_id",
-            "document_id"
-          ],
-          "name": "brain_erased_documents_purge_id_document_id_pk"
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

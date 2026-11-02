@@ -31,8 +31,8 @@ import { sha256Hex } from "./encoding.ts";
 // rewrites not yet done) counts as after the mark: the mark stops below
 // its records, so a copy read from what it hasn't rewritten yet is found
 // too. One that stopped without saying it was done counts as running for
-// `runningPurgeMs` at most. The mark is the records' own sequence (their
-// rowid), not a time: two isolates' clocks may differ, the database's
+// `runningPurgeMs` at most. The mark is the records' own sequence (`seq`,
+// AUTOINCREMENT, never used twice), not a time: two isolates' clocks may differ, the database's
 // order doesn't. Nothing of what was erased is kept: IDs and hashes of
 // places alone.
 
@@ -82,9 +82,11 @@ const erasedDocumentsWrite = async (
 
 /**
  * The statements that record `documents` as erased by purge `purgeId`
- * anew, for an attempt at it (purge-ledger.ts): its records from an
- * attempt before go, so they come after any mark taken since, and count
- * as running again.
+ * anew, for an attempt at it (purge-ledger.ts): written again, they come
+ * after any mark taken since (their sequence is never one used before)
+ * and count as running again. Its records from an attempt before go in
+ * the same batch, so a purge keeps one record a document, however often
+ * it is run.
  */
 export const erasedDocumentsRecord = async (
   db: DrizzleD1Database,
@@ -127,8 +129,12 @@ export const erasedDocumentsDone = (
  */
 export const runningPurgeMs = 60 * 60 * 1000;
 
-/** The rowid of an erasure record: its place in the order they were written. */
-const sequence = sql<number>`${brainErasedDocuments}.rowid`;
+/**
+ * An erasure record's place in the order they were written: AUTOINCREMENT,
+ * so one written after a mark is always above it, also when the records
+ * of an attempt before were deleted (`erasedDocumentsRecord`).
+ */
+const sequence = brainErasedDocuments.seq;
 
 /**
  * How far the erasure records reach as a copy starts reading its
