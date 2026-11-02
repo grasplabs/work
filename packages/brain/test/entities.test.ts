@@ -1643,8 +1643,48 @@ describe("entity linking", () => {
         documents: record.documentIds?.length,
       }))
     ).toStrictEqual([
-      { caller: "admin", read: "entity_matches", documents: 2 },
+      // Both sides' sources, and the evidence the match rests on.
+      { caller: "admin", read: "entity_matches", documents: 3 },
     ]);
+  });
+
+  it("restricts a delegate that reads a match whose evidence is in a sensitive collection", async () => {
+    const { host, pair, sales, support } = await adaTwice();
+    const hr = await ensureCollection(
+      host.brain,
+      {
+        id: crypto.randomUUID(),
+        name: "HR",
+        description: "",
+        owner: "owner",
+        access: "everyone",
+        sensitive: true,
+        source: "here",
+        createdAt: new Date(),
+      },
+      { type: "person", userId: "owner" }
+    );
+    const note = await save(host, hr, "note.md", "Both calls were hers.");
+    const all = [sales.id, support.id, hr.id];
+    await decideEntityMatch(
+      host.brain,
+      { userId: "hr-lead", reads: all },
+      {
+        entities: pair,
+        decision: "same",
+        evidence: { documentId: note.id, version: 1 },
+      }
+    );
+    // An agent granted both sides and the HR note.
+    const delegate: Caller = { userId: "agent", reads: all };
+    const before = host.restricted.has("agent");
+    const matched = await sameAsFor(host.brain, delegate, pair[0]);
+
+    expect({
+      before,
+      matched,
+      after: host.restricted.has("agent"),
+    }).toStrictEqual({ before: false, matched: [pair[1]], after: true });
   });
 
   it("forgets a `same` whose evidence a purge rewrites, though both entities stay", async () => {

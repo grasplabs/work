@@ -1593,26 +1593,52 @@ const readableMentions = async <C>(
   ].slice(0, readRowsMax);
 };
 
-/** Tells the host what a read of mentions returned (its `onRead` port). */
+/** A document a read rests on besides its mentions: a match's evidence. */
+interface ReadEvidence {
+  documentId: string;
+  collectionId: string;
+  sensitive: boolean;
+}
+
+/**
+ * Tells the host what a read of mentions returned (its `onRead` port),
+ * with the documents it rested on (`evidence`), each collection with its
+ * sensitivity: mentions are read only from collections that aren't
+ * sensitive, but a match's evidence may be in one, and restricts the
+ * reader as reading it would.
+ */
 const noteRead = async <C>(
   brain: Brain<C>,
   reader: C,
   read: string,
-  rows: readonly ReadableMention[]
+  rows: readonly ReadableMention[],
+  evidence: readonly ReadEvidence[] = []
 ): Promise<void> => {
-  const collectionIds = [
-    ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
-  ];
+  const sensitivity = new Map<string, boolean>();
+  for (const { collectionId } of rows) {
+    if (collectionId !== null) {
+      sensitivity.set(collectionId, false);
+    }
+  }
+  for (const { collectionId, sensitive } of evidence) {
+    sensitivity.set(
+      collectionId,
+      sensitive || (sensitivity.get(collectionId) ?? false)
+    );
+  }
   await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
       documentIds: [
-        ...new Set(rows.flatMap(({ documentId }) => documentId ?? [])),
+        ...new Set([
+          ...rows.flatMap(({ documentId }) => documentId ?? []),
+          ...evidence.map(({ documentId }) => documentId),
+        ]),
       ].slice(0, 20),
       detail: { read, mentions: rows.length },
     },
-    ...collectionIds.map((id) => ({ id, sensitive: false }))
+    ...[...sensitivity].map(([id, sensitive]) => ({ id, sensitive }))
   );
 };
 
@@ -2403,20 +2429,34 @@ export const sameAsFor = async <C>(
   // Every direct decision, a page at a time, so none is dropped before
   // the visibility check.
   const readable: string[] = [];
-  // What the read showed, for the host's record of it (`noteRead`).
+  // What the read showed, for the host's record of it (`noteRead`): the
+  // mentions, and the evidence each shown match rests on.
   const shown: ReadableMention[] = [];
+  const evidence: ReadEvidence[] = [];
   const allowed = await allowedFor(brain.ports, reader);
   let after: { a: string; b: string } | undefined;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, keyset-ordered
     const page = await brain.db
-      .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
+      .select({
+        a: brainEntityMatches.entityA,
+        b: brainEntityMatches.entityB,
+        documentId: documents.id,
+        collectionId: collections.id,
+        sensitive: collections.sensitive,
+      })
       .from(brainEntityMatches)
+      // A `same` only for a reader of its evidence (`readableEvidence`).
+      .innerJoin(
+        documents,
+        eq(documents.id, brainEntityMatches.evidenceDocumentId)
+      )
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
       .where(
         and(
           eq(brainEntityMatches.decision, "same"),
           sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`,
-          readableEvidence(brain, allowed),
+          allowed.documents(),
           after === undefined
             ? undefined
             : sql`(${brainEntityMatches.entityA}, ${brainEntityMatches.entityB}) > (${after.a}, ${after.b})`
@@ -2438,6 +2478,15 @@ export const sameAsFor = async <C>(
     }
     const counterparts = others.filter((id) => sides.has(id));
     readable.push(...counterparts);
+    evidence.push(
+      ...page
+        .filter(({ a, b }) => sides.has(a === entityId ? b : a))
+        .map(({ documentId, collectionId, sensitive }) => ({
+          documentId,
+          collectionId,
+          sensitive,
+        }))
+    );
     const read = new Set([entityId, ...counterparts]);
     shown.push(
       ...rows.filter((row) => row.entityId !== null && read.has(row.entityId))
@@ -2449,7 +2498,7 @@ export const sameAsFor = async <C>(
   }
   // Recorded as the other entity reads are: who read which identification,
   // from which collections.
-  await noteRead(brain, reader, "entity_matches", shown);
+  await noteRead(brain, reader, "entity_matches", shown, evidence);
   return readable.toSorted();
 };
 
