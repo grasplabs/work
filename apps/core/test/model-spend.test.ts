@@ -1,7 +1,11 @@
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -14,13 +18,18 @@ import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  endedRun,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  publishedWorkflow,
+  startedBy,
+} from "./json-workflow-apps.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { plan } from "./platform-providers.ts";
 import { streamText } from "./provider-streams.ts";
-import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Model spend, counted by the model ledger: every provider request is
 // admitted before it is sent, counted against all of its scopes at once,
@@ -29,7 +38,10 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // behind connect is the outside system (test/model-provider.ts). The
 // ledger, the audit log and the runs are real; where a test needs the
 // ledger to fail, its binding fails, as an unreachable Durable Object
-// would.
+// would. A run's calls are made as a JSON workflow's run makes them
+// (resource-calls.ts). An App workflow's run making a call on Grasp's own
+// key, counted as a request of its lineage, went with App workflows: no
+// JSON workflow's run makes one.
 
 const idp = mockIdp();
 
@@ -320,78 +332,34 @@ describe("model spend", { timeout: 60_000 }, () => {
     });
   });
 
-  it("count a run's call on Grasp's own key as a request of its lineage, never as money of the run's", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
-    const run = await builder.api.workflows.start(app, "idle");
-    await finished(run.id);
-    const month = newMonth();
-    const rulesEnv: Env = { ...env, MODEL_BUDGET_MONTH: month };
-    await plan(platformOpenAiKey, [
-      {
-        sse: streamText("openai-responses", {
-          text: "# Expense policy",
-          inputTokens: 2000,
-          outputTokens: 100,
-        }),
-      },
-    ]);
-
-    // A document the run's step converts, on Grasp's key.
-    const converted = await outcome(
-      models(rulesEnv).platformCall({
-        model: "openai/gpt-5.4-mini",
-        purpose: "knowledge.conversion",
-        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
-        work: { platform: "document_conversion" },
-        input: "Write out this document as Markdown.",
-        document: {
-          name: "policy.pdf",
-          mediaType: "application/pdf",
-          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
-        },
-      })
-    );
-    const { run: lineage = [] } = await modelLedger(env).spendOf(
-      month,
-      ["run"],
-      10
-    );
-    const grasp = await modelLedger(env).platformSpend([month]);
-
-    expect({
-      converted,
-      // Counted in the lineage, as a request: no money spent there.
-      run: lineage
-        .filter(({ key }) => key === run.id)
-        .map(({ spentMicros }) => spentMicros),
-      grasp: grasp.some(({ micros }) => micros > 0),
-    }).toStrictEqual({ converted: "ok", run: [0], grasp: true });
-  });
-
   it("count the calls an agent or a run makes for a person as that person's spend", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
-    const run = await builder.api.workflows.start(app, "idle");
-    await finished(run.id);
-    const appId = appIdSchema.parse(app);
+    const builder = await jsonWorkflowAppsOf(idp).signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks());
+    const run = await startedBy(builder, id);
+    await endedRun(builder, id, run);
+    const workflowId = workflowResourceIdSchema.parse(id);
     const { call, month } = withProvider(times(3, pricedAnswer));
     const ada = { type: "person", userId: builder.userId } as const;
     const forAda = [
       hello({
         trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
       }),
+      // As a JSON workflow's run makes it, for whom it acts.
       hello({
         purpose: "workflow.step",
-        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
+        trigger: { type: "system" },
+        lineage: { rootRunId: run, workflowId: id },
         work: {
           authority: {
-            subject: { type: "app", appId },
+            subject: { type: "workflow", workflowId },
             onBehalfOf: ada.userId,
             mode: "workflow",
-            appVersion: 1,
           },
-          context: { type: "run", appId, runId: runIdSchema.parse(run.id) },
+          context: {
+            type: "workflowRun",
+            workflowId,
+            runId: runIdSchema.parse(run),
+          },
         },
       }),
       hello({ trigger: ada }),
