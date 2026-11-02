@@ -257,6 +257,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         ),
         depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
         stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
+        stopTakenAt: sql<null>`NULL`.as("stop_taken"),
         controlGeneration: sql<number>`0`.as("control_generation"),
         summaryRevision: sql<number>`0`.as("summary_revision"),
         compensation: sql<null>`NULL`.as("compensation"),
@@ -1855,8 +1856,9 @@ export const stopRunsStartedBy = async (
  * person-erasure.ts): each as a builder's stop is, audited under `actor`,
  * claimed first so no pass asks it twice. A stop that fails is logged and
  * left to the next pass. Answers how many it asked to stop, and how many
- * unfinished runs of theirs a stop is still due for: never asked, or
- * claimed so long ago that the stop may never have been sent (`stopDue`).
+ * unfinished runs of theirs no stop was taken for yet (`stopTakenAt`):
+ * never asked, or claimed by a pass that may have died before sending it,
+ * which a pass asks again once the claim is old (`stopDue`).
  */
 export const stopRunsFor = async (
   env: Env,
@@ -1888,6 +1890,11 @@ export const stopRunsFor = async (
     try {
       // oxlint-disable-next-line no-await-in-loop -- one run at a time
       await stopResourceRun(env, actor, run);
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopTakenAt: new Date() })
+        .where(eq(workflowResourceRuns.id, run.id));
       asked += 1;
     } catch (error) {
       log.error("workflow.erasure_stop_failed", {
@@ -1909,7 +1916,7 @@ export const stopRunsFor = async (
   const [left] = await db
     .select({ count: sql<number>`count(*)` })
     .from(workflowResourceRuns)
-    .where(and(ofTheirs, stopDue()));
+    .where(and(ofTheirs, isNull(workflowResourceRuns.stopTakenAt)));
   return { asked, unasked: left?.count ?? 0 };
 };
 

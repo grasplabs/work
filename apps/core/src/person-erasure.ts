@@ -207,7 +207,8 @@ const identity: ErasureStep = {
  * goes on running for someone erased: every unfinished run of theirs, of
  * an App's workflow or an independent one, is cancelled or stopped as a
  * builder's is, audited, for the admin who asked. The area is complete
- * once each was asked to end; the engine ends it. A run that starts for
+ * once each one's cancel or stop was taken, never on a stop claimed by a
+ * pass that died before sending it; the engine ends it. A run that starts for
  * them after (a trigger of an App they own, a schedule of theirs) does
  * nothing: every step of every run checks first that the person it acts
  * for is still a member (`requireActivePerson`, the hosts'
