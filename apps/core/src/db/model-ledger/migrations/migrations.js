@@ -13,6 +13,7 @@ import m0010 from './0010_provider_failing_since.sql';
 import m0011 from './0011_request_scopes_recorded.sql';
 import m0012 from './0012_drop_budgets.sql';
 import m0013 from './0013_drop_quota_policy.sql';
+import m0014 from './0014_drop_model_queue.sql';
 
   export default {
     journal,
@@ -30,7 +31,8 @@ m0009,
 m0010,
 m0011,
 m0012,
-m0013
+m0013,
+m0014
     }
   }
   
