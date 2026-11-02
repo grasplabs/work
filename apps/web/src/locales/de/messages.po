@@ -2277,6 +2277,10 @@ msgstr "Notiz hinzufügen"
 msgid "Add one so invoices are paid when they come."
 msgstr "Fügen Sie eine hinzu, damit Rechnungen gleich bezahlt werden."
 
+#: src/activity/pending.tsx
+msgid "add records to {tables}"
+msgstr "Datensätze zu {tables} hinzufügen"
+
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Etwas ergänzen"
@@ -11197,6 +11201,14 @@ msgstr "Erneut lesen"
 msgid "Read an email attachment"
 msgstr "Einen E-Mail-Anhang gelesen"
 
+#: src/activity/pending.tsx
+msgid "read and change every record of {tables}"
+msgstr "jeden Datensatz von {tables} lesen und ändern"
+
+#: src/activity/pending.tsx
+msgid "read every record of {tables}"
+msgstr "jeden Datensatz von {tables} lesen"
+
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
@@ -13388,20 +13400,16 @@ msgid "Store {store}"
 msgstr "Speicher {store}"
 
 #: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. This can read and change every record of {changes}, whoever owns it"
-msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {changes} lesen und ändern, egal wem er gehört"
-
-#: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. This can read every record of {reads}, and read and change every record of {changes}, whoever owns it"
-msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} lesen und jeden Datensatz von {changes} lesen und ändern, egal wem er gehört"
-
-#: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
-msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} lesen, egal wem er gehört"
+msgid "Store {store}, a workflow's. This can {what}"
+msgstr "Speicher {store} eines Workflows. Dies kann: {what}"
 
 #: src/activity/pending.tsx
 msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
 msgstr "Speicher {store} eines Workflows. Was diese Vorgänge erreichen, kann gerade nicht angezeigt werden"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
+msgstr "Speicher {store} eines Workflows. Egal wem die Datensätze gehören, dies kann: {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"

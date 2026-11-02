@@ -517,8 +517,12 @@ export interface Permission {
 export interface StoreReach {
   operation: string;
   table: string;
-  /** Whether it changes records too (an insert or patch), not only reads. */
-  changes: boolean;
+  /**
+   * What it does to the table's records: `reads` them (a get or a list),
+   * `adds` records (an insert), or `changes` them, reading them as it does
+   * (a patch).
+   */
+  access: "reads" | "adds" | "changes";
 }
 
 /**

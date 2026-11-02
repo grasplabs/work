@@ -2,6 +2,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type {
   Permission,
   PermissionSubject,
+  StoreReach,
 } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
@@ -94,29 +95,40 @@ const storeObject = (storeId: string, reach: Permission["reach"]): string => {
   }
   if (reach !== undefined) {
     // Consent in plain words: a workflow's store, whose operations reach
-    // every record of their tables, whoever owns it.
-    const reads = formatList([
-      ...new Set(
-        reach.filter(({ changes }) => !changes).map(({ table }) => table)
-      ),
+    // every record of their tables, whoever owns it, or add records to them.
+    const tablesThat = (access: StoreReach["access"]): string =>
+      formatList([
+        ...new Set(
+          reach
+            .filter((entry) => entry.access === access)
+            .map(({ table }) => table)
+        ),
+      ]);
+    const reads = tablesThat("reads");
+    const changes = tablesThat("changes");
+    const adds = tablesThat("adds");
+    const what = formatList([
+      ...(reads === ""
+        ? []
+        : [i18n._(msg`read every record of ${ph({ tables: reads })}`)]),
+      ...(changes === ""
+        ? []
+        : [
+            i18n._(
+              msg`read and change every record of ${ph({ tables: changes })}`
+            ),
+          ]),
+      ...(adds === ""
+        ? []
+        : [i18n._(msg`add records to ${ph({ tables: adds })}`)]),
     ]);
-    const changes = formatList([
-      ...new Set(
-        reach.filter(({ changes: writes }) => writes).map(({ table }) => table)
-      ),
-    ]);
-    const store = ph({ store: storeId });
-    if (changes === "") {
-      return i18n._(
-        msg`Store ${store}, a workflow's. This can read every record of ${reads}, whoever owns it`
-      );
-    }
-    return reads === ""
+    // Records it only adds are no one else's yet.
+    return reads === "" && changes === ""
       ? i18n._(
-          msg`Store ${store}, a workflow's. This can read and change every record of ${changes}, whoever owns it`
+          msg`Store ${ph({ store: storeId })}, a workflow's. This can ${ph({ what })}`
         )
       : i18n._(
-          msg`Store ${store}, a workflow's. This can read every record of ${reads}, and read and change every record of ${changes}, whoever owns it`
+          msg`Store ${ph({ store: storeId })}, a workflow's. Whoever owns the records, this can ${ph({ what })}`
         );
   }
   return i18n._(msg`Store ${ph({ store: storeId })}`);
