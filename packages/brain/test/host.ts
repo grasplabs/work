@@ -33,6 +33,8 @@ export interface Caller {
   only?: Readonly<Record<string, readonly string[]>>;
   /** The capabilities the host says they hold. */
   capabilities?: readonly string[];
+  /** Whether the host counts them an admin: they replace others' decisions. */
+  admin?: boolean;
 }
 
 /** A job the Brain asked its host to start. */
@@ -64,12 +66,18 @@ export const testHost = (
 ): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
+  /**
+   * The callers a read of a sensitive collection restricted, as core
+   * restricts an App or agent that reads one.
+   */
+  restricted: Set<string>;
   events: BrainEvent[];
   started: StartedJob[];
   /** What each lesson wording was asked from, in order. */
   worded: LessonFacts[];
 } => {
   const reads: { caller: string; record: ReadRecord }[] = [];
+  const restricted = new Set<string>();
   const events: BrainEvent[] = [];
   const started: StartedJob[] = [];
   const worded: LessonFacts[] = [];
@@ -81,6 +89,9 @@ export const testHost = (
       }),
     onRead: async (caller, record, ...sources) => {
       reads.push({ caller: caller.userId, record });
+      if (sources.some(({ sensitive }) => sensitive)) {
+        restricted.add(caller.userId);
+      }
       return await Promise.resolve({
         collectionIds: [...new Set(sources.map(({ id }) => id))].map((id) =>
           collectionIdSchema.parse(id)
@@ -128,6 +139,12 @@ export const testHost = (
     },
     mayRetire: async () => {
       await Promise.resolve();
+    },
+    mayReplaceMatch: async (caller, { decidedBy }) => {
+      await Promise.resolve();
+      if (caller.userId !== decidedBy && caller.admin !== true) {
+        throw brainErrors.create("brain.denied");
+      }
     },
     wordLesson: async (facts) => {
       worded.push(facts);
@@ -205,6 +222,7 @@ export const testHost = (
   return {
     brain: createBrain(env.BRAIN, ports),
     reads,
+    restricted,
     events,
     started,
     worded,
