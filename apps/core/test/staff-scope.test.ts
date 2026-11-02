@@ -5,7 +5,13 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { finished } from "./runs.ts";
+import {
+  endedRun,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  publishedWorkflow,
+} from "./json-workflow-apps.ts";
+import type { Person } from "./json-workflow-apps.ts";
 import { acmeTenant, clientOrigin, signInConfig } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -16,10 +22,10 @@ import {
   signedIn,
   signedInApi,
   staffPerson,
+  unique,
   whoami,
   withSignIn,
 } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Grasp's staff on a client's deployment (GRA-306; Nick, 2026-11-01): a
 // staff sign-in is for managing a deployment, never for acting inside the
@@ -89,28 +95,28 @@ const postedAs = async (
   return response.status;
 };
 
-/** How many runs of `app` anyone started, as core keeps them. */
-const runsOf = async (app: string): Promise<number> => {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS runs FROM workflow_runs WHERE app_id = ?"
-  )
-    .bind(app)
-    .first<{ runs: number }>();
-  return row?.runs ?? 0;
+const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
+
+/** How many runs of workflow `id` there are, as its builder lists them. */
+const runsOf = async (builder: Person, id: string): Promise<number> => {
+  const runs = await builder.api.workflowResources.runs(id);
+  return runs.length;
 };
 
-/** An App of a new builder's with one workflow, `report`, that finishes. */
-const reportApp = async (): Promise<string> => {
-  const builder = await signedInApi(idp, "builder");
-  return await appWith(
-    builder,
-    workflowFiles(
-      "report",
-      `  return await step.do("total", { description: "Read" }, async () => 1);`,
-      { total: 1 }
-    )
-  );
+/** A new builder's App, and their independent workflow that finishes. */
+const reportWorkflow = async () => {
+  const builder = await signedInPerson("builder");
+  const { id: app } = await builder.api.apps.create({ name: "Reports" });
+  const workflow = await publishedWorkflow(builder, greetingTasks());
+  return { builder, app, workflow: workflow.id };
 };
+
+/** A start of version 1, under a key of its own, as a session starts one. */
+const startOf = () => ({
+  version: 1,
+  input: { who: "Ada" },
+  key: unique(),
+});
 
 describe("a Grasp staff session, whatever its scope", () => {
   afterEach(reset);
@@ -156,13 +162,13 @@ describe("a Grasp staff session, whatever its scope", () => {
   });
 
   it("starts no run, asks no chat, calls no App function, creates no App and writes no Knowledge or Brain", async () => {
-    const app = await reportApp();
+    const { builder, app, workflow } = await reportWorkflow();
     const { session, api } = await staffOn(env);
     const { userId } = await api.whoami();
     const asScreen = { [screenPersonHeader]: userId };
 
     expect({
-      run: await outcome(api.workflows.start(app, "report")),
+      run: await outcome(api.workflowResources.start(workflow, startOf())),
       chat: await outcome(api.chats.create("Check")),
       send: await outcome(
         api.chats.send(crypto.randomUUID(), { text: "Hi", model: "any" })
@@ -180,7 +186,7 @@ describe("a Grasp staff session, whatever its scope", () => {
         asScreen
       ),
       token: await postedAs(`${appTokenPath}/${app}`, session),
-      runs: await runsOf(app),
+      runs: await runsOf(builder, workflow),
     }).toStrictEqual({
       run: "role.forbidden",
       chat: "role.forbidden",
@@ -199,7 +205,7 @@ describe("a Grasp staff session, whatever its scope", () => {
 
 describe("a Grasp staff member added as a member", () => {
   it("acts as that member when signed in as one, as their staff session can't", async () => {
-    const app = await reportApp();
+    const { builder, workflow } = await reportWorkflow();
     const { api: staff } = await staffOn(env);
     const added = entraPerson(acmeTenant, "acme.test", {
       name: "Grasp staff, added as a member",
@@ -209,12 +215,18 @@ describe("a Grasp staff member added as a member", () => {
     });
     const { core } = await openRpc(session);
     const member = core.authenticate();
-
-    const byStaff = await outcome(staff.workflows.start(app, "report"));
-    const run = await member.workflows.start(app, "report");
-    await finished(run.id);
-    const { status } = await member.workflows.status(run.id);
     const who = await whoami(session);
+    await builder.api.workflowResources.share(workflow, {
+      type: "person",
+      id: who.userId,
+      role: "user",
+    });
+
+    const byStaff = await outcome(
+      staff.workflowResources.start(workflow, startOf())
+    );
+    const { runId } = await member.workflowResources.start(workflow, startOf());
+    const { status } = await endedRun(builder, workflow, String(runId));
 
     expect({
       byStaff,
