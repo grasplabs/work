@@ -41,6 +41,15 @@ const detailKeyPattern = /^[a-z][a-zA-Z0-9_.]{0,63}$/u;
 const actionPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
 /**
+ * The Grasp staff member whose work an event was, on events kept before
+ * Grasp staff stopped starting work in a client's workspace. Nothing writes
+ * it any more; it stays so those events, and an outbox retry of one, read
+ * and compare exactly as they were kept (the chain refuses a retry whose
+ * JSON differs from the stored event).
+ */
+const legacyStaff = identifierSchema.optional();
+
+/**
  * Who did something: a person, an agent acting for one, part of an App (its
  * screens or server code), a workflow run, the platform itself, or Grasp
  * staff (whose access is always logged).
@@ -64,11 +73,13 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      * by its adapter's name; none in Grasp's own app.
      */
     via: chatPlatformSchema.optional(),
+    staff: legacyStaff,
   }),
   z.object({
     type: z.literal("app"),
     appId: appIdSchema,
     part: z.enum(["screen", "server"]),
+    staff: legacyStaff,
   }),
   z.object({
     type: z.literal("workflow"),
@@ -90,6 +101,7 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      * run charged to its lineage's own.
      */
     accountRunId: runIdSchema.optional(),
+    staff: legacyStaff,
   }),
   z.object({
     type: z.literal("staff"),
@@ -111,7 +123,7 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     appId: appIdSchema,
     invitedBy: identifierSchema,
   }),
-  z.object({ type: z.literal("system") }),
+  z.object({ type: z.literal("system"), staff: legacyStaff }),
 ]);
 export type AuditActor = z.infer<typeof auditActorSchema>;
 
