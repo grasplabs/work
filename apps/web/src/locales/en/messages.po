@@ -722,10 +722,6 @@ msgstr "{label} isn't answering since {since}."
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, on Grasp’s support site, in a new tab"
 
-#: src/activity/audit-log.tsx
-msgid "{label}, started by {name} (Grasp staff)"
-msgstr "{label}, started by {name} (Grasp staff)"
-
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -3282,6 +3278,14 @@ msgstr "At work"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Athens"
 msgstr "Athens"
+
+#: src/chat/chat-files.tsx
+msgid "Attach files"
+msgstr "Attach files"
+
+#: src/activity/audit-words.ts
+msgid "Attached a file to a chat"
+msgstr "Attached a file to a chat"
 
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
@@ -5942,6 +5946,10 @@ msgstr "Files and documents"
 msgid "Files its runs wrote"
 msgstr "Files its runs wrote"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Files to workflows"
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Fill this in."
@@ -5989,6 +5997,10 @@ msgstr "Finance and accounting"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Find a team or a person"
 msgstr "Find a team or a person"
+
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Find Stephen under Apps in your Slack workspace."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -7461,6 +7473,10 @@ msgstr "Its apps and workflows run on it from now on. Grasp checks and builds it
 msgid "Its bindings"
 msgstr "Its bindings"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7577,6 +7593,10 @@ msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped t
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Its screens and server code may hand files people can read to the workflows it binds"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -10124,6 +10144,7 @@ msgstr "Only your organization's admins can abandon a change to a store."
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Open"
 
@@ -10175,6 +10196,10 @@ msgstr "Open"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Open a chat with Stephen, or search for him in Teams’ apps."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -10248,6 +10273,10 @@ msgstr "Open since {date}. Until it is answered, this stays unknown, never zero.
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Open since Grasp's go on {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Open Stephen in {app}, in a new tab"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -11235,6 +11264,11 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Reading"
 
+#. Grasp reads a file the person attached; {file} is its name.
+#: src/chat/thread.tsx
+msgid "Reading {file}"
+msgstr "Reading {file}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Reading {name}"
@@ -11433,6 +11467,7 @@ msgstr "Remove {label}"
 msgid "Remove {label}?"
 msgstr "Remove {label}?"
 
+#: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 msgid "Remove {name}"
 msgstr "Remove {name}"
@@ -11484,6 +11519,10 @@ msgstr "Remove: {item}"
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Removed"
+
+#: src/activity/audit-words.ts
+msgid "Removed a file from a chat before sending it"
+msgstr "Removed a file from a chat before sending it"
 
 #: src/activity/audit-words.ts
 msgid "Removed a member"
@@ -16676,6 +16715,10 @@ msgstr "Where the work passes on"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Where the workflows stand"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Where to reach Stephen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"

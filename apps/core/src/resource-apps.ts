@@ -14,7 +14,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { findApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { actingPerson } from "./auth/identity.ts";
+import { memberOf } from "./auth/identity.ts";
 import { appResourceBindings } from "./db/core/schema.ts";
 import type {
   BindingCaller,
@@ -184,13 +184,7 @@ type Calling = BindingCaller & { readonly env: Env };
 
 /** Who `caller` acts for, to the called App: as core knows them now. */
 const personOf = async (caller: Calling) => {
-  // Work a Grasp staff member started acts as them while their staff
-  // session lasts (GRA-1088); the binding's approval still decides.
-  const person = await actingPerson(
-    caller.env,
-    caller.authority.onBehalfOf,
-    caller.authority.staff
-  );
+  const person = await memberOf(caller.env.DB, caller.authority.onBehalfOf);
   if (person === undefined) {
     throw operationErrors.create("resource.unavailable");
   }
@@ -260,7 +254,6 @@ const callFor = async (
     onBehalfOf: by.userId,
     mode: "interactive",
     appVersion: version,
-    ...(caller.authority.staff === true ? { staff: true as const } : {}),
   };
   const calleeContext: WorkContext = { type: "app", appId: callee };
   // Restricted mode follows the data both ways, each flag set before the
@@ -330,8 +323,6 @@ const callFor = async (
       ...(caller.cancelled === undefined
         ? {}
         : { cancelled: caller.cancelled }),
-      // The calling work's staff mark goes on to the called App (GRA-1088).
-      ...(caller.authority.staff === true ? { byStaff: true } : {}),
       ...runOriginField(caller),
       ...(caller.requireHolds === undefined
         ? {}

@@ -48,17 +48,19 @@ const day = "2026-10-14";
 
 /** Bakkerij with its orders drawn, and what Grasp counted as known by hand. */
 const drawnView = (counted: string[], work = orders): AdminView => {
-  const { org, state } = adminOrgOf(bothTalked, client, {
-    works: [work],
-    rules: STARTING_ORG_RULES,
-    counted,
-  });
+  const { org, state } = adminOrgOf(
+    {
+      ...bothTalked,
+      works: { works: [work], rules: STARTING_ORG_RULES, counted },
+    },
+    client
+  );
   return adminViewOf(org, state, day);
 };
 
 /** The section as it renders for `view`. */
 const sectionOf = (view: AdminView): string =>
-  renderToString(createElement(OrgWorkflows, { view }));
+  renderToString(createElement(OrgWorkflows, { view, clientId: "client" }));
 
 /** The table's row of the work named `name`. */
 const rowOf = (html: string, name: string): string => {
@@ -85,7 +87,7 @@ describe("an organization's workflows", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("says the work isn't known yet while the company's own Grasp doesn't draw it", async () => {
+  it("says none is named yet before a lead names the team's work", async () => {
     const acme = await liveClient();
     acme.account.admin = { ...emptyAdminSnapshot("Acme"), told: true };
 
@@ -97,7 +99,7 @@ describe("an organization's workflows", () => {
       status,
       title: html.includes("Workflows</h1>"),
       none: html.includes(
-        "Not known yet: the company’s own Grasp doesn’t draw the work from its interviews yet."
+        "None yet. A team’s work shows up here once its lead has named it."
       ),
       toCome: html.includes("This section isn’t in the admin yet."),
       table: html.includes("<table"),
@@ -130,7 +132,7 @@ describe("an organization's workflows", () => {
       figures: [true, true, true],
       // The head's row and one for the piece of work.
       rows: 2,
-      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped`,
+      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped Count as known Draw again`,
       // Its work is all one team's: no column to tell teams apart.
       teams: false,
       rules: true,

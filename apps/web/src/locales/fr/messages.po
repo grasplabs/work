@@ -722,10 +722,6 @@ msgstr "{label} ne répond plus depuis {since}."
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, sur le site d’assistance de Grasp, dans un nouvel onglet"
 
-#: src/activity/audit-log.tsx
-msgid "{label}, started by {name} (Grasp staff)"
-msgstr "{label}, à la demande de {name} (équipe Grasp)"
-
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -3282,6 +3278,14 @@ msgstr "À l’œuvre"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Athens"
 msgstr "Athènes"
+
+#: src/chat/chat-files.tsx
+msgid "Attach files"
+msgstr "Joindre des fichiers"
+
+#: src/activity/audit-words.ts
+msgid "Attached a file to a chat"
+msgstr "A joint un fichier à une discussion"
 
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
@@ -5942,6 +5946,10 @@ msgstr "Fichiers et documents"
 msgid "Files its runs wrote"
 msgstr "Fichiers écrits par ses exécutions"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Fichiers vers les workflows"
+
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Remplissez ce champ."
@@ -5989,6 +5997,10 @@ msgstr "Finance et comptabilité"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Find a team or a person"
 msgstr "Trouver une équipe ou une personne"
+
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Vous trouverez Stephen sous Apps dans votre espace de travail Slack."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -7461,6 +7473,10 @@ msgstr "Ses apps et workflows tournent dessus dès maintenant. Grasp la vérifie
 msgid "Its bindings"
 msgstr "Ses liaisons"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Son code ne peut pas être lu : ses écrans et son code serveur peuvent transmettre des fichiers que les personnes peuvent lire aux workflows qu'il lie"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7577,6 +7593,10 @@ msgstr "Ses exécutions n'arrivaient pas à démarrer, il n'en démarre donc plu
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Sa planification s’est arrêtée : son exécution n’a pas pu démarrer {maxFailedStarts} fois de suite. Elle reprend quand la planification est définie sous Paramètres, ou quand une nouvelle version du domaine devient actuelle."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Ses écrans et son code serveur peuvent transmettre des fichiers que les personnes peuvent lire aux workflows qu'il lie"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -10124,6 +10144,7 @@ msgstr "Seuls les admins de votre organisation peuvent abandonner une modificati
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Ouvrir"
 
@@ -10175,6 +10196,10 @@ msgstr "Ouvrir"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "Ouvrir {name}"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Ouvrez une conversation avec Stephen, ou cherchez-le parmi les apps de Teams."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -10248,6 +10273,10 @@ msgstr "Ouverte depuis le {date}. Tant qu’elle reste sans réponse, cette vale
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Ouvert depuis le feu vert de Grasp le {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Ouvrir Stephen dans {app}, dans un nouvel onglet"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -11235,6 +11264,11 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Lecture"
 
+#. Grasp reads a file the person attached; {file} is its name.
+#: src/chat/thread.tsx
+msgid "Reading {file}"
+msgstr "Lecture de {file}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Lecture de {name}"
@@ -11433,6 +11467,7 @@ msgstr "Retirer {label}"
 msgid "Remove {label}?"
 msgstr "Retirer {label} ?"
 
+#: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 msgid "Remove {name}"
 msgstr "Retirer {name}"
@@ -11484,6 +11519,10 @@ msgstr "Retirer : {item}"
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Supprimé"
+
+#: src/activity/audit-words.ts
+msgid "Removed a file from a chat before sending it"
+msgstr "A retiré un fichier d’une discussion avant de l’envoyer"
 
 #: src/activity/audit-words.ts
 msgid "Removed a member"
@@ -16676,6 +16715,10 @@ msgstr "Où le travail passe la main"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Où en sont les workflows"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Où joindre Stephen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"
