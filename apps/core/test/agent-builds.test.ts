@@ -113,6 +113,13 @@ const repair = `export default async (self, env) => {
   };
 };`;
 
+/** A diagnostic of the App's layout about `file`, as a check reports it. */
+const layout = (file: string | null) => ({
+  file,
+  rule: "server",
+  category: "structure",
+});
+
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
@@ -1220,6 +1227,114 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       app,
       versions: await person.api.apps.versions.list(app.id),
     }).toMatchObject({ app: { pendingVersion: null }, versions: [] });
+  });
+
+  it("type-checks a draft's server code as its seal would, with no preview open, and proposes nothing that fails it", async () => {
+    // Calls an internal operation by its reference, typed as the seal's
+    // generated references type it from the draft's own operations: what
+    // it answers is typed, and a wrong call fails.
+    const operations = `${(notesFiles["operations/notes.ts"] ?? "").replace(
+      "import { action, doc, mutation, query }",
+      'import { internal } from "#grasp/server-references";\nimport { action, doc, internalQuery, mutation, query }'
+    )}
+export const listAll = internalQuery({
+  args: {},
+  returns: v.array(doc("notes")),
+  handler: async (ctx) => await ctx.db.query("notes").take(100),
+});
+
+export const titles = action({
+  args: {},
+  returns: v.array(v.string()),
+  uses: [internal.notes.list],
+  handler: async (ctx) => (await ctx.runQuery(internal.notes.list, {})).map(note => note.title),
+});
+`;
+    const wrongCall = operations.replace(
+      "(await ctx.runQuery(internal.notes.list, {})).map(note => note.title)",
+      "await ctx.runQuery(internal.notes.missing, {})"
+    );
+    // The public `list` registered as `page`: `notes.list` is internal here.
+    const registration = (notesFiles["app.ts"] ?? "")
+      .replace("import { big,", "import { big, listAll, titles,")
+      .replace("notes: { list,", "notes: { page: list,")
+      .replace("stamp, big }", "stamp, big, titles }")
+      .replace(
+        "internalOperations: {}",
+        "internalOperations: { notes: { list: listAll } }"
+      );
+    const sound = {
+      ...notesFiles,
+      "operations/notes.ts": operations,
+      "app.ts": registration,
+      "screens/notes.tsx": (notesFiles["screens/notes.tsx"] ?? "").replace(
+        "api.notes.list",
+        "api.notes.page"
+      ),
+    };
+    const mistyped = operations.replace(
+      "import { AppError,",
+      'const total: number = "seven";\nvoid total;\nimport { AppError,'
+    );
+    const { person, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        const server = async () => {
+          const checked = await env.build.check(app.id);
+          return { passed: checked.passed, status: checked.server.status, diagnostics: checked.server.diagnostics.map(({ file, rule, category }) => ({ file, rule, category })) };
+        };
+        await env.build.write(app.id, ${JSON.stringify({ ...sound, "operations/notes.ts": wrongCall })});
+        const wrongCall = await server();
+        await env.build.write(app.id, ${JSON.stringify(sound)});
+        const sound = await server();
+        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })});
+        const mistyped = await server();
+        const proposal = await env.build.propose(app.id, "Notes");
+        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })});
+        const leftover = await server();
+        await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })});
+        const unregistered = await server();
+        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
+      };`),
+      says("Checked."),
+    ]);
+    await grant();
+
+    await chat.ask("Build a notes App");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toMatchObject({
+      wrongCall: {
+        passed: false,
+        status: "failed",
+        diagnostics: [
+          { file: "operations/notes.ts", rule: "TS2339", category: "types" },
+        ],
+      },
+      sound: { passed: true, status: "ok", diagnostics: [] },
+      mistyped: {
+        passed: false,
+        status: "failed",
+        diagnostics: [
+          { file: "operations/notes.ts", rule: "TS2322", category: "types" },
+        ],
+      },
+      proposed: { version: null, passed: false, server: "failed" },
+      leftover: {
+        passed: false,
+        status: "failed",
+        diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
+      },
+      unregistered: {
+        passed: false,
+        status: "failed",
+        diagnostics: [layout(null)],
+      },
+    });
+    const app = await createdApp(person.api);
+    await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
+      []
+    );
   });
 
   it("writes no workflow into an App, whatever the path, the company it keeps or the blueprint it comes from, and changes none a builder wrote but to delete it", async () => {
