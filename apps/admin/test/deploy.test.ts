@@ -527,6 +527,43 @@ describe("rolling shared secrets out", () => {
     });
   });
 
+  it("deploys rolled-out secrets again once staff retry a deploy of them that failed before delivering", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    await runs.converge();
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-rotated"
+    );
+    // The secrets deploy's first upload is refused: nothing is delivered.
+    cloudflare.failNext(await uploadOf(client), 400);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let failed: Awaited<ReturnType<typeof deployOf>> = null;
+    try {
+      await rollOutSecrets(env, staff);
+      await runs.converge();
+      failed = await deployOf(client.clientId);
+    } finally {
+      errors.mockRestore();
+    }
+
+    await retryChannel(env, staff, { channel: "edge" });
+    await runs.converge();
+
+    expect({
+      failed: failed?.status,
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      failed: "failed",
+      started: 2,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
   it("delivers a provider key added to the store and rolled out to a client that didn't have it", async () => {
     const release = await placedRelease("feat(core): runs");
     await releaseToEdge(env, [release]);

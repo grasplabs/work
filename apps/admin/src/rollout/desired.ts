@@ -200,23 +200,24 @@ export interface RolledOut {
 
 /**
  * Whether a client's shared secrets are behind the ones staff rolled out
- * (`rolledOut`): its operation, started at `startedAt`, delivered
- * (`delivered`, by Worker then name, each a keyed fingerprint) another
- * fingerprint of a rolled-out secret, or none at all, such as a provider
- * key added since. An operation started since the rollout is never
- * behind: it delivered what Secrets Store held then or later, the most a
- * deploy can, so a deploy after the store moved on settles the client.
+ * (`rolledOut`): its operation delivered (`delivered`, by Worker then
+ * name, each a keyed fingerprint) another fingerprint of a rolled-out
+ * secret, or none at all, such as a provider key added since. A change
+ * that finished (`doneSince`: when its last change started, if it ended
+ * done) since the rollout is never behind: it delivered what Secrets
+ * Store held then or later, the most a deploy can, so a deploy after the
+ * store moved on settles the client. One that failed settles nothing.
  * Nothing rolled out yet: never behind.
  */
 export const isSecretsBehind = (
   delivered: Readonly<Record<string, Readonly<Record<string, string>>>>,
-  startedAt: Date | null,
+  doneSince: Date | null,
   rolledOut: RolledOut | null
 ): boolean => {
   if (rolledOut === null) {
     return false;
   }
-  if (startedAt !== null && startedAt >= rolledOut.at) {
+  if (doneSince !== null && doneSince >= rolledOut.at) {
     return false;
   }
   const workers = Object.values(delivered);

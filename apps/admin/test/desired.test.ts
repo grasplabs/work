@@ -168,7 +168,7 @@ describe("shared secrets behind", () => {
     ).toBeTruthy();
   });
 
-  it("is never an operation started since the rollout, whatever it delivered", () => {
+  it("is never a change done since the rollout, whatever it delivered", () => {
     expect(
       isSecretsBehind({ connect: { A: "2" } }, after, {
         prints: { A: "1", C: "3" },

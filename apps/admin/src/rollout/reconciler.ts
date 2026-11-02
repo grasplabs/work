@@ -89,6 +89,7 @@ const factColumns = {
   running: runningSql,
   progress: clientProvisions.progress,
   operationStartedAt: clientProvisions.createdAt,
+  operationStatus: clientProvisions.status,
   deployRelease: clientDeploys.releaseId,
   deployStatus: clientDeploys.status,
   deployError: clientDeploys.error,
@@ -134,7 +135,8 @@ const clientPage = async (
     running: row.running,
     secretsBehind: isSecretsBehind(
       deliveredShared(row.progress),
-      row.operationStartedAt,
+      // A change counts only once it delivered: done, never just started.
+      row.operationStatus === "done" ? row.operationStartedAt : null,
       rolledOut
     ),
     deploy:
