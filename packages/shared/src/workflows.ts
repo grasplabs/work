@@ -1254,6 +1254,8 @@ export interface ResourceListedRun {
   status: RunStatus;
   /** While it is `queued`: the share it waits for, and when it asks again. */
   queued?: RunQueue;
+  /** While it is `queued` for an AI provider: which, and what's wrong. */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
 }

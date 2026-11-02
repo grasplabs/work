@@ -182,7 +182,13 @@ const RunOutcome = ({
 }) => {
   const { t } = useLingui();
   if (run.type === "resource") {
-    return <RunResult queued={run.queued} status={run.status} />;
+    return (
+      <RunResult
+        aiProvider={run.aiProvider}
+        queued={run.queued}
+        status={run.status}
+      />
+    );
   }
   return (
     <div className="flex flex-col items-start gap-1">
