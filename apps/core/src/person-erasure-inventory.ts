@@ -315,7 +315,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.counted_works": { company: "who counted a work (D5)" },
   "onboarding.documents": { company: "documents the admin shared" },
   "onboarding.kickoff": { company: "the kickoff, as staff brought it in" },
-  "onboarding.notes": { none: "staff's own notes, by staff" },
   "onboarding.voice_use": { kept: "today's voice seconds, gone tomorrow" },
   "onboarding.audit_outbox": {
     kept: "audit events on their way to the log (D2)",
