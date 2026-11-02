@@ -2273,6 +2273,10 @@ msgstr "Notitie toevoegen"
 msgid "Add one so invoices are paid when they come."
 msgstr "Voeg er een toe, zodat facturen meteen worden betaald."
 
+#: src/activity/pending.tsx
+msgid "add records to {tables}"
+msgstr "records aan {tables} toevoegen"
+
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Iets toevoegen"
@@ -2812,6 +2816,10 @@ msgstr "Elk type"
 msgctxt "log filter: who"
 msgid "Anyone"
 msgstr "Iedereen"
+
+#: src/engines/blueprints.tsx
+msgid "Anyone who builds and has a role in {name} can now start a new app from it. {name} itself stays as it is."
+msgstr "Wie bouwt en een rol heeft in {name}, kan er nu een nieuwe app vanuit beginnen. {name} zelf blijft zoals het is."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
@@ -3492,6 +3500,10 @@ msgstr "Blokkade"
 msgid "Blockers"
 msgstr "Blokkades"
 
+#: src/engines/blueprints.tsx
+msgid "Blueprints"
+msgstr "Blueprints"
+
 #: src/brain/brain-atlas.ts
 msgid "Board"
 msgstr "Directie"
@@ -3661,6 +3673,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
 
+#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -3676,6 +3689,7 @@ msgstr "Niet leesbaar"
 #: src/engines/app-status.tsx
 #: src/engines/app-versions.tsx
 #: src/engines/app-workflows.tsx
+#: src/engines/blueprints.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
@@ -4131,6 +4145,7 @@ msgstr "Filters wissen"
 #: src/dashboard/widget-block.tsx
 #: src/engines/app-access-requests.tsx
 #: src/engines/app-workflows.tsx
+#: src/engines/blueprints.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
@@ -4173,6 +4188,10 @@ msgctxt "shut every part of a workflow's overview"
 msgid "Close all"
 msgstr "Alles sluiten"
 
+#: src/brain/gap-actions.tsx
+msgid "Close it"
+msgstr "Sluiten"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Sluiten voor de onboarding"
@@ -4180,6 +4199,15 @@ msgstr "Sluiten voor de onboarding"
 #: src/screens/app-panel.tsx
 msgid "Close panel"
 msgstr "Paneel sluiten"
+
+#: src/brain/gap-actions.tsx
+msgid "Close this question without an answer?"
+msgstr "Deze vraag zonder antwoord sluiten?"
+
+#: src/brain/gap-actions.tsx
+#: src/chat/brain-questions.tsx
+msgid "Close without an answer"
+msgstr "Sluiten zonder antwoord"
 
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
@@ -4241,6 +4269,10 @@ msgstr "Collecties"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Collecties bevatten de documenten die Grasp en zijn agents mogen lezen. Een admin deelt ze met je, of je voegt je eigen toe."
+
+#: src/engines/blueprints.tsx
+msgid "Comes with Grasp"
+msgstr "Hoort bij Grasp"
 
 #: src/decision-confirmation.tsx
 msgctxt "a comment on an answer to a decision"
@@ -5266,6 +5298,7 @@ msgid "done"
 msgstr "klaar"
 
 #: src/chat/thread.tsx
+#: src/engines/blueprints.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -5332,12 +5365,14 @@ msgstr "Deuren"
 msgid "Download"
 msgstr "Downloaden"
 
+#: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
 msgid "Download"
 msgstr "Downloaden"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "{name} downloaden"
 
@@ -5941,6 +5976,10 @@ msgstr "Bestanden en apps"
 msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Bestanden en documenten"
+
+#: src/workflows/run-files.tsx
+msgid "Files it wrote"
+msgstr "Bestanden die hij schreef"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Files its runs wrote"
@@ -7345,6 +7384,10 @@ msgstr "Hij wordt met niemand gedeeld."
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "Het weet wie welk team leidt, zodat ik eerst met de teamleiders kan praten. We koppelen het samen met jou."
 
+#: src/brain/gap-actions.tsx
+msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
+msgstr "Ze verdwijnt uit de open vragen, zonder antwoord, en niemand wordt er nog naar gevraagd. Ze kan niet opnieuw worden geopend."
+
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Misschien is het hernoemd of verwijderd."
@@ -7400,6 +7443,10 @@ msgstr "Het werkt nog steeds niet. Je kunt nu stoppen en later terugkomen. Je pl
 #: src/engines/release-controls.tsx
 msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
 msgstr "Hij stopt meteen, ook lopende aanroepen, en kan nooit meer draaien. Hij blijft bewaard, en de intrekking wordt vastgelegd met uw reden."
+
+#: src/workflows/stop-run.tsx
+msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
+msgstr "Hij stopt waar hij is en gaat nooit verder. Wat hij al deed, blijft gedaan. Dit kan niet ongedaan worden gemaakt."
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
@@ -7681,6 +7728,7 @@ msgstr "Blijf vasthouden"
 msgid "Keep it"
 msgstr "Bewaren"
 
+#: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
 msgstr "Laten draaien"
@@ -8690,6 +8738,10 @@ msgstr "Nieuw"
 msgid "New app"
 msgstr "Nieuwe app"
 
+#: src/engines/blueprints.tsx
+msgid "New apps can start from version {version} of {name}, as a copy with none of its data. {name} itself stays as it is."
+msgstr "Nieuwe apps kunnen beginnen vanuit versie {version} van {name}, als kopie zonder de gegevens ervan. {name} zelf blijft zoals het is."
+
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
 msgstr "Nieuw doel van de directie"
@@ -8855,6 +8907,10 @@ msgstr "Geen app heet ‘{asked}’"
 #: src/routes/_shell.domains.index.tsx
 msgid "No apps yet"
 msgstr "Nog geen apps"
+
+#: src/engines/blueprints.tsx
+msgid "No blueprints yet"
+msgstr "Nog geen blueprints"
 
 #: src/workflows/business-process.tsx
 msgid "No business process"
@@ -11226,6 +11282,14 @@ msgstr "Opnieuw lezen"
 msgid "Read an email attachment"
 msgstr "Een e-mailbijlage gelezen"
 
+#: src/activity/pending.tsx
+msgid "read and change every record of {tables}"
+msgstr "elk record van {tables} lezen en wijzigen"
+
+#: src/activity/pending.tsx
+msgid "read every record of {tables}"
+msgstr "elk record van {tables} lezen"
+
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
@@ -11363,6 +11427,18 @@ msgstr "Record-to-Report"
 #: src/engines/store-changes.tsx
 msgid "Records checked: {scanned}. Filled in: {filled}."
 msgstr "Gecontroleerde records: {scanned}. Ingevuld: {filled}."
+
+#: src/brain/gap-actions.tsx
+msgid "Redact it"
+msgstr "Weglakken"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact the answer"
+msgstr "Antwoord weglakken"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact this answer?"
+msgstr "Dit antwoord weglakken?"
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -11525,6 +11601,10 @@ msgstr "Verwijderen"
 #: src/engines/app-own-link.tsx
 msgid "Remove link"
 msgstr "Link verwijderen"
+
+#: src/engines/blueprints.tsx
+msgid "Remove the blueprint {name}"
+msgstr "Blueprint {name} verwijderen"
 
 #: src/inbox/item-detail.tsx
 msgid "Remove the package"
@@ -12178,6 +12258,18 @@ msgctxt "button: save a team's or a person's details"
 msgid "Save"
 msgstr "Opslaan"
 
+#: src/engines/blueprints.tsx
+msgid "Save {name} as a blueprint"
+msgstr "{name} opslaan als blueprint"
+
+#: src/engines/blueprints.tsx
+msgid "Save an app as a blueprint from its domain, and it shows here."
+msgstr "Sla een app op als blueprint vanuit het domein, dan staat hij hier."
+
+#: src/engines/blueprints.tsx
+msgid "Save as blueprint"
+msgstr "Opslaan als blueprint"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Opslaan als pdf"
@@ -12210,10 +12302,18 @@ msgstr "Correctie opslaan"
 msgid "Saved"
 msgstr "Opgeslagen"
 
+#: src/engines/blueprints.tsx
+msgid "Saved as a blueprint"
+msgstr "Opgeslagen als blueprint"
+
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
 msgid "Saved as revision {0}."
 msgstr "Opgeslagen als revisie {0}."
+
+#: src/engines/blueprints.tsx
+msgid "Saved by {person} on {date}"
+msgstr "Opgeslagen door {person} op {date}"
 
 #: src/workflows/saved-ago.tsx
 msgid "Saved just now"
@@ -13076,6 +13176,14 @@ msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 msgid "Start by typing"
 msgstr "Typend beginnen"
 
+#: src/engines/blueprints.tsx
+msgid "Start from {name}"
+msgstr "Beginnen vanuit {name}"
+
+#: src/engines/blueprints.tsx
+msgid "Start from a blueprint"
+msgstr "Beginnen vanuit een blueprint"
+
 #: src/onboarding/interview-actions.tsx
 msgid "Start over on a new device"
 msgstr "Opnieuw beginnen op een nieuw apparaat"
@@ -13355,6 +13463,11 @@ msgstr "Wacht nog"
 msgid "Stockholm"
 msgstr "Stockholm"
 
+#: src/workflows/stop-run.tsx
+msgctxt "stop a workflow's run"
+msgid "Stop"
+msgstr "Stoppen"
+
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
 msgid "Stop"
@@ -13371,6 +13484,14 @@ msgstr "Voor nu stoppen"
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
 msgstr "Niet meer delen met {shown}"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop the run"
+msgstr "Run stoppen"
+
+#: src/workflows/stop-run.tsx
+msgid "Stop this run?"
+msgstr "Deze run stoppen?"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
@@ -13427,6 +13548,18 @@ msgstr "Opslag"
 #: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Opslag {store}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can {what}"
+msgstr "Opslag {store} van een workflow. Dit kan: {what}"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Opslag {store} van een workflow. Wat deze bewerkingen bereiken, kan nu niet worden getoond"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
+msgstr "Opslag {store} van een workflow. Van wie de records ook zijn, dit kan: {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
@@ -13935,6 +14068,10 @@ msgstr "De afspraak tussen het bedrijf en Grasp over de omgang met gegevens, get
 msgid "The answer was cut off at the model's limit."
 msgstr "Het antwoord is afgekapt op de limiet van het model."
 
+#: src/brain/gap-actions.tsx
+msgid "The answer, and who gave it, are taken away for good. The question stays closed."
+msgstr "Het antwoord, en wie het gaf, worden definitief weggehaald. De vraag blijft gesloten."
+
 #: src/engines/app-workflows.tsx
 msgid "The app can no longer start a workflow by this name, until a builder binds it again. Runs already started go on."
 msgstr "De app kan onder deze naam geen workflow meer starten, tot een bouwer hem opnieuw koppelt. Runs die al gestart zijn gaan door."
@@ -14371,6 +14508,10 @@ msgstr "Het maandbudget voor AI is nog niet vastgesteld."
 #: src/routes/_shell.onboarding.index.tsx
 msgid "The most pressing first."
 msgstr "Het dringendste eerst."
+
+#: src/engines/blueprints.tsx
+msgid "The new app starts as a copy of it, with none of its data. Its access waits for an admin."
+msgstr "De nieuwe app begint als kopie ervan, zonder de gegevens. De toegang ervan wacht op een beheerder."
 
 #: src/engines/store-changes.tsx
 msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."

@@ -16,8 +16,8 @@ import {
   waitingInOutbox,
   whileLogDown,
 } from "./maintenance.ts";
-import { streamText } from "./model-provider.ts";
 import { plan } from "./platform-providers.ts";
+import { streamText } from "./provider-streams.ts";
 import {
   auditedDuring,
   openRpc,
