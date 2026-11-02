@@ -25,8 +25,6 @@ export interface RulesInput {
   trigger: AuditActor;
   /** IDs of the resources that fed the prompt. */
   provenance: readonly string[];
-  /** Connections whose data may have fed the prompt. */
-  connections: readonly string[];
   /**
    * Where the call works, whose restricted mode it has. The type lets it
    * be missing only for a caller that isn't type-checked: the gateway
@@ -60,7 +58,6 @@ export interface Refusal {
     | "model.answer_too_long"
     | "model.ledger_unavailable"
     | "model.quota_policy_unavailable"
-    | "model.quota_policy_behind"
     | "permission.context_invalid";
   because?: string;
   /**

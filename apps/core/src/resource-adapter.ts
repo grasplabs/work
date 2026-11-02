@@ -54,8 +54,6 @@ export interface InvocationSources {
   readonly snapshot: () => InvocationProvenance;
   /** Notes that data of connection `id`, from `resources`, reached it. */
   readonly noteConnection: (id: string, resources: readonly string[]) => void;
-  /** The connections whose data reached it, for the model gateway's rules. */
-  readonly connections: () => readonly string[];
 }
 
 /** A new invocation's sources: nothing read yet. */
@@ -103,7 +101,6 @@ export const invocationSources = (): InvocationSources => {
         }
       }
     },
-    connections: () => [...connections.keys()].toSorted(),
   };
 };
 

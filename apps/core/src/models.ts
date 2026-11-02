@@ -39,11 +39,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
 import type { ModelRole } from "@grasp-os/shared/deployment-config";
-import {
-  appIdSchema,
-  connectionIdSchema,
-  identifierSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   defaultModelEffort,
@@ -307,11 +303,6 @@ const sessionShape = {
    * many as its event holds (`keepingProvenance`).
    */
   provenance: z.array(identifierSchema).default([]),
-  /**
-   * Connections whose data may have fed the prompt, such as a run's:
-   * never recorded, and no check reads them now.
-   */
-  connections: z.array(connectionIdSchema).default([]),
   /**
    * Where the call works, and for whom (model-rules.ts). Set by the host,
    * like the trigger. Required of every caller (`ModelCall`,
@@ -1126,10 +1117,7 @@ const scopesRead = async (
  */
 const heldBecause = (
   call: Session,
-  admitted: Exclude<
-    LedgerAdmitted,
-    { ok: true } | { policyBehind: true; highest: number }
-  >,
+  admitted: Exclude<LedgerAdmitted, { ok: true }>,
   disclose: ShareIdentity["disclose"]
 ): Refusal => {
   // A guest is told nothing shaped by anyone else's calls.
@@ -1251,16 +1239,6 @@ const admitRequest = async (
       fair,
       ...(route.way === undefined ? {} : { route: route.way }),
     });
-    if ("policyBehind" in admitted) {
-      // Never expected: the ledger refuses this only for an admission that
-      // carries a policy generation, which none does. Logged, and refused
-      // for what it is, never as a ledger outage.
-      log.error("model.quota_policy_behind", {
-        model: call.model,
-        ledgerGeneration: admitted.highest,
-      });
-      return { held: { code: "model.quota_policy_behind" } };
-    }
     if (admitted.ok) {
       return {
         id,
@@ -3255,7 +3233,6 @@ const speechSchema = z.strictObject({
   purpose: sessionShape.purpose,
   trigger: sessionShape.trigger,
   provenance: sessionShape.provenance,
-  connections: sessionShape.connections,
   work: sessionShape.work,
   requestId: sessionShape.requestId,
   /** The line to say: at most `maxSpeechChars`, which bounds what it costs. */
@@ -3754,7 +3731,6 @@ const listeningSchema = z.strictObject({
   purpose: sessionShape.purpose,
   trigger: sessionShape.trigger,
   provenance: sessionShape.provenance,
-  connections: sessionShape.connections,
   work: sessionShape.work,
   requestId: sessionShape.requestId,
   /**

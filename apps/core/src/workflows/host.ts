@@ -2595,14 +2595,6 @@ export class RunHost extends RpcTarget {
                 // Whose share it takes: who started the run, never the
                 // owner it acts for when nobody did.
                 shareSubject: this.#run.shareSubject,
-                // The step may have read any of them into its input.
-                connections: [
-                  ...new Set(
-                    Object.values(this.#run.connections).map(
-                      ({ connection }) => connection.connectionId
-                    )
-                  ),
-                ],
                 // The run's restricted mode, which is its App's.
                 work: {
                   authority: this.#run.authority,
