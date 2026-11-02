@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f3b1716b-2cd8-41a3-b774-1519a5a84a3e",
+  "id": "f5393f9e-0635-4028-b718-06e74fc3ee29",
   "prevId": "219636a8-cf68-48b8-b90a-e4b0134a0ec4",
   "tables": {
     "access_revocations": {
@@ -1864,14 +1864,6 @@
         },
         "workflow_calls": {
           "name": "workflow_calls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'{}'"
-        },
-        "exports": {
-          "name": "exports",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -5558,34 +5550,6 @@
         },
         "advisory": {
           "name": "advisory",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "event_type": {
-          "name": "event_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "event_resource": {
-          "name": "event_resource",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stop_reason": {
-          "name": "stop_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
