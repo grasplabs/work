@@ -523,4 +523,65 @@ describe("exporting the company's Brain", () => {
       numbers: Array.from({ length: versionCount }, (_, index) => index + 1),
     });
   });
+
+  it("refuses a download a purge began during, and deletes the export", async () => {
+    const { brain } = testHost();
+    const plans = await newCollection(brain, "Plans");
+    const plan = await writeVersion(brain, admin, {
+      collection: plans,
+      path: "plan.md",
+      text: "# Plan\nThe route.",
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const onExport = hostWith();
+    const exportId = await begun(brain, onExport);
+    const ended = await ranToEnd(brain, exportId, onExport);
+    // As the bucket hands over the file, a purge begins.
+    let purged = "";
+    const racing = withPorts(brain, {
+      blobs: {
+        delete: env.BLOBS.delete.bind(env.BLOBS),
+        head: env.BLOBS.head.bind(env.BLOBS),
+        list: env.BLOBS.list.bind(env.BLOBS),
+        put: env.BLOBS.put.bind(env.BLOBS),
+        get: async (key, options) => {
+          const object = await env.BLOBS.get(key, options);
+          if (purged === "" && key.startsWith(`exports/${exportId}/`)) {
+            purged = await blockedPurge(brain, plan.id);
+          }
+          return object;
+        },
+      },
+    });
+    const downloaded = await outcome(
+      (async () =>
+        await new Response(
+          await exportFile(racing, admin, exportId, "collections.jsonl")
+        ).text())()
+    );
+
+    const audited = await env.BRAIN.prepare(
+      "SELECT event FROM audit_outbox WHERE instr(event, ?) > 0 AND instr(event, 'knowledge.export.downloaded') > 0"
+    )
+      .bind(exportId)
+      .all();
+    expect({
+      ended,
+      purged,
+      downloaded,
+      state: await stateOf(brain, exportId),
+      left: await objectsOf(exportId),
+      // Its audit, as stored, says no download happened.
+      downloadsAudited: audited.results.length,
+    }).toStrictEqual({
+      ended: "ok",
+      purged: "Error: The host's copies are out of reach",
+      downloaded: "knowledge.not_found",
+      state: "failed",
+      left: [],
+      downloadsAudited: 0,
+    });
+  });
 });

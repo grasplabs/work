@@ -1,6 +1,6 @@
 import type { Goal, GoalWorkflow } from "@grasp-os/shared/brain";
 import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -27,7 +27,7 @@ import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { listWorkflows } from "../workflows/reads.ts";
+import { listAppWorkflows } from "../workflows/reads.ts";
 import {
   newGoalRecords,
   relinkedRecords,
@@ -359,7 +359,8 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
       next.what === "workflows" &&
       workflows === undefined
     ) {
-      const listed = await run(listWorkflows);
+      // A goal links engines' workflows.
+      const listed = await run(listAppWorkflows);
       if (listed === undefined) {
         return;
       }

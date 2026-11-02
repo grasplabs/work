@@ -12,12 +12,19 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import { inList, notInList } from "./db/d1.ts";
 import {
+  auditOutbox,
   brainErasedEvidence,
   brainExportFiles,
   brainExports,
@@ -219,6 +226,13 @@ const purgeOpen = and(
   isNull(brainPurges.completedAt),
   isNull(brainPurges.supersededBy)
 );
+
+/**
+ * That no purge may have erased what an export begun at `mark` holds, as
+ * a condition (`purgedSince`): for a statement written only while so.
+ */
+const unpurgedSince = (mark: number): SQL =>
+  sql`((SELECT count(*) FROM ${brainPurges}) <= ${mark} AND NOT EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${purgeOpen}))`;
 
 /**
  * Whether a purge may have erased what an export begun at `mark` holds:
@@ -1304,13 +1318,26 @@ export const exportFile = async <C>(
   if (object === null) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  await auditedBatch(brain.ports, brain.db, [
-    outboxed(brain, {
-      actor: by.actor,
-      action: "knowledge.export.downloaded",
-      target: { type: "export", id: exportId },
-      detail: { file: name },
-    }),
+  // The download is recorded only while still no purge has begun, which
+  // a purge begun as the bucket was read fails: then the file is never
+  // handed over, nor its download recorded, and the export goes. Nothing
+  // is awaited between the record and the hand-over.
+  const [recorded] = await auditedBatch(brain.ports, brain.db, [
+    outboxedWhere(
+      brain,
+      {
+        actor: by.actor,
+        action: "knowledge.export.downloaded",
+        target: { type: "export", id: exportId },
+        detail: { file: name },
+      },
+      unpurgedSince(row.purgeMark)
+    ).returning({ id: auditOutbox.id }),
   ]);
+  if (recorded.length === 0) {
+    await object.body.cancel();
+    await failPurged(brain, exportId);
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
   return object.body;
 };
