@@ -121,6 +121,7 @@ export const screenTests = [
   "test/run-controls.test.ts",
   "test/run-summary.test.ts",
   "test/run-history.test.ts",
+  "test/run-object.test.ts",
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
   "test/guests.test.ts",

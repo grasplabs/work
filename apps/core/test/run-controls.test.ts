@@ -1,381 +1,233 @@
-import { actorOf } from "@grasp-os/shared/audit";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { repairControls, settleControls } from "../src/workflows/controls.ts";
-import { markRunCancelled, runEngine } from "../src/workflows/engine.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import {
-  completeCancel,
-  projectStatus,
-  repairStarts,
-} from "../src/workflows/runs.ts";
-import { allEvents } from "./audit-events.ts";
+  projectResourceRun,
+  repairResourceStarts,
+  repairResourceTerminations,
+  settleResourceControls,
+} from "../src/workflows/resource-runs.ts";
 import { mockIdp } from "./idp.ts";
-import { runMinuteTasks } from "./maintenance.ts";
 import {
-  aroundEngine,
-  endLiveRuns,
-  finished,
-  liveStatus,
-  runObject,
-  sleeping,
-  woken,
-} from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import {
-  appWith,
-  hitCall,
-  hitsCall,
-  hitsOf,
-  openGate,
-  workflowFiles,
-} from "./workflow-apps.ts";
+  called,
+  controlCommand,
+  jsonWorkflowAppsOf,
+  keyOf,
+  outcomeOf,
+  runFor,
+  screenOf,
+  settles,
+  staged,
+  startCommand,
+  startedOf,
+} from "./json-workflow-apps.ts";
+import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
+import { liveStatus, runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 
-// Pausing, resuming and cancelling a run from an App's screens, as the
-// host admits each request with a durable receipt (controls.ts). What
-// could go wrong, tried below: a request answered before it is durable,
-// one sent twice making two, a pause and a resume overlapping, a pause
-// that outlives a cancel and brings the run back, a request the run's
-// lifecycle doesn't allow, someone who doesn't build the App, another
-// App's run, a request whose answer from the engine was lost, and a pause
-// that stops time. Runs are real, on the engine; the App's counters show
-// what really ran.
+// Pausing, resuming and cancelling an independent JSON workflow's run from
+// an App's screen, as the host admits each request with a durable receipt
+// and settles it from the engine's own fenced word (screen-workflows.ts,
+// workflows/resource-runs.ts). The everyday paths (receipts answered again
+// under their key, joins, conflicts, a cancel superseding a pause, the
+// repair applying a stalled one, other people's and other Apps' runs) are
+// in screen-typed-workflows.test.ts. What could still go wrong, tried
+// below: a pause that stops time; a pause of a run still starting that
+// ends the run, gets lost, or outlives a start given up; a resume judged
+// by a row that lags behind the engine; a control of a run the engine has
+// ended; a pause delivered late undoing a newer resume; a receipt settled
+// from a stale read or a late notification rather than the engine's
+// fence; and receipts that never settle crowding a live run's out of the
+// repair. Runs are real, on the engine.
 
 const idp = mockIdp();
 
-const personApi = async (role: "admin" | "builder" | "user") =>
-  await signedInApi(idp, role);
+const { boundApp } = jsonWorkflowAppsOf(idp);
 
-/** A step, a sleep of a day, and a step that counts that it ran. */
-const napper = workflowFiles(
-  "napper",
-  `  await step.do("first", { description: "First" }, async () => null);
-  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
-  { first: null, after: 1 }
-);
+/** Receipts due before a repair's turn: more than one repair takes (20). */
+const moreThanOneRepairTakes = 25;
+
+/** A minute and more from now: past when an admitted receipt is first due. */
+const pastFirstRepair = (): Date => new Date(Date.now() + 2 * 60_000);
+
+/** Past the longest a run may say `starting` before its start is given up. */
+const pastStarting = (): Date => new Date(Date.now() + 7 * 3_600_000);
 
 /**
- * As `napper`, its first step held open until the App counts `gate`: a
- * pause asked for meanwhile waits for it.
+ * Ends every JSON workflow run a test left live in the engine: a run held
+ * an hour would go on in the background of whatever test file runs next
+ * (see `endLiveRuns` in runs.ts, which ends App runs). A run the engine
+ * has no record of has nothing to end.
  */
-const gated = workflowFiles(
-  "gated",
-  `  await step.do("first", { description: "First" }, async () => {
-    await ${hitCall(`"entered"`)};
-    while ((await ${hitsCall(`"gate"`)}) === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    return null;
-  });
-  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
-  { first: null, after: 1 }
-);
-
-/** The run's receipts, oldest first. */
-const receiptsOf = async (run: string) => {
+const endLiveResourceRuns = async (): Promise<void> => {
   const { results } = await env.DB.prepare(
-    "SELECT id, kind, state FROM workflow_run_controls WHERE run_id = ? ORDER BY created_at, id"
-  )
-    .bind(run)
-    .all<{ id: string; kind: string; state: string }>();
-  return results;
-};
-
-/** The run's receipts, oldest first, as their kind and state. */
-const receiptStates = async (run: string): Promise<string[][]> => {
-  const receipts = await receiptsOf(run);
-  return receipts.map(({ kind, state }) => [kind, state]);
-};
-
-/** The run's receipts, oldest first, as their kind and generation. */
-const receiptsGenerations = async (run: string) => {
-  const { results } = await env.DB.prepare(
-    "SELECT kind, generation FROM workflow_run_controls WHERE run_id = ? ORDER BY created_at, id"
-  )
-    .bind(run)
-    .all<{ kind: string; generation: number }>();
-  return results;
-};
-
-/** The run's status as a screen of `app` shows it to `person`. */
-const shown = async (
-  person: Awaited<ReturnType<typeof personApi>>,
-  app: string,
-  run: string
-): Promise<string> => {
-  const { status } = await person.api.screens.frame(app, "").run(run);
-  return status;
-};
-
-/** Once `check` holds, polling. */
-const until = async (check: () => Promise<boolean>): Promise<void> => {
-  await vi.waitFor(
-    async () => {
-      await expect(check()).resolves.toBeTruthy();
-    },
-    { timeout: 15_000, interval: 100 }
+    "SELECT id FROM workflow_resource_runs WHERE status IN ('starting', 'running', 'paused')"
+  ).all<{ id: string }>();
+  await Promise.all(
+    results.map(async ({ id }) => {
+      const status = await runObject(id).status();
+      if (
+        status !== undefined &&
+        !["complete", "errored", "terminated"].includes(status.status)
+      ) {
+        await runObject(id).terminate({ rollback: false });
+      }
+    })
   );
 };
 
-/** The journaled deadline of the run's sleep `go`. */
-const sleepDeadline = async (run: string): Promise<number | undefined> =>
+/** A screen of `person`'s on `app`, and what it asks of the workflow. */
+const screenAsking = async (
+  person: Person,
+  app: string,
+  reference: WorkflowReference
+) => {
+  const lease = await screenOf(person, app);
+  return {
+    start: async (): Promise<string> =>
+      startedOf(await called(person, app, lease, startCommand(reference)))
+        .runId,
+    control: async (
+      command: "pause" | "resume" | "cancel",
+      runId: string
+    ): Promise<unknown> =>
+      outcomeOf(
+        await called(
+          person,
+          app,
+          lease,
+          controlCommand(reference, command, runId)
+        )
+      ),
+  };
+};
+
+/** The run's receipts, oldest generation first, as their kind and state. */
+const receiptStates = async (run: string): Promise<string[][]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation, created_at"
+  )
+    .bind(run)
+    .all<{ kind: string; state: string }>();
+  return results.map(({ kind, state }) => [kind, state]);
+};
+
+/** Whether every receipt of the run is applied. */
+const allApplied = async (run: string): Promise<boolean> => {
+  const receipts = await receiptStates(run);
+  return receipts.every(([, state]) => state === "applied");
+};
+
+/** The run's status as its row has it, read as `person` reads the run. */
+const rowStatus = async (
+  person: Person,
+  workflow: string,
+  run: string
+): Promise<string> => {
+  const { status } = await runFor(person.acting, workflow, run);
+  return status;
+};
+
+/**
+ * Whether the engine holds the run paused, or pausing at its next safe
+ * boundary. A run in its hold may otherwise be waiting, or running a
+ * moment as it is woken to check its share.
+ */
+const pausedInEngine = async (run: string): Promise<boolean> =>
+  ["paused", "waitingForPause"].includes(await liveStatus(run));
+
+/** Once `check` holds, polling. */
+const until = async (check: () => Promise<boolean>): Promise<void> => {
+  await vi.waitFor(async () => {
+    await expect(check()).resolves.toBeTruthy();
+  }, settles);
+};
+
+/** The journaled deadline of the run's hold. */
+const holdDeadline = async (run: string): Promise<number | undefined> =>
   await runInDurableObject(
     runObject(run),
     (_object, state) =>
       state.storage.sql
         .exec<{ deadline: number }>(
-          "SELECT deadline FROM steps WHERE type = 'sleep' AND name = 'go'"
+          "SELECT deadline FROM steps WHERE type = 'sleep' AND name = 'task:hold'"
         )
         .toArray()[0]?.deadline
   );
 
-/** The control requests of `run` the audit log has, with where from. */
-const requested = async (run: string) => {
-  const events = await allEvents();
-  return events
-    .filter(
-      ({ action, target }) =>
-        target?.id === run &&
-        (action === "workflow.run.pause_requested" ||
-          action === "workflow.run.resume_requested" ||
-          action === "workflow.run.cancelled")
-    )
-    .map(({ action, detail }) => `${action} ${String(detail.via)}`);
+/** A run of the workflow, asleep in its hold of an hour. */
+const holding = async () => {
+  const bound = await boundApp({ hold: "PT1H" });
+  const screen = await screenAsking(bound.builder, bound.app, bound.reference);
+  const runId = await screen.start();
+  await sleeping(runId, "task:hold");
+  return { ...bound, screen, runId };
+};
+
+/** A run of the workflow whose start the engine never took: still starting. */
+const neverStarted = async () => {
+  const bound = await boundApp({ hold: "PT1H" });
+  const screen = await screenAsking(bound.builder, bound.app, bound.reference);
+  const runId = await whileEngineRefuses(
+    () => true,
+    async () => await screen.start()
+  );
+  return { ...bound, screen, runId };
 };
 
 describe(
-  "controls of a run from its App's screens",
+  "controls of a JSON workflow's run from an App's screen",
   { timeout: 60_000 },
   () => {
-    afterEach(endLiveRuns);
+    afterEach(endLiveResourceRuns);
 
-    it("pause a waiting run at once and resume it, with a receipt each, its deadline where it was", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await until(async () => (await sleepDeadline(run)) !== undefined);
-      const deadline = await sleepDeadline(run);
+    it("keeps a hold's deadline where it was across a pause and its resume, so time passes while the run is paused", async () => {
+      const { screen, runId } = await holding();
+      await until(async () => (await holdDeadline(runId)) !== undefined);
+      const deadline = await holdDeadline(runId);
 
-      const paused = await builder.api.screens
-        .frame(app, "")
-        .control(run, "pause");
-      await until(async () => (await shown(builder, app, run)) === "paused");
+      const paused = await screen.control("pause", runId);
+      await until(async () => (await liveStatus(runId)) === "paused");
       await scheduler.wait(50);
-      const resumed = await builder.api.screens
-        .frame(app, "")
-        .control(run, "resume");
-      const kept = await sleepDeadline(run);
-      await woken(run);
-      await finished(run);
+      const resumed = await screen.control("resume", runId);
 
       expect({
-        paused: { kind: paused.kind, state: paused.state },
-        resumed: { kind: resumed.kind, state: resumed.state },
-        kept: kept === deadline,
-        status: await shown(builder, app, run),
-        after: await hitsOf(builder, app, "after"),
-        receipts: await receiptStates(run),
-        requested: await requested(run),
+        paused: staged(paused),
+        resumed: staged(resumed),
+        kept: (await holdDeadline(runId)) === deadline,
+        stillPaused: await pausedInEngine(runId),
       }).toStrictEqual({
         paused: { kind: "pause", state: "applied" },
         resumed: { kind: "resume", state: "applied" },
-        // Time didn't stop while it was paused.
         kept: true,
-        status: "completed",
-        after: 1,
-        receipts: [
-          ["pause", "applied"],
-          ["resume", "applied"],
-        ],
-        requested: [
-          "workflow.run.pause_requested screen",
-          "workflow.run.resume_requested screen",
-        ],
+        stillPaused: false,
       });
     });
 
-    it("join a pause asked for again while it waits for a step, refuse a resume beside it, and settle it once the engine paused", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, gated);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("gated");
-      await until(async () => (await hitsOf(builder, app, "entered")) > 0);
+    it("keeps a pause of a run still starting admitted, never ending the run, and applies it once the run started", async () => {
+      const { screen, runId } = await neverStarted();
 
-      // Twice at once, then once more: one request.
-      const [first, second] = await Promise.all([
-        builder.api.screens.frame(app, "").control(run, "pause"),
-        builder.api.screens.frame(app, "").control(run, "pause"),
-      ]);
-      const again = await builder.api.screens
-        .frame(app, "")
-        .control(run, "pause");
-      const resume = await outcome(
-        builder.api.screens.frame(app, "").control(run, "resume")
-      );
-      await openGate(builder, app);
-      await until(async () => (await shown(builder, app, run)) === "paused");
-      await until(async () => {
-        const receipts = await receiptsOf(run);
-        return receipts.every(({ state }) => state === "applied");
-      });
-
-      expect({
-        first: first.state,
-        same: [second.id, again.id].every((id) => id === first.id),
-        resume,
-        receipts: await receiptStates(run),
-        requested: await requested(run),
-        after: await hitsOf(builder, app, "after"),
-      }).toStrictEqual({
-        first: "admitted",
-        same: true,
-        resume: "workflow.control_conflict",
-        receipts: [["pause", "applied"]],
-        requested: ["workflow.run.pause_requested screen"],
-        after: 0,
-      });
-    });
-
-    it("cancel over a pause still waiting for a step, which then never comes back, and refuse a pause after", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, gated);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("gated");
-      await until(async () => (await hitsOf(builder, app, "entered")) > 0);
-
-      const pause = await builder.api.screens
-        .frame(app, "")
-        .control(run, "pause");
-      const cancel = await builder.api.screens
-        .frame(app, "")
-        .control(run, "cancel");
-      // The step its activation had out ends, late: it starts nothing more.
-      await openGate(builder, app);
-      await finished(run);
-      const late = await outcome(
-        builder.api.screens.frame(app, "").control(run, "pause")
-      );
-      const again = await builder.api.screens
-        .frame(app, "")
-        .control(run, "cancel");
-
-      expect({
-        pause: pause.state,
-        cancel: cancel.state,
-        late,
-        again: { kind: again.kind, state: again.state },
-        status: await shown(builder, app, run),
-        receipts: await receiptStates(run),
-        after: await hitsOf(builder, app, "after"),
-      }).toStrictEqual({
-        pause: "admitted",
-        cancel: "applied",
-        late: "workflow.control_refused",
-        // Cancelled already: acknowledged.
-        again: { kind: "cancel", state: "applied" },
-        status: "cancelled",
-        receipts: [
-          ["pause", "superseded"],
-          ["cancel", "applied"],
-          ["cancel", "applied"],
-        ],
-        after: 0,
-      });
-    });
-
-    it("are for the App's builders, and for its own runs only", async () => {
-      const builder = await personApi("builder");
-      const user = await personApi("user");
-      const app = await appWith(builder, napper);
-      const other = await appWith(builder, napper);
-      await builder.api.apps.members.add(app, {
-        type: "person",
-        id: user.userId,
-        role: "user",
-      });
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-
-      expect({
-        user: await outcome(
-          user.api.screens.frame(app, "").control(run, "cancel")
-        ),
-        otherApp: await outcome(
-          builder.api.screens.frame(other, "").control(run, "cancel")
-        ),
-        unknownKind: await outcome(
-          builder.api.screens.frame(app, "").control(
-            run,
-            // SAFETY: a kind the types refuse, as any page can send.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            "restart" as never
-          )
-        ),
-        receipts: await receiptsOf(run),
-      }).toMatchObject({
-        user: "role.forbidden",
-        otherApp: "workflow.run_not_found",
-        unknownKind: "workflow.invalid",
-        receipts: [],
-      });
-    });
-
-    it("keep a pause of a run still starting admitted, never ending the run, and apply it once the run started", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      // A run whose start the engine hasn't had yet: no record of it.
-      const run = crypto.randomUUID();
-      await env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, pending_start) VALUES (?, ?, 'napper', 1, ?, 'starting', ?, '{}')"
-      )
-        .bind(run, app, builder.userId, Date.now())
-        .run();
-
-      const pause = await builder.api.screens
-        .frame(app, "")
-        .control(run, "pause");
+      const pause = await screen.control("pause", runId);
       const whileStarting = {
         row: await env.DB.prepare(
-          "SELECT status, ended_at IS NOT NULL AS ended FROM workflow_runs WHERE id = ?"
+          "SELECT status, ended_at IS NOT NULL AS ended FROM workflow_resource_runs WHERE id = ?"
         )
-          .bind(run)
+          .bind(runId)
           .first(),
-        receipts: await receiptStates(run),
+        receipts: await receiptStates(runId),
       };
-      // The start reaches the engine; the repair sends the pause again.
-      await runEngine(env).create({
-        id: run,
-        pinned: {
-          app: appIdSchema.parse(app),
-          workflow: workflowIdSchema.parse("napper"),
-          version: 1,
-        },
-        input: undefined,
-      });
-      await sleeping(run, "go");
-      await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
-      )
-        .bind(Date.now() - 60_000, run)
-        .run();
-      await runMinuteTasks();
-      await until(async () => (await shown(builder, app, run)) === "paused");
+      // The repair sends the start again, then the pause once it started.
+      await repairResourceStarts(env, pastFirstRepair());
+      await sleeping(runId, "task:hold");
+      await repairResourceTerminations(env, pastFirstRepair());
+      await until(async () => (await liveStatus(runId)) === "paused");
+      await until(async () => await allApplied(runId));
 
       expect({
-        pause: { kind: pause.kind, state: pause.state },
+        pause: staged(pause),
         whileStarting,
-        receipts: await receiptStates(run),
+        receipts: await receiptStates(runId),
       }).toStrictEqual({
         pause: { kind: "pause", state: "admitted" },
         whileStarting: {
@@ -386,409 +238,189 @@ describe(
       });
     });
 
-    it("resume a paused run asked for before its row heard it paused, judged by the engine", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await until(async () => (await sleepDeadline(run)) !== undefined);
-
-      const paused = await builder.api.screens
-        .frame(app, "")
-        .control(run, "pause");
-      // The engine paused it; its row still says what it said before, as
-      // when the engine's notification is still on the way.
-      await env.DB.prepare(
-        "UPDATE workflow_runs SET status = 'running' WHERE id = ?"
-      )
-        .bind(run)
-        .run();
-      const resumed = await builder.api.screens
-        .frame(app, "")
-        .control(run, "resume");
-      const stillPaused = (await liveStatus(run)) === "paused";
-      await woken(run);
-      await finished(run);
-
-      expect({
-        paused: paused.state,
-        resumed: { kind: resumed.kind, state: resumed.state },
-        stillPaused,
-        after: await hitsOf(builder, app, "after"),
-      }).toStrictEqual({
-        paused: "applied",
-        resumed: { kind: "resume", state: "applied" },
-        stillPaused: false,
-        after: 1,
-      });
-    });
-
-    it("supersede a pause of a run still starting once its start fails, so the repair leaves it", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const run = crypto.randomUUID();
-      await env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, pending_start) VALUES (?, ?, 'napper', 1, ?, 'starting', ?, '{}')"
-      )
-        .bind(run, app, builder.userId, Date.now() - 20 * 60_000)
-        .run();
-      await builder.api.screens.frame(app, "").control(run, "pause");
+    it("supersedes a pause of a run still starting once its start is given up, leaving none admitted behind the failed run", async () => {
+      const { builder, workflow, screen, runId } = await neverStarted();
+      await screen.control("pause", runId);
 
       // The engine never takes the start: the repair gives it up.
-      await aroundEngine(
-        async (method, call) => {
-          if (method === "start") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () => {
-          await repairStarts(env, run);
-        }
-      );
+      await repairResourceStarts(env, pastStarting());
+      await repairResourceTerminations(env, pastStarting());
 
       expect({
-        row: await shown(builder, app, run),
-        receipts: await receiptStates(run),
+        status: await rowStatus(builder, workflow, runId),
+        receipts: await receiptStates(runId),
       }).toStrictEqual({
-        row: "failed",
+        status: "failed",
         receipts: [["pause", "superseded"]],
       });
     });
 
-    it("reach a live run's receipt in one repair, past receipts of runs that have ended", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await until(async () => (await sleepDeadline(run)) !== undefined);
-      await aroundEngine(
-        async (method, call) => {
-          if (method === "pause") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () =>
-          await outcome(
-            builder.api.screens.frame(app, "").control(run, "pause")
-          )
-      );
-      // As many ended runs' pauses as a repair takes, older than it.
-      const old = Date.now() - 120_000;
-      await env.DB.batch(
-        Array.from({ length: 50 }, () => crypto.randomUUID()).flatMap(
-          (ended) => [
-            env.DB.prepare(
-              "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'napper', 1, ?, 'failed', ?, ?)"
-            ).bind(ended, app, builder.userId, old, old),
-            env.DB.prepare(
-              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
-            ).bind(crypto.randomUUID(), ended, builder.userId, old, old),
-          ]
-        )
-      );
+    it("resumes a run the engine has paused though its row still says running, judged by the engine", async () => {
+      const { screen, runId } = await holding();
+      await screen.control("pause", runId);
+      await until(async () => (await liveStatus(runId)) === "paused");
+      // The row behind the engine, as while its notification is on the way.
       await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
+        "UPDATE workflow_resource_runs SET status = 'running' WHERE id = ?"
       )
-        .bind(Date.now() - 60_000, run)
+        .bind(runId)
         .run();
 
-      await repairControls(env);
-      const { results: left } = await env.DB.prepare(
-        "SELECT count(*) AS left FROM workflow_run_controls c JOIN workflow_runs r ON r.id = c.run_id WHERE r.app_id = ? AND c.state = 'admitted'"
-      )
-        .bind(app)
-        .all<{ left: number }>();
+      const resumed = await screen.control("resume", runId);
 
       expect({
-        live: await receiptStates(run),
-        left: left[0]?.left,
-      }).toStrictEqual({ live: [["pause", "applied"]], left: 0 });
+        resumed: staged(resumed),
+        stillPaused: await pausedInEngine(runId),
+        receipts: await receiptStates(runId),
+      }).toStrictEqual({
+        resumed: { kind: "resume", state: "applied" },
+        stillPaused: false,
+        receipts: [
+          ["pause", "applied"],
+          ["resume", "applied"],
+        ],
+      });
     });
 
-    it("settle a pause only from where the engine has the run as it is read, never from a late notification", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      // A pause admitted that the engine hasn't taken.
+    it("refuses a pause or a resume of a run the engine has ended, its row still to hear of it, keeping no receipt", async () => {
+      const { builder, workflow, screen, runId } = await holding();
+      // The row deaf to the engine's notifications from now on, as while
+      // they are on the way; then the engine ends the run.
       await env.DB.prepare(
-        "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
+        "UPDATE workflow_resource_runs SET engine_sequence = ? WHERE id = ?"
       )
-        .bind(crypto.randomUUID(), run, builder.userId, Date.now(), Date.now())
+        .bind(Number.MAX_SAFE_INTEGER, runId)
         .run();
-      await env.DB.prepare(
-        "UPDATE workflow_runs SET control_generation = 1 WHERE id = ?"
+      await runObject(runId).terminate({ rollback: false });
+      await until(async () => (await liveStatus(runId)) === "terminated");
+
+      expect({
+        row: await rowStatus(builder, workflow, runId),
+        pause: await screen.control("pause", runId),
+        resume: await screen.control("resume", runId),
+        receipts: await receiptStates(runId),
+      }).toStrictEqual({
+        row: "running",
+        pause: "workflow.control_refused",
+        resume: "workflow.control_refused",
+        receipts: [],
+      });
+    });
+
+    it("leaves a run unpaused when a pause older than its resume reaches the engine late", async () => {
+      const { screen, runId } = await holding();
+      await screen.control("pause", runId);
+      await until(async () => (await liveStatus(runId)) === "paused");
+      await screen.control("resume", runId);
+      const pause = await env.DB.prepare(
+        "SELECT generation FROM workflow_resource_run_controls WHERE run_id = ? AND kind = 'pause'"
       )
-        .bind(run)
-        .run();
+        .bind(runId)
+        .first<number>("generation");
+
+      // The pause's call to the engine, delivered again after the resume.
+      await runEngine(env).pause(runId, pause ?? 0);
+
+      expect({
+        paused: await pausedInEngine(runId),
+        receipts: await receiptStates(runId),
+      }).toStrictEqual({
+        paused: false,
+        receipts: [
+          ["pause", "applied"],
+          ["resume", "applied"],
+        ],
+      });
+    });
+
+    it("settles no pause the engine hasn't taken, from a read of the run paused before it or a late notification of it paused", async () => {
+      const { screen, runId } = await holding();
+      await screen.control("pause", runId);
+      await until(async () => (await liveStatus(runId)) === "paused");
+      // Read while it is paused, and handed on late.
+      const read = await runEngine(env).controlState(runId);
+      await screen.control("resume", runId);
+      // A newer pause admitted, its call to the engine failing.
+      const newer = await whileEngineRefuses(
+        (method) => method === "pause",
+        async () => await screen.control("pause", runId)
+      );
 
       // A "paused" from before it, delivered late, the row taking it.
-      await projectStatus(env, run, {
+      await projectResourceRun(env, runId, {
         status: "paused",
         at: Date.now(),
         sequence: 1_000_000,
       });
-      const afterNotification = await receiptStates(run);
-      await settleControls(env, run, await runEngine(env).controlState(run));
+      const afterNotification = await receiptStates(runId);
+      await settleResourceControls(env, runId, read);
 
       expect({
+        newer: staged(newer),
         afterNotification,
-        afterRead: await receiptStates(run),
-        engine: await liveStatus(run),
+        afterRead: await receiptStates(runId),
+        paused: await pausedInEngine(runId),
       }).toStrictEqual({
-        afterNotification: [["pause", "admitted"]],
-        afterRead: [["pause", "admitted"]],
-        engine: "waiting",
-      });
-    });
-
-    it("send a receipt again whose answer from the engine was lost, once it has waited, and settle it", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await until(async () => (await sleepDeadline(run)) !== undefined);
-
-      // The engine doesn't take the pause: the request fails, its receipt
-      // admitted all the same.
-      const lost = await aroundEngine(
-        async (method, call) => {
-          if (method === "pause") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () =>
-          await outcome(
-            builder.api.screens.frame(app, "").control(run, "pause")
-          )
-      );
-      const admitted = await receiptsOf(run);
-      await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
-      )
-        .bind(Date.now() - 60_000, run)
-        .run();
-      await runMinuteTasks();
-      await until(async () => (await shown(builder, app, run)) === "paused");
-
-      expect({
-        lost,
-        admitted: admitted.map(({ kind, state }) => [kind, state]),
-        settled: await receiptStates(run),
-      }).toStrictEqual({
-        lost: "internal.unexpected",
-        admitted: [["pause", "admitted"]],
-        settled: [["pause", "applied"]],
-      });
-    });
-
-    it("leave no pause admitted behind a cancel the run's object finished for a request that died", async () => {
-      const builder = await personApi("builder");
-      const identity = await builder.api.whoami();
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      // A pause admitted, its answer from the engine lost.
-      await aroundEngine(
-        async (method, call) => {
-          if (method === "pause") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () =>
-          await outcome(
-            builder.api.screens.frame(app, "").control(run, "pause")
-          )
-      );
-      const generationOf = async () =>
-        await env.DB.prepare(
-          "SELECT control_generation FROM workflow_runs WHERE id = ?"
-        )
-          .bind(run)
-          .first<number>("control_generation");
-      const before = await generationOf();
-      // A cancel whose request died once its mark was kept: the run's
-      // object records it in core (`completeCancel`, as its repair does),
-      // while the engine has yet to end the run.
-      const mark = await markRunCancelled(env, run, actorOf(identity));
-      await completeCancel(env, mark);
-      const recorded = {
-        receipts: await receiptStates(run),
-        fenced: ((await generationOf()) ?? 0) > (before ?? 0),
-      };
-      await runDurableObjectAlarm(runObject(run));
-      await finished(run);
-
-      expect({
-        recorded,
-        receipts: await receiptStates(run),
-        fenced: ((await generationOf()) ?? 0) > (before ?? 0),
-      }).toStrictEqual({
-        recorded: { receipts: [["pause", "superseded"]], fenced: true },
-        receipts: [["pause", "superseded"]],
-        fenced: true,
-      });
-    });
-
-    it("leave a run running when a pause older than its resume reaches the engine late", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await builder.api.screens.frame(app, "").control(run, "pause");
-      await until(async () => (await liveStatus(run)) === "paused");
-      await builder.api.screens.frame(app, "").control(run, "resume");
-      // Resumed, and asleep in `go` again: not merely past paused, which a
-      // resumed run is while it runs back to its sleep.
-      await until(async () => (await liveStatus(run)) === "waiting");
-      const generations = await receiptsGenerations(run);
-      const pause =
-        generations.find(({ kind }) => kind === "pause")?.generation ?? 0;
-
-      // The pause's call to the engine, delivered again after the resume.
-      await runEngine(env).pause(run, pause);
-
-      expect({
-        engine: await liveStatus(run),
-        receipts: await receiptStates(run),
-      }).toStrictEqual({
-        engine: "waiting",
-        receipts: [
-          ["pause", "applied"],
-          ["resume", "applied"],
-        ],
-      });
-    });
-
-    it("settle no pause the engine hasn't taken, however the run's status read before it looks", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await builder.api.screens.frame(app, "").control(run, "pause");
-      await until(async () => (await liveStatus(run)) === "paused");
-      // Read while it is paused, and handed on late.
-      const read = await runEngine(env).controlState(run);
-      await builder.api.screens.frame(app, "").control(run, "resume");
-      // Asleep in `go` again (see above).
-      await until(async () => (await liveStatus(run)) === "waiting");
-      // A newer pause admitted, its call to the engine failing.
-      await aroundEngine(
-        async (method, call) => {
-          if (method === "pause") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () =>
-          await outcome(
-            builder.api.screens.frame(app, "").control(run, "pause")
-          )
-      );
-
-      await settleControls(env, run, read);
-
-      expect({
-        engine: await liveStatus(run),
-        receipts: await receiptStates(run),
-      }).toStrictEqual({
-        engine: "waiting",
-        receipts: [
+        newer: { kind: "pause", state: "admitted" },
+        afterNotification: [
           ["pause", "applied"],
           ["resume", "applied"],
           ["pause", "admitted"],
         ],
+        afterRead: [
+          ["pause", "applied"],
+          ["resume", "applied"],
+          ["pause", "admitted"],
+        ],
+        paused: false,
       });
     });
 
-    it("reach a live run's receipt within two repairs, past more receipts that never settle than one repair takes", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(builder, napper);
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("napper");
-      await sleeping(run, "go");
-      await until(async () => (await sleepDeadline(run)) !== undefined);
-      // Its pause admitted, the engine's answer lost.
-      await aroundEngine(
-        async (method, call) => {
-          if (method === "pause") {
-            throw new Error("The engine is unavailable");
-          }
-          return await call();
-        },
-        async () =>
-          await outcome(
-            builder.api.screens.frame(app, "").control(run, "pause")
-          )
-      );
-      // More pauses than a repair takes, each of a run the engine has no
-      // record of, so none ever settles, all of them due before it.
+    it("reaches a live run's stalled pause within two repairs, past more receipts that never settle than one repair takes", async () => {
+      const stuck = await neverStarted();
+      const { screen, runId } = await holding();
+      const { app, builder } = stuck;
+      // Receipts of a run the engine has no record of, so none ever
+      // settles, each due before the live run's.
       const old = Date.now() - 120_000;
       await env.DB.batch(
-        Array.from({ length: 60 }, () => crypto.randomUUID()).flatMap(
-          (stuck) => [
-            env.DB.prepare(
-              "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'napper', 1, ?, 'running', ?)"
-            ).bind(stuck, app, builder.userId, old),
-            env.DB.prepare(
-              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
-            ).bind(crypto.randomUUID(), stuck, builder.userId, old, old),
-          ]
+        Array.from({ length: moreThanOneRepairTakes }, (_, index) =>
+          env.DB.prepare(
+            "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) VALUES (?, ?, ?, ?, ?, 'pause', 'admitted', 1000, ?, ?)"
+          ).bind(
+            crypto.randomUUID(),
+            stuck.runId,
+            app,
+            builder.userId,
+            keyOf(),
+            old,
+            old + index
+          )
         )
       );
-      await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
-      )
-        .bind(Date.now() - 60_000, run)
-        .run();
-
-      await repairControls(env);
-      await repairControls(env);
-
-      await expect(receiptStates(run)).resolves.toStrictEqual([
-        ["pause", "applied"],
-      ]);
-    });
-
-    it("refuse to resume a run the engine has ended, its row still to hear of it", async () => {
-      const builder = await personApi("builder");
-      const app = await appWith(
-        builder,
-        workflowFiles("quick", "  return null;", {})
+      // The live run's pause admitted, the engine's answer lost.
+      const lost = await whileEngineRefuses(
+        (method) => method === "pause",
+        async () => await screen.control("pause", runId)
       );
-      const { id: run } = await builder.api.screens
-        .frame(app, "")
-        .startRun("quick");
-      await finished(run);
-      // The row behind the engine: still running, as it was.
       await env.DB.prepare(
-        "UPDATE workflow_runs SET status = 'running', ended_at = NULL WHERE id = ?"
+        "UPDATE workflow_resource_run_controls SET next_at = ? WHERE run_id = ?"
       )
-        .bind(run)
+        .bind(Date.now() - 60_000, runId)
         .run();
 
-      await expect(
-        outcome(builder.api.screens.frame(app, "").control(run, "resume"))
-      ).resolves.toBe("workflow.control_refused");
+      await repairResourceTerminations(env, new Date());
+      await repairResourceTerminations(env, new Date());
+      await until(async () => (await liveStatus(runId)) === "paused");
+      await until(async () => await allApplied(runId));
+
+      expect({
+        lost: staged(lost),
+        live: await receiptStates(runId),
+      }).toStrictEqual({
+        lost: { kind: "pause", state: "admitted" },
+        live: [["pause", "applied"]],
+      });
     });
   }
 );
