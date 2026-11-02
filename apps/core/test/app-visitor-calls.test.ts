@@ -132,6 +132,40 @@ export default app({
 `,
 });
 
+/** 50 more queries' names, as long as names get. */
+const manyNames = Array.from(
+  { length: 50 },
+  (_, index) =>
+    `notesKeptForTheVisitorsOfThisPortalNumber${String(index).padStart(2, "0")}`
+);
+
+/** Their paths. */
+const manyPaths = manyNames.map((name) => `portal.${name}`);
+
+/** The Portal App with the 50 queries of `manyNames` beside its own. */
+const manyFiles = (): Record<string, string> => {
+  const files = portalFiles();
+  const queries = manyNames
+    .map(
+      (name) => `
+export const ${name} = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(1)).map(({ text }) => text),
+});
+`
+    )
+    .join("");
+  const list = manyNames.join(", ");
+  return {
+    ...files,
+    "operations/portal.ts": `${files["operations/portal.ts"] ?? ""}${queries}`,
+    "app.ts": (files["app.ts"] ?? "")
+      .replace("shout } from", `shout, ${list} } from`)
+      .replace("kick, shout }", `kick, shout, ${list} }`),
+  };
+};
+
 /** Commits `files` as the App's current version, its screen approved. */
 const released = async (
   builder: Person,
@@ -496,7 +530,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
           (event) =>
             event.target?.id === app &&
             (event.action === "app.visitor_called" ||
-              event.action === "app.visitor_grants_set" ||
+              event.action === "app.visitor_granted" ||
               (event.action === "app.visitor_refused" &&
                 JSON.stringify(event.detail).includes("not_granted")))
         )
@@ -507,9 +541,9 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         }))
     ).toStrictEqual([
       {
-        action: "app.visitor_grants_set",
+        action: "app.visitor_granted",
         actor: "person",
-        detail: { version, added: "portal.mine", removed: "" },
+        detail: { version, function: "portal.mine" },
       },
       {
         action: "app.visitor_called",
@@ -522,6 +556,41 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         detail: { reason: "not_granted", function: "portal.secrets", version },
       },
     ]);
+  });
+
+  it("grant 50 long-named functions, and audit every one granted and taken away in full", async () => {
+    const { builder, admin, app } = await portal(newDomain());
+    const version = await released(builder, admin, app, manyFiles());
+    const kept = manyPaths.slice(0, 25);
+    const taken = manyPaths.slice(25);
+
+    let granted: unknown;
+    let narrowed: unknown;
+    const events = await auditedDuring(async () => {
+      granted = await builder.api.apps.setVisitorGrants(app, manyPaths);
+      narrowed = await builder.api.apps.setVisitorGrants(app, kept);
+    });
+    const changes = (action: string) =>
+      events
+        .filter((event) => event.action === action && event.target?.id === app)
+        .map((event) => JSON.stringify(event.detail))
+        .toSorted();
+    const asDetails = (paths: string[]) =>
+      paths
+        .map((path) => JSON.stringify({ function: path, version }))
+        .toSorted();
+
+    expect({
+      granted,
+      narrowed,
+      added: changes("app.visitor_granted"),
+      removed: changes("app.visitor_ungranted"),
+    }).toStrictEqual({
+      granted: { version, functions: manyPaths.toSorted() },
+      narrowed: { version, functions: kept.toSorted() },
+      added: asDetails(manyPaths),
+      removed: asDetails(taken),
+    });
   });
 
   it("are granted only by the App's builders, never staff or its users", async () => {

@@ -56,7 +56,8 @@ import { requireNotStaff } from "./sharing.ts";
 //   the endpoint per client address too.
 // - Unseen. Every call admitted is audited as the visitor, with the
 //   function granted and the version; a call refused for its grant is
-//   audited too. Granting is audited as the builder, with the version.
+//   audited too. Granting is audited as the builder, one event per
+//   function granted or taken away, with the version.
 
 /** The functions App `app`'s version `version` grants visitors, by path. */
 export const grantedFunctions = async (
@@ -176,16 +177,19 @@ export const setAppVisitorGrants = async (
         grantedAt: now,
       })
     ),
-    outboxed(db, {
-      actor: actorOf(by),
-      action: "app.visitor_grants_set",
-      target: { type: "app", id: found.id },
-      detail: {
-        version,
-        added: added.join(" "),
-        removed: removed.join(" "),
-      },
-    }),
+    // One event per function: a path fits an audit value (256 characters
+    // at most), a whole set of them doesn't.
+    ...[
+      ...added.map((path) => ["app.visitor_granted", path] as const),
+      ...removed.map((path) => ["app.visitor_ungranted", path] as const),
+    ].map(([action, path]) =>
+      outboxed(db, {
+        actor: actorOf(by),
+        action,
+        target: { type: "app", id: found.id },
+        detail: { version, function: path },
+      })
+    ),
   ]);
   return { version, functions: await grantedFunctions(env, found.id, version) };
 };
