@@ -37,7 +37,7 @@ import { deliver, invoiceMail, storedObjects } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // Independent workflows' email triggers (workflows/inbound-email.ts), from
@@ -95,13 +95,13 @@ const attachment = {
 };
 
 /** A workflow taking a message's `subject`, and what else its trigger maps. */
-const definitionOf = (name: string): string =>
+const definitionOf = (name: string, version = "1.0.0"): string =>
   JSON.stringify({
     document: {
       dsl: "1.0.3",
       namespace: workflowNamespace,
       name,
-      version: "1.0.0",
+      version,
       title: name,
       metadata: {
         grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
@@ -205,9 +205,62 @@ const emailTrigger = async () => {
     builder,
     admin: by,
     workflow: id,
+    name,
     trigger,
     start,
     address: `${trigger.address ?? ""}@${own}`,
+  };
+};
+
+/**
+ * Core's database, with `first` run once, just before the first statement
+ * whose query `at` matches is run: another writer getting there between
+ * what core read before and that statement.
+ */
+const racedAt = (at: RegExp, first: () => Promise<unknown>): D1Database => {
+  const real = env.DB;
+  let raced = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property, receiver) => {
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        if (
+          property === "first" ||
+          property === "all" ||
+          property === "raw" ||
+          property === "run"
+        ) {
+          return async (...args: unknown[]) => {
+            await first();
+            const run: unknown = Reflect.get(target, property, target);
+            if (typeof run !== "function") {
+              throw new TypeError(`No ${property} on a statement`);
+            }
+            const result: unknown = await Reflect.apply(run, target, args);
+            return result;
+          };
+        }
+        const value: unknown = Reflect.get(target, property, receiver);
+        return value;
+      },
+    });
+  return {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      if (raced || !at.test(query)) {
+        return statement;
+      }
+      raced = true;
+      return racing(statement);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
   };
 };
 
@@ -904,5 +957,46 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       freed: freed.status,
       runs: await runCount(trigger.id),
     }).toStrictEqual({ full: true, runsWhileFull: 0, freed: 202, runs: 1 });
+  });
+
+  it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
+    const { builder, workflow, name, trigger, address } = await emailTrigger();
+    await builder.api.workflowResources.publish(workflow, {
+      definition: definitionOf(name, "1.1.0"),
+      basedOn: 1,
+    });
+    const message = invoiceMail({
+      to: address,
+      messageId: `moved-${unique()}@acme.test`,
+    });
+    // Moved to version 2 after core read the trigger, just as the start
+    // checks what the trigger may do.
+    const moving = racedAt(/trigger_resources AS live/u, async () => {
+      await builder.api.workflowResources.triggers.setVersion(trigger.id, 2);
+    });
+    const failed = vi.spyOn(console, "error").mockReturnValue();
+
+    const raced = await outcome(
+      deliver(address, message, { changes: { DB: moving } })
+    );
+    failed.mockRestore();
+    const again = await deliver(address, message);
+    const versions = await env.DB.prepare(
+      "SELECT workflow_resource_version AS version FROM workflow_start_receipts WHERE invoker_type = 'trigger' AND invoker_id = ?"
+    )
+      .bind(trigger.id)
+      .all<{ version: number }>();
+
+    expect({
+      raced: raced === "ok",
+      again: again.rejected,
+      versions: versions.results.map(({ version }) => version),
+      refused: await refusalsOf(trigger.id),
+    }).toStrictEqual({
+      raced: false,
+      again: undefined,
+      versions: [2],
+      refused: [],
+    });
   });
 });

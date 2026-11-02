@@ -384,10 +384,39 @@ const settle = async (
 };
 
 /**
+ * Where trigger `taker` stands now, read live: `moved` to another version
+ * since it was read (so a refusal may be of the old version's start, and
+ * the event is to be tried again, at the new one), `gone` (disabled or
+ * deleted), or still `current`.
+ */
+const standingOf = async (
+  env: Env,
+  taker: Taker
+): Promise<"current" | "moved" | "gone"> => {
+  const live = await drizzle(env.DB)
+    .select({ version: triggerResources.currentVersion })
+    .from(triggerResources)
+    .where(
+      and(
+        eq(triggerResources.id, taker.id),
+        eq(triggerResources.enabled, true),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+  if (live === undefined) {
+    return "gone";
+  }
+  return live.version === taker.version ? "current" : "moved";
+};
+
+/**
  * What became of `taker`'s start of `arrival` that threw `error`: gone
  * (refused for good, audited, or held back too long, dropped, audited:
- * settled), unavailable (the trigger disabled, deleted or moved
- * meanwhile), or to try again.
+ * settled), unavailable (the trigger disabled or deleted meanwhile), or to
+ * try again (core's own failure, or the trigger moved to another version
+ * meanwhile, whatever it was refused with: nothing of the old version's
+ * is settled for good).
  */
 const refusalOf = async (
   env: Env,
@@ -402,7 +431,11 @@ const refusalOf = async (
     });
     return "retry";
   }
-  if (error.code === "workflow.trigger_unavailable") {
+  const standing = await standingOf(env, taker);
+  if (standing === "moved") {
+    return "retry";
+  }
+  if (error.code === "workflow.trigger_unavailable" || standing === "gone") {
     return "unavailable";
   }
   let { code } = error;

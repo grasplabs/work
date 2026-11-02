@@ -598,13 +598,10 @@ const receiveForTrigger = async (
     ...(loop === undefined ? {} : { refusedAs: loop }),
   });
   if (outcome === "unavailable") {
-    // Disabled or deleted as it arrived: no such address. Moved to
-    // another version: tried again, at that version.
-    if ((await emailTakerAt(env, address)) === undefined) {
-      message.setReject("No such address.");
-      return;
-    }
-    throw new Error(`Message ${id} arrived as its trigger changed`);
+    // Disabled or deleted as it arrived: no such address. (Moved to
+    // another version, it is tried again, at that version: `retry`.)
+    message.setReject("No such address.");
+    return;
   }
   if (outcome === "retry") {
     throw new Error(`Message ${id} didn't start its trigger's run yet`);
