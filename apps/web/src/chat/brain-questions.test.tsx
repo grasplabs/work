@@ -20,7 +20,8 @@ import { BrainQuestions } from "./brain-questions.tsx";
 
 // The brain's open questions in its chat, against core's brain as the page
 // reaches it over RPC, faked: a closed question isn't shown; a member
-// answers in their own words; only the company's admins ask the owner;
+// answers in their own words; only the company's admins ask the owner, or
+// close a question without an answer;
 // Grasp's staff do neither; a refusal is said and the draft kept, and an
 // ask nobody could receive is said and shows nothing as asked.
 
@@ -65,6 +66,11 @@ const shown = async (gaps: Gap[], who: Who, refusal?: string) => {
     askAboutGap: async (id: string) => {
       await Promise.resolve();
       calls.push(`ask ${id}`);
+      refuse();
+    },
+    closeGap: async (id: string) => {
+      await Promise.resolve();
+      calls.push(`close ${id}`);
       refuse();
     },
   };
@@ -188,8 +194,34 @@ describe(BrainQuestions, () => {
     await press("Ask Head of finance");
 
     expect({ before, calls }).toStrictEqual({
-      before: ["Answer", "Ask Head of finance", "Answer"],
+      before: [
+        "Answer",
+        "Ask Head of finance",
+        "Close without an answer",
+        "Answer",
+        "Close without an answer",
+      ],
       calls: ["ask gap-open"],
+    });
+  });
+
+  it("lets the company's admin close a question without an answer, which a member can't", async () => {
+    const { calls, changed } = await shown([open], {
+      role: "admin",
+      staff: false,
+    });
+
+    await press("Close without an answer");
+    const admin = { calls: [...calls], changed: changed.length };
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown([open], { role: "user", staff: false });
+
+    expect({ admin, member: buttons() }).toStrictEqual({
+      admin: { calls: ["close gap-open"], changed: 1 },
+      member: ["Answer"],
     });
   });
 
@@ -209,7 +241,7 @@ describe(BrainQuestions, () => {
     }).toStrictEqual({
       said: true,
       changed: 0,
-      still: ["Answer", "Ask Head of finance"],
+      still: ["Answer", "Ask Head of finance", "Close without an answer"],
     });
   });
 
