@@ -549,7 +549,7 @@ const coreSql = (statement: string): void => {
   );
 };
 
-test("a run whose model call waits for a share of its App's requests reads as queued, with when it tries again, not failed or running", async ({
+test("a run whose model call waits for a share of its person's requests reads as queued, with when it tries again, not failed or running", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("workflows");
@@ -571,14 +571,14 @@ test("a run whose model call waits for a share of its App's requests reads as qu
   expect(app).toMatch(plainId);
   expect(run).toMatch(plainId);
   expect(builder.userId).toMatch(plainId);
-  // Its step's model call waits for its App's share, and asks again in ten
+  // Its step's model call waits for its person's share, and asks again in ten
   // minutes at the latest. A wait stays live a minute and a half after its
   // call asked: this one asked "now" a minute from now, room for pages to
   // load.
   const asked = Date.now() + 60_000;
   const retryAt = Date.now() + 10 * 60_000;
   coreSql(
-    `INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES ('${run}', 'e2e-step', 'e2e', 'app', ${retryAt}, ${asked})`
+    `INSERT INTO workflow_model_waits (run_id, step_hash, owner, waiting_for, retry_at, seen_at) VALUES ('${run}', 'e2e-step', 'e2e', 'person', ${retryAt}, ${asked})`
   );
   const page = await pageOf(builder);
   try {
@@ -587,7 +587,7 @@ test("a run whose model call waits for a share of its App's requests reads as qu
     const row = page.getByRole("row").nth(1);
     await expect(row).toContainText("Queued", pageRead);
     await expect(row).toContainText(
-      "Waiting for a share of this domain's runs; tries again by"
+      "Waiting for a share of this person's runs; tries again by"
     );
     await expect(row).not.toContainText("Failed");
     await expect(row).not.toContainText("Running");
@@ -599,7 +599,7 @@ test("a run whose model call waits for a share of its App's requests reads as qu
       .locator("xpath=..");
     await expect(header).toContainText("Queued", pageRead);
     await expect(header).toContainText(
-      "Waiting for a share of this domain's runs; tries again by"
+      "Waiting for a share of this person's runs; tries again by"
     );
     await expect(header).not.toContainText("Waiting for a decision");
     await expect(header).not.toContainText("Failed");

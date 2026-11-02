@@ -48,7 +48,7 @@ const lineageSpend = async (
 };
 
 describe("run lineages", { timeout: 90_000 }, () => {
-  it("charge a run another App's mail starts in a lineage to that App's account there: its spend, its time and its share, while its place counts in the lineage", async () => {
+  it("charge a run another App's mail starts in a lineage to that App's account there: its spend and its time, while its place counts in the lineage", async () => {
     const builder = await signedInApi(idp, "builder");
     const appX = await appWith(builder, {
       ...workflowFiles("idle", "  return null;"),
@@ -98,10 +98,9 @@ describe("run lineages", { timeout: 90_000 }, () => {
         spentTwiceTheRoot:
           (spent.get(root.id) ?? 0) > 0 &&
           spent.get(first) === 2 * (spent.get(root.id) ?? 0),
-        // App Y's runs take App Y's triggers' share, not the root's
-        // person's, and their attempts count on its account.
-        attempts: await rowsOf<{ subject: string; account: string }>(
-          "SELECT DISTINCT subject, root_run_id AS account FROM run_lineage_attempts WHERE run_id IN (?, ?)",
+        // App Y's runs' attempts count on its account.
+        attempts: await rowsOf<{ account: string }>(
+          "SELECT DISTINCT root_run_id AS account FROM run_lineage_attempts WHERE run_id IN (?, ?)",
           first,
           second
         ),
@@ -125,10 +124,9 @@ describe("run lineages", { timeout: 90_000 }, () => {
       accounts: result.accounts.map((id) =>
         id === result.firstId ? "first" : id
       ),
-      attempts: result.attempts.map(({ subject, account }) => [
-        subject,
-        account === result.firstId ? "first" : account,
-      ]),
+      attempts: result.attempts.map(({ account }) =>
+        account === result.firstId ? "first" : account
+      ),
       lineages: {
         // All three runs took the lineage's places.
         descendants: rootRow?.descendants,
@@ -146,7 +144,7 @@ describe("run lineages", { timeout: 90_000 }, () => {
       accounts: ["first"],
       firstId: undefined,
       spentTwiceTheRoot: true,
-      attempts: [[`trigger:${appY}`, "first"]],
+      attempts: ["first"],
       lineages: {
         descendants: 3,
         sameAge: true,
