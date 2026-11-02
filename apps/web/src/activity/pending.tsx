@@ -1,5 +1,4 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { AppExports } from "@grasp-os/shared/apps";
 import type {
   Permission,
   PermissionSubject,
@@ -27,12 +26,6 @@ import { formatList } from "../format.ts";
 export interface PendingRequests {
   requests: Permission[];
   directory: Directory;
-  /**
-   * The exports of each App a request asks to call, as they are now: what
-   * granting it lets the asking App call. Missing for one that couldn't
-   * be read.
-   */
-  exports: ReadonlyMap<string, AppExports>;
 }
 
 /**
@@ -49,27 +42,7 @@ export const readRequestNames = async (
     session.apps.list(),
     readPeople(session),
   ]);
-  const directory = { people, apps: appsById(apps) };
-  const called = [
-    ...new Set(
-      requests.flatMap(({ object }) =>
-        object.type === "app" ? [object.appId] : []
-      )
-    ),
-  ];
-  // Each App's exports on their own: one that can't be read is shown as
-  // such, and the requests are still there to decide.
-  const read = await Promise.allSettled(
-    called.map(async (app) => await session.apps.exports(app))
-  );
-  const exports = new Map<string, AppExports>();
-  for (const [index, app] of called.entries()) {
-    const result = read[index];
-    if (result?.status === "fulfilled") {
-      exports.set(app, result.value.exports);
-    }
-  }
-  return { requests, directory, exports };
+  return { requests, directory: { people, apps: appsById(apps) } };
 };
 
 /**
@@ -108,29 +81,51 @@ export const subjectOf = (
     : holderName(subject);
 
 /**
- * The exports of another App a request's actions cover, as they are now:
- * all those marked `read` or `write`, and each named.
+ * A workflow's store a permission asks for, in plain words: what its
+ * operations reach, as the list read them (`reach`).
  */
-const coveredExports = (
-  actions: readonly string[],
-  exported: AppExports | undefined
-): string => {
-  if (exported === undefined) {
-    return i18n._(msg`couldn't be read`);
+const storeObject = (storeId: string, reach: Permission["reach"]): string => {
+  if (reach?.length === 0) {
+    // A workflow's store whose operations can't be read now, or that
+    // serves none of these: consent can't be given in plain words yet.
+    return i18n._(
+      msg`Store ${ph({ store: storeId })}, a workflow's. What these operations reach can't be shown now`
+    );
   }
-  const covered = Object.entries(exported).flatMap(([name, { access }]) =>
-    actions.includes(name) || actions.includes(access)
-      ? [`${name} (${access})`]
-      : []
-  );
-  return covered.length === 0 ? i18n._(msg`none now`) : formatList(covered);
+  if (reach !== undefined) {
+    // Consent in plain words: a workflow's store, whose operations reach
+    // every record of their tables, whoever owns it.
+    const reads = formatList([
+      ...new Set(
+        reach.filter(({ changes }) => !changes).map(({ table }) => table)
+      ),
+    ]);
+    const changes = formatList([
+      ...new Set(
+        reach.filter(({ changes: writes }) => writes).map(({ table }) => table)
+      ),
+    ]);
+    const store = ph({ store: storeId });
+    if (changes === "") {
+      return i18n._(
+        msg`Store ${store}, a workflow's. This can read every record of ${reads}, whoever owns it`
+      );
+    }
+    return reads === ""
+      ? i18n._(
+          msg`Store ${store}, a workflow's. This can read and change every record of ${changes}, whoever owns it`
+        )
+      : i18n._(
+          msg`Store ${store}, a workflow's. This can read every record of ${reads}, and read and change every record of ${changes}, whoever owns it`
+        );
+  }
+  return i18n._(msg`Store ${ph({ store: storeId })}`);
 };
 
 /** What it asks for, by ID: connections and collections have no names here. */
 export const objectOf = (
   { object, actions, reach }: Permission,
-  directory: Directory,
-  exports: PendingRequests["exports"]
+  directory: Directory
 ): string => {
   if (object.type === "connection") {
     const { connectionId, resource } = object;
@@ -143,9 +138,20 @@ export const objectOf = (
     return i18n._(msg`Collection ${collectionId}`);
   }
   if (object.type === "app") {
+    // An agent's permission on an App's functions, by action as core
+    // checks it (agent-apps.ts): `read` calls its queries, `write` its
+    // mutations and actions, and neither allows the other's.
     const engine = appName(directory, object.appId);
-    const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${ph({ domain: engine })}: ${covered}`);
+    const reads = actions.includes("read");
+    const writes = actions.includes("write");
+    if (reads && writes) {
+      return i18n._(
+        msg`Queries, mutations and actions of ${ph({ domain: engine })}`
+      );
+    }
+    return writes
+      ? i18n._(msg`Mutations and actions of ${ph({ domain: engine })}`)
+      : i18n._(msg`Queries of ${ph({ domain: engine })}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
@@ -166,42 +172,8 @@ export const objectOf = (
       msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
   }
-  if (object.type === "store" && reach?.length === 0) {
-    // A workflow's store whose operations can't be read now, or that
-    // serves none of these: consent can't be given in plain words yet.
-    return i18n._(
-      msg`Store ${ph({ store: object.storeId })}, a workflow's. What these operations reach can't be shown now`
-    );
-  }
-  if (object.type === "store" && reach !== undefined) {
-    // Consent in plain words: a workflow's store, whose operations reach
-    // every record of their tables, whoever owns it.
-    const reads = formatList([
-      ...new Set(
-        reach.filter(({ changes }) => !changes).map(({ table }) => table)
-      ),
-    ]);
-    const changes = formatList([
-      ...new Set(
-        reach.filter(({ changes: writes }) => writes).map(({ table }) => table)
-      ),
-    ]);
-    const store = ph({ store: object.storeId });
-    if (changes === "") {
-      return i18n._(
-        msg`Store ${store}, a workflow's. This can read every record of ${reads}, whoever owns it`
-      );
-    }
-    return reads === ""
-      ? i18n._(
-          msg`Store ${store}, a workflow's. This can read and change every record of ${changes}, whoever owns it`
-        )
-      : i18n._(
-          msg`Store ${store}, a workflow's. This can read every record of ${reads}, and read and change every record of ${changes}, whoever owns it`
-        );
-  }
   if (object.type === "store") {
-    return i18n._(msg`Store ${ph({ store: object.storeId })}`);
+    return storeObject(object.storeId, reach);
   }
   return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
 };

@@ -3,6 +3,7 @@ import { compilerVersion } from "@grasp-os/compiler";
 import {
   acceptedUpdateSchema,
   appErrors,
+  appV1ServerFolder,
   fromBlueprintSchema,
 } from "@grasp-os/shared/apps";
 import type {
@@ -34,7 +35,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { exportsIn } from "./app-exports.ts";
+import { refuseV1Server } from "./app-v1-server.ts";
 import type { ProvisionalOrigin, AppRow, VersionRow } from "./apps.ts";
 import {
   appFor,
@@ -55,6 +56,7 @@ import {
   supersededBy,
   toApp,
   toVersion,
+  versionFiles,
   versionTree,
   workflowsIn,
 } from "./apps.ts";
@@ -442,6 +444,9 @@ export const markBlueprint = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
+  // A version holding the v1 server's files is never a blueprint: no App
+  // could be created from it (`createFromBlueprint` refuses them too).
+  refuseV1Server(Object.keys(await versionFiles(env, found.id, row.version)));
   const db = drizzle(env.DB);
   const marked = async () =>
     await db
@@ -591,6 +596,9 @@ export const createFromBlueprint = async (
     blueprint.permissions,
     blueprint.id
   );
+  // A blueprint marked from a version holding the v1 server's files: no
+  // App is created from it as none is committed with them.
+  refuseV1Server(files.keys());
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
@@ -649,12 +657,11 @@ export const createFromBlueprint = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
-    exports: exportsIn(files),
     proposedBy: null,
     // Typed as the code it copies was: the requests it is created with,
     // and over them the source version's binding names, which a copy
     // keeps though it asks only for what it may declare (no connection or
-    // other App's exports), and which hold even where a name the
+    // workflow), and which hold even where a name the
     // blueprint declares is now another kind. Types grant nothing: a call
     // is refused until the copy holds the permission.
     workflowBindings: {
@@ -812,6 +819,11 @@ interface Merged {
  * file: what only one side changed comes from that side, and a file both
  * changed (to different content) stays as the App has it, listed as a
  * conflict. AGENTS.md is the App's own, whatever the blueprint holds.
+ *
+ * The v1 server's files (`app/`) are dropped, from either side: a copy
+ * made before the v1 server went may still hold them, and no version is
+ * committed with them any more (app-v1-server.ts). The update shows them
+ * deleted, and its version is one that commits.
  */
 const mergeOver = (
   base: ReadonlyMap<string, string>,
@@ -822,6 +834,9 @@ const mergeOver = (
   const conflicts: string[] = [];
   const paths = new Set([...base.keys(), ...ours.keys(), ...theirs.keys()]);
   for (const path of [...paths].toSorted()) {
+    if (path.startsWith(appV1ServerFolder)) {
+      continue;
+    }
     const mine = ours.get(path);
     const was = base.get(path);
     const now = theirs.get(path);
@@ -1011,7 +1026,6 @@ export const acceptBlueprintUpdate = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
-    exports: exportsIn(files),
     proposedBy: null,
     workflowBindings: await appBindingKinds(env, appId),
   };

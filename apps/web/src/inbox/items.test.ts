@@ -260,7 +260,6 @@ const waiting = (ranOut = true) =>
       data: {
         requests: [request],
         directory: { people: new Map(), apps: new Map() },
-        exports: new Map(),
       },
     },
     dependencies: {
@@ -507,9 +506,16 @@ describe(listed, () => {
         about: { kind: "brain" },
       },
     ]);
-    expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
-      "The schedule of Nightly report stopped"
-    );
+    const stopped = items.find(({ kind }) => kind === "stoppedSchedule");
+    expect({ title: stopped?.title, about: stopped?.about }).toStrictEqual({
+      title: "The schedule of Nightly report stopped",
+      // Its workflow's Triggers tab, where it is turned on again.
+      about: {
+        kind: "independentWorkflow",
+        workflow: "workflow-1",
+        tab: "triggers",
+      },
+    });
     expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 8);
   });
 });
