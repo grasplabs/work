@@ -44,19 +44,19 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** Classifies the App's data as `admin`, under the generation they review now. */
+/** Classifies the App's data as `admin`, under the generation they read now. */
 const classifyAs = async (
   admin: Person,
   app: string,
   output: "ordinary" | "sensitive"
 ): Promise<void> => {
-  const { generation } = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.classify(app, output, generation);
+  const { generation } = await admin.api.dataPolicy.read(app);
+  await admin.api.dataPolicy.classify(app, output, generation);
 };
 
 /**
  * A builder's Notes App, made current; its data `ordinary` (fine for
- * code nobody approved) unless `sensitive`.
+ * code Grasp didn't serve) unless `sensitive`.
  */
 /**
  * The Notes App, with a list that never answers more than ten notes a

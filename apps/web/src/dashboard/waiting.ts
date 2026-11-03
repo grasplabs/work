@@ -4,7 +4,6 @@ import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type {
   BindingApprovalItem,
   GoLiveItem,
@@ -37,8 +36,6 @@ export interface Waiting {
   requests: Loaded<PendingRequests> | undefined;
   /** Packages to approve: none for anyone without that permission. */
   dependencies: Loaded<DependenciesWaiting>;
-  /** Engines with apps whose code waits for approval. Admins only. */
-  screens: Loaded<ScreensWaiting[]> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */
   decisions: Loaded<DecisionView[]>;
   /** Versions of workflows asked to go live that the person may approve or send back. */

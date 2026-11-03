@@ -712,7 +712,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const response = await screen.channel.content("attachments", id);
     const reader = response.body?.getReader();
     await reader?.read();
-    // The same files under a second version, so its screens stay trusted.
+    // The same files under a second version.
     const { version } = await builder.api.apps.files.commit(
       app,
       { ...files, "app.ts": `${files["app.ts"] ?? ""}\n// The second.\n` },
@@ -721,24 +721,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await builder.api.apps.versions.setCurrent(app, version);
     await expect(reader?.read()).rejects.toThrow(
       "That reference belongs to another version"
-    );
-  });
-
-  it("delivers none of a download's remaining bytes once its screen's build is revoked", async () => {
-    const { app, admin, artifacts, screen } = await openedApp();
-    const id = await upload(
-      screen.channel,
-      blobOf(png(2 * fileLimits.chunkBytes), "image/png")
-    );
-    const response = await screen.channel.content("attachments", id);
-    const reader = response.body?.getReader();
-    await reader?.read();
-    for (const artifact of artifacts) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await admin.api.screenTrust.revoke(app, artifact);
-    }
-    await expect(reader?.read()).rejects.toThrow(
-      "The approval of this page's code was taken back."
     );
   });
 
@@ -758,7 +740,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     await expect(reader?.read()).rejects.toThrow(
-      "The approval of this page's code was taken back."
+      "This version of the App was revoked."
     );
     await expect(
       codeOf(screen.channel.describe("attachments", id))

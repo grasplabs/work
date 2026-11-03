@@ -2,7 +2,6 @@ import type { App, AppContents } from "@grasp-os/shared/apps";
 import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { AppWorkflowSummary, RunsPage } from "@grasp-os/shared/workflows";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
@@ -46,7 +45,6 @@ import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
-import { ScreenApproval } from "../engines/screen-approval.tsx";
 import { readStoreChanges, StoreChanges } from "../engines/store-changes.tsx";
 import {
   LoadingLines,
@@ -229,19 +227,10 @@ const PageCard = ({ app, screen }: { app: string; screen: string }) => (
 );
 
 /**
- * The App's pages, or why it has none; for an admin, with whether their
- * code is approved for the App's data (`approval`). A new page is made in
- * the App's chat, as any change to it.
+ * The App's pages, or why it has none. A new page is made in the App's
+ * chat, as any change to it.
  */
-const Pages = ({
-  app,
-  contents,
-  approval,
-}: {
-  app: string;
-  contents: AppContents;
-  approval: Deferred<ScreenTrustReview> | undefined;
-}) => {
+const Pages = ({ app, contents }: { app: string; contents: AppContents }) => {
   const { t } = useLingui();
   const none = contents.version === null || contents.screens.length === 0;
   return (
@@ -279,13 +268,6 @@ const Pages = ({
             <PageCard app={app} key={screen} screen={screen} />
           ))}
         </ul>
-      )}
-      {/* Also with no pages now: earlier versions' approvals can still be
-          taken back. Not before a first version, which has nothing. */}
-      {approval === undefined || contents.version === null ? null : (
-        <Later promise={approval}>
-          {(review) => <ScreenApproval review={review} />}
-        </Later>
       )}
     </div>
   );
@@ -446,7 +428,6 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     runs,
     members,
     integrations,
-    approval,
     resources,
     webhooks,
     storeChanges,
@@ -583,7 +564,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </TabsContent>
         <TabsContent value="pages">
           <div className="pt-4">
-            <Pages app={app.id} approval={approval} contents={contents} />
+            <Pages app={app.id} contents={contents} />
           </div>
         </TabsContent>
         {integrations === undefined ? null : (
@@ -796,13 +777,6 @@ export const Route = createFileRoute("/_shell/apps/$app_/details")({
       core,
       async (session) => await session.screens.surfaces(params.app)
     ),
-    // Only for who decides it: the organization's own admins.
-    approval: decidesRequests(identity)
-      ? loadFromCore(
-          core,
-          async (session) => await session.screenTrust.review(params.app)
-        )
-      : undefined,
     // Only for who may abandon a store's failed change: the organization's
     // own admins, never Grasp staff.
     storeChanges: readStoreChanges(core, identity, params.app),

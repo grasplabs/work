@@ -71,6 +71,8 @@ import { activeMember } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
+import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
+import type { Grantee } from "./data-policy.ts";
 import {
   apps,
   appVersions,
@@ -84,8 +86,6 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
-import { madeSensitiveByGrant, widenedByGrant } from "./screen-trust.ts";
-import type { Grantee } from "./screen-trust.ts";
 import { storeReachOf } from "./workflow-store-host.ts";
 
 // Permission records and the one check every server path runs. A person
@@ -1267,7 +1267,7 @@ export const grantPermission = async (
       .returning(),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     // The Apps whose data it makes sensitive again, read before that
-    // happens below: their open screens are told to look again.
+    // happens below: their open connections are told to look again.
     madeSensitiveByGrant(db, widened, storedEvent(event.id)),
     // An admin granting an App's permission approves the version they
     // reviewed (`madeCurrent`), as they would by making it current.
@@ -1289,9 +1289,9 @@ export const grantPermission = async (
       ? [workflowGenerationMoved(db, found.objectId, storedEvent(event.id))]
       : []),
     // More access for an App is more for every App that reaches it
-    // through workflows: their data, if an admin had said it
-    // may go to code nobody approved, is sensitive again, and their
-    // screens' policy moves on (screen-trust.ts). More for a workflow is
+    // through workflows: their data, if an admin had said it may go to
+    // code Grasp didn't serve, is sensitive again, and their data policy
+    // moves on (data-policy.ts). More for a workflow is
     // more for every App that starts it, or a workflow that binds it.
     ...(isApp
       ? widenedByGrant(

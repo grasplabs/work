@@ -149,7 +149,7 @@ describe("security headers on the screen frame", () => {
     }
   });
 
-  it("is an opaque sandbox, framed only by the product page, that reaches nothing and runs no script but its build's", async () => {
+  it("is an opaque sandbox, framed only by the product page, that reaches nothing, parses no markup a script writes and runs no script but its build's", async () => {
     // Without a build: no script at all. With one, only that build's
     // (screen-bridge.test.ts).
     const policy = policyOf(await routed("/screen-frame"));
@@ -166,6 +166,9 @@ describe("security headers on the screen frame", () => {
       "form-action": ["'none'"],
       "base-uri": ["'none'"],
       "frame-ancestors": ["'self'"],
+      "require-trusted-types-for": ["'script'"],
+      "trusted-types": ["'none'"],
+      webrtc: ["'block'"],
     });
   });
 

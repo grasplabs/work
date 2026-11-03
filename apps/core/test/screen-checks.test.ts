@@ -357,6 +357,87 @@ export default function Escapes() {
     ).toBeTruthy();
   });
 
+  it("fails a screen that names WebRTC or makes a nested document, saying what to do", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        "screens/peers.tsx": `import { useEffect, useRef } from "react";
+
+export default function Peers() {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const connection = new RTCPeerConnection();
+    const legacy = window.webkitRTCPeerConnection;
+    const channel: RTCDataChannel | undefined = undefined;
+    const quoted = globalThis["RTCIceTransport"];
+    const nested = document.createElement("iframe");
+    const realm = nested.contentWindow;
+    void [connection, legacy, channel, quoted, realm, box];
+  }, []);
+  return (
+    <div ref={box}>
+      <iframe title="nested" />
+    </div>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect(built.ok).toBeFalsy();
+    expect(
+      built.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-peer-connections")
+        .map(({ line, rule }) => `${line} ${rule}`)
+    ).toStrictEqual([
+      "6 grasp/no-peer-connections",
+      "7 grasp/no-peer-connections",
+      "8 grasp/no-peer-connections",
+      "9 grasp/no-peer-connections",
+      "10 grasp/no-peer-connections",
+      "11 grasp/no-peer-connections",
+      "16 grasp/no-peer-connections",
+    ]);
+    // Each says what to do instead.
+    expect(
+      built.diagnostics
+        .filter(({ rule }) => rule === "grasp/no-peer-connections")
+        .every(({ message }) => message.includes("through its App's functions"))
+    ).toBeTruthy();
+  });
+
+  it("passes a screen that names the window's members, or only looks like WebRTC", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        "screens/windowed.tsx": `import { useEffect, useState } from "react";
+
+const peers = { RTCMode: "relay", connection: "PeerConnection" };
+
+export default function Windowed() {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    setWidth(window.innerWidth);
+    const saved = window["localStorage"].getItem("draft");
+    const frame = document.createElement("div");
+    const key = "draft";
+    void [saved, frame, typeof window, globalThis.location.hash, Object.keys(window).length, window.localStorage[key]];
+  }, []);
+  return (
+    <p>
+      {width} {peers.RTCMode} {peers.connection}
+    </p>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect(built).toMatchObject({ ok: true, diagnostics: [] });
+  });
+
   it("passes a screen whose names only look like an escape", async () => {
     const built = await buildScreens(
       env,

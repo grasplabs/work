@@ -7,13 +7,16 @@ import {
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { artifactSchema } from "@grasp-os/shared/screen-trust";
 import {
+  artifactSchema,
   screenErrors,
   screenFrameMessage,
   screenFrameReady,
   screenLanguageOf,
   screenModulePath,
+  screenNestedDocuments,
+  screenNestedInterfaces,
+  screenPeerInterfaces,
 } from "@grasp-os/shared/screens";
 import { z } from "zod";
 
@@ -38,8 +41,8 @@ import { screenFramePolicy } from "./security-headers.ts";
 // lets it in: HTML an App's server sends that the screen renders (an
 // `onerror` attribute, a `<script>`), a module the screen imports from a
 // string (`import("data:…")`), `eval` or `new Function`, a second import
-// map. What an admin approved, a build's hash, is then what the frame
-// runs; a change to the App's server changes data, never code. Browsers
+// map. The build core leased, by its hash, is then what the frame runs; a
+// change to the App's server changes data, never code. Browsers
 // match a policy's addresses on scheme, host, port and the exact path,
 // so the policy names the deployment's own origin as people reach it
 // (`SIGN_IN.origin`, behind the router), not the address core is called
@@ -584,10 +587,261 @@ export const screenModuleResponse = async (
 // - the report carries nothing: what counts is that it came over this
 //   port, which only this script holds. The screen's ports and the page's
 //   window are its own to post on, and the page reads no act from them.
+//
+// It also keeps the screen from making a document of its own, before any
+// of the screen's code runs. A nested document, even an empty
+// `about:blank` one, which `frame-src 'none'` doesn't stop, is a realm
+// with its own WebRTC (a peer connection to a TURN server is a way out no
+// policy closes, security-headers.ts) and its own network. The frame's
+// policy makes every sink of the HTML parser (`innerHTML`,
+// `insertAdjacentHTML`, `DOMParser`, `document.write`, `srcdoc`, …)
+// refuse a string (Trusted Types, with no policy allowed), and this script
+// closes what is left, so a screen can't create a nested realm:
+// - It checks that the browser enforces that first, by giving a detached
+//   element's `innerHTML` a string: a browser that takes it would parse a
+//   screen's markup, nested documents and all, so the screen isn't
+//   started there, and the page says the browser is too old.
+// - Each WebRTC interface becomes an undefined, non-configurable property
+//   of the window, so no script gets it back there.
+// - `createElement`, `createElementNS` and `createDocument` convert their
+//   arguments once, call the browser's own, and refuse what came out when
+//   it is a nested document by its local name or its interface, read with
+//   getters taken at start: a namespace prefix (`x:iframe`), a name whose
+//   `toString` answers differently each time, or a customized built-in
+//   all end there.
+// - The nested documents' interfaces are taken at start and replaced
+//   with stand-ins that construct nothing (React reads
+//   `window.HTMLIFrameElement` with `instanceof`, which they still
+//   answer): no class can extend them. `XSLTProcessor`, which makes
+//   markup into nodes without the parser, is gone.
+// - `document.execCommand("insertHTML")` is refused, and so is the
+//   Sanitizer API (`setHTML` on an element or a shadow root,
+//   `Document.parseHTML`), which builds elements with a parser of its own
+//   that Trusted Types doesn't govern, and whose configuration can be
+//   widened to make a `<link>` with an address; `Document.parseHTMLUnsafe`
+//   too, whatever Trusted Types does with it.
+// - An element's `contentWindow` and `contentDocument` answer null.
+// - `document.open`, `write` and `writeln` are refused: opening the
+//   document again clears every listener of the document and the
+//   window, these guards' among them, and Trusted Types covers only the
+//   markup `write` takes, not an `open()` with none. Nothing else a
+//   script can do resets them in place: a navigation leaves the screen's
+//   code behind (and the page stops a frame that leaves), and reloading
+//   runs this script again.
+// - Nor can a `<link>` it makes have an address: a `preconnect` opens a
+//   connection to whatever address it names, a lookup and a handshake
+//   that carry the name out, which neither this policy nor
+//   `X-DNS-Prefetch-Control` governs. Making a link stays allowed, as
+//   the kit's module loader makes one as it loads, only to ask which
+//   `rel` the browser supports; giving one an `href` is refused, by
+//   its property and every way an attribute is set, so a link connects
+//   nowhere. Screens style with the kit, and load nothing a link would.
+// - Markup pasted or dropped never becomes nodes: the window's first
+//   capturing listener cancels the browser's own handling of every
+//   `paste` and `drop`, before anything about it is read, so it holds
+//   whatever the event says it carries. It asks neither where nor what:
+//   at the window, an event from inside a shadow root names its host,
+//   and WebKit pasted markup that a check of the event's types let
+//   through. A paste's plain text is inserted instead, into whatever
+//   has focus (nothing, when nothing editable does), so a screen's
+//   fields take text, formatting dropped; a drop inserts nothing. The
+//   screen's own listeners still hear both, and read their files. The
+//   text goes in only after the screen's listeners on its elements, from
+//   a bubbling listener on the window, and not at all when the screen cancelled the paste itself
+//   (its own `preventDefault`, as a field that splits pasted tags
+//   calls, or `returnValue = false`) or stopped it on the way: a screen
+//   that handles a paste gets the text once, its way. To the screen,
+//   both events look as the browser handed them: not cancelled until it
+//   cancels them itself (`defaultPrevented`). A paste listener the
+//   screen puts on the window itself comes after the insertion, and
+//   cancelling there is too late for it. A dropped file reaches a file
+//   field only through the field's own drop handler (the kit's has one).
+//
+// All of it is one closure, so nothing it keeps is reachable from the
+// screen's code. A classic script's top-level `const` is a binding of the
+// realm's global scope, which every later script and module resolves a
+// free name against (a screen's `declare const createElement` compiles
+// away and then reads it): the browser's own methods kept there would
+// hand the screen a way past every lock. Inside the closure they exist
+// only for the wrappers that use them. That, the locks being
+// non-configurable, and the frame's policy are the boundary. The
+// compiler's no-peer-connections rule (@grasp-os/compiler's
+// design-rules.ts) only tells an author early; it reads source, which a
+// screen can always spell some other way, and nothing relies on it.
 const bootstrap = `"use strict";
+(() => {
 const apply = Reflect.apply;
+const enforced = (() => {
+  try {
+    document.createElement("div").innerHTML = "<b></b>";
+    return false;
+  } catch {
+    return true;
+  }
+})();
+const lock = (target, name, descriptor) => {
+  if (Object.getOwnPropertyDescriptor(target, name)?.configurable !== false) {
+    Object.defineProperty(target, name, { ...descriptor, enumerable: false, configurable: false });
+  }
+};
+for (const name of ${JSON.stringify(screenPeerInterfaces)}) {
+  lock(window, name, { value: undefined, writable: false });
+}
+const refusedNames = new Set(${JSON.stringify(screenNestedDocuments)});
+const nestedInterfaces = ${JSON.stringify(screenNestedInterfaces)}.flatMap((name) => {
+  const found = Object.getOwnPropertyDescriptor(window, name)?.value;
+  return typeof found === "function" ? [[name, found]] : [];
+});
+const localNameOf = Object.getOwnPropertyDescriptor(Element.prototype, "localName").get;
+const rootOf = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
+// Every intrinsic the locks use at call time is taken now: the screen's
+// code may replace \`String\`, \`Set.prototype.has\` or \`Array.prototype.some\`.
+const toText = String;
+const toLower = String.prototype.toLowerCase;
+const hasInstance = Function.prototype[Symbol.hasInstance];
+const has = Set.prototype.has;
+const some = Array.prototype.some;
+const Refusal = DOMException;
+const isRefused = (node) =>
+  node !== null &&
+  typeof node === "object" &&
+  (apply(has, refusedNames, [apply(toLower, toText(apply(localNameOf, node, [])), [])]) ||
+    apply(some, nestedInterfaces, [(entry) => apply(hasInstance, entry[1], [node])]));
+const refuse = () => {
+  throw new Refusal("A screen makes no nested document, and no link with an address.", "NotSupportedError");
+};
+const asName = (value) => (value === null || value === undefined ? value : toText(value));
+const createElement = Document.prototype.createElement;
+const createElementNS = Document.prototype.createElementNS;
+const createDocument = DOMImplementation.prototype.createDocument;
+const execCommand = Document.prototype.execCommand;
+lock(Document.prototype, "createElement", {
+  writable: false,
+  value: function (tag, options) {
+    const made = apply(createElement, this, [toText(tag), options]);
+    return isRefused(made) ? refuse() : made;
+  },
+});
+lock(Document.prototype, "createElementNS", {
+  writable: false,
+  value: function (namespace, tag, options) {
+    const made = apply(createElementNS, this, [asName(namespace), toText(tag), options]);
+    return isRefused(made) ? refuse() : made;
+  },
+});
+lock(DOMImplementation.prototype, "createDocument", {
+  writable: false,
+  value: function (namespace, tag, doctype) {
+    const made = apply(createDocument, this, [asName(namespace), asName(tag), doctype]);
+    return isRefused(apply(rootOf, made, [])) ? refuse() : made;
+  },
+});
+for (const owner of [Document.prototype, globalThis.HTMLDocument?.prototype]) {
+  for (const name of ["open", "write", "writeln"]) {
+    if (owner !== undefined && Object.hasOwn(owner, name)) {
+      lock(owner, name, { writable: false, value: refuse });
+    }
+  }
+}
+lock(Document.prototype, "execCommand", {
+  writable: false,
+  value: function (command, showUI, value) {
+    const asked = toText(command);
+    return apply(toLower, asked, []) === "inserthtml" ? refuse() : apply(execCommand, this, [asked, showUI, value]);
+  },
+});
+for (const [name, found] of nestedInterfaces) {
+  for (const member of ["contentWindow", "contentDocument"]) {
+    if (member in found.prototype) {
+      lock(found.prototype, member, { get: () => null });
+    }
+  }
+  if ("getSVGDocument" in found.prototype) {
+    lock(found.prototype, "getSVGDocument", { writable: false, value: () => null });
+  }
+  const standIn = function () {
+    refuse();
+  };
+  lock(standIn, Symbol.hasInstance, { writable: false, value: (node) => apply(hasInstance, found, [node]) });
+  lock(window, name, { value: standIn, writable: false });
+}
+lock(window, "XSLTProcessor", { value: undefined, writable: false });
+for (const [owner, name] of [[Element.prototype, "setHTML"], [globalThis.ShadowRoot?.prototype, "setHTML"], [Document, "parseHTML"], [Document, "parseHTMLUnsafe"]]) {
+  if (owner !== undefined && typeof owner[name] === "function") {
+    lock(owner, name, { writable: false, value: refuse });
+  }
+}
+const attrNameOf = Object.getOwnPropertyDescriptor(Attr.prototype, "localName").get;
+const endsWith = String.prototype.endsWith;
+const isLink = (node) => apply(toLower, toText(apply(localNameOf, node, [])), []) === "link";
+const isAddress = (name) => {
+  const lower = apply(toLower, toText(name), []);
+  return lower === "href" || apply(endsWith, lower, [":href"]);
+};
+for (const [name, nameAt] of [["setAttribute", 0], ["setAttributeNS", 1], ["toggleAttribute", 0]]) {
+  const set = Element.prototype[name];
+  lock(Element.prototype, name, {
+    writable: false,
+    value: function (...args) {
+      const named = toText(args[nameAt]);
+      args[nameAt] = named;
+      return isLink(this) && isAddress(named) ? refuse() : apply(set, this, args);
+    },
+  });
+}
+for (const [owner, name] of [[Element.prototype, "setAttributeNode"], [Element.prototype, "setAttributeNodeNS"], [NamedNodeMap.prototype, "setNamedItem"], [NamedNodeMap.prototype, "setNamedItemNS"]]) {
+  const set = owner[name];
+  lock(owner, name, {
+    writable: false,
+    value: function (attr) {
+      return isAddress(apply(attrNameOf, attr, [])) ? refuse() : apply(set, this, [attr]);
+    },
+  });
+}
+const linkHref = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, "href");
+lock(HTMLLinkElement.prototype, "href", { get: linkHref.get, set: refuse });
 const listen = EventTarget.prototype.addEventListener;
 const unlisten = EventTarget.prototype.removeEventListener;
+const preventDefault = Event.prototype.preventDefault;
+const getData = DataTransfer.prototype.getData;
+const clipboardOf = Object.getOwnPropertyDescriptor(ClipboardEvent.prototype, "clipboardData").get;
+const define = Object.defineProperty;
+const weakAdd = WeakSet.prototype.add;
+const weakHas = WeakSet.prototype.has;
+// Cancels the browser's own handling of a paste or drop, and shows the
+// screen the event as if nothing had: its cancelling, by any of the
+// event's ways, is recorded for the paste's insertion to read.
+const cancelledByScreen = new WeakSet();
+const shield = (event) => {
+  apply(preventDefault, event, []);
+  const cancel = () => {
+    apply(weakAdd, cancelledByScreen, [event]);
+  };
+  const cancelled = () => apply(weakHas, cancelledByScreen, [event]);
+  define(event, "preventDefault", { value: cancel });
+  define(event, "defaultPrevented", { get: cancelled });
+  define(event, "returnValue", {
+    get: () => !cancelled(),
+    set: (value) => {
+      if (!value) {
+        cancel();
+      }
+    },
+  });
+};
+apply(listen, window, ["paste", shield, true]);
+apply(listen, window, ["drop", shield, true]);
+apply(listen, window, ["paste", (event) => {
+  if (apply(weakHas, cancelledByScreen, [event])) {
+    return;
+  }
+  const data = apply(clipboardOf, event, []);
+  const text = data === null ? "" : apply(getData, data, ["text/plain"]);
+  // Nothing to insert (an image, a file) replaces no selection either.
+  if (text !== "") {
+    apply(execCommand, document, ["insertText", false, text]);
+  }
+}, false]);
 const post = MessagePort.prototype.postMessage;
 const repeatOf = Object.getOwnPropertyDescriptor(KeyboardEvent.prototype, "repeat").get;
 const load = new URLSearchParams(location.search).get("load");
@@ -632,8 +886,11 @@ const start = (event) => {
     )
   );
 };
-apply(listen, window, ["message", start]);
-parent.postMessage({ type: "${screenFrameReady}", load }, "*");`;
+if (enforced) {
+  apply(listen, window, ["message", start]);
+}
+parent.postMessage({ type: "${screenFrameReady}", load, supported: enforced }, "*");
+})();`;
 
 /**
  * `value` as JSON to put between `<script>` tags: a `<` would let the
@@ -758,6 +1015,9 @@ export const screenFrameResponse = async (
     headers: {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": screenFramePolicy(scripts),
+      // No name a screen writes is looked up ahead of time: a lookup is a
+      // packet to whoever answers for that name.
+      "x-dns-prefetch-control": "off",
     },
   });
 };

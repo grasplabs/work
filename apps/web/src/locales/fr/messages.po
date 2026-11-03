@@ -313,11 +313,6 @@ msgstr "{conversations, plural, one {# conversation} other {# conversations}}"
 msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
 msgstr "{count, plural, one {{label} : # élément} other {{label} : # éléments}}"
 
-#: src/dashboard/to-do.tsx
-#: src/inbox/items.ts
-msgid "{count, plural, one {{name} has # page whose code nobody approved} other {{name} has # pages whose code nobody approved}}"
-msgstr "{count, plural, one {{name} a # page dont personne n’a approuvé le code} other {{name} a # pages dont personne n’a approuvé le code}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} travaillent ici, sur # travail apparu dans ce que les gens ont dit.} other {{names} travaillent ici, sur # travaux apparus dans ce que les gens ont dit.}}"
@@ -1667,21 +1662,13 @@ msgstr "Une nouvelle version de cette application est prête. Elle s'ouvrira une
 msgid "A newer link was sent since. Open the latest one from the chat app."
 msgstr "Un lien plus récent a été envoyé depuis. Ouvrez le dernier depuis l’application de chat."
 
-#: src/engines/screen-approval.tsx
-msgid "A page is code that runs in people's browsers. It gets this App's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "Une page est du code qui s’exécute dans le navigateur des personnes. Elle ne reçoit les données de cette application qu’une fois qu’un admin a approuvé exactement ce code, et une modification du code demande une nouvelle approbation. Lisez d’abord le code : un code approuvé peut toujours envoyer ailleurs ce qu’il reçoit, l’approuver revient donc à dire que vous lui faites confiance."
-
 #: src/routes/_shell.apps.$app_.details.tsx
 msgid "A page is what people open of this App. Ask Grasp in the App's chat to design one."
 msgstr "Une page est ce que les personnes ouvrent de cette application. Demandez à Grasp, dans le chat de l’application, d’en concevoir une."
 
 #: src/activity/audit-words.ts
-msgid "A page nobody approved was refused the App's data"
-msgstr "Une page que personne n’a approuvée s’est vu refuser les données de l’application"
-
-#: src/inbox/items.ts
-msgid "A page runs only once an admin approved its code. That happens in the App's details."
-msgstr "Une page ne s’exécute qu’une fois son code approuvé par un administrateur. Cela se fait dans les détails de l’application."
+msgid "A page was refused the App's data"
+msgstr "Une page s’est vu refuser les données de l’application"
 
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
@@ -2375,10 +2362,6 @@ msgstr "Un admin le connecte pour tout le monde."
 msgid "An admin hasn't set up company memory yet."
 msgstr "Aucun admin n’a encore configuré la mémoire de l’entreprise."
 
-#: src/engines/screen-approval.tsx
-msgid "An admin said this App's data may go to pages nobody approved, so its pages run without approval, unless their approval was taken back."
-msgstr "Un administrateur a indiqué que les données de cette application peuvent aller à des pages que personne n’a approuvées : ses pages fonctionnent donc sans approbation, sauf si leur approbation a été retirée."
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
 msgstr "Un montant en {currency} a au plus {digits, plural, one {# décimale} other {# décimales}}."
@@ -2584,16 +2567,6 @@ msgstr "Application {app}"
 msgid "App {app}, version {version}"
 msgstr "Application {app}, version {version}"
 
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "App approval"
-msgstr "Approbation d’application"
-
-#: src/dashboard/to-do.tsx
-msgctxt "kind of thing that waits"
-msgid "App approval"
-msgstr "Approbation d’applications"
-
 #: src/routes/_shell.apps.$app_.data.tsx
 #: src/routes/_shell.apps.$app_.details.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -2638,14 +2611,9 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 
-#: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 msgid "Approval"
 msgstr "Approbation"
-
-#: src/engines/screen-approval.tsx
-msgid "Approval taken back"
-msgstr "Approbation retirée"
 
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Approvals"
@@ -2695,10 +2663,6 @@ msgstr "Approuver les paquets pour {app}"
 msgid "Approve the packages for {app}?"
 msgstr "Approuver les paquets pour {app} ?"
 
-#: src/engines/screen-approval.tsx
-msgid "Approve the pages of version {version}"
-msgstr "Approuver les pages de la version {version}"
-
 #: src/inbox/items.ts
 msgid "Approve what {name} reaches"
 msgstr "Approuver ce que {name} atteint"
@@ -2706,7 +2670,6 @@ msgstr "Approuver ce que {name} atteint"
 #: src/dashboard/runs-widget.tsx
 #: src/engines/app-webhooks.tsx
 #: src/engines/package-approvals.tsx
-#: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approuvé"
 
@@ -2785,10 +2748,6 @@ msgstr "Applications en cours de création dans ce chat"
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Applications dans lesquelles il travaille"
-
-#: src/dashboard/to-do.tsx
-msgid "Apps to approve"
-msgstr "Applications à approuver"
 
 #: src/engines/app-status.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -3654,8 +3613,8 @@ msgid "Changed what is built of approved packages"
 msgstr "A modifié ce qui est compilé des paquets approuvés"
 
 #: src/activity/audit-words.ts
-msgid "Changed whether an App's data needs approved pages"
-msgstr "A modifié si les données d’une application exigent des pages approuvées"
+msgid "Changed whether an App's data goes to code outside Grasp"
+msgstr "A modifié si les données d’une application vont à du code hors de Grasp"
 
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
@@ -4900,10 +4859,6 @@ msgstr "Agit pour les personnes ici"
 msgid "Does things for people in {name}"
 msgstr "Agit pour les personnes dans {name}"
 
-#: src/engines/screen-approval.tsx
-msgid "Doesn't build now"
-msgstr "Ne se compile pas pour l'instant"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Domain"
@@ -5092,10 +5047,6 @@ msgstr "Plus anciennes"
 #: src/chat/draft-versions.tsx
 msgid "Earlier version"
 msgstr "Version précédente"
-
-#: src/engines/screen-approval.tsx
-msgid "Earlier versions"
-msgstr "Versions précédentes"
 
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
@@ -5994,6 +5945,10 @@ msgstr "Grasp convertit les PDF importés avec {whereItRuns}, avec la propre cl�
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "Grasp n’a pas pu être joint. Réessayez."
+
+#: src/screens/screen-frame.tsx
+msgid "Grasp couldn't confirm this page's code for you. Reload to try again."
+msgstr "Grasp n’a pas pu confirmer le code de cette page pour vous. Rechargez pour réessayer."
 
 #: src/chat/failure.ts
 msgid "Grasp couldn't put this question to the model. Try again."
@@ -8615,10 +8570,6 @@ msgstr "Personne d’autre avec qui partager."
 msgid "Nobody from Grasp can sign in to this workspace now."
 msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 
-#: src/screens/screen-frame.tsx
-msgid "Nobody has approved this page's code for the App's data yet. An admin can approve it in the App's details."
-msgstr "Personne n’a encore approuvé le code de cette page pour les données de l’application. Un admin peut l’approuver dans les détails de l’application."
-
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
 msgstr "Personne ne l'a modifié depuis sa version actuelle."
@@ -8726,10 +8677,6 @@ msgstr "Non autorisé"
 msgctxt "a question to the board without an answer"
 msgid "Not answered yet"
 msgstr "Pas encore de réponse"
-
-#: src/engines/screen-approval.tsx
-msgid "Not approved"
-msgstr "Non approuvé"
 
 #: src/engines/resource-bindings.tsx
 msgid "Not bound"
@@ -9720,12 +9667,7 @@ msgstr "Paquets pour {workflow}"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Des paquets de {name} ont été révoqués comme logiciels malveillants"
 
-#: src/engines/screen-approval.tsx
-msgid "Page"
-msgstr "Page"
-
 #: src/engines/app-page.tsx
-#: src/inbox/items.ts
 #: src/routes/_shell.apps.$app_.details.tsx
 msgid "Pages"
 msgstr "Pages"
@@ -10384,10 +10326,6 @@ msgstr "Lire les propos des autres"
 msgid "Read restricted sources, and is held to them"
 msgstr "A lu des sources restreintes et y est désormais soumis"
 
-#: src/engines/screen-approval.tsx
-msgid "Read the code of version {version}"
-msgstr "Lire le code de la version {version}"
-
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Lire ce qui est à l'entreprise"
@@ -10968,7 +10906,6 @@ msgstr "Gain par mois"
 msgid "return a month, measured"
 msgstr "gain par mois, mesuré"
 
-#: src/dashboard/to-do.tsx
 #: src/inbox/item-detail.tsx
 msgid "Review"
 msgstr "Examiner"
@@ -10984,10 +10921,6 @@ msgstr "À relire avant le"
 #: src/dashboard/signals.tsx
 msgid "Review overdue"
 msgstr "Révision en retard"
-
-#: src/dashboard/to-do.tsx
-msgid "Review the pages of {name}"
-msgstr "Examiner les pages de {name}"
 
 #. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
@@ -12437,7 +12370,6 @@ msgstr "Statistiques"
 
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
-#: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -12719,14 +12651,6 @@ msgstr "Retirer {name} du projet"
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
 msgstr "Retirer {who} de {name}"
-
-#: src/engines/screen-approval.tsx
-msgid "Take back"
-msgstr "Retirer"
-
-#: src/engines/screen-approval.tsx
-msgid "Take back the approval of {screen}"
-msgstr "Retirer l’approbation de {screen}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
@@ -13155,10 +13079,6 @@ msgstr "Les statistiques propres à l’application"
 msgid "The App's own statistics, and the platform's under permission {permission}"
 msgstr "Les statistiques propres à l’application, et celles de la plateforme sous l'autorisation {permission}"
 
-#: src/screens/screen-frame.tsx
-msgid "The approval of this page's code was taken back, and the page was stopped. An admin can approve it again in the App's details."
-msgstr "L’approbation du code de cette page a été retirée, et la page a été arrêtée. Un admin peut l’approuver de nouveau dans les détails de l’application."
-
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
 msgstr "Les applications et workflows qui peuvent utiliser des paquets npm approuvés. Ouvrez-en un pour mettre hors service ou révoquer ce qui lui a été approuvé."
@@ -13239,10 +13159,6 @@ msgstr "La modification du magasin {name} a été abandonnée"
 #: src/workflows/business-process.tsx
 msgid "The checks, reviews and records the regulator expects from you."
 msgstr "Les contrôles, revues et registres que le régulateur attend de vous."
-
-#: src/engines/screen-approval.tsx
-msgid "The code of version {version}"
-msgstr "Le code de la version {version}"
 
 #: src/routes/setup.tsx
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
@@ -13859,6 +13775,10 @@ msgstr "Cette application est archivée. Elle reste telle quelle, et personne n�
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Ce navigateur ne peut pas écouter. Vous pouvez écrire vos réponses."
 
+#: src/screens/screen-frame.tsx
+msgid "This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari."
+msgstr "Ce navigateur est trop ancien pour les pages d’applications. Mettez-le à jour ou ouvrez cette page dans une version récente de Chrome, Edge, Firefox ou Safari."
+
 #: src/knowledge/purge.tsx
 msgid "This can't be undone. Confirm by {until}, or prepare it again."
 msgstr "C’est irréversible. Confirmez avant {until}, ou préparez-la à nouveau."
@@ -14071,8 +13991,8 @@ msgid "This page wants to open another site in a new tab. Open it only if you ex
 msgstr "Cette page veut ouvrir un autre site dans un nouvel onglet. Ne l’ouvrez que si vous vous attendiez à y aller."
 
 #: src/screens/screen-frame.tsx
-msgid "This page's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
-msgstr "Le code enregistré de cette page ne correspond plus au code approuvé, elle n’a donc pas été ouverte. Prévenez un admin."
+msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
+msgstr "Le code enregistré de cette page ne correspond plus au code publié, elle n’a donc pas été ouverte. Prévenez un admin."
 
 #: src/chat/failure.ts
 msgid "This run has made all the model calls it may make."
@@ -14125,6 +14045,10 @@ msgstr "Cette version de l’application n’a pas été scellée, elle ne peut 
 #: src/screens/screen-frame.tsx
 msgid "This version of the App was revoked and no longer runs. An admin can make another version current."
 msgstr "Cette version de l’application a été révoquée et ne s’exécute plus. Un admin peut rendre une autre version actuelle."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the App was revoked, and the page was stopped. An admin can make another version current."
+msgstr "Cette version de l’application a été révoquée et la page a été arrêtée. Un admin peut rendre une autre version actuelle."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
@@ -14701,7 +14625,6 @@ msgstr "Vérifier la chaîne"
 
 #: src/engines/app-versions.tsx
 #: src/engines/app-workflows.tsx
-#: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx

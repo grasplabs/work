@@ -1,10 +1,12 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { appFilesPath, fileLimits } from "@grasp-os/shared/app-file-limits";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { screenLeaseHeader } from "@grasp-os/shared/screens";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { revokeRelease } from "../src/release-retention.ts";
 import {
   appsOf,
   answerOf,
@@ -29,6 +31,7 @@ import {
 } from "./app-files.ts";
 import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { person as actingPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 
@@ -259,9 +262,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
     ).resolves.toMatchObject({ id });
   });
 
-  it("refuses a screen's file requests once its build is unreviewed, or revoked", async () => {
+  it("serves a new screen's file requests with nobody approving its build, and refuses them once its release is revoked", async () => {
     const builder = await personApi("builder");
-    const admin = await personApi("admin");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(app);
     const { version } = await builder.api.apps.files.commit(
@@ -270,44 +272,32 @@ describe("an App's files", { timeout: 120_000 }, () => {
       "First"
     );
     await builder.api.apps.versions.setCurrent(app, version);
-    // Its data ordinary: a screen nobody approved runs, and gets a lease.
-    const first = await admin.api.screenTrust.review(app);
-    await admin.api.screenTrust.classify(app, "ordinary", first.generation);
+    // Made current, its App's data sensitive, and no admin looked at it.
     const screen = await screenOf(builder, app);
     const id = await upload(screen.channel, blobOf(png(), "image/png"));
-    const refusals = async () => [
+    await expect(
+      screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ id });
+    await revokeRelease(
+      env,
+      await actingPerson("admin"),
+      { app: appIdSchema.parse(app), version },
+      "Leaks data"
+    );
+    expect([
       await codeOf(screen.channel.describe("attachments", id)),
       await codeOf(upload(screen.channel, blobOf(png(), "image/png"))),
-    ];
-    // Sensitive again: the build nobody approved gets none of it.
-    const second = await admin.api.screenTrust.review(app);
-    await admin.api.screenTrust.classify(app, "sensitive", second.generation);
-    const unreviewed = await refusals();
-    // Approved, then revoked.
-    const third = await admin.api.screenTrust.review(app);
-    const artifacts = builtArtifacts(third.screens);
-    await admin.api.screenTrust.approve(app, {
-      version: third.version,
-      generation: third.generation,
-      artifacts,
-    });
-    for (const artifact of artifacts) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      await admin.api.screenTrust.revoke(app, artifact);
-    }
-    expect({ unreviewed, revoked: await refusals() }).toStrictEqual({
-      unreviewed: ["screen.unreviewed", "screen.unreviewed"],
-      revoked: ["screen.revoked", "screen.revoked"],
-    });
+    ]).toStrictEqual(["screen.revoked", "screen.revoked"]);
   });
 
   it("refuses a request whose lease doesn't verify for its person, though the App's data is ordinary", async () => {
     const { builder, app, screen } = await openedApp();
     const id = await upload(screen.channel, blobOf(png(), "image/png"));
-    // Ordinary data: a screen of it runs without a valid lease elsewhere.
+    // Ordinary data: code core didn't serve runs without a valid lease
+    // elsewhere.
     const admin = await personApi("admin");
-    const { generation } = await admin.api.screenTrust.review(app);
-    await admin.api.screenTrust.classify(app, "ordinary", generation);
+    const { generation } = await admin.api.dataPolicy.read(app);
+    await admin.api.dataPolicy.classify(app, "ordinary", generation);
     const colleague = await colleagueOf(builder, app);
     const described = async (lease: string) =>
       await screen.fetch(`${appFilesPath}/${app}/attachments/files/${id}`, {

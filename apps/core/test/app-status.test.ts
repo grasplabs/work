@@ -16,7 +16,7 @@ import { shareStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
 import { repairStarts } from "../src/workflows/runs.ts";
-import { ordinaryData, racingDb } from "./apps.ts";
+import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -75,7 +75,6 @@ const draftApp = async (builder: Person, user?: Person): Promise<string> => {
     "First version"
   );
   await builder.api.apps.versions.setCurrent(id, version);
-  await ordinaryData(id);
   if (user !== undefined) {
     await builder.api.apps.members.add(id, {
       type: "person",
@@ -115,7 +114,7 @@ const noSuchApp = {
 const { boundApp } = jsonWorkflowAppsOf(idp);
 
 /**
- * An App of a builder's, published, its screen approved, with an
+ * An App of a builder's, published, with an
  * independent workflow bound that holds an hour, and the App's grant to
  * start it.
  */
@@ -679,7 +678,7 @@ describe("an App's status", () => {
       signedInApi(idp, "user"),
     ]);
     const app = await draftApp(builder);
-    const { generation } = await admin.api.screenTrust.review(app);
+    const { generation } = await admin.api.dataPolicy.read(app);
     const by = await builder.api.whoami();
     const archive = async (): Promise<void> => {
       await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
@@ -698,7 +697,7 @@ describe("an App's status", () => {
     );
     const members = await builder.api.apps.members.list(app);
     const classified = await outcome(
-      admin.api.screenTrust.classify(app, "sensitive", generation)
+      admin.api.dataPolicy.classify(app, "ordinary", generation)
     );
 
     expect({
@@ -736,7 +735,6 @@ const napApp = async (builder: Person, user?: Person): Promise<string> => {
     "First version"
   );
   await builder.api.apps.versions.setCurrent(id, version);
-  await ordinaryData(id);
   if (user !== undefined) {
     await builder.api.apps.members.add(id, {
       type: "person",

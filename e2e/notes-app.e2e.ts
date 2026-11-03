@@ -15,7 +15,7 @@ import {
   endSession,
   peopleIn,
   release,
-  sensitiveData,
+  revokeNewestRelease,
   signInTo,
 } from "./people.ts";
 
@@ -180,8 +180,8 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 test("a screen whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
   pageOf,
 }) => {
-  // Someone else may use the App and its data is ordinary, so a save sent
-  // again under their cookie would run, and commit, as them.
+  // Someone else may use the App, so a save sent again under their cookie
+  // would run, and commit, as them.
   const { first, next } = peopleIn("notesAppSwitch");
   const app = await notesApp(first, next);
   const page = await pageOf(first);
@@ -788,24 +788,24 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
     buffer: pixel,
   });
   await expect(screen.getByText("Showing photo.png")).toBeVisible();
-  // The App's data is sensitive again: its build, approved by nobody,
-  // gets none, and the next thing the screen asks is refused. The page
-  // then asks core about the build at once, and stops the screen: the
-  // refusal the person is left with is the page's, not the screen's own,
-  // which shows only until then.
-  await sensitiveData(app);
+  // The App's release is revoked: its build gets none of the App's data,
+  // and the next thing the screen asks is refused. The page then asks
+  // core about the build at once, and stops the screen: the refusal the
+  // person is left with is the page's, not the screen's own, which shows
+  // only until then.
+  await revokeNewestRelease(app);
   let reads = 0;
   page.on("request", (request) => {
     if (request.url().includes("/attachments/files/")) {
       reads += 1;
     }
   });
-  const refusal = page.getByText(
-    "Nobody has approved this page's code for the App's data yet."
-  );
+  // The page's own refusal of a revoked release (the screen's or the
+  // version's, whichever it hears first).
+  const refusal = page.getByText(/^This version of the App was revoked/u);
   // The upload makes the screen ask, but it may have asked already: its
-  // live data is refused the same way the moment the data turns
-  // sensitive, and the page then stops the screen, its picker with it. So
+  // live data is refused the same way the moment the release is
+  // revoked, and the page then stops the screen, its picker with it. So
   // whichever comes first: the refusal, or the upload that brings it.
   const uploaded = async (): Promise<void> => {
     try {

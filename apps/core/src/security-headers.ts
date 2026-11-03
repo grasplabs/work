@@ -119,25 +119,27 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  * above), so the frame gets no further than this origin, where the page
  * notices and stops the screen (the frontend's screen-host.ts).
  *
- * This is not a promise that nothing leaves the frame. WebRTC stays open,
- * and no header here closes it: a screen can make an `RTCPeerConnection`
- * with a TURN or STUN server of its choosing, and the browser sends that
- * server packets, with a username the screen wrote. `connect-src` doesn't
- * govern ICE, and the `webrtc 'block'` directive changed nothing in any
- * browser we test. Chromium and WebKit send the packets; Firefox, run
- * headless against a server on the same machine, sent none in the time
- * the test waits, which says nothing about a server elsewhere. Deleting
- * or wrapping `RTCPeerConnection` in the frame would be no boundary
- * either: the screen's code runs in the same realm and can get the
- * original back from a frame of its own, so we don't pretend to.
+ * WebRTC is the one way out no directive closes in the browsers we test:
+ * `connect-src` doesn't govern ICE, and `webrtc 'block'`, sent for the
+ * browsers that come to enforce it, changes nothing yet. Chromium and
+ * WebKit send a TURN server of the screen's choosing packets. So the
+ * frame closes it itself, before any of the screen's code runs
+ * (screen-frame.ts): its WebRTC interfaces are taken away, and the screen
+ * can make no document of its own, the only place WebRTC (or a network
+ * this policy doesn't govern) could come back from. That rests on this
+ * policy: with Trusted Types and no policy allowed, every sink of the
+ * HTML parser refuses a string, so no markup becomes a nested document,
+ * and the bootstrap closes the ways that don't parse markup. A browser
+ * that doesn't enforce Trusted Types is told so, and runs no screen. The
+ * compiler's no-peer-connections rule (@grasp-os/compiler's
+ * design-rules.ts) only tells an author early; nothing relies on it. The
+ * browser tests try every way, in every engine (e2e/screen-attacks.e2e.ts).
  *
- * So what keeps data in is not this policy but what a screen is handed in
- * the first place: only what its person may already see in that App, and,
- * for data that must not leave, only code a person has reviewed (artifact
- * approval: core's to enforce, never the browser's). What this policy
- * adds is that the code which runs is that code. The browser tests write
- * down what each browser did with WebRTC and never count it as blocked
- * (e2e/screen-attacks.e2e.ts).
+ * What a screen is handed stays bounded besides: only what its person may
+ * already read through that App's functions, which reach only the
+ * connections and resources an admin granted the App
+ * (screen-delivery.ts). What this policy adds is that the code which runs
+ * is the build core leased, and nothing it writes leaves the frame.
  */
 export const screenFramePolicy = (scripts: readonly string[]): string =>
   policy({
@@ -153,6 +155,13 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
     "form-action": "'none'",
     "base-uri": "'none'",
     "frame-ancestors": "'self'",
+    // Every sink of the HTML parser refuses a string, and no policy may
+    // make one it takes: a screen can't write markup into a nested
+    // document (screen-frame.ts). `webrtc 'block'` is the standard's
+    // word on WebRTC, which no browser we test enforces yet.
+    "require-trusted-types-for": "'script'",
+    "trusted-types": "'none'",
+    webrtc: "'block'",
   });
 
 /**

@@ -25,7 +25,6 @@ import type {
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
-import type { ScreensWaiting } from "./screen-trust.ts";
 import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
@@ -36,7 +35,7 @@ import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 // that same kind's own call, its checks and audit included: the feed adds
 // no way to decide anything. An item goes by itself once what it is
 // about is settled, wherever that was. A kind settled on its own page (a
-// decision, which is confirmed there; an engine's apps or version to
+// decision, which is confirmed there; an App's version to
 // review; a connection to sign in to again; a question of the brain)
 // takes no verdict here.
 
@@ -103,13 +102,6 @@ export interface PackagesItem extends ItemBase {
   request: DependencyRequest;
   /** The policy generation it was read under: a decision names it. */
   policyGeneration: number;
-}
-
-/** An App whose current pages run code nobody approved: approved in the App's details. */
-export interface AppApprovalItem extends ItemBase {
-  kind: "appApproval";
-  verdicts: never[];
-  waiting: ScreensWaiting;
 }
 
 /** A version of an App up for review, for the person who answers for the App: made current under Versions in the App's details. */
@@ -222,7 +214,6 @@ export type WaitingItem =
   | UnknownOutcomeItem
   | PermissionRequestItem
   | PackagesItem
-  | AppApprovalItem
   | GoLiveItem
   | WorkflowGoLiveItem
   | FailedRunItem
@@ -247,7 +238,6 @@ export const waitingParts = [
   "outcomes",
   "requests",
   "packages",
-  "screens",
   "versions",
   "workflowGoLives",
   "notifications",

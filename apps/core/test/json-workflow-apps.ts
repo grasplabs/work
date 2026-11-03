@@ -9,7 +9,6 @@ import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   screenLeaseHeader,
@@ -33,8 +32,8 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // paths people and Apps take, each over a real session's RPC: a workflow
 // created and published as its builder does it, bound to an App under an
 // alias the App's app.ts declares, the App's version made current, its
-// `start` grant asked for by its builder and granted by an admin, its
-// screen approved, and its runs started, followed and controlled by a
+// `start` grant asked for by its builder and granted by an admin, and
+// its runs started, followed and controlled by a
 // person or by the App's screen over core's function route. What replaces
 // an App's own workflow (workflow-apps.ts) in a test:
 //
@@ -520,12 +519,6 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
       binding: "FOLLOW_UP",
     });
     await grantReviewed(admin.api, grant);
-    const review = await admin.api.screenTrust.review(app);
-    await admin.api.screenTrust.approve(app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
     return {
       admin,
       builder,

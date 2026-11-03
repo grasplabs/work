@@ -52,7 +52,7 @@ import type {
 } from "./file-host.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
+import { delivering, leasedBuild, personRefusal } from "./screen-delivery.ts";
 import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
@@ -85,14 +85,14 @@ import { routeMember } from "./staff-audit.ts";
 //   someone else's: the page names the person its frame is for, and a
 //   request of anyone else is refused before it is counted or read
 //   (`personRefusal`), as a function call is.
-// - Someone without a role in the App, or who lost it, or a build nobody
-//   approved: the session is read on every request, the role checked
+// - Someone without a role in the App, or who lost it, or a revoked
+//   release: the session is read on every request, the role checked
 //   (`appFor`), the release of the App's current version checked not
 //   revoked, and the request runs inside `delivering`, which checks the
-//   lease's build is still trusted before and after. A download decides
+//   lease's build still gets the App's data before and after. A download decides
 //   again, before every chunk, whether the reader may read the file now
-//   (their roles, the records holding it, its tombstone) and the build is
-//   trusted, and ends after `fileLimits.downloadMs`, so a revocation, a
+//   (their roles, the records holding it, its tombstone) and the build
+//   still gets the App's data, and ends after `fileLimits.downloadMs`, so a revocation, a
 //   lost role, a detachment or a deletion fences the bytes still to come.
 // - A screen does what its App didn't declare: each request needs its
 //   resource's operation (`upload`, `read` or `delete`) in the sealed
@@ -870,8 +870,9 @@ export const appFileResponse = async (
       request.headers.get(screenLeaseHeader)
     );
     // A lease that doesn't verify, for this person and App, is no screen
-    // of theirs, whatever the App's data: a screen of ordinary data runs
-    // without one elsewhere, but never moves files.
+    // of theirs, whatever the App's data: code core didn't serve runs
+    // without one elsewhere where the data is ordinary, but never moves
+    // files.
     if (build === undefined) {
       throw requestErrors.create("request.forbidden");
     }

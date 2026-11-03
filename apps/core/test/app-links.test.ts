@@ -3,7 +3,6 @@ import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -60,21 +59,14 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
 
 type Person = Awaited<ReturnType<typeof personApi>>;
 
-/** Commits `files` to `app`, makes it current and has an admin approve its build. */
+/** Commits `files` to `app` and makes it current. */
 const released = async (
   builder: Person,
-  admin: Person,
   app: string,
   files: Record<string, string>
 ): Promise<number> => {
   const { version } = await builder.api.apps.files.commit(app, files, "Next");
   await builder.api.apps.versions.setCurrent(app, version);
-  const review = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   return version;
 };
 
@@ -143,27 +135,25 @@ const screenOf = async (
 };
 
 /**
- * A builder's App declaring links, current, approved and published (a
- * draft is its builders' alone), open in their screen.
+ * A builder's App declaring links, current and published (a draft is its
+ * builders' alone), open in their screen.
  */
 const openedApp = async (files = linkedFiles()) => {
   const builder = await personApi("builder");
-  const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const version = await released(builder, admin, id, files);
+  const version = await released(builder, id, files);
   await builder.api.apps.publish(id);
   return {
     app: id,
     version,
     builder,
-    admin,
     screen: await screenOf(builder, id),
   };
 };
 
 /**
- * Core's database with the first read of App `app`'s screen trust held
- * once it is reached (screen-trust.ts `standingOf`): a link request
+ * Core's database with the first read of App `app`'s screen delivery held
+ * once it is reached (screen-delivery.ts `standingOf`): a link request
  * waits there, past its admission and before its decision, until
  * `release`.
  */
@@ -373,8 +363,8 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     }).toStrictEqual({ files: "link.not_allowed", none: "link.not_allowed" });
   });
 
-  it("opens nothing once its version no longer declares the links, for a person who lost their role, or for a build no longer approved", async () => {
-    const { app, builder, admin, screen } = await openedApp();
+  it("opens nothing once its version no longer declares the links, or for a person who lost their role", async () => {
+    const { app, builder } = await openedApp();
     const colleague = await personApi("user");
     await builder.api.apps.members.add(app, {
       type: "person",
@@ -390,16 +380,8 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     });
     const roleLost = await outcomeOf(theirs.channel.check("help", url));
 
-    // The first screen's build, its approval taken back.
-    const review = await admin.api.screenTrust.review(app);
-    await Promise.all(
-      builtArtifacts(review.screens).map(async (artifact) => {
-        await admin.api.screenTrust.revoke(app, artifact);
-      })
-    );
-    const buildRevoked = await outcomeOf(screen.channel.check("help", url));
-    // A version without the declaration, approved and opened.
-    await released(builder, admin, app, linkedFiles(null));
+    // A version without the declaration, opened.
+    await released(builder, app, linkedFiles(null));
     const reopened = await screenOf(builder, app);
     const undeclared = await outcomeOf(reopened.channel.check("help", url));
 
@@ -407,12 +389,10 @@ describe("an App's external links", { timeout: 120_000 }, () => {
       before,
       roleLost: /^(?:app\.not_found|permission\.)/u.test(String(roleLost)),
       undeclared,
-      buildRevoked: String(buildRevoked).startsWith("screen."),
     }).toStrictEqual({
       before: "opened",
       roleLost: true,
       undeclared: "link.not_allowed",
-      buildRevoked: true,
     });
   });
 
@@ -552,9 +532,9 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens nothing through another App's path with this App's lease, though the person may open both", async () => {
-    const { builder, admin, screen } = await openedApp();
+    const { builder, screen } = await openedApp();
     const { id: other } = await builder.api.apps.create({ name: "Other" });
-    await released(builder, admin, other, linkedFiles());
+    await released(builder, other, linkedFiles());
 
     await expect(
       screen.raw(

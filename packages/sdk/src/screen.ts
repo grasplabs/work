@@ -32,9 +32,9 @@ const codeOf = (error: unknown): string | undefined =>
     : undefined;
 
 /**
- * Refusals no new subscription or read gets past: the build's approval,
- * or the release it runs, taken back. Others that fence (a role lost, a
- * build not approved yet) may lift, so it keeps trying, backing off.
+ * Refusals no new subscription or read gets past: the release the build
+ * runs revoked. Others that fence (a role lost, an App's data not yet open
+ * to code outside Grasp) may lift, so it keeps trying, backing off.
  */
 const finalRefusals: ReadonlySet<string> = new Set([
   "screen.revoked",

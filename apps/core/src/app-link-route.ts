@@ -27,7 +27,7 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
+import { delivering, leasedBuild, personRefusal } from "./screen-delivery.ts";
 import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
@@ -54,11 +54,10 @@ import { routeMember } from "./staff-audit.ts";
 //   else's: a request naming anyone else is refused before it is counted
 //   or read (`personRefusal`).
 // - Someone without a role in the App, a version whose release was
-//   revoked, a build nobody approved, an App archived (nobody uses one):
-//   the session, the role and the App's status (`usableApp`),
-//   the current version's release and its revocation are read on every
-//   request, inside `delivering`, which checks the lease's build is still
-//   trusted before and after. A check and its open each decide anew, so a
+//   revoked, an App archived (nobody uses one): the session, the role and
+//   the App's status (`usableApp`), the current version's release and its
+//   revocation are read on every request, inside `delivering`, which
+//   checks the lease's build still gets the App's data before and after. A check and its open each decide anew, so a
 //   revocation while the person reads the confirmation opens nothing.
 // - A screen opens what its App didn't declare: the origins are the
 //   current release's `resource.links` declaration's, never what the

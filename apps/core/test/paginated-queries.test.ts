@@ -4,7 +4,6 @@ import { clientInternals, GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
   rateLimitedRetryMs,
@@ -102,22 +101,15 @@ export const touchOldest = mutation({
 };
 
 /**
- * A builder's Notes App, made current, its screen approved by an admin and
- * opened: the release, the screen's lease, and the builder's session.
+ * A builder's Notes App, made current and opened: the release, the
+ * screen's lease, and the builder's session.
  */
 const openedApp = async () => {
   const builder = await personApi("builder");
-  const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   await builder.api.apps.publish(id);
-  const review = await admin.api.screenTrust.review(id);
-  await admin.api.screenTrust.approve(id, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
   const { lease } = await builder.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
   return {
