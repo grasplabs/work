@@ -1,8 +1,13 @@
-import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { release } from "./apps.ts";
-import { deadlinePassed } from "./decisions.ts";
+import { allEvents } from "./audit-events.ts";
+import {
+  asking,
+  asksOf,
+  deadlinePassed,
+  outputOf,
+  reminding,
+} from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import {
   decidingWorkflow,
@@ -12,17 +17,13 @@ import {
   jsonWorkflowAppsOf,
   startedBy,
 } from "./json-workflow-apps.ts";
-import { endLiveRuns, finished, resumed, stopped, woken } from "./runs.ts";
+import { resumed, stopped } from "./runs.ts";
 
 // Decisions past their deadline: a wait resumed after it ends timed out
-// at once, never approved, and its decision closed as timed out. (Apart
-// from decisions.test.ts: one file holds only so many runs' worth of
-// workers.) Each run is an independent JSON workflow's.
-//
-// Kept until JSON decisions have reminders: asking nobody for a reminder
-// late in a run once its decision's deadline has passed, as an App run's,
-// in its own block below. An independent workflow's decision asks once,
-// as it opens.
+// at once, never approved, and its decision closed as timed out; a
+// reminder that would come after it asks nobody. (Apart from
+// decisions.test.ts: one file holds only so many runs' worth of workers.)
+// Each run is an independent JSON workflow's.
 
 const idp = mockIdp();
 
@@ -66,72 +67,46 @@ describe("decisions past their deadline", { timeout: 60_000 }, () => {
   });
 });
 
-// Kept until JSON decisions have reminders: an App run's, as before.
 describe(
-  "an App run's decisions past their deadline",
+  "reminders of decisions past their deadline",
   { timeout: 60_000 },
   () => {
-    afterEach(endLiveRuns);
+    afterEach(endLiveResourceRuns);
 
-    it("ask nobody once a decision's deadline has passed", async () => {
+    it("remind nobody once a decision's deadline has passed, and tell nobody again", async () => {
+      const admin = await signedIn("admin");
       const builder = await signedIn("builder");
-      await signedIn("admin");
-      // Written against the engine: it opens a decision, stops until told to
-      // go on, then asks who may answer, as a reminder late in a run does.
-      const { id: app } = await builder.api.apps.create({ name: "Late" });
-      await release(builder, app, {
-        "workflows/late.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
-
-// Past the SDK: the engine as the host hands it to a run's code.
-type Engine = {
-  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
-  sleep: (name: string, milliseconds: number) => Promise<void>;
-  openDecision: (request: object) => Promise<{ decision: string }>;
-  decisionRecipients: (decision: string, reminder: boolean) => Promise<unknown[]>;
-};
-
-export default {
-  metadata: { id: "late", params: [] },
-  run: async (engine: Engine) => {
-    const { decision } = await engine.do("open", {}, async () =>
-      await engine.openDecision({ step: "open", from: "role:admin", description: "Late", timeout: 500 })
-    );
-    await engine.sleep("gate", 86400000);
-    const before = await engine.do("before", {}, async () => await engine.decisionRecipients(decision, true));
-    return before.length;
-  },
-} as unknown as WorkflowDefinition<number>;
-`,
-        "workflows/late.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-import definition from "./late.ts";
-export default workflowTests(definition, [{ name: "runs", expect: {} }]);
-`,
-      });
-      const run = await builder.api.workflows.start(app, "late");
-      const decision = await vi.waitFor(
-        async () => {
-          const row = await env.DB.prepare(
-            "SELECT id FROM workflow_decisions WHERE run_id = ?"
-          )
-            .bind(run.id)
-            .first<{ id: string }>();
-          if (!row) {
-            throw new Error("No decision yet");
-          }
-          return row.id;
-        },
-        { timeout: 10_000 }
+      const decider = await signedIn("user");
+      const { run, decision } = await asking(
+        { admin, builder },
+        { from: `person:${decider.userId}`, ...reminding }
       );
+      // Stopped before its reminder is due, and resumed only once the
+      // decision's deadline has passed: the reminder would come too late.
+      await stopped(run.run);
       await vi.waitFor(
         async () => {
           await expect(deadlinePassed(decision)).resolves.toBeTruthy();
         },
-        { timeout: 10_000, interval: 100 }
+        { timeout: 20_000, interval: 100 }
       );
-      await woken(run.id, "gate");
-      await finished(run.id);
-      const { output } = await builder.api.workflows.status(run.id);
-      expect(output).toBe(0);
+      await resumed(run.run);
+      const output = await outputOf(run);
+      const asks = await asksOf(run);
+      const audited = await allEvents();
+
+      expect({
+        output,
+        asks: asks.map(({ reminder }) => reminder),
+        asked: audited.filter(
+          ({ action, target }) =>
+            action === "workflow.decision.asked" && target?.id === decision
+        ).length,
+      }).toStrictEqual({
+        output: { status: "failed", code: "workflow.decision_timed_out" },
+        asks: [false],
+        asked: 1,
+      });
     });
   }
 );

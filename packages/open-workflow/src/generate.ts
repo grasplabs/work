@@ -112,7 +112,10 @@ import { literalDurationMs } from "./values.ts";
  *   outcome, read from the decision itself, and whose call answers that
  *   outcome (core's resource-host.ts). Generated code waits for nothing
  *   and passes nothing of it: between the two the run waits durably,
- *   holding no isolate.
+ *   holding no isolate. Its reminder (`remindAfterMs`) and the action
+ *   that tells its people (`ask`, sealed as the module and export its
+ *   binding names) are the host's too: it asks, and reminds, in steps of
+ *   its own between the two, never on anything the code passes.
  * - A child workflow other than the one its source named. A `run` task's
  *   binding is a literal sealed in the task table (`GeneratedRun`), and
  *   validation matched the task's namespace, name and version to the
@@ -365,6 +368,22 @@ export type GeneratedCall =
        * age limit for its runs without one (spec 13.7).
        */
       readonly timeoutMs?: number;
+      /**
+       * How long after asking it asks once more, if nobody answered: its
+       * `remindAfter`, always before its deadline.
+       */
+      readonly remindAfterMs?: number;
+      /**
+       * The workflow's own action that tells the people it asks (its
+       * `ask`), in place of the host's notice: its operation binding, and
+       * the module and export that binding names. The host runs it with
+       * `{ recipients, reminder }`, each time in a step of its own.
+       */
+      readonly ask?: {
+        readonly binding: string;
+        readonly module: string;
+        readonly export: string;
+      };
     }
   | {
       readonly name: "grasp.compute";
@@ -1699,6 +1718,37 @@ const decisionCallOf = (
     return undefined;
   }
   const timeoutMs = timeoutOf(emitter.checked.definition, item.task.timeout);
+  const withPointer = pointerJoin(item.pointer, "with");
+  const remindAfterMs = literalDurationMs(args.remindAfter);
+  // A reminder due at or after the deadline would never be sent.
+  if (
+    remindAfterMs !== undefined &&
+    timeoutMs !== undefined &&
+    remindAfterMs >= timeoutMs
+  ) {
+    emitter.refusals.add(
+      pointerJoin(withPointer, "remindAfter"),
+      "decision:remindAfter",
+      item.id
+    );
+    return undefined;
+  }
+  let ask: { binding: string; module: string; export: string } | undefined;
+  if (typeof args.ask === "string") {
+    const contract = emitter.checked.bindings.get(args.ask)?.contract ?? "";
+    const local = localContract.exec(contract)?.groups;
+    // Validation held it to a local action: one it couldn't resolve is
+    // never sealed as one.
+    if (local?.module === undefined || local.export === undefined) {
+      emitter.refusals.add(
+        pointerJoin(withPointer, "ask"),
+        "decision:ask",
+        item.id
+      );
+      return undefined;
+    }
+    ask = { binding: args.ask, module: local.module, export: local.export };
+  }
   return {
     name: "grasp.decision",
     binding,
@@ -1706,6 +1756,8 @@ const decisionCallOf = (
     prompt,
     input,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(remindAfterMs === undefined ? {} : { remindAfterMs }),
+    ...(ask === undefined ? {} : { ask }),
   };
 };
 

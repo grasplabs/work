@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import {
-  asking as askingInApp,
+  asking as askingByAction,
   asksOf,
   confirmedAnswer,
   outputOf,
@@ -21,13 +21,7 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import {
-  aroundEngine,
-  endLiveRuns,
-  resumed,
-  stopped,
-  whileEngineRefuses,
-} from "./runs.ts";
+import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
@@ -65,9 +59,9 @@ import {
 // asks its run's person, and asks a team past one ask's list ("asks more
 // people than one ask lists without failing the run, audited by count,
 // and one of them answers").
-// Kept until JSON decisions have reminders: a reminder asking again,
-// whoever is in the team then, as an App run's (`remindAfter`), in its
-// own block below. An independent workflow's decision asks once.
+// A decision's reminder asks again whoever may answer it then, by the
+// workflow's own action (`ask`) or Grasp's notice, once each, a restart
+// mid-wait included.
 
 const idp = mockIdp();
 
@@ -538,36 +532,134 @@ describe("decisions", { timeout: 60_000 }, () => {
   });
 });
 
-// Kept until JSON decisions have reminders: an App run's decision
-// (`step.decision`'s `remindAfter`), as before.
-describe("an App run's decisions", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
+describe("a decision's reminder", { timeout: 60_000 }, () => {
+  afterEach(endLiveResourceRuns);
 
-  it("remind by asking again, whoever is in the team then", async () => {
-    const admin = await signedIn("admin");
+  it("reminds by asking again, whoever is in the team then", async () => {
+    const people = await owners();
     const anna = await signedIn("user");
     const ben = await signedIn("user");
-    const team = await newTeam(admin, [anna]);
-    const { app, run } = await askingInApp(admin, {
+    const team = await newTeam(people.admin, [anna]);
+    const { run } = await askingByAction(people, {
       from: `team:${team}`,
       ...reminding,
     });
     // Ben joins the team before the reminder goes out.
-    await joinTeam(admin, team, ben);
-    const asks = await asksOf(app, 2);
+    await joinTeam(people.admin, team, ben);
+    const asks = await asksOf(run, 2);
 
     expect({
       asks: asks.map(({ recipients, reminder }) => ({
         reminder,
         to: recipients.map(({ userId }) => userId).toSorted(),
       })),
-      output: await outputOf(admin, run.id),
+      output: await outputOf(run),
     }).toStrictEqual({
       asks: [
         { reminder: false, to: [anna.userId] },
         { reminder: true, to: [anna.userId, ben.userId].toSorted() },
       ],
-      output: { timedOut: true },
+      output: { status: "failed", code: "workflow.decision_timed_out" },
+    });
+  });
+
+  it("asks and reminds once each across a restart mid-wait, then goes on with the answer", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const { run, decision } = await askingByAction(people, {
+      from: `person:${decider.userId}`,
+      ...reminding,
+    });
+    // Stopped while it waits for the reminder, as a deploy or a crash
+    // does, and started again: its run replays what it asked.
+    await stopped(run.run);
+    await resumed(run.run);
+    const asks = await asksOf(run, 2);
+    await confirmedAnswer(decider, decision, { approved: true });
+    const output = await outputOf(run);
+    const toldAfter = await asksOf(run, 2);
+    const audited = await eventsOf(decision);
+
+    expect({
+      asks: asks.map(({ recipients, reminder }) => ({
+        reminder,
+        to: recipients.map(({ userId }) => userId),
+        // Each with the decision's own page.
+        link: recipients.map(({ link }) => new URL(link).pathname),
+      })),
+      output,
+      // Told once each: nothing asked again once the run went on.
+      told: toldAfter.length,
+      asked: audited.filter(
+        ({ action }) => action === "workflow.decision.asked"
+      ).length,
+    }).toStrictEqual({
+      asks: [
+        {
+          reminder: false,
+          to: [decider.userId],
+          link: [`/decisions/${decision}`],
+        },
+        {
+          reminder: true,
+          to: [decider.userId],
+          link: [`/decisions/${decision}`],
+        },
+      ],
+      output: {
+        answered: true,
+        approved: true,
+        by: decider.userId,
+        value: null,
+      },
+      told: 2,
+      asked: 2,
+    });
+  });
+
+  it("reminds by Grasp's own notice when the workflow names no action", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const workflow = await decidingWorkflow(people, {
+      recipient: `person:${decider.userId}`,
+      timeout: 10,
+      remindAfter: 5,
+    });
+    const runId = await startedBy(people.builder, workflow.id);
+    const decision = await decisionOf(decider, runId);
+    await stopped(runId);
+    await resumed(runId);
+    const asked = async () => {
+      const audited = await eventsOf(decision);
+      return audited.filter(
+        ({ action }) => action === "workflow.decision.asked"
+      );
+    };
+    await vi.waitFor(
+      async () => {
+        await expect(asked()).resolves.toHaveLength(2);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await confirmedAnswer(decider, decision, { approved: true });
+    const end = await endOf(people.builder, workflow.id, runId);
+    const asks = await asked();
+
+    expect({
+      end,
+      asked: asks.map(({ detail, provenance }) => ({
+        reminder: detail.reminder,
+        whom: provenance,
+      })),
+    }).toStrictEqual({
+      end: {
+        status: "completed",
+        output: { status: `approved by ${decider.userId}` },
+      },
+      asked: [
+        { reminder: false, whom: [decider.userId] },
+        { reminder: true, whom: [decider.userId] },
+      ],
     });
   });
 });

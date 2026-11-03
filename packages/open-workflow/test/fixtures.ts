@@ -85,6 +85,23 @@ export const moduleEntries: Record<string, CatalogContract> = {
     input: text(v.array(v.number())),
     output: text(v.number()),
   },
+  "local:code/notify.ts#notify": {
+    kind: "operation",
+    input: text(
+      v.object({
+        recipients: v.array(
+          v.object({
+            userId: v.string(),
+            name: v.string(),
+            email: v.string(),
+            link: v.string(),
+          })
+        ),
+        reminder: v.boolean(),
+      })
+    ),
+    output: text(v.null()),
+  },
 };
 
 export const options: ValidateOptions = {

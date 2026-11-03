@@ -187,13 +187,15 @@ export const endedRun = async (
 
 /**
  * The tasks of a workflow that asks `recipient` its `approval` decision
- * about `{ who }`, waiting `timeout` seconds at most if given,
- * then ends saying how it was answered and by whom, with the comment the
- * answer carried, if any.
+ * about `{ who }`, waiting `timeout` seconds at most if given, and
+ * reminding them `remindAfter` seconds after asking if given, then ends
+ * saying how it was answered and by whom, with the comment the answer
+ * carried, if any.
  */
 export const decisionTasks = (
   recipient: string,
-  timeout?: number
+  timeout?: number,
+  remindAfter?: number
 ): unknown[] => [
   {
     ask: {
@@ -203,6 +205,9 @@ export const decisionTasks = (
         recipients: [recipient],
         prompt: "Greet them?",
         input: { who: "${ $workflow.input.who }" },
+        ...(remindAfter === undefined
+          ? {}
+          : { remindAfter: { seconds: remindAfter } }),
       },
       ...(timeout === undefined
         ? {}
@@ -233,7 +238,13 @@ export const decidingWorkflow = async (
     recipient,
     deciders = [recipient],
     timeout,
-  }: { recipient: string; deciders?: string[]; timeout?: number }
+    remindAfter,
+  }: {
+    recipient: string;
+    deciders?: string[];
+    timeout?: number;
+    remindAfter?: number;
+  }
 ) => {
   const contract = `approval-${unique()}`;
   await admin.api.workflowResources.publishContract({
@@ -245,7 +256,7 @@ export const decidingWorkflow = async (
     ),
   });
   const workflow = await publishedWorkflow(builder, (name) =>
-    definitionOf(name, decisionTasks(recipient, timeout), {
+    definitionOf(name, decisionTasks(recipient, timeout, remindAfter), {
       bindings: { approval: { kind: "decision", contract } },
     })
   );
