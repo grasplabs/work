@@ -26,7 +26,11 @@ export const peopleLimits = {
   pageDefault: 25,
   /** The longest search. */
   queryMaxLength: 100,
-  /** The fewest letters or digits a search holds: "@" lists nobody. */
+  /**
+   * The fewest letters or digits a search holds, so a match-all search
+   * ("@", ".") is refused. It doesn't stop harvesting: the opt-in, the cap
+   * a read and the audit log do that.
+   */
   queryMinCharacters: 2,
   /** The longest ID or cursor. */
   idMaxLength: 128,

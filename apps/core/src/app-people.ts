@@ -55,12 +55,15 @@ import { inList } from "./db/d1.ts";
 //   the organization's current members only (a membership, and no removal
 //   recorded); a caller who lost theirs is refused
 //   (`permission.person_inactive`).
-// - Paging through everyone: each read answers at most 100 people
-//   (`peopleLimits.pageMax`), a function makes at most its 100 host calls
-//   (operation-channel.ts), a search needs at least 2 letters or digits
-//   ("@" matches nobody), and every read of the directory is recorded
-//   (`app.people.read`): the App, the person it read for, which read and
-//   how many people it answered, never whom.
+// - Paging through everyone: what limits it is the opt-in above (only a
+//   declared App reads at all), the cap of 100 people a read
+//   (`peopleLimits.pageMax`, with a function's 100 host calls,
+//   operation-channel.ts), and the record of every read
+//   (`app.people.read`: the App, the person it read for, which read and
+//   how many people it answered, never whom). A declared App can still
+//   page through every member, read by read, on the record. A search's 2
+//   letters or digits only stop a match-all search ("@", "."); two
+//   letters still match many.
 // - A read tells more than a directory entry: a person is their ID, name,
 //   email and teams, read field by field, never their role, sessions or
 //   anything else of theirs; the placeholder address of someone made from
