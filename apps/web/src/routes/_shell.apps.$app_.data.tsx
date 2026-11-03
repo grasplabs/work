@@ -50,7 +50,8 @@ const AppDataPage = () => {
         <h1 className="text-2xl font-medium tracking-tight">
           <Trans>Data of {appName}</Trans>
         </h1>
-        <AppData app={app.id} tables={tables.tables} />
+        {/* Opening another domain on this page starts afresh. */}
+        <AppData app={app.id} key={app.id} tables={tables.tables} />
       </div>
     </>
   );

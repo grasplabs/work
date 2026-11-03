@@ -16,8 +16,10 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { identify } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { release } from "./apps.ts";
@@ -46,6 +48,12 @@ export default defineSchema({
   }),
   salaries: defineTable({ person: v.string(), amount: v.number() }).sensitive(),
   pins: defineTable({ text: v.string() }),
+  labels: defineTable({
+    name: v.string(),
+    nick: v.string().nullable(),
+    note: v.string().optional(),
+    extra: v.string().nullable().optional(),
+  }),
 });
 `,
   "operations/notes.ts": `import { mutation } from "#grasp/server";
@@ -81,6 +89,17 @@ export const remove = mutation({
   },
 });
 
+export const label = mutation({
+  args: {
+    name: v.string(),
+    nick: v.string().nullable(),
+    note: v.string().optional(),
+    extra: v.string().nullable().optional(),
+  },
+  returns: v.id("labels"),
+  handler: async (ctx, args) => await ctx.db.insert("labels", args),
+});
+
 export const pin = mutation({
   args: { text: v.string() },
   returns: v.id("pins"),
@@ -94,7 +113,7 @@ export const pay = mutation({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, pay, pin, remove, rename } from "./operations/notes.ts";
+import { create, label, pay, pin, remove, rename } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -105,9 +124,10 @@ export default app({
       notes: { read: "appMembers", write: "appMembers" },
       salaries: { read: "appMembers", write: "appMembers" },
       pins: { read: "owner", write: "owner" },
+      labels: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { notes: { create, pay, pin, remove, rename } },
+  operations: { notes: { create, label, pay, pin, remove, rename } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -221,6 +241,14 @@ const byTitle = (records: readonly { fields: Record<string, unknown> }[]) =>
     .map(({ fields }) => fields)
     .toSorted((left, right) =>
       String(left.title).localeCompare(String(right.title))
+    );
+
+/** The fields of `records`, in the order of their names. */
+const byName = (records: readonly { fields: Record<string, unknown> }[]) =>
+  records
+    .map(({ fields }) => fields)
+    .toSorted((left, right) =>
+      String(left.name).localeCompare(String(right.name))
     );
 
 /** A CSV of four notes, the second without a title, the third's `done` not one. */
@@ -689,5 +717,58 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
       vi.useRealTimers();
     }
     await expect(left()).resolves.toStrictEqual({ changes: 0, staged: 0 });
+  });
+
+  it("round-trips null, empty text and no value, in required, nullable and optional fields", async () => {
+    const notes = await notesApp();
+    const { builder } = notes;
+    const labels = [
+      { name: "", nick: null },
+      { name: "null", nick: "", note: "" },
+      { name: "x", nick: "null", note: "null", extra: null },
+      { name: "y", nick: null, extra: "" },
+    ];
+    for (const fields of labels) {
+      // oxlint-disable-next-line no-await-in-loop -- one label at a time
+      await call(notes, builder, "notes.label", fields);
+    }
+    const csv = await exported(notes, "labels");
+    const other = await notesApp();
+    const { mapping } = await other.builder.api.apps.data.previewImport(
+      other.app,
+      "labels",
+      csv
+    );
+    await expect(
+      other.builder.api.apps.data.import(other.app, "labels", { csv, mapping })
+    ).resolves.toStrictEqual({ ok: true, inserted: labels.length });
+    expect(byName(await everyRecord(other, "labels"))).toStrictEqual(
+      byName(labels.map((fields) => ({ fields })))
+    );
+  });
+
+  it("stops an export, rather than mixing two versions, once another version is made current", async () => {
+    const notes = await notesApp();
+    const { app, builder } = notes;
+    await call(notes, builder, "notes.create", { title: "Plan" });
+    // Read here a pull at a time, as a client takes a page in, with the
+    // session checked before each, as a connection checks it.
+    const headers = new Headers({ cookie: builder.session });
+    const rpc = new AppDataRpc(env, async () => {
+      const identity = await identify(env, headers);
+      if (!identity) {
+        throw new Error("Session ended");
+      }
+      return identity;
+    });
+    const stream = await rpc.export(app, "notes");
+    const reader = stream.getReader();
+    const header = await reader.read();
+    expect(new TextDecoder().decode(header.value)).toContain("_id,");
+    await release(builder, app, {
+      ...files,
+      "screens/notes.tsx": `${files["screens/notes.tsx"] ?? ""}\n// v2\n`,
+    });
+    await expect(reader.read()).rejects.toThrow(/changed while this ran/u);
   });
 });

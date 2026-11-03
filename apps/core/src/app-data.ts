@@ -74,6 +74,12 @@ import { requireNotStaff } from "./sharing.ts";
 //   parsed (its bytes, by the request's schema) and as it is read (rows,
 //   columns, errors reported). An export stops past
 //   `appDataExportMaxRecords`, never truncating silently.
+// - An export or import mixing two versions: an export reads every page
+//   of the version it began on and stops (`app_data.version_changed`)
+//   once another is made current; an import checked against one version
+//   lands only while it is still current, under that version's schema.
+// - A value that doesn't come back as it went out: no value, null and
+//   empty text each have a cell of their own (`fieldCell`, `cellValue`).
 // - A CSV cell run as a formula where the export is opened: a text cell
 //   that a spreadsheet would read as a formula (or that starts with the
 //   guard itself) is written with a leading `'`, which an import takes
@@ -250,41 +256,48 @@ const guarded = /^[=+\-@\t\r']/u;
 /** A cell that must be quoted: it holds a quote, a comma or a line break. */
 const quotedCell = /[",\r\n]/u;
 
-/**
- * A field's value as a CSV cell's text: text kinds as they are (guarded
- * against formulas), anything else as JSON; undefined for no value.
- */
-const cellText = (
-  descriptor: ValueDescriptor | undefined,
-  value: unknown
-): string | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (descriptor !== undefined && textKinds.has(descriptor.kind)) {
-    if (typeof value === "string") {
-      return guarded.test(value) ? `'${value}` : value;
-    }
-    // A text field's null is no value, as an empty cell reads.
-    if (value === null) {
-      return undefined;
-    }
-  }
-  return JSON.stringify(value);
-};
+/** The unquoted cell that holds null, in a field of any kind. */
+const nullCell = "null";
 
-/** One CSV field: empty for no value, quoted when it must be or is empty text. */
-const csvField = (text: string | undefined): string => {
-  if (text === undefined) {
-    return "";
-  }
-  return text === "" || quotedCell.test(text)
+/**
+ * Text as one CSV field: quoted when it must be (a quote, a comma, a line
+ * break), and when it is empty or reads `null`, so it is never taken for
+ * no value or for null.
+ */
+const quotedText = (text: string): string =>
+  text === "" || text === nullCell || quotedCell.test(text)
     ? `"${text.replaceAll('"', '""')}"`
     : text;
+
+/**
+ * A field's value as one CSV field, which an import reads back as it was
+ * (`cellValue`). In a field of any kind, no value is an empty unquoted
+ * cell and null the unquoted cell `null`. A text field's text is written
+ * as it is, guarded against formulas (`guarded`), quoted when empty or
+ * when it reads `null`, so a quoted cell is always text; any other value
+ * is JSON.
+ */
+const fieldCell = (
+  descriptor: ValueDescriptor | undefined,
+  value: unknown
+): string => {
+  if (value === undefined) {
+    return "";
+  }
+  if (value === null) {
+    return nullCell;
+  }
+  if (
+    descriptor !== undefined &&
+    textKinds.has(descriptor.kind) &&
+    typeof value === "string"
+  ) {
+    return quotedText(guarded.test(value) ? `'${value}` : value);
+  }
+  return quotedText(JSON.stringify(value));
 };
 
-const csvLine = (cells: readonly (string | undefined)[]): string =>
-  `${cells.map(csvField).join(",")}\r\n`;
+const csvLine = (cells: readonly string[]): string => `${cells.join(",")}\r\n`;
 
 /** The column an export names a record's ID by; an import leaves it out. */
 const idColumn = "_id";
@@ -386,6 +399,9 @@ const cellValue = (
 ): { value?: unknown } | { error: string } => {
   if (!cell.quoted && cell.text === "") {
     return {};
+  }
+  if (!cell.quoted && cell.text === nullCell) {
+    return { value: null };
   }
   if (textKinds.has(descriptor.kind)) {
     // The export's formula guard comes off again.
@@ -646,7 +662,7 @@ const importRows = async (
   const still = await openedStore(env, by, input);
   requireNotArchived(still.app);
   if (still.version !== open.version) {
-    throw appDataErrors.create("app_data.invalid");
+    throw appDataErrors.create("app_data.version_changed");
   }
   try {
     // Its audit event lands with its rows, in the store's transaction:
@@ -698,22 +714,29 @@ const exportStream = (
     {
       pull: async (controller) => {
         try {
+          // Every page of the version its header named, or none: one made
+          // current meanwhile stops it rather than mixing two.
           const now = await recheck();
+          if (now.version !== open.version) {
+            throw appDataErrors.create("app_data.version_changed");
+          }
           if (!started) {
             started = true;
-            controller.enqueue(encoder.encode(csvLine([idColumn, ...fields])));
+            controller.enqueue(
+              encoder.encode(csvLine([idColumn, ...fields].map(quotedText)))
+            );
             return;
           }
-          const page = await readPage(now, table, queryMaxResults, cursor);
+          const page = await readPage(open, table, queryMaxResults, cursor);
           count += page.records.length;
           if (count > appDataExportMaxRecords) {
             throw appDataErrors.create("app_data.export_too_large");
           }
           const lines = page.records.map((record) =>
             csvLine([
-              record.id,
+              quotedText(record.id),
               ...fields.map((field) =>
-                cellText(
+                fieldCell(
                   declared.fields[field],
                   Object.hasOwn(record.fields, field)
                     ? record.fields[field]

@@ -192,6 +192,8 @@ export const appDataErrors = defineErrorFamily({
   "app_data.no_table": "This App's current version has no such table.",
   "app_data.invalid": "That isn't a valid request for this App's data.",
   "app_data.export_too_large": `A table exports at most ${appDataExportMaxRecords} records.`,
+  "app_data.version_changed":
+    "The App changed while this ran. Try again on its current version.",
 });
 
 /** An App's data, through `apps.data`: for its builders and the admins. */
@@ -224,10 +226,15 @@ export interface AppDataApi {
     before: number | null
   ) => Promise<RecordChangePage>;
   /**
-   * `table` as CSV, as the person may read it: a header of its fields,
-   * then a record a row, streamed. Recorded in the audit log before
-   * anything is read; stops (`app_data.export_too_large`) past
-   * `appDataExportMaxRecords`.
+   * `table` as CSV, as the person may read it: a header of `_id` and its
+   * fields, then a record a row, streamed, every page of the version the
+   * export began on (`app_data.version_changed` once another is made
+   * current). In a field of any kind, an empty unquoted cell is no value
+   * and the unquoted cell `null` is null; a text field's text is as it is
+   * (a leading `'` guarding a formula), quoted when empty or when it reads
+   * `null`; any other value is JSON. An import reads it back as it was.
+   * Recorded in the audit log before anything is read; stops
+   * (`app_data.export_too_large`) past `appDataExportMaxRecords`.
    */
   export: (app: string, table: string) => Promise<ReadableStream<Uint8Array>>;
   /** A CSV's columns, how many rows it has, and the fields they'd fill. */

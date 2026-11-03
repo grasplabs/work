@@ -575,6 +575,9 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>
+                <Trans>Record</Trans>
+              </TableHead>
               {columns.map((column) => (
                 <TableHead key={column}>{column}</TableHead>
               ))}
@@ -586,23 +589,24 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
           <TableBody>
             {records?.map((record) => (
               <TableRow key={record.id}>
-                {columns.map((column, at) => (
+                {/* Opened by its ID, which every record has, whatever
+                    fields its table declares. */}
+                <TableCell>
+                  <Button
+                    onClick={() => {
+                      setOpen(record);
+                    }}
+                    size="sm"
+                    variant="link"
+                  >
+                    <span className="block max-w-32 truncate">{record.id}</span>
+                  </Button>
+                </TableCell>
+                {columns.map((column) => (
                   <TableCell key={column}>
-                    {at === 0 ? (
-                      <Button
-                        onClick={() => {
-                          setOpen(record);
-                        }}
-                        size="sm"
-                        variant="link"
-                      >
-                        {valueText(record.fields[column] ?? "–")}
-                      </Button>
-                    ) : (
-                      <span className="block max-w-48 truncate">
-                        {valueText(record.fields[column] ?? "")}
-                      </span>
-                    )}
+                    <span className="block max-w-48 truncate">
+                      {valueText(record.fields[column] ?? "")}
+                    </span>
                   </TableCell>
                 ))}
                 <TableCell>{formatDateTime(record.updatedAt)}</TableCell>
@@ -658,8 +662,11 @@ export const AppData = ({
   tables: AppDataTable[];
 }) => {
   const { t } = useLingui();
-  const [picked, setPicked] = useState(tables[0]?.name);
-  const table = tables.find(({ name }) => name === picked);
+  // The table picked, with the domain it was picked in: another domain
+  // opened on the same page starts from its own first table.
+  const [picked, setPicked] = useState({ app, table: tables[0]?.name });
+  const wanted = picked.app === app ? picked.table : tables[0]?.name;
+  const table = tables.find(({ name }) => name === wanted) ?? tables.at(0);
   if (table === undefined) {
     return (
       <Empty>
@@ -681,7 +688,7 @@ export const AppData = ({
         items={items}
         onValueChange={(value: unknown) => {
           if (typeof value === "string") {
-            setPicked(value);
+            setPicked({ app, table: value });
           }
         }}
         value={table.name}
@@ -705,7 +712,9 @@ export const AppData = ({
           </Trans>
         </p>
       ) : null}
-      <TableData app={app} key={table.name} table={table} />
+      {/* Its own state for each domain and table: nothing read of one
+          is shown, or kept, for another. */}
+      <TableData app={app} key={`${app}/${table.name}`} table={table} />
     </div>
   );
 };

@@ -10291,6 +10291,10 @@ msgid "Receipt"
 msgstr "Beleg"
 
 #: src/engines/app-data.tsx
+msgid "Record"
+msgstr "Datensatz"
+
+#: src/engines/app-data.tsx
 msgid "Record {id}"
 msgstr "Datensatz {id}"
 
