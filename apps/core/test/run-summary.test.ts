@@ -128,7 +128,16 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
       lease,
       controlCommand(reference, "pause", runId)
     );
-    const paused = await run.once(({ status }) => status === "paused");
+    // Paused once its pause has settled. The row says paused as the
+    // engine's notification is projected; the pause is settled by
+    // whichever of the screen's request or that notification first reads
+    // from the engine that it took the pause (resource-runs.ts,
+    // `settleResourceControls`), in a write of its own, so a snapshot may
+    // show the run paused with its pause still applying.
+    const paused = await run.once(
+      ({ status, control }) =>
+        status === "paused" && control.pendingControl === null
+    );
     await called(
       builder,
       app,
