@@ -880,6 +880,8 @@ class FixtureSession extends TestTarget {
             role,
             this.#release.app.people === true
           ),
+          // A test's fixture person, on a store only the test reaches.
+          actor: { type: "person", userId: `fixture-${name}` },
           consumer: {
             resourceId: this.#release.manifest.resourceId,
             resourceVersion: this.#release.manifest.resourceVersion,

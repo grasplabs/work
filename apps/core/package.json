@@ -39,6 +39,7 @@
     "better-auth": "catalog:",
     "capnweb": "catalog:",
     "chat": "catalog:",
+    "csv-parse": "catalog:",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
     "jose": "catalog:",

@@ -43,6 +43,8 @@ catalog:
   capnweb: 0.12.0
   # Schedule triggers: cron expressions, in a time zone.
   croner: 10.0.1
+  # Reads an App table's CSV import (RFC 4180).
+  csv-parse: 7.0.3
   # Inbound email to workflows.
   postal-mime: 4.2.0
   # Standard Webhooks' own library (MIT): only core's tests use it, to sign

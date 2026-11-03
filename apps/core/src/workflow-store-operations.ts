@@ -128,6 +128,7 @@ export const callWorkflowStoreOperation = async (
   await requireSchemaInForce(env, storeId, server);
   const invocation: Invocation = {
     principal: caller.principal,
+    actor: caller.actor,
     consumer: {
       resourceId: consumer.subject.id,
       resourceVersion: consumer.version,

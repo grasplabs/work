@@ -519,6 +519,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         version,
         principal: "visitor:test",
         email: "test@example.test",
+        actor: { type: "visitor", appId: appIdSchema.parse(app) },
         stillAllowed: async () => {
           await Promise.resolve();
         },

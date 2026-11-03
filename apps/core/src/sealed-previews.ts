@@ -1001,6 +1001,8 @@ export class SealedPreviews {
     return {
       ...(draftFailure === undefined ? {} : { draftFailure }),
       principal: personId,
+      // The person whose chat previews the draft, on its fixture store.
+      actor: { type: "person", userId: personId },
       consumer: { resourceId: app, resourceVersion: running.version },
       store,
       requestId,

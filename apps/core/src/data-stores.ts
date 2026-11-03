@@ -1,3 +1,4 @@
+import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -57,7 +58,7 @@ import {
 import type { MemberRef } from "./sharing.ts";
 import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
-import type { ReadResult } from "./store-host.ts";
+import type { ImportApply, ImportBatch, ReadResult } from "./store-host.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -166,6 +167,19 @@ export interface OpenStore {
   ) => Promise<ReadResult>;
   /** The current generation of each of `tables` (`StoreHost.generations`). */
   generations: (tables: string[]) => Promise<Record<string, number>>;
+  /** A page of a record's change history (`StoreHost.history`). */
+  history: (
+    scope: ReadScope,
+    table: string,
+    id: string,
+    before: number | null
+  ) => Promise<RecordChangePage>;
+  /** One batch of an import's rows (`StoreHost.stageImport`). */
+  stageImport: (batch: ImportBatch) => Promise<void>;
+  /** The store's sensitive tables (`StoreHost.sensitiveTables`). */
+  sensitiveTables: () => Promise<string[]>;
+  /** Lands an import's staged rows (`StoreHost.applyImport`). */
+  applyImport: (landing: ImportApply) => Promise<{ inserted: number }>;
   /**
    * Checks `reader` may use each of `fileIds`, files of the store
    * (`FileHost.usable`).
@@ -198,6 +212,15 @@ const claimedSchema = z.union([
 
 const claimedOf = (answered: string): Claimed =>
   claimedSchema.parse(JSON.parse(answered));
+
+/** A page of a record's history, as JSON text over RPC (data-store.ts). */
+const historyOf = (answered: string): RecordChangePage => {
+  const page: unknown = JSON.parse(answered);
+  // SAFETY: the store's host shaped the page (`StoreHost.history`, read
+  // with its own schemas, store-changes.ts), which JSON carries unchanged.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return page as RecordChangePage;
+};
 
 const readResultOf = (answered: string): ReadResult => {
   const { value, generations } = readResultSchema.parse(JSON.parse(answered));
@@ -899,6 +922,13 @@ const storeClient = (
     read: async (scope, request, staged) =>
       readResultOf(await stub.read(storeId, scope, request, staged)),
     generations: async (names) => await stub.generations(storeId, names),
+    history: async (scope, table, recordId, before) =>
+      historyOf(await stub.history(storeId, scope, table, recordId, before)),
+    stageImport: async (batch) => {
+      await stub.stageImport(storeId, batch);
+    },
+    applyImport: async (landing) => await stub.applyImport(storeId, landing),
+    sensitiveTables: async () => await stub.sensitiveTables(storeId),
     filesUsable: async (reader, fileIds, resources) => {
       await stub.filesUsable(storeId, reader, fileIds, resources);
     },

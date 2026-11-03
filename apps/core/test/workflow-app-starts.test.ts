@@ -1108,6 +1108,7 @@ describe("a mutation starting a workflow after it commits", () => {
         ? await fx.store
             .commit({
               principal: { userId: fx.bob.userId },
+              actor: { type: "person", userId: fx.bob.userId },
               roles: { appMember: true, appBuilder: false },
               schemaHash: await schemaHash(manifest.schema),
               receipt: older.held,

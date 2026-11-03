@@ -203,6 +203,7 @@ export default {
       { manifest, run },
       {
         principal: "person-stand-in",
+        actor: { type: "person", userId: "person-stand-in" },
         consumer: { resourceId: "app-stand-in", resourceVersion: 1 },
         // SAFETY: an action never reaches its store; any use throws.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

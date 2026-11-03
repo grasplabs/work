@@ -50,6 +50,10 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // looser mode exposes records, a tighter one would leave older versions
 // reading under the looser one.
 //
+// A table declared sensitive (`TableDefinition.sensitive`) changes no
+// data, and no plan: the store keeps which tables any schema declared so
+// (core's store-host.ts, `sdk_tables.sensitive`).
+//
 // A field the store reserved (`reserved`: one a pending target added
 // before an admin abandoned it, whose values the records it filled in
 // keep) is added again only with the descriptor it had, so those values

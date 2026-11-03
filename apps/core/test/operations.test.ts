@@ -446,6 +446,7 @@ const invocationOf = (
   version = 1
 ): Invocation => ({
   principal: by.userId,
+  actor: { type: "person", userId: by.userId },
   consumer: { resourceId: appId, resourceVersion: version },
   store,
   requestId: crypto.randomUUID(),

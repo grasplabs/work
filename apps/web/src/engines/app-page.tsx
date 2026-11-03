@@ -14,6 +14,7 @@ import {
   ArchiveIcon,
   ChevronDownIcon,
   CodeIcon,
+  DatabaseIcon,
   GlobeIcon,
   LayoutGridIcon,
   LinkIcon,
@@ -371,6 +372,18 @@ export const AppPage = ({
           <ScreenTabs app={app.id} open={open} screens={contents.screens} />
         )}
         <span className="ml-auto flex items-start gap-2">
+          {/* Its data, for whoever builds it: core refuses anyone else. */}
+          {builds ? (
+            <Link
+              aria-label={t`Data of ${name}`}
+              className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
+              params={{ app: app.id }}
+              title={t`Data`}
+              to="/apps/$app/data"
+            >
+              <DatabaseIcon />
+            </Link>
+          ) : null}
           <Link
             aria-label={t`Settings of ${name}`}
             className={buttonVariants({ size: "icon-sm", variant: "ghost" })}

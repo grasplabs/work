@@ -22,6 +22,7 @@ import type { OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -254,6 +255,12 @@ export interface WorkflowStarts {
 export interface Invocation {
   /** The person the call acts for, who owns what it inserts. */
   readonly principal: string;
+  /**
+   * Who the audit log names as making the call: the person, an agent for
+   * them, a visitor, a workflow run, or the App. Each commit names them,
+   * in the store's change history of every record it writes.
+   */
+  readonly actor: AuditActor;
   /** The App and version it comes through, which cursors are bound to. */
   readonly consumer: {
     readonly resourceId: string;
@@ -3516,6 +3523,7 @@ const runMutation = async (
         async () =>
           await store.commit({
             principal: { userId: invocation.principal },
+            actor: invocation.actor,
             roles: current,
             schemaHash: scope.schemaHash,
             receipt: claimed.held,

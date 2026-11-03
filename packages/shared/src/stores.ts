@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { fileLimits } from "./app-file-limits.ts";
+import { auditActorSchema } from "./audit.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
@@ -364,6 +365,13 @@ export const commitSchema = z
   .strictObject({
     storeId: storeIdSchema,
     principal: z.strictObject({ userId: identifierSchema }),
+    /**
+     * Who the audit log names as making the commit (the person, an agent
+     * acting for them, a visitor, a workflow run or the App), as core
+     * resolved it for the invocation: whom the store's change history of
+     * each record it writes names.
+     */
+    actor: auditActorSchema,
     roles: writerRolesSchema,
     schemaHash: schemaHashSchema,
     receipt: z.strictObject({

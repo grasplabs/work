@@ -95,6 +95,7 @@ export class Caps extends WorkerEntrypoint<StandInEnv, { runId: string }> {
       { manifest, run: releaseRunner(this.env, release, "app-jobs") },
       {
         principal: "person-stand-in",
+        actor: { type: "person", userId: "person-stand-in" },
         consumer: { resourceId: "app-jobs", resourceVersion: 1 },
         // SAFETY: an action never reaches its store; any use throws.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

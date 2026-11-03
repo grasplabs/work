@@ -66,6 +66,12 @@ export const store = sqliteTable(
      * preferences; host-only, never a caller's.
      */
     preferencesContract: text("preferences_contract"),
+    /**
+     * How many bytes the store's change history holds
+     * (`sdk_record_changes.bytes`, summed): kept with each change added
+     * and removed, so retention's byte bound costs no scan.
+     */
+    historyBytes: integer("history_bytes").notNull().default(0),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -90,6 +96,13 @@ export const tables = sqliteTable(
      * changed a table it read, whether or not its records matched.
      */
     generation: integer().notNull().default(0),
+    /**
+     * Whether any schema handed to the store declared the table sensitive
+     * (`defineTable(...).sensitive()`): its change history keeps field
+     * names only from then on, and its values kept before were cleared
+     * as it was set. Never unset.
+     */
+    sensitive: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("sdk_tables_name_key").on(table.nameKey),
@@ -794,6 +807,13 @@ export const cascadeJobs = sqliteTable(
     resourceId: text("resource_id"),
     /** The workflow run the commit was made in, if any. */
     runId: text("run_id"),
+    /**
+     * Who made the commit, as the audit log names them (`AuditActor`, as
+     * JSON): whom the change history of each record the job deletes names.
+     * SQLite adds a required column only with a default: a job planned
+     * before stores kept this (none was released) names the system.
+     */
+    actor: text().notNull().default('{"type":"system"}'),
     /** The first record the commit itself deleted: what the job is named by. */
     rootTableId: text("root_table_id").notNull(),
     rootRecordId: text("root_record_id").notNull(),
@@ -840,5 +860,85 @@ export const cascadeMembers = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.tableId, table.recordId] }),
     index("sdk_cascade_members_job").on(table.jobId),
+  ]
+);
+
+/**
+ * The store's change history (store-changes.ts): one row per record a
+ * commit, a cascade or an import inserted, updated or deleted, written in
+ * the transaction that changed it. Who (`actor`, an `AuditActor` as JSON),
+ * when, which table and record, and which fields changed; the changed
+ * fields' values before and after only for a table not declared
+ * sensitive, and only within `recordChangeLimits.valuesMaxBytes`. Kept
+ * `recordChangeLimits.retentionDays`, and at most
+ * `recordChangeLimits.maxEntries` rows, pruned by the transactions that
+ * add rows. Read by the App's builders and the organization's admins
+ * (core's app-data.ts), never by App code.
+ */
+export const recordChanges = sqliteTable(
+  "sdk_record_changes",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    changedAt: integer("changed_at").notNull(),
+    /** The commit it was made in, in the store's order; none for a cascade job's batch. */
+    commit: integer(),
+    tableId: text("table_id").notNull(),
+    /** The table's name when it changed. */
+    tableName: text("table_name").notNull(),
+    recordId: text("record_id").notNull(),
+    op: text({ enum: ["insert", "update", "delete"] }).notNull(),
+    source: text({ enum: ["commit", "cascade", "import"] }).notNull(),
+    actor: text().notNull(),
+    /**
+     * The person the change was made for (the commit's principal, the
+     * importer, the cascade's commit's): whose erasure clears its values,
+     * whoever acted for them.
+     */
+    principal: text().notNull(),
+    /** The row's size in bytes, as the store's history bound counts it. */
+    bytes: integer().notNull(),
+    /** The changed fields' names, as a JSON array. */
+    fields: text().notNull(),
+    /** The changed fields' values before and after, as JSON objects. */
+    beforeJson: text("before_json"),
+    afterJson: text("after_json"),
+    /** Why the values aren't kept, if they aren't. */
+    valuesLeftOut: text("values_left_out", {
+      enum: ["sensitive", "too_large", "unread", "erased"],
+    }),
+  },
+  (table) => [
+    // A record's history, newest first.
+    index("sdk_record_changes_record").on(
+      table.tableId,
+      table.recordId,
+      table.id
+    ),
+    // What retention removes first.
+    index("sdk_record_changes_changed_at").on(table.changedAt),
+  ]
+);
+
+/**
+ * An import's rows, as core hands them to the store in batches
+ * (`StoreHost.stageImport`) before it lands them all in one transaction
+ * (`StoreHost.applyImport`), which removes them. Rows an import left
+ * staged (its connection lost) are removed by a later import once
+ * `importStagedMs` old, and with the store.
+ */
+export const importRows = sqliteTable(
+  "sdk_import_rows",
+  {
+    importId: text("import_id").notNull(),
+    position: integer().notNull(),
+    principal: text().notNull(),
+    tableName: text("table_name").notNull(),
+    recordId: text("record_id").notNull(),
+    valueJson: text("value_json").notNull(),
+    stagedAt: integer("staged_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.importId, table.position] }),
+    index("sdk_import_rows_staged_at").on(table.stagedAt),
   ]
 );

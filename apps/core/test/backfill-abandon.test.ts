@@ -690,6 +690,7 @@ describe("abandoning a failed backfill", () => {
             {
               storeId: store.id,
               principal: { userId: "ada" },
+              actor: { type: "person", userId: "ada" },
               roles: memberRoles,
               stagedAt: Date.now(),
               schemaHash: second.schemaHash,

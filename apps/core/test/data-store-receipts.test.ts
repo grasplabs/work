@@ -94,6 +94,7 @@ const insertOf = (
   more: Partial<Omit<Commit, "storeId">> = {}
 ): Omit<Commit, "storeId"> => ({
   principal: { userId: "ada" },
+  actor: { type: "person", userId: "ada" },
   roles: memberRoles,
   stagedAt: Date.now(),
   schemaHash,
@@ -274,6 +275,7 @@ describe("receipts", () => {
     await expect(
       store.commit({
         principal: { userId: "ada" },
+        actor: { type: "person", userId: "ada" },
         roles: memberRoles,
         stagedAt: Date.now(),
         schemaHash,
@@ -303,6 +305,7 @@ describe("receipts", () => {
     const check = async (key: string) =>
       await store.commit({
         principal: { userId: "ada" },
+        actor: { type: "person", userId: "ada" },
         roles: memberRoles,
         stagedAt: Date.now(),
         schemaHash,
@@ -320,6 +323,7 @@ describe("receipts", () => {
     const bump = heldBy(await store.claim(await claimOf("bump", {})));
     await store.commit({
       principal: { userId: "ada" },
+      actor: { type: "person", userId: "ada" },
       roles: memberRoles,
       stagedAt: Date.now(),
       schemaHash,

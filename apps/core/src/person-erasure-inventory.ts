@@ -363,6 +363,14 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "dataStore.sdk_files": { company: "the App's files they own" },
   "dataStore.sdk_file_delete_keys": { company: "the App's files they own" },
   "dataStore.sdk_preferences": { erased: "apps" },
+  // A store's change history (store-changes.ts): the values of changes
+  // made for or by them go with their erasure (`forgetPerson`); who acted,
+  // when and which fields changed stay, the company's record of its
+  // records' writes.
+  "dataStore.sdk_record_changes": { erased: "apps" },
+  // An import's rows waiting to land (store-host.ts, `stageImport`): theirs
+  // go with their erasure, and every one an hour after it was staged.
+  "dataStore.sdk_import_rows": { erased: "apps" },
   "dataStore.sdk_cascade_jobs": { company: "writes of the App's records" },
   "dataStore.sdk_cascade_members": noPerson,
   "dataStore.sdk_file_chunks": noPerson,
@@ -598,13 +606,15 @@ export const reviewedPersonColumns: Readonly<
   "core.workflow_start_receipts": ["principal_id"],
   "core.workflow_teams": ["set_by"],
   "dataStore.sdk_abandoned_targets": ["abandoned_by"],
-  "dataStore.sdk_cascade_jobs": ["principal"],
+  "dataStore.sdk_cascade_jobs": ["actor", "principal"],
   "dataStore.sdk_commit_writers": ["principal"],
   "dataStore.sdk_file_delete_keys": ["owner_id"],
   "dataStore.sdk_files": ["owner_id"],
   "dataStore.sdk_migration_work": ["owner_id"],
   "dataStore.sdk_mutation_receipts": ["principal"],
+  "dataStore.sdk_import_rows": ["principal"],
   "dataStore.sdk_preferences": ["person_id"],
+  "dataStore.sdk_record_changes": ["actor", "principal"],
   "dataStore.sdk_records": ["owner_id"],
   "dataStore.sdk_schema_backfills": ["cursor_owner"],
   "dataStore.sdk_store": ["deleted_by"],

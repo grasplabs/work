@@ -19,6 +19,7 @@ export const familyNamespaces = [
   "ai_key",
   "ai_provider",
   "app",
+  "app_data",
   "audit",
   "auth",
   "brain",

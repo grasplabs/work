@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AppDataApi } from "./app-data.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
@@ -971,6 +972,7 @@ export interface AppsApi {
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;
+  readonly data: AppDataApi;
 }
 
 /**

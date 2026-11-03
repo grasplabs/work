@@ -628,6 +628,10 @@ export const noStore = (): OpenStore => ({
   commit: unbound,
   read: unbound,
   generations: unbound,
+  history: unbound,
+  stageImport: unbound,
+  applyImport: unbound,
+  sensitiveTables: unbound,
   filesUsable: async () => {
     await Promise.reject(fileErrors.create("file.unavailable"));
   },

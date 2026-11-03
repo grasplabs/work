@@ -1,5 +1,6 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import {
   agentIdSchema,
@@ -226,6 +227,31 @@ const keptUseRefusals =
   };
 
 /**
+ * Who makes a call core resolved for `person`, as the audit log names
+ * them: the run whose chain it comes from; else the agent acting for them;
+ * else the App whose function called this one; else the person.
+ */
+const callerActor = (
+  person: string,
+  {
+    agent,
+    chain,
+    runOrigin,
+  }: Pick<FunctionCaller, "agent" | "chain" | "runOrigin">
+): AuditActor => {
+  if (runOrigin !== undefined) {
+    return runOrigin.actor;
+  }
+  if (agent !== undefined) {
+    return { type: "agent", agentId: agent.agentId, onBehalfOf: person };
+  }
+  const caller = chain?.at(-1);
+  return caller === undefined
+    ? { type: "person", userId: person }
+    : { type: "app", appId: caller, part: "server" };
+};
+
+/**
  * The invocation of `release` for `caller`: the store from the release
  * alone, the principal and roles from core's identity of the caller,
  * never from a request.
@@ -292,6 +318,7 @@ export const invocationFor = async (
       : await openStore(env, release.store.storeId);
   return {
     principal: by.userId,
+    actor: callerActor(by.userId, { agent, chain, runOrigin }),
     consumer: {
       resourceId: app,
       resourceVersion: release.manifest.resourceVersion,
@@ -531,6 +558,7 @@ export const runInvocationFor = async (
   });
   return {
     principal: authority.onBehalfOf,
+    actor: runActorOf(run),
     consumer: { resourceId: app, resourceVersion: version },
     // Who calls: the person the run acts for, the one who started it.
     people: memberPeople(env, {
@@ -1345,6 +1373,8 @@ export interface VisitorCaller {
   readonly principal: string;
   /** The address they signed in with, as their session holds it. */
   readonly email: string;
+  /** The visitor, by their session, as the audit log names them. */
+  readonly actor: AuditActor;
   /**
    * Throws unless the visitor may still call `path`: their session live,
    * the App published at this version, their address listed, and `path`
@@ -1394,6 +1424,7 @@ export const visitorInvocation = async (
       : await openStore(env, release.store.storeId);
   return {
     principal: caller.principal,
+    actor: caller.actor,
     consumer: {
       resourceId: caller.app,
       resourceVersion: release.manifest.resourceVersion,

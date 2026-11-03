@@ -128,6 +128,7 @@ const insert = async (
   }
   const { inserted } = await store.commit({
     principal: { userId: principal },
+    actor: { type: "person", userId: principal },
     roles: memberRoles,
     stagedAt: Date.now(),
     schemaHash,
@@ -736,6 +737,7 @@ describe("more owners, more tables", () => {
       inserted: [person],
     } = await fixture.store.commit({
       principal: { userId: "ada" },
+      actor: { type: "person", userId: "ada" },
       roles: memberRoles,
       stagedAt: Date.now(),
       schemaHash: fixture.schemaHash,
