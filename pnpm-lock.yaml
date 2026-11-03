@@ -565,6 +565,9 @@ importers:
       '@grasp-os/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@grasp-os/connector-kit':
+        specifier: workspace:*
+        version: link:../../packages/connector-kit
       '@grasp-os/open-workflow':
         specifier: workspace:*
         version: link:../../packages/open-workflow

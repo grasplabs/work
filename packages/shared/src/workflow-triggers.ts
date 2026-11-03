@@ -17,6 +17,7 @@ export const triggerKinds = [
   "connector",
   "webhook",
   "schedule",
+  "email",
 ] as const;
 
 export type TriggerKind = (typeof triggerKinds)[number];
@@ -112,6 +113,16 @@ export const connectorTriggerConfigSchema = z.strictObject({
   input: inputMappingSchema,
 });
 
+/**
+ * An email trigger's configuration: how each message to its address
+ * becomes the run's input, mapped as a connector trigger's event is, from
+ * the message as an App's email trigger hands it over (`inboundEmailSchema`
+ * in workflows.ts: `/subject`, `/from/address`, `/text`).
+ */
+export const emailTriggerConfigSchema = z.strictObject({
+  input: inputMappingSchema,
+});
+
 /** A live trigger of a workflow, as `workflowResources.triggers` shows it. */
 export interface WorkflowTrigger {
   id: string;
@@ -138,6 +149,12 @@ export interface WorkflowTrigger {
    * starts kept failing (enabling it again starts it afresh).
    */
   nextAt: string | null;
+  /**
+   * The part before the `@` of the address an email trigger receives mail
+   * at, on the deployment's mail domain: `trigger-` and 128 random bits
+   * of its own, never derived from its ID; null for any other kind.
+   */
+  address: string | null;
   /**
    * Whether a schedule trigger stopped after its starts kept failing
    * (`maxFailedStarts` in a row): it starts nothing until its owner

@@ -1,6 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
@@ -10,6 +10,7 @@ import { isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   connectorTriggerConfigSchema,
+  emailTriggerConfigSchema,
   scheduleTriggerConfigSchema,
   systemTriggerConfigSchema,
   workflowTriggerCreateSchema,
@@ -94,6 +95,15 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
 //   into the event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
+// - An email trigger taking mail meant for another, or mailed by anyone
+//   who learned its ID: its address is `trigger-` and 128 random bits of
+//   its own (`emailAddressOf`), never derived from its ID (which builders,
+//   admins, staff and the audit log see), shown only to whoever may see
+//   the trigger, never audited or logged. Mail to it reaches the trigger
+//   first (inbound-email.ts); no App's address is that token unless
+//   copied. It is never changed: deleting the trigger and making another is
+//   how it changes. Its input is a fixed mapping as a connector trigger's
+//   is. Its mail starts runs as workflows/inbound-email.ts says.
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -208,6 +218,14 @@ const kindFieldsOf = async (
   if (kind === "connector") {
     return await connectorFieldsOf(env, config, principal);
   }
+  if (kind === "email") {
+    const { input } = workflowResourceErrors.parse(
+      "workflow.resource_invalid",
+      emailTriggerConfigSchema,
+      config
+    );
+    return { ...noKindFields, inputMapping: canonicalJson(input) };
+  }
   if (kind === "system") {
     const { event } = workflowResourceErrors.parse(
       "workflow.resource_invalid",
@@ -242,6 +260,13 @@ const kindFieldsOf = async (
     scheduleInput: await scheduleInputFor(env, workflowId, version, input),
   };
 };
+
+/** Random bytes in an email trigger's address: 128 bits. */
+const addressBytes = 16;
+
+/** A new email trigger's address, before the `@`: random, its own. */
+const emailAddressOf = (): string =>
+  `trigger-${toHex(crypto.getRandomValues(new Uint8Array(addressBytes)))}`;
 
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
@@ -337,6 +362,7 @@ export const createTriggerResource = async (
       currentVersion: 1,
       enabled: true,
       createdAt: now,
+      emailAddress: kind === "email" ? emailAddressOf() : null,
     }),
     db.insert(triggerResourceVersions).values({
       triggerId: id,
@@ -734,6 +760,7 @@ interface TriggerRow {
   workflowId: string;
   workflowVersion: number;
   principal: string;
+  emailAddress: string | null;
   eventContract: string | null;
   eventType: string | null;
   scheduleCron: string | null;
@@ -789,6 +816,11 @@ const connectorConfigOf = (row: TriggerRow): Json | null => {
  * the fields its version keeps; null when it keeps none (a webhook).
  */
 const configOf = (row: TriggerRow): Json | null => {
+  if (row.kind === "email") {
+    return row.inputMapping === null
+      ? null
+      : { input: keptJson(row.inputMapping) };
+  }
   if (row.kind === "system") {
     return systemConfigOf(row);
   }
@@ -813,6 +845,7 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   createdAt: row.createdAt.toISOString(),
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
+  address: row.emailAddress,
   // Stopped by its own failing starts (workflows/schedule-triggers.ts):
   // no next time, after `maxFailedStarts` in a row.
   stopped:
@@ -837,6 +870,7 @@ const triggersWhere = async (
       workflowId: triggerResourceVersions.workflowResourceId,
       workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
+      emailAddress: triggerResources.emailAddress,
       eventContract: triggerResourceVersions.eventContract,
       eventType: triggerResourceVersions.eventType,
       scheduleCron: triggerResourceVersions.scheduleCron,
