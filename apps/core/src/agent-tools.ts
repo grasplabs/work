@@ -4,6 +4,7 @@ import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import { exports } from "cloudflare:workers";
+import { Value } from "typebox/value";
 import { z } from "zod";
 
 import type { DedicatedToolName } from "./agent-messages.ts";
@@ -220,12 +221,43 @@ interface TurnTool {
   tool: AgentTool;
 }
 
+/** Most problems a refused input's message names. */
+const maxProblemsNamed = 5;
+
+/**
+ * `args` as `parameters` take them, or a short refusal naming where each
+ * problem is and what it breaks, and never a value: pi's own would quote
+ * the whole input back (every file of a refused `writeFile`), past what a
+ * result may hold.
+ */
+const checkedInput = <P extends TSchema>(
+  name: string,
+  parameters: P,
+  args: unknown
+): Static<P> => {
+  if (Value.Check(parameters, args)) {
+    // Static<P> of a generic P reads as `any` to the linter; the check narrows it.
+    // oxlint-disable-next-line typescript/no-unsafe-return -- narrowed by Value.Check
+    return args;
+  }
+  const problems = [...Value.Errors(parameters, args)]
+    .slice(0, maxProblemsNamed)
+    .map(
+      ({ instancePath, message }) =>
+        `- ${instancePath === "" ? "the input" : instancePath}: ${message}`
+    );
+  throw new Error([`${name} refused its input:`, ...problems].join("\n"));
+};
+
 /** A definition as a tool of the turn, its calls run by `callAs`. */
 const tool =
   <P extends TSchema>({ api, run, ...definition }: Definition<P>) =>
   (deps: ToolDeps): TurnTool => {
     const made: AgentTool<P, CodeStepDetails> = {
       ...definition,
+      prepareArguments: (args) =>
+        // oxlint-disable-next-line typescript/no-unsafe-return -- Static<P>, checked
+        checkedInput(definition.name, definition.parameters, args),
       executionMode: "sequential",
       execute: async (toolCallId, input, signal) =>
         await callAs(
@@ -332,14 +364,16 @@ const linesWith = (
   return more === 0 ? { matches } : { matches, leftOut: more };
 };
 
-/** The document a piece of evidence comes from first, if it comes from one. */
+/** The first document a piece of evidence comes from, if any is one. */
 const documentOf = (
   sources: readonly { kind: string; documentId?: unknown }[]
 ): string | null => {
-  const [source] = sources;
-  return source?.kind === "document" && typeof source.documentId === "string"
-    ? source.documentId
-    : null;
+  for (const { kind, documentId } of sources) {
+    if (kind === "document" && typeof documentId === "string") {
+      return documentId;
+    }
+  }
+  return null;
 };
 
 /** What the model reads with the brain's evidence. */

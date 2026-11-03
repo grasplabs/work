@@ -932,6 +932,40 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a write of more files than one call takes in a few words, without its files", async () => {
+    const content = "x".repeat(1000);
+    const { chat, existing } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: Object.fromEntries(
+          Array.from({ length: 51 }, (_, at) => [`notes/${at}.md`, content])
+        ),
+      }),
+      says("Too many."),
+    ]);
+
+    await chat.ask("Write fifty-one notes");
+
+    const [refused] = await toolResults(chat.stub, chat.chat.id);
+    const { changes } = await chat.stub.draft(
+      chatIdSchema.parse(chat.chat.id),
+      existing
+    );
+    expect({
+      refused: refused?.isError,
+      short: (refused?.text.length ?? Infinity) < 500,
+      quotes: refused?.text.includes(content),
+      says: refused?.text.startsWith("writeFile refused its input:"),
+      changes,
+    }).toStrictEqual({
+      refused: true,
+      short: true,
+      quotes: false,
+      says: true,
+      changes: {},
+    });
+  });
+
   it("refuses a file write for someone who doesn't build the App, as it refuses their code", async () => {
     const { chat } = await setUp(
       (app) => [
