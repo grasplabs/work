@@ -2882,12 +2882,20 @@ const runHandler = async (
     {
       ...keepingEvidence(run, operation, capabilities),
       // Every kind's: who calls, and the directory, as core resolved them
-      // for the invocation, nested calls' included.
+      // for the invocation, nested calls' included. Each directory read is
+      // admitted first, as a resource request is (`admit`): a person
+      // removed, a release revoked or an agent's permission withdrawn
+      // while the call runs reads nothing more. Only who calls is kept
+      // from the call's start.
       ...(people === undefined
         ? {}
         : {
-            people: async (read: unknown, readArgs: unknown) =>
-              await answerPeople(people, read, readArgs),
+            people: async (read: unknown, readArgs: unknown) => {
+              if (read !== "caller") {
+                await admit(run.invocation);
+              }
+              return await answerPeople(people, read, readArgs);
+            },
           }),
     },
     run.invocation.deadline

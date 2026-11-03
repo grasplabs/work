@@ -341,6 +341,9 @@ export const useNavigate = (): Navigate => useClient().navigate;
 export const useCaller = (): Caller | undefined =>
   useQuery(peopleReferences.caller, {});
 
+/** Each client's directory (`usePeople`). */
+const directories = new WeakMap<GraspClient, PeopleDirectory>();
+
 /**
  * The organization's people, read-only, for a member, in an App that
  * declares it (`app({ people: true })`): `find` by ID, `search` by name or
@@ -350,11 +353,18 @@ export const useCaller = (): Caller | undefined =>
  */
 export const usePeople = (): PeopleDirectory => {
   const client = useClient();
-  return peopleDirectory(
-    async (name, args) =>
-      // The reads' own references: core answers them for this App.
-      await client.query(peopleReferences[name], args)
-  );
+  // One directory a client, the same on every render: an effect that
+  // depends on it runs again only when the client changes.
+  let directory = directories.get(client);
+  if (directory === undefined) {
+    directory = peopleDirectory(
+      async (name, args) =>
+        // The reads' own references: core answers them for this App.
+        await client.query(peopleReferences[name], args)
+    );
+    directories.set(client, directory);
+  }
+  return directory;
 };
 
 /**

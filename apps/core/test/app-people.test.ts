@@ -8,7 +8,7 @@ import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
@@ -22,6 +22,7 @@ import {
   teamMembers,
   teams,
 } from "../src/db/core/schema.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -84,6 +85,45 @@ export const search = query({
   },
 });
 
+/** Keeps a note, and lists them: how a test follows an action. */
+export const note = mutation({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", { text: args.text });
+    return null;
+  },
+});
+
+export const noted = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map(({ text }) => text),
+});
+
+/**
+ * Reads the directory, says so in a note, then reads it again until a
+ * read is refused: what it was refused with.
+ */
+export const twice = action({
+  args: {},
+  returns: v.string(),
+  uses: [note],
+  handler: async (ctx) => {
+    const first = await ctx.people.search("Person", { limit: 1 });
+    await ctx.runMutation(note, { text: "read once" });
+    for (let polls = 0; polls < 40; polls += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      try {
+        await ctx.people.find([]);
+      } catch (error) {
+        return JSON.stringify({ first: first.people.length, afterwards: String(Reflect.get(Object(error), "code")) });
+      }
+    }
+    return JSON.stringify({ first: first.people.length, afterwards: "read" });
+  },
+});
+
 /** A team's members, and the people with the IDs given. */
 export const team = query({
   args: { teamId: v.string(), ids: v.array(v.string()) },
@@ -96,14 +136,14 @@ export const team = query({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { me, meAgain, meToo, search, team } from "./operations/people.ts";
+import { me, meAgain, meToo, note, noted, search, team, twice } from "./operations/people.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Directory",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { dir: { me, meToo, meAgain, search, team } },
+  operations: { dir: { me, meToo, meAgain, note, noted, search, team, twice } },
   internalOperations: {},
   screens: [],
   ${people ? "people: true," : ""}
@@ -457,6 +497,30 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       before: "answered",
       server: "permission.person_inactive",
       screen: "permission.person_inactive",
+    });
+  });
+
+  it("admit every directory read again: one made after the release is revoked mid-action is refused", async () => {
+    const app = await directoryApp();
+    const running = call(app, app.owner, "dir.twice");
+    await vi.waitFor(
+      async () => {
+        expect(valueOf(await call(app, app.owner, "dir.noted"))).toStrictEqual([
+          "read once",
+        ]);
+      },
+      { timeout: 6000, interval: 100 }
+    );
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: appIdSchema.parse(app.app), version: 1 },
+      "Reads too much"
+    );
+
+    expect(answerOf(await running)).toStrictEqual({
+      first: 1,
+      afterwards: "version.revoked",
     });
   });
 
