@@ -146,6 +146,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.trigger_resources": { company: "triggers they own" },
   "core.trigger_resource_versions": { none: "a binding's name" },
   "core.trigger_schedules": noPerson,
+  "core.trigger_hour_slots": noPerson,
   "core.workflow_start_receipts": { company: "runs started for them (D3)" },
   "core.workflow_resource_runs": { company: "runs for them (D3)" },
   "core.workflow_run_files": { company: "files of runs (D3)" },
@@ -373,6 +374,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "each purge's own record: the admin who ran it, by ID",
   },
   "brain.brain_purge_steps": noPerson,
+  "brain.brain_exports": { company: "exports of the Brain an admin asked for" },
+  "brain.brain_export_files": noPerson,
   "brain.brain_erased_documents": {
     kept: "the purge's own record: document IDs and hashes of their places",
   },
