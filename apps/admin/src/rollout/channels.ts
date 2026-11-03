@@ -132,6 +132,14 @@ const assertDeployable = async (
 };
 
 /**
+ * Whether release `releaseId` still has its bundle, as SQL: checked in the
+ * write that points a channel or pins a client at it, so retention's claim
+ * (src/releases/retention.ts) and that write never both land.
+ */
+const bundleKept = (releaseId: string) =>
+  sql`EXISTS (SELECT 1 FROM ${releases} WHERE ${releases.id} = ${releaseId} AND ${releases.bundleDeletedAt} IS NULL)`;
+
+/**
  * Points `channel` at `releaseId`, as `actor`, audited with what it
  * pointed at before: only from `from`, as read, so two changes at once
  * land one. Returns whether it changed.
@@ -158,7 +166,9 @@ const pointChannel = async (
       actor,
       db
         .insert(channels)
-        .values({ id: channel, releaseId, updatedAt: now })
+        .select(
+          sql`SELECT ${channel}, ${releaseId}, ${now.getTime()} WHERE ${bundleKept(releaseId)}`
+        )
         .onConflictDoNothing(),
       event
     );
@@ -169,7 +179,13 @@ const pointChannel = async (
     db
       .update(channels)
       .set({ releaseId, updatedAt: now })
-      .where(and(eq(channels.id, channel), eq(channels.releaseId, from))),
+      .where(
+        and(
+          eq(channels.id, channel),
+          eq(channels.releaseId, from),
+          bundleKept(releaseId)
+        )
+      ),
     event
   );
 };
@@ -216,6 +232,8 @@ export const promoteRelease = async (
     back,
   });
   if (!changed) {
+    // Its bundle claimed since it was checked, or the channel moved.
+    await assertDeployable(db, releaseId);
     throw new RolloutError(
       "channel_changed",
       `${channel} changed as it was promoted`
@@ -404,7 +422,7 @@ export const pinClient = async (
     await assertDeployable(db, releaseId);
   }
   const pinned = clients.pinnedReleaseId;
-  await actIfChanged(
+  const changed = await actIfChanged(
     db,
     staff,
     db
@@ -415,11 +433,19 @@ export const pinClient = async (
           eq(clients.id, clientId),
           releaseId === null
             ? isNotNull(pinned)
-            : or(isNull(pinned), ne(pinned, releaseId))
+            : and(
+                or(isNull(pinned), ne(pinned, releaseId)),
+                bundleKept(releaseId)
+              )
         )
       ),
     releaseId === null
       ? { action: "client.unpin", clientId }
       : { action: "client.pin", clientId, target: releaseId }
   );
+  // Unchanged: pinned to it already, or its bundle claimed since it was
+  // checked, which is refused.
+  if (!changed && releaseId !== null) {
+    await assertDeployable(db, releaseId);
+  }
 };

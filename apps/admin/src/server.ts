@@ -68,18 +68,26 @@ export default {
     }
     // An import that fails never keeps stuck provisioning from resuming:
     // logged by its code, and reconciling runs all the same.
+    let caughtUp = false;
     try {
-      await importReleases(env.RELEASES, adminDatabase(env.DB));
+      ({ caughtUp } = await importReleases(
+        env.RELEASES,
+        adminDatabase(env.DB)
+      ));
     } catch (error) {
       log.error("releases.import_failed", { error: errorCode(error) });
     }
-    // Bundles of releases never promoted past Edge go after 14 days.
+    // Bundles of releases never promoted past Edge go after 14 days: only
+    // once the import read every release published, so each one's blobs
+    // are on record and kept.
     try {
-      await deleteExpiredBundles(
-        adminDatabase(env.DB),
-        env.RELEASES,
-        new Date(controller.scheduledTime)
-      );
+      if (caughtUp) {
+        await deleteExpiredBundles(
+          adminDatabase(env.DB),
+          env.RELEASES,
+          new Date(controller.scheduledTime)
+        );
+      }
     } catch (error) {
       log.error("releases.retention_failed", { error: errorCode(error) });
     }

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b66f44d5-39c8-4629-8fc6-40a59d5a6ae3",
+  "id": "f3035bae-799c-48f0-88e7-a110f58b701f",
   "prevId": "a17573e7-7536-4c72-b79f-259c69d4b304",
   "tables": {
     "audit_events": {
@@ -1218,6 +1218,46 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "release_blobs": {
+      "name": "release_blobs",
+      "columns": {
+        "release_id": {
+          "name": "release_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blob_key": {
+          "name": "blob_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "release_blobs_blob_idx": {
+          "name": "release_blobs_blob_idx",
+          "columns": [
+            "blob_key"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "release_blobs_release_id_blob_key_pk": {
+          "columns": [
+            "release_id",
+            "blob_key"
+          ],
+          "name": "release_blobs_release_id_blob_key_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

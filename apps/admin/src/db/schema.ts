@@ -46,6 +46,27 @@ export const releases = sqliteTable("releases", {
 });
 
 /**
+ * Which blobs each published release names (src/releases/blobs.ts): one
+ * row a blob, written when the import first reads the release's manifest,
+ * imported yet or not. Blobs are content-addressed and shared, so a blob
+ * may leave the releases bucket only once no release still holding its
+ * bundle names it (src/releases/retention.ts): an indexed look-up, never
+ * a read of every manifest. No foreign key: a release still being
+ * imported has no record yet, and its blobs are kept all the same.
+ */
+export const releaseBlobs = sqliteTable(
+  "release_blobs",
+  {
+    releaseId: text("release_id").notNull(),
+    blobKey: text("blob_key").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.releaseId, table.blobKey] }),
+    index("release_blobs_blob_idx").on(table.blobKey),
+  ]
+);
+
+/**
  * A published release that didn't verify, and when the import tries it
  * again (src/releases/import.ts). Gone once it's imported.
  */
