@@ -430,9 +430,7 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
   pageOf,
 }) => {
   await page.goto(`/apps/${app}?screen=counter`);
-  await expect(
-    page.getByText("Use your organization’s account to go on.")
-  ).toBeVisible();
+  await expect(page.getByText("Log in with your work account.")).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
   expect(returnTo).toBe(`/apps/${app}?screen=counter`);
 

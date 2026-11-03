@@ -3297,6 +3297,10 @@ msgctxt "a change's source"
 msgid "by an import"
 msgstr "por una importación"
 
+#: src/routes/sign-in.tsx
+msgid "By continuing, you agree to Grasp’s <0>terms</0> and <1>privacy policy</1>."
+msgstr "Al continuar, aceptas los <0>términos</0> y la <1>política de privacidad</1> de Grasp."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "By hand now"
 msgstr "A mano ahora"
@@ -4278,6 +4282,10 @@ msgstr "Contexto"
 #: src/onboarding/setup-steps.tsx
 msgid "Continue"
 msgstr "Continuar"
+
+#: src/sign-in-options.tsx
+msgid "Continue with {label}"
+msgstr "Continuar con {label}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
@@ -5570,6 +5578,10 @@ msgstr "Buscar un registro por su ID"
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Encontrarás a Stephen en Aplicaciones, en tu espacio de trabajo de Slack."
+
+#: src/routes/sign-in.tsx
+msgid "Find the work AI should be doing."
+msgstr "Encuentra el trabajo que la IA debería estar haciendo."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -7495,6 +7507,10 @@ msgstr "Cargando"
 #: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Cargando…"
+
+#: src/routes/sign-in.tsx
+msgid "Log in with your work account."
+msgstr "Inicia sesión con tu cuenta de trabajo."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -11940,14 +11956,6 @@ msgstr "Inicia sesión para responder"
 msgid "Sign in to connect {name} now"
 msgstr "Inicia sesión para conectar {name} ahora"
 
-#: src/routes/sign-in.tsx
-msgid "Sign in to Grasp"
-msgstr "Inicia sesión en Grasp"
-
-#: src/sign-in-options.tsx
-msgid "Sign in with {label}"
-msgstr "Iniciar sesión con {label}"
-
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Inicia sesión con la cuenta de tu organización."
@@ -14485,10 +14493,6 @@ msgstr "Usar el chat, Conocimiento y las aplicaciones compartidas con ellos"
 msgid "Use the default"
 msgstr "Usar el predeterminado"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Usa la cuenta de tu organización para continuar."
-
 #: src/chat/thread.tsx
 msgid "Used {tool}"
 msgstr "Se usó {tool}"
@@ -14943,6 +14947,10 @@ msgstr "Semana {week} de {weeks} · {stage}"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Resumen semanal"
+
+#: src/routes/sign-in.tsx
+msgid "Welcome back."
+msgstr "Te damos la bienvenida de nuevo."
 
 #: src/tour/tour-script.ts
 msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."

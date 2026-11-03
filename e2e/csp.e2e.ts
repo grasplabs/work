@@ -51,7 +51,9 @@ test("can't be framed by another origin", async ({ page, baseURL }) => {
 test("runs no injected inline script", async ({ page }) => {
   const violations = await recordCspViolations(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Grasp" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Welcome back." })
+  ).toBeVisible();
 
   // An inline script runs as it's inserted, if it runs at all.
   const ran = await page.evaluate(() => {
@@ -70,9 +72,7 @@ test("runs no injected inline script", async ({ page }) => {
 test("connects to no other origin", async ({ page }) => {
   const violations = await recordCspViolations(page);
   await page.goto("/");
-  await expect(
-    page.getByText("Use your organization’s account to go on.")
-  ).toBeVisible();
+  await expect(page.getByText("Log in with your work account.")).toBeVisible();
 
   const targets = ["http://attacker.test/steal", "ws://attacker.test/steal"];
   await page.evaluate(async ([http = "", ws = ""]) => {

@@ -3297,6 +3297,10 @@ msgctxt "a change's source"
 msgid "by an import"
 msgstr "by an import"
 
+#: src/routes/sign-in.tsx
+msgid "By continuing, you agree to Grasp’s <0>terms</0> and <1>privacy policy</1>."
+msgstr "By continuing, you agree to Grasp’s <0>terms</0> and <1>privacy policy</1>."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "By hand now"
 msgstr "By hand now"
@@ -4278,6 +4282,10 @@ msgstr "Context"
 #: src/onboarding/setup-steps.tsx
 msgid "Continue"
 msgstr "Continue"
+
+#: src/sign-in-options.tsx
+msgid "Continue with {label}"
+msgstr "Continue with {label}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
@@ -5570,6 +5578,10 @@ msgstr "Find a record by its ID"
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Find Stephen under Apps in your Slack workspace."
+
+#: src/routes/sign-in.tsx
+msgid "Find the work AI should be doing."
+msgstr "Find the work AI should be doing."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -7495,6 +7507,10 @@ msgstr "Loading"
 #: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Loading…"
+
+#: src/routes/sign-in.tsx
+msgid "Log in with your work account."
+msgstr "Log in with your work account."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -11940,14 +11956,6 @@ msgstr "Sign in to answer"
 msgid "Sign in to connect {name} now"
 msgstr "Sign in to connect {name} now"
 
-#: src/routes/sign-in.tsx
-msgid "Sign in to Grasp"
-msgstr "Sign in to Grasp"
-
-#: src/sign-in-options.tsx
-msgid "Sign in with {label}"
-msgstr "Sign in with {label}"
-
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
@@ -14485,10 +14493,6 @@ msgstr "Use the chat, Knowledge and the Apps shared with them"
 msgid "Use the default"
 msgstr "Use the default"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Use your organization’s account to go on."
-
 #: src/chat/thread.tsx
 msgid "Used {tool}"
 msgstr "Used {tool}"
@@ -14943,6 +14947,10 @@ msgstr "Week {week} of {weeks} · {stage}"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Weekly summary"
+
+#: src/routes/sign-in.tsx
+msgid "Welcome back."
+msgstr "Welcome back."
 
 #: src/tour/tour-script.ts
 msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
