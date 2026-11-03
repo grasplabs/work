@@ -126,6 +126,7 @@ import {
   takeConnectorEvents,
 } from "./events.ts";
 import { hrConnections, readHr } from "./hr.ts";
+import { createHttpConnection } from "./http-connections.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   npmAdvisories,
@@ -490,6 +491,16 @@ export default class Connect
 
   // A company's webhooks (src/webhooks.ts): core signs an App's event,
   // connect sends it to the URL, checked again.
+
+  // HTTP connections (src/http-connections.ts): an admin approves an
+  // outside API's origin, paths, methods and credential, sealed here and
+  // never answered back; its calls go through `call` as any connection's.
+
+  async createHttpConnection(
+    request: unknown
+  ): Promise<{ connectionId: string }> {
+    return await createHttpConnection(this.env, request);
+  }
 
   async webhookPost(post: unknown): Promise<WebhookOutcome> {
     return await webhookPost(this.env, post);
@@ -909,6 +920,7 @@ export default class Connect
         replayed: progress.replayed,
         recovery: progress.recovery,
         pendingActionId: held?.id,
+        http: progress.http,
       });
       throw reason === "connect.outcome_unknown"
         ? unknownOutcome(progress, lost ? undefined : detailsOf(error))
@@ -931,6 +943,7 @@ export default class Connect
       recovery: done.recovery,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
+      http: progress.http,
     };
     try {
       const kept = await keptChange(this.env, claims, call, done.change);

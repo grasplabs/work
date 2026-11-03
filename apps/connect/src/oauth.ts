@@ -54,10 +54,12 @@ import {
 import {
   connections,
   connectionTokens,
+  httpConnections,
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
+import { httpSummaries } from "./http-connections.ts";
 import { exchangeCode } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
@@ -1008,6 +1010,10 @@ export const listConnections = async (
       )
     )
     .orderBy(desc(connections.createdAt));
+  const http = await httpSummaries(
+    env,
+    rows.filter(({ serverKind }) => serverKind === "http").map(({ id }) => id)
+  );
   return rows.map((row) => ({
     id: row.id,
     source: row.serverKind,
@@ -1024,6 +1030,7 @@ export const listConnections = async (
       readTools: readToolNames(row),
       toolResources: toolResourcesOf(row),
     }),
+    ...(http.has(row.id) && { http: http.get(row.id) }),
   }));
 };
 
@@ -1097,10 +1104,12 @@ const stop = async (
   // whatever becomes of that deletion, and the clock retries it
   // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
   const composio = connection.serverKind === "composio";
+  // An HTTP connection's credential is the API's own: nothing to revoke
+  // at a provider, it is only deleted, below.
+  const http = connection.serverKind === "http";
   const cleanupId = crypto.randomUUID();
-  const revokeOutcome = composio
-    ? "nothing"
-    : await revokeAtProvider(env, connection);
+  const revokeOutcome =
+    composio || http ? "nothing" : await revokeAtProvider(env, connection);
   const revokedGrant = revokeOutcome === "revoked";
   const owed = revokeOutcome === "failed";
   // Recorded only by the disconnect that stops it, if two run at once.
@@ -1136,6 +1145,17 @@ const stop = async (
               "disconnected",
               sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
             ),
+          ]
+        : []),
+      // After the status: only a stopped connection's credential goes.
+      ...(http
+        ? [
+            db
+              .update(httpConnections)
+              .set({ sealed: null })
+              .where(
+                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+              ),
           ]
         : []),
       // After the status: only a stopped connection's tokens go.
@@ -1216,6 +1236,12 @@ export const disconnect = async (
   if (!mayManage(person, connection.scope)) {
     await refused("role.forbidden");
     throw roleErrors.create("role.forbidden");
+  }
+  // Staff never approve an HTTP connection (`createHttpConnection`), so
+  // they never take one away either.
+  if (connection.serverKind === "http" && person.staff) {
+    await refused("connection.staff_not_allowed");
+    throw connectionErrors.create("connection.staff_not_allowed");
   }
   if (connection.status === "disconnected") {
     // Already stopped, maybe by a call that failed before it dropped the

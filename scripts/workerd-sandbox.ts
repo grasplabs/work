@@ -1601,7 +1601,6 @@ class SandboxPool {
     if (client.destroyed) {
       caller.abort();
     }
-    client.on("error", ignore);
     const host = await this.#acquire(
       AbortSignal.any([
         caller.signal,
@@ -2502,6 +2501,12 @@ export const startSandboxSupervisor = async (
   server.on(
     "upgrade",
     (request: IncomingMessage, client: Socket, head: Buffer) => {
+      // Node hands over an upgraded socket with no `error` listener of its
+      // own, and its error, unheard, ends this process. Core may leave at
+      // any point (a run cancelled while its session waits for a place):
+      // a refusal written to it then fails (EPIPE), or its reset is read
+      // (ECONNRESET). Its close says it left; its error says nothing more.
+      client.on("error", ignore);
       const { pathname } = new URL(request.url ?? "/", "http://sandbox");
       if (pathname !== "/session") {
         client.destroy();

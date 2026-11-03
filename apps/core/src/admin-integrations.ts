@@ -4,7 +4,7 @@ import type {
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
 import type {
-  CatalogSource,
+  ConnectionSource,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -30,7 +30,7 @@ import {
 
 /** An app, as a connection names it. */
 interface App {
-  source: CatalogSource;
+  source: ConnectionSource;
   provider: string;
 }
 

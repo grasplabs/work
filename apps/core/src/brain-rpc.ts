@@ -22,7 +22,7 @@ import type {
   BrainRecordInput,
   BrainRecordsAdded,
 } from "@grasp-os/shared/brain-records";
-import type { CatalogSource } from "@grasp-os/shared/connect";
+import type { ConnectionSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 import { purgedMarker } from "@grasp-os/shared/knowledge";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
@@ -652,7 +652,7 @@ const organizationName = async (env: Env): Promise<string> => {
 };
 
 /** A catalog entry's key: its source and id. */
-const entryKey = (source: CatalogSource, id: string): string =>
+const entryKey = (source: ConnectionSource, id: string): string =>
   `${source}:${id}`;
 
 /** How Grasp connects to an entry: a native provider directly. */

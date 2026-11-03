@@ -10,7 +10,7 @@ import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
-import { isResource, isWorkflowResource } from "./resources.ts";
+import { httpContract, isResource, isWorkflowResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -239,6 +239,61 @@ const clientMethods = {
   app: "call",
 } as const;
 
+/** Statuses whose response has no body, as `Response` requires. */
+const bodilessStatuses: ReadonlySet<number> = new Set([
+  101, 103, 204, 205, 304,
+]);
+
+/** Reads `value` as an HTTP connection's answer, or refuses it. */
+const httpAnswerOf = (
+  value: unknown
+): { status: number; headers: Record<string, string>; body: string } => {
+  const answer = isPlainObject(value) ? value : {};
+  const { status, headers, body } = answer;
+  if (
+    typeof status !== "number" ||
+    !isPlainObject(headers) ||
+    typeof body !== "string"
+  ) {
+    throw new TypeError("The HTTP connection's answer isn't one");
+  }
+  const read: Record<string, string> = {};
+  for (const [name, header] of Object.entries(headers)) {
+    if (typeof header === "string") {
+      read[name] = header;
+    }
+  }
+  return { status, headers: read, body };
+};
+
+/**
+ * An HTTP connection's `fetch` (GRA-1478) over its `call`: a GET or HEAD
+ * is the declaration's `get`, any other method its `send`; the answer as
+ * a `Response`. The host and connect check everything again.
+ */
+const httpFetchOf =
+  (call: (...args: unknown[]) => Promise<unknown>) =>
+  async (path: unknown, init: unknown = {}): Promise<Response> => {
+    const given = isPlainObject(init) ? init : {};
+    const method =
+      typeof given.method === "string" ? given.method.toUpperCase() : "GET";
+    const read = method === "GET" || method === "HEAD";
+    const input: Record<string, unknown> = { method, path };
+    if (given.headers !== undefined) {
+      input.headers = given.headers;
+    }
+    if (!read && given.body !== undefined) {
+      input.body = given.body;
+    }
+    const { status, headers, body } = httpAnswerOf(
+      await call(read ? "get" : "send", input)
+    );
+    return new Response(
+      bodilessStatuses.has(status) || method === "HEAD" ? null : body,
+      { status, headers }
+    );
+  };
+
 /** The client of each resource `fn` uses, over `channel`. */
 const resourcesOf = (
   fn: AnyFunction,
@@ -257,9 +312,16 @@ const resourcesOf = (
       resource["~resource"] === "guests"
         ? [...resource.operations]
         : [clientMethods[resource["~resource"]]];
-    clients[resource.alias] = Object.freeze(
-      Object.fromEntries(methods.map((method) => [method, call(method)]))
+    const client: Record<string, unknown> = Object.fromEntries(
+      methods.map((method) => [method, call(method)])
     );
+    if (
+      resource["~resource"] === "connector" &&
+      resource.contract === httpContract
+    ) {
+      client.fetch = httpFetchOf(call("call"));
+    }
+    clients[resource.alias] = Object.freeze(client);
   }
   return Object.freeze(clients);
 };

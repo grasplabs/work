@@ -58,6 +58,12 @@ import { takesPageAnswers } from "./workflows/exact-values.ts";
 //   release's install, the contracts a built-in blueprint's workflows bind
 //   (`ensureReleaseContract`), only under a key nobody has taken.
 
+/**
+ * Who publishes a contract: one of the organization's admins, or the
+ * release's install (`ensureReleaseContract`).
+ */
+type ContractSource = "admin" | "release";
+
 /** A stored contract, as a validation resolves it. */
 const storedSchema = z.strictObject({
   kind: z.enum(catalogBindingKinds),
@@ -152,9 +158,17 @@ const requireDeclared = (
  * its `readOnly`, whether it answers a file and whether it attaches files,
  * as the connector declares them.
  * Nothing else may put a pattern where core runs it (GRA-982).
+ *
+ * The release's own contracts (`ensureReleaseContract`, `from: "release"`)
+ * are this release's code, not anyone's input: their schemas are the very
+ * ones connect serves (`httpActionSchemas`, which connect's tests confirm
+ * as native actions), so their envelopes are checked here but connect
+ * isn't asked. Core installs them as it boots, where connect may not be
+ * up yet, or, in core's on-prem smoke run, there at all.
  */
 const requireNativeOperations = async (
   env: Env,
+  from: ContractSource,
   contract: {
     kind: CatalogBindingKind;
     operations?: Record<
@@ -208,6 +222,9 @@ const requireNativeOperations = async (
         `operations.${operation}: Its JSON Schema uses something a connector call's check doesn't enforce.`
       );
     }
+    if (from === "release") {
+      continue;
+    }
     let confirmed: Declared & { readOnly: boolean };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one confirmation per operation, each bounded
@@ -235,15 +252,20 @@ const requireNativeOperations = async (
 /**
  * `input` as the catalog stores it: refused unless the profile's catalog
  * reader accepts it, and a decision contract's response schema takes what
- * a person can answer (`workflow.contract_invalid`).
+ * a person can answer (`workflow.contract_invalid`). `from` is who
+ * publishes it: an admin, or the release's install.
  */
-const checkedContract = async (env: Env, input: unknown) => {
+const checkedContract = async (
+  env: Env,
+  from: ContractSource,
+  input: unknown
+) => {
   const { key, ...contract } = workflowResourceErrors.parse(
     "workflow.contract_invalid",
     catalogContractSchema,
     input
   );
-  await requireNativeOperations(env, contract);
+  await requireNativeOperations(env, from, contract);
   const read = resolveContract(
     () => forValidation(contract),
     key,
@@ -283,7 +305,11 @@ export const publishCatalogContract = async (
   input: unknown
 ): Promise<CatalogContractEntry> => {
   requireMemberAdmin(by);
-  const { key, kind, text, fingerprint } = await checkedContract(env, input);
+  const { key, kind, text, fingerprint } = await checkedContract(
+    env,
+    "admin",
+    input
+  );
   const publishedAt = new Date();
   const db = drizzle(env.DB);
   try {
@@ -342,7 +368,11 @@ export const ensureReleaseContract = async (
   /** What the audit event names it shipped with: the built-in. */
   detail: Readonly<Record<string, string>>
 ): Promise<void> => {
-  const { key, kind, text, fingerprint } = await checkedContract(env, input);
+  const { key, kind, text, fingerprint } = await checkedContract(
+    env,
+    "release",
+    input
+  );
   const db = drizzle(env.DB);
   // Not an insert over the key's row, which the database refuses whatever
   // the conflict clause (migrations 0080 and 0101): one only while there is

@@ -41,6 +41,13 @@ import type { Connection } from "./connections.ts";
 import { nativeAction, nativeRelease, nativeServer } from "./connectors.ts";
 import { connections } from "./db/schema.ts";
 import {
+  httpConfigOf,
+  httpServer,
+  httpTool,
+  requireHttpRequest,
+} from "./http-connections.ts";
+import type { HttpTrace } from "./http-connections.ts";
+import {
   effectKeyOf,
   hashCall,
   idempotencyStore,
@@ -78,17 +85,33 @@ const retryAfterSchema = z.object({
   }),
 });
 
+const httpRefusalSchema = z.object({
+  code: z.literal("connect.http_refused"),
+  reason: z.string().max(64),
+});
+
 /**
  * `connect.server_unavailable` for a call its tool says did nothing, with
  * the wait the tool passed on, if it did (`{ error: { retryAfterSeconds } }`,
- * as the connector kit reports a provider's `retry-after`).
+ * as the connector kit reports a provider's `retry-after`). An HTTP
+ * connection's refusal of what it was answered (a redirect off what the
+ * admin approved) is `connect.http_refused`: trying again won't help.
  */
-const notPerformed = ({ output }: McpToolResult): Error => {
+const notPerformed = (
+  kind: Connection["serverKind"],
+  { output }: McpToolResult
+): Error => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch {
     parsed = undefined;
+  }
+  const refusal = httpRefusalSchema.safeParse(parsed);
+  if (kind === "http" && refusal.success) {
+    return connectErrors.create("connect.http_refused", {
+      reason: refusal.data.reason,
+    });
   }
   const wait = retryAfterSchema.safeParse(parsed).data?.error.retryAfterSeconds;
   return connectErrors.create(
@@ -217,6 +240,11 @@ export interface CallProgress extends Repeat {
    * unknown outcome a run waits on for its person to resolve.
    */
   native?: boolean;
+  /**
+   * An HTTP connection's request (GRA-1478): its method and path once it
+   * is checked, its status and size once answered, for the audit log.
+   */
+  http?: HttpTrace;
 }
 
 type Input = Record<string, Json>;
@@ -269,7 +297,8 @@ const actionFor = async (
   env: Env,
   connection: Connection,
   claims: CapabilityClaims,
-  action: string
+  action: string,
+  progress: CallProgress
 ): Promise<{
   tool: McpTool;
   recovery: RecoveryMode;
@@ -300,6 +329,25 @@ const actionFor = async (
           claims,
           native.declared.routes.filter(({ method }) => method === "GET")
         ),
+    };
+  }
+  if (connection.serverKind === "http") {
+    // Connect's own requests: what the admin allowed of the connection.
+    const config = await httpConfigOf(env, connection.id);
+    const tool = config === undefined ? undefined : httpTool(config, action);
+    if (tool === undefined) {
+      throw connectErrors.create("connect.action_not_found");
+    }
+    const server = httpServer(env, connection, progress);
+    // A request of unknown outcome is never recovered: nobody can know
+    // what the API does with a repeat.
+    return {
+      tool,
+      recovery: "none",
+      release: null,
+      takesFiles: false,
+      open: async () => await Promise.resolve(server),
+      openLookup: async () => await Promise.resolve(server),
     };
   }
   // Only a tool the admin allowed and Grasp classed, asked for before
@@ -607,7 +655,7 @@ const readOnce = async (
       : error;
   }
   if (didNothing(connection.serverKind, read)) {
-    throw notPerformed(read);
+    throw notPerformed(connection.serverKind, read);
   }
   return { ...answerOf(read), replayed: false };
 };
@@ -723,7 +771,7 @@ const sendClaimed = async (
   // claim (and its connector build) afresh.
   if (didNothing(connection.serverKind, done)) {
     await (recovering ? store.spend() : store.release());
-    throw notPerformed(done);
+    throw notPerformed(connection.serverKind, done);
   }
   // ...or the provider refused it access, and the connection's grant lacks
   // a right its connector asks for now: it is marked for its person to
@@ -968,7 +1016,7 @@ export const carryOut = async (
   }
 
   const { tool, recovery, release, takesFiles, open, openLookup } =
-    await actionFor(env, connection, claims, call.action);
+    await actionFor(env, connection, claims, call.action, progress);
   const sideEffect = hasSideEffect(
     tool,
     connection.serverKind,
@@ -979,6 +1027,9 @@ export const carryOut = async (
   checkResourceScope(resource, tool, input);
   requirePointedMailbox(claims, connection, call.action, tool, input);
   requirePointedResource(claims, connection, call.action, input);
+  // Before it is held or its key claimed: an HTTP request the connection
+  // doesn't allow is refused unsent.
+  await requireHttpRequest(env, connection, call.action, input, progress);
   const files = await requireFiles(takesFiles, input, call.attachments);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above

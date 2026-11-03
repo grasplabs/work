@@ -15,6 +15,7 @@ import type {
   AppRequestInput,
   CatalogEntry,
   CatalogSource,
+  ConnectionSource,
   ConnectionScope,
   CatalogTool,
   ComposioToolRule,
@@ -32,6 +33,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
+import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -210,7 +212,7 @@ const offerSchema = z.discriminatedUnion("source", [
 ]);
 
 /** A catalog entry's key, as the audit log names it. */
-export const entryKey = (source: CatalogSource, id: string): string =>
+export const entryKey = (source: ConnectionSource, id: string): string =>
   `${source}:${id}`;
 
 /** The keys of the entries an admin hid. */
@@ -262,6 +264,26 @@ const isHidden = async (
 };
 
 /**
+ * The `offeredConnections` among `listed`, what connect lists for the
+ * person: for a caller that needs that list itself too, so connect is
+ * asked once.
+ */
+export const offeredAmong = async (
+  env: Env,
+  listed: readonly ConnectionSummary[]
+): Promise<ConnectionSummary[]> => {
+  const hidden = await hiddenEntries(env);
+  // An HTTP connection is Apps' and workflows' alone: a chat's agent
+  // never asks for one (tool-classes.ts).
+  return listed.filter(
+    ({ status, source, provider }) =>
+      status === "active" &&
+      source !== "http" &&
+      !hidden.has(entryKey(source, provider))
+  );
+};
+
+/**
  * The connections `person` may have their chat's agent ask for
  * (chat-connections.ts): their own personal ones and the shared ones, as
  * connect lists them, active, of entries an admin hasn't hidden. Hiding an
@@ -271,16 +293,8 @@ const isHidden = async (
 export const offeredConnections = async (
   env: Env,
   person: ConnectionPerson
-): Promise<ConnectionSummary[]> => {
-  const [listed, hidden] = await Promise.all([
-    env.CONNECT.listConnections(person),
-    hiddenEntries(env),
-  ]);
-  return listed.filter(
-    ({ status, source, provider }) =>
-      status === "active" && !hidden.has(entryKey(source, provider))
-  );
-};
+): Promise<ConnectionSummary[]> =>
+  await offeredAmong(env, await env.CONNECT.listConnections(person));
 
 /**
  * Refuses `connectionId` unless it is one of `person`'s
@@ -526,6 +540,24 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       ownerIsMember:
         each.ownerUserId !== null && memberIds.has(each.ownerUserId),
     }));
+  }
+
+  /**
+   * Approves an HTTP connection, as the signed-in person: connect checks
+   * the rest (the role, staff, the origin and where it leads), keeps the
+   * credential sealed, and audits it (GRA-1478).
+   */
+  async createHttp(connection: unknown): Promise<{ connectionId: string }> {
+    const person = await this.#person();
+    // Read here to name what is wrong; connect reads it again.
+    const parsed = httpConnectionSchema.safeParse(connection);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.createHttpConnection({
+      person,
+      connection: parsed.data,
+    });
   }
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
