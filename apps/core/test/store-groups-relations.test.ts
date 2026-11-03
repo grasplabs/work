@@ -249,6 +249,24 @@ describe("groups", () => {
     ]);
   });
 
+  it("order text keys by code point, as SQLite orders text", async () => {
+    const fixture = await storeWith();
+    // U+1F600 is past U+FF5E, though its first UTF-16 unit (a surrogate,
+    // U+D83D) comes before it.
+    await put(fixture, "orders", [
+      { id: "e1", fields: { status: "😀", region: "EU", paid: true } },
+      { id: "e2", fields: { status: "～", region: "EU", paid: true } },
+      { id: "e3", fields: { status: "a", region: "EU", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const groups = await db.query("orders").group({ by: ["status"] });
+    expect(groups.map(({ key }) => key.status)).toStrictEqual([
+      "a",
+      "～",
+      "😀",
+    ]);
+  });
+
   it("group by two fields, booleans as booleans, within an index range and a filter", async () => {
     const fixture = await storeWith();
     await put(fixture, "orders", orders);

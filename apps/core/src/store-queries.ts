@@ -1332,6 +1332,27 @@ const keyRank = (part: string | null): number => {
   return part.startsWith('"') ? 4 : 3;
 };
 
+/**
+ * Two strings in Unicode code point order, as SQLite orders text (by its
+ * UTF-8 bytes): not by UTF-16 code units, which put a character past
+ * U+FFFF (a surrogate pair) before U+E000 to U+FFFF.
+ */
+const byCodePoint = (left: string, right: string): number => {
+  const others = right[Symbol.iterator]();
+  for (const character of left) {
+    const other = others.next();
+    if (other.done === true) {
+      return 1;
+    }
+    const difference =
+      (character.codePointAt(0) ?? 0) - (other.value.codePointAt(0) ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return others.next().done === true ? 0 : -1;
+};
+
 /** Two keys' JSON texts, in order. */
 const compareParts = (
   left: readonly (string | null)[],
@@ -1353,10 +1374,9 @@ const compareParts = (
     }
     // Booleans and strings compare as SQLite does: false first, text by
     // code point.
-    const text = String(value);
-    const otherText = String(otherValue);
-    if (text !== otherText) {
-      return text < otherText ? -1 : 1;
+    const order = byCodePoint(String(value), String(otherValue));
+    if (order !== 0) {
+      return order;
     }
   }
   return 0;

@@ -168,13 +168,17 @@ const digestOf = async (
       })),
       filter: binding.filter === null ? null : filterJson(binding.filter),
       order: binding.order,
-      search: binding.search,
+      // A search's own, and only a search's: a query's digest is what it
+      // was before searches, so its cursors still open.
+      ...(binding.search === null ? {} : { search: binding.search }),
       generation: withGeneration
         ? {
             resourceVersion: binding.consumer.resourceVersion,
             schemaHash: binding.schemaHash,
             emitterVersion,
-            searchGeneration: binding.searchGeneration,
+            ...(binding.searchGeneration === null
+              ? {}
+              : { searchGeneration: binding.searchGeneration }),
           }
         : null,
     })

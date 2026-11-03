@@ -422,8 +422,10 @@ export interface RecordReads<Document> {
  * A search of one table's search index (`ctx.db.search`): its records in
  * order of relevance, best first, the record ID breaking ties. Filter it,
  * load related records, and read it with any terminal that returns
- * records. A relevance changes as records do, so a record changed between
- * pages may move past or into a later one.
+ * records. Relevance moves with every write to the table, so a search's
+ * page cursor expires after any write to it (`data.cursor_expired`):
+ * start again from the first page then, rather than skip or repeat
+ * records.
  */
 export type SearchQuery<
   Document,
