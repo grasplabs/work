@@ -287,14 +287,34 @@ describe("restoring an export of the company's Brain", () => {
     const exportId = await exported(source);
     const bundle = await bundleOf(source, exportId);
 
-    // The model names what the handbook keeps, as linking asks it.
+    // The model names what the handbook keeps, as linking asks it, and
+    // in the shared record, that the handbook says it.
+    const said = `The handbook says keep${u}.`;
     const restoredHost = testHost(
-      async (text) =>
-        await Promise.resolve({
+      async (text) => {
+        await Promise.resolve();
+        if (text.includes(said)) {
+          return {
+            entities: [
+              { kind: "thing", name: "handbook" },
+              { kind: "Process", name: `keep${u}` },
+            ],
+            relations: [
+              {
+                subject: "handbook",
+                predicate: "says",
+                object: `keep${u}`,
+                evidence: said,
+              },
+            ],
+          };
+        }
+        return {
           entities: text.includes(`keep${u}`)
             ? [{ kind: "Process", name: `keep${u}` }]
             : [],
-        }),
+        };
+      },
       {},
       env.RESTORED
     );
@@ -315,6 +335,11 @@ describe("restoring an export of the company's Brain", () => {
     )
       .bind(memoryId)
       .first<{ n: number }>();
+    const memoryRelations = await env.RESTORED.prepare(
+      "SELECT a.predicate, a.subject_name AS subject, a.object_name AS object FROM brain_assertions a JOIN brain_entities s ON s.id = a.subject_entity_id JOIN brain_entities o ON o.id = a.object_entity_id WHERE a.memory_id = ?"
+    )
+      .bind(memoryId)
+      .all<{ predicate: string; subject: string; object: string }>();
     const [document] = await target.db
       .select()
       .from(documents)
@@ -354,6 +379,7 @@ describe("restoring an export of the company's Brain", () => {
       cites: cites.map(({ collectionId }) => collectionId),
       // Its entities linked again, as the export holds none.
       memoryLinked: (memoryMentions?.n ?? 0) > 0,
+      memoryRelations: memoryRelations.results,
       personal: JSON.stringify(
         await target.db.select().from(documents)
       ).includes(`own${u}`),
@@ -375,6 +401,9 @@ describe("restoring an export of the company's Brain", () => {
       },
       cites: [handbook.id],
       memoryLinked: true,
+      memoryRelations: [
+        { predicate: "says", subject: "handbook", object: `keep${u}` },
+      ],
       personal: false,
       forgotten: [`leaver-${u}`],
       result: { documents: 1, versions: 2, memories: 1, memoriesLeftOut: 2 },
