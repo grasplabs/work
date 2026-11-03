@@ -147,6 +147,33 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "app.output.classified",
     text: msg`Changed whether a domain's data needs approved apps`,
   },
+  // A published domain's visitors (core's src/app-visitors.ts), each
+  // action by name: an `app.visitor_*` action has no dotted prefix of its
+  // own, so it would otherwise read as `app`.
+  {
+    action: "app.visitor_listed",
+    text: msg`Let someone visit a domain`,
+  },
+  {
+    action: "app.visitor_unlisted",
+    text: msg`Stopped someone visiting a domain`,
+  },
+  {
+    action: "app.visitor_code_sent",
+    text: msg`Was sent a code to visit a domain`,
+  },
+  {
+    action: "app.visitor_signed_in",
+    text: msg`Signed in to a domain as a visitor`,
+  },
+  {
+    action: "app.visitor_signed_out",
+    text: msg`Signed out of a domain as a visitor`,
+  },
+  {
+    action: "app.visitor_refused",
+    text: msg`Was refused as a domain's visitor`,
+  },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
   {
