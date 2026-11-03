@@ -21,8 +21,10 @@ import type {
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import type { Link } from "./core.ts";
+import { askedFor, awayLine, misreadable, pasteOf, splitOf } from "./events.ts";
+import type { Happened, Planned } from "./events.ts";
 import type { Move } from "./moves.ts";
-import type { Player } from "./person.ts";
+import type { Answer, Player } from "./person.ts";
 
 /** An interview that was played: how it went, and which facts each answer held, in the order of the person's lines. */
 export interface Played {
@@ -44,6 +46,8 @@ export interface Played {
   wantsAt: InterviewWants[];
   /** They went away before the read-back: nothing was agreed to. */
   left: boolean;
+  /** What happened to them on the way (events.ts), when anything was planned. */
+  events?: Happened[];
 }
 
 /** The most answers before the lab stops asking: an interview that long has lost its way. */
@@ -53,6 +57,11 @@ const readBackRounds = 14;
 const triesPerPart = 2;
 /** The longest a turn may say the interview took. */
 const minutesMost = 240;
+/** Time away counts as this many minutes at most, as the page counts it (GRA-1468). */
+const awayCountsMost = 5;
+
+/** How long a word of theirs takes to type, in seconds. */
+const typedSecondsPerWord = 1.2;
 
 const words = (text: string): number =>
   text.trim().split(/\s+/u).filter(Boolean).length;
@@ -64,7 +73,7 @@ const words = (text: string): number =>
  * when time is short is never seen.
  */
 export const secondsOf = (his: string, theirs: string): number =>
-  words(his) * 0.4 + 2.3 + 6 + words(theirs) * 1.2;
+  words(his) * 0.4 + 2.3 + 6 + words(theirs) * typedSecondsPerWord;
 
 /** A fact as a turn changed it: taken out, or in new words, and to be agreed to again. */
 const changed = (
@@ -142,6 +151,8 @@ export interface PlayOptions {
   clock?: "talk";
   /** The device's key, when the link was opened on this device before. */
   key?: string;
+  /** What happens to them on the way, by minute (events.ts). */
+  events?: readonly Planned[];
 }
 
 /** Opens the link on this device: its key, and the version what was said is kept as. */
@@ -166,10 +177,10 @@ const opened = async (
 export const playInterview = async (
   link: Link,
   player: Player,
-  { locale, interviewer, clock, key: knownKey }: PlayOptions
+  { locale, interviewer, clock, key: knownKey, events = [] }: PlayOptions
 ): Promise<Played> => {
-  const { key, version: first } = await opened(link, knownKey);
-  let version = first;
+  const { key, version: opening } = await opened(link, knownKey);
+  let version = opening;
   const startedAt = Date.now();
   let progress: InterviewProgress = {
     person: "progress",
@@ -199,11 +210,23 @@ export const playInterview = async (
     left: false,
   };
   let talked = 0;
+  /** Minutes they were away that count, as the page counts them. */
+  let away = 0;
   const minutes = () =>
     Math.min(
-      clock === "talk" ? talked / 60 : (Date.now() - startedAt) / 60_000,
+      (clock === "talk" ? talked / 60 : (Date.now() - startedAt) / 60_000) +
+        away,
       minutesMost
     );
+  const pending = [...events];
+  const happened: Happened[] = [];
+  /** The first event due now that `fits`; it stays planned until it is played. */
+  const dueNow = (fits: (event: Planned) => boolean): Planned | undefined =>
+    pending.find((event) => minutes() >= event.at && fits(event));
+  const playedOut = (event: Planned, more: Partial<Happened> = {}) => {
+    pending.splice(pending.indexOf(event), 1);
+    happened.push({ kind: event.kind, answer: played.answers, ...more });
+  };
   const save = async () => {
     version = await link.save(key, version, progress);
   };
@@ -252,6 +275,138 @@ export const playInterview = async (
     played.moves.push(move);
     played.untrue.push(wrong);
   };
+  /** Their last line, sent on: the page joins what they sent since his last line into one. */
+  const sentOn = (
+    rest: string,
+    facts: string[],
+    move: Move | null,
+    wrong: string[]
+  ) => {
+    const last = progress.lines.at(-1);
+    if (last === undefined) {
+      return;
+    }
+    // Only the time to type the rest: the rest of the exchange was counted with the first part.
+    talked += words(rest) * typedSecondsPerWord;
+    progress = {
+      ...progress,
+      lines: [
+        ...progress.lines.slice(0, -1),
+        { ...last, text: `${last.text} ${rest}` },
+      ],
+    };
+    played.said[played.said.length - 1] = facts;
+    played.moves[played.moves.length - 1] = move;
+    played.untrue[played.untrue.length - 1] = wrong;
+  };
+  /** His turn after their line, kept. */
+  const answered = async () => {
+    progress = taken(progress, await turn("answer"));
+    played.wantsAt.push(progress.wants);
+    await save();
+  };
+  const plainly = "Your answer to Stephen’s last line, and nothing else:";
+  let asked: string = plainly;
+  const lastOfHis = () =>
+    progress.lines.findLast(({ from }) => from === "stephen")?.text ?? "";
+
+  /** They stop after his line, and come back through the same link much later: whether they did now. */
+  const cameBack = async (): Promise<boolean> => {
+    const later = dueNow(({ kind }) => kind === "resumes later");
+    if (later === undefined || progress.wants !== "answer") {
+      return false;
+    }
+    await save();
+    ({ version } = await opened(link, key));
+    away += awayCountsMost;
+    progress = taken(progress, await turn("resume"));
+    await save();
+    playedOut(later);
+    return true;
+  };
+  /** The event that happens at this answer, if any: a misreading only where his question can be misread. */
+  const eventNow = (): Planned | undefined =>
+    progress.wants === "answer"
+      ? dueNow(
+          ({ kind }) =>
+            kind !== "resumes later" &&
+            (kind !== "misread" || misreadable(lastOfHis()))
+        )
+      : undefined;
+  /** They are called away, or paste the wrong thing: code says what, and the next answer is asked for as it follows. */
+  const instead = async (event: Planned) => {
+    const interrupted = event.kind === "interrupted";
+    const line = interrupted
+      ? awayLine(locale, event.pick)
+      : pasteOf(locale, event.pick);
+    says(line, [], null, interrupted ? [] : [`(pasted by mistake) ${line}`]);
+    playedOut(event);
+    await answered();
+    if (interrupted) {
+      away += Math.min(event.away ?? 1, awayCountsMost);
+    }
+    asked = interrupted ? askedFor.back : askedFor.afterPaste;
+  };
+  /** One answer in two messages: the first stops mid-sentence and gets his turn; the rest follows it. */
+  const inTwo = async (
+    event: Planned,
+    answer: Answer,
+    [start, rest]: [string, string]
+  ) => {
+    says(start, [], answer.move ?? null, []);
+    const first = await turn("answer");
+    const waited = first.more || first.say === "";
+    playedOut(event, { waited });
+    progress = taken(progress, first);
+    if (waited) {
+      sentOn(rest, answer.said, answer.move ?? null, answer.untrue ?? []);
+    } else {
+      played.wantsAt.push(progress.wants);
+      await save();
+      says(rest, answer.said, null, answer.untrue ?? []);
+    }
+    await answered();
+  };
+  /** Their next answer and his turn to it: whether they went away with it. */
+  const nextAnswer = async (): Promise<boolean> => {
+    const event = eventNow();
+    if (event?.kind === "interrupted" || event?.kind === "wrong paste") {
+      await instead(event);
+      return false;
+    }
+    if (progress.wants === "file") {
+      says(noExample(locale), []);
+      await answered();
+      return false;
+    }
+    const answer = await player.answer(
+      progress.lines,
+      event?.kind === "misread" ? askedFor.misread : asked,
+      { phase: progress.phase, readback: false }
+    );
+    asked = plainly;
+    if (event?.kind === "misread") {
+      playedOut(event);
+    }
+    const split =
+      event?.kind === "split message" && answer.left !== true
+        ? splitOf(answer.say)
+        : null;
+    if (event !== undefined && split !== null) {
+      await inTwo(event, answer, split);
+      return false;
+    }
+    says(answer.say, answer.said, answer.move ?? null, answer.untrue ?? []);
+    // They went away: what they said is kept as it stands, and nothing of it is agreed to.
+    if (answer.left === true) {
+      played.wantsAt.push("answer");
+      await save();
+      return true;
+    }
+    await answered();
+    return false;
+  };
+  const withEvents = events.length === 0 ? {} : { events: happened };
 
   progress = taken(progress, await turn("start"));
   await save();
@@ -260,35 +415,21 @@ export const playInterview = async (
     progress.wants !== "readback" &&
     progress.wants !== "end"
   ) {
-    played.answers += 1;
-    if (progress.wants === "file") {
-      says(noExample(locale), []);
-    } else {
-      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
-      const answer = await player.answer(
-        progress.lines,
-        "Your answer to Stephen’s last line, and nothing else:",
-        { phase: progress.phase, readback: false }
-      );
-      says(answer.say, answer.said, answer.move ?? null, answer.untrue ?? []);
-      // They went away: what they said is kept as it stands, and nothing of it is agreed to.
-      if (answer.left === true) {
-        played.wantsAt.push("answer");
-        // oxlint-disable-next-line no-await-in-loop -- kept before they go
-        await save();
-        return {
-          ...played,
-          readbackFrom: progress.lines.length,
-          minutes: minutes(),
-          left: true,
-        };
-      }
+    // oxlint-disable-next-line no-await-in-loop -- they come back before they answer
+    if (await cameBack()) {
+      continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-    progress = taken(progress, await turn("answer"));
-    played.wantsAt.push(progress.wants);
-    // oxlint-disable-next-line no-await-in-loop -- kept after every turn
-    await save();
+    played.answers += 1;
+    // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+    if (await nextAnswer()) {
+      return {
+        ...played,
+        readbackFrom: progress.lines.length,
+        minutes: minutes(),
+        left: true,
+        ...withEvents,
+      };
+    }
   }
   // The read-back, a part at a time: they agree, or put a line right first.
   played.readbackFrom = progress.lines.length;
@@ -338,5 +479,5 @@ export const playInterview = async (
     facts: progress.facts.map((fact) => ({ ...fact, agreed: true })),
   };
   await save();
-  return { ...played, minutes: minutes() };
+  return { ...played, minutes: minutes(), ...withEvents };
 };
