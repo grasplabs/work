@@ -1485,19 +1485,6 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Every interview's conversation as kept, by person: what a Knowledge
-   * content purge looks in (interview-erasure.ts); never served otherwise.
-   */
-  interviewsSaid(): { person: string; progress: InterviewProgress }[] {
-    return this.interviewPeople().flatMap((person) => {
-      const stored = this.interviewStored(person);
-      return stored !== null && "progress" in stored
-        ? [{ person, progress: stored.progress }]
-        : [];
-    });
-  }
-
-  /**
    * Whose interviews are kept: what a Knowledge content purge reads one at
    * a time (interview-erasure.ts), so no one call carries them all.
    */
@@ -2454,35 +2441,6 @@ export class Onboarding extends DurableObject<Env> {
       }
     }
     return item;
-  }
-
-  /**
-   * Draws a team's map again, as staff ask: after it was given up, or to
-   * draw it from what its lead agreed to once more. False when its lead
-   * hasn't agreed to anything yet.
-   */
-  async drawAgain(team: string, by: AuditActor): Promise<boolean> {
-    const lead = this.#roster()?.teams.find(({ id }) => id === team)?.lead;
-    if (lead === undefined || lead === null || this.drawInput(lead) === null) {
-      return false;
-    }
-    const now = new Date().toISOString();
-    this.ctx.storage.transactionSync(() => {
-      this.#db
-        .delete(drawFailures)
-        .where(eq(drawFailures.item, `team:${team}`))
-        .run();
-      this.#db
-        .update(interviewStates)
-        .set({ agreedAt: now })
-        .where(eq(interviewStates.person, lead))
-        .run();
-      this.#noted(lead, "map.again", now, whoIs(by));
-      this.#changed(by, "onboarding.team.redrawn", {});
-    });
-    this.#deliverAudit();
-    await this.#alarmBy(Date.now() + drawAfterMs);
-    return true;
   }
 
   /**

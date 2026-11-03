@@ -94,26 +94,6 @@ ${remember}
 );
 `;
 
-/**
- * The approval workflow written so its review reads every step: no spread
- * of options (and so no reminder), its reviewer and deadline still taken
- * from the run's input (`StepOutline.dynamic`).
- */
-export const approvalReadable = approval.replace(
-  "      ...(input.remindAfter === undefined ? {} : { remindAfter: input.remindAfter }),\n",
-  ""
-);
-
-/**
- * `approvalReadable` with its reviewer written in its code, as `deciders`,
- * not taken from the run's input: the review reads who it is.
- */
-export const approvalNaming = (deciders: string): string =>
-  approvalReadable.replace(
-    "from: input.from as Person,",
-    `from: ${JSON.stringify(deciders)} as Person,`
-  );
-
 export const approvalTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
 import approval from "./approval.ts";
@@ -212,17 +192,6 @@ export const asksOf = async (app: string, count = 1): Promise<Ask[]> => {
     },
     { timeout: 20_000, interval: 100 }
   );
-};
-
-/** The link the ask sent to `userId`, and the decision it leads to. */
-export const linkOf = (ask: Ask | undefined, userId: string) => {
-  const recipient = ask?.recipients.find((person) => person.userId === userId);
-  if (!recipient) {
-    throw new Error(`The ask went to ${JSON.stringify(ask?.recipients)}`);
-  }
-  const url = new URL(recipient.link);
-  const decision = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
-  return { link: url, decision };
 };
 
 /** Starts the approval workflow and waits until it has asked. */
