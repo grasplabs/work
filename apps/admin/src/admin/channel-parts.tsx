@@ -15,7 +15,7 @@ import {
 import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { releaseTitle } from "../releases/version.ts";
@@ -25,6 +25,7 @@ import { promoteReleaseFn, retryChannelFn } from "../rollout/functions.ts";
 import type { ChannelProgress, ClientProgress } from "../rollout/progress.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
+import { fetchChannels } from "./platform-data.ts";
 import { clientStateWords } from "./platform-parts.tsx";
 import { Quiet } from "./release-parts.tsx";
 import { Section } from "./section.tsx";
@@ -213,34 +214,61 @@ const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
   );
 };
 
-/** How often the Platform page is read again while a deploy moves on. */
+/** How often the channels are read again while a deploy moves on. */
 const followMs = 5000;
 
+/** Channels read again, and the page's `channels` they were read after. */
+interface Followed {
+  after: readonly ChannelProgress[];
+  channels: readonly ChannelProgress[];
+}
+
 /**
- * Reads the Platform page again every few seconds while a company of a
- * channel is deploying or waiting to, so its state, Retry and the counts
- * follow the reconciler. A failed channel starts nothing until Retry, so
- * its waiting companies don't count.
+ * Reads each channel's progress again every few seconds while a company
+ * of a channel is deploying or waiting to, so its state, Retry and the
+ * counts follow the reconciler. Only the channels: the rest of the
+ * Platform page, every company's AI spend above all (a read of each
+ * core), isn't read again. A failed channel starts nothing until Retry,
+ * so its waiting companies don't count. Once the page itself is read
+ * again (after Promote or Retry), its own channels show.
  */
-const useFollowDeploys = (channels: readonly ChannelProgress[]) => {
-  const router = useRouter();
-  const moving = channels.some(({ failed, clients }) =>
+const useFollowDeploys = (
+  channels: readonly ChannelProgress[]
+): readonly ChannelProgress[] => {
+  const [followed, setFollowed] = useState<Followed | null>(null);
+  const shown =
+    followed !== null && followed.after === channels
+      ? followed.channels
+      : channels;
+  const moving = shown.some(({ failed, clients }) =>
     clients.some(
       ({ state }) => state === "deploying" || (state === "waiting" && !failed)
     )
   );
   useEffect(() => {
+    let current = true;
+    const follow = async () => {
+      try {
+        const read = await fetchChannels();
+        // A page left, or read again, before its answer came doesn't take it.
+        if (current) {
+          setFollowed({ after: channels, channels: read });
+        }
+      } catch {
+        // What shows stays as it is; the next read tries again.
+      }
+    };
     const timer = moving
       ? setInterval(() => {
-          void router.invalidate({
-            filter: (match) => match.routeId === "/platform/",
-          });
+          void follow();
         }, followMs)
       : undefined;
     return () => {
+      current = false;
       clearInterval(timer);
     };
-  }, [moving, router]);
+  }, [moving, channels]);
+  return shown;
 };
 
 /** Edge, Beta and Stable, side by side where there's room. */
@@ -251,10 +279,10 @@ export const Channels = ({
   id: string;
   channels: readonly ChannelProgress[];
 }) => {
-  useFollowDeploys(channels);
+  const shown = useFollowDeploys(channels);
   return (
     <div className="grid gap-6 @4xl:grid-cols-3" id={id}>
-      {channels.map((channel) => (
+      {shown.map((channel) => (
         <ChannelPanel channel={channel} key={channel.channel} />
       ))}
     </div>

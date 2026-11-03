@@ -107,6 +107,18 @@ export const fetchPlatform = createServerFn({ method: "GET" }).handler(
   async () => await platformData(env)
 );
 
+/**
+ * Each channel's progress alone, read again while a deploy moves on. The
+ * rest of the Platform page, its AI spend above all (a read of every
+ * company's core), stays as it was read.
+ */
+export const fetchChannels = createServerFn({ method: "GET" }).handler(
+  async (): Promise<ChannelProgress[]> => {
+    const { channels } = await channelsProgress(env);
+    return channels;
+  }
+);
+
 /** What the admin's sidebar says beside Platform (`platformCounts`). */
 export const platformSidebar = async (envOf: Env): Promise<PlatformCounts> =>
   platformCounts(await clientGrid(envOf));
