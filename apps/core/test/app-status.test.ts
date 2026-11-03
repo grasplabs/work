@@ -397,15 +397,16 @@ describe("an App's status", () => {
       .bind(Date.now() - 60_000, app)
       .run();
 
-    // While a cancel it owes fails, the restore is refused, and the App
-    // stays archived for the clock to ask again.
+    // While the engine refuses the stop it owes, the stop is kept on the
+    // run, which ends itself on its object's next alarm: until it has, the
+    // restore is refused and the App stays archived.
     const refused = await whileEngineRefuses(
       (method) => method === "terminate",
       async () => await outcome(builder.api.apps.restore(app))
     );
     const { status: stillArchived } = await builder.api.apps.get(app);
-    // Asked again once the engine takes stops: the restore goes through
-    // once the stop has ended the run (`app.stops_pending` until then).
+    // Asked again: the restore goes through once the stop has ended the
+    // run.
     const restored = await vi.waitFor(
       async () => await builder.api.apps.restore(app),
       { timeout: 30_000, interval: 200 }
@@ -428,7 +429,7 @@ describe("an App's status", () => {
       leftStatus,
       swept,
     }).toStrictEqual({
-      refused: "app.conflict",
+      refused: "app.stops_pending",
       stillArchived: "archived",
       restored: "draft",
       leftStatus: "cancelled",
