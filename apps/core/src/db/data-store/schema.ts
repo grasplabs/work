@@ -150,6 +150,27 @@ export const records = sqliteTable(
 );
 
 /**
+ * The number each record has in the store's full-text search indexes
+ * (store-search.ts): an FTS5 table keys its rows by an integer, and a
+ * record's own rowid in `sdk_records` isn't stable (a VACUUM may renumber
+ * a table without an integer primary key), so a record gets one here the
+ * first time a search index takes it, kept until the record is deleted (a
+ * trigger of this migration's), and shared by every search index of its
+ * table.
+ */
+export const searchDocs = sqliteTable(
+  "sdk_search_docs",
+  {
+    doc: integer().primaryKey(),
+    docTable: text("doc_table").notNull(),
+    docRecord: text("doc_record").notNull(),
+  },
+  (table) => [
+    uniqueIndex("sdk_search_docs_record").on(table.docTable, table.docRecord),
+  ]
+);
+
+/**
  * The references the store's records make: one row per record and each
  * record ID one of its `v.id` fields holds, as the schema it was written
  * under declares them (store-references.ts). Kept in the transaction that

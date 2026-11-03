@@ -18,6 +18,8 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { cursorKeysOf, openCursor } from "../src/store-cursors.ts";
+import type { CursorBinding } from "../src/store-cursors.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
 
@@ -303,6 +305,40 @@ describe("pages", () => {
       count,
       pages: 101,
     });
+  });
+
+  it("go through 1,200 records along an index, in its order, 100 at a time", async () => {
+    const fixture = await storeWith("appMembers");
+    const count = 1200;
+    // Titles in no order of creation: the index, not insertion, orders them.
+    const titles = Array.from(
+      { length: count },
+      (_, index) => `t${String((index * 7919) % count).padStart(5, "0")}`
+    );
+    await insertNotes(
+      fixture,
+      titles.map((title) => ({ title }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    for (const order of ["asc", "desc"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const { items, pages } = await allPages(
+        async (cursor) =>
+          await db
+            .query("notes")
+            .withIndex("by_title")
+            .order(order)
+            .paginate({ pageSize: 100, cursor })
+      );
+      const sorted = titles.toSorted();
+      expect({
+        titles: items.map(({ title }) => title),
+        pages: pages.length,
+      }).toStrictEqual({
+        titles: order === "asc" ? sorted : sorted.toReversed(),
+        pages: count / 100,
+      });
+    }
   });
 
   it("carry on after a record inserted between them, without repeating any", async () => {
@@ -876,6 +912,39 @@ describe("seeks", () => {
       "n-ada-00004",
       "n-ada-00005",
     ]);
+  });
+});
+
+describe("a query's cursor from before searches", () => {
+  it("still opens: a query binds nothing of a search", async () => {
+    // Sealed by this module as it was before searches existed, under a
+    // store key of 0x11 bytes, for the binding below.
+    const issued =
+      "1.sT6LnPfRSu94IHbQqV82DL5zVEw2vDeYOqOWFKBF8hM7TzJWK-Ou_d8kC5lErwE9oO-IMV9i9w_XTg.9FpvHHaybSlfn5Ma37wGUvBiRqSNmqSlHJM1spVyfmw.DOZnTANzPkOEHathL9mnDlue1AGkzQ337WOnxczc18I";
+    const binding: CursorBinding = {
+      storeId: "store-1",
+      schemaHash: "a".repeat(64),
+      consumer: { resourceId: "notes-app", resourceVersion: 1 },
+      principal: "ada",
+      appMember: true,
+      appBuilder: false,
+      table: "notes",
+      index: "by_title",
+      range: [],
+      filter: null,
+      order: "asc",
+      search: null,
+      searchGeneration: null,
+    };
+    const keys = await cursorKeysOf("11".repeat(32));
+    await expect(openCursor(keys, binding, issued)).resolves.toStrictEqual({
+      id: "n-1",
+      values: [["t1"]],
+    });
+    // A search's binding is another, which no query's cursor opens.
+    await expect(
+      openCursor(keys, { ...binding, search: "t1" }, issued)
+    ).rejects.toMatchObject({ code: "data.invalid_cursor" });
   });
 });
 

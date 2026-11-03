@@ -45,6 +45,9 @@ catalog:
   croner: 10.0.1
   # Inbound email to workflows.
   postal-mime: 4.2.0
+  # Standard Webhooks' own library (MIT): only core's tests use it, to sign
+  # deliveries to webhook triggers as any sender of the standard does.
+  standardwebhooks: 1.1.1
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.3
   # Knowledge frontmatter.

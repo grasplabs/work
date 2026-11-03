@@ -371,6 +371,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "dataStore.sdk_reserved_fields": noPerson,
   "dataStore.sdk_schema_activations": noPerson,
   "dataStore.sdk_schemas": noPerson,
+  // Record IDs and the number each has in the search indexes. The indexes
+  // themselves (`sdk_fts_*`, store-search.ts) are no Drizzle tables: they
+  // hold a copy of `sdk_records`' text fields, kept in step by triggers
+  // with secure-delete, so erasing or changing a record erases its text
+  // there in the same write.
+  "dataStore.sdk_search_docs": noPerson,
   "dataStore.sdk_tables": noPerson,
   // A form's values (app.form_sent) wait here only to reach the App's
   // webhooks: cleared once handed over, and with their sender's erasure

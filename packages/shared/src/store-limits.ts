@@ -96,3 +96,38 @@ export const cursorMaxLength = 4096;
  * their own, as any push is (`screenLimits.answerBytes`).
  */
 export const liveWindowMaxItems = 1000;
+
+// Full-text search, grouped aggregates and related records: the bounds of
+// what one read of them asks and answers, checked by the SDK as a query is
+// built and again by the store's host.
+
+/** The most text fields one table's search index covers. */
+export const searchIndexMaxFields = 8;
+
+/**
+ * The most search indexes a store holds, retained ones (for consumers
+ * pinned to older schemas) included: each keeps its own full-text table,
+ * which every write to its table's records updates.
+ */
+export const storeMaxSearchIndexes = 64;
+
+/** The longest text one search looks for, in characters. */
+export const searchTextMaxLength = 256;
+
+/** The most words one search looks for: each must match. */
+export const searchMaxTerms = 8;
+
+/** The most fields records are grouped by. */
+export const groupMaxFields = 2;
+
+/** The most aggregated fields one grouped read computes, all told. */
+export const groupMaxAggregates = 8;
+
+/**
+ * The most groups one grouped read answers: more fails
+ * (`data.group_limit`) rather than answering part.
+ */
+export const queryMaxGroups = 100;
+
+/** The most relations one read loads the related records of (`with`). */
+export const queryMaxRelations = 4;

@@ -3877,6 +3877,18 @@ export const triggerResources = sqliteTable("trigger_resources", {
    * shown only to whoever may see the trigger, never logged or audited.
    */
   emailAddress: text("email_address").unique(),
+  /**
+   * For a webhook trigger (GRA-1478, workflows/webhook-triggers.ts): the
+   * token its URL ends in, 128 random bits, set as it is created and never
+   * changed, shown and logged as the email address is; and the generation
+   * of its secret, which is never stored but derived from the trigger and
+   * this generation: one more each time it is rotated, never reused; and
+   * when its secret was revoked, until a new one is made: no delivery is
+   * taken meanwhile. Null for any other kind.
+   */
+  webhookToken: text("webhook_token").unique(),
+  webhookSecretGeneration: integer("webhook_secret_generation"),
+  webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
 });
 
 /**

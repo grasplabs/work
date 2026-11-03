@@ -14,6 +14,7 @@ export {
   allowsNull,
   indexBase,
   managedFields,
+  relationOf,
   SchemaDefinitionError,
   schemaLimits,
 } from "./schema.ts";

@@ -242,6 +242,9 @@ const mergedTable = (
     ),
   ]),
   indexes: declared.indexes,
+  ...(declared.searchIndex === undefined
+    ? {}
+    : { searchIndex: declared.searchIndex }),
   access: kept.access,
 });
 

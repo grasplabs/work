@@ -5,9 +5,14 @@ import {
   cursorMaxLength,
   filterMaxInValues,
   filterMaxNodes,
+  groupMaxAggregates,
+  groupMaxFields,
+  queryMaxRelations,
   queryMaxResults,
   queryMaxStringLength,
   rangeMaxBounds,
+  searchMaxTerms,
+  searchTextMaxLength,
   storeNameMaxLength,
   storeNamePattern,
 } from "./store-limits.ts";
@@ -16,6 +21,7 @@ import {
   filterBudgetIssue,
   rangeShapeIssue,
   readDescriptorVersion,
+  searchTerms,
 } from "./store-reads.ts";
 import type {
   FilterNode,
@@ -37,6 +43,7 @@ export type {
   FilterCondition,
   FilterNode,
   GetRequest,
+  GroupTerminal,
   QueryRequest,
   QueryScalar,
   QueryTerminal,
@@ -169,6 +176,35 @@ const terminalSchema = z.union([
     operation: z.enum(["sum", "min", "max"]),
     field: fieldSchema,
   }),
+  z
+    .strictObject({
+      kind: z.literal("group"),
+      by: z.array(nameSchema).min(1).max(groupMaxFields),
+      sum: z.array(nameSchema).max(groupMaxAggregates),
+      avg: z.array(nameSchema).max(groupMaxAggregates),
+      min: z.array(nameSchema).max(groupMaxAggregates),
+      max: z.array(nameSchema).max(groupMaxAggregates),
+    })
+    .superRefine((group, context) => {
+      if (
+        group.sum.length +
+          group.avg.length +
+          group.min.length +
+          group.max.length >
+        groupMaxAggregates
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: `A grouped read computes at most ${groupMaxAggregates} aggregates`,
+        });
+      }
+      if (new Set(group.by).size !== group.by.length) {
+        context.addIssue({
+          code: "custom",
+          message: "A grouped read groups by each field once",
+        });
+      }
+    }),
 ]) satisfies z.ZodType<QueryTerminal>;
 
 export const queryRequestSchema = z
@@ -180,11 +216,25 @@ export const queryRequestSchema = z
     filter: filterSchema.nullable(),
     order: z.enum(["asc", "desc"]),
     terminal: terminalSchema,
+    search: z.string().max(searchTextMaxLength).optional(),
+    with: z.array(nameSchema).min(1).max(queryMaxRelations).optional(),
   })
-  .superRefine(({ range, filter }, context) => {
+  .superRefine(({ range, filter, search, terminal }, context) => {
     const issue = boundValuesIssue(range, filter);
     if (issue !== undefined) {
       context.addIssue({ code: "custom", message: issue });
+    }
+    if (search !== undefined && searchTerms(search).length > searchMaxTerms) {
+      context.addIssue({
+        code: "custom",
+        message: `A search looks for at most ${searchMaxTerms} words`,
+      });
+    }
+    if (search !== undefined && terminal.kind === "group") {
+      context.addIssue({
+        code: "custom",
+        message: "A search answers records, never groups",
+      });
     }
   }) satisfies z.ZodType<QueryRequest>;
 
