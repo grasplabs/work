@@ -694,6 +694,8 @@ export interface AdminInterviewFacts {
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
   /** Which Stephen held its last turn (`stephenVersion`); null before that was kept. */
   version: string | null;
+  /** The language its last turn was held in; null before a turn ran. */
+  locale: string | null;
 }
 
 /** `text` as JSON, or undefined when it isn't JSON, for a schema to refuse. */
@@ -4502,6 +4504,7 @@ export class Onboarding extends DurableObject<Env> {
         .select({
           state: interviewStates,
           version: interviewSettings.version,
+          locale: interviewSettings.locale,
         })
         .from(interviewStates)
         .leftJoin(
@@ -4509,10 +4512,11 @@ export class Onboarding extends DurableObject<Env> {
           eq(interviewSettings.person, interviewStates.person)
         )
         .all()
-        .map(({ state, version }) => ({
+        .map(({ state, version, locale }) => ({
           ...state,
           ...(countsBy.get(state.person) ?? noCounts),
           version: version ?? null,
+          locale: locale ?? null,
         })),
     };
   }
