@@ -145,6 +145,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_visitor_entries": {
     company: "an App's visitor list, and the builder who listed each",
   },
+  // The App functions a version grants its visitors (app-visitor-calls.ts),
+  // with the builder who granted each (`granted_by`): the App's own
+  // settings, as other settings a builder changed are.
+  "core.app_visitor_grants": {
+    company: "the functions builders granted an App's visitors",
+  },
   // A visitor's codes and sessions name them only by address, mostly an
   // outside visitor's, and are short-lived: a code works 10 minutes and
   // its row goes an hour after, a session lasts 8 hours at most, and the
@@ -457,6 +463,7 @@ export const reviewedPersonColumns: Readonly<
   "core.app_tool_classes": ["changed_by"],
   "core.app_versions": ["author_id", "proposed_by"],
   "core.app_visitor_entries": ["added_by"],
+  "core.app_visitor_grants": ["granted_by"],
   "core.app_workflow_bindings": ["bound_by", "removed_by"],
   "core.apps": ["owner_id", "removed_by", "status_changed_by"],
   "core.blueprints": ["marked_by"],
