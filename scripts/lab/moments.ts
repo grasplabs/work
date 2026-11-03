@@ -88,6 +88,16 @@ export const signalRules = {
     "They said many things at once, out of order. He takes the lead: he picks one of them and asks about only that. He does not ask them to tell it all again, and does not sum up everything they said.",
   "where to start":
     "They do not know where to begin, or what he wants to hear. He gives them a concrete place to start in the last real case and asks what happened there. He does not repeat his wide question in other words, and does not explain the interview at length.",
+  "called away":
+    "They say they have to step away for a moment: a call, someone at their desk. He says in a few words that it is fine and that he will wait, and asks nothing: no question about the work in the same line.",
+  "back later":
+    "They left the interview after his last line and have come back to it later, maybe the next day. He says in one short sentence where they were, and goes on with what he still needs, which may be the question they left open. He does not ask again for anything in his notes, does not start over, and does not ask why they left.",
+  "wrong paste":
+    "What they sent is pasted by mistake: a spreadsheet formula, a log from a system, a letter meant for someone else. It is no answer to him. He says in a few words that it looks like the wrong thing was pasted, and asks what they meant to say. He does not take any of it as part of their work, does not explain or answer it, and does not go on as if it were an answer.",
+  "split message":
+    "Their message breaks off in the middle of what they were typing, and the rest is still coming in a next message. He says nothing, and waits for the rest.",
+  misread:
+    "Their answer does not fit his question: he asked one thing (how often, how many, how long, or two things at once) and they answered another. He does not take it as the answer to what he asked. He may take what they said for what it is, and asks his own question once more in other words, so the difference is plain. He does not blame them.",
   misheard:
     "Their answer was spoken, and it came through as words that make no sense together: that is how it was heard, not what they said. He says he did not catch it and asks them to say it once more. He does not say he cannot use their answer, does not call it nonsense and does not guess what they meant.",
 } as const;
@@ -141,6 +151,11 @@ export const signalPlain: Readonly<Record<Signal, string>> = {
   flood: "Everything at once → one thing at a time",
   "where to start": '"Where do I start?" → give them the start',
   misheard: 'A spoken answer heard as garble → "say it once more"',
+  "called away": '"Sorry, a call" → fine, I\'ll wait',
+  "back later": "Back after leaving → where we were, and on",
+  "wrong paste": "Pasted the wrong thing → what did you mean?",
+  "split message": "One answer in two messages → wait for the rest",
+  misread: "Answered another question → ask again, in other words",
 };
 
 /** What a kind of moment asks of him: to hear what is missing, to say that an answer is no use, to keep to what is true, to lead, or to deal with the person. */
@@ -193,6 +208,11 @@ export const signalGroup: Readonly<Record<Signal, Group>> = {
   flood: "lead",
   "where to start": "lead",
   misheard: "unusable",
+  "called away": "person",
+  "back later": "lead",
+  "wrong paste": "unusable",
+  "split message": "lead",
+  misread: "unusable",
 };
 
 /** One moment: who he talks with, the conversation up to their last line, and the notes he has. */
@@ -210,7 +230,15 @@ export interface Moment {
   spoken?: boolean;
   /** Their last line calls for more than one thing at once: a line that follows one of these rules is right as well. */
   also?: Signal[];
+  /** They left after his last line and came back later: his turn is to their coming back, and the moment ends on his line. */
+  event?: "resume";
 }
+
+/** The kinds where the right line is no line: he waits for the rest. */
+export const waitsFor: ReadonlySet<Signal> = new Set<Signal>([
+  "mid sentence",
+  "split message",
+]);
 
 /**
  * Where a moment plays. `told` is their story as they first told it, in
@@ -1212,4 +1240,136 @@ export const handMoments: readonly Moment[] = [
     ]),
     spoken: true,
   },
+
+  // What happens to people on the way (GRA-1425): called away, back much later, a wrong paste, one answer in two messages, a question misread.
+  moment(
+    "orders-called-away",
+    "called away",
+    ORDERS,
+    "steps",
+    4,
+    [
+      ...OPENED_ORDERS,
+      "S: What did you check before you typed it in?",
+      "P: hold on, the warehouse is on the other line. two minutes",
+    ],
+    ORDER_NOTES.slice(0, 1)
+  ),
+  moment(
+    "inkoop-called-away",
+    "called away",
+    INKOOP,
+    "steps",
+    6,
+    [
+      ...OPENED_INKOOP,
+      "S: Wie geeft het akkoord op die bestelling?",
+      "P: even wachten, er komt net iemand binnen met een vraag over de planning",
+    ],
+    ORDER_NOTES_NL.slice(0, 1)
+  ),
+  {
+    ...moment(
+      "planning-back-later",
+      "back later",
+      PLANNING,
+      "exceptions",
+      7,
+      [
+        ...OPENED_PLANNING,
+        "S: What did you do first with that plan?",
+        "P: I put the jobs on the board by street, so the crews drive less.",
+        "S: What happens when a crew calls in sick?",
+      ],
+      PLAN_NOTES
+    ),
+    event: "resume",
+  },
+  {
+    ...moment(
+      "inkoop-back-later",
+      "back later",
+      INKOOP,
+      "numbers",
+      9,
+      [
+        ...OPENED_INKOOP,
+        "S: Hoeveel bestellingen plaats je in een normale week?",
+        "P: een stuk of zestig",
+        "S: Hoe lang wacht een bestelling meestal op dat akkoord?",
+      ],
+      ORDER_NOTES_NL
+    ),
+    event: "resume",
+  },
+  moment(
+    "claims-wrong-paste",
+    "wrong paste",
+    CLAIMS,
+    "steps",
+    5,
+    [
+      ...OPENED_CLAIMS,
+      "S: How do you find the frame in the stock system?",
+      "P: =INDEX(Frames!C:C;MATCH(A7;Frames!A:A;0))",
+    ],
+    CLAIM_NOTES.slice(0, 2)
+  ),
+  moment("timesheets-wrong-paste", "wrong paste", TIMESHEETS, "exceptions", 7, [
+    ...OPENED_TIMESHEETS,
+    "S: What do you do when a client sends the hours late?",
+    "P: Hi Marco, please find the corrected hours for week 43 attached. Let us know if anything looks off. Kind regards, the payroll team",
+  ]),
+  moment(
+    "orders-split-message",
+    "split message",
+    ORDERS,
+    "steps",
+    5,
+    [
+      ...OPENED_ORDERS,
+      "S: How did you get the day price for the turbot?",
+      "P: rang the fish market at seven like every day, and",
+    ],
+    ORDER_NOTES.slice(0, 2)
+  ),
+  moment(
+    "inkoop-split-message",
+    "split message",
+    INKOOP,
+    "steps",
+    5,
+    [
+      ...OPENED_INKOOP,
+      "S: Wat doe je als de offerte niet klopt met de prijslijst?",
+      "P: dan bel ik eerst de leverancier, en als die niet opneemt",
+    ],
+    ORDER_NOTES_NL.slice(0, 2)
+  ),
+  moment(
+    "claims-misread",
+    "misread",
+    CLAIMS,
+    "numbers",
+    9,
+    [
+      ...OPENED_CLAIMS,
+      "S: Out of ten claims, how many come in without a receipt?",
+      "P: chasing one takes me maybe ten minutes, the shops are slow to answer",
+    ],
+    CLAIM_NOTES.slice(0, 4)
+  ),
+  moment(
+    "planning-misread",
+    "misread",
+    PLANNING,
+    "exceptions",
+    6,
+    [
+      ...OPENED_PLANNING,
+      "S: How often does a crew turn out short on a normal week?",
+      "P: When it happens I swap a man in from the mowing crew, that takes a phone call.",
+    ],
+    PLAN_NOTES
+  ),
 ];

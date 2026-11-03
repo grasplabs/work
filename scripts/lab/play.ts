@@ -339,7 +339,12 @@ export const playInterview = async (
     const line = interrupted
       ? awayLine(locale, event.pick)
       : pasteOf(locale, event.pick);
-    says(line, [], null, interrupted ? [] : [`(pasted by mistake) ${line}`]);
+    says(
+      line,
+      [],
+      interrupted ? "called away" : "wrong paste",
+      interrupted ? [] : [`(pasted by mistake) ${line}`]
+    );
     playedOut(event);
     await answered();
     if (interrupted) {
@@ -396,7 +401,9 @@ export const playInterview = async (
       await inTwo(event, answer, split);
       return false;
     }
-    says(answer.say, answer.said, answer.move ?? null, answer.untrue ?? []);
+    // A misread question is the move of this answer: his next line is held to its rule.
+    const move = event?.kind === "misread" ? "misread" : (answer.move ?? null);
+    says(answer.say, answer.said, move, answer.untrue ?? []);
     // They went away: what they said is kept as it stands, and nothing of it is agreed to.
     if (answer.left === true) {
       played.wantsAt.push("answer");

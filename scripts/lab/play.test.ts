@@ -278,10 +278,12 @@ describe("what happens to them on the way", () => {
     });
     expect({
       said: played.said,
+      moves: played.moves,
       untrue: played.untrue[0],
       prompts,
     }).toStrictEqual({
       said: [[], ["S1"]],
+      moves: ["wrong paste", null],
       untrue: [`(pasted by mistake) ${pasteOf("en", 0)}`],
       prompts: [askedFor.afterPaste],
     });
@@ -338,12 +340,17 @@ describe("what happens to them on the way", () => {
       locale: "en",
       events: [{ kind: "misread", at: 0 }],
     });
-    expect({ prompts, events: played.events }).toStrictEqual({
+    expect({
+      prompts,
+      events: played.events,
+      moves: played.moves,
+    }).toStrictEqual({
       prompts: [
         "Your answer to Stephen’s last line, and nothing else:",
         askedFor.misread,
       ],
       events: [{ kind: "misread", answer: 2 }],
+      moves: [null, "misread"],
     });
   });
 

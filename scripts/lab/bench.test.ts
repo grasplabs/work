@@ -22,7 +22,7 @@ import type { Transcript } from "./cases.ts";
 import { compare, noiseOf } from "./compare.ts";
 import type { Ask } from "./core.ts";
 import { keyOf } from "./keys/index.ts";
-import { handMoments, signalRules } from "./moments.ts";
+import { handMoments, signalRules, waitsFor } from "./moments.ts";
 import type { Moment } from "./moments.ts";
 import type { Asker } from "./person.ts";
 import type { CaseScore } from "./results.ts";
@@ -320,6 +320,18 @@ describe("the next-question bench", () => {
       right: 0,
       lineOnly: true,
     },
+    {
+      moment: "inkoop-split-message",
+      turn: stephen({ say: "", more: true }),
+      right: 1,
+      lineOnly: false,
+    },
+    {
+      moment: "orders-split-message",
+      turn: stephen({ say: "And then?" }),
+      right: 0,
+      lineOnly: false,
+    },
   ])(
     "holds what the turn says where it goes, beside the judge: $moment",
     async ({ moment, turn, right, lineOnly }) => {
@@ -338,6 +350,30 @@ describe("the next-question bench", () => {
       });
     }
   );
+
+  it("asks a moment they came back to later as a resume, and tells the judge they came back", async () => {
+    const back = momentNamed("planning-back-later");
+    const told: string[] = [];
+    const { stand, asked } = standWith(
+      () => stephen({ say: "We were at a crew calling in sick: what then?" }),
+      judgeAnswering((call) => {
+        told.push(call.input);
+        return { pass: true, single: true, why: "ok" };
+      })
+    );
+    await benchAsk(stand, [back], {
+      set: "open",
+      interviewer: "stephen",
+      keep: ignored,
+    });
+    expect({
+      event: asked[0]?.turn.event,
+      last: asked[0]?.turn.lines.at(-1)?.from,
+      toldBack: told.some((input) =>
+        input.includes("came back to the interview later")
+      ),
+    }).toStrictEqual({ event: "resume", last: "stephen", toldBack: true });
+  });
 
   it("holds a line to any one of the rules when their last line calls for more than one thing", () => {
     const rule = ruleOf(momentNamed("orders-vague-amount"));
@@ -378,7 +414,7 @@ describe("a round of the next-question bench", () => {
   /** A Stephen who gets a moment right when `rightFor` says so, and a judge who passes only lines that say "right". */
   const runOf = async (rightFor: (moment: number) => boolean) => {
     const moments = handMoments
-      .filter((each) => each.signal !== "mid sentence")
+      .filter((each) => !waitsFor.has(each.signal))
       .slice(0, 40);
     let asked = 0;
     const { stand } = standWith(
