@@ -464,9 +464,9 @@ const liveOf = (
     const releases = releasesOf(row);
     const [first = "~"] = interviews
       .flatMap((interview) =>
-        interview.at !== undefined &&
+        interview.startedAt !== undefined &&
         releases.includes(interview.stephen ?? UNRECORDED)
-          ? [interview.at]
+          ? [interview.startedAt]
           : []
       )
       .toSorted();

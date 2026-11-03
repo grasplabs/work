@@ -923,8 +923,8 @@ export interface Interview {
   stephen?: string;
   /** The language its last turn was held in; none where it isn't known. */
   language?: string;
-  /** When it last moved, as ISO time; none where it isn't known. Days above count from each organization's own start, so only this sets interviews of two organizations in order. */
-  at?: string;
+  /** When it started, as ISO time; none before it did. Days above count from each organization's own start, so only this sets interviews of two organizations in order. */
+  startedAt?: string;
 }
 
 /** The kinds of mistake an interviewer makes, as the review scores them. */

@@ -73,8 +73,9 @@ const organization = (
     finished: boolean;
     locale?: string;
     typed?: boolean;
-    /** The day it ended, as ISO time. */
+    /** When it started, and when it last moved, as ISO time. */
     on?: string;
+    ended?: string;
   }[],
   channel?: string
 ): LabOrganization => {
@@ -92,11 +93,11 @@ const organization = (
     interviews: interviews.map((each, at) => ({
       person: `p${at}`,
       kind: "own",
-      startedAt: "2026-10-10T09:00:00.000Z",
+      startedAt: each.on ?? "2026-10-10T09:00:00.000Z",
       completedAt: each.finished
-        ? (each.on ?? "2026-10-10T09:30:00.000Z")
+        ? (each.ended ?? "2026-10-10T09:30:00.000Z")
         : null,
-      updatedAt: each.on ?? "2026-10-10T09:30:00.000Z",
+      updatedAt: each.ended ?? "2026-10-10T09:30:00.000Z",
       agreed: each.finished,
       phase: each.finished ? "readback" : "steps",
       stoppedAt: each.finished ? null : "steps",
@@ -120,18 +121,20 @@ const organization = (
   };
 };
 
-/** `count` interviews of `version`, `finished` of them finished, in `locale`, ended `on`. */
+/** `count` interviews of `version`, `finished` of them finished, in `locale`, started `on` and last moved `ended`. */
 const held = (
   version: string | undefined,
   count: number,
   finished: number,
   locale?: string,
-  on?: string
+  on?: string,
+  ended?: string
 ) =>
   Array.from({ length: count }, (_, at) => ({
     ...(version === undefined ? {} : { version }),
     ...(locale === undefined ? {} : { locale }),
     ...(on === undefined ? {} : { on }),
+    ...(ended === undefined ? {} : { ended }),
     finished: at < finished,
   }));
 
@@ -332,14 +335,29 @@ describe("live, group by group", () => {
     expect([all?.now.finished, all?.now.started]).toStrictEqual([4, 5]);
   });
 
-  it("sets the Stephen in use against the one people talked with before him, whatever order organizations come in", () => {
+  it("sets the Stephen in use against the one people started with before him, whatever order organizations come in or when each last moved", () => {
+    // Molen started with v1 first, though its interviews last moved after Bakkerij's with v2.
     const older = organization(
       "Molen",
-      held("v1", 10, 10, undefined, "2026-10-08T09:30:00.000Z")
+      held(
+        "v1",
+        10,
+        10,
+        undefined,
+        "2026-10-08T09:00:00.000Z",
+        "2026-10-13T09:30:00.000Z"
+      )
     );
     const newer = organization(
       "Bakkerij",
-      held("v2", 12, 6, undefined, "2026-10-10T09:30:00.000Z")
+      held(
+        "v2",
+        12,
+        6,
+        undefined,
+        "2026-10-09T09:00:00.000Z",
+        "2026-10-10T09:30:00.000Z"
+      )
     );
 
     for (const organizations of [
