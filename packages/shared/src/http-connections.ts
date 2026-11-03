@@ -54,6 +54,11 @@ export const httpLimits = {
   headers: 32,
   /** The longest value of one of them. */
   headerValueChars: 2048,
+  /**
+   * The shortest credential: one too short could match ordinary text in
+   * an answer, which connect's scrub of echoed credentials would mangle.
+   */
+  secretMinChars: 16,
   /** The longest credential. */
   secretChars: 4096,
   /**
@@ -221,7 +226,7 @@ export const httpCredentialSchema = z.discriminatedUnion("kind", [
     kind: z.literal("bearer"),
     token: z
       .string()
-      .min(1)
+      .min(httpLimits.secretMinChars)
       .max(httpLimits.secretChars)
       .regex(headerValuePattern),
   }),
@@ -239,7 +244,7 @@ export const httpCredentialSchema = z.discriminatedUnion("kind", [
       ),
     secret: z
       .string()
-      .min(1)
+      .min(httpLimits.secretMinChars)
       .max(httpLimits.secretChars)
       .regex(headerValuePattern),
   }),

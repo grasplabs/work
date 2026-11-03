@@ -98,7 +98,10 @@ interface __BaseEnv_Env {
    * own address, and to nothing else private: `allow = ["public",
    * "10.0.0.8/32"]` on the network service connect fetches through, never
    * `"private"`, which would let any name that resolves to a private
-   * address through (src/ai-endpoint-guard.ts).
+   * address through (src/ai-endpoint-guard.ts). Connect has one outbound
+   * network, so every address opened for these is reachable by HTTP
+   * connections too (src/http-connections.ts), until they get a
+   * public-only network of their own (GRA-1481).
    */
   AI_PRIVATE_HOSTS?: string;
   /**

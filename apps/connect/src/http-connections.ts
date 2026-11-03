@@ -59,13 +59,18 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 // - Reaching inside a network (SSRF): the origin is exactly
 //   `https://host[:port]`, never an IP address or a private name
 //   (`originRefusal`, the rules links and outbound webhooks go by). What
-//   keeps every call on the public internet is the fetch itself: on
-//   Cloudflare, connect's `global_fetch_strictly_public` refuses any
-//   address outside it (loopback, private, link-local, metadata) whatever
-//   the name resolves to, at the moment it connects. On-prem, connect's
-//   fetches for HTTP connections must go through a workerd network that
-//   allows only `public` (`allow = ["public"]`); without that, nothing here
-//   stops a name that leads inside. A DNS lookup of our own can't stand in
+//   keeps every call on the public internet is the network the fetch goes
+//   out through, never connect's code. On Cloudflare that is the
+//   platform's egress, which doesn't route a Worker's subrequests to
+//   private, loopback or metadata addresses, whatever the name resolves
+//   to (`global_fetch_strictly_public` isn't it: that only sends requests
+//   to the Worker's own zone through the front door). On-prem it is
+//   workerd's outbound network for connect, which must allow only
+//   `public` (`allow = ["public"]`); without that, nothing here stops a
+//   name that leads inside. Connect has one such network today, so any
+//   CIDR an install opens for `AI_PRIVATE_HOSTS` is reachable by HTTP
+//   connections too, until they get a public-only network of their own
+//   (GRA-1481). A DNS lookup of our own can't stand in
 //   for it: the name can be rebound between the lookup and the fetch, and
 //   on-prem, split-horizon DNS answers the outside resolver one address
 //   and the install's own resolver another, so a public answer means
@@ -602,14 +607,34 @@ const boundedText = async (
 const credentialPlaceholder = "[credential]";
 
 /**
- * `text` with every exact copy of the credential, as sent and bare,
- * replaced: an API that echoes its request back (a debugging endpoint, an
- * error that quotes the headers) never hands it to the App.
+ * The forms of the credential an API may echo it back in: as sent and
+ * bare, each also as a JSON string escapes it, with `/` left as is or
+ * escaped (`\/`), as some encoders do. Longest first, so a longer form is
+ * replaced whole before a shorter one inside it.
  */
-const withoutCredential = (text: string, sentAs: readonly string[]): string => {
+const credentialForms = (sentAs: readonly string[]): string[] => {
+  const forms = new Set<string>();
+  for (const value of sentAs) {
+    const escaped = JSON.stringify(value).slice(1, -1);
+    forms.add(value);
+    forms.add(escaped);
+    forms.add(escaped.replaceAll("/", "\\/"));
+  }
+  return [...forms].toSorted((one, other) => other.length - one.length);
+};
+
+/**
+ * `text` with every copy of the credential `credentialForms` names
+ * replaced, so an API that echoes its request back (a debugging endpoint,
+ * an error that quotes the headers) doesn't hand it to the App as it is.
+ * Best effort: an API can always encode it some other way (base64, URL
+ * encoding, split across fields); what stops a leak is the admin
+ * approving only an API they trust with the credential.
+ */
+const withoutCredential = (text: string, forms: readonly string[]): string => {
   let replaced = text;
-  for (const secret of sentAs) {
-    replaced = replaced.replaceAll(secret, credentialPlaceholder);
+  for (const form of forms) {
+    replaced = replaced.replaceAll(form, credentialPlaceholder);
   }
   return replaced;
 };
@@ -731,14 +756,18 @@ const sendWithin = async (
     throw new McpError("The answer couldn't be read", error);
   }
   if (read === undefined) {
-    // A send went out and was answered: never taken as nothing done.
+    // A read changed nothing: not done. A send went out and was answered,
+    // so it most likely acted, though its answer can't be kept: of unknown
+    // outcome, its key spent, for a person to resolve.
+    const isRead = plan.action === "get";
     return {
       ...unavailable("too_large"),
-      notPerformed: plan.action === "get",
+      notPerformed: isRead,
+      outcomeUnknown: !isRead,
     };
   }
   trace.bytes = read.bytes;
-  const secrets = [sentAs, credential];
+  const secrets = credentialForms([sentAs, credential]);
   const answerHeaders: Record<string, string> = {};
   for (const [name, value] of response.headers) {
     if (!droppedResponseHeaders.has(name) && name !== config.credentialHeader) {

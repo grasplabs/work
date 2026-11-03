@@ -12,6 +12,7 @@ import {
   it,
   vi,
 } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   appFor,
@@ -84,6 +85,13 @@ const answer = (
           },
         }
       );
+    }
+    case "/v1/echo-escaped": {
+      // The same, as an encoder that escapes `/` too writes it.
+      const headers = Object.fromEntries(request.headers);
+      return new Response(JSON.stringify({ headers }).replaceAll("/", "\\/"), {
+        headers: { "content-type": "application/json" },
+      });
     }
     case "/v1/bytes": {
       // Not UTF-8: three bytes, which decode to more as text.
@@ -235,12 +243,29 @@ describe("HTTP connections", () => {
       await outcome(
         create(
           billing({
-            credential: { kind: "header", header: "X-Api-Key", secret: "clé" },
+            credential: {
+              kind: "header",
+              header: "X-Api-Key",
+              secret: "clé-of-a-test-credential",
+            },
           })
         )
       ),
       await outcome(
-        create(billing({ credential: { kind: "bearer", token: "a\u0085b" } }))
+        create(
+          billing({
+            credential: {
+              kind: "bearer",
+              token: "a\u0085b-of-a-test-credential",
+            },
+          })
+        )
+      ),
+      // One so short it could match ordinary text in an answer.
+      await outcome(
+        create(
+          billing({ credential: { kind: "bearer", token: "short-token" } })
+        )
       ),
     ];
     const person = admin();
@@ -259,6 +284,7 @@ describe("HTTP connections", () => {
       "connection.http_origin_refused",
       "connection.http_origin_refused",
       "connection.http_origin_refused",
+      "connection.invalid",
       "connection.invalid",
       "connection.invalid",
       "connection.invalid",
@@ -538,6 +564,43 @@ describe("HTTP connections", () => {
     ]);
   });
 
+  it("never hand back a credential an API echoes escaped as JSON", async () => {
+    // A credential JSON escapes: a quote, a backslash and slashes.
+    const escapable = 'the/billing"api\\test/credential';
+    const connectionId = await create(
+      billing({ credential: { kind: "bearer", token: escapable } })
+    );
+    const bodies = [];
+    for (const path of ["/v1/echo", "/v1/echo-escaped"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const result = await callAs(app, {
+        connectionId,
+        action: "get",
+        input: { path },
+      });
+      const { body } = z
+        .object({ body: z.string() })
+        .parse(JSON.parse(result.output));
+      bodies.push(body);
+    }
+    const escaped = JSON.stringify(escapable).slice(1, -1);
+    const forms = [escapable, escaped, escaped.replaceAll("/", "\\/")];
+
+    expect(sent.map(({ headers }) => headers.authorization)).toStrictEqual([
+      `Bearer ${escapable}`,
+      `Bearer ${escapable}`,
+    ]);
+    expect(
+      bodies.map((body) => ({
+        shown: forms.filter((form) => body.includes(form)),
+        replaced: body.includes('"authorization":"[credential]"'),
+      }))
+    ).toStrictEqual([
+      { shown: [], replaced: true },
+      { shown: [], replaced: true },
+    ]);
+  });
+
   it("cut off an answer whose body drips in past the time limit", async () => {
     const connectionId = await create();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -656,9 +719,30 @@ describe("HTTP connections", () => {
       })
     );
 
+    // A send whose answer is over the limit went out and most likely
+    // acted: of unknown outcome, its key spent, never sent again.
+    const full = await create();
+    const hugeSend: Call = {
+      connectionId: full,
+      action: "send",
+      input: { method: "POST", path: "/v1/huge", body: "{}" },
+      idempotencyKey: "run-2:huge",
+    };
+    const hugeSends = [
+      await outcome(callAs(app, hugeSend)),
+      await outcome(callAs(app, hugeSend)),
+    ];
+
     expect(huge).toBe("connect.server_unavailable");
     expect(Object.keys(contract.actions)).toStrictEqual(["get"]);
     expect(noSend).toBe("connect.action_not_found");
+    expect(hugeSends).toStrictEqual([
+      "connect.outcome_unknown",
+      "connect.outcome_unknown",
+    ]);
+    expect(
+      sent.filter(({ method }) => method === "POST").map(({ url }) => url)
+    ).toStrictEqual(["https://api.billing.example/v1/huge"]);
   });
 
   it("stop taking calls and drop the credential once disconnected", async () => {
