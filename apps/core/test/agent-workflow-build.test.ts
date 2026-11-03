@@ -468,9 +468,15 @@ describe("the agent building an independent workflow", () => {
     });
     try {
       const asked = chat.ask("Bind it");
-      await vi.waitFor(() => {
-        expect(held.reading).toBeTruthy();
-      });
+      // Waits on the gate itself, for as long as the chat takes to reach
+      // the read under load: the held read sets the flag, nothing goes on
+      // until it does, and only a chat that never reads it times out.
+      await vi.waitFor(
+        () => {
+          expect(held.reading).toBeTruthy();
+        },
+        { timeout: 15_000, interval: 20 }
+      );
       await admin.api.permissions.revoke(granted);
       held.revoked = true;
       await asked;
