@@ -265,7 +265,8 @@ export interface ChatDraft {
   /** When it was last written (ISO 8601). */
   updatedAt: string;
   /**
-   * The code step (`ChatCode.callId`) whose code wrote this revision:
+   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
+   * that wrote this revision:
    * where the thread shows the draft's preview. Null when core doesn't
    * know it (a revision written before it kept one).
    */
@@ -295,7 +296,8 @@ export interface ChatDraftVersion {
   /** The SHA-256 of what it holds: two versions alike hold the same. */
   contentHash: string;
   /**
-   * The code step (`ChatCode.callId`) whose code wrote it, when the
+   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
+   * that wrote it, when the
    * chat's agent did; null when the person restored an earlier one.
    */
   callId: string | null;
@@ -348,6 +350,31 @@ export interface ChatCode {
   callId: string;
   code: string;
 }
+
+/**
+ * A call of one of the agent's tools made for what it does most (core's
+ * agent-tools.ts: `writeFile`, `searchBrain`, …), which the thread shows as
+ * one line saying what it did, where a code step shows its code. Its
+ * result is a `result` message by the same `callId`, as a code step's is.
+ */
+export interface ChatToolCall {
+  callId: string;
+  /** The tool, by its name. */
+  tool: string;
+  /**
+   * How many of the response's code steps (`code`) came before it: the
+   * thread shows its steps in the order the response made them.
+   */
+  codeBefore: number;
+  /**
+   * What it was given, as far as it has streamed in. While the response is
+   * written, each text in it is cut short (`chatToolPreviewChars`).
+   */
+  input: Record<string, unknown>;
+}
+
+/** Most characters of each text a tool call's input shows while it is written. */
+export const chatToolPreviewChars = 200;
 
 /** How one of the agent's responses ended. */
 export type ChatReplyEnd =
@@ -542,6 +569,8 @@ export type ChatMessage =
       citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
+      /** The calls of its other tools, each shown as one line. */
+      tools: ChatToolCall[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
       /**
@@ -566,9 +595,12 @@ export type ChatMessage =
   | {
       id: number;
       role: "result";
-      /** The code step this is the result of (`ChatCode.callId`). */
+      /**
+       * The code step or tool call this is the result of (`ChatCode.callId`,
+       * `ChatToolCall.callId`).
+       */
       callId: string;
-      /** What the code returned, logged or threw, as the agent read it. */
+      /** What the code or tool returned, logged or threw, as the agent read it. */
       text: string;
       failed: boolean;
       at: string;
@@ -589,6 +621,8 @@ export type ChatMessage =
 export interface ChatPartial {
   text: string;
   code: ChatCode[];
+  /** Its calls of other tools so far, their texts cut short. */
+  tools: ChatToolCall[];
   /** What the model thought so far (`ChatReasoning.text`); empty for nothing. */
   reasoning: string;
 }
@@ -614,6 +648,8 @@ export interface ChatPartialUpdate {
   text: string;
   /** Every code step of the response, each as its own text is. */
   code: { callId: string; from: number; code: string }[];
+  /** Every other tool call of the response, whole: their texts are cut short. */
+  tools: ChatToolCall[];
   /** What the model thought, as `from` and `text` are for its answer. */
   reasoning: { from: number; text: string };
 }
@@ -643,6 +679,7 @@ export const applyPartial = (
         code
       ),
     })),
+    tools: update.tools,
     reasoning: extended(
       shown?.reasoning ?? "",
       update.reasoning.from,

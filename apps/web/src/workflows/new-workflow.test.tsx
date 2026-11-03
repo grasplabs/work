@@ -467,6 +467,7 @@ describe("New workflow", () => {
       text: "Drawn: an invoice comes in. Who checks it?",
       citations: [],
       code: [],
+      tools: [],
       end: "done",
       at: "2026-11-03T09:00:01.000Z",
     };

@@ -10,6 +10,29 @@ import type { Message } from "@earendil-works/pi-ai";
  */
 export const showThinkingName = "show_thinking";
 
+/**
+ * The agent's tools for what it does most (agent-tools.ts), as their
+ * stored calls name them: the chat shows each call as one line.
+ */
+export const dedicatedToolNames = [
+  "createApp",
+  "readFile",
+  "writeFile",
+  "editFile",
+  "searchFiles",
+  "searchBrain",
+  "requestConnection",
+  "editWorkflow",
+] as const;
+
+export type DedicatedToolName = (typeof dedicatedToolNames)[number];
+
+const dedicatedNames: ReadonlySet<string> = new Set(dedicatedToolNames);
+
+/** Whether `name` is one of the agent's dedicated tools. */
+export const isDedicatedTool = (name: string): boolean =>
+  dedicatedNames.has(name);
+
 const messageRoles = new Set<unknown>([
   "system",
   "user",

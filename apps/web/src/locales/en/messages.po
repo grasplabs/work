@@ -444,6 +444,14 @@ msgstr "{count, plural, one {The board set # goal for the sprint.} other {The bo
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Writing # file} other {Writing # files}}"
+msgstr "{count, plural, one {Writing # file} other {Writing # files}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Wrote # file} other {Wrote # files}}"
+msgstr "{count, plural, one {Wrote # file} other {Wrote # files}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, other {# not counted yet}}"
 msgstr "{count, plural, other {# not counted yet}}"
@@ -1292,6 +1300,10 @@ msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of it
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 
+#: src/engines/app-code.tsx
+msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+msgstr "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} of {total} not interviewed yet"
@@ -2013,6 +2025,7 @@ msgid "Add webhook"
 msgstr "Add webhook"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Added"
@@ -2460,6 +2473,7 @@ msgid "Anything else?"
 msgstr "Anything else?"
 
 #: src/connections/request-app-dialog.tsx
+#: src/engines/app-page.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
@@ -2483,6 +2497,10 @@ msgstr "App not found"
 #: src/settings/erasures.tsx
 msgid "App preferences and usage signals of their collections"
 msgstr "App preferences and usage signals of their collections"
+
+#: src/engines/app-page.tsx
+msgid "App views"
+msgstr "App views"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -2844,6 +2862,10 @@ msgstr "Asked on"
 msgid "Asked the agent to fix a run"
 msgstr "Asked the agent to fix a run"
 
+#: src/chat/thread.tsx
+msgid "Asked to connect {binding}"
+msgstr "Asked to connect {binding}"
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Asked to connect again on {since}."
 msgstr "Asked to connect again on {since}."
@@ -2859,6 +2881,10 @@ msgstr "Asked to send, edit or delete a chat app message as the company's bot"
 #: src/brain/brain-log.tsx
 msgid "Asked: {title}"
 msgstr "Asked: {title}"
+
+#: src/chat/thread.tsx
+msgid "Asking to connect {binding}"
+msgstr "Asking to connect {binding}"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
@@ -3351,6 +3377,7 @@ msgid "Change: {text}"
 msgstr "Change: {text}"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 msgid "Changed"
 msgstr "Changed"
 
@@ -3447,6 +3474,11 @@ msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 
 #: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Changes"
+
+#: src/engines/app-code.tsx
+msgctxt "what a draft changes in an app's code"
 msgid "Changes"
 msgstr "Changes"
 
@@ -3727,6 +3759,7 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-page.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -4241,6 +4274,14 @@ msgstr "Created a team"
 msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
 msgstr "Created by you. It opens for you, the admins, and whoever it is shared with."
 
+#: src/chat/thread.tsx
+msgid "Created the App {name}"
+msgstr "Created the App {name}"
+
+#: src/chat/thread.tsx
+msgid "Creating the App {name}"
+msgstr "Creating the App {name}"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Critical"
@@ -4254,6 +4295,10 @@ msgstr "CRM"
 #: src/engines/app-versions.tsx
 msgid "Current"
 msgstr "Current"
+
+#: src/engines/app-code.tsx
+msgid "Current (version {current})"
+msgstr "Current (version {current})"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
@@ -4413,6 +4458,10 @@ msgstr "Delete this workflow"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Delete your interview?"
+
+#: src/engines/app-code.tsx
+msgid "Deleted"
+msgstr "Deleted"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -4794,6 +4843,10 @@ msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Draft"
 
+#: src/engines/app-code.tsx
+msgid "Draft (version {draft})"
+msgstr "Draft (version {draft})"
+
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Drafts, events and files of their own, after they press a card."
@@ -4896,6 +4949,22 @@ msgstr "Edit project"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit the instructions"
 msgstr "Edit the instructions"
+
+#: src/chat/thread.tsx
+msgid "Edited {path}"
+msgstr "Edited {path}"
+
+#: src/chat/thread.tsx
+msgid "Edited a workflow"
+msgstr "Edited a workflow"
+
+#: src/chat/thread.tsx
+msgid "Editing {path}"
+msgstr "Editing {path}"
+
+#: src/chat/thread.tsx
+msgid "Editing a workflow"
+msgstr "Editing a workflow"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -5284,6 +5353,7 @@ msgid "File"
 msgstr "File"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -6350,6 +6420,7 @@ msgstr "Independent"
 msgid "Independent workflow"
 msgstr "Independent workflow"
 
+#: src/chat/thread.tsx
 #: src/workflows/test-run.tsx
 msgid "Input"
 msgstr "Input"
@@ -7932,6 +8003,10 @@ msgstr "No chats here yet."
 msgid "No chats yet. What is asked above starts one, and it stays in this project."
 msgstr "No chats yet. What is asked above starts one, and it stays in this project."
 
+#: src/engines/app-code.tsx
+msgid "No code yet: Grasp writes the first version in the chat."
+msgstr "No code yet: Grasp writes the first version in the chat."
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "No connector yet"
@@ -8051,6 +8126,10 @@ msgstr "No model is set up for this deployment yet."
 #: src/workflows/module-files.tsx
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "No modules yet. A module holds calculations a task calls through a local binding."
+
+#: src/engines/app-code.tsx
+msgid "No newline at end of file"
+msgstr "No newline at end of file"
 
 #: src/workflows/triggers.tsx
 msgid "No next run"
@@ -9887,6 +9966,10 @@ msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Read"
 
+#: src/chat/thread.tsx
+msgid "Read {path}"
+msgstr "Read {path}"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "Read a domain's statistics"
@@ -9964,6 +10047,10 @@ msgstr "Read what could be improved"
 msgid "Read-only"
 msgstr "Read-only"
 
+#: src/engines/app-code.tsx
+msgid "Read-only. Changes to the code go through the chat."
+msgstr "Read-only. Changes to the code go through the chat."
+
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
 msgstr "Reading"
@@ -9976,6 +10063,10 @@ msgstr "Reading {file}"
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Reading {name}"
+
+#: src/chat/thread.tsx
+msgid "Reading {path}"
+msgstr "Reading {path}"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11069,9 +11160,25 @@ msgstr "Searched above. After this, events move to the archive."
 msgid "Searched knowledge"
 msgstr "Searched knowledge"
 
+#: src/chat/thread.tsx
+msgid "Searched the App's files for {text}"
+msgstr "Searched the App's files for {text}"
+
 #: src/activity/audit-words.ts
 msgid "Searched the audit trail"
 msgstr "Searched the audit trail"
+
+#: src/chat/thread.tsx
+msgid "Searched the brain for {query}"
+msgstr "Searched the brain for {query}"
+
+#: src/chat/thread.tsx
+msgid "Searching the App's files for {text}"
+msgstr "Searching the App's files for {text}"
+
+#: src/chat/thread.tsx
+msgid "Searching the brain for {query}"
+msgstr "Searching the brain for {query}"
 
 #: src/engines/app-webhooks.tsx
 msgid "Secret"
@@ -12723,6 +12830,10 @@ msgstr "The domains and workflows that may use approved npm packages. Open one t
 msgid "The domains this chat builds didn't load."
 msgstr "The domains this chat builds didn't load."
 
+#: src/engines/app-code.tsx
+msgid "The draft changes no file."
+msgstr "The draft changes no file."
+
 #: src/chat/draft-versions.tsx
 msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
 msgstr "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
@@ -13507,6 +13618,10 @@ msgstr "This version changes the domain's data, and the change can't be applied:
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 
+#: src/engines/app-code.tsx
+msgid "This version has no files."
+msgstr "This version has no files."
+
 #: src/screens/screen-frame.tsx
 msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
@@ -13649,6 +13764,10 @@ msgstr "Tomorrow"
 #: src/onboarding/setup-steps.tsx
 msgid "Too large to read"
 msgstr "Too large to read"
+
+#: src/engines/app-code.tsx
+msgid "Too many changes to show line by line"
+msgstr "Too many changes to show line by line"
 
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
@@ -14013,6 +14132,10 @@ msgstr "Use the default"
 msgid "Use your organization’s account to go on."
 msgstr "Use your organization’s account to go on."
 
+#: src/chat/thread.tsx
+msgid "Used {tool}"
+msgstr "Used {tool}"
+
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "Used a connected tool"
@@ -14029,6 +14152,10 @@ msgstr "Used by"
 #: src/labels.ts
 msgid "User"
 msgstr "User"
+
+#: src/chat/thread.tsx
+msgid "Using {tool}"
+msgstr "Using {tool}"
 
 #. A time zone
 #: src/routes/_shell.settings.workspace.tsx
@@ -14766,6 +14893,10 @@ msgstr "What to remember"
 msgid "What to remove"
 msgstr "What to remove"
 
+#: src/engines/app-code.tsx
+msgid "What to show of the code"
+msgstr "What to show of the code"
+
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "What to show of the traces"
@@ -14958,6 +15089,10 @@ msgstr "Which language do you want to do this interview in?"
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "Which tools do people actually use?"
+
+#: src/engines/app-code.tsx
+msgid "Which version"
+msgstr "Which version"
 
 #: src/dashboard/widget-board.tsx
 msgid "Which workflows failed most this month?"
@@ -15313,6 +15448,10 @@ msgstr "Writing"
 msgid "Writing “{title}”…"
 msgstr "Writing “{title}”…"
 
+#: src/chat/thread.tsx
+msgid "Writing {file}"
+msgstr "Writing {file}"
+
 #: src/dashboard/widget-progress.tsx
 msgid "Writing the widget…"
 msgstr "Writing the widget…"
@@ -15338,6 +15477,10 @@ msgstr "Written in a chat"
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
 msgstr "Written in a document"
+
+#: src/chat/thread.tsx
+msgid "Wrote {file}"
+msgstr "Wrote {file}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"

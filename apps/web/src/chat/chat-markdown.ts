@@ -111,6 +111,7 @@ export const chatMarkdown = ({
             text: partial.text,
             citations: [],
             code: [],
+            tools: [],
             end: "done" as const,
             at: "",
           },

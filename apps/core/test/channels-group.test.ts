@@ -39,6 +39,10 @@ watched();
 const setUpTime = { timeout: 90_000 };
 
 /** A new group chat's conversation id, as Teams names one. */
+/** A request that offers any of the agent's tools besides code (agent-tools.ts). */
+const dedicated =
+  /"name":"(?<tool>createApp|readFile|writeFile|editFile|searchFiles|searchBrain|requestConnection|editWorkflow)"/u;
+
 const newGroup = (): string => `19:${unique()}@thread.v2`;
 
 /** A message `person` sent in `conversation`, @mentioning Stephen. */
@@ -308,6 +312,12 @@ describe("in a group chat", setUpTime, () => {
     expect(told(1)).toContain("connections,apps,build,workflows,memory");
     expect(told(3)).toContain('\\"knowledge\\"');
     expect(told(3)).not.toContain("connections,");
+    // Nor any of the tools that write, ask for a connection or read the
+    // brain: each calls an API the group's chat doesn't have.
+    expect([dedicated.test(told(0)), dedicated.test(told(2))]).toStrictEqual([
+      true,
+      false,
+    ]);
   });
 
   it("takes nothing not said to Stephen: no line, no roster read, no turn", async () => {
