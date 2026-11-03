@@ -50,7 +50,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, useRouter } from "@tanstack/react-router";
-import { UserPlusIcon, UsersIcon } from "lucide-react";
+import { FolderIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -119,10 +119,23 @@ const RoleSelect = ({
   );
 };
 
-/** Who `member` is, in words: a team says so. */
-const memberName = (member: AppMember, team: (name: string) => string) => {
+/** How a member is named: a team, and everyone in a project, say so. */
+interface MemberWords {
+  team: (name: string) => string;
+  project: (name: string) => string;
+  /** A project the viewer isn't in, whose name is its members' alone. */
+  unnamedProject: string;
+}
+
+/** Who `member` is, in words. */
+const memberName = (member: AppMember, words: MemberWords) => {
+  if (member.type === "project") {
+    return member.name === null
+      ? words.unnamedProject
+      : words.project(member.name);
+  }
   const name = member.name ?? member.id;
-  return member.type === "team" ? team(name) : name;
+  return member.type === "team" ? words.team(name) : name;
 };
 
 /**
@@ -143,6 +156,7 @@ export const ShareApp = ({
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<AppRole>("user");
   const [candidates, setCandidates] = useState<ShareCandidates | null>(null);
+  const everyone = (project: string): string => t`Everyone in ${project}`;
   const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
   const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
     !shared.has(`${type}:${id}`) && !(type === "person" && id === app.owner);
@@ -172,6 +186,11 @@ export const ShareApp = ({
   };
   const people = candidates?.people.filter(({ id }) => isOffered("person", id));
   const teams = candidates?.teams.filter(({ id }) => isOffered("team", id));
+  // Only the projects the person builds: sharing with one reaches everyone
+  // in it, which its builders decide.
+  const projects = candidates?.projects.filter(({ id }) =>
+    isOffered("project", id)
+  );
   return (
     <div className="flex flex-col items-end gap-1">
       <Popover
@@ -209,7 +228,9 @@ export const ShareApp = ({
           >
             <CommandInput placeholder={t`Search people and teams`} />
             <CommandList>
-              {people === undefined || teams === undefined ? (
+              {people === undefined ||
+              teams === undefined ||
+              projects === undefined ? (
                 <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
                   <Spinner />
                   <Trans>Reading people and teams…</Trans>
@@ -249,6 +270,24 @@ export const ShareApp = ({
                       ))}
                     </CommandGroup>
                   )}
+                  {projects.length === 0 ? null : (
+                    <CommandGroup heading={t`Projects`}>
+                      {projects.map((project) => (
+                        <CommandItem
+                          key={project.id}
+                          onSelect={() => {
+                            void share({ type: "project", id: project.id });
+                          }}
+                          value={`${project.name} ${project.id}`}
+                        >
+                          <FolderIcon className="text-muted-foreground" />
+                          <span className="flex-1 truncate">
+                            {everyone(project.name)}
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
                 </>
               )}
             </CommandList>
@@ -273,7 +312,11 @@ const MemberRow = ({
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const name = memberName(member, (team) => t`${team} (team)`);
+  const name = memberName(member, {
+    team: (team) => t`${team} (team)`,
+    project: (project) => t`Everyone in ${project}`,
+    unnamedProject: t`Everyone in a project you aren’t in`,
+  });
   const ref: AppMemberRef = { type: member.type, id: member.id };
   const change = async (
     action: (

@@ -17,6 +17,7 @@ import {
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { viaProjectSql } from "./project-sql.ts";
 import {
   ceilingOf,
   roleFromMembers,
@@ -28,9 +29,11 @@ import type { SharedRole } from "./sharing.ts";
 //
 // - the organization's admins, who manage every App, as builders;
 // - its owner, the person who created it, as a builder;
-// - the people and teams it is shared with (`app_members`), in the role
-//   it is shared with them in; someone in several (as a person and
-//   through a team) has the highest.
+// - the people, teams and projects it is shared with (`app_members`), in
+//   the role it is shared with them in; someone in several (as a person,
+//   through a team or through a project they are in) has the highest.
+//   Being in a project reaches only what is shared with it, never what is
+//   merely filed in it (projects.ts).
 //
 // The person's role in the organization caps their role in an App: only
 // admins and builders build, so someone whose role there is `user` works
@@ -348,7 +351,7 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
  * away yet.
  */
 export const appsOwnedOrSharedNow = (userId: string): SQL =>
-  sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})))))`;
+  sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, userId)})))`;
 
 /** That App `app` isn't removed (app-removal.ts) when the statement runs. */
 const kept = (app: AppId): SQL =>
@@ -366,7 +369,7 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
   if (isAdmin(by.role)) {
     return kept(app);
   }
-  const theirs = sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})))`;
+  const theirs = sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, by.userId)})`;
   const role = sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirs}))`;
   // As `openInItsStatus`, read when the statement runs.
   const builds = canBuild(by.role)

@@ -59,29 +59,40 @@ const workOf = (files: readonly ShardFile[]): number =>
 
 /**
  * How long a shard with `files` takes, roughly: its groups one after
- * another, each as long as its work spread over the files it runs at
- * once, and never shorter than its longest file, and the start of each
- * of its projects.
+ * another, each as long as the longest of its files run at once (their
+ * work spread over the files a runner works through together), each of
+ * its projects that runs its files one after another (`serial`: their
+ * work added up, beside the rest), and its longest file; and the start of
+ * each of its projects. A project runs its files one at a time when two
+ * at once starve each other, such as the compiler's builds, each of which
+ * starts Node, TypeScript and three bundles across the runner's CPUs.
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
   const groups = new Map<
     number,
-    { work: number; longest: number; serial: boolean }
+    { parallel: number; serial: Map<string, number>; longest: number }
   >();
   for (const file of files) {
     const group = groups.get(file.group) ?? {
-      work: 0,
+      parallel: 0,
+      serial: new Map<string, number>(),
       longest: 0,
-      serial: file.serial,
     };
-    group.work += costOf(file);
+    if (file.serial) {
+      group.serial.set(
+        file.project,
+        (group.serial.get(file.project) ?? 0) + costOf(file)
+      );
+    } else {
+      group.parallel += costOf(file);
+    }
     group.longest = Math.max(group.longest, costOf(file));
     groups.set(file.group, group);
   }
   let total =
     new Set(files.map(({ project }) => project)).size * projectStartSeconds;
-  for (const { work, longest, serial } of groups.values()) {
-    total += Math.max(serial ? work : work / concurrentFiles, longest);
+  for (const { parallel, serial, longest } of groups.values()) {
+    total += Math.max(parallel / concurrentFiles, ...serial.values(), longest);
   }
   return total;
 };

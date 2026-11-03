@@ -1,9 +1,5 @@
 // @vitest-environment happy-dom
-import type {
-  ChatProject,
-  ChatSummary,
-  ChatUpdate,
-} from "@grasp-os/shared/chat";
+import type { ChatSummary, ChatUpdate } from "@grasp-os/shared/chat";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -24,34 +20,22 @@ import { ChatMore } from "./chat-more.tsx";
 
 // The open chat's menu in the header, against core's chats as the page
 // reaches them over RPC, faked: it copies the chat as the thread shows it,
-// renames it from a dialog, moves it into a project and out, and deletes
-// it only once the person confirms, leaving it for a new chat.
+// renames it from a dialog, and deletes it only once the person confirms, leaving it for a new chat.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const question = "How long is leave?";
 const answer = "Twenty-five days a year.";
 
-const chatIn = (projectId: string | null): ChatSummary => ({
+const leave: ChatSummary = {
   id: "chat-1",
   title: "Leave",
   createdAt: "2026-10-20T08:00:00.000Z",
   lastAt: "2026-10-20T08:00:00.000Z",
   running: false,
-  projectId,
   appId: null,
   via: "web",
-});
-
-const projects: ChatProject[] = [
-  {
-    id: "project-1",
-    name: "HR",
-    goal: "",
-    createdAt: "2026-10-20T08:00:00.000Z",
-    documents: [],
-  },
-];
+};
 
 /** The chat as core's watch first answers it: a question and its answer. */
 const firstUpdate: ChatUpdate = {
@@ -124,10 +108,6 @@ const opened = async (
       await Promise.resolve();
       writes.push(`rename ${id} ${name}`);
     },
-    moveChat: async (id: string, projectId: string | null) => {
-      await Promise.resolve();
-      writes.push(`move ${id} ${projectId ?? "out"}`);
-    },
     remove: async (id: string) => {
       await Promise.resolve();
       writes.push(`remove ${id}`);
@@ -144,7 +124,7 @@ const opened = async (
     const shown = all.find(({ id }) => id === open) ?? chat;
     return (
       <Toaster>
-        <ChatMore chat={shown} projects={projects} sourceNames={new Map()} />
+        <ChatMore chat={shown} sourceNames={new Map()} />
       </Toaster>
     );
   };
@@ -253,7 +233,7 @@ describe("the open chat's menu", () => {
         },
       },
     });
-    await opened(chatIn(null));
+    await opened(leave);
     await choose("Copy as Markdown");
     expect(copied).toHaveLength(1);
     expect(copied[0]).toMatch(/^# Leave/u);
@@ -263,7 +243,7 @@ describe("the open chat's menu", () => {
   });
 
   it("renames the chat to the name typed in its dialog", async () => {
-    const { writes } = await opened(chatIn(null));
+    const { writes } = await opened(leave);
     await choose("Rename");
     const field = document.querySelector<HTMLInputElement>(
       'input[aria-label="Chat name"]'
@@ -286,23 +266,9 @@ describe("the open chat's menu", () => {
     expect(writes).toStrictEqual(["rename chat-1 Annual leave"]);
   });
 
-  it("moves the chat into a project, and out of the one it is in", async () => {
-    const outside = await opened(chatIn(null));
-    await choose("HR", "Move to project");
-    expect(outside.writes).toStrictEqual(["move chat-1 project-1"]);
-
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
-    const inside = await opened(chatIn("project-1"));
-    await choose("Take out of the project", "Move to project");
-    expect(inside.writes).toStrictEqual(["move chat-1 out"]);
-  });
-
   it("deletes the chat only once the person confirms, and leaves it for a new chat", async () => {
     setActiveChat("chat-1");
-    const { writes, router } = await opened(chatIn(null));
+    const { writes, router } = await opened(leave);
     await choose("Delete");
     expect(writes).toStrictEqual([]);
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
@@ -315,7 +281,7 @@ describe("the open chat's menu", () => {
   });
 
   it("copies and downloads nothing until the chat's messages are in", async () => {
-    const { answerWatch } = await opened(chatIn(null), { slow: true });
+    const { answerWatch } = await opened(leave, { slow: true });
     await openMenu();
     const disabled = (name: string): string | null =>
       byRole("menuitem", name).getAttribute("aria-disabled");
@@ -332,8 +298,8 @@ describe("the open chat's menu", () => {
   });
 
   it("closes the rename dialog when another chat opens, renaming neither", async () => {
-    const other: ChatSummary = { ...chatIn(null), id: "chat-2", title: "Pay" };
-    const { writes, router } = await opened(chatIn(null), { others: [other] });
+    const other: ChatSummary = { ...leave, id: "chat-2", title: "Pay" };
+    const { writes, router } = await opened(leave, { others: [other] });
     await choose("Rename");
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 

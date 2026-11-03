@@ -60,6 +60,7 @@ export const familyNamespaces = [
   "package",
   "permission",
   "place",
+  "project",
   "query",
   "request",
   "resource",

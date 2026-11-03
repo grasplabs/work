@@ -116,7 +116,7 @@ export interface App {
    * The team or person the App is made for, if a builder said: shown with
    * it, granting nothing. Whom it is open to is its members.
    */
-  audience: AppMemberRef | null;
+  audience: AppAudience | null;
   /**
    * What the App was made from: the blueprint's ID for an App made from
    * one, otherwise the label its creator gave, if any.
@@ -665,12 +665,22 @@ export interface AppVersionsApi {
 export const appRoleSchema = z.enum(["user", "builder"]);
 export type AppRole = z.infer<typeof appRoleSchema>;
 
-/** Whom an App is shared with: a person or a team of the organization. */
+/**
+ * Whom an App is shared with: a person or a team of the organization, or
+ * everyone in a project (@grasp-os/shared/projects).
+ */
 export const appMemberRefSchema = z.strictObject({
-  type: z.enum(["person", "team"]),
+  type: z.enum(["person", "team", "project"]),
   id: identifierSchema,
 });
 export type AppMemberRef = z.infer<typeof appMemberRefSchema>;
+
+/** Whom an App is made for: a person or a team of the organization. */
+export const appAudienceSchema = z.strictObject({
+  type: z.enum(["person", "team"]),
+  id: identifierSchema,
+});
+export type AppAudience = z.infer<typeof appAudienceSchema>;
 
 /** Sharing an App with someone, or changing their role in it. */
 export const newAppMemberSchema = z.strictObject({
@@ -690,7 +700,7 @@ export const appChangesSchema = z
     name: newAppSchema.shape.name.optional(),
     description: z.string().max(appLimits.descriptionLength).optional(),
     responsible: identifierSchema.optional(),
-    audience: appMemberRefSchema.nullable().optional(),
+    audience: appAudienceSchema.nullable().optional(),
     process: businessProcessSchema.nullable().optional(),
   })
   .refine((changes) => Object.keys(changes).length > 0, {
@@ -700,7 +710,10 @@ export type AppChanges = z.input<typeof appChangesSchema>;
 
 /** Someone an App is shared with. Times are ISO 8601. */
 export interface AppMember extends AppMemberRef {
-  /** The person's or team's name; null once they are gone. */
+  /**
+   * The person's, team's or project's name; null once they are gone, and
+   * for a project the person isn't in, whose name is its members' alone.
+   */
   name: string | null;
   role: AppRole;
   /** Who shared it with them, or last changed their role. */
@@ -744,10 +757,14 @@ export interface AppMembersApi {
   candidates: (app: string) => Promise<ShareCandidates>;
 }
 
-/** The organization's people and teams, by name, to share an App with. */
+/**
+ * The organization's people and teams, by name, to share an App with, and
+ * the projects the person builds, whose everyone it may be shared with.
+ */
 export interface ShareCandidates {
   people: { id: string; name: string }[];
   teams: { id: string; name: string }[];
+  projects: { id: string; name: string }[];
 }
 
 /**

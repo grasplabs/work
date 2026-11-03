@@ -81,8 +81,6 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Where a new chat opens: on the chat page, or where the person is (the dock). */
   opens: "page" | "here" = "page",
-  /** The project a new chat is made in, when it is started from one. */
-  projectId?: string,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
   { chatFor, onAsked }: AskOptions = noOptions
@@ -116,13 +114,8 @@ export const useAsk = (
   // next render.
   const sending = useRef(false);
   // A new chat made for a question that then failed to send: asking the
-  // same question again, from the same project or none, asks in it,
-  // rather than making another.
-  const unsent = useRef<{
-    id: string;
-    question: string;
-    projectId: string | undefined;
-  } | null>(null);
+  // same question again asks in it, rather than making another.
+  const unsent = useRef<{ id: string; question: string } | null>(null);
   const attach = (chosen: readonly File[]): void => {
     const problems = chosen.flatMap((file) => problemOf(file) ?? []);
     const added = chosen
@@ -166,18 +159,12 @@ export const useAsk = (
     const sent = await run(async (session) => {
       let id =
         chatId ??
-        (unsent.current?.question === question &&
-        unsent.current.projectId === projectId
-          ? unsent.current.id
-          : undefined);
+        (unsent.current?.question === question ? unsent.current.id : undefined);
       if (id === undefined && chatFor !== undefined) {
         id = await chatFor(session);
       }
       if (id === undefined) {
-        ({ id } = await session.chats.create(
-          titleOf(question),
-          projectId ?? null
-        ));
+        ({ id } = await session.chats.create(titleOf(question)));
         created = id;
       }
       const askedIn = id;
@@ -211,7 +198,7 @@ export const useAsk = (
       // The box keeps the question and says why it wasn't sent; a new chat
       // made for it waits to be asked in again, and shows in Chat's list.
       if (created !== undefined) {
-        unsent.current = { id: created, question, projectId };
+        unsent.current = { id: created, question };
         await router.invalidate();
       }
       return;

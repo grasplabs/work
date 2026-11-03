@@ -398,6 +398,54 @@ describe("sharing an App", () => {
     );
   });
 
+  it("leaves out of a project's page and counts an App shared with it that someone in it may no longer read", async () => {
+    const admin = await personApi("admin");
+    const owner = await personApi("builder");
+    const anna = await personApi("user");
+    const [readers, others] = await Promise.all([
+      newTeam(admin, [anna]),
+      newTeam(admin, []),
+    ]);
+    const app = await newApp(owner);
+    const collection = await collectionFor(admin, owner, app, readers);
+    const { id: project } = await owner.api.projects.create({
+      name: `Project ${unique()}`,
+    });
+    await owner.api.projects.addMember(project, {
+      type: "person",
+      id: anna.userId,
+      role: "user",
+    });
+    await owner.api.projects.file(project, {
+      item: { type: "app", id: app },
+      share: true,
+    });
+    const listed = async (who: Person) => {
+      const page = await who.api.projects.get(project);
+      return { apps: page.items.length, counted: page.counts.apps };
+    };
+    const before = await listed(anna);
+
+    // The collection the App read is now another team's alone.
+    await env.DB.prepare(
+      "UPDATE collection_teams SET team_id = ? WHERE collection_id = ?"
+    )
+      .bind(others, collection)
+      .run();
+
+    expect({
+      before,
+      anna: await listed(anna),
+      opens: await outcome(anna.api.apps.get(app)),
+      owner: await listed(owner),
+    }).toStrictEqual({
+      before: { apps: 1, counted: 1 },
+      anna: { apps: 0, counted: 0 },
+      opens: "app.unreadable",
+      owner: { apps: 1, counted: 1 },
+    });
+  });
+
   it("checks a large team's people at once, but not those no longer in the organization", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");

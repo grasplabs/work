@@ -24,6 +24,14 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import {
+  addProjectMember,
+  createProject,
+  fileItem,
+  removeProject,
+  removeProjectMember,
+  unfileItem,
+} from "../src/projects.ts";
+import {
   createTriggerResource,
   setTriggerEnabled,
   updateTriggerVersion,
@@ -563,6 +571,63 @@ describe("authority changing under a start", () => {
       staleMembers: "workflow.start_denied",
       sameShare: "ok",
       deleted: "workflow.start_denied",
+    });
+  });
+
+  it("refuses a start decided through a project once its person, the workflow or the project is taken away", async () => {
+    const ada = await person("builder");
+    const [bob, cy, dee] = await Promise.all([
+      person("user"),
+      person("user"),
+      person("user"),
+    ]);
+    const workflow = await workflowOf(ada);
+    /** A project of Ada's, with `who` in it, the workflow shared with it. */
+    const sharedThrough = async (who: Person): Promise<string> => {
+      const { id } = await createProject(env, ada, { name: `P ${unique()}` });
+      await addProjectMember(env, ada, id, {
+        type: "person",
+        id: who.userId,
+        role: "user",
+      });
+      await fileItem(env, ada, id, {
+        item: { type: "workflow", id: workflow.id },
+        share: true,
+      });
+      return id;
+    };
+    const [takenOut, unfiled, deleted] = await Promise.all([
+      sharedThrough(bob),
+      sharedThrough(cy),
+      sharedThrough(dee),
+    ]);
+    // Each decided just before its own change: one change moves the
+    // workflow's generation for every start decided before it.
+    const bobs = await decide(personOf(bob), workflow.id, 1);
+    await removeProjectMember(env, ada, takenOut, {
+      type: "person",
+      id: bob.userId,
+    });
+    const afterTakenOut = await outcome(admitWorkflowStart(env, bobs));
+    const cys = await decide(personOf(cy), workflow.id, 1);
+    await unfileItem(env, ada, unfiled, { type: "workflow", id: workflow.id });
+    const afterUnfiled = await outcome(admitWorkflowStart(env, cys));
+    const dees = await decide(personOf(dee), workflow.id, 1);
+    await removeProject(env, ada, deleted);
+    const afterDeleted = await outcome(admitWorkflowStart(env, dees));
+
+    expect({
+      takenOut: afterTakenOut,
+      unfiled: afterUnfiled,
+      deleted: afterDeleted,
+      startsAgain: await outcome(
+        decideWorkflowStart(env, personOf(bob), workflow.id, request())
+      ),
+    }).toStrictEqual({
+      takenOut: "workflow.start_denied",
+      unfiled: "workflow.start_denied",
+      deleted: "workflow.start_denied",
+      startsAgain: "workflow.resource_unavailable",
     });
   });
 });

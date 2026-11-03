@@ -464,7 +464,6 @@ describe("chat agent", () => {
       id,
       undefined,
       undefined,
-      undefined,
       "teams"
     );
     await fakeProvider(says("Hello."));
@@ -2494,7 +2493,6 @@ describe("chat agent code output", () => {
       "Questions",
       userId,
       id,
-      undefined,
       undefined,
       undefined,
       "teams"

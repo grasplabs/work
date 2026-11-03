@@ -24,8 +24,6 @@ import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { alias } from "drizzle-orm/sqlite-core";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { teamAccessMayHaveDropped, teamGone } from "../access-revocations.ts";
@@ -38,7 +36,6 @@ import {
   accounts,
   invitations,
   jwks,
-  memberRemovals,
   members,
   organizations,
   sessions,
@@ -48,7 +45,6 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
 import {
   isErasedEmail,
   isErasedSubject,
@@ -63,14 +59,16 @@ import {
   providerIds,
 } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
+import { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
 import { keyIdOf, keyRing } from "./token-keys.ts";
 import type { KeyRing, KeyUse } from "./token-keys.ts";
 
+// Kept apart (membership-sql.ts), with nothing but the schema imported, so
+// access checks read by the revocations this file reaches can use them.
+export { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
+
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
-
-/** The deployment's one organization, created on the first sign-in. */
-export const organizationId = "organization";
 
 const hour = 60 * 60 * 1000;
 /**
@@ -136,20 +134,6 @@ const authLogger = {
 };
 
 /**
- * That an admin hasn't removed `userId` (an ID, or the column holding one)
- * from the organization, as a SQL condition. A removal is kept after the
- * membership goes, so every read and write of a membership checks it:
- * nothing brings a removed person back.
- */
-export const notRemoved = (
-  userId: string | SQLiteColumn
-): SQL => sql`NOT EXISTS (
-  SELECT 1 FROM ${memberRemovals}
-  WHERE ${memberRemovals.organizationId} = ${organizationId}
-    AND ${memberRemovals.userId} = ${userId}
-)`;
-
-/**
  * `userId`'s current membership of the organization, as a SQL condition on
  * `members`: none once an admin removed them.
  */
@@ -178,26 +162,6 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
     AND ${members.role} = 'admin'
     AND ${notRemoved(members.userId)}
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
-)`;
-
-/** `members`, as `activeMember` reads it: apart from any caller's. */
-const activeMembership = alias(members, "active_membership");
-
-/**
- * That `userId` (an ID, or a column holding one) is an active member of
- * the organization now, with one of `roles` if given, as a SQL condition.
- * Its own read of `members` is aliased: a caller's column of `members`
- * (a query on members itself) is that caller's row, never this read's.
- */
-export const activeMember = (
-  userId: string | SQLiteColumn,
-  withRoles?: readonly string[]
-): SQL => sql`EXISTS (
-  SELECT 1 FROM ${members} AS ${activeMembership}
-  WHERE ${activeMembership.organizationId} = ${organizationId}
-    AND ${activeMembership.userId} = ${userId}
-    ${withRoles === undefined ? sql`` : sql`AND ${inList(activeMembership.role, withRoles)}`}
-    AND ${notRemoved(activeMembership.userId)}
 )`;
 
 /**
