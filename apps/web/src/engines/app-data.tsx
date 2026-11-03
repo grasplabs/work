@@ -328,17 +328,22 @@ const ImportDialog = ({
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
   const [result, setResult] = useState<AppDataImportResult>();
   const choose = async (file: File | undefined) => {
+    // Whatever the last file showed goes at once: Import waits for this
+    // one's preview, and stays off should it fail.
+    setCsv(undefined);
+    setPreview(undefined);
+    setMapping({});
+    setResult(undefined);
     if (file === undefined) {
       return;
     }
     const text = await file.text();
-    setCsv(text);
-    setResult(undefined);
     const read = await run(
       async (session) =>
         await session.apps.data.previewImport(app, table.name, text)
     );
     if (read !== undefined) {
+      setCsv(text);
       setPreview(read);
       setMapping(read.mapping);
     }

@@ -74,6 +74,14 @@ const shown = async () => {
         await Promise.resolve();
         return { changes: [], next: null };
       },
+      // A file whose text says "refused" doesn't read, as core refuses one.
+      previewImport: async (_app: string, _table: string, csv: string) => {
+        await Promise.resolve();
+        if (csv.includes("refused")) {
+          throw new Error("That isn't a valid request for this App's data.");
+        }
+        return { columns: ["title"], rows: 1, mapping: { title: "title" } };
+      },
     },
   };
   const core = {
@@ -140,6 +148,31 @@ const press = async (name: string) => {
   await settled();
 };
 
+/** Chooses a CSV file holding `text` in the import dialog, as a person does. */
+const choose = async (text: string) => {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+  if (input === null) {
+    throw new Error("No file input");
+  }
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File([text], "notes.csv", { type: "text/csv" })],
+  });
+  await act(async () => {
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** Whether the dialog's Import button may be pressed. */
+const importable = (): boolean => {
+  const button = [...document.querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === "Import"
+  );
+  return button !== undefined && !button.disabled;
+};
+
 describe("a domain's data page", () => {
   afterEach(takenDown);
 
@@ -158,5 +191,17 @@ describe("a domain's data page", () => {
     await press("Open second");
     await press("second-bare-1");
     expect(document.body.textContent).toContain("Record second-bare-1");
+  });
+
+  it("forgets a file's preview as soon as another is chosen, Import staying off until that one reads", async () => {
+    await shown();
+    await settled();
+    await press("Import CSV");
+    await choose("title\nFirst\n");
+    expect(importable()).toBeTruthy();
+
+    await choose("title\nrefused\n");
+    expect(importable()).toBeFalsy();
+    expect(document.body.textContent).not.toContain("1 row to import.");
   });
 });

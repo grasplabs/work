@@ -7230,9 +7230,12 @@ export class StoreHost {
       .get();
     // Retention: the history's next due, and an import's staged rows
     // never landed.
+    // The oldest by its index: a seek, never a scan.
     const staged = this.#db
-      .select({ at: min(importRows.stagedAt) })
+      .select({ at: importRows.stagedAt })
       .from(importRows)
+      .orderBy(asc(importRows.stagedAt))
+      .limit(1)
       .get();
     const times = [
       historyDueAt(this.#db, Date.now()),

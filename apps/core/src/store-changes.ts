@@ -9,7 +9,7 @@ import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";
-import { and, asc, desc, eq, inArray, lt, max, min, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -219,16 +219,21 @@ export const recordChangesIn = (
  * still count, an upper bound too): cheap enough for every schedule.
  */
 const overBound = (db: DrizzleSqliteDODatabase): boolean => {
-  const span = db
-    .select({ first: min(recordChanges.id), last: max(recordChanges.id) })
-    .from(recordChanges)
-    .get();
+  // Each end its own seek of the primary key: `min` and `max` in one
+  // query would scan the whole history, and every schedule asks this.
+  const end = (order: typeof asc) =>
+    db
+      .select({ id: recordChanges.id })
+      .from(recordChanges)
+      .orderBy(order(recordChanges.id))
+      .limit(1)
+      .get()?.id;
+  const first = end(asc);
+  const last = end(desc);
   const bytes =
     db.select({ bytes: store.historyBytes }).from(store).get()?.bytes ?? 0;
   const count =
-    span?.first === null || span?.first === undefined || span.last === null
-      ? 0
-      : span.last - span.first + 1;
+    first === undefined || last === undefined ? 0 : last - first + 1;
   return (
     count > recordChangeLimits.maxEntries || bytes > recordChangeLimits.maxBytes
   );
@@ -243,9 +248,12 @@ export const historyDueAt = (
   db: DrizzleSqliteDODatabase,
   now: number
 ): number | null => {
+  // The oldest by its index: a seek, never a scan.
   const oldest = db
-    .select({ at: min(recordChanges.changedAt) })
+    .select({ at: recordChanges.changedAt })
     .from(recordChanges)
+    .orderBy(asc(recordChanges.changedAt))
+    .limit(1)
     .get()?.at;
   if (oldest === null || oldest === undefined) {
     return null;
