@@ -13,7 +13,7 @@ import { tableIdLiteral, textExpression } from "./store-expressions.ts";
 // becomes a full-text index in its store (store-host.ts), and the text an
 // FTS5 query of it is given (store-queries.ts reads it).
 //
-// Each search index is a contentless FTS5 table of its own: one column per
+// Each search index is an FTS5 table of its own: one column per
 // text field (`f0`, `f1`, ...) and, for a table read by owner only, its
 // records' owner (`owner`), so a search narrows to the caller's records
 // inside the index rather than ranking every owner's. Its rows are keyed
@@ -29,13 +29,13 @@ import { tableIdLiteral, textExpression } from "./store-expressions.ts";
 // number is still there to find; the migration's own trigger forgets the
 // number after). Nothing in the write path calls this module.
 //
-// A contentless FTS5 index only marks a removed row deleted: its words
-// stay in the index's segments until they are merged. So a removal also
-// marks its index in `sdk_fts_pending`, and the store's alarm runs FTS5's
-// `optimize` on each index marked (`optimizeSearches`), after which the
-// text of deleted and changed records is gone from the store's pages. A
-// deleted store's purge drops every search index, its triggers and shadow
-// tables before its records (`dropSearches`).
+// The index keeps its own copy of the text it holds, and FTS5's
+// `secure-delete` is on for it: a record deleted or changed has its old
+// words taken out of the index's pages in the same write, at that
+// record's cost (a contentless index would only mark them deleted until a
+// merge of the whole index, and can't securely delete). A deleted store's
+// purge drops every search index, its triggers and shadow tables before
+// its records (`dropSearches`).
 //
 // Search indexes, like indexes, are never retired yet: a table's index
 // that no retained version declares any more stays, kept in step, until
@@ -78,16 +78,6 @@ const searchPrefix = "sdk_fts_";
 
 /** Hex digits of a definition's SHA-256 a name keeps: 128 bits. */
 const nameHashLength = 32;
-
-/** A search index's physical name, and nothing else. */
-const searchName = /^sdk_fts_[0-9a-f]{32}$/u;
-
-/**
- * The search indexes that had records removed since their last
- * `optimize`, by name: made with the first search index, under the
- * prefix the purge drops.
- */
-const pendingTable = "sdk_fts_pending";
 
 /**
  * How text is split into words: Unicode letters and digits, case folded,
@@ -152,10 +142,8 @@ const physicalSearch = async (
   ];
   const insert = (row: string): string =>
     `INSERT INTO ${name} (rowid, ${columns.join(", ")}) VALUES (${docOf(row)}, ${valuesOf(ownerScoped, fields, row).join(", ")});`;
-  // A removal leaves the words in the index's segments until they are
-  // merged: the index is marked for the alarm's `optimize`.
   const remove = (row: string): string =>
-    `DELETE FROM ${name} WHERE rowid = ${docOf(row)}; INSERT OR IGNORE INTO ${pendingTable} (name) VALUES ('${name}');`;
+    `DELETE FROM ${name} WHERE rowid = ${docOf(row)};`;
   const number =
     "INSERT OR IGNORE INTO sdk_search_docs (doc_table, doc_record) VALUES (new.table_id, new.record_id);";
   return {
@@ -167,7 +155,7 @@ const physicalSearch = async (
       {
         name,
         type: "table",
-        sql: `CREATE VIRTUAL TABLE ${name} USING fts5(${columns.join(", ")}, content='', contentless_delete=1, tokenize='${tokenizer}')`,
+        sql: `CREATE VIRTUAL TABLE ${name} USING fts5(${columns.join(", ")}, tokenize='${tokenizer}')`,
       },
       {
         name: `${name}_on_insert`,
@@ -186,6 +174,9 @@ const physicalSearch = async (
       },
     ],
     fill: [
+      // Kept in the index's own config: a removal takes its words out of
+      // the index's pages at once, not only marks them deleted.
+      `INSERT INTO ${name} (${name}, rank) VALUES ('secure-delete', 1)`,
       `INSERT OR IGNORE INTO sdk_search_docs (doc_table, doc_record) SELECT table_id, record_id FROM sdk_records WHERE table_id = ${table}`,
       `INSERT INTO ${name} (rowid, ${columns.join(", ")}) SELECT ${docOf("sdk_records")}, ${valuesOf(ownerScoped, fields, "sdk_records").join(", ")} FROM sdk_records WHERE table_id = ${table}`,
     ],
@@ -274,11 +265,6 @@ export const installSearches = (
       wanted: missing.length,
     });
   }
-  if (missing.length > 0) {
-    sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${pendingTable} (name TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID`
-    );
-  }
   for (const search of missing) {
     for (const object of search.objects) {
       sql.exec(object.sql);
@@ -289,66 +275,18 @@ export const installSearches = (
   }
 };
 
-/** Whether the store holds the table of search indexes due an `optimize`. */
-const hasPending = (sql: Pick<SqlStorage, "exec">): boolean =>
-  sql
-    .exec(
-      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '${pendingTable}'`
-    )
-    .toArray().length > 0;
-
-/** Whether a search index had records removed since its last `optimize`. */
-export const searchesPending = (sql: Pick<SqlStorage, "exec">): boolean =>
-  hasPending(sql) &&
-  sql.exec(`SELECT 1 FROM ${pendingTable} LIMIT 1`).toArray().length > 0;
-
 /**
- * Runs FTS5's `optimize` on each search index that had records removed,
- * each in a transaction of its own: it merges the index's segments into
- * one, so the words of removed and changed records are gone from the
- * store's pages, not only marked deleted. The alarm's.
- */
-export const optimizeSearches = (storage: DurableObjectStorage): void => {
-  const { sql } = storage;
-  if (!hasPending(sql)) {
-    return;
-  }
-  const names = sql
-    .exec<{ name: string }>(`SELECT name FROM ${pendingTable}`)
-    .toArray()
-    .map(({ name }) => name);
-  for (const name of names) {
-    storage.transactionSync(() => {
-      const exists =
-        searchName.test(name) &&
-        sql
-          .exec(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            name
-          )
-          .toArray().length > 0;
-      if (exists) {
-        sql.exec(`INSERT INTO ${name} (${name}) VALUES ('optimize')`);
-      }
-      sql.exec(`DELETE FROM ${pendingTable} WHERE name = ?`, name);
-    });
-  }
-};
-
-/**
- * SQL that is 1 while the store holds any search index object (an index,
- * its triggers, the table of those due an `optimize`): what a deleted
- * store's purge must still drop.
+ * SQL that is 1 while the store holds any search index object (an index
+ * or its triggers): what a deleted store's purge must still drop.
  */
 export const searchObjectsLeft =
   "EXISTS (SELECT 1 FROM sqlite_master WHERE name LIKE 'sdk\\_fts\\_%' ESCAPE '\\')";
 
 /**
  * Drops every search index of a deleted store, with its triggers and
- * shadow tables, and the table of those due an `optimize`: run by its
- * purge before its records go, so no deleted record's text is kept in
- * the store's pages and no trigger runs for the records the purge
- * removes.
+ * shadow tables: run by its purge before its records go, so no deleted
+ * record's text is kept in the store's pages and no trigger runs for the
+ * records the purge removes.
  */
 export const dropSearches = (sql: Pick<SqlStorage, "exec">): void => {
   const objects = sql
@@ -367,7 +305,6 @@ export const dropSearches = (sql: Pick<SqlStorage, "exec">): void => {
       sql.exec(`DROP TABLE IF EXISTS "${name}"`);
     }
   }
-  sql.exec(`DROP TABLE IF EXISTS ${pendingTable}`);
 };
 
 /** A word as an FTS5 string: in double quotes, its own doubled. */

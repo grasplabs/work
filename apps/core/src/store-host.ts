@@ -178,9 +178,7 @@ import { recordReferences } from "./store-references.ts";
 import {
   dropSearches,
   installSearches,
-  optimizeSearches,
   planSearches,
-  searchesPending,
   searchObjectsLeft,
 } from "./store-search.ts";
 
@@ -6579,13 +6577,6 @@ export class StoreHost {
       failed = true;
       log.error("store.cascade_failed", errorFields(error));
     }
-    // After the cascades, whose deletions mark search indexes due.
-    try {
-      optimizeSearches(this.ctx.storage);
-    } catch (error) {
-      failed = true;
-      log.error("store.search_optimize_failed", errorFields(error));
-    }
     try {
       await this.files.sweep(this.#storeId());
     } catch (error) {
@@ -6722,8 +6713,6 @@ export class StoreHost {
       )
       .get();
     const times = [
-      // A search index with records removed: its `optimize` is due.
-      searchesPending(this.ctx.storage.sql) ? Date.now() : null,
       cascading === undefined ? null : Date.now(),
       typeof failedJob?.at === "number"
         ? failedJob.at + cascadeFailedRetryMs

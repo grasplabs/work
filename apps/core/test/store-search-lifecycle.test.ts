@@ -132,10 +132,11 @@ const pagesHolding = async (store: OpenStore, word: string): Promise<number> =>
     if (index === undefined) {
       throw new Error("The store holds no search index");
     }
+    // Its segments, and its own copy of the text (one column: `title`).
     return Number(
       storage.sql
         .exec(
-          `SELECT count(*) AS n FROM ${index.name}_data WHERE instr(block, CAST(? AS BLOB)) > 0`,
+          `SELECT (SELECT count(*) FROM ${index.name}_data WHERE instr(block, CAST(?1 AS BLOB)) > 0) + (SELECT count(*) FROM ${index.name}_content WHERE instr(CAST(c0 AS BLOB), CAST(?1 AS BLOB)) > 0) AS n`,
           word
         )
         .one().n
@@ -207,30 +208,39 @@ describe("a search's pages", () => {
 });
 
 describe("a search index's text", () => {
-  it("is gone from the store's pages once the alarm optimizes the index after a deletion", async () => {
+  it("is gone from the store's pages as soon as a change or deletion commits", async () => {
     const store = await newStore();
     const { schemaHash } = await store.defineTables(v1);
     const [id = ""] = await insert(store, schemaHash, "zyzzyva");
     const stored = await pagesHolding(store, "zyzzyva");
     await commit(store, schemaHash, [
-      { op: "delete", table: "notes", id, expectedRevision: 1 },
+      {
+        op: "patch",
+        table: "notes",
+        id,
+        fields: { title: "quokka" },
+        expectedRevision: 1,
+      },
     ]);
-    const deleted = {
-      found: await found(store, schemaHash, "zyzzyva"),
-      pages: await pagesHolding(store, "zyzzyva"),
+    const changed = {
+      old: await pagesHolding(store, "zyzzyva"),
+      found: await found(store, schemaHash, "quokka"),
     };
-    await inHost(store, async (host) => {
-      await host.runAlarm({});
-    });
+    await commit(store, schemaHash, [
+      { op: "delete", table: "notes", id, expectedRevision: 2 },
+    ]);
     expect({
       stored,
-      deleted,
-      optimized: await pagesHolding(store, "zyzzyva"),
+      changed,
+      deleted: {
+        found: await found(store, schemaHash, "quokka"),
+        pages: await pagesHolding(store, "quokka"),
+      },
     }).toStrictEqual({
-      stored: 1,
-      // Found no more, but still in the index's pages until merged.
-      deleted: { found: [], pages: 1 },
-      optimized: 0,
+      // In the index's segments and in its copy of the text.
+      stored: 2,
+      changed: { old: 0, found: ["quokka"] },
+      deleted: { found: [], pages: 0 },
     });
   });
 
