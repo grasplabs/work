@@ -35,7 +35,7 @@ const encoded = (value: unknown): unknown => {
 
 /**
  * Answers the page's calls that name a method (as Cap'n Web writes its
- * path, such as `["onboardingStaff","aiUse"]`) with `answers`' value for
+ * path, such as `["onboarding","view"]`) with `answers`' value for
  * it, in place of core's. The calls still reach core, which checks who
  * makes them; only a call core answered gets the seeded answer, so one
  * core refuses stays refused. For what the local stack can't come to

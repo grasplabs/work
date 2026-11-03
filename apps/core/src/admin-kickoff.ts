@@ -30,9 +30,8 @@ import { onboardingStore } from "./onboarding/store.ts";
 
 // The kickoff brought in from Grasp's admin (GRA-1099,
 // `@grasp-os/shared/admin-kickoff`, which lists what can go wrong): the
-// transcript is read and kept exactly as the onboarding staff RPC did
-// (onboarding/staff-rpc.ts), so what it brought seeds Stephen's context
-// the same way, by the staff member the admin names.
+// transcript is read and kept in the onboarding's store, so what it
+// brought seeds Stephen's context, by the staff member the admin names.
 //
 // - Only the admin's request signed for this purpose with this company's
 //   key reaches it (console-signed.ts); anything else is 401 or 403.

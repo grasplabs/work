@@ -40,7 +40,8 @@ import type { LinkAnswer, LinkRefusal } from "./store.ts";
 //   Deleting works at any time on the device the link opened on.
 // - Someone taken off the list (L7): their link, and what they said, go
 //   with them, and their link answers as one that never was (L10).
-// - A lost device (L9): staff give a new start (staff-rpc.ts).
+// - A lost device (L9): staff give a new start from Grasp's admin
+//   (admin-command.ts).
 // - Floods (L11): the router limits this endpoint per address; the store
 //   counts calls per link.
 // - The company learning who talked, and when: what someone does on their

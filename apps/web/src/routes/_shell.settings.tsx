@@ -46,7 +46,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // (its list is for who may approve packages); the account's for everyone.
 // Core checks the role on every call whatever is listed. Onboarding is the
 // company admin's own view of the interviews, as their onboarding shows
-// it; what only Grasp's staff do there is their own area (`/onboarding`).
+// it; what only Grasp's staff do there is in Grasp's admin.
 
 type SettingsPath =
   | "/settings/workspace"

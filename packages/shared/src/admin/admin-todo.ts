@@ -7,9 +7,6 @@ import { present } from "./present.ts";
  * What the stage an organization is at asks of Grasp, as a list to tick off: everything that has
  * to be in place before the next stage, done or not, with how far it is. What needs Grasp from
  * outside that stage (the contract, AI use, a sign-in that stopped) is kept apart. Pure.
- *
- * Grasp OS's onboarding area in a client's deployment works its stages and needs out the same way,
- * adapted to what core's store holds (apps/core/src/onboarding/staff-area.ts).
  */
 
 export type Todo =

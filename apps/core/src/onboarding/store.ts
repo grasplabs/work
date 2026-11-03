@@ -37,11 +37,9 @@ import type {
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
-  firstInterviewer,
   minTeamShown,
   planSchema,
   remindAfterWorkingDays,
-  rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -66,24 +64,12 @@ import type {
   DocumentReading,
   OnboardingDocument,
 } from "@grasp-os/shared/onboarding-documents";
-import type {
-  OrganizationChange,
-  StaffOrganization,
-} from "@grasp-os/shared/onboarding-organization";
 import {
   drawnWorkSchema,
-  logPageMax,
   orgRulesSchema,
   stephenSetupSchema,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
-  LogActor,
-  LogFilter,
-  StaffAgreements,
-  StaffLog,
-  StaffLogEntry,
-  StaffNote,
-  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -146,7 +132,6 @@ import {
   documents,
   kickoff,
   links,
-  notes,
   onboarding,
   participations,
   people,
@@ -195,8 +180,6 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
-import { organizationOf, rosterAfter } from "./organization.ts";
-import type { ListChange, ListRefusal } from "./organization.ts";
 import { referralOf, referred } from "./referral.ts";
 import {
   agreementsIn,
@@ -747,54 +730,6 @@ const documentOf = (row: {
 /** How the log names someone who did something on their own interview link. */
 const interviewee = "interviewee";
 
-/** Who did what the log holds, as the staff's log names them. */
-const logActorOf = (by: string): LogActor => {
-  if (by.startsWith("staff:")) {
-    return "staff";
-  }
-  if (by.startsWith("person:")) {
-    return "company";
-  }
-  return by === interviewee ? "person" : "grasp";
-};
-
-/** The log's rows `actor` did, as SQL: the inverse of `logActorOf`. */
-const byActor = (actor: LogActor): SQL => {
-  const staff = like(events.by, "staff:%");
-  const company = like(events.by, "person:%");
-  const person = eq(events.by, interviewee);
-  if (actor === "staff") {
-    return staff;
-  }
-  if (actor === "company") {
-    return company;
-  }
-  return actor === "person" ? person : not(or(staff, company, person) ?? staff);
-};
-
-/**
- * The log's rows `filter` keeps, as SQL. `what` is a dotted name or its
- * start, compared by prefix rather than `LIKE`, where its `_` would match
- * any character. `about` holds the people of the team.
- */
-const logWhere = (filter: LogFilter, about: string[] | undefined) =>
-  and(
-    filter.actor === undefined ? undefined : byActor(filter.actor),
-    filter.what === undefined
-      ? undefined
-      : or(
-          eq(events.what, filter.what),
-          eq(
-            sql`substr(${events.what}, 1, ${filter.what.length + 1})`,
-            `${filter.what}.`
-          )
-        ),
-    about === undefined ? undefined : inArray(events.about, about),
-    filter.day === undefined
-      ? undefined
-      : eq(sql`substr(${events.at}, 1, 10)`, filter.day)
-  );
-
 /** The waits for his voice are kept to the tenth of a second, rounded up. */
 const waitStepMs = 100;
 
@@ -841,109 +776,6 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   typed: progress.mode === "type",
   interviewer: progress.interviewer ?? null,
 });
-
-/** How someone's interview was held, as staff see it: never what was said. */
-const howHeld = (
-  progress: InterviewProgress | null
-): Pick<StaffInterview, "state" | "mode" | "rating" | "interviewer"> =>
-  progress === null
-    ? { state: null, mode: null, rating: null, interviewer: null }
-    : {
-        state: progress.person,
-        mode: progress.mode,
-        rating: progress.rating ?? null,
-        interviewer: progress.interviewer ?? firstInterviewer,
-      };
-
-/** How much someone said and how much was written down: numbers, never what. */
-const countsOfSaid = (
-  progress: InterviewProgress | null
-): { said: number; facts: number; out: number } => {
-  const facts = progress?.facts ?? [];
-  return {
-    said: (progress?.lines ?? []).filter(({ from }) => from === "person")
-      .length,
-    facts: facts.filter(({ out }) => out !== true).length,
-    out: facts.filter(({ out }) => out === true).length,
-  };
-};
-
-/** Why staff's change to the organization wasn't made. */
-export type OrganizationRefusal =
-  | ListRefusal
-  | "onboarding.invalid"
-  | "onboarding.no_roster"
-  | "onboarding.no_work"
-  | "onboarding.not_now"
-  | "onboarding.no_map";
-
-/** A change to the list as the log and the audit log name it, and whom it was about. */
-const listChangeOf = (
-  change: ListChange,
-  before: Roster,
-  id: string
-): {
-  action: string;
-  detail: Record<string, AuditDetailValue>;
-  about: string | null;
-} => {
-  if (change.kind === "addTeam") {
-    return {
-      action: "onboarding.team.added",
-      detail: { team: id },
-      about: null,
-    };
-  }
-  if (change.kind === "editTeam") {
-    return {
-      action: "onboarding.team.changed",
-      detail: { team: change.team },
-      about: null,
-    };
-  }
-  if (change.kind === "takesPart") {
-    return {
-      action: change.takes
-        ? "onboarding.team.asked_in"
-        : "onboarding.team.left_out",
-      detail: { team: change.team },
-      about: null,
-    };
-  }
-  if (change.kind === "lead") {
-    return {
-      action: "onboarding.team.lead_set",
-      detail: { team: change.team },
-      about: change.person,
-    };
-  }
-  if (change.kind === "addPerson") {
-    return { action: "onboarding.person.added", detail: {}, about: id };
-  }
-  if (change.kind === "editPerson") {
-    const was = before.people.find(({ id: of }) => of === change.person);
-    return {
-      action:
-        was?.team === change.team
-          ? "onboarding.person.changed"
-          : "onboarding.person.moved",
-      detail: {},
-      about: change.person,
-    };
-  }
-  if (change.kind === "away") {
-    return {
-      action: change.away ? "onboarding.person.away" : "onboarding.person.back",
-      detail: {},
-      about: change.person,
-    };
-  }
-  return {
-    action: "onboarding.person.removed",
-    detail: {},
-    about: change.person,
-  };
-};
 
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1755,11 +1587,6 @@ export class Onboarding extends DurableObject<Env> {
     return rewritten;
   }
 
-  /** `person`'s interview as kept now, or null: what a purge reads again (interview-erasure.ts). */
-  interviewSaid(person: string): InterviewProgress | null {
-    return this.#held(person);
-  }
-
   /**
    * Keeps `person`'s interview as a Knowledge content purge rewrote it
    * (`after`), only if it is still as the purge read it (`before`): one
@@ -2063,70 +1890,38 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Grasp's staff's own text, as a Knowledge term purge reaches it
-   * (staff-text-erasure.ts): their notes, and how Stephen is set up (JSON,
-   * as stored). Never served otherwise.
+   * (staff-text-erasure.ts): how Stephen is set up (JSON, as stored).
+   * Never served otherwise.
    */
-  staffTextsSaid(): {
-    notes: { id: number; text: string }[];
-    setup: string | null;
-  } {
+  staffTextsSaid(): { setup: string | null } {
     const [row] = this.#db
       .select({ stephen: onboarding.stephen })
       .from(onboarding)
       .all();
-    return {
-      notes: this.#db
-        .select({ id: notes.id, text: notes.text })
-        .from(notes)
-        .all(),
-      setup: row?.stephen ?? null,
-    };
+    return { setup: row?.stephen ?? null };
   }
 
   /**
-   * Keeps staff's own text as a Knowledge term purge rewrote it
-   * (`after`), only if what it rewrote is still as it read it (`before`):
-   * one saved since is left to the purge to read again. A note it leaves
-   * as it is isn't written. In the audit log by counts alone. Whether it
-   * was rewritten.
+   * Keeps Stephen's setup as a Knowledge term purge rewrote it (`after`),
+   * only if it is still as the purge read it (`before`): one saved since
+   * is left to the purge to read again. In the audit log without its
+   * words. Whether it was rewritten.
    */
   rewriteStaffTexts(
-    before: {
-      notes: readonly { id: number; text: string }[];
-      setup: string | null;
-    },
-    after: {
-      notes: readonly { id: number; text: string }[];
-      setup: string | null;
-    },
+    before: { setup: string | null },
+    after: { setup: string | null },
     by: AuditActor
   ): boolean {
-    const was = new Map(before.notes.map(({ id, text }) => [id, text]));
-    const changed = after.notes.filter(({ id, text }) => was.get(id) !== text);
-    const setupChanged = after.setup !== before.setup;
-    if (changed.length === 0 && !setupChanged) {
+    if (after.setup === before.setup) {
       return true;
     }
     let landed = false;
     this.ctx.storage.transactionSync(() => {
-      const now = this.staffTextsSaid();
-      const current = new Map(now.notes.map(({ id, text }) => [id, text]));
-      if (
-        changed.some(({ id }) => current.get(id) !== was.get(id)) ||
-        (setupChanged && now.setup !== before.setup)
-      ) {
+      if (this.staffTextsSaid().setup !== before.setup) {
         return;
       }
-      for (const { id, text } of changed) {
-        this.#db.update(notes).set({ text }).where(eq(notes.id, id)).run();
-      }
-      if (setupChanged) {
-        this.#db.update(onboarding).set({ stephen: after.setup }).run();
-      }
-      this.#changed(by, "onboarding.staff_text.purged", {
-        notes: changed.length,
-        setup: setupChanged ? 1 : 0,
-      });
+      this.#db.update(onboarding).set({ stephen: after.setup }).run();
+      this.#changed(by, "onboarding.staff_text.purged", { setup: 1 });
       landed = true;
     });
     if (landed) {
@@ -3157,212 +2952,7 @@ export class Onboarding extends DurableObject<Env> {
     return this.review();
   }
 
-  /**
-   * The organization as Grasp's staff see it (organization.ts): every team
-   * with its people, its map, when its links go out and what needs a look.
-   * Empty before there is a list.
-   */
-  staffOrganization(now: string = new Date().toISOString()): StaffOrganization {
-    const roster = this.#roster();
-    if (roster === null) {
-      return { teams: [], people: [], open: this.isOpen() };
-    }
-    const states = this.#db.select().from(interviewStates).all();
-    return organizationOf(
-      {
-        roster,
-        plan: this.#row().plan,
-        open: this.isOpen(),
-        links: new Map(
-          this.#db
-            .select({
-              person: links.person,
-              sentAt: links.sentAt,
-              openedAt: links.openedAt,
-            })
-            .from(links)
-            .all()
-            .map(({ person, ...link }) => [person, link])
-        ),
-        interviews: new Map(
-          states.map(({ person, startedAt, completedAt, agreedAt }) => [
-            person,
-            { startedAt, completedAt, agreedAt },
-          ])
-        ),
-        works: this.#db
-          .select()
-          .from(works)
-          .orderBy(asc(works.team), asc(works.position))
-          .all()
-          .map((row) => ({ ...row, doers: doersOf(row.doers) })),
-        asked: new Map(
-          this.#db
-            .select()
-            .from(askedAbout)
-            .all()
-            .map(({ person, work }) => [person, work])
-        ),
-        mapped: this.#linkFacts().mapped,
-      },
-      now
-    );
-  }
-
-  /**
-   * Puts the list right, one change at a time, as Grasp's staff make it
-   * (organization.ts `rosterAfter`): links already out stay out, and
-   * whoever takes part now and has none gets one when it is due. Every
-   * change is in the log, as the staff member who made it, with whom it
-   * was about; the audit log has what was done, never to whom. Returns
-   * why it wasn't made, or null.
-   */
-  async changeOrganization(
-    change: OrganizationChange,
-    by: AuditActor
-  ): Promise<OrganizationRefusal | null> {
-    if (change.kind === "send") {
-      return await this.#sendNow(change.person, by);
-    }
-    if (change.kind === "askAbout") {
-      return this.#askAbout(change.person, change.work, by);
-    }
-    if (change.kind === "draw") {
-      if (this.#roster()?.teams.some(({ id }) => id === change.team) !== true) {
-        return "onboarding.no_team";
-      }
-      return (await this.drawAgain(change.team, by))
-        ? null
-        : "onboarding.no_map";
-    }
-    const id = `${change.kind === "addTeam" ? "t" : "p"}-${crypto.randomUUID().slice(0, 8)}`;
-    const next = this.#listAfter(change, id);
-    if (typeof next === "string") {
-      return next;
-    }
-    const fresh = await this.#freshCodes(next);
-    const lines = await this.#lineKeysOf(this.#leaving(next));
-    const written = this.ctx.storage.transactionSync(() => {
-      // Made again on the list as it is now: what changed meanwhile stands.
-      const before = this.#roster();
-      const after = this.#listAfter(change, id);
-      if (typeof after === "string" || before === null) {
-        return typeof after === "string" ? after : "onboarding.no_roster";
-      }
-      const { erased } = this.#writeRoster(after, fresh, {
-        late: true,
-        lines,
-      });
-      const { action, detail, about } = listChangeOf(change, before, id);
-      this.#changed(by, action, detail, about);
-      return erased;
-    });
-    if (typeof written === "string") {
-      return written;
-    }
-    this.#deliverAudit();
-    this.ctx.waitUntil(this.#armLinks());
-    if (written.length > 0) {
-      await this.#afterForget(written);
-    }
-    return null;
-  }
-
   /** The list after `change`, held to the roster's rules; or why it can't be. */
-  #listAfter(change: ListChange, id: string): Roster | OrganizationRefusal {
-    const roster = this.#roster();
-    if (roster === null) {
-      return "onboarding.no_roster";
-    }
-    const next = rosterAfter(roster, change, id);
-    if (typeof next === "string") {
-      return next;
-    }
-    const parsed = rosterSchema.safeParse(next);
-    return parsed.success ? parsed.data : "onboarding.invalid";
-  }
-
-  /**
-   * Sends someone's link now, before its moment or their lead's interview,
-   * while the interviews run and they take part. Already out is fine.
-   */
-  async #sendNow(
-    person: string,
-    by: AuditActor,
-    now: string = new Date().toISOString()
-  ): Promise<OrganizationRefusal | null> {
-    // First: no other call comes in between what is read below and the
-    // transaction that sends.
-    const said = await this.#mailContext();
-    const roster = this.#roster();
-    const { plan } = this.#row();
-    const one = roster?.people.find(({ id }) => id === person);
-    if (roster === null || one === undefined) {
-      return "onboarding.not_found";
-    }
-    if (plan === null || !this.isOpen() || !takingPart(roster, one)) {
-      return "onboarding.not_now";
-    }
-    if (this.#linkFacts().sent.has(person)) {
-      return null;
-    }
-    this.ctx.storage.transactionSync(() => {
-      this.#send({ roster, plan, said }, person, now);
-      this.#changed(by, "onboarding.link.sent_now", {}, person);
-    });
-    this.#deliverAudit();
-    this.#deliverMailSoon();
-    return null;
-  }
-
-  /**
-   * The piece of work Stephen asks someone about, from their team's map;
-   * null and he asks which work they do. They do the piece they are asked
-   * about, as far as the record goes. From their next turn on: what they
-   * agreed to already stays with what it was about.
-   */
-  #askAbout(
-    person: string,
-    work: string | null,
-    by: AuditActor
-  ): OrganizationRefusal | null {
-    const one = this.#roster()?.people.find(({ id }) => id === person);
-    if (one === undefined) {
-      return "onboarding.not_found";
-    }
-    const [row] =
-      work === null
-        ? []
-        : this.#db.select().from(works).where(eq(works.id, work)).all();
-    if (work !== null && row?.team !== one.team) {
-      return "onboarding.no_work";
-    }
-    this.ctx.storage.transactionSync(() => {
-      if (row === undefined) {
-        this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
-      } else {
-        this.#db
-          .insert(askedAbout)
-          .values({ person, work: row.id })
-          .onConflictDoUpdate({
-            target: askedAbout.person,
-            set: { work: row.id },
-          })
-          .run();
-        const doers = doersOf(row.doers);
-        if (!doers.includes(person)) {
-          this.#db
-            .update(works)
-            .set({ doers: JSON.stringify([...doers, person]) })
-            .where(eq(works.id, row.id))
-            .run();
-        }
-      }
-      this.#changed(by, "onboarding.person.asked_about", {}, person);
-    });
-    this.#deliverAudit();
-    return null;
-  }
 
   /**
    * Every piece of work, team by team in the roster's order, as staff see
@@ -4044,50 +3634,9 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /**
-   * What the staff's numbers on Stephen and Claire are made from: each
-   * interview as numbers (`adminFacts`), the text each ran on, and the
-   * waits for his voice by day. Never anything that was said.
-   */
-  interviewerFacts(): {
-    interviews: AdminInterviewFacts[];
-    texts: (typeof interviewSettings.$inferSelect)[];
-    waits: (typeof answerWaits.$inferSelect)[];
-  } {
-    return {
-      interviews: this.adminFacts().interviews,
-      texts: this.#db.select().from(interviewSettings).all(),
-      waits: this.#db
-        .select()
-        .from(answerWaits)
-        .orderBy(asc(answerWaits.day), asc(answerWaits.upTo))
-        .all(),
-    };
-  }
-
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
-  }
-
-  /**
-   * Where the agreements stand for Grasp's staff: whether the team is
-   * told (a link ever went out, even to someone since taken off the
-   * roster), and how many links are out and wait.
-   */
-  staffAgreements(): StaffAgreements {
-    const { agreements } = this.#row();
-    const roster = this.#roster();
-    const { sent } = this.#linkFacts();
-    const taking =
-      roster?.people.filter((person) => takingPart(roster, person)) ?? [];
-    return {
-      agreements,
-      agreed: agreementsIn(agreements),
-      told: this.#told(),
-      out: sent.size,
-      waiting: taking.filter(({ id }) => !sent.has(id)).length,
-    };
   }
 
   /** Whether the team is told: a link ever went out, even to someone since taken off the roster. */
@@ -4724,133 +4273,6 @@ export class Onboarding extends DurableObject<Env> {
     return kickoffBrief(reading, answers);
   }
 
-  /** Grasp's notes, the newest first. */
-  notes(): StaffNote[] {
-    return this.#db.select().from(notes).orderBy(desc(notes.id)).all();
-  }
-
-  /** Keeps a note of Grasp's staff, in the log too (without its words). */
-  addNote(text: string, by: AuditActor): StaffNote {
-    const at = new Date().toISOString();
-    const byId = by.type === "staff" ? by.userId : whoIs(by);
-    return this.ctx.storage.transactionSync(() => {
-      const [note] = this.#db
-        .insert(notes)
-        .values({ at, by: byId, text })
-        .returning()
-        .all();
-      this.#db
-        .insert(events)
-        .values({ at, by: whoIs(by), what: "onboarding.note.added" })
-        .run();
-      if (note === undefined) {
-        throw new Error("A note was kept but not returned");
-      }
-      return note;
-    });
-  }
-
-  /**
-   * What happened, the newest first, at most `logPageMax`, narrowed in
-   * the query: everything the onboarding's own log holds, with the person
-   * it is about while they are on the roster; and the roster's teams to
-   * narrow it by. For Grasp's staff only.
-   */
-  staffLog(filter: LogFilter = {}): StaffLog {
-    const roster = this.#roster();
-    const onRoster = roster?.people ?? [];
-    const byId = new Map(onRoster.map((one) => [one.id, one] as const));
-    const named = (roster?.teams ?? []).map(({ id, name }) => ({ id, name }));
-    const about =
-      filter.team === undefined
-        ? undefined
-        : onRoster
-            .filter(({ team }) => team === filter.team)
-            .map(({ id }) => id);
-    if (about?.length === 0) {
-      return { entries: [], teams: named };
-    }
-    const rows = this.#db
-      .select()
-      .from(events)
-      .where(logWhere(filter, about))
-      .orderBy(desc(events.seq))
-      .limit(logPageMax)
-      .all();
-    const namedOf = (id: string) => {
-      const one = byId.get(id);
-      return one === undefined ? null : { id: one.id, name: one.name };
-    };
-    const entries = rows.map((row): StaffLogEntry => {
-      const person = row.about === null ? undefined : byId.get(row.about);
-      return {
-        seq: row.seq,
-        at: row.at,
-        actor: logActorOf(row.by),
-        what: row.what,
-        person:
-          person === undefined ? null : { id: person.id, name: person.name },
-        team: person?.team ?? null,
-        ...(row.named === null ? {} : { named: namedOf(row.named) }),
-      };
-    });
-    return { entries, teams: named };
-  }
-
-  /**
-   * Someone's interview for Grasp's staff (GRA-329): who held it, the
-   * texts it was held with, where it stands and its numbers, read here,
-   * inside the store, so not a word of it leaves; and the link's random id
-   * to audit the look by.
-   */
-  interviewOf(
-    person: string
-  ): (StaffInterview & { interviewId: string }) | null {
-    const roster = this.#roster();
-    const one = roster?.people.find(({ id }) => id === person);
-    const [code] = this.#db
-      .select({ linkId: linkCodes.linkId })
-      .from(linkCodes)
-      .where(eq(linkCodes.person, person))
-      .all();
-    if (one === undefined || code === undefined) {
-      return null;
-    }
-    const state = this.#interviews().get(person);
-    const progress = this.#held(person);
-    const texts = this.#db
-      .select({ mark: interviewTexts.mark })
-      .from(interviewTexts)
-      .where(eq(interviewTexts.person, person))
-      .orderBy(asc(interviewTexts.at), asc(interviewTexts.mark))
-      .all();
-    const [taking] = this.#db
-      .select({
-        at: participations.at,
-        withdrawnAt: participations.withdrawnAt,
-      })
-      .from(participations)
-      .where(eq(participations.person, person))
-      .all();
-    return {
-      person,
-      name: one.name,
-      team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
-      startedAt: state?.startedAt ?? null,
-      completedAt: state?.completedAt ?? null,
-      ...howHeld(progress),
-      texts: texts.map(({ mark }) => mark),
-      counts: {
-        ...countsOfSaid(progress),
-        approved: this.#admitted(person, progress).length,
-      },
-      participatedAt: taking?.at ?? null,
-      withdrawnAt: taking?.withdrawnAt ?? null,
-      failedMail: this.#failedMail(person),
-      interviewId: code.linkId,
-    };
-  }
-
   /** Everyone on the roster whose latest mail failed for good, by id: for the admin's snapshot. */
   failedMails(): Map<string, FailedMail> {
     const failed = new Map<string, FailedMail>();
@@ -4884,7 +4306,7 @@ export class Onboarding extends DurableObject<Env> {
    * What a practice person said and approved, for the Stephen Lab alone
    * (lab.ts, on a local stack): the lab played them, and scores what was
    * written down. Never reached on a deployed core, where Grasp's staff
-   * see no word of an interview (GRA-329, `interviewOf`).
+   * see no word of an interview (GRA-329).
    */
   practiceInterviewOf(person: string): {
     startedAt: string | null;
@@ -4900,22 +4322,6 @@ export class Onboarding extends DurableObject<Env> {
       completedAt: state?.completedAt ?? null,
       progress: this.#forSpeaker(person, this.#held(person)),
     };
-  }
-
-  /**
-   * Someone's link's random id, to audit a read of their link by: none
-   * for anyone not on the roster.
-   */
-  linkIdOf(person: string): string | null {
-    if (!this.#onRoster(person)) {
-      return null;
-    }
-    const [code] = this.#db
-      .select({ linkId: linkCodes.linkId })
-      .from(linkCodes)
-      .where(eq(linkCodes.person, person))
-      .all();
-    return code?.linkId ?? null;
   }
 
   /**
@@ -5095,20 +4501,6 @@ export class Onboarding extends DurableObject<Env> {
     this.#deliverAudit();
     await this.#afterForget([said]);
     return true;
-  }
-
-  /** What Grasp's staff see of where the interviews stand: exact, by person. */
-  staffFacts(): {
-    sent: { person: string; sentAt: string }[];
-    interviews: InterviewState[];
-  } {
-    return {
-      sent: this.#db
-        .select({ person: links.person, sentAt: links.sentAt })
-        .from(links)
-        .all(),
-      interviews: [...this.#interviews().values()],
-    };
   }
 
   /**
