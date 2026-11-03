@@ -1738,6 +1738,10 @@ msgstr "Une liste du personnel est le moyen le plus rapide : noms, adresses e-
 msgid "A step"
 msgstr "Une étape"
 
+#: src/workflows/workflow-flow.tsx
+msgid "A step is a JSON object."
+msgstr "Une étape est un objet JSON."
+
 #: src/workflows/requests/request-needs.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
@@ -3314,6 +3318,10 @@ msgstr "Modifier {title}"
 msgid "Change plan"
 msgstr "Changer d’abonnement"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Change step {id}"
+msgstr "Modifier l’étape {id}"
+
 #: src/settings/stephen-settings.tsx
 msgid "Change the company's"
 msgstr "Modifier ce qui est à l'entreprise"
@@ -3522,6 +3530,7 @@ msgid "Check a workflow"
 msgstr "Vérifier un workflow"
 
 #: src/workflows/definition-editor.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Check and save"
 msgstr "Vérifier et enregistrer"
 
@@ -3554,6 +3563,7 @@ msgid "Checking it against your numbers…"
 msgstr "Vérification avec vos chiffres…"
 
 #: src/workflows/definition-editor.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Checking…"
 msgstr "Vérification…"
 
@@ -4479,15 +4489,15 @@ msgstr "Outils de développement"
 msgid "Devices"
 msgstr "Appareils"
 
-#: src/workflows/definition-editor.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Diagram"
 msgstr "Diagramme"
 
-#: src/workflows/definition-editor.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Diagram of revision {checkpointRevision}"
 msgstr "Diagramme de la révision {checkpointRevision}"
 
-#: src/workflows/definition-editor.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Diagram of the current version"
 msgstr "Diagramme de la version actuelle"
 
@@ -4720,6 +4730,11 @@ msgctxt "what something known rests on: it happened in a run"
 msgid "Done"
 msgstr "Fait"
 
+#: src/workflows/workflow-flow.tsx
+msgctxt "where a workflow ends"
+msgid "Done"
+msgstr "Terminé"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ran alone"
 msgid "done by itself"
@@ -4872,6 +4887,10 @@ msgstr "Versions précédentes"
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
 msgstr "Modifier"
+
+#: src/workflows/workflow-flow.tsx
+msgid "Edit JSON"
+msgstr "Modifier le JSON"
 
 #: src/chat/project-dialog.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -5365,6 +5384,10 @@ msgstr "D’abord, les étapes."
 msgid "Fit and center"
 msgstr "Ajuster et centrer"
 
+#: src/workflows/workflow-flow.tsx
+msgid "Fit to view"
+msgstr "Ajuster à la vue"
+
 #: src/settings/stephen-card.tsx
 msgid "Five or more people asked Stephen “{wording}” and he didn't know. Ask the {role} for the answer, so he knows it from now on."
 msgstr "Cinq personnes ou plus ont demandé « {wording} » à Stephen et il ne savait pas. Demande la réponse à {role}, pour qu’il la sache désormais."
@@ -5400,6 +5423,11 @@ msgstr "Corrigé le {date} · {up} utile depuis"
 #: src/workflows/requests/request-summary.tsx
 msgid "Fixed: “{label}”, asked {times} times since"
 msgstr "Corrigé : « {label} », demandé {times} fois depuis"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgctxt "tab of a workflow"
+msgid "Flow"
+msgstr "Flux"
 
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
@@ -6495,6 +6523,10 @@ msgstr "Il n’a aucune étape."
 msgid "It has recorded no step yet."
 msgstr "Aucune étape n’a encore été enregistrée."
 
+#: src/workflows/workflow-flow.tsx
+msgid "It is drawn once a revision passes the check: check and save it under Definition."
+msgstr "Il est dessiné dès qu’une révision passe la vérification : vérifiez-la et enregistrez-la sous Définition."
+
 #: src/brain/forget.tsx
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "C'est définitif et ne peut pas être récupéré. Le journal d'audit garde qu'il a été retiré et par qui, jamais ce que c'était."
@@ -6957,6 +6989,14 @@ msgstr "Version suivante"
 #: src/inbox/inbox-page.tsx
 msgid "Latest activity"
 msgstr "Activité récente"
+
+#: src/workflows/workflow-flow.tsx
+msgid "Lay it out left to right"
+msgstr "Disposer de gauche à droite"
+
+#: src/workflows/workflow-flow.tsx
+msgid "Lay it out top to bottom"
+msgstr "Disposer de haut en bas"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
@@ -9887,6 +9927,10 @@ msgstr "A lu les appels au résultat inconnu de tout le monde"
 msgid "Read how knowledge is used"
 msgstr "A lu comment les connaissances sont utilisées"
 
+#: src/workflows/workflow-flow.tsx
+msgid "Read it again"
+msgstr "Le relire"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read others' words"
 msgstr "Lire les propos des autres"
@@ -10497,6 +10541,10 @@ msgstr "Révision {draftRevision} dessus"
 msgid "Revision {revision} doesn't pass yet, and no revision has."
 msgstr "La révision {revision} ne passe pas encore la vérification, et aucune révision ne l'a passée."
 
+#: src/workflows/workflow-flow.tsx
+msgid "Revision {revision} doesn't pass yet: fix it under Definition to change steps here."
+msgstr "La révision {revision} ne passe pas encore : corrigez-la sous Définition pour modifier les étapes ici."
+
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet. The latest that passed is revision {passed}."
 msgstr "La révision {revision} ne passe pas encore la vérification. La dernière qui l'a passée est la révision {passed}."
@@ -10888,6 +10936,10 @@ msgstr "Enregistrée comme blueprint"
 msgid "Saved as revision {0}."
 msgstr "Enregistré en révision {0}."
 
+#: src/workflows/workflow-flow.tsx
+msgid "Saved as revision {savedRevision}, but it doesn't pass yet: Definition says what to fix."
+msgstr "Enregistré comme révision {savedRevision}, mais elle ne passe pas encore : Définition indique quoi corriger."
+
 #: src/engines/blueprints.tsx
 msgid "Saved by {person} on {date}"
 msgstr "Enregistrée par {person} le {date}"
@@ -11064,6 +11116,10 @@ msgstr "Voir l’utilisation"
 msgid "See what needs you"
 msgstr "Voir ce qui a besoin de vous"
 
+#: src/workflows/workflow-flow.tsx
+msgid "See what starts it"
+msgstr "Voir ce qui le lance"
+
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: Grasp saw it in use"
 msgid "Seen"
@@ -11213,6 +11269,7 @@ msgid "Settings of {appName}"
 msgstr "Réglages de {appName}"
 
 #: src/engines/app-page.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Settings of {name}"
 msgstr "Paramètres de {name}"
 
@@ -11592,6 +11649,10 @@ msgstr "Quelqu’un"
 msgid "Someone asked for their data to be erased"
 msgstr "Quelqu’un a demandé l’effacement de ses données"
 
+#: src/workflows/workflow-flow.tsx
+msgid "Someone changed this draft since you read it. Read it again, then change the step."
+msgstr "Quelqu’un a modifié ce brouillon depuis que vous l’avez lu. Relisez-le, puis modifiez l’étape."
+
 #: src/workflows/definition-editor.tsx
 msgid "Someone changed this draft since you read it. Your text is still here: read their revision, then save again, or take theirs instead."
 msgstr "Quelqu'un a modifié ce brouillon depuis que vous l'avez lu. Votre texte est toujours là : lisez sa révision puis enregistrez à nouveau, ou reprenez la sienne."
@@ -11790,6 +11851,11 @@ msgstr "Démarrage"
 #: src/workflows/test-run.tsx
 msgid "Starting…"
 msgstr "Démarrage…"
+
+#: src/workflows/workflow-flow.tsx
+msgctxt "where a workflow starts"
+msgid "Starts"
+msgstr "Démarre"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Starts {starts}"
@@ -12951,6 +13017,10 @@ msgstr "La planification de {workflowName} s'est arrêtée"
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
 msgstr "Les fichiers source de la version {sourceVersion}"
+
+#: src/workflows/workflow-flow.tsx
+msgid "The step, as JSON"
+msgstr "L’étape, en JSON"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
@@ -15577,10 +15647,12 @@ msgid "Yours"
 msgstr "Les vôtres"
 
 #: src/brain/atlas-overlays.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom avant"
 
 #: src/brain/atlas-overlays.tsx
+#: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Zoom arrière"
 

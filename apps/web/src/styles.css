@@ -445,6 +445,24 @@
     0 14px 28px -14px color-mix(in oklch, var(--foreground) 28%, transparent);
 }
 
+/* The dotted ground the steps lie on: a fine grid of dots in the page's own ink, on the page's
+   muted surface (a workflow's Flow, `workflows/workflow-flow.tsx`). */
+@utility dot-ground {
+  background-color: color-mix(in oklch, var(--muted) 45%, var(--background));
+  background-image: radial-gradient(
+    circle at center,
+    color-mix(in oklch, var(--foreground) 16%, transparent) 1px,
+    transparent 1.4px
+  );
+  background-size: 16px 16px;
+}
+
+/* How near the Flow's drawing is (`zoom-75` is three quarters as drawn). CSS zoom, not a
+   transform: the drawing takes the room it shows at, so it centres and scrolls as it is seen. */
+@utility zoom-* {
+  zoom: calc(--value(integer) * 1%);
+}
+
 /* An agent's step carries the brain's print: a field of dots in its top right corner that fades
    into the sheet. A person's step is plain paper. */
 @utility node-print {

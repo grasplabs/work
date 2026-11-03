@@ -16,13 +16,14 @@ import { useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { ModuleFiles, sameModules } from "./module-files.tsx";
-import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's definition as its builders edit it: the draft's JSON and its
 // own modules, each save one revision-checked edit that core checks against the profile,
 // what it found at its JSON Pointer and task, and publishing the latest
 // edit once it passes. The page never decides what passes: core's answer
-// does, and the editor keeps the person's text whatever it answers.
+// does, and the editor keeps the person's text whatever it answers. What
+// passed is drawn on the page's Flow, where a step changed (`editStep`)
+// comes back here as the draft's newer revision.
 
 /** What the editor last heard of a save or publication. */
 type Outcome =
@@ -36,7 +37,7 @@ type Outcome =
  * when the edit left it as it was (it didn't pass): its diagram, doors
  * and all, which the answer draws without doors (`WorkflowDraft`).
  */
-const withHeldCheckpoint = (
+export const withHeldCheckpoint = (
   held: WorkflowDraft,
   saved: WorkflowDraft
 ): WorkflowDraft => {
@@ -97,26 +98,6 @@ const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
   );
 };
 
-/** The diagram of the draft's checkpoint, the latest text that passed. */
-const CheckpointDiagram = ({
-  checkpoint,
-}: {
-  checkpoint: NonNullable<WorkflowDraft["checkpoint"]>;
-}) => {
-  const { t } = useLingui();
-  const { revision: checkpointRevision } = checkpoint;
-  return (
-    <div className="flex flex-col gap-2">
-      <h2 className="font-medium">
-        {checkpointRevision === 0
-          ? t`Diagram of the current version`
-          : t`Diagram of revision ${checkpointRevision}`}
-      </h2>
-      <WorkflowDiagramView diagram={checkpoint.diagram} label={t`Diagram`} />
-    </div>
-  );
-};
-
 /** What core found in the latest revision, when it found anything. */
 const Problems = ({
   problems,
@@ -139,6 +120,30 @@ const Problems = ({
     </section>
   );
 
+/**
+ * The draft the editor goes by, and the text and modules in it, from
+ * `loaded`; and whether they were edited since. A later revision the page
+ * has (a step changed on the Flow) is taken, text and all, unless
+ * something typed here would be lost: then saving meets it as a conflict,
+ * as it would anyone else's save.
+ */
+const useEdited = (loaded: WorkflowDraft) => {
+  const [draft, setDraft] = useState(loaded);
+  const [text, setText] = useState(loaded.source);
+  const [modules, setModules] = useState(loaded.modules);
+  const edited = text !== draft.source || !sameModules(modules, draft.modules);
+  const [seen, setSeen] = useState(loaded);
+  if (loaded !== seen) {
+    setSeen(loaded);
+    if (loaded.revision > draft.revision && !edited) {
+      setDraft(loaded);
+      setText(loaded.source);
+      setModules(loaded.modules);
+    }
+  }
+  return { draft, setDraft, text, setText, modules, setModules, edited };
+};
+
 export const DefinitionEditor = ({
   workflow,
   loaded,
@@ -148,8 +153,13 @@ export const DefinitionEditor = ({
   onVersionMoved,
 }: {
   workflow: string;
-  loaded: WorkflowDraft;
   currentVersion: number | null;
+  /**
+   * The draft as the page last had it, read or saved; a later revision
+   * saved elsewhere on the page (a step changed on the Flow) is taken
+   * here while nothing is typed that it would overwrite.
+   */
+  loaded: WorkflowDraft;
   /** The draft as a save or a read here left it: its checkpoint, for a test, and when it was saved. */
   onDraft: (draft: WorkflowDraft) => void;
   onPublished: (version: WorkflowResourceVersion) => void;
@@ -158,21 +168,18 @@ export const DefinitionEditor = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
-  const [draft, setDraft] = useState(loaded);
+  const { draft, setDraft, text, setText, modules, setModules, edited } =
+    useEdited(loaded);
   // What a save or a read here left, here and on the page around it.
   const took = (next: WorkflowDraft): void => {
     setDraft(next);
     onDraft(next);
   };
-  const [text, setText] = useState(loaded.source);
-  const [modules, setModules] = useState(loaded.modules);
   const [busy, setBusy] = useState(false);
   // Taking theirs replaces the text when it arrives: the editor holds still
   // until then, so nothing typed meanwhile is overwritten.
   const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
-  const edited = text !== draft.source || !sameModules(modules, draft.modules);
-  const { checkpoint } = draft;
   const publishable =
     !edited &&
     draft.revision > 0 &&
@@ -353,9 +360,6 @@ export const DefinitionEditor = ({
       <ErrorText>
         {outcome?.kind === "failed" ? outcome.reason : undefined}
       </ErrorText>
-      {checkpoint === null ? null : (
-        <CheckpointDiagram checkpoint={checkpoint} />
-      )}
       <Problems problems={draft.problems} />
     </div>
   );
