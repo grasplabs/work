@@ -4994,12 +4994,15 @@ export class Onboarding extends DurableObject<Env> {
    * so it answers `interview.link_invalid`, it is marked erased, so no
    * code is made for it again, and the device it opened on is forgotten.
    * Unlike a delete on their own request, no new interview can be saved
-   * under it. Their entry on the list stays, an admin's to remove; taken
-   * off the list, the mark goes with the link.
+   * under it. What they were asked about goes too (a referral naming them
+   * may have set it, `#referOne`): nobody asks them anything again. Their
+   * entry on the list stays, an admin's to remove; taken off the list, the
+   * mark goes with the link.
    */
   closeLinkOf(person: string, now: string = new Date().toISOString()): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
       // Mail still to go about them (a reminder, say) goes nowhere now.
       // Sent mail stays: the company's record, as the roster is.
       dropMailAbout(this.ctx.storage.sql, person);

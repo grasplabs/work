@@ -1341,6 +1341,109 @@ describe("erasing a person", () => {
     });
   });
 
+  it("leaves nothing of a referral that named them before their erasure but the company's records of it", async () => {
+    // The test draws the referral itself, inside its faked provider (holdAlarm).
+    await holdAlarm();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+    await mapped(ids);
+    // Pim is them: the list has them by the address that is theirs.
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      String(person.person.email),
+      ids.pim
+    );
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    const tickets = works.find(({ name }) => name === "handling new tickets");
+    if (rota === undefined || tickets === undefined) {
+      throw new Error("Expected the team's map");
+    }
+    await agree(ids.max, [
+      fact("x1", "who", "Pim handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+    // Saved before Pim's erasure: it names Pim, and asks them about tickets.
+    await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.pim }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+    const askedOf = async (id: string) => {
+      const [row] = await onList(
+        "SELECT work FROM asked_about WHERE person = ?",
+        id
+      );
+      return row?.work ?? null;
+    };
+    const pimLink = await store.linkOf(ids.pim);
+    const pimSecret = pimLink?.split("#")[1] ?? "";
+    const queuedToPim = async () => {
+      const rows = await onList(
+        "SELECT key FROM mail_outbox WHERE about = ? AND state = 'queued'",
+        ids.pim
+      );
+      return rows.length;
+    };
+    const state = async () => {
+      const { entries } = await store.staffLog({ what: "interview.referred" });
+      const after = await store.teamWorks(ids.team);
+      return {
+        pimAsked: await askedOf(ids.pim),
+        pimLink: await sessionWith(pimSecret),
+        pimMail: await queuedToPim(),
+        maxAsked: await askedOf(ids.max),
+        maxOnRota: after
+          .find(({ id }) => id === rota.id)
+          ?.doers.includes(ids.max),
+        pimOnTickets: after
+          .find(({ id }) => id === tickets.id)
+          ?.doers.includes(ids.pim),
+        logged: entries
+          .filter(({ person: by }) => by?.id === ids.max)
+          .map(({ named }) => named?.id ?? null),
+      };
+    };
+    const before = await state();
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    expect({ before, after: await state() }).toStrictEqual({
+      before: {
+        pimAsked: tickets.id,
+        pimLink: "open",
+        pimMail: before.pimMail,
+        maxAsked: rota.id,
+        maxOnRota: true,
+        pimOnTickets: true,
+        logged: [ids.pim],
+      },
+      after: {
+        // What asked them goes with their interview, and so does their link
+        // with any mail still to go to it.
+        pimAsked: null,
+        pimLink: "interview.link_invalid",
+        pimMail: 0,
+        // The referrer's own stays.
+        maxAsked: rota.id,
+        maxOnRota: true,
+        // The company's (D5): who does what on the roster, as their entry
+        // stays, and the onboarding's log of who named whom, by ID (D2).
+        pimOnTickets: true,
+        logged: [ids.pim],
+      },
+    });
+  });
+
   it("saves nothing of a referral they made whose model call was under way as they were erased", async () => {
     await expect(referralWhileErased("max")).resolves.toStrictEqual({
       asked: 1,
