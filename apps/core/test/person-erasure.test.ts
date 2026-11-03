@@ -11,7 +11,7 @@ import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -25,7 +25,14 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import {
+  agree,
+  fact,
+  mapped,
+  team as onboardingTeam,
+} from "./onboarding-team.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -492,7 +499,117 @@ const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
   return { admin, person };
 };
 
+/**
+ * A referral Max makes, naming Pim, while the person `erased` was on the
+ * list (Max or Pim, by the address that was theirs) is erased as the model
+ * reads it: the erasure runs from inside the faked provider's answer.
+ * What the referral then saved: who Max named, and whether Max moved.
+ */
+const referralWhileErased = async (erased: "max" | "pim") => {
+  // The test draws the referral itself, inside its faked provider (holdAlarm).
+  await holdAlarm();
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const { admin, person } = await removedPerson();
+  const store = onboardingStore(env);
+  const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+  await mapped(ids);
+  await onList(
+    "UPDATE people SET email = ? WHERE id = ?",
+    String(person.person.email),
+    ids[erased]
+  );
+  const works = await store.teamWorks(ids.team);
+  const rota = works.find(({ name }) => name === "planning the rota");
+  if (rota === undefined) {
+    throw new Error("Expected the team's map");
+  }
+  await agree(ids.max, [
+    fact("x1", "who", "Pim handles the new tickets, not Max."),
+    fact("x2", "work", "Max plans the rota with Lea."),
+  ]);
+  let asked = 0;
+  await answeringWith(
+    async () => {
+      asked += 1;
+      if (asked === 1) {
+        await admin.api.members.erase(
+          person.userId,
+          String(person.person.name)
+        );
+      }
+      // The model's answer, once: it names Pim.
+      return asked === 1
+        ? {
+            text: JSON.stringify({ does: rota.id, person: ids.pim }),
+            inputTokens: 100,
+            outputTokens: 20,
+          }
+        : undefined;
+    },
+    async () => await store.drawNext()
+  );
+  const after = await store.teamWorks(ids.team);
+  const { entries } = await store.staffLog({ what: "interview.referred" });
+  return {
+    asked,
+    maxOnRota: after.find(({ id }) => id === rota.id)?.doers.includes(ids.max),
+    // This team's referrals: the log holds earlier tests' too, whose people
+    // the list no longer has.
+    logged: entries
+      .filter(({ person: by }) => by?.id === ids.max)
+      .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
+  };
+};
+
 describe("erasing a person", () => {
+  it("takes out the codes and sessions they had as an App's visitor under the address that was theirs, and leaves everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const app = crypto.randomUUID();
+    const now = Date.now();
+    // An App whose builders listed their address, as visitors' are kept:
+    // lower case.
+    const theirs = String(person.person.email).toLowerCase();
+    const other = `visitor-${crypto.randomUUID().slice(0, 8)}@partner.test`;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Portal', '', ?, ?)"
+      ).bind(app, admin.userId, now),
+      ...[theirs, other].flatMap((address) => [
+        env.DB.prepare(
+          "INSERT INTO app_visitor_codes (id, app_id, address, code_hash, tries, used_at, sent_at, expires_at) VALUES (?, ?, ?, 'h', 0, NULL, ?, ?)"
+        ).bind(crypto.randomUUID(), app, address, now, now + 600_000),
+        env.DB.prepare(
+          "INSERT INTO app_visitor_sessions (id, app_id, address, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          address,
+          crypto.randomUUID(),
+          now,
+          now + 3_600_000
+        ),
+      ]),
+    ]);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const left = async (table: string, address: string) =>
+      await rowsOf(table, "address", address);
+    expect({
+      theirCodes: await left("app_visitor_codes", theirs),
+      theirSessions: await left("app_visitor_sessions", theirs),
+      otherCodes: await left("app_visitor_codes", other),
+      otherSessions: await left("app_visitor_sessions", other),
+    }).toStrictEqual({
+      theirCodes: 0,
+      theirSessions: 0,
+      otherCodes: 1,
+      otherSessions: 1,
+    });
+  });
+
   it("erases their email and every sign-in, keeping only their name and ID", async () => {
     const { admin, person } = await removedPerson();
     const name = String(person.person.name);
@@ -984,6 +1101,16 @@ describe("erasing a person", () => {
     };
     await queue(theirs);
     await queue(others);
+    // A referral each, still to be made: who does what put right from what
+    // they agreed to. A referral row names only the person who made it.
+    for (const id of [theirs, others]) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await onList(
+        "INSERT INTO referrals (person, at) VALUES (?, ?)",
+        id,
+        new Date(Date.now() + 86_400_000).toISOString()
+      );
+    }
 
     await admin.api.members.erase(person.userId, String(person.person.name));
 
@@ -1005,6 +1132,13 @@ describe("erasing a person", () => {
       );
       return rows.length;
     };
+    const referralsBy = async (id: string) => {
+      const rows = await onList(
+        "SELECT person FROM referrals WHERE person = ?",
+        id
+      );
+      return rows.length;
+    };
     expect({
       before,
       // Their old link opens nothing any more, so nothing new is saved.
@@ -1015,6 +1149,8 @@ describe("erasing a person", () => {
       otherEntry: await listed(others),
       theirMail: await queuedFor(theirs),
       otherMail: await queuedFor(others),
+      theirReferral: await referralsBy(theirs),
+      otherReferral: await referralsBy(others),
     }).toStrictEqual({
       before: "open",
       after: "interview.link_invalid",
@@ -1025,6 +1161,8 @@ describe("erasing a person", () => {
       otherEntry: 1,
       theirMail: 0,
       otherMail: 1,
+      theirReferral: 0,
+      otherReferral: 1,
     });
   });
 
@@ -1125,6 +1263,200 @@ describe("erasing a person", () => {
       // Every one of them, from the first.
       saves: ["interview.link_invalid"],
       link: "interview.link_invalid",
+    });
+  });
+
+  it("never names them in a referral someone else makes after their erasure, though their entry stays", async () => {
+    // The test draws the referral itself, inside its faked provider: the
+    // store's own alarm, armed half a second on by Max's agreement, would
+    // otherwise draw it first outside it, fail, and put it off a minute
+    // (holdAlarm).
+    await holdAlarm();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam([
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+    ]);
+    await mapped(ids);
+    // Noor and Pim were them: the list has them twice, by the address that
+    // was theirs, spelled two ways, as an address may be.
+    const email = String(person.person.email);
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      email.toUpperCase(),
+      ids.noor
+    );
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      ` ${email.toLowerCase()} `,
+      ids.pim
+    );
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    if (rota === undefined) {
+      throw new Error("Expected the team's map");
+    }
+
+    // Max says the tickets are Noor's, and the model names Noor for them.
+    await agree(ids.max, [
+      fact("x1", "who", "Noor handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+    await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.noor }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+
+    const after = await store.teamWorks(ids.team);
+    const { entries } = await store.staffLog({ what: "interview.referred" });
+    expect({
+      // Max is moved onto the work they do, as any referral moves them.
+      maxOnRota: after
+        .find(({ id }) => id === rota.id)
+        ?.doers.includes(ids.max),
+      // Who named whom: Max named nobody.
+      // This team's referrals: the log holds earlier tests' too, whose people
+      // the list no longer has.
+      logged: entries
+        .filter(({ person: by }) => by?.id === ids.max)
+        .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
+    }).toStrictEqual({
+      maxOnRota: true,
+      logged: [[ids.max, null]],
+    });
+  });
+
+  it("leaves nothing of a referral that named them before their erasure but the company's records of it", async () => {
+    // The test draws the referral itself, inside its faked provider (holdAlarm).
+    await holdAlarm();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+    await mapped(ids);
+    // Pim is them: the list has them by the address that is theirs.
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      String(person.person.email),
+      ids.pim
+    );
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    const tickets = works.find(({ name }) => name === "handling new tickets");
+    if (rota === undefined || tickets === undefined) {
+      throw new Error("Expected the team's map");
+    }
+    await agree(ids.max, [
+      fact("x1", "who", "Pim handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+    // Saved before Pim's erasure: it names Pim, and asks them about tickets.
+    await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.pim }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+    const askedOf = async (id: string) => {
+      const [row] = await onList(
+        "SELECT work FROM asked_about WHERE person = ?",
+        id
+      );
+      return row?.work ?? null;
+    };
+    const pimLink = await store.linkOf(ids.pim);
+    const pimSecret = pimLink?.split("#")[1] ?? "";
+    const queuedToPim = async () => {
+      const rows = await onList(
+        "SELECT key FROM mail_outbox WHERE about = ? AND state = 'queued'",
+        ids.pim
+      );
+      return rows.length;
+    };
+    const state = async () => {
+      const { entries } = await store.staffLog({ what: "interview.referred" });
+      const after = await store.teamWorks(ids.team);
+      return {
+        pimAsked: await askedOf(ids.pim),
+        pimLink: await sessionWith(pimSecret),
+        pimMail: await queuedToPim(),
+        maxAsked: await askedOf(ids.max),
+        maxOnRota: after
+          .find(({ id }) => id === rota.id)
+          ?.doers.includes(ids.max),
+        pimOnTickets: after
+          .find(({ id }) => id === tickets.id)
+          ?.doers.includes(ids.pim),
+        logged: entries
+          .filter(({ person: by }) => by?.id === ids.max)
+          .map(({ named }) => named?.id ?? null),
+      };
+    };
+    const before = await state();
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    expect({ before, after: await state() }).toStrictEqual({
+      before: {
+        pimAsked: tickets.id,
+        pimLink: "open",
+        pimMail: before.pimMail,
+        maxAsked: rota.id,
+        maxOnRota: true,
+        pimOnTickets: true,
+        logged: [ids.pim],
+      },
+      after: {
+        // What asked them goes with their interview, and so does their link
+        // with any mail still to go to it.
+        pimAsked: null,
+        pimLink: "interview.link_invalid",
+        pimMail: 0,
+        // The referrer's own stays.
+        maxAsked: rota.id,
+        maxOnRota: true,
+        // The company's (D5): who does what on the roster, as their entry
+        // stays, and the onboarding's log of who named whom, by ID (D2).
+        pimOnTickets: true,
+        logged: [ids.pim],
+      },
+    });
+  });
+
+  it("saves nothing of a referral they made whose model call was under way as they were erased", async () => {
+    await expect(referralWhileErased("max")).resolves.toStrictEqual({
+      asked: 1,
+      maxOnRota: false,
+      logged: [],
+    });
+  });
+
+  it("saves nothing of a referral naming them whose model call was under way as they were erased", async () => {
+    await expect(referralWhileErased("pim")).resolves.toStrictEqual({
+      asked: 1,
+      maxOnRota: false,
+      logged: [],
     });
   });
 
