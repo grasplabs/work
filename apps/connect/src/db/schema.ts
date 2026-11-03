@@ -40,7 +40,13 @@ export const connections = sqliteTable(
     status: text({
       enum: ["active", "needs_reauth", "disconnected"],
     }).notNull(),
-    serverKind: text("server_kind", { enum: ["native", "composio"] }).notNull(),
+    /**
+     * `http` for an HTTP connection (GRA-1478): connect sends its requests
+     * itself, to `server`, its origin (`http_connections`).
+     */
+    serverKind: text("server_kind", {
+      enum: ["native", "composio", "http"],
+    }).notNull(),
     server: text().notNull(),
     /**
      * For an OAuth connection: the organization's tenant at the provider,
@@ -692,4 +698,35 @@ export const aiProviderKeys = sqliteTable("ai_provider_keys", {
   baseUrl: text("base_url"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * An HTTP connection (GRA-1478, src/http-connections.ts): what an admin
+ * approved, never edited, and its credential, sealed with the vault for
+ * this connection, origin and header (`credentialContext`), so a value
+ * moved to another row, or an origin or header changed in the database,
+ * doesn't open. The credential goes once the connection is disconnected
+ * (`sealed` null). Never read back to core but its header's name.
+ */
+export const httpConnections = sqliteTable("http_connections", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connections.id),
+  name: text().notNull(),
+  /** Exactly `https://host[:port]`, as approved. */
+  origin: text().notNull(),
+  /** The paths it allows, as a JSON array. */
+  pathPrefixes: text("path_prefixes", { mode: "json" })
+    .$type<string[]>()
+    .notNull(),
+  /** The methods it allows, as a JSON array. */
+  methods: text({ mode: "json" }).$type<string[]>().notNull(),
+  /** The header its credential goes in, in lower case. */
+  credentialHeader: text("credential_header").notNull(),
+  /** `bearer`: the credential is sent as `Bearer <token>`. */
+  credentialKind: text("credential_kind", {
+    enum: ["bearer", "header"],
+  }).notNull(),
+  sealed: text(),
+  createdAt: timestamp("created_at").notNull(),
 });

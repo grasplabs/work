@@ -99,13 +99,70 @@ export interface ModelConfig<Output extends AnySchema | undefined> {
 export type ComposioContract = `composio.${string}@1`;
 
 /**
+ * An outside API an admin approved as an HTTP connection (GRA-1478): its
+ * one origin, the paths and methods it allows, and its credential, which
+ * connect adds and nobody else sees. Its actions are `get` (a read: GET or
+ * HEAD) and `send` (POST, PUT, PATCH or DELETE, a change a person confirms
+ * where they are there); its client also has `fetch`, which picks the
+ * action by the method. The same as `httpContract` in
+ * `@grasp-os/shared/http-connections`.
+ */
+export type HttpContract = "http.request@1";
+
+/** An HTTP connection's contract, for `resource.connector`. */
+export const httpContract: HttpContract = "http.request@1";
+
+/** The headers a request sets: never its credential, which connect adds. */
+type HttpHeaders = Readonly<Record<string, string>>;
+
+/** What an HTTP connection's request answers: never redirected off it. */
+export interface HttpAnswer {
+  readonly status: number;
+  readonly headers: HttpHeaders;
+  /** The response's text: at most 512 KiB. */
+  readonly body: string;
+}
+
+/** An HTTP connection's actions, as `call` takes them. */
+interface HttpActions {
+  readonly get: {
+    readonly input: {
+      readonly method?: "GET" | "HEAD";
+      /** The path and query, starting with `/`, under an allowed prefix. */
+      readonly path: string;
+      readonly headers?: HttpHeaders;
+    };
+    readonly output: HttpAnswer;
+  };
+  readonly send: {
+    readonly input: {
+      readonly method: "POST" | "PUT" | "PATCH" | "DELETE";
+      readonly path: string;
+      readonly headers?: HttpHeaders;
+      /** At most 48 KiB of text, such as `JSON.stringify(value)`. */
+      readonly body?: string;
+    };
+    readonly output: HttpAnswer;
+  };
+}
+
+/** What `fetch` of an HTTP connection's client takes besides its path. */
+export interface HttpRequestInit {
+  readonly method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+  readonly headers?: HttpHeaders;
+  readonly body?: string;
+}
+
+/**
  * A generated connector contract (spec 12): a native connector's tools of
  * one family, such as `microsoft-365.mail@1`, from this release's catalog;
- * or a Composio toolkit's (`ComposioContract`).
+ * a Composio toolkit's (`ComposioContract`); or an HTTP connection's
+ * (`HttpContract`).
  */
 export type ConnectorContract =
   | Extract<keyof ConnectorCatalog, string>
-  | ComposioContract;
+  | ComposioContract
+  | HttpContract;
 
 /**
  * The actions of connector contract `Contract`, by name: any name for a
@@ -114,7 +171,9 @@ export type ConnectorContract =
 export type ConnectorAction<Contract extends ConnectorContract> =
   Contract extends keyof ConnectorCatalog
     ? Extract<keyof ConnectorCatalog[Contract], string>
-    : string;
+    : Contract extends HttpContract
+      ? keyof HttpActions
+      : string;
 
 /**
  * A Composio action's arguments and answer: any JSON object in, any JSON
@@ -134,9 +193,13 @@ type ContractAction<Contract, Action> = Contract extends keyof ConnectorCatalog
   ? Action extends keyof ConnectorCatalog[Contract]
     ? ConnectorCatalog[Contract][Action]
     : never
-  : Contract extends ComposioContract
-    ? ComposioCall
-    : never;
+  : Contract extends HttpContract
+    ? Action extends keyof HttpActions
+      ? HttpActions[Action]
+      : never
+    : Contract extends ComposioContract
+      ? ComposioCall
+      : never;
 
 /** What a declaration's config may say about a connector. */
 export interface ConnectorConfig<
@@ -517,6 +580,19 @@ export interface ConnectorClient<
   ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
+/**
+ * What `ctx.resources.<alias>` is for an HTTP connection: `call`, and
+ * `fetch`, a request as the web's `fetch` makes one, to a path of the
+ * connection's own origin, answered as a `Response`. A GET or HEAD is the
+ * declaration's `get`; any other method its `send`, which the host may hold
+ * for the person to confirm (`resource.awaiting_confirmation`).
+ */
+export interface HttpClient<
+  Actions extends readonly string[],
+> extends ConnectorClient<HttpContract, Actions> {
+  readonly fetch: (path: string, init?: HttpRequestInit) => Promise<Response>;
+}
+
 /** What `ctx.resources.<alias>` is for knowledge, by its operations. */
 export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
   ("search" extends Operations[number]
@@ -692,7 +768,9 @@ interface ResourceClients<Resource> {
     infer Contract,
     infer Actions
   >
-    ? ConnectorClient<Contract, Actions>
+    ? Contract extends HttpContract
+      ? HttpClient<Actions>
+      : ConnectorClient<Contract, Actions>
     : never;
   readonly knowledge: Resource extends KnowledgeResource<
     string,

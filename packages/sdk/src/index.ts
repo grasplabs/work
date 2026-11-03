@@ -20,7 +20,7 @@ export type {
   MigrationContext,
   MigrationDefinition,
 } from "./migration.ts";
-export { resource } from "./resources.ts";
+export { httpContract, resource } from "./resources.ts";
 export type {
   AnyResource,
   BrowserResource,
@@ -30,6 +30,10 @@ export type {
   ConnectorContract,
   ConnectorResource,
   FilesResource,
+  HttpAnswer,
+  HttpClient,
+  HttpContract,
+  HttpRequestInit,
   LinksResource,
   KnowledgeHit,
   KnowledgeOperation,

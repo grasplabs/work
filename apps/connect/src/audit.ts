@@ -165,6 +165,16 @@ export interface CallRecord {
    * them (`call_changes`), for a write that said what it changed.
    */
   changeHash?: string;
+  /**
+   * An HTTP connection's request (GRA-1478): its method, its path without
+   * the query, the response's status and size. Never headers or bodies.
+   */
+  http?: {
+    method?: string;
+    path?: string;
+    status?: number;
+    bytes?: number;
+  };
 }
 
 /**
@@ -215,6 +225,16 @@ const callerOf = (
     ...(context?.type === "workflowRun" ? { run: context.runId } : {}),
   };
 };
+
+/** An HTTP connection's request, as a call's detail names it. */
+const httpDetailOf = ({
+  http,
+}: CallRecord): Record<string, AuditDetailValue | undefined> => ({
+  httpMethod: http?.method,
+  httpPath: http?.path,
+  httpStatus: http?.status,
+  httpBytes: http?.bytes,
+});
 
 /**
  * The receipt of a side effect, for a call that has one (idempotency.ts,
@@ -291,6 +311,9 @@ export const auditCall = async (
   add("recovery", record.recovery);
   add("pendingActionId", record.pendingActionId);
   add("changeHash", record.changeHash);
+  for (const [key, value] of Object.entries(httpDetailOf(record))) {
+    add(key, value);
+  }
   add("provenanceCount", provenance.length);
 
   const [first = [], ...rest] = provenanceGroups(provenance);

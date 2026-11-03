@@ -217,8 +217,9 @@ const notificationItems = async (
             id: `stoppedEvents:${notification.id}`,
             verdicts: [],
             notification,
+            // An HTTP connection listens for no events: never one of these.
             account:
-              connection === undefined
+              connection === undefined || connection.source === "http"
                 ? null
                 : {
                     name: connection.accountName,
@@ -273,6 +274,12 @@ const connectionItems = async (
   return {
     items: listed.flatMap((connection): WaitingItem[] => {
       const entry = entries.get(`${connection.source}:${connection.provider}`);
+      const { source } = connection;
+      // An HTTP connection is never signed in again: its admin approves
+      // another (`canSignInAgain` says so too).
+      if (source === "http") {
+        return [];
+      }
       const waits =
         connection.status === "needs_reauth" &&
         canSignInAgain(connection, entry?.offered ?? false, person);
@@ -289,7 +296,7 @@ const connectionItems = async (
               verdicts: [],
               connection,
               integration: {
-                source: connection.source,
+                source,
                 id: connection.provider,
                 // The catalog alone has its name: its ID stands in.
                 name: entry?.name ?? connection.provider,

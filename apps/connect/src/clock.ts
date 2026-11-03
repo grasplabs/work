@@ -8,6 +8,7 @@ import {
   reconcileUnsyncedTools,
   retryComposioCleanups,
 } from "./composio-connections.ts";
+import { resealHttpCredentials } from "./http-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
 import { expireHeldActions } from "./pending.ts";
 import { pruneGivenUpRevocations } from "./revocations-by-hand.ts";
@@ -52,6 +53,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "vault.tokens", period: "minute", run: resealTokens },
   { name: "vault.flows", period: "minute", run: resealFlows },
   { name: "vault.ai_keys", period: "minute", run: resealAiProviderKeys },
+  { name: "vault.http", period: "minute", run: resealHttpCredentials },
   { name: "vault.owed", period: "minute", run: resealOwedRevokes },
 ];
 

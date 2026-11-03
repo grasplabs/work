@@ -3,7 +3,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { describe, expect, it } from "vite-plus/test";
 
 import { canConnect, signInAgainTarget } from "./connect-dialog.tsx";
-import type { Integration } from "./integrations.ts";
+import type { CatalogConnection, Integration } from "./integrations.ts";
 
 // Who is offered Connect: the page shows the button only where core and
 // connect would start a flow, so nobody consents to a toolkit that is then
@@ -84,7 +84,7 @@ const connection = (
   id: string,
   scope: ListedConnection["scope"],
   status: ListedConnection["status"]
-): ListedConnection => ({
+): CatalogConnection => ({
   id,
   source: "native",
   provider: "microsoft",
@@ -97,7 +97,7 @@ const connection = (
   createdAt: "2026-10-01T00:00:00.000Z",
 });
 
-const withConnections = (...connections: ListedConnection[]): Integration => ({
+const withConnections = (...connections: CatalogConnection[]): Integration => ({
   ...integration("native", "microsoft", "managed"),
   connections,
 });

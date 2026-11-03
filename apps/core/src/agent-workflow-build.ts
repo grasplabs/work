@@ -490,6 +490,15 @@ ${profileCallLines.join("\n")}
  * \`catalog()\`. Never write judgement, an outside system or a person's approval as
  * code: when the catalog has no contract for such a step, say which one (its kind,
  * input and output) an admin should publish.
+ * An outside API is reached only through an HTTP connection an admin approved
+ * (\`env.connections.available()\`, \`forAppsOnly\`): bind \`{ kind: "connector",
+ * contract: "grasp/http" }\` (\`get\` and \`send\`; \`"grasp/http-read"\` for \`get\` alone, on
+ * a connection that allows no change) and call it with \`call: "grasp.connector"\`,
+ * \`operation: "get"\` (a read: \`{ path, method?: "GET" | "HEAD", headers? }\`) or
+ * \`"send"\` (a change: \`{ method: "POST" | "PUT" | "PATCH" | "DELETE", path, headers?, body? }\`,
+ * body as text, such as \`\${ .invoice | tostring }\`). It answers \`{ status, headers, body }\`,
+ * body as text. Ask for the connection with \`requestPermission\` (actions \`["get", "send"]\`,
+ * or \`["get"]\` for reads alone). Never put a URL, key or token in a definition.
  */
 workflowBuild: {
   /** The host catalog's contracts: what a definition can bind besides its own code and other workflows. */

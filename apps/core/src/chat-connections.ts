@@ -6,6 +6,7 @@ import type {
   ConnectionSummary,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { httpActionsOf } from "@grasp-os/shared/http-connections";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -31,6 +32,7 @@ import {
 import { activeMember } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
+  offeredAmong,
   offeredConnections,
   personOf,
   requireOfferedConnection,
@@ -119,6 +121,11 @@ export interface AskableConnection {
   actions: string[];
   /** Who grants it: the person in the chat, or an admin. */
   decidedBy: "person" | "admin";
+  /**
+   * An outside API an admin approved (`provider: "http"`): only an App or
+   * a workflow asks for it, never the chat.
+   */
+  forAppsOnly?: true;
 }
 
 /** What asking did, as the chat's code reads it. */
@@ -221,16 +228,45 @@ export const askableConnections = async (
   env: Env,
   scope: AgentScope
 ): Promise<AskableConnection[]> => {
-  const offered = await offeredConnections(env, await scopePerson(env, scope));
+  const person = await scopePerson(env, scope);
+  // Connect asked once: what it lists is both what the chat is offered
+  // and the outside APIs below.
+  const listed = await env.CONNECT.listConnections(person);
+  const offered = await offeredAmong(env, listed);
   const actions = await actionsOf(env, offered);
-  return offered.map(({ id, provider, accountName, ownerUserId }) => ({
-    connectionId: id,
-    provider,
-    account: accountName,
-    scope: ownerUserId === null ? "shared" : "personal",
-    actions: actions.get(id) ?? [],
-    decidedBy: ownerUserId === null ? "admin" : "person",
-  }));
+  // The outside APIs an admin approved (GRA-1478): listed so an App or a
+  // workflow the chat builds can ask for one, by its ID. The chat itself
+  // never calls or asks for one (`offeredConnections`).
+  const apis = listed.flatMap((connection): AskableConnection[] =>
+    connection.source === "http" &&
+    connection.status === "active" &&
+    connection.http !== undefined
+      ? [
+          {
+            connectionId: connection.id,
+            provider: "http",
+            account: `${connection.http.name} (${connection.http.origin})`,
+            scope: "shared",
+            actions: httpActionsOf(connection.http.methods),
+            decidedBy: "admin",
+            forAppsOnly: true,
+          },
+        ]
+      : []
+  );
+  return [
+    ...offered.map(
+      ({ id, provider, accountName, ownerUserId }): AskableConnection => ({
+        connectionId: id,
+        provider,
+        account: accountName,
+        scope: ownerUserId === null ? "shared" : "personal",
+        actions: actions.get(id) ?? [],
+        decidedBy: ownerUserId === null ? "admin" : "person",
+      })
+    ),
+    ...apis,
+  ];
 };
 
 /** Why a request wasn't stored, read once the insert took nothing. */
@@ -337,7 +373,7 @@ export const askInChat = async (
   if (connection === undefined) {
     throw permissionErrors.create("permission.invalid", {
       issues: [
-        "connectionId: No connection you may ask for has that ID (env.connections.available()).",
+        "connectionId: No connection you may ask for has that ID (env.connections.available()); one `forAppsOnly` is for an App's or a workflow's request (env.build, env.workflowBuild), never the chat's.",
       ],
     });
   }

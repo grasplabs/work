@@ -11,6 +11,11 @@ import type {
   ConnectorContractAction,
   NativeOperation,
 } from "@grasp-os/shared/connect";
+import {
+  httpActionSchemas,
+  httpActions,
+  httpContract,
+} from "@grasp-os/shared/http-connections";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -24,6 +29,11 @@ import {
 import { allowedTool } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { connections } from "./db/schema.ts";
+import {
+  httpConfigOf,
+  httpServedContract,
+  httpTool,
+} from "./http-connections.ts";
 
 // Generated connector contracts (spec 12). Which one a connection serves
 // is decided by the connection's kind, never by the name alone, so a
@@ -36,7 +46,11 @@ import { connections } from "./db/schema.ts";
 //   output (connector-kit's manifest, `generatedContracts`). Read from the
 //   release's manifests alone: nothing is loaded and no token is read;
 // - a Composio connection serves `composio.<toolkit>@1`, its own toolkit's
-//   allowed tools, as its server lists them now (composio-contracts.ts).
+//   allowed tools, as its server lists them now (composio-contracts.ts);
+// - an HTTP connection serves `http.request@1` (GRA-1478): `get` and
+//   `send`, those its allowed methods use, with schemas of connect's own
+//   (`httpActionSchemas`). What it may reach is the connection's, checked
+//   on every call (http-connections.ts), never the contract's.
 //
 // Core binds an App's connector resource to one, checks every call's input
 // and answer against it, and fingerprints it, so a change to any of it (a
@@ -105,6 +119,13 @@ export const connectorContract = async (
       throw connectErrors.create("connect.contract_not_found");
     }
     return await composioContract(env, connection, contract);
+  }
+  if (connection.serverKind === "http") {
+    const config = await httpConfigOf(env, connection.id);
+    if (contract !== httpContract || config === undefined) {
+      throw connectErrors.create("connect.contract_not_found");
+    }
+    return httpServedContract(config);
   }
   const served = nativeContract(connection, contract);
   if (served === undefined) {
@@ -179,6 +200,18 @@ export const actionShape = async (
     }
     return { readOnly: rule.read, inputs, provider };
   }
+  if (connection.serverKind === "http") {
+    const config = await httpConfigOf(env, connection.id);
+    const tool = config === undefined ? undefined : httpTool(config, action);
+    if (tool === undefined) {
+      throw connectErrors.create("connect.action_not_found");
+    }
+    return {
+      readOnly: tool.readOnly,
+      inputs: [...(tool.inputProperties ?? [])],
+      provider,
+    };
+  }
   const manifest = nativeConnector(connection.server)?.manifest;
   const declared =
     manifest !== undefined &&
@@ -218,6 +251,18 @@ export const nativeOperation = (request: unknown): NativeOperation => {
   const input = canonicalOf(parsed.data.input);
   const output = canonicalOf(parsed.data.output);
   if (input !== undefined && output !== undefined) {
+    // An HTTP connection's actions: connect's own schemas, reviewed here,
+    // with no pattern.
+    for (const action of httpActions) {
+      const schemas = httpActionSchemas[action];
+      if (
+        action === tool &&
+        canonicalJson(schemas.input) === input &&
+        canonicalJson(schemas.output) === output
+      ) {
+        return { contract: httpContract, readOnly: action === "get" };
+      }
+    }
     for (const { manifest } of nativeConnectors()) {
       for (const [contract, served] of generatedContracts(manifest)) {
         for (const action of served.values()) {

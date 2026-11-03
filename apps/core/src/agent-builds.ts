@@ -1371,6 +1371,20 @@ const buildDeclaration = `/**
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
  * this. A visitor's call can't tell anyone. Read the SDK's types for the
  * rest.
+ *
+ * An outside API is reached only as an HTTP connection an admin approved
+ * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
+ * and methods it allows; its credential is connect's and never yours).
+ * Never write a URL, key or token into code: declare it in app.ts as
+ * \`resource.connector("billing", { contract: "http.request@1", actions: ["get", "send"] })\`
+ * (only the actions you use; \`get\` reads, \`send\` changes), list it in
+ * the action's \`uses\`, and call
+ * \`await ctx.resources.billing.fetch("/v1/invoices?status=open")\` or
+ * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
+ * a \`Response\` from the connection's own origin (512 KiB at most, a
+ * redirect elsewhere refused). A \`send\` a person makes waits for them to
+ * confirm it. Ask for it with \`requestPermission\` (\`{ type: "connection", connectionId }\`,
+ * actions \`["get"]\` and/or \`["send"]\`); an admin grants it and binds the resource.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */

@@ -25,6 +25,7 @@ import {
   syncGraspSkills,
 } from "../src/knowledge/grasp-skills.ts";
 import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
+import { releaseContracts } from "../src/release-contracts.ts";
 import { storedCurrentTexts } from "./knowledge.ts";
 import { auditedDuring } from "./sign-in.ts";
 
@@ -292,5 +293,55 @@ describe("the built-ins", () => {
     expect(skillSaves(events)).toHaveLength(1);
     await expect(storedSkills()).resolves.toStrictEqual(releaseSkills());
     await expect(installed()).resolves.toStrictEqual(expect.any(String));
+  });
+
+  it("install every contract the release ships with connect not there, as core boots on plain workerd", async () => {
+    await forgetInstall();
+    // Connect not up yet, or, as in core's on-prem smoke run, not there:
+    // anything asked of it fails.
+    const connectless: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: () => {
+          throw new Error("Connect isn't there");
+        },
+      }),
+    };
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    let complete: boolean;
+    let failures: string[];
+    try {
+      complete = await runInDurableObject(
+        builtins(env),
+        async (_instance, state) =>
+          await installBuiltins(
+            connectless,
+            state.storage,
+            await loadBuiltinRelease()
+          )
+      );
+      // Read before the spy is restored, which forgets its calls.
+      failures = logged.mock.calls
+        .flat()
+        .map((entry) => JSON.stringify(entry))
+        .filter((entry) => entry.includes("builtins.contract_failed"));
+    } finally {
+      logged.mockRestore();
+    }
+    const stored = await env.DB.prepare(
+      `SELECT key FROM workflow_catalog_contracts WHERE key IN (${releaseContracts.map(() => "?").join(", ")}) ORDER BY key`
+    )
+      .bind(...releaseContracts.map(({ key }) => key))
+      .all<{ key: string }>();
+
+    expect({
+      complete,
+      failures,
+      stored: stored.results.map(({ key }) => key),
+    }).toStrictEqual({
+      complete: true,
+      failures: [],
+      stored: releaseContracts.map(({ key }) => key).toSorted(),
+    });
   });
 });

@@ -42,7 +42,7 @@ export interface Integration {
   /** Whether the catalog lists it to this person. */
   listed: boolean;
   /** Its connections this person can see, newest first. */
-  connections: ListedConnection[];
+  connections: CatalogConnection[];
 }
 
 /** Where an integration stands, for the person looking at it. */
@@ -51,6 +51,9 @@ export type IntegrationState =
   | "shared"
   | "personal"
   | "not_connected";
+
+/** A connection of a catalog entry: any but an HTTP connection. */
+export type CatalogConnection = ListedConnection & { source: CatalogSource };
 
 /** An integration's key in the address: `native:microsoft`. */
 export const integrationKey = (source: CatalogSource, id: string): string =>
@@ -84,8 +87,12 @@ export const integrationsOf = (
   entries: readonly Entry[],
   connections: readonly ListedConnection[]
 ): Integration[] => {
-  const live = connections.filter(({ status }) => status !== "disconnected");
-  const of = (source: CatalogSource, id: string): ListedConnection[] =>
+  // An HTTP connection is no catalog entry's: it is listed apart.
+  const live = connections.filter(
+    (connection): connection is CatalogConnection =>
+      connection.status !== "disconnected" && connection.source !== "http"
+  );
+  const of = (source: CatalogSource, id: string): CatalogConnection[] =>
     live
       .filter(
         (connection) =>
