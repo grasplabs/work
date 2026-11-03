@@ -318,6 +318,18 @@ const metFor = (
     .map(([, snapshot]) => snapshot.dependencies?.[peer]);
 
 /**
+ * The store the checkout installed into, as its install recorded it. Named
+ * to every install here: unnamed, pnpm takes a store on the project's own
+ * file system, so a temporary directory on another file system than the
+ * checkout's (as on one CI shard) installs from an empty one.
+ */
+const checkoutStore = z
+  .object({ storeDir: z.string() })
+  .parse(
+    parse(readFileSync(path.join(ROOT, "node_modules/.modules.yaml"), "utf-8"))
+  ).storeDir;
+
+/**
  * The project's install as a developer runs it, by the checkout's own
  * package manager, from the store the checkout installed into; pnpm's
  * re-check of each pin against the registry's publish times is skipped,
@@ -340,7 +352,7 @@ const installIn = async (
   const passed = args.includes("--") ? args : [...args, "--"];
   const child = spawn(
     path.join(ROOT, "node_modules/.bin/vp"),
-    ["install", ...passed, "--trust-lockfile"],
+    ["install", ...passed, "--trust-lockfile", `--store-dir=${checkoutStore}`],
     { cwd: out, env }
   );
   let output = "";
