@@ -17,6 +17,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { maxToolCallsPerResponse } from "../src/agent-tools.ts";
 import {
   latestSections,
   maxRunsPerResponse,
@@ -45,6 +46,8 @@ import {
   says,
   setObjectEnv,
   testRunOpening,
+  toolResults,
+  toolStep,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
@@ -572,6 +575,47 @@ describe("chat agent", () => {
       maxRunsPerTurn
     );
     expect(results.at(-1)?.text).toMatch(/30 times, the most it may/u);
+  });
+
+  it("calls its other tools at most 20 times per response, and counts none as a code run", async () => {
+    const reads = toolStep("readFile", { app: "app_none", path: "app.ts" });
+    const read = reads.toolCalls?.[0];
+    const { stub, chat, ask } = await newChat(
+      {
+        ...reads,
+        toolCalls: Array.from(
+          { length: maxToolCallsPerResponse + 1 },
+          (_, at) => ({
+            id: `call_read_${at}`,
+            name: read?.name ?? "readFile",
+            arguments: read?.arguments ?? {},
+          })
+        ),
+      },
+      // Then as many code runs as a turn may make, all of them run.
+      ...Array.from({ length: maxRunsPerTurn / maxRunsPerResponse }, () =>
+        codeStep("export default async () => 'ran';", maxRunsPerResponse)
+      ),
+      says("Done.")
+    );
+
+    await ask("Read it twenty-one times, then run it all.");
+
+    const steps = await toolResults(stub, chat.id);
+    const reading = steps.filter(({ tool }) => tool === "readFile");
+    const running = steps.filter(({ tool }) => tool === "executeCode");
+    expect({
+      // Each read made is refused by the App it names, not by the limit.
+      made: reading
+        .slice(0, maxToolCallsPerResponse)
+        .every(({ text }) => !text.includes("Not done")),
+      last: reading.at(-1)?.text,
+      ran: running.filter(({ isError }) => !isError).length,
+    }).toStrictEqual({
+      made: true,
+      last: `Not done: one response may call these tools at most ${maxToolCallsPerResponse} times. Make the rest in your next response.`,
+      ran: maxRunsPerTurn,
+    });
   });
 
   it("stops the turn when the person leaves during it", async () => {

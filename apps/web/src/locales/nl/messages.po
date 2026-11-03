@@ -444,6 +444,14 @@ msgstr "{count, plural, one {Het bestuur stelde # doel voor de sprint.} other {H
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Gebruikt door # workflow} other {Gebruikt door # workflows}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Writing # file} other {Writing # files}}"
+msgstr "{count, plural, one {# bestand schrijven} other {# bestanden schrijven}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Wrote # file} other {Wrote # files}}"
+msgstr "{count, plural, one {# bestand geschreven} other {# bestanden geschreven}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, other {# not counted yet}}"
 msgstr "{count, plural, other {# nog niet geteld}}"
@@ -2854,6 +2862,10 @@ msgstr "Gevraagd op"
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
 
+#: src/chat/thread.tsx
+msgid "Asked to connect {binding}"
+msgstr "Gevraagd om {binding} te koppelen"
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Asked to connect again on {since}."
 msgstr "Op {since} gevraagd opnieuw te koppelen."
@@ -2869,6 +2881,10 @@ msgstr "Gevraagd een chat-appbericht te versturen, bewerken of verwijderen als d
 #: src/brain/brain-log.tsx
 msgid "Asked: {title}"
 msgstr "Gevraagd: {title}"
+
+#: src/chat/thread.tsx
+msgid "Asking to connect {binding}"
+msgstr "Vraagt om {binding} te koppelen"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
@@ -4258,6 +4274,14 @@ msgstr "Een team aangemaakt"
 msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
 msgstr "Door jou gemaakt. Het opent voor jou, de beheerders en iedereen met wie het gedeeld is."
 
+#: src/chat/thread.tsx
+msgid "Created the App {name}"
+msgstr "App {name} gemaakt"
+
+#: src/chat/thread.tsx
+msgid "Creating the App {name}"
+msgstr "App {name} maken"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Critical"
@@ -4925,6 +4949,22 @@ msgstr "Project bewerken"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit the instructions"
 msgstr "Instructies bewerken"
+
+#: src/chat/thread.tsx
+msgid "Edited {path}"
+msgstr "{path} bewerkt"
+
+#: src/chat/thread.tsx
+msgid "Edited a workflow"
+msgstr "Een workflow bewerkt"
+
+#: src/chat/thread.tsx
+msgid "Editing {path}"
+msgstr "{path} bewerken"
+
+#: src/chat/thread.tsx
+msgid "Editing a workflow"
+msgstr "Een workflow bewerken"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -6380,6 +6420,7 @@ msgstr "Zelfstandig"
 msgid "Independent workflow"
 msgstr "Zelfstandige workflow"
 
+#: src/chat/thread.tsx
 #: src/workflows/test-run.tsx
 msgid "Input"
 msgstr "Invoer"
@@ -9925,6 +9966,10 @@ msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lezen"
 
+#: src/chat/thread.tsx
+msgid "Read {path}"
+msgstr "{path} gelezen"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "De statistieken van een domein gelezen"
@@ -10018,6 +10063,10 @@ msgstr "{file} wordt gelezen"
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "{name} lezen"
+
+#: src/chat/thread.tsx
+msgid "Reading {path}"
+msgstr "{path} lezen"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11111,9 +11160,25 @@ msgstr "Hierboven doorzocht. Daarna gaan gebeurtenissen naar het archief."
 msgid "Searched knowledge"
 msgstr "In kennis gezocht"
 
+#: src/chat/thread.tsx
+msgid "Searched the App's files for {text}"
+msgstr "In de bestanden van de App gezocht naar {text}"
+
 #: src/activity/audit-words.ts
 msgid "Searched the audit trail"
 msgstr "In het auditlogboek gezocht"
+
+#: src/chat/thread.tsx
+msgid "Searched the brain for {query}"
+msgstr "In het brein gezocht naar {query}"
+
+#: src/chat/thread.tsx
+msgid "Searching the App's files for {text}"
+msgstr "Zoekt in de bestanden van de App naar {text}"
+
+#: src/chat/thread.tsx
+msgid "Searching the brain for {query}"
+msgstr "Zoekt in het brein naar {query}"
 
 #: src/engines/app-webhooks.tsx
 msgid "Secret"
@@ -14067,6 +14132,10 @@ msgstr "Standaard gebruiken"
 msgid "Use your organization’s account to go on."
 msgstr "Gebruik het account van je organisatie om verder te gaan."
 
+#: src/chat/thread.tsx
+msgid "Used {tool}"
+msgstr "{tool} gebruikt"
+
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "Een gekoppelde tool gebruikt"
@@ -14083,6 +14152,10 @@ msgstr "Gebruikt door"
 #: src/labels.ts
 msgid "User"
 msgstr "Gebruiker"
+
+#: src/chat/thread.tsx
+msgid "Using {tool}"
+msgstr "{tool} gebruiken"
 
 #. A time zone
 #: src/routes/_shell.settings.workspace.tsx
@@ -15375,6 +15448,10 @@ msgstr "Schrijft"
 msgid "Writing “{title}”…"
 msgstr "“{title}” wordt geschreven…"
 
+#: src/chat/thread.tsx
+msgid "Writing {file}"
+msgstr "{file} schrijven"
+
 #: src/dashboard/widget-progress.tsx
 msgid "Writing the widget…"
 msgstr "De widget wordt geschreven…"
@@ -15400,6 +15477,10 @@ msgstr "In een chat geschreven"
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
 msgstr "Geschreven in een document"
+
+#: src/chat/thread.tsx
+msgid "Wrote {file}"
+msgstr "{file} geschreven"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"

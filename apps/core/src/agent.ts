@@ -21,8 +21,13 @@ import { memoryCharactersPerToken } from "@grasp-os/shared/memory";
 import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
-import { isMessage, showThinkingName } from "./agent-messages.ts";
+import {
+  isDedicatedTool,
+  isMessage,
+  showThinkingName,
+} from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { dedicatedTools, maxToolCallsPerResponse } from "./agent-tools.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
@@ -36,8 +41,11 @@ import type { CodeRunOpening } from "./workspace.ts";
 // reading their declarations with `readApi` (every request carries only an
 // index of the APIs, a line each, so it fits the smallest model's window);
 // the code runs in its own locked isolate (src/code-mode.ts) and what it
-// returns or throws goes back to the model, until the model answers. Every
-// request goes through the model gateway (`models(env).agent`).
+// returns or throws goes back to the model, until the model answers. What
+// it does most (writing an App's files, searching the brain) has a tool of
+// its own (agent-tools.ts), one call of the same APIs, which the chat shows
+// as a line instead of code. Every request goes through the model gateway
+// (`models(env).agent`).
 //
 // The transcript is pi's: system, user, assistant and tool result
 // messages. The caller keeps each message as the loop finishes it, so a
@@ -54,9 +62,11 @@ export const maxSteps = 20;
 export const maxRunsPerResponse = 5;
 export const maxRunsPerTurn = 30;
 
-const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them by writing code. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
+const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them with your tools. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
 
-To use an API, call the \`executeCode\` tool with a complete JavaScript module whose default export is an async function of \`(self, env, ctx)\`. \`env\` holds the APIs; \`self\` is null and \`ctx\` gives you nothing you need. Helper functions in the module are fine:
+Use the tool made for what you do when there is one: \`createApp\`, \`readFile\`, \`writeFile\`, \`editFile\` and \`searchFiles\` for an App's files, \`searchBrain\` to find evidence in the brain, \`requestConnection\` to ask for a connection, \`editWorkflow\` to save a workflow's draft. The person sees each as one line saying what you did. Write code only to compute, to read what no tool reads, and to check and test what you built.
+
+To run code, call the \`executeCode\` tool with a complete JavaScript module whose default export is an async function of \`(self, env, ctx)\`. \`env\` holds the APIs; \`self\` is null and \`ctx\` gives you nothing you need. Helper functions in the module are fine:
 
 \`\`\`js
 export default async (self, env, ctx) => {
@@ -79,7 +89,7 @@ Building in Grasp:
 - An App is code in files: \`app.ts\`, which registers it, \`schema.ts\`, its tables, and its queries, mutations and actions in \`operations/<group>.ts\`, which screens call and whose queries keep open screens live; screens (\`screens/<name>.tsx\`, React with @grasp-os/ui) that people open, which reach the App's functions through \`#grasp\`, and show records in a \`DataGrid\` and edit them with the form fields of @grasp-os/ui/form (formatted text shown with \`RichText\`, never as HTML), as \`env.build\`'s declaration says, never a table or form wired by hand; and the independent workflows it binds for anything that runs on its own.
 - Screens never run in the background: anything that runs on a schedule, on an event or for a long time is a workflow, built with \`env.workflowBuild\`: edit its draft until it has no problems, test-run it with an answer for every call, publish it, bind the version to the App, and test it from the App with \`workflowTest\`. Follow runs with \`env.workflows\`.
 - A chat started beside a new workflow names it in its first message, with its ID; the workflow's page draws its draft's latest revision that passes, and the person tells you how the work runs today. Ask about it step by step (who does what, in which app, how often), and edit that workflow's draft with \`env.workflowBuild\` as each step becomes clear, fixing its problems, so the drawing grows as you talk. Give it a short title in people's words (\`document.title\`), which the page heads it with. Publish only when the person asks.
-- To build or change an App, write its files into this chat's draft with \`env.build\`, check them, and fix what the check reports until it passes, without asking the person about each error. Then propose it, and ask for the permissions it and its workflows need. An App's files go live only when a builder of the App makes them current in Grasp, but binding a published workflow version to an App takes effect at once, so bind only what the person asked for. No permission holds, nor any call a workflow makes outside itself, until an admin grants or approves it: say so.`;
+- To build or change an App, write its files into this chat's draft (\`writeFile\`, \`editFile\`), check them with \`env.build.check\`, and fix what the check reports until it passes, without asking the person about each error. Then propose it, and ask for the permissions it and its workflows need. An App's files go live only when a builder of the App makes them current in Grasp, but binding a published workflow version to an App takes effect at once, so bind only what the person asked for. No permission holds, nor any call a workflow makes outside itself, until an admin grants or approves it: say so.`;
 
 /**
  * The chat's APIs, as every request carries them: an index, a line each
@@ -505,7 +515,7 @@ const runOpen = async (
  * How a code step's result says it went: as it runs (its output streams
  * through pi's tool updates) and how it ended, with the run it was.
  */
-interface CodeStepDetails {
+export interface CodeStepDetails {
   status: CodeRunStatus | "running";
   runId: string;
 }
@@ -1170,6 +1180,8 @@ interface Progress {
   last?: AssistantMessage;
   /** The response whose code runs are being asked for, and how many so far. */
   asking?: { response: AssistantMessage; calls: number };
+  /** The response whose dedicated tools are being called, and how often so far. */
+  calling?: { response: AssistantMessage; calls: number };
   /** Why the turn was stopped before a request, if it was. */
   stopped?: Error;
   /** Steps of thinking shown in the brain this turn. */
@@ -1203,6 +1215,29 @@ const refusal = (
   // This response is the turn's last: nobody would read the result.
   if (progress.steps + 1 >= maxSteps) {
     return "Not run: this turn has reached its last step. Answer with what you have.";
+  }
+  return undefined;
+};
+
+/**
+ * Why a call of a dedicated tool (agent-tools.ts) isn't made, if it isn't:
+ * too many in one response, or its result would never be read. These are
+ * no code runs: a turn's runs don't bound them, its steps do.
+ */
+const toolRefusal = (
+  progress: Progress,
+  response: AssistantMessage
+): string | undefined => {
+  if (progress.calling?.response !== response) {
+    progress.calling = { response, calls: 0 };
+  }
+  const position = progress.calling.calls;
+  progress.calling.calls += 1;
+  if (position >= maxToolCallsPerResponse) {
+    return `Not done: one response may call these tools at most ${maxToolCallsPerResponse} times. Make the rest in your next response.`;
+  }
+  if (progress.steps + 1 >= maxSteps) {
+    return "Not done: this turn has reached its last step. Answer with what you have.";
   }
   return undefined;
 };
@@ -1321,6 +1356,7 @@ export const runTurn = async ({
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
+    ...dedicatedTools({ apis, scope, runs }, history),
     ...(thinkingTool === undefined ? [] : [thinkingTool]),
     // Only in Grasp's own chat, where the questions take the composer's
     // place; a chat app's chat asks in words.
@@ -1395,14 +1431,22 @@ export const runTurn = async ({
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
         // Reading a declaration, or asking the person, runs no code: only
         // the turn's steps bound them. Showing thinking runs none either,
-        // but leaves the answer room.
+        // but leaves the answer room. A dedicated tool runs no code either,
+        // and has a bound of its own.
+        const dedicated = isDedicatedTool(toolCall.name);
         const runsCode =
+          !dedicated &&
           toolCall.name !== "readApi" &&
           toolCall.name !== showThinkingName &&
           toolCall.name !== "askQuestions";
-        const reason = runsCode
-          ? refusal(progress, assistantMessage)
-          : thinkingRefusalOf(toolCall.name, progress);
+        let reason: string | undefined;
+        if (dedicated) {
+          reason = toolRefusal(progress, assistantMessage);
+        } else if (runsCode) {
+          reason = refusal(progress, assistantMessage);
+        } else {
+          reason = thinkingRefusalOf(toolCall.name, progress);
+        }
         if (runsCode && reason === undefined) {
           progress.runs += 1;
         }

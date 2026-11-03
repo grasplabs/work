@@ -7,6 +7,7 @@ import type {
 import {
   chatAskSchema,
   chatCitationsMax,
+  chatToolPreviewChars,
   citedQuoteMax,
 } from "@grasp-os/shared/chat";
 import type {
@@ -18,11 +19,12 @@ import type {
   ChatReasoning,
   ChatReplyEnd,
   ChatReplyUsage,
+  ChatToolCall,
 } from "@grasp-os/shared/chat";
 import { thinkingStepSchema } from "@grasp-os/shared/thinking";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 
-import { showThinkingName } from "./agent-messages.ts";
+import { isDedicatedTool, showThinkingName } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
@@ -68,6 +70,49 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
     }
     const { code } = part.arguments;
     return [{ callId: part.id, code: typeof code === "string" ? code : "" }];
+  });
+
+/** `value` with each text in it cut to `chars`, at any depth. */
+const cutTexts = (value: unknown, chars: number): unknown => {
+  if (typeof value === "string") {
+    return value.length > chars ? `${value.slice(0, chars)}…` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => cutTexts(item, chars));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cutTexts(item, chars)])
+    );
+  }
+  return value;
+};
+
+/**
+ * The calls a response made of the agent's dedicated tools (agent-tools.ts),
+ * as far as they have streamed in, each text of their input cut to
+ * `chars` when given (while the response is written).
+ */
+const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
+  message.content.flatMap((part, at) => {
+    if (part.type !== "toolCall" || !isDedicatedTool(part.name)) {
+      return [];
+    }
+    const codeBefore = message.content
+      .slice(0, at)
+      .filter(
+        (before) => before.type === "toolCall" && before.name === "executeCode"
+      ).length;
+    const input: Record<string, unknown> =
+      chars === undefined
+        ? part.arguments
+        : Object.fromEntries(
+            Object.entries(part.arguments).map(([key, value]) => [
+              key,
+              cutTexts(value, chars),
+            ])
+          );
+    return [{ callId: part.id, tool: part.name, codeBefore, input }];
   });
 
 /**
@@ -431,6 +476,7 @@ const givenNothing = (): boolean => false;
 export const partialOf = (message: AssistantMessage): ChatPartial => ({
   text: citedIn(textOf(message.content), givenNothing).text,
   code: codeOf(message),
+  tools: toolsOf(message, chatToolPreviewChars),
   reasoning: thoughtOf(message),
 });
 
@@ -478,6 +524,7 @@ export const chatMessageOf = (
       text,
       citations,
       code: codeOf(message),
+      tools: toolsOf(message),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(asked === undefined ? {} : { asked }),
       end: ends[message.stopReason],
