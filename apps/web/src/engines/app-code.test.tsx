@@ -1,17 +1,14 @@
 // @vitest-environment happy-dom
-import type {
-  AppFiles,
-  AppVersion,
-  FileDiff,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
@@ -23,14 +20,18 @@ import { AppPage } from "./app-page.tsx";
 
 // An App's Code tab on its page, against core's Apps API as the page
 // reaches it over RPC, faked: version 1 is current and version 2, up for
-// review, changes one line of app.ts and adds a screen. Core's diff is
-// the files as they were and are; the page works out the lines.
+// review, changes one line of app.ts, adds a screen and deletes old.ts.
+// Core's diff is the files as they were and are, as its `diffFiles`
+// gives them; the page works out the lines.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const appId = appIdSchema.parse("app-1");
 
-const builtApp = (role: ViewedApp["role"]): ViewedApp => ({
+const builtApp = (
+  role: ViewedApp["role"],
+  currentVersion: number | null
+): ViewedApp => ({
   id: appId,
   name: "Invoices",
   description: "",
@@ -39,7 +40,7 @@ const builtApp = (role: ViewedApp["role"]): ViewedApp => ({
   audience: null,
   process: null,
   blueprint: null,
-  currentVersion: 1,
+  currentVersion,
   pendingVersion: 2,
   status: "published",
   link: null,
@@ -47,22 +48,26 @@ const builtApp = (role: ViewedApp["role"]): ViewedApp => ({
   role,
 });
 
-/** app.ts, with its limit far enough down that the lines above it fold. */
+/**
+ * app.ts, its limit far enough from both ends that the lines above and
+ * below it fold.
+ */
 const appWith = (limit: number): string =>
   [
     'export const title = "Invoices";',
     ...Array.from({ length: 6 }, (_, note) => `// Note ${note + 1}`),
     `export const limit = ${limit};`,
-    "// End",
+    ...Array.from({ length: 5 }, (_, end) => `// End ${end + 1}`),
     "",
   ].join("\n");
 const appV1 = appWith(10);
 const appV2 = appWith(25);
 const schemaText = "export const schema = {};\n";
 const inboxText = "export default function Inbox() {}\n";
+const oldText = "export const legacy = true;\n";
 
 const filesOf: Record<number, AppFiles> = {
-  1: { "app.ts": appV1, "schema.ts": schemaText },
+  1: { "app.ts": appV1, "old.ts": oldText, "schema.ts": schemaText },
   2: {
     "app.ts": appV2,
     "schema.ts": schemaText,
@@ -70,38 +75,33 @@ const filesOf: Record<number, AppFiles> = {
   },
 };
 
-const version = (number: number): AppVersion => ({
-  app: appId,
-  version: number,
-  parent: number === 1 ? null : number - 1,
-  tree: `tree-${number}`,
-  files: Object.keys(filesOf[number] ?? {}).length,
-  author: "user-1",
-  message: `Change ${number}`,
-  createdAt: `2026-10-0${number}T09:00:00.000Z`,
-  proposedBy: null,
-});
+/** What core's `diffFiles` gives: every path that differs, sorted. */
+const diffOf = (before: AppFiles, after: AppFiles): FileDiff[] =>
+  [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .toSorted()
+    .flatMap((path): FileDiff[] => {
+      const old = before[path];
+      const now = after[path];
+      if (old === undefined) {
+        return now === undefined ? [] : [{ path, change: "added", after: now }];
+      }
+      if (now === undefined) {
+        return [{ path, change: "deleted", before: old }];
+      }
+      return old === now
+        ? []
+        : [{ path, change: "modified", before: old, after: now }];
+    });
 
 const apps = {
   versions: {
-    list: async (): Promise<AppVersion[]> => {
+    diff: async (
+      _app: string,
+      from: number,
+      to: number
+    ): Promise<FileDiff[]> => {
       await Promise.resolve();
-      return [version(2), version(1)];
-    },
-    diff: async (_app: string, from: number, to: number) => {
-      await Promise.resolve();
-      const before = filesOf[from] ?? {};
-      const after = filesOf[to] ?? {};
-      const diffs: FileDiff[] = [];
-      for (const [path, text] of Object.entries(after)) {
-        const old = before[path];
-        if (old === undefined) {
-          diffs.push({ path, change: "added", after: text });
-        } else if (old !== text) {
-          diffs.push({ path, change: "modified", before: old, after: text });
-        }
-      }
-      return diffs;
+      return diffOf(filesOf[from] ?? {}, filesOf[to] ?? {});
     },
   },
   files: {
@@ -124,28 +124,40 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The App's page for one of `role` in it, its Code asked for. */
-const shown = async (role: ViewedApp["role"]): Promise<void> => {
+/**
+ * The App's page for one of `role` in it, its Code asked for at an
+ * address that also names its open screen; version `current` runs.
+ */
+const shown = async (
+  role: ViewedApp["role"],
+  current: number | null = 1
+): Promise<void> => {
   const core = {
     withSession: async <T,>(
       action: (session: { apps: typeof apps }) => Promise<T>
     ): Promise<T> => await action({ apps }),
   };
+  const rootRoute = createRootRoute({ component: Outlet });
+  const page = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/apps/$app",
+    component: () => (
+      <AppPage
+        app={builtApp(role, current)}
+        contents={{ version: current, screens: ["home"], workflows: [] }}
+        identity={{ staff: false }}
+        open="home"
+        view="code"
+      >
+        <p>The screen</p>
+      </AppPage>
+    ),
+  });
   const router = createRouter({
-    routeTree: createRootRoute({
-      component: () => (
-        <AppPage
-          app={builtApp(role)}
-          contents={{ version: 1, screens: ["home"], workflows: [] }}
-          identity={{ staff: false }}
-          open="home"
-          view="code"
-        >
-          <p>The screen</p>
-        </AppPage>
-      ),
+    routeTree: rootRoute.addChildren([page]),
+    history: createMemoryHistory({
+      initialEntries: [`/apps/${appId}?screen=home&view=code`],
     }),
-    history: createMemoryHistory(),
     context: { core },
   });
   const host = document.createElement("div");
@@ -183,6 +195,15 @@ const named = (selector: string, name: string) =>
 /** The text of the file shown. */
 const fileShown = (): string =>
   document.querySelector("figure pre")?.textContent ?? "";
+
+/** Each changed file shown, and its lines as the view prints them. */
+const changesShown = () =>
+  [...document.querySelectorAll("section")].map((section) => ({
+    file: section.querySelector("h3")?.textContent,
+    lines: [...(section.querySelector("pre")?.children ?? [])].map(
+      (line) => line.textContent
+    ),
+  }));
 
 describe("An App's Code tab", () => {
   afterEach(() => {
@@ -234,19 +255,23 @@ describe("An App's Code tab", () => {
     });
   });
 
+  it("switches between the App and its Code, keeping the screen open", async () => {
+    await shown("builder");
+
+    expect({
+      app: named("a", "App")?.getAttribute("href"),
+      code: named("a", "Code")?.getAttribute("href"),
+    }).toStrictEqual({
+      app: `/apps/${appId}?screen=home`,
+      code: `/apps/${appId}?screen=home&view=code`,
+    });
+  });
+
   it("shows the draft's changed lines against the current version, with a few around them", async () => {
     await shown("builder");
     await press(named("button", "Changes"));
-    const sections = [...document.querySelectorAll("section")];
 
-    expect(
-      sections.map((section) => ({
-        file: section.querySelector("h3")?.textContent,
-        lines: [...(section.querySelector("pre")?.children ?? [])].map(
-          (line) => line.textContent
-        ),
-      }))
-    ).toStrictEqual([
+    expect(changesShown()).toStrictEqual([
       {
         file: "app.ts",
         lines: [
@@ -256,13 +281,38 @@ describe("An App's Code tab", () => {
           "  // Note 6",
           "- export const limit = 10;",
           "+ export const limit = 25;",
-          "  // End",
+          "  // End 1",
+          "  // End 2",
+          "  // End 3",
+          "⋯ 2 unchanged lines",
         ],
       },
+      { file: "old.ts", lines: ["- export const legacy = true;"] },
       {
         file: "screens/inbox.tsx",
         lines: ["+ export default function Inbox() {}"],
       },
     ]);
+  });
+
+  it("shows every file of a draft as added while no version is current", async () => {
+    await shown("builder", null);
+    const draftFile = fileShown();
+    await press(named("button", "Changes"));
+
+    expect({
+      draftFile,
+      changes: changesShown().map(({ file, lines }) => ({
+        file,
+        added: lines.every((line) => line?.startsWith("+ ")),
+      })),
+    }).toStrictEqual({
+      draftFile: appV2,
+      changes: [
+        { file: "app.ts", added: true },
+        { file: "schema.ts", added: true },
+        { file: "screens/inbox.tsx", added: true },
+      ],
+    });
   });
 });

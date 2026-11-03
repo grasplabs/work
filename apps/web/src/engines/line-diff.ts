@@ -29,24 +29,29 @@ const lineCount = (text: string): number =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
 /**
+ * The most lines added and removed worked out for one file. The diff runs
+ * on the page's own thread, for each changed file of a draft: past this,
+ * a file's change costs more than it shows, and it isn't worked out.
+ */
+const maxEditLength = 2000;
+
+/**
  * The changed lines of `before` against `after`, each hunk's unchanged
- * lines around them, and gaps for the unchanged lines between.
+ * lines around them, and gaps for the unchanged lines between; none when
+ * it changes more lines than `maxEditLength`.
  */
 export const changedLines = (
   before: string,
   after: string
-): (DiffLine | DiffGap)[] => {
-  const { hunks } = structuredPatch(
-    "",
-    "",
-    before,
-    after,
-    undefined,
-    undefined,
-    {
-      context: contextLines,
-    }
-  );
+): (DiffLine | DiffGap)[] | undefined => {
+  const patch = structuredPatch("", "", before, after, undefined, undefined, {
+    context: contextLines,
+    maxEditLength,
+  });
+  if (patch === undefined) {
+    return undefined;
+  }
+  const { hunks } = patch;
   const shown: (DiffLine | DiffGap)[] = [];
   // The next old line no hunk has shown yet, from 1.
   let next = 1;

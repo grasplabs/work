@@ -265,7 +265,8 @@ const ViewTabs = ({ app, view }: { app: string; view: AppPageView }) => {
         })}
         params={{ app }}
         replace
-        search={{}}
+        // Only the view changes: the open screen stays open.
+        search={(held) => ({ ...held, view: undefined })}
         to="/apps/$app"
       >
         <LayoutGridIcon data-icon="inline-start" />
@@ -279,7 +280,7 @@ const ViewTabs = ({ app, view }: { app: string; view: AppPageView }) => {
         })}
         params={{ app }}
         replace
-        search={{ view: "code" }}
+        search={(held) => ({ ...held, view: "code" as const })}
         to="/apps/$app"
       >
         <CodeIcon data-icon="inline-start" />

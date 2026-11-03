@@ -18,15 +18,15 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { changedLines } from "./line-diff.ts";
+import type { DiffGap, DiffLine } from "./line-diff.ts";
 
 // An App's code on its page, for its builders (app-page.tsx's Code tab):
 // the files of its current version as a tree, the one picked shown
-// highlighted, and, when a newer version waits (the one up for review, or
-// else the latest committed over the current), the same of that draft and
-// its changes against the current version, file by file. Read-only: the
-// App changes through its chat, which the note says. Everything is read
-// with core's own reads for builders (`apps.versions.list`,
-// `apps.files.read`, `apps.versions.diff`), which refuse anyone else.
+// highlighted, and, when a version is up for review (the draft), the same
+// of it and its changes against the current version, file by file.
+// Read-only: the App changes through its chat, which the note says.
+// Everything is read with core's own reads for builders
+// (`apps.files.read`, `apps.versions.diff`), which refuse anyone else.
 //
 // Highlighting is the chat's (answer-markdown.tsx): rehype-highlight by
 // class, coloured from the theme's tokens in styles.css. A file goes
@@ -287,6 +287,52 @@ const GapText = ({ unchanged }: { unchanged: number }) => (
   />
 );
 
+/** A file's changed lines, as a diff prints them. */
+const ChangedLines = ({
+  shown,
+}: {
+  shown: readonly (DiffLine | DiffGap)[];
+}) => (
+  <pre className="overflow-x-auto py-2 font-mono text-xs leading-relaxed">
+    {shown.map((line, index) => {
+      if (line.kind === "gap") {
+        return (
+          <div
+            className="text-muted-foreground px-4"
+            // Nothing else marks a gap's place.
+            key={`gap-${index}`}
+          >
+            <GapText unchanged={line.lines} />
+          </div>
+        );
+      }
+      const key = `${line.before ?? ""}:${line.after ?? ""}`;
+      if (line.kind === "added") {
+        return (
+          <ins
+            className="bg-status-agreed/10 block px-4 no-underline"
+            key={key}
+          >
+            {`+ ${line.text}`}
+          </ins>
+        );
+      }
+      if (line.kind === "removed") {
+        return (
+          <del className="bg-destructive/10 block px-4 no-underline" key={key}>
+            {`- ${line.text}`}
+          </del>
+        );
+      }
+      return (
+        <div className="px-4" key={key}>
+          {`  ${line.text}`}
+        </div>
+      );
+    })}
+  </pre>
+);
+
 /** One file's changed lines, with a few unchanged ones around them. */
 const FileChange = ({ diff }: { diff: FileDiff }) => {
   const before = diff.change === "added" ? "" : diff.before;
@@ -298,47 +344,13 @@ const FileChange = ({ diff }: { diff: FileDiff }) => {
         <h3 className="min-w-0 truncate font-mono text-xs">{diff.path}</h3>
         <ChangeBadge change={diff.change} />
       </header>
-      <pre className="overflow-x-auto py-2 font-mono text-xs leading-relaxed">
-        {shown.map((line, index) => {
-          if (line.kind === "gap") {
-            return (
-              <div
-                className="text-muted-foreground px-4"
-                // Nothing else marks a gap's place.
-                key={`gap-${index}`}
-              >
-                <GapText unchanged={line.lines} />
-              </div>
-            );
-          }
-          const key = `${line.before ?? ""}:${line.after ?? ""}`;
-          if (line.kind === "added") {
-            return (
-              <ins
-                className="bg-status-agreed/10 block px-4 no-underline"
-                key={key}
-              >
-                {`+ ${line.text}`}
-              </ins>
-            );
-          }
-          if (line.kind === "removed") {
-            return (
-              <del
-                className="bg-destructive/10 block px-4 no-underline"
-                key={key}
-              >
-                {`- ${line.text}`}
-              </del>
-            );
-          }
-          return (
-            <div className="px-4" key={key}>
-              {`  ${line.text}`}
-            </div>
-          );
-        })}
-      </pre>
+      {shown === undefined ? (
+        <p className="text-muted-foreground px-4 py-2 text-xs">
+          <Trans>Too many changes to show line by line</Trans>
+        </p>
+      ) : (
+        <ChangedLines shown={shown} />
+      )}
     </section>
   );
 };
@@ -517,26 +529,13 @@ const CodeBody = ({
 };
 
 /**
- * The App's Code tab: its versions read first, to know the draft, if any:
- * the one up for review, or else the latest version over the current.
+ * The App's Code tab. Its draft is the version up for review alone, as the
+ * App says it: a version merely newer than the current one may be one a
+ * builder rolled back from, never a draft.
  */
 export const AppCode = ({ app }: { app: ViewedApp }) => {
-  const versions = useCoreRead(
-    // Read again whenever the App's versions move.
-    `${app.id}/${app.currentVersion ?? ""}/${app.pendingVersion ?? ""}`,
-    async (session) => await session.apps.versions.list(app.id)
-  );
-  if (versions === undefined) {
-    return <LoadingLines lines={6} />;
-  }
-  if (versions.state !== "ready") {
-    return <NotLoaded page={versions} />;
-  }
-  const latest = versions.data[0]?.version ?? null;
   const current = app.currentVersion;
-  const newer =
-    latest !== null && (current === null || latest > current) ? latest : null;
-  const draft = app.pendingVersion ?? newer;
+  const draft = app.pendingVersion;
   if (current === null && draft === null) {
     return (
       <p className="text-muted-foreground">

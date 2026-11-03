@@ -13696,6 +13696,10 @@ msgstr "Mañana"
 msgid "Too large to read"
 msgstr "Demasiado grande para leerlo"
 
+#: src/engines/app-code.tsx
+msgid "Too many changes to show line by line"
+msgstr "Demasiados cambios para mostrarlos línea por línea"
+
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Se están transfiriendo demasiados archivos a la vez. Inténtalo de nuevo en un momento."
