@@ -149,20 +149,24 @@ export const workflowWebhookLimits = {
 } as const;
 
 /**
- * The headers a delivery is signed with, as Grasp signs its own webhooks
- * (`appWebhookHeaders`): the Unix time in seconds, and `v1=` and the
- * lower-case hex of HMAC-SHA256, with the trigger's secret, of the
- * timestamp, a dot and the body exactly as sent.
+ * The headers a delivery is signed with, as the Standard Webhooks
+ * specification has them (standardwebhooks.com): the delivery's own ID,
+ * the same on every retry of it; the Unix time in seconds it was signed
+ * at; and one or more signatures, space-separated, each `v1,` and the
+ * base64 HMAC-SHA256, with the key of the trigger's secret (`whsec_` and
+ * the key, in base64), of the ID, a dot, the timestamp, a dot and the body
+ * exactly as sent.
  */
 export const workflowWebhookHeaders = {
-  timestamp: "grasp-webhook-timestamp",
-  signature: "grasp-webhook-signature",
+  id: "webhook-id",
+  timestamp: "webhook-timestamp",
+  signature: "webhook-signature",
 } as const;
 
 /** Why a webhook trigger refused a delivery, as its sender is told. */
 export const workflowWebhookErrors = defineErrorFamily({
   "webhook.signature_invalid":
-    "This delivery isn't signed with the trigger's secret, or its timestamp is missing or more than five minutes from now.",
+    "This delivery isn't signed with the trigger's secret as Standard Webhooks signs one (webhook-id, webhook-timestamp, webhook-signature), or its timestamp is more than five minutes from now.",
   "webhook.body_invalid":
     "A delivery's body is one JSON value, of at most 64 KiB.",
   "webhook.input_refused":

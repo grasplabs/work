@@ -1,9 +1,4 @@
-import {
-  fromHex,
-  sha256Hex,
-  toBase64Url,
-  toHex,
-} from "@grasp-os/shared/encoding";
+import { sha256Hex, toBase64, toHex } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { readAtMost } from "@grasp-os/shared/http";
 import { log } from "@grasp-os/shared/log";
@@ -14,7 +9,7 @@ import {
   workflowWebhookLimits,
   workflowWebhookPath,
 } from "@grasp-os/shared/workflow-triggers";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -36,9 +31,13 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   of the trigger's own (never its ID, which builders, admins, staff and
 //   the audit log see), shown only to whoever may see the trigger, and
 //   left out of the request log (`withoutWebhookToken`). It is not the
-//   credential: every delivery must also be signed, `v1=` HMAC-SHA256 over
-//   `<timestamp>.<body>` with the trigger's secret, checked in constant
-//   time (`crypto.subtle.verify`) before the body is even parsed.
+//   credential: every delivery must also be signed as the Standard
+//   Webhooks specification says (standardwebhooks.com): `webhook-id`,
+//   `webhook-timestamp` and `webhook-signature` headers, the signature
+//   `v1,` and the base64 HMAC-SHA256 of `<id>.<timestamp>.<body>` with the
+//   trigger's secret (`whsec_` and its key, in base64), checked in
+//   constant time (`crypto.subtle.verify`) before the body is parsed. Any
+//   sender or library that speaks the standard can call it.
 // - The secret leaking from core. It is never stored: it is derived from
 //   the trigger's ID and its secret's generation with a key of core's own
 //   (`derivedHmacKey`, as outbound webhooks' are), answered once to its
@@ -46,10 +45,17 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   audited. Rotating makes a new generation, never one used before, so
 //   the old secret takes nothing from then on; revoking takes nothing
 //   until a new one is made. Rotating core's auth secret changes them all.
-// - A captured delivery replayed. Its timestamp must be within five
-//   minutes of now (`workflowWebhookLimits.toleranceSeconds`); within that
-//   window the same delivery (the same signature) is the same start
-//   (`startOnce`'s key, a start receipt), its run the same run.
+//   A delivery whose secret is rotated or revoked while its body arrives
+//   starts nothing: its admission requires the secret it was checked with
+//   to be the trigger's still (`also`), and is answered 401 when it isn't.
+// - A delivery started twice: a sender's retry is signed afresh, with a
+//   new timestamp, but keeps its `webhook-id`. The run is keyed by the
+//   trigger and that ID (`startOnce`'s key, a start receipt), so a retry
+//   is the same start, its run the same run; the ID is signed, so it can't
+//   be swapped for another to start a second run. A captured delivery
+//   replayed later than five minutes from its timestamp is refused
+//   (`workflowWebhookLimits.toleranceSeconds`); within them it is the
+//   same start.
 // - A trigger nobody approved starting anything. Its starts need `start` on
 //   its workflow, a grant of its own only an admin gives, as every
 //   trigger's do; a trigger disabled or deleted takes nothing (404), and
@@ -61,32 +67,45 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   nothing in it is evaluated. One refused is refused for good, audited.
 // - Floods. A trigger starts at most `triggeredRunsPerHour` runs an hour,
 //   counted as each is admitted, as connector and email triggers do
-//   (`startOnce`); past it the sender is told to try again later (503).
+//   (`startOnce`); past it the sender is told to try again later (503,
+//   `retry-after`), and nothing is held back for it: it retries under the
+//   same `webhook-id`, which starts one run however often it is sent.
 //   An unsigned request costs a lookup by a unique index and an HMAC, and
 //   is logged by reason, never audited: an unauthenticated sender can't
 //   fill the audit log. Each signed delivery is audited: its start with
-//   its run, a refusal or a drop as `workflow.webhook.refused` and
-//   `workflow.webhook.dropped`, by the delivery's hash, never its body.
+//   its run, a refusal for good as `workflow.webhook.refused`, by the
+//   hash of its `webhook-id`, never its body.
 
 const secretPurpose = "grasp-os workflow webhook secret";
 
-/** The prefix of a webhook trigger's secret, so it is recognised wherever it is pasted. */
-const secretPrefix = "gwtsec_";
+/** The prefix of a Standard Webhooks secret: its key follows, in base64. */
+const secretPrefix = "whsec_";
 
-/** The secret of webhook trigger `id` at `generation`: never stored. */
-export const webhookTriggerSecretOf = async (
+/** The key of webhook trigger `id`'s secret at `generation`: never stored. */
+const secretKeyOf = async (
   env: Pick<Env, "BETTER_AUTH_SECRET">,
   id: string,
   generation: number
-): Promise<string> => {
+): Promise<Uint8Array<ArrayBuffer>> => {
   const key = await derivedHmacKey(env, secretPurpose, ["sign"]);
   const mac = await crypto.subtle.sign(
     "HMAC",
     key,
     new TextEncoder().encode(`${id}\n${generation}`)
   );
-  return `${secretPrefix}${toBase64Url(new Uint8Array(mac))}`;
+  return new Uint8Array(mac);
 };
+
+/**
+ * The secret of webhook trigger `id` at `generation`, as Standard Webhooks
+ * writes one: `whsec_` and its 32-byte key, in base64. Never stored.
+ */
+export const webhookTriggerSecretOf = async (
+  env: Pick<Env, "BETTER_AUTH_SECRET">,
+  id: string,
+  generation: number
+): Promise<string> =>
+  `${secretPrefix}${toBase64(await secretKeyOf(env, id, generation))}`;
 
 /** A token of a webhook trigger's URL: 128 random bits, in hex. */
 const tokenPattern = /^[0-9a-f]{32}$/u;
@@ -116,11 +135,21 @@ export const withoutWebhookToken = (pathname: string): string =>
     ? pathname
     : `${workflowWebhookPath}/-`;
 
-/** A signature as sent: `v1=` and 64 hex digits. */
-const signaturePattern = /^v1=(?<mac>[0-9a-f]{64})$/u;
+/** One signature of `webhook-signature`: `v1,` and a 32-byte MAC in base64. */
+const signaturePattern = /^v1,(?<mac>[A-Za-z0-9+/]{43}=)$/u;
 
 /** A timestamp as sent: Unix seconds. */
 const timestampPattern = /^\d{1,12}$/u;
+
+/** A `webhook-id`: 1 to 256 printable ASCII characters, no spaces. */
+const deliveryIdPattern = /^[\u0021-\u007E]{1,256}$/u;
+
+/** The most signatures one `webhook-signature` header lists. */
+const maxSignatures = 8;
+
+/** Base64 `text` as bytes. */
+const bytesOfBase64 = (text: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(atob(text), (char) => char.codePointAt(0) ?? 0);
 
 /** A webhook trigger, with its secret's generation and whether it was revoked. */
 interface WebhookTaker extends Taker {
@@ -161,33 +190,51 @@ const webhookTakerAt = async (
     )
     .get();
 
+/** What a delivery is signed over, as its headers say. */
+interface Signed {
+  id: string;
+  timestamp: string;
+  signatures: string;
+}
+
 /**
- * Whether `signature` is `v1=` HMAC-SHA256 of `<timestamp>.<body>` with
- * `secret`, checked in constant time.
+ * Whether one of `signed.signatures` (space-separated, as Standard
+ * Webhooks lists them, a key rotating on the sender's side) is `v1,` and
+ * the HMAC-SHA256 of `<id>.<timestamp>.<body>` with `key`, each checked in
+ * constant time. Signatures of any other version are passed over.
  */
 const signedWith = async (
-  secret: string,
-  timestamp: string,
-  body: Uint8Array<ArrayBuffer>,
-  signature: string
+  key: Uint8Array<ArrayBuffer>,
+  { id, timestamp, signatures }: Signed,
+  body: Uint8Array<ArrayBuffer>
 ): Promise<boolean> => {
-  const mac = fromHex(signaturePattern.exec(signature)?.groups?.mac ?? "");
-  if (mac === undefined || mac.byteLength === 0) {
+  const macs = signatures
+    .split(" ")
+    .slice(0, maxSignatures)
+    .flatMap((each) => {
+      const mac = signaturePattern.exec(each)?.groups?.mac;
+      return mac === undefined ? [] : [bytesOfBase64(mac)];
+    });
+  if (macs.length === 0) {
     return false;
   }
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
+  const hmac = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(secret),
+    key,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["verify"]
   );
-  const prefix = encoder.encode(`${timestamp}.`);
-  const signed = new Uint8Array(prefix.byteLength + body.byteLength);
-  signed.set(prefix);
-  signed.set(body, prefix.byteLength);
-  return await crypto.subtle.verify("HMAC", key, mac, signed);
+  const prefix = new TextEncoder().encode(`${id}.${timestamp}.`);
+  const content = new Uint8Array(prefix.byteLength + body.byteLength);
+  content.set(prefix);
+  content.set(body, prefix.byteLength);
+  const verified = await Promise.all(
+    macs.map(
+      async (mac) => await crypto.subtle.verify("HMAC", hmac, mac, content)
+    )
+  );
+  return verified.includes(true);
 };
 
 /** Whether `timestamp` (Unix seconds, as sent) is within the window of now. */
@@ -196,6 +243,19 @@ const isRecent = (timestamp: string | null): timestamp is string =>
   timestampPattern.test(timestamp) &&
   Math.abs(Date.now() / 1000 - Number(timestamp)) <=
     workflowWebhookLimits.toleranceSeconds;
+
+/** The headers a delivery is signed by, if they are all there and well formed. */
+const signedOf = (headers: Headers): Signed | undefined => {
+  const id = headers.get(workflowWebhookHeaders.id);
+  const timestamp = headers.get(workflowWebhookHeaders.timestamp);
+  const signatures = headers.get(workflowWebhookHeaders.signature);
+  return id !== null &&
+    deliveryIdPattern.test(id) &&
+    isRecent(timestamp) &&
+    signatures !== null
+    ? { id, timestamp, signatures }
+    : undefined;
+};
 
 /** Refuses a delivery as unsigned: logged by reason, never audited. */
 const unsigned = (reason: string, requestId: string): Response => {
@@ -241,6 +301,15 @@ const answerOf = (outcome: Outcome, requestId: string): Response => {
         requestId
       );
     }
+    case "stale": {
+      // Its secret was rotated or revoked as the delivery arrived.
+      log.warn("workflow.webhook.unsigned", { reason: "rotated" });
+      return errorResponse(
+        401,
+        workflowWebhookErrors.create("webhook.signature_invalid"),
+        requestId
+      );
+    }
     case "unavailable": {
       return errorResponse(
         404,
@@ -265,7 +334,7 @@ const answerOf = (outcome: Outcome, requestId: string): Response => {
 
 /**
  * Answers a POST to a webhook trigger's URL (see the header): 202 once its
- * run started (or had, for the same delivery), 401 unsigned, 404 for no
+ * run started (or had, for the same `webhook-id`), 401 unsigned, 404 for no
  * live trigger there, 413 or 400 for a body that isn't one JSON value
  * within the limit, 422 refused for good, 503 to try again later.
  */
@@ -293,12 +362,12 @@ export const workflowWebhookResponse = async (
     await request.body?.cancel();
     return unsigned("revoked", requestId);
   }
-  const timestamp = request.headers.get(workflowWebhookHeaders.timestamp);
-  const signature = request.headers.get(workflowWebhookHeaders.signature);
-  if (!isRecent(timestamp) || signature === null) {
+  const signed = signedOf(request.headers);
+  if (signed === undefined) {
     await request.body?.cancel();
-    return unsigned("timestamp", requestId);
+    return unsigned("headers", requestId);
   }
+  const { generation } = taker;
   // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
   // chunks; its type says `any` only for streams in general.
   const stream = request.body as ReadableStream<Uint8Array> | null;
@@ -313,8 +382,8 @@ export const workflowWebhookResponse = async (
       requestId
     );
   }
-  const secret = await webhookTriggerSecretOf(env, taker.id, taker.generation);
-  if (!(await signedWith(secret, timestamp, body, signature))) {
+  const key = await secretKeyOf(env, taker.id, generation);
+  if (!(await signedWith(key, signed, body))) {
     return unsigned("signature", requestId);
   }
   const input = jsonOf(body);
@@ -325,21 +394,28 @@ export const workflowWebhookResponse = async (
       requestId
     );
   }
-  // The same delivery, sent again within the window, is the same start.
-  const same = await sha256Hex(`webhook:${signature}`);
+  // The same `webhook-id`, however often sent and signed, is the same
+  // start: a sender's retries start one run.
+  const same = await sha256Hex(`webhook:${signed.id}`);
   const outcome = await startOnce(env, taker, {
     same,
     key: `${coreStartKeyPrefix}webhook:${taker.id}:${same}`,
     admission: `webhook:${same}:${taker.id}`,
     input,
     stamped: undefined,
+    // Admitted only while the secret it was checked with is still the
+    // trigger's: rotated or revoked meanwhile, it starts nothing.
+    also: sql`EXISTS (SELECT 1 FROM ${triggerResources}
+      WHERE ${triggerResources.id} = ${taker.id}
+        AND ${triggerResources.webhookSecretGeneration} = ${generation}
+        AND ${triggerResources.webhookSecretRevokedAt} IS NULL)`,
     noted: { delivery: same },
     audited: {
       refused: "workflow.webhook.refused",
-      dropped: "workflow.webhook.dropped",
       detail: { delivery: same },
     },
     logged: { type: "webhook", delivery: same },
+    answered: true,
   });
   return answerOf(outcome, requestId);
 };

@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { toHex } from "@grasp-os/shared/encoding";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -12,6 +11,7 @@ import {
   workflowWebhookPath,
 } from "@grasp-os/shared/workflow-triggers";
 import { env } from "cloudflare:workers";
+import { Webhook } from "standardwebhooks";
 import { describe, expect, it } from "vite-plus/test";
 
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -24,9 +24,11 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 // from their threat model: a delivery that isn't signed with the trigger's
 // secret, one replayed past its window, one too large, one that isn't
 // JSON or isn't an input the workflow takes, one before an admin granted
-// the trigger its start, and the same delivery sent twice each start
+// the trigger its start, a sender's retry of the same `webhook-id` signed
+// afresh, and one whose secret is rotated as it is admitted each start
 // nothing more than they should; the secret is shown once, never listed
-// or audited, and rotating or revoking it stops the old one.
+// or audited, and rotating or revoking it stops the old one. Deliveries
+// are signed by Standard Webhooks' own library, as any sender's are.
 
 const idp = mockIdp();
 
@@ -158,57 +160,53 @@ const webhookTrigger = async ({ grant = true } = {}) => {
   return { builder, admin: by, workflow: id, trigger };
 };
 
-/** `v1=` HMAC-SHA256 of `<timestamp>.<body>` with `secret`, as a sender signs. */
-const signatureOf = async (
-  secret: string,
-  timestamp: string,
-  body: string
-): Promise<string> => {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(`${timestamp}.${body}`)
-  );
-  return `v1=${toHex(new Uint8Array(mac))}`;
-};
-
 /** How a test sends a delivery, when not as a sender holding the secret does. */
 interface Sending {
+  /** Its `webhook-id`: one of its own unless given. */
+  id?: string;
+  /** Signed with another secret than the trigger's. */
   secret?: string;
   /** Seconds from now its timestamp says. */
   skew?: number;
+  /** Its `webhook-signature`, as is. */
   signature?: string;
   method?: string;
+  /** Core's env the request reaches. */
+  coreEnv?: Env;
 }
 
-/** Sends `body` to the webhook trigger's URL at `token`, signed with `secret`. */
+/**
+ * Sends `body` to the webhook trigger's URL at `token`, signed with
+ * `secret` by Standard Webhooks' own library, as any sender of the
+ * standard signs.
+ */
 const send = async (
   token: string,
   secret: string,
   body: string,
   sending: Sending = {}
 ): Promise<Response> => {
-  const timestamp = String(Math.floor(Date.now() / 1000) + (sending.skew ?? 0));
+  const id = sending.id ?? `msg_${unique()}`;
+  const at = new Date(Date.now() + (sending.skew ?? 0) * 1000);
   const signature =
     sending.signature ??
-    (await signatureOf(sending.secret ?? secret, timestamp, body));
-  return await routed(`${workflowWebhookPath}/${token}`, {
-    method: sending.method ?? "POST",
-    headers: {
-      "content-type": "application/json",
-      [workflowWebhookHeaders.timestamp]: timestamp,
-      [workflowWebhookHeaders.signature]: signature,
+    new Webhook(sending.secret ?? secret).sign(id, at, body);
+  return await routed(
+    `${workflowWebhookPath}/${token}`,
+    {
+      method: sending.method ?? "POST",
+      headers: {
+        "content-type": "application/json",
+        [workflowWebhookHeaders.id]: id,
+        [workflowWebhookHeaders.timestamp]: String(
+          Math.floor(at.getTime() / 1000)
+        ),
+        [workflowWebhookHeaders.signature]: signature,
+      },
+      ...(sending.method === "GET" ? {} : { body }),
     },
-    ...(sending.method === "GET" ? {} : { body }),
-  });
+    sending.coreEnv
+  );
 };
 
 /** The inputs of the runs trigger `trigger` started, oldest first. */
@@ -223,6 +221,59 @@ const runInputsOf = async (trigger: string): Promise<unknown[]> => {
   );
 };
 
+/**
+ * Core's env with `first` run once, just before the first statement whose
+ * query `at` matches is run: someone acting between what core read and
+ * that statement.
+ */
+const racedAt = (at: RegExp, first: () => Promise<unknown>): Env => {
+  const real = env.DB;
+  let raced = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property, receiver) => {
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        if (
+          property === "first" ||
+          property === "all" ||
+          property === "raw" ||
+          property === "run"
+        ) {
+          return async (...args: unknown[]) => {
+            await first();
+            const run: unknown = Reflect.get(target, property, target);
+            if (typeof run !== "function") {
+              throw new TypeError(`No ${property} on a statement`);
+            }
+            const result: unknown = await Reflect.apply(run, target, args);
+            return result;
+          };
+        }
+        const value: unknown = Reflect.get(target, property, receiver);
+        return value;
+      },
+    });
+  const DB: D1Database = {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      if (raced || !at.test(query)) {
+        return statement;
+      }
+      raced = true;
+      return racing(statement);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  return { ...env, DB };
+};
+
 /** A delivery's body: one invoice. */
 const invoice = JSON.stringify({ invoice: "INV-1", amount: 120 });
 
@@ -233,7 +284,7 @@ describe("a workflow's webhook trigger", () => {
     const events = await allEvents();
 
     expect({
-      secret: trigger.secret?.startsWith("gwtsec_"),
+      secret: /^whsec_[A-Za-z0-9+/]{43}=$/u.test(trigger.secret ?? ""),
       token: /^[0-9a-f]{32}$/u.test(trigger.webhook?.token ?? ""),
       secretState: trigger.webhook?.secret,
       listed: listed.map((each) => ({
@@ -254,22 +305,32 @@ describe("a workflow's webhook trigger", () => {
     });
   });
 
-  it("starts a run with a signed delivery's body as its input, once for the same delivery", async () => {
+  it("starts one run per webhook-id, its body the input: a retry signed afresh starts none, another ID one more", async () => {
     const { trigger } = await webhookTrigger();
     const token = trigger.webhook?.token ?? "";
     const secret = trigger.secret ?? "";
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = await signatureOf(secret, timestamp, invoice);
-    const delivered = await send(token, secret, invoice, { signature });
-    // The same delivery again, as a sender retrying: the same start.
-    const again = await send(token, secret, invoice, { signature });
+    const delivered = await send(token, secret, invoice, { id: "msg_1" });
+    // The sender's retry: the same ID, a timestamp and signature of its own.
+    const retried = await send(token, secret, invoice, {
+      id: "msg_1",
+      skew: 30,
+    });
+    const another = await send(
+      token,
+      secret,
+      JSON.stringify({ invoice: "INV-2", amount: 2 }),
+      { id: "msg_2" }
+    );
 
     expect({
-      statuses: [delivered.status, again.status],
+      statuses: [delivered.status, retried.status, another.status],
       inputs: await runInputsOf(trigger.id),
     }).toStrictEqual({
-      statuses: [202, 202],
-      inputs: [{ invoice: "INV-1", amount: 120 }],
+      statuses: [202, 202, 202],
+      inputs: [
+        { invoice: "INV-1", amount: 120 },
+        { invoice: "INV-2", amount: 2 },
+      ],
     });
   });
 
@@ -277,16 +338,27 @@ describe("a workflow's webhook trigger", () => {
     const { trigger } = await webhookTrigger();
     const token = trigger.webhook?.token ?? "";
     const secret = trigger.secret ?? "";
+    const otherSecret = new Webhook(
+      `whsec_${btoa("another-secret-of-32-bytes-long!")}`
+    );
+    const at = new Date();
     const refused = {
       wrongSecret: await send(token, secret, invoice, {
-        secret: "gwtsec_not-the-trigger-secret",
+        signature: otherSecret.sign("msg_a", at, invoice),
+        id: "msg_a",
+      }),
+      // Signed for another ID: the ID can't be swapped.
+      swappedId: await send(token, secret, invoice, {
+        signature: new Webhook(secret).sign("msg_b", at, invoice),
+        id: "msg_c",
       }),
       tampered: await send(token, secret, invoice, {
-        signature: await signatureOf(
-          secret,
-          String(Math.floor(Date.now() / 1000)),
-          JSON.stringify({ invoice: "INV-2", amount: 1 })
+        signature: new Webhook(secret).sign(
+          "msg_d",
+          at,
+          JSON.stringify({ invoice: "INV-9", amount: 1 })
         ),
+        id: "msg_d",
       }),
       unsigned: await send(token, secret, invoice, { signature: "" }),
       stale: await send(token, secret, invoice, { skew: -600 }),
@@ -321,6 +393,7 @@ describe("a workflow's webhook trigger", () => {
     }).toStrictEqual({
       statuses: {
         wrongSecret: 401,
+        swappedId: 401,
         tampered: 401,
         unsigned: 401,
         stale: 401,
@@ -399,6 +472,39 @@ describe("a workflow's webhook trigger", () => {
         { invoice: "INV-4", amount: 4 },
         { invoice: "INV-6", amount: 6 },
       ],
+    });
+  });
+
+  it("starts nothing for a delivery whose secret is rotated as it is admitted, and takes it again signed with the new one", async () => {
+    const { builder, trigger } = await webhookTrigger();
+    const token = trigger.webhook?.token ?? "";
+    let rotated = "";
+    // The secret rotated after the delivery was checked, before its start
+    // is admitted: the statement that admits it reads the trigger live.
+    const rotating = racedAt(/trigger_resources AS live/u, async () => {
+      ({ secret: rotated } =
+        await builder.api.workflowResources.triggers.rotateWebhookSecret(
+          trigger.id
+        ));
+    });
+    const raced = await send(token, trigger.secret ?? "", invoice, {
+      id: "msg_race",
+      coreEnv: rotating,
+    });
+    const before = await runInputsOf(trigger.id);
+    // The sender's retry, signed with the new secret: nothing was settled.
+    const retried = await send(token, rotated, invoice, { id: "msg_race" });
+
+    expect({
+      raced: raced.status,
+      before,
+      retried: retried.status,
+      after: await runInputsOf(trigger.id),
+    }).toStrictEqual({
+      raced: 401,
+      before: [],
+      retried: 202,
+      after: [{ invoice: "INV-1", amount: 120 }],
     });
   });
 });

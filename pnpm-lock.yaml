@@ -259,6 +259,9 @@ catalogs:
     shadcn:
       specifier: 4.23.0
       version: 4.23.0
+    standardwebhooks:
+      specifier: 1.1.1
+      version: 1.1.1
     tailwind-merge:
       specifier: 3.7.0
       version: 3.7.0
@@ -650,6 +653,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.3.0
+      standardwebhooks:
+        specifier: 'catalog:'
+        version: 1.1.1
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)

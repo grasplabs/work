@@ -60,6 +60,7 @@
     "axios": "catalog:",
     "drizzle-kit": "catalog:",
     "react": "catalog:",
+    "standardwebhooks": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "catalog:"
   }
