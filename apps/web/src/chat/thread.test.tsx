@@ -250,6 +250,7 @@ describe(ChatThread, () => {
           {
             callId: "write",
             tool: "writeFile",
+            codeBefore: 0,
             input: {
               app: "app_1",
               path: "screens/desk.tsx",
@@ -259,6 +260,7 @@ describe(ChatThread, () => {
           {
             callId: "search",
             tool: "searchBrain",
+            codeBefore: 0,
             input: { query: "expense policy" },
           },
         ],
@@ -298,6 +300,57 @@ describe(ChatThread, () => {
       came: true,
       code: false,
     });
+  });
+
+  it("shows a response's tool calls and code steps in the order it made them", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const done = (id: number, callId: string): ChatMessage => ({
+      id,
+      role: "result",
+      callId,
+      text: "Returned:\nnull",
+      failed: false,
+      at,
+    });
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [{ callId: "check", code: "await env.build.check('app_1')" }],
+        tools: [
+          {
+            callId: "write",
+            tool: "writeFile",
+            codeBefore: 0,
+            input: { app: "app_1", path: "screens/desk.tsx", content: "" },
+          },
+          {
+            callId: "edit",
+            tool: "editFile",
+            codeBefore: 1,
+            input: { app: "app_1", path: "app.ts" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      done(3, "write"),
+      done(4, "check"),
+      done(5, "edit"),
+    ]);
+
+    expect(
+      [...document.querySelectorAll("button[aria-expanded]")].map(
+        (line) => line.textContent
+      )
+    ).toStrictEqual([
+      "Wrote screens/desk.tsx",
+      "Code stepDone",
+      "Edited app.ts",
+    ]);
   });
 
   it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {

@@ -360,6 +360,11 @@ export interface ChatToolCall {
   /** The tool, by its name. */
   tool: string;
   /**
+   * How many of the response's code steps (`code`) came before it: the
+   * thread shows its steps in the order the response made them.
+   */
+  codeBefore: number;
+  /**
    * What it was given, as far as it has streamed in. While the response is
    * written, each text in it is cut short (`chatToolPreviewChars`).
    */

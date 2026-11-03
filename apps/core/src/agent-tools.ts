@@ -55,7 +55,8 @@ const callAs = async (
   toolCallId: string,
   tool: string,
   input: unknown,
-  call: (scope: AgentScope) => Promise<unknown>
+  signal: AbortSignal | undefined,
+  call: (scope: AgentScope, guard: () => void) => Promise<unknown>
 ) => {
   const source = JSON.stringify({ tool, input });
   const runId = runs.open({
@@ -63,19 +64,37 @@ const callAs = async (
     sourceHash: await sourceHash(source),
     sourceChars: source.length,
   });
+  // Stopping the turn closes the run at once, as it ends a code run: a
+  // call under way is refused as it commits (`admitEffect`), and the
+  // guard stops the next one from starting.
+  let closing: Promise<CodeRunStatus> | undefined;
+  const cancel = (): void => {
+    closing ??= runs.close(runId, "cancelled");
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  const guard = (): void => {
+    if (signal?.aborted === true) {
+      throw new Error("The run was cancelled.");
+    }
+  };
   let status: CodeRunStatus = "crashed";
   let result: string | undefined;
   let failure: string | undefined;
   let ended: CodeRunStatus;
   try {
-    const value = await call({ ...scope, runId });
+    guard();
+    const value = await call({ ...scope, runId }, guard);
     result = JSON.stringify(value ?? null);
     status = "completed";
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
     status = "threw";
   } finally {
-    ended = await runs.close(runId, status);
+    signal?.removeEventListener("abort", cancel);
+    if (signal?.aborted === true) {
+      cancel();
+    }
+    ended = await (closing ?? runs.close(runId, status));
   }
   const text =
     ended === "revoked"
@@ -186,7 +205,12 @@ const tool =
   <S extends z.ZodType>(
     definition: Definition,
     schema: S,
-    run: (scope: AgentScope, input: z.output<S>) => Promise<unknown>
+    run: (
+      scope: AgentScope,
+      input: z.output<S>,
+      /** Throws once the turn was stopped: called before each later API call. */
+      guard: () => void
+    ) => Promise<unknown>
   ) =>
   (deps: ToolDeps): TurnTool => {
     const input = checked(definition.name, schema, definition.takes);
@@ -198,7 +222,7 @@ const tool =
       api: definition.api,
       prepareArguments: input,
       executionMode: "sequential",
-      execute: async (toolCallId, args) => {
+      execute: async (toolCallId, args, signal) => {
         // Checked once more, as what it runs on.
         const checkedInput = input(args);
         return await callAs(
@@ -206,7 +230,8 @@ const tool =
           toolCallId,
           definition.name,
           checkedInput,
-          async (scope) => await run(scope, checkedInput)
+          signal,
+          async (scope, guard) => await run(scope, checkedInput, guard)
         );
       },
     };
@@ -280,7 +305,7 @@ const editWorkflowInput = z.strictObject({
   workflow: z.string(),
   expectedRevision: z.number().int().min(0),
   source: z.string(),
-  modules: z.record(z.string(), z.string()).optional(),
+  modules: z.record(z.string(), z.string()),
 });
 
 /**
@@ -407,7 +432,7 @@ const definitions = (known: Set<string>) => [
       ),
     },
     editInput,
-    async (scope, { app, path, oldText, newText }) => {
+    async (scope, { app, path, oldText, newText }, guard) => {
       if (!known.has(fileKey(app, path))) {
         throw new Error(
           `Read ${path} with readFile before you edit it: you haven't read it in this chat.`
@@ -422,6 +447,7 @@ const definitions = (known: Set<string>) => [
             : `oldText occurs ${found} times in ${path}: give more of the text around it, so it occurs once.`
         );
       }
+      guard();
       return await exports
         .BuildApi({ props: scope })
         .write(app, { [path]: content.replace(oldText, () => newText) });
@@ -516,7 +542,9 @@ const definitions = (known: Set<string>) => [
           workflow: Type.String({ description: "The workflow's ID." }),
           expectedRevision: Type.Integer(),
           source: Type.String({ description: "The whole workflow.json." }),
-          modules: Type.Optional(Type.Record(Type.String(), Type.String())),
+          modules: Type.Record(Type.String(), Type.String(), {
+            description: "All its modules, by name: {} for none.",
+          }),
         },
         { additionalProperties: false }
       ),
@@ -525,7 +553,7 @@ const definitions = (known: Set<string>) => [
     async (scope, { workflow, expectedRevision, source, modules }) =>
       await exports
         .WorkflowBuildApi({ props: scope })
-        .edit(workflow, { expectedRevision, source, modules: modules ?? {} })
+        .edit(workflow, { expectedRevision, source, modules })
   ),
 ];
 

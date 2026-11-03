@@ -94,10 +94,15 @@ const cutTexts = (value: unknown, chars: number): unknown => {
  * `chars` when given (while the response is written).
  */
 const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
-  message.content.flatMap((part) => {
+  message.content.flatMap((part, at) => {
     if (part.type !== "toolCall" || !isDedicatedTool(part.name)) {
       return [];
     }
+    const codeBefore = message.content
+      .slice(0, at)
+      .filter(
+        (before) => before.type === "toolCall" && before.name === "executeCode"
+      ).length;
     const input: Record<string, unknown> =
       chars === undefined
         ? part.arguments
@@ -107,7 +112,7 @@ const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
               cutTexts(value, chars),
             ])
           );
-    return [{ callId: part.id, tool: part.name, input }];
+    return [{ callId: part.id, tool: part.name, codeBefore, input }];
   });
 
 /**

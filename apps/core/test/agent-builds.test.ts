@@ -850,6 +850,45 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
   });
 
+  it("lands no file write the person stopped while it was under way", async () => {
+    const { chat, existing, grant } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        path: "screens/late.tsx",
+        content: "export default () => null;",
+      }),
+      says("Never asked."),
+    ]);
+    await grant();
+
+    // The write is let in at once, then waits on the App's files while the
+    // person presses Stop: refused as it commits.
+    await slowFilesDuring(chat.stub, async () => {
+      const reply = chat.ask("Write it.");
+      await vi.waitFor(
+        async () => {
+          await expect(
+            transcript(chat.stub, chat.chat.id)
+          ).resolves.toHaveLength(3);
+        },
+        { timeout: 10_000 }
+      );
+      await chat.stub.cancel(chat.chat.id, chat.personId);
+      await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
+    });
+
+    const [written] = await toolResults(chat.stub, chat.chat.id);
+    expect({
+      written: [written?.tool, written?.isError],
+      cancelled: written?.text.startsWith("Error (cancelled)"),
+      draft: await chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing),
+    }).toStrictEqual({
+      written: ["writeFile", true],
+      cancelled: true,
+      draft: { base: null, changes: {}, revision: 0 },
+    });
+  });
+
   it("commits no proposal whose run ran out of time while it was checked", async () => {
     const { chat, builder, existing, grant } = await setUp([]);
     await fakeProvider(

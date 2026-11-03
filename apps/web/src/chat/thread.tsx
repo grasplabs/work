@@ -624,25 +624,37 @@ const ReplySteps = ({
       {reply.reasoning === undefined ? null : (
         <Reasoning reasoning={reply.reasoning} thinking={thinking} />
       )}
-      {reply.tools.map((call) => (
-        <ToolStep
-          call={call}
-          key={call.callId}
-          result={results.get(call.callId)}
-          running={running}
-          writing={writing}
-        />
-      ))}
-      {reply.code.map((code) => (
-        <Fragment key={code.callId}>
-          <CodeStep
-            code={code}
-            output={output?.callId === code.callId ? output.text : undefined}
-            result={results.get(code.callId)}
-            running={running}
-            writing={writing}
-          />
-          <WidgetLines callId={code.callId} />
+      {/* Each step where the response made it: the calls of its tools
+          before each code step, then those after its last. */}
+      {[...reply.code, undefined].map((code, before) => (
+        <Fragment key={code?.callId ?? "end"}>
+          {reply.tools
+            .filter(({ codeBefore }) =>
+              code === undefined ? codeBefore >= before : codeBefore === before
+            )
+            .map((call) => (
+              <ToolStep
+                call={call}
+                key={call.callId}
+                result={results.get(call.callId)}
+                running={running}
+                writing={writing}
+              />
+            ))}
+          {code === undefined ? null : (
+            <>
+              <CodeStep
+                code={code}
+                output={
+                  output?.callId === code.callId ? output.text : undefined
+                }
+                result={results.get(code.callId)}
+                running={running}
+                writing={writing}
+              />
+              <WidgetLines callId={code.callId} />
+            </>
+          )}
         </Fragment>
       ))}
     </Trace>
