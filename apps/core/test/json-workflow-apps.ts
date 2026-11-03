@@ -239,11 +239,14 @@ export const decidingWorkflow = async (
     deciders = [recipient],
     timeout,
     remindAfter,
+    around = (tasks) => tasks,
   }: {
     recipient: string;
     deciders?: string[];
     timeout?: number;
     remindAfter?: number;
+    /** The workflow's tasks around the decision's, if not those alone. */
+    around?: (tasks: unknown[]) => unknown[];
   }
 ) => {
   const contract = `approval-${unique()}`;
@@ -256,7 +259,7 @@ export const decidingWorkflow = async (
     ),
   });
   const workflow = await publishedWorkflow(builder, (name) =>
-    definitionOf(name, decisionTasks(recipient, timeout, remindAfter), {
+    definitionOf(name, around(decisionTasks(recipient, timeout, remindAfter)), {
       bindings: { approval: { kind: "decision", contract } },
     })
   );

@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
 import { checkSource, parseSlot } from "@grasp-os/workflow-expressions/source";
 
@@ -1720,11 +1721,12 @@ const decisionCallOf = (
   const timeoutMs = timeoutOf(emitter.checked.definition, item.task.timeout);
   const withPointer = pointerJoin(item.pointer, "with");
   const remindAfterMs = literalDurationMs(args.remindAfter);
-  // A reminder due at or after the deadline would never be sent.
+  // A reminder due at or after the deadline would never be sent: with no
+  // timeout, the deadline is what is left of the run's age limit, at most
+  // all of it.
   if (
     remindAfterMs !== undefined &&
-    timeoutMs !== undefined &&
-    remindAfterMs >= timeoutMs
+    remindAfterMs >= (timeoutMs ?? platformLimits.workflowAgeMs)
   ) {
     emitter.refusals.add(
       pointerJoin(withPointer, "remindAfter"),

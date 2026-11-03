@@ -3,11 +3,13 @@
  * run objects (Workerflow), as a crash, a deploy or time passing would.
  */
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { decode, encode } from "@grasp-os/workerflow/codec";
 import { runObjectName } from "@grasp-os/workerflow/identity";
 import { WorkflowInstance } from "@grasp-os/workerflow/instance";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { runDefinition } from "../src/workflows/engine.ts";
 import type { AttemptAdmission } from "../src/workflows/quotas.ts";
@@ -194,6 +196,120 @@ export const woken = async (run: string, step = "go"): Promise<void> => {
     },
     { timeout: 10_000, interval: 100 }
   );
+};
+
+/**
+ * A look a decision wait records (resource-host.ts and host.ts, `look`):
+ * when it looked, by the clock, and whether anyone had answered.
+ */
+const decisionLook = /(?::decision:(?:reached|reminded)|:woken:\d+)$/u;
+const lookedSchema = z.looseObject({ at: z.number() });
+/**
+ * An enter step's journal with its task's deadline (resource-host.ts,
+ * `#entered`): its record's `until`.
+ */
+const deadlineSchema = z.looseObject({
+  record: z.looseObject({ until: z.number() }),
+});
+
+/**
+ * What step `name` recorded (`value`), its instants of a decision moved
+ * back by `ms`: a look's `at`, an enter step's deadline. Nothing else.
+ */
+const movedBack = (name: string, value: unknown, ms: number): unknown => {
+  const looked = lookedSchema.safeParse(value);
+  if (decisionLook.test(name) && looked.success) {
+    return { ...looked.data, at: looked.data.at - ms };
+  }
+  const entered = deadlineSchema.safeParse(value);
+  if (entered.success) {
+    const { record } = entered.data;
+    return { ...entered.data, record: { ...record, until: record.until - ms } };
+  }
+  return undefined;
+};
+
+/**
+ * Lets `ms` pass for the decision run `run` waits on, as its clock would,
+ * without the test waiting for it: every instant the run recorded of it
+ * (each look's `at`, a task's deadline) and the decision's own deadline
+ * are moved back by `ms`, so each wait keeps its length on replay, and
+ * the wait it is in comes due now. The next activation replays the run,
+ * on those moved instants, and goes on as it would have `ms` later. A run
+ * a test stopped is resumed, its wait due as it resumes.
+ */
+export const decisionTimePassed = async (
+  run: string,
+  ms: number
+): Promise<void> => {
+  const object = runObject(run);
+  // First: the run reads it as it replays.
+  await env.DB.prepare(
+    "UPDATE workflow_decisions SET expires_at = expires_at - ? WHERE run_id = ? OR resource_run_id = ?"
+  )
+    .bind(ms, run, run)
+    .run();
+  const found = await vi.waitFor(
+    async () => {
+      const state = await runInDurableObject(
+        object,
+        async (_object, durable): Promise<"waiting" | "paused" | "not_yet"> => {
+          const { sql } = durable.storage;
+          const [current] = sql
+            .exec<{ status: string }>("SELECT status FROM run")
+            .toArray();
+          const waiting = sql
+            .exec(
+              "SELECT 1 FROM steps WHERE type = 'waitForEvent' AND state = 'waiting'"
+            )
+            .toArray();
+          if (
+            waiting.length === 0 ||
+            (current?.status !== "waiting" && current?.status !== "paused")
+          ) {
+            return "not_yet";
+          }
+          const recorded = sql
+            .exec<{ ordinal: number; name: string; value: string }>(
+              "SELECT ordinal, name, value FROM steps WHERE type = 'do' AND state = 'succeeded' AND value IS NOT NULL"
+            )
+            .toArray();
+          for (const { ordinal, name, value } of recorded) {
+            const moved = movedBack(name, decode(value), ms);
+            if (moved !== undefined) {
+              sql.exec(
+                "UPDATE steps SET value = ? WHERE ordinal = ?",
+                encode(moved),
+                ordinal
+              );
+            }
+          }
+          if (current.status === "paused") {
+            // Resuming moves each deadline on by the time the run was
+            // paused: one set to when it paused comes due as it resumes.
+            sql.exec(
+              "UPDATE steps SET deadline = (SELECT paused_at FROM run) WHERE type = 'waitForEvent' AND state = 'waiting'"
+            );
+            return "paused";
+          }
+          const now = Date.now();
+          sql.exec(
+            "UPDATE steps SET deadline = ? WHERE type = 'waitForEvent' AND state = 'waiting'",
+            now
+          );
+          sql.exec("UPDATE run SET wake_at = ?", now);
+          await durable.storage.setAlarm(now);
+          return "waiting";
+        }
+      );
+      expect(state).not.toBe("not_yet");
+      return state;
+    },
+    { timeout: 10_000, interval: 100 }
+  );
+  if (found === "paused") {
+    await resumed(run);
+  }
 };
 
 /**

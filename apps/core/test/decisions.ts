@@ -176,15 +176,16 @@ const approvalOf = (
   });
 };
 
-export const week = 7 * 86_400_000;
+export const day = 86_400_000;
+export const week = 7 * day;
 
 /**
- * A decision a test acts on while it waits for the reminder: the reminder
- * is due ten seconds after the ask, which leaves a slow runner room for
- * what a test does first (change a team, stop the run); the deadline, ten
- * seconds after that, room for what it does after.
+ * A decision a test acts on while it waits for the reminder: due a day
+ * after the ask, its deadline a week after it, so nothing a test does
+ * races either. The test lets that time pass when it is ready
+ * (`decisionTimePassed`, runs.ts).
  */
-export const reminding = { timeout: 20_000, remindAfter: 10_000 };
+export const reminding = { timeout: week, remindAfter: day };
 
 /**
  * A new approval workflow asking as `asking` says, published by

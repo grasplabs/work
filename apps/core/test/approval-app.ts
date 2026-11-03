@@ -1,12 +1,17 @@
 /**
  * An App with a workflow of its own (`approval`, which waits for a
  * decision), for the tests that need a released App whose workflow a
- * screen follows and the RPC walk reaches: until App-owned TypeScript
+ * screen follows and the RPC walk reaches, and for an App run's decision
+ * reminder (`step.decision`'s `remindAfter`): until App-owned TypeScript
  * workflows go (GRA-1367). Decisions themselves are tested on JSON
  * workflows (decisions.ts).
  */
+import { vi } from "vite-plus/test";
+import { z } from "zod";
+
 import { release } from "./apps.ts";
 import type { signedInApi } from "./sign-in.ts";
+import { sampleCall } from "./workflow-apps.ts";
 
 /** Someone signed in, with their API. */
 type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -114,3 +119,30 @@ export const approvalApp = async (builder: Person): Promise<string> => {
   });
   return id;
 };
+
+const appAskSchema = z.object({
+  recipients: z.array(z.object({ userId: z.string() })),
+  reminder: z.boolean(),
+});
+
+/**
+ * The asks approval App `app` kept, as `builder`, who released it, reads
+ * them, once there are `count` of them.
+ */
+export const appAsksOf = async (
+  builder: Person,
+  app: string,
+  count: number
+): Promise<z.infer<typeof appAskSchema>[]> =>
+  await vi.waitFor(
+    async () => {
+      const kept = z
+        .array(z.string())
+        .parse(await sampleCall(builder, app, "approvals.asks", "query", {}));
+      if (kept.length < count) {
+        throw new Error(`${kept.length} of ${count} asks so far`);
+      }
+      return kept.map((body) => appAskSchema.parse(JSON.parse(body)));
+    },
+    { timeout: 20_000, interval: 100 }
+  );

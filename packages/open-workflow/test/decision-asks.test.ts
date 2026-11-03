@@ -119,18 +119,21 @@ describe("a decision's reminder and ask", () => {
     ]);
   });
 
-  it("refuses to seal a reminder due at or after the decision's deadline", async () => {
-    const result = await sealed(
-      deciding({ remindAfter: "PT1H" }, { after: { hours: 1 } })
-    );
-
-    expect(result).toStrictEqual({
+  it("refuses to seal a reminder due at or after the decision's deadline, its timeout's or, with none, the run's age limit's", async () => {
+    const refused = {
       unsupported: [
         expect.objectContaining({
           pointer: `${pointer}/remindAfter`,
           feature: "decision:remindAfter",
         }),
       ],
-    });
+    };
+
+    await expect(
+      Promise.all([
+        sealed(deciding({ remindAfter: "PT1H" }, { after: { hours: 1 } })),
+        sealed(deciding({ remindAfter: { days: 365 } })),
+      ])
+    ).resolves.toStrictEqual([refused, refused]);
   });
 });

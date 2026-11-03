@@ -4021,7 +4021,15 @@ export class ResourceRunHost
     if (remindAt !== undefined && remindAt < deadline) {
       await waitUntil(remindAt);
       if (!seen.answered && seen.at < deadline) {
-        await this.#askOnce(step, data, decision, true);
+        // As after any durable wait: its person may have left meanwhile.
+        await this.#requirePerson();
+        // A branch another settled its scope over while it waited reminds
+        // nobody, by either way of asking (an action's attempt would be
+        // refused, `#attempt`); it looks all the same, so a replay waits
+        // as the first activation did, whichever it found.
+        if (!this.#fencedOff(step.scope)) {
+          await this.#askOnce(step, data, decision, true);
+        }
         seen = await look(`${stepName}:decision:reminded`);
       }
     }

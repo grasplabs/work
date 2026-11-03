@@ -1,6 +1,9 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { fencesIn } from "../src/workflows/run-object.ts";
+import { approvalApp, appAsksOf } from "./approval-app.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   approvalWorkflow,
@@ -22,9 +25,20 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
+import { completedSteps } from "./json-workflows.ts";
 import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
+import {
+  aroundEngine,
+  decisionTimePassed,
+  endLiveRuns,
+  finished,
+  leave,
+  resumed,
+  runObject,
+  stopped,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
@@ -536,7 +550,22 @@ describe("decisions", { timeout: 60_000 }, () => {
 });
 
 describe("a decision's reminder", { timeout: 60_000 }, () => {
-  afterEach(endLiveResourceRuns);
+  afterEach(async () => {
+    await endLiveResourceRuns();
+    await endLiveRuns();
+  });
+
+  /** A workflow reminding by Grasp's own notice, as `reminding`, in seconds. */
+  const notifying = {
+    timeout: reminding.timeout / 1000,
+    remindAfter: reminding.remindAfter / 1000,
+  };
+
+  /** The audit events of `decision` asking its people, the reminder's included. */
+  const askedOf = async (decision: string) => {
+    const audited = await eventsOf(decision);
+    return audited.filter(({ action }) => action === "workflow.decision.asked");
+  };
 
   it("reminds by asking again, whoever is in the team then", async () => {
     const people = await owners();
@@ -549,7 +578,9 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
     });
     // Ben joins the team before the reminder goes out.
     await joinTeam(people.admin, team, ben);
+    await decisionTimePassed(run.run, reminding.remindAfter);
     const asks = await asksOf(run, 2);
+    await decisionTimePassed(run.run, reminding.timeout);
 
     expect({
       asks: asks.map(({ recipients, reminder }) => ({
@@ -574,16 +605,16 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
       ...reminding,
     });
     // Stopped while it waits for the reminder, as a deploy or a crash
-    // does, and started again: its run replays what it asked.
+    // does, and started again once it is due: its run replays what it
+    // asked.
     await stopped(run.run);
-    // Stopped before the reminder went out: it waits for it.
     const beforeRestart = await asksOf(run);
-    await resumed(run.run);
+    await decisionTimePassed(run.run, reminding.remindAfter);
     const asks = await asksOf(run, 2);
     await confirmedAnswer(decider, decision, { approved: true });
     const output = await outputOf(run);
     const toldAfter = await asksOf(run, 2);
-    const audited = await eventsOf(decision);
+    const audited = await askedOf(decision);
 
     expect({
       asks: asks.map(({ recipients, reminder }) => ({
@@ -596,9 +627,7 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
       // Told once each: nothing asked again once the run went on.
       beforeRestart: beforeRestart.length,
       told: toldAfter.length,
-      asked: audited.filter(
-        ({ action }) => action === "workflow.decision.asked"
-      ).length,
+      asked: audited.length,
     }).toStrictEqual({
       asks: [
         {
@@ -656,28 +685,21 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
     const decider = await signedIn("user");
     const workflow = await decidingWorkflow(people, {
       recipient: `person:${decider.userId}`,
-      timeout: 20,
-      remindAfter: 10,
+      ...notifying,
     });
     const runId = await startedBy(people.builder, workflow.id);
     const decision = await decisionOf(decider, runId);
     await stopped(runId);
-    await resumed(runId);
-    const asked = async () => {
-      const audited = await eventsOf(decision);
-      return audited.filter(
-        ({ action }) => action === "workflow.decision.asked"
-      );
-    };
+    await decisionTimePassed(runId, reminding.remindAfter);
     await vi.waitFor(
       async () => {
-        await expect(asked()).resolves.toHaveLength(2);
+        await expect(askedOf(decision)).resolves.toHaveLength(2);
       },
       { timeout: 20_000, interval: 100 }
     );
     await confirmedAnswer(decider, decision, { approved: true });
     const end = await endOf(people.builder, workflow.id, runId);
-    const asks = await asked();
+    const asks = await askedOf(decision);
 
     expect({
       end,
@@ -694,6 +716,112 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
         { reminder: false, whom: [decider.userId] },
         { reminder: true, whom: [decider.userId] },
       ],
+    });
+  });
+
+  it("reminds nobody once the run's person has left, and fails the run", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const workflow = await decidingWorkflow(people, {
+      recipient: `person:${decider.userId}`,
+      ...notifying,
+    });
+    const runId = await startedBy(people.builder, workflow.id);
+    const decision = await decisionOf(decider, runId);
+    // The person the run acts for leaves while it waits for the reminder.
+    const rejoin = await leave(people.builder.userId);
+    await decisionTimePassed(runId, reminding.remindAfter);
+    await finished(runId);
+    await rejoin();
+    const end = await endOf(people.builder, workflow.id, runId);
+    const asks = await askedOf(decision);
+
+    expect({
+      end,
+      asked: asks.map(({ detail }) => detail.reminder),
+    }).toStrictEqual({
+      end: { status: "failed", code: "permission.person_inactive" },
+      asked: [false],
+    });
+  });
+
+  it("reminds nobody in a branch another settled its fork over while it waited", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const workflow = await decidingWorkflow(people, {
+      recipient: `person:${decider.userId}`,
+      ...notifying,
+      around: (tasks) => [
+        {
+          pick: {
+            fork: {
+              branches: [
+                { deciding: { do: tasks } },
+                { other: { set: { status: "other" } } },
+              ],
+            },
+            // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
+            output: { as: '${ {status: "forked"} }' },
+          },
+        },
+      ],
+    });
+    const runId = await startedBy(people.builder, workflow.id);
+    const decision = await decisionOf(decider, runId);
+    // The other branch settles the fork while this one waits, as a race's
+    // winner would, in the fence kept with the run.
+    await runInDurableObject(runObject(runId), (_object, state) => {
+      fencesIn(state.storage.sql).settle("pick", 1);
+    });
+    await decisionTimePassed(runId, reminding.remindAfter);
+    // Past the reminder's time: it looked again, as though it reminded.
+    await vi.waitFor(
+      async () => {
+        const steps = await completedSteps(runId);
+        expect(
+          [...steps.keys()].some((name) => name.endsWith(":decision:reminded"))
+        ).toBeTruthy();
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const asks = await askedOf(decision);
+
+    expect(asks.map(({ detail }) => detail.reminder)).toStrictEqual([false]);
+  });
+
+  // Until App-owned TypeScript workflows go (GRA-1367): an App run's
+  // decision reminds as `step.decision`'s `remindAfter` says.
+  it("reminds in an App run's decision by asking again, whoever is in the team then", async () => {
+    const { admin } = await owners();
+    const anna = await signedIn("user");
+    const ben = await signedIn("user");
+    const team = await newTeam(admin, [anna]);
+    const app = await approvalApp(admin);
+    const run = await admin.api.workflows.start(app, "approval", {
+      from: `team:${team}`,
+      ...reminding,
+    });
+    await appAsksOf(admin, app, 1);
+    // Ben joins the team before the reminder goes out.
+    await joinTeam(admin, team, ben);
+    await decisionTimePassed(run.id, reminding.remindAfter);
+    const asks = await appAsksOf(admin, app, 2);
+    await decisionTimePassed(run.id, reminding.timeout);
+    await finished(run.id);
+    const { output } = await admin.api.workflows.status(run.id);
+
+    expect({
+      asks: asks.map(({ recipients, reminder }) => ({
+        reminder,
+        to: recipients.map(({ userId }) => userId).toSorted(),
+      })),
+      output,
+    }).toStrictEqual({
+      asks: [
+        { reminder: false, to: [anna.userId] },
+        { reminder: true, to: [anna.userId, ben.userId].toSorted() },
+      ],
+      output: { timedOut: true },
     });
   });
 });
