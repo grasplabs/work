@@ -268,6 +268,9 @@ export const interviewStates = sqliteTable("interview_states", {
  * The interviewer's texts each interview was held with, by their mark
  * (onboarding/interviewer-text.ts), and when each first spoke in it: so
  * staff, and the lab, know which Stephen they read. Gone with what was said.
+ * No longer written, as nothing reads it: it stays while the release
+ * before still writes it (expand, then contract), and goes with the
+ * interview until a later release drops it.
  */
 export const interviewTexts = sqliteTable(
   "interview_texts",
@@ -579,7 +582,9 @@ export const interviewSettings = sqliteTable("interview_settings", {
  * How long people waited for Stephen's voice, from the end of what they
  * said to his first sound, as their page measured it: by day, how many
  * answers took up to each tenth of a second (`upTo`, in ms). Whose
- * answers they were isn't kept.
+ * answers they were isn't kept. No longer written, as nothing reads it: it
+ * stays while the release before still writes it (expand, then contract),
+ * until a later release drops it.
  */
 export const answerWaits = sqliteTable(
   "answer_waits",

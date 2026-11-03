@@ -19,7 +19,7 @@ import type {
 import { useSyncExternalStore } from "react";
 
 import { readingSeconds } from "../onboarding/setup.ts";
-import { answerMeter, waitedOf } from "./answer-meter.ts";
+import { answerMeter } from "./answer-meter.ts";
 import type { Measured } from "./answer-meter.ts";
 import { askStory, askTurn, turnFailed } from "./api.ts";
 import type { EarlyEvent, TurnFailed } from "./api.ts";
@@ -91,8 +91,7 @@ import type { LoopWords } from "./words.ts";
 // is back, and with whatever they say next.
 //
 // Every answer is measured from their last word to his first sound
-// (answer-meter.ts) and sent with the next turn, which core keeps for
-// staff. Everything that happens, what is done about it and each answer
+// (answer-meter.ts). Everything that happens, what is done about it and each answer
 // measured is told on `window` as a `loopEventName` event, so tests can
 // follow the conversation.
 
@@ -120,7 +119,7 @@ export interface LoopState {
 export type LoopEvent =
   | { happened: Happening }
   | { did: Act }
-  | { measured: Measured; waited: number | null };
+  | { measured: Measured };
 
 /** The name of the event on `window` that tells each `LoopEvent`. */
 export const loopEventName = "grasp:interview-loop";
@@ -221,8 +220,6 @@ let asked = false;
 let troubled = 0;
 let owed: (() => void) | null = null;
 let again = 0;
-/** How long they waited for his voice the answer before, for the next turn; none when it wasn't heard. */
-let waited: number | undefined;
 let unmeasure: (() => void) | null = null;
 
 /** Tells whoever follows the conversation what happens in it. */
@@ -231,8 +228,7 @@ const announce = (event: LoopEvent): void => {
 };
 
 const meter = answerMeter((answer) => {
-  waited = waitedOf(answer);
-  announce({ measured: answer, waited: waited ?? null });
+  announce({ measured: answer });
 });
 const pause = async (ms: number): Promise<void> => {
   // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form in browsers
@@ -585,7 +581,6 @@ const requestOf = (
         : Math.min(240, Math.max(0, (Date.now() - now.startedAt) / 60_000)),
     ...(reading === undefined ? {} : { reading }),
     adding: now.adding,
-    ...(waited === undefined ? {} : { waited }),
   };
 };
 
@@ -1106,8 +1101,6 @@ const ask = async (
   if (request === null) {
     return;
   }
-  // The wait for his voice goes with one turn only.
-  waited = undefined;
   drop();
   const mine: Pending = {
     turn,
@@ -1482,7 +1475,6 @@ export const startLoop = (): void => {
   drop();
   state = idle;
   troubled = 0;
-  waited = undefined;
   window.addEventListener("online", tryAgain);
   unmeasure = onFirstSound((at) => {
     meter.voice(at);

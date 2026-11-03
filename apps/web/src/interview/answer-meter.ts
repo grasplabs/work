@@ -1,10 +1,8 @@
-import { answerWaitMaxMs } from "@grasp-os/shared/interview-turn";
-
 // How fast Stephen answers (prototype `lib/interview-telemetry.ts`): from
 // the end of what someone said to the first sound of his answer, and what
 // happens in between. Pure: loop.ts tells it what happens, with when on
-// the page's clock, and sends each answer's wait with the next turn
-// (`waited`), which core keeps by day for staff (GRA-378's numbers).
+// the page's clock, and tells each answer measured to whoever follows the
+// conversation (`loopEventName`).
 
 /** One answer of his, measured, in ms from the end of what they said; none where it wasn't known. */
 export interface Measured {
@@ -117,9 +115,3 @@ export const atShare = (values: number[], share: number): number | null => {
   );
   return sorted[at] ?? null;
 };
-
-/** What core is told of an answer: its wait for his voice, the longest as the longest core takes; none without a sound. */
-export const waitedOf = (answer: Measured): number | undefined =>
-  answer.voice === null
-    ? undefined
-    : Math.min(answerWaitMaxMs, Math.max(0, answer.voice));
