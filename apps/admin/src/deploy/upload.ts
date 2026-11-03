@@ -13,6 +13,7 @@ import {
   d1IdPlaceholder,
 } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import mime from "mime";
 import { z } from "zod";
 
 import type {
@@ -95,25 +96,19 @@ const moduleTypes = {
   data: "application/octet-stream",
 } as const;
 
-/** Content types by extension, for the static files a release serves. */
-const assetTypes: Record<string, string> = {
-  css: "text/css",
-  html: "text/html",
-  ico: "image/x-icon",
-  js: "text/javascript",
-  json: "application/json",
-  map: "application/json",
-  png: "image/png",
-  svg: "image/svg+xml",
-  txt: "text/plain",
-  webmanifest: "application/manifest+json",
-  woff: "font/woff",
-  woff2: "font/woff2",
+/**
+ * The type a static file at `path` is uploaded with, and so served with:
+ * Wrangler's own rule (workers-shared's `getContentType`), so a client's
+ * core serves its files as `wrangler deploy` and local dev do. Core checks
+ * the type of what it reads from its assets before it runs it (the
+ * compiler's `esbuild.wasm` must be `application/wasm`), so a type that
+ * differs from Wrangler's breaks only in a client account. A file
+ * Wrangler leaves untyped goes up as `application/octet-stream`.
+ */
+const assetType = (path: string): string => {
+  const type = mime.getType(path) ?? "application/octet-stream";
+  return type.startsWith("text/") ? `${type}; charset=utf-8` : type;
 };
-
-const assetType = (path: string): string =>
-  assetTypes[/\.(?<extension>[^./]+)$/u.exec(path)?.groups?.extension ?? ""] ??
-  "application/octet-stream";
 
 /**
  * `worker`'s static files, read from R2, each checked against the key the

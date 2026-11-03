@@ -3,6 +3,7 @@
  * scripts (with their static assets), their secrets, cron schedules and
  * workers.dev route, reading what is live, and applying D1 migrations.
  */
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { encodeAsset } from "@grasp-os/shared/release";
 import { z } from "zod";
 
@@ -71,6 +72,15 @@ const inBatches = async <T, R>(
 };
 
 /**
+ * The key a file goes up under: its content key (`encodeAsset`) and its
+ * type, hashed together, cut to the 32 hex characters the API takes.
+ */
+const typedAssetKey = async (key: string, type: string): Promise<string> => {
+  const hash = await sha256Hex(`${key}\n${type}`);
+  return hash.slice(0, 32);
+};
+
+/**
  * Uploads the files the script at `scriptAt` serves that the account
  * doesn't hold yet, and returns the token its upload's metadata names them
  * by (`assets.jwt`). The script is an account's own, or one in a Workers
@@ -85,10 +95,13 @@ const uploadAssetsAt = async (
 ): Promise<string> => {
   const encoded = await Promise.all(
     files.map(async (file) => {
-      // Named by the key the release manifest gives it (Wrangler's shape
-      // and extension rule, with SHA-256), and encoded once for both.
+      // Encoded once for its key and its body, and named by the key the
+      // release manifest gives it (Wrangler's shape and extension rule,
+      // with SHA-256) bound to its type: the account keeps a file it holds
+      // under its key with the type it was first uploaded with, so a file
+      // whose type changes must go up again under a new key.
       const { key, base64 } = await encodeAsset(file.content, file.path);
-      return { ...file, base64, hash: key };
+      return { ...file, base64, hash: await typedAssetKey(key, file.type) };
     })
   );
   const session = await api.call(

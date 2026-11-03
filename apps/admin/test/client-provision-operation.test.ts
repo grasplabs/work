@@ -939,6 +939,52 @@ describe("provisioning a placed client", () => {
     ).toStrictEqual([]);
   });
 
+  it("uploads each of core's static files with the type Wrangler gives it, so core serves the compiler's wasm as wasm", async () => {
+    // One file of each kind core's built assets hold (apps/web/dist, with
+    // the compiler and extractor built into it).
+    const types = {
+      "/index.html": "text/html; charset=utf-8",
+      "/assets/index.js": "text/javascript; charset=utf-8",
+      "/assets/index.css": "text/css; charset=utf-8",
+      "/assets/tide.avif": "image/avif",
+      "/assets/geist.woff2": "font/woff2",
+      "/favicon.svg": "image/svg+xml",
+      "/_compiler/v1/kit.json": "application/json",
+      "/_compiler/v1/esbuild.wasm": "application/wasm",
+    };
+    const manifest = await importRelease({
+      assets: Object.fromEntries(
+        Object.keys(types).map((path) => [
+          path,
+          `${path} ${crypto.randomUUID()}`,
+        ])
+      ),
+    });
+    const { account, clientId, held } = await setUp(manifest);
+
+    await runClientProvision(context, held);
+
+    const { core } = await scriptsOf(clientId);
+    const session = cloudflare.calls.findLast(
+      ({ path }) =>
+        path.includes(`/scripts/${core}/`) &&
+        path.endsWith("/assets-upload-session")
+    );
+    const served = z
+      .object({
+        manifest: z.record(z.string(), z.object({ hash: z.string() })),
+      })
+      .parse(session?.body).manifest;
+    expect(
+      Object.fromEntries(
+        Object.entries(served).map(([path, { hash }]) => [
+          path,
+          account.assets.get(hash),
+        ])
+      )
+    ).toStrictEqual(types);
+  });
+
   it("does nothing once done", async () => {
     const manifest = await importRelease();
     const { clientId, held } = await setUp(manifest);

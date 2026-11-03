@@ -74,8 +74,11 @@ export interface AccountState {
    * Workers by script name. A test adds a namespace; uploads fill it.
    */
   namespaces: Map<string, Map<string, ScriptState>>;
-  /** The hashes of the static files the account holds. */
-  assets: Set<string>;
+  /**
+   * The static files the account holds: each one's hash, and the type it
+   * was uploaded with, which it is served with.
+   */
+  assets: Map<string, string>;
   /** Assets upload sessions: each token, and the hashes still to upload. */
   sessions: Map<string, Set<string>>;
   /** Assets completion tokens it issued. */
