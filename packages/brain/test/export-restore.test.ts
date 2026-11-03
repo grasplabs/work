@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
@@ -10,6 +10,7 @@ import {
   collections,
   documents,
   transcripts,
+  versions,
 } from "../src/db/schema.ts";
 import { versionText, writeVersion } from "../src/documents.ts";
 import { sha256Hex, toBase64Url } from "../src/encoding.ts";
@@ -25,8 +26,9 @@ import {
 import { canonicalJson } from "../src/json.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { citesWrite } from "../src/memories.ts";
+import { preparePurge, purge } from "../src/purge.ts";
 import { restoreExport } from "../src/restore.ts";
-import { newCollection, testHost, writerOf } from "./host.ts";
+import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
 // Restoring an export into an empty Brain (GRA-1193, GRA-335's E2; the
 // threat model is on GRA-335). It starts from the ways it can fail: a
@@ -93,6 +95,44 @@ const readerOf =
 /** Version `number` of a long ledger: near the most a version holds. */
 const ledgerText = (number: number) =>
   `# Ledger ${String(number)}\n${"x".repeat(1_000_000)}`;
+
+/**
+ * Adds to `files` a manifest naming them, signed as the test host's key
+ * signs it (test/host.ts `keys`): a bundle crafted by hand.
+ */
+const signedBundle = async (files: Map<string, string>): Promise<void> => {
+  const body = {
+    format: "grasp-brain-export",
+    version: 1,
+    exportId: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    files: await Promise.all(
+      [...files].map(async ([name, text]) => ({
+        name,
+        sha256: await sha256Hex(text),
+        bytes: new TextEncoder().encode(text).byteLength,
+        rows: text.split("\n").filter((line) => line !== "").length,
+      }))
+    ),
+  };
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode("test key for grasp-os brain export manifest v1"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        new TextEncoder().encode(canonicalJson(body))
+      )
+    )
+  );
+  files.set("manifest.json", JSON.stringify({ ...body, signature }));
+};
 
 /** A refusal's code, or `ok`. */
 const codeOf = async (call: Promise<unknown>): Promise<string> => {
@@ -207,6 +247,22 @@ describe("restoring an export of the company's Brain", () => {
       recordedAt: now,
       updatedAt: now,
     });
+    // Made, and its versions saved, long before: times a restore keeps.
+    const madeAt = new Date("2024-03-01T09:00:00.000Z");
+    const savedAt = [madeAt, new Date("2024-03-02T10:30:00.000Z")];
+    await source.db
+      .update(documents)
+      .set({ createdAt: madeAt })
+      .where(eq(documents.id, first.id));
+    for (const [at, time] of savedAt.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await source.db
+        .update(versions)
+        .set({ createdAt: time })
+        .where(
+          and(eq(versions.documentId, first.id), eq(versions.number, at + 1))
+        );
+    }
     const exportId = await exported(source);
     const bundle = await bundleOf(source, exportId);
 
@@ -231,12 +287,19 @@ describe("restoring an export of the company's Brain", () => {
       .from(brainMemoryCites)
       .where(eq(brainMemoryCites.memoryId, memoryId));
     const kept = await target.db.select().from(collections);
+    const restoredVersions = await target.db
+      .select({ createdAt: versions.createdAt })
+      .from(versions)
+      .where(eq(versions.documentId, document?.id ?? ""))
+      .orderBy(versions.number);
     const forgotten = await target.db
       .select({ userId: brainForgottenPeople.userId })
       .from(brainForgottenPeople);
     expect({
       collections: kept.map(({ id }) => id),
       texts,
+      createdAt: document?.createdAt.toISOString(),
+      savedAt: restoredVersions.map(({ createdAt }) => createdAt.toISOString()),
       memory: {
         statement: memory?.statement,
         pointsAtRestored: memory?.sourceRefs.includes(document?.id ?? "-"),
@@ -255,6 +318,8 @@ describe("restoring an export of the company's Brain", () => {
     }).toStrictEqual({
       collections: [handbook.id],
       texts: [`# Rules\nAsk keep${u}.`, `# Rules\nAsk keep${u} first.`],
+      createdAt: madeAt.toISOString(),
+      savedAt: savedAt.map((time) => time.toISOString()),
       memory: {
         statement: `The handbook says keep${u}.`,
         pointsAtRestored: true,
@@ -368,40 +433,7 @@ describe("restoring an export of the company's Brain", () => {
       ["memories-0001.jsonl", ""],
       ["erasures-0001.jsonl", ""],
     ]);
-    const body = {
-      format: "grasp-brain-export",
-      version: 1,
-      exportId: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      files: await Promise.all(
-        [...files].map(async ([name, text]) => ({
-          name,
-          sha256: await sha256Hex(text),
-          bytes: new TextEncoder().encode(text).byteLength,
-          rows: text.split("\n").filter((line) => line !== "").length,
-        }))
-      ),
-    };
-    // Signed as the test host's key signs it (test/host.ts `keys`).
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(
-        "test key for grasp-os brain export manifest v1"
-      ),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-    const signature = toBase64Url(
-      new Uint8Array(
-        await crypto.subtle.sign(
-          "HMAC",
-          key,
-          new TextEncoder().encode(canonicalJson(body))
-        )
-      )
-    );
-    files.set("manifest.json", JSON.stringify({ ...body, signature }));
+    await signedBundle(files);
     const target = testHost(undefined, {}, env.RESTORED).brain;
     await target.db.delete(collections);
     const refused = await codeOf(
@@ -415,6 +447,128 @@ describe("restoring an export of the company's Brain", () => {
     expect({ refused, written: written.length }).toStrictEqual({
       refused: "knowledge.invalid",
       written: 0,
+    });
+  });
+
+  it("restores a Brain a purge rewrote, a skill's name taken out too", async () => {
+    const source = testHost().brain;
+    const u = crypto.randomUUID().slice(0, 8).replaceAll(/[0-9]/gu, "x");
+    const name = `ledger${u}`;
+    const skills = await newCollection(source, `Skills ${u}`);
+    const skill = await writeVersion(source, admin, {
+      collection: skills,
+      path: `${name}/SKILL.md`,
+      text: `---\nname: ${name}\ndescription: Keeps ${name}.\n---\n\n# ${name}\n\nKeep it.\n`,
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    // A real purge of its name: its frontmatter keeps `name: (removed)`,
+    // which only a purge's save allows.
+    const input = {
+      type: "content",
+      documentIds: [skill.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const { token } = await preparePurge(source, admin, input, noCopies);
+    await purge(source, admin, input, token, noCopies);
+    const exportId = await exported(source);
+    const bundle = await bundleOf(source, exportId);
+
+    const target = testHost(undefined, {}, env.RESTORED).brain;
+    await target.db.delete(brainMemoryCites);
+    await target.db.delete(brainMemories);
+    await target.db.delete(collections);
+    const restored = await codeOf(
+      restoreExport(target, admin, readerOf(bundle))
+    );
+    const [document] = await target.db
+      .select()
+      .from(documents)
+      .where(eq(documents.path, `${name}/SKILL.md`));
+    const texts = await Promise.all(
+      [1, 2].map(
+        async (number) =>
+          await versionText(target, target.db, document?.id ?? "", number)
+      )
+    );
+    expect({
+      restored,
+      versions: document?.currentVersion,
+      purged: texts[1]?.includes("name: (removed)"),
+      leftOut: texts[1]?.includes(name),
+    }).toStrictEqual({
+      restored: "ok",
+      versions: 2,
+      purged: true,
+      leftOut: false,
+    });
+  });
+
+  it("refuses a signed bundle whose text a save would refuse before writing anything", async () => {
+    const collection = {
+      id: crypto.randomUUID(),
+      name: "Crafted",
+      description: "",
+      owner: "admin",
+      access: "everyone",
+      sensitive: false,
+      source: "here",
+      createdAt: new Date().toISOString(),
+    };
+    // Past the most a version holds: a save refuses it.
+    const document = {
+      id: crypto.randomUUID(),
+      collectionId: collection.id,
+      path: "big.md",
+      createdAt: new Date().toISOString(),
+      versions: [
+        {
+          number: 1,
+          author: "admin",
+          message: null,
+          restoredFrom: null,
+          createdAt: new Date().toISOString(),
+          text: `# Big\n${"x".repeat(1_100_000)}`,
+        },
+      ],
+      transcript: null,
+    };
+    const files = new Map([
+      ["collections-0001.jsonl", `${JSON.stringify(collection)}\n`],
+      ["documents-0001.jsonl", `${JSON.stringify(document)}\n`],
+      ["memories-0001.jsonl", ""],
+      [
+        "erasures-0001.jsonl",
+        `${JSON.stringify({ type: "forgotten_person", userId: `crafted-${collection.id}`, at: new Date().toISOString() })}\n`,
+      ],
+    ]);
+    await signedBundle(files);
+    const target = testHost(undefined, {}, env.RESTORED).brain;
+    await target.db.delete(brainMemoryCites);
+    await target.db.delete(brainMemories);
+    await target.db.delete(collections);
+    const refused = await codeOf(
+      restoreExport(
+        target,
+        admin,
+        async (name) => await Promise.resolve(files.get(name) ?? null)
+      )
+    );
+    const written = await target.db.select().from(collections);
+    const forgotten = await target.db
+      .select()
+      .from(brainForgottenPeople)
+      .where(eq(brainForgottenPeople.userId, `crafted-${collection.id}`));
+    expect({
+      refused,
+      written: written.length,
+      forgotten: forgotten.length,
+    }).toStrictEqual({
+      refused: "knowledge.invalid",
+      written: 0,
+      forgotten: 0,
     });
   });
 

@@ -14,10 +14,11 @@ import {
   brainMemories,
   brainPurges,
   collections,
+  documents,
   transcripts,
   versions,
 } from "./db/schema.ts";
-import { writeVersion } from "./documents.ts";
+import { checkedText, writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { sha256Hex } from "./encoding.ts";
 import {
@@ -324,76 +325,155 @@ const eachRow = async <T>(
 type DocumentsLine = z.infer<typeof documentsLineSchema>;
 
 /**
+ * Checks `text`, version `path` of a document in `collection`, as a
+ * restore's save checks it (`Write.restored`): the host's `onWrite` and
+ * the Brain's own rules for saved and purged text. A refusal refuses the
+ * bundle, saying nothing of what it holds.
+ */
+const checkVersionText = async <C>(
+  brain: Brain<C>,
+  collection: CollectionRow,
+  path: string,
+  text: string
+): Promise<void> => {
+  try {
+    await checkedText(
+      brain,
+      { ...collection, createdAt: new Date(collection.createdAt) },
+      path,
+      text,
+      true,
+      true
+    );
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) !== undefined) {
+      throw refused();
+    }
+    throw error;
+  }
+};
+
+/**
  * Checks the documents' lines as they come, a document at a time: each in
  * a collection the bundle holds, in ID order (so none twice), at a place
  * no other has, its lines continuing it alone, its versions numbered 1, 2,
- * 3 and on with none lost or repeated.
+ * 3 and on with none lost or repeated, each version's text as its save
+ * would check it, and its transcript of one of its versions.
  */
-const documentsCheck = (known: ReadonlySet<string>) => {
+const documentsCheck = <C>(
+  brain: Brain<C>,
+  known: ReadonlyMap<string, CollectionRow>
+) => {
   const places = new Set<string>();
-  let current: { id: string; next: number } | undefined;
+  let current:
+    | {
+        id: string;
+        path: string;
+        collection: CollectionRow;
+        next: number;
+        transcript: number | null;
+      }
+    | undefined;
   const ended = () => {
-    // A document with no version at all is no document.
-    if (current !== undefined && current.next === 1) {
+    if (current === undefined) {
+      return;
+    }
+    const { next, transcript } = current;
+    // A document with no version at all is no document; a transcript is
+    // of one of its versions.
+    if (next === 1 || (transcript !== null && transcript >= next)) {
       throw refused();
     }
   };
-  const versionsFrom = (rows: readonly VersionRow[]) => {
-    for (const { number } of rows) {
+  const versionsFrom = async (rows: readonly VersionRow[]) => {
+    for (const { number, text } of rows) {
       if (current === undefined || number !== current.next) {
         throw refused();
       }
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await checkVersionText(
+        brain,
+        current.collection,
+        current.path,
+        text ?? ""
+      );
       current.next += 1;
     }
   };
   return {
-    line: (line: DocumentsLine) => {
+    line: async (line: DocumentsLine) => {
       if ("continues" in line) {
         if (line.continues !== current?.id) {
           throw refused();
         }
-        versionsFrom(line.versions);
+        await versionsFrom(line.versions);
         return;
       }
       ended();
       const place = `${line.collectionId}\n${line.path}`;
+      const collection = known.get(line.collectionId);
       if (
-        !known.has(line.collectionId) ||
+        collection === undefined ||
         places.has(place) ||
         (current !== undefined && line.id <= current.id)
       ) {
         throw refused();
       }
       places.add(place);
-      current = { id: line.id, next: 1 };
-      versionsFrom(line.versions);
+      current = {
+        id: line.id,
+        path: line.path,
+        collection,
+        next: 1,
+        transcript: line.transcript?.version ?? null,
+      };
+      await versionsFrom(line.versions);
     },
     ended,
   };
 };
 
 /**
- * Checks the whole bundle before anything is written: every file against
- * its SHA-256, a file at a time, and every row of the parts it restores.
+ * Checks the whole bundle before anything is written, so a restore fails
+ * before its first write or not at all: every file against its SHA-256,
+ * a file at a time, and every row of the parts it restores as its write
+ * would check it (collections and memory records in ID order, as written,
+ * so none twice).
  */
-const checkBundle = async (
+const checkBundle = async <C>(
+  brain: Brain<C>,
   read: (name: string) => Promise<string | null>,
   manifest: Manifest
 ): Promise<void> => {
-  const known = new Set<string>();
+  const known = new Map<string, CollectionRow>();
+  let lastCollection = "";
   await eachRow(read, manifest, "collections", collectionRowSchema, (row) => {
-    known.add(row.id);
+    if (row.id <= lastCollection) {
+      throw refused();
+    }
+    lastCollection = row.id;
+    known.set(row.id, row);
   });
-  const documents = documentsCheck(known);
-  await eachRow(read, manifest, "documents", documentsLineSchema, (line) => {
-    documents.line(line);
-  });
-  documents.ended();
-  await eachRow(read, manifest, "memories", memoryRowSchema, () => {
-    // Checked as read.
+  const checking = documentsCheck(brain, known);
+  await eachRow(
+    read,
+    manifest,
+    "documents",
+    documentsLineSchema,
+    async (line) => {
+      await checking.line(line);
+    }
+  );
+  checking.ended();
+  let lastMemory = "";
+  await eachRow(read, manifest, "memories", memoryRowSchema, (row) => {
+    if (row.id <= lastMemory) {
+      throw refused();
+    }
+    lastMemory = row.id;
   });
   await eachRow(read, manifest, "erasures", erasureRowSchema, () => {
-    // Checked as read.
+    // Checked as read; each replays over what is there (`replayed`).
   });
   // The host's files, and any other the manifest names: their checksums.
   const restored = new Set(
@@ -470,6 +550,8 @@ const restoreVersions = async <C>(
         message: version.message,
         restoredFrom: version.restoredFrom,
         sync: true,
+        // As the Brain it came from saved it, or a purge rewrote it.
+        restored: true,
       }
     );
     ({ id } = saved);
@@ -518,6 +600,11 @@ const restoreDocuments = async <C>(
     const { line, id } = current;
     if (id !== undefined) {
       newIds.set(line.id, id);
+      // Its time as it was.
+      await db
+        .update(documents)
+        .set({ createdAt: new Date(line.createdAt) })
+        .where(eq(documents.id, id));
       if (line.transcript !== null) {
         await db.insert(transcripts).values({
           documentId: id,
@@ -677,7 +764,7 @@ export const restoreExport = async <C>(
 ): Promise<RestoreResult> => {
   const { db } = brain;
   const manifest = await manifestOf(brain, read);
-  await checkBundle(read, manifest);
+  await checkBundle(brain, read, manifest);
   const [heldCollections] = await db.select({ n: count() }).from(collections);
   const [heldMemories] = await db.select({ n: count() }).from(brainMemories);
   if ((heldCollections?.n ?? 0) > 0 || (heldMemories?.n ?? 0) > 0) {
@@ -702,7 +789,7 @@ export const restoreExport = async <C>(
     }
   );
   // Documents get new IDs: the records citing them are pointed at them.
-  const documents = await restoreDocuments(
+  const restoredDocuments = await restoreDocuments(
     brain,
     by,
     read,
@@ -714,13 +801,13 @@ export const restoreExport = async <C>(
     brain,
     read,
     manifest,
-    documents.newIds
+    restoredDocuments.newIds
   );
   const result: RestoreResult = {
     exportId: manifest.exportId,
     collections: collectionsById.size,
-    documents: documents.newIds.size,
-    versions: documents.versions,
+    documents: restoredDocuments.newIds.size,
+    versions: restoredDocuments.versions,
     memories: memories.restored,
     memoriesLeftOut: memories.leftOut,
     forgottenPeople,
