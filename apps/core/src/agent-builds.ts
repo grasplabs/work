@@ -1302,6 +1302,20 @@ const buildDeclaration = `/**
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
  * when the person can't read that table. Read the SDK's types for the rest.
+ *
+ * Who is calling and the organization's people need no permission. Every
+ * server function's \`ctx.caller\` is who calls, from Grasp's sign-in:
+ * \`{ kind: "person", id, name, email, orgRole, appRole, teams: { id, name }[] }\`
+ * or, for a visitor the App was shared with, \`{ kind: "visitor", id, email }\`.
+ * Decide who may see or do what with it, on the server (\`ctx.caller.id\`
+ * for "my requests", "assigned to me"). \`ctx.people\` reads members:
+ * \`find(ids)\`, \`search(query, { limit?, cursor? })\` and
+ * \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each person
+ * \`{ id, name, email, teams, manager }\` (\`manager\` null until the org
+ * chart is known); a visitor is refused it. Screens get the same from
+ * \`@grasp-os/sdk/react\`: \`useCaller()\` (undefined while loading; for
+ * showing, never deciding) and \`usePeople()\` (the same three reads). The
+ * top-level \`people\` path is the platform's: no function registers there.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */

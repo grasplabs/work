@@ -27,6 +27,14 @@ import { z } from "zod";
 import { operationRoles } from "./app-access.ts";
 import { callTimeoutMs } from "./app-call-timeout.ts";
 import {
+  answerPeople,
+  isPeoplePath,
+  memberPeople,
+  peopleReadOf,
+  visitorPeople,
+} from "./app-people.ts";
+import type { PeopleAccess } from "./app-people.ts";
+import {
   answerPreferences,
   isPreferencePath,
   preferenceOperationOf,
@@ -278,6 +286,15 @@ export const invocationFor = async (
       resourceId: app,
       resourceVersion: release.manifest.resourceVersion,
     },
+    // Who calls: the person core resolved, their roles in the App read as
+    // the gate reads them.
+    people: memberPeople(env, {
+      app,
+      userId: by.userId,
+      roles: async () => await operationRoles(env, by, app),
+      actor: delegateActorOf(authority),
+      requestId,
+    }),
     // Called from a run's chain: its commits only while the run's step
     // still holds its lease.
     store:
@@ -495,6 +512,25 @@ export const runInvocationFor = async (
   return {
     principal: authority.onBehalfOf,
     consumer: { resourceId: app, resourceVersion: version },
+    // Who calls: the person the run acts for, the one who started it.
+    people: memberPeople(env, {
+      app,
+      userId: authority.onBehalfOf,
+      roles: async () => {
+        const role = await memberRole(env.DB, authority.onBehalfOf);
+        if (role === undefined) {
+          throw permissionErrors.create("permission.person_inactive");
+        }
+        return await operationRoles(
+          env,
+          { userId: authority.onBehalfOf, role },
+          app,
+          true
+        );
+      },
+      actor: runActorOf(run),
+      requestId,
+    }),
     store:
       release.store === null
         ? noStore()
@@ -986,6 +1022,68 @@ const answeredPreferences = async (
   }
 };
 
+/**
+ * A read of who calls or of the organization's people (app-people.ts),
+ * as a screen of App `app` makes it, answered as `callFunction` answers a
+ * call: for the App the call came through (never one its reference
+ * names), once the caller passes the gate a call core answers itself
+ * passes.
+ */
+const answeredPeople = async (
+  env: Env,
+  {
+    by,
+    app: named,
+    call,
+    refused,
+    stillAllowed,
+    deadline,
+    requestId,
+  }: {
+    by: Pick<Identity, "userId" | "role" | "teams">;
+    app: unknown;
+    call: FunctionRequest;
+    refused: (error: unknown) => FunctionAnswer;
+    stillAllowed: FunctionCallOptions["stillAllowed"];
+    deadline: number;
+    requestId: string;
+  }
+): Promise<FunctionAnswer> => {
+  try {
+    const read = peopleReadOf(call.reference);
+    if (call.window !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    // Anyone without a role in the App learns nothing of it.
+    const found = await usableApp(env, by, named);
+    if (found.currentVersion === null) {
+      throw versionErrors.create("version.not_sealed");
+    }
+    const app = appIdSchema.parse(found.id);
+    const release = await loadRelease(env, app, found.currentVersion);
+    await coreAnsweredGate(env, { by, app, release, stillAllowed, deadline })();
+    const value = await answerPeople(
+      memberPeople(env, {
+        app,
+        userId: by.userId,
+        roles: async () => await operationRoles(env, by, app),
+        actor: { type: "app", appId: app, part: "screen" },
+        requestId,
+      }),
+      read,
+      call.input
+    );
+    return {
+      result: { ok: true, value },
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
 /** `callAppFunction`, with all of its options. */
 /**
  * `invocation`, telling `observeReads` what a query read of `release`'s
@@ -1047,6 +1145,18 @@ const callFunction = async (
     call = callAllowed(request, { kind, windowed: chargeWindow !== undefined });
   } catch (error) {
     return refused(error);
+  }
+  // Who calls, and the organization's people: core's own.
+  if (isPeoplePath(call.reference.contractId)) {
+    return await answeredPeople(env, {
+      by,
+      app,
+      call,
+      refused,
+      stillAllowed,
+      deadline,
+      requestId,
+    });
   }
   let release: Release;
   let path: string;
@@ -1205,6 +1315,8 @@ export interface VisitorCaller {
    * inserts, and keys its receipts, so no two visitors share either.
    */
   readonly principal: string;
+  /** The address they signed in with, as their session holds it. */
+  readonly email: string;
   /**
    * Throws unless the visitor may still call `path`: their session live,
    * the App published at this version, their address listed, and `path`
@@ -1219,6 +1331,17 @@ export interface VisitorCaller {
   /** Told the function the call runs, once it is admitted. */
   readonly admitted: (path: string) => Promise<void>;
 }
+
+/**
+ * What a visitor is told of people: who they are, and no directory, each
+ * read of which is refused as a function no grant opens, and recorded.
+ */
+const visitorPeopleOf = (caller: VisitorCaller): PeopleAccess =>
+  visitorPeople({
+    principal: caller.principal,
+    email: caller.email,
+    refuse: async (name) => await caller.notGranted(`people.${name}`),
+  });
 
 /**
  * The invocation of `release`'s function `path` for a visitor: the App's
@@ -1256,6 +1379,7 @@ export const visitorInvocation = async (
       await caller.stillAllowed(path);
       return { appMember: false, appBuilder: false };
     },
+    people: visitorPeopleOf(caller),
   };
 };
 
@@ -1282,6 +1406,26 @@ export const callVisitorFunction = async (
   try {
     const call = callAllowed(request, { kind: undefined, windowed: false });
     const { contractId } = call.reference;
+    // Who they are, and nothing of the directory (app-people.ts): no grant
+    // opens it to a visitor.
+    if (isPeoplePath(contractId)) {
+      const read = peopleReadOf(call.reference);
+      if (call.window !== undefined) {
+        throw operationErrors.create("contract.invalid_request");
+      }
+      // Their session was found live, the App published and their address
+      // listed before this call was taken: that is all telling them who
+      // they are needs. Every directory read is refused, and recorded.
+      return {
+        result: {
+          ok: true,
+          value: await answerPeople(visitorPeopleOf(caller), read, call.input),
+        },
+        provenance: null,
+        fingerprint: call.reference.fingerprint,
+        manifestHash: null,
+      };
+    }
     // Never granted, whatever the grants say: refused, and recorded, before
     // anything of the release is read.
     if (

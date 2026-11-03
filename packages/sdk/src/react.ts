@@ -84,6 +84,8 @@ import type {
   RecordFormOptions,
   SchemaFormOptions,
 } from "./form.ts";
+import { peopleDirectory, peopleReferences } from "./people.ts";
+import type { Caller, PeopleDirectory } from "./people.ts";
 import type {
   AnyWorkflowReference,
   ArgsOf,
@@ -136,6 +138,16 @@ export type {
   UploadOptions,
 } from "./client-files.ts";
 export type { OpenLinkOptions } from "./client-links.ts";
+export type {
+  Caller,
+  PageOptions,
+  PeopleDirectory,
+  PeoplePage,
+  Person,
+  PersonCaller,
+  TeamRef,
+  VisitorCaller,
+} from "./people.ts";
 export type { UploadView } from "./upload-transfer.ts";
 export type {
   FieldChange,
@@ -316,6 +328,33 @@ export const useMutation = <Reference extends MutationReference>(
  * opens gets the input as its `ScreenProps`.
  */
 export const useNavigate = (): Navigate => useClient().navigate;
+
+/**
+ * Who is using the screen: a member of the organization (`kind:
+ * "person"`, with their roles and teams), or a visitor the App was shared
+ * with (`kind: "visitor"`); `undefined` while it loads. Core answers it
+ * from who is signed in, never from the screen: show it, but decide what
+ * someone may do in the App's server functions, with `ctx.caller`, which
+ * no screen can change.
+ */
+export const useCaller = (): Caller | undefined =>
+  useQuery(peopleReferences.caller, {});
+
+/**
+ * The organization's people, read-only, for a member: `find` by ID,
+ * `search` by name or email, and `team` for a team's members, at most 100
+ * a read, each person with only their name, email, teams and manager. A
+ * visitor is refused every read (`visitor.not_granted`). Call it from an
+ * event handler or an effect.
+ */
+export const usePeople = (): PeopleDirectory => {
+  const client = useClient();
+  return peopleDirectory(
+    async (name, args) =>
+      // The reads' own references: core answers them for this App.
+      await client.query(peopleReferences[name], args)
+  );
+};
 
 /**
  * The action `reference` names, as a stable function: each call is one

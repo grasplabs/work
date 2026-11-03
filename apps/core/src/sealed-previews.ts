@@ -45,6 +45,13 @@ import {
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import {
+  answerPeople,
+  isPeoplePath,
+  memberPeople,
+  peopleReadOf,
+} from "./app-people.ts";
+import type { PeopleAccess } from "./app-people.ts";
+import {
   answerPreferences,
   isPreferencePath,
   preferenceOperationOf,
@@ -676,12 +683,14 @@ export class SealedPreviews {
       }
       const deadline =
         options.deadline ?? Date.now() + platformLimits.serverInvocationWallMs;
-      if (isPreferencePath(call.reference.contractId)) {
-        return await this.#preferences(chatId, personId, app, running, {
-          release,
-          call,
-          deadline,
-        });
+      const byCore = this.#answeredByCore(chatId, personId, app, running, {
+        release,
+        call,
+        deadline,
+        requestId,
+      });
+      if (byCore !== undefined) {
+        return await byCore;
       }
       const path = publicOperationOf(release, call.reference);
       // Before the preview's store is made or opened.
@@ -758,6 +767,83 @@ export class SealedPreviews {
       }
       return refused(error);
     }
+  }
+
+  /**
+   * What core answers itself rather than the draft's code, if `call` asks
+   * for it: the draft's preferences, and who calls and the organization's
+   * people. Undefined for any other call.
+   */
+  #answeredByCore(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    {
+      release,
+      call,
+      deadline,
+      requestId,
+    }: {
+      release: Release;
+      call: FunctionRequest;
+      deadline: number;
+      requestId: string;
+    }
+  ): Promise<PreviewAnswer> | undefined {
+    const { contractId } = call.reference;
+    if (isPreferencePath(contractId)) {
+      return this.#preferences(chatId, personId, app, running, {
+        release,
+        call,
+        deadline,
+      });
+    }
+    if (isPeoplePath(contractId)) {
+      return this.#people(chatId, personId, app, running, {
+        release,
+        call,
+        requestId,
+      });
+    }
+    return undefined;
+  }
+
+  /**
+   * Who calls, and the organization's people (app-people.ts), as a live
+   * screen's read is answered: for the builder previewing the draft, once
+   * the preview's gate passes. Throws for a refusal; `call` answers it.
+   */
+  async #people(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    {
+      release,
+      call,
+      requestId,
+    }: { release: Release; call: FunctionRequest; requestId: string }
+  ): Promise<PreviewAnswer> {
+    const read = peopleReadOf(call.reference);
+    if (call.window !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    await this.#authorizer(chatId, personId, app, running)();
+    const value = await answerPeople(
+      this.#peopleOf(chatId, personId, app, running, requestId),
+      read,
+      call.input
+    );
+    return {
+      answer: {
+        result: { ok: true, value },
+        provenance: null,
+        fingerprint: call.reference.fingerprint,
+        manifestHash: release.manifestHash,
+      },
+      reads: undefined,
+    };
   }
 
   /**
@@ -918,7 +1004,26 @@ export class SealedPreviews {
         await this.#requireRecorded(chatId, app, running, store);
         return await this.#authorizer(chatId, personId, app, running)();
       },
+      // Who calls: the builder previewing it, the directory as theirs.
+      people: this.#peopleOf(chatId, personId, app, running, requestId),
     };
+  }
+
+  /** Who calls a preview of `running`, and what of people they read. */
+  #peopleOf(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    requestId: string
+  ): PeopleAccess {
+    return memberPeople(this.#env, {
+      app,
+      userId: personId,
+      roles: this.#authorizer(chatId, personId, app, running),
+      actor: { type: "app", appId: app, part: "server" },
+      requestId,
+    });
   }
 
   /**

@@ -760,6 +760,7 @@ const callAsVisitor = async (
           app: appId,
           version,
           principal,
+          email: session.address,
           stillAllowed: async (path) => {
             const live = await sessionById(env, session.id);
             const now = await publishedApp(env, appId);

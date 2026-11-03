@@ -321,8 +321,9 @@ const appKeys: ReadonlySet<string> = new Set([
 
 /**
  * The top-level path segments the platform keeps, with what each is for:
- * `preferences` for an App's preferences (spec 10.7.7) and `workflows` for
- * its generated workflow references (`workflows.<alias>.queries.*`), which
+ * `preferences` for an App's preferences (spec 10.7.7), `workflows` for
+ * its generated workflow references (`workflows.<alias>.queries.*`) and
+ * `people` for who calls and the organization's people (people.ts), which
  * the host answers itself. No function registers under either, whether or
  * not the App declares preferences or workflows now, so declaring one
  * later never shadows or is shadowed by a function.
@@ -330,6 +331,7 @@ const appKeys: ReadonlySet<string> = new Set([
 export const reservedSegments: ReadonlyMap<string, string> = new Map([
   ["preferences", "the App's preferences"],
   ["workflows", "the App's workflow references"],
+  ["people", "the organization's people"],
 ]);
 
 /**

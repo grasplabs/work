@@ -1111,6 +1111,7 @@ describe("references in uses", () => {
       },
       resource: async () => await Promise.reject(new Error("no resources")),
       emit: async () => await Promise.reject(new Error("no emits")),
+      people: async () => await Promise.reject(new Error("no people")),
     };
     await expect(runFunction(notes, "notes.tally", {}, channel)).resolves.toBe(
       3

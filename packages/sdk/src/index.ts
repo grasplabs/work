@@ -85,3 +85,15 @@ export type {
   WorkflowWait,
   WorkflowWaitOf,
 } from "./references.ts";
+// Who calls an App, and the organization's people (people.ts): what a
+// server function reads as `ctx.caller` and `ctx.people`.
+export type {
+  Caller,
+  PageOptions,
+  PeopleDirectory,
+  PeoplePage,
+  Person,
+  PersonCaller,
+  TeamRef,
+  VisitorCaller,
+} from "./people.ts";

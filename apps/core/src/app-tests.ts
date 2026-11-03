@@ -43,6 +43,7 @@ import {
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
+import { fixturePeople } from "./app-people.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { discardFixtureStore, openFixtureStore } from "./data-stores.ts";
@@ -873,6 +874,8 @@ class FixtureSession extends TestTarget {
         const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
         const invocation: Invocation = {
           principal: `fixture-${name}`,
+          // The fixture as the person calling, and nobody else to read.
+          people: fixturePeople(`fixture-${name}`, role),
           consumer: {
             resourceId: this.#release.manifest.resourceId,
             resourceVersion: this.#release.manifest.resourceVersion,

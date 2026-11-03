@@ -115,6 +115,7 @@ const channelOf = (remote) => ({
   call: async (kind, path, args) => rebuilt(await remote.call(kind, path, args)),
   resource: async (alias, method, args) => rebuilt(await remote.resource(alias, method, args)),
   emit: async (progress) => rebuilt(await remote.emit(progress)),
+  people: async (name, args) => rebuilt(await remote.people(name, args)),
 });
 
 const bounded = (value, max) =>
@@ -272,6 +273,7 @@ interface ArrivingChannel {
     args: unknown
   ) => Promise<unknown>;
   readonly emit: (progress: unknown) => Promise<unknown>;
+  readonly people: (name: unknown, args: unknown) => Promise<unknown>;
 }
 
 class IsolateChannel extends IsolateChannelTarget {
@@ -311,6 +313,10 @@ class IsolateChannel extends IsolateChannelTarget {
 
   async emit(progress: unknown): Promise<unknown> {
     return await settled(async () => await this.#channel.emit(progress));
+  }
+
+  async people(name: unknown, args: unknown): Promise<unknown> {
+    return await settled(async () => await this.#channel.people(name, args));
   }
 }
 

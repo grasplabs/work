@@ -2179,6 +2179,7 @@ describe("an action's nested calls", () => {
         resource: async (alias, method, callArgs) =>
           await channel.resource(alias, method, callArgs),
         emit: async (progress) => await channel.emit(progress),
+        people: async (read, readArgs) => await channel.people(read, readArgs),
       };
       return await defaultRun(path, args, tearing);
     };

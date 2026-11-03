@@ -84,6 +84,8 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import { answerPeople } from "./app-people.ts";
+import type { PeopleAccess } from "./app-people.ts";
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import { CallTree } from "./call-tree.ts";
 import type { RunnerCall } from "./call-tree.ts";
@@ -315,6 +317,14 @@ export interface Invocation {
    * to the log, and no caller's answer ever carries them.
    */
   readonly draftFailure?: (message: string) => void;
+  /**
+   * Who the call is for, and what of the organization's people it may
+   * read (app-people.ts): App code's `ctx.caller` and `ctx.people`, read
+   * through the channel. Resolved by core with the rest of the
+   * invocation, never from App code. Without it, App code is told nothing
+   * of either, and a function fails as it starts.
+   */
+  readonly people?: PeopleAccess;
 }
 
 /** The most of a draft's failure a preview is told (`draftFailure`). */
@@ -2578,6 +2588,7 @@ const trackedCalls = (
       call: track(capabilities.call),
       resource: track(capabilities.resource),
       emit: track(capabilities.emit),
+      people: track(capabilities.people),
     },
     inFlight: async () => await Promise.allSettled(running),
     settle: async () => {
@@ -2668,7 +2679,7 @@ const staleRun = new Error("A run's reads went stale");
 interface Capabilities {
   /** Told of every refused or failed use, as the channel's `refused`. */
   readonly onRefused?: (
-    name: "read" | "write" | "call" | "resource" | "emit",
+    name: "read" | "write" | "call" | "resource" | "emit" | "people",
     error: Error
   ) => void;
   readonly read?: (request: unknown) => Promise<unknown>;
@@ -2684,6 +2695,8 @@ interface Capabilities {
     args: unknown
   ) => Promise<unknown>;
   readonly emit?: (progress: unknown) => Promise<unknown>;
+  /** Who calls, and the organization's people (`Invocation.people`). */
+  readonly people?: (name: unknown, args: unknown) => Promise<unknown>;
   /**
    * Whether an effect it started (a mutation or action it called, a
    * resource request) is still under way: a cancel that lands then can't
@@ -2864,8 +2877,19 @@ const runHandler = async (
     run.told.failure = undefined;
     run.told.nested.clear();
   }
+  const { people } = run.invocation;
   const calls = trackedCalls(
-    keepingEvidence(run, operation, capabilities),
+    {
+      ...keepingEvidence(run, operation, capabilities),
+      // Every kind's: who calls, and the directory, as core resolved them
+      // for the invocation, nested calls' included.
+      ...(people === undefined
+        ? {}
+        : {
+            people: async (read: unknown, readArgs: unknown) =>
+              await answerPeople(people, read, readArgs),
+          }),
+    },
     run.invocation.deadline
   );
   const open = openChannel({
