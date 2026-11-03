@@ -6,21 +6,24 @@
  * companies on Edge, Beta and Stable (one still being provisioned, one
  * whose last deploy failed), and the newest release promoted through Edge
  * and Beta to Stable, its Stable company deploying it or, with `done`,
- * done. Each company is
- * placed in one made-up dedicated destination, its release recorded as
- * its operation (src/hosting/operation.ts) left it: done, failed, or still
+ * done, its Workers and operation then on that release too. Each company
+ * is placed in one made-up destination, its release recorded as its
+ * operation (src/hosting/operation.ts) left it: done, failed, or still
  * provisioning.
  *
  * It writes only the admin's local D1, applying its migrations first,
  * through Wrangler's local mode: it never reaches an account. It can run
- * again: each run replaces what the last one wrote, and nothing else.
- * The destination's account is made up, so the page's live reads find
- * none of the companies; the page says so.
+ * again: each run replaces what the last one wrote. The channels' releases
+ * are every client's, so it refuses a database with clients of its own
+ * rather than move them. The destination's account is made up, so the
+ * page's live reads find none of the companies; the page says so.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { z } from "zod";
 
 const adminDir = path.join(import.meta.dirname, "../apps/admin");
 
@@ -87,8 +90,13 @@ const companies = [
     name: "Veldkamp Installatietechniek",
     channel: "stable",
     status: "active",
-    release: "26.10.3",
-    lastDeploy: { status: "done", kind: "release", day: 9 },
+    // Deploying Stable's new release, or, with `done`, on it.
+    release: mode === "done" ? "26.10.4" : "26.10.3",
+    lastDeploy: {
+      status: "done",
+      kind: "release",
+      day: mode === "done" ? 14 : 9,
+    },
   },
   {
     id: "vanrijn",
@@ -103,7 +111,7 @@ const companies = [
 /** The release a company still being provisioned is provisioned with. */
 const provisioning = "26.10.4";
 
-/** The made-up dedicated destination every company is placed in. */
+/** The made-up destination every company is placed in. */
 const destinationId = "seed-eu-dedicated";
 
 const staff = "nick@grasp.test";
@@ -129,7 +137,6 @@ const statements = [
   // What the last run wrote, children first.
   `DELETE FROM audit_events WHERE id LIKE 'seed-%'`,
   `DELETE FROM client_deploys WHERE client_id IN (${companyIds})`,
-  `DELETE FROM channels`,
   `DELETE FROM client_provisions WHERE client_id IN (${companyIds})`,
   `DELETE FROM client_placements WHERE client_id IN (${companyIds})`,
   // The companies, releases and workers in place, as anything else a local
@@ -148,18 +155,9 @@ const statements = [
     .join(
       ", "
     )} ON CONFLICT(id) DO UPDATE SET commit_sha = excluded.commit_sha, manifest = excluded.manifest, manifest_sha256 = excluded.manifest_sha256, built_at = excluded.built_at, imported_at = excluded.imported_at`,
-  `INSERT INTO hosting_destinations (id, kind, account_id, namespace, policies, capabilities, created_at, updated_at) VALUES ${row(
-    [
-      destinationId,
-      "dedicated",
-      "seed-account",
-      null,
-      JSON.stringify(["eu-storage"]),
-      JSON.stringify({}),
-      at(1),
-      at(1),
-    ]
-  )} ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, account_id = excluded.account_id, namespace = excluded.namespace, policies = excluded.policies, capabilities = excluded.capabilities, updated_at = excluded.updated_at`,
+  `INSERT INTO hosting_destinations (id, account_id, namespace, created_at, updated_at) VALUES ${row(
+    [destinationId, "seed-account", "seed-clients", at(1), at(1)]
+  )} ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, namespace = excluded.namespace, updated_at = excluded.updated_at`,
   `INSERT INTO clients (id, name, channel, status, created_by, created_at, updated_at) VALUES ${companies
     .map(({ id, name, channel, status }) =>
       row([id, name, channel, status, staff, at(1), at(1)])
@@ -167,10 +165,8 @@ const statements = [
     .join(
       ", "
     )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, channel = excluded.channel, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
-  `INSERT INTO client_placements (client_id, deployment_id, destination_id, policy_id, placed_by, placed_at) VALUES ${companies
-    .map(({ id }) =>
-      row([id, `seed${id}`, destinationId, "eu-storage", staff, at(1)])
-    )
+  `INSERT INTO client_placements (client_id, deployment_id, destination_id, placed_by, placed_at) VALUES ${companies
+    .map(({ id }) => row([id, `seed${id}`, destinationId, staff, at(1)]))
     .join(", ")}`,
   ...companies.flatMap(({ id, release }) =>
     release === null
@@ -238,7 +234,9 @@ const statements = [
     "stable",
   ]
     .map((channel) => row([channel, promoted, at(14)]))
-    .join(", ")}`,
+    .join(
+      ", "
+    )} ON CONFLICT(id) DO UPDATE SET release_id = excluded.release_id, updated_at = excluded.updated_at`,
   `INSERT INTO client_deploys (client_id, release_id, run_id, status, error, started_at, ended_at) VALUES ${row(
     [
       "veldkamp",
@@ -314,7 +312,38 @@ const wrangler = (args: string[]): void => {
   }
 };
 
+/** The ids of clients in the local database other than the seed's. */
+const otherClients = (): string[] => {
+  const result = spawnSync(
+    path.join(adminDir, "node_modules/.bin/wrangler"),
+    [
+      "d1",
+      "execute",
+      "DB",
+      "--local",
+      "--json",
+      `--command=SELECT id FROM clients WHERE id NOT IN (${companyIds})`,
+    ],
+    { cwd: adminDir, encoding: "utf-8" }
+  );
+  if (result.status !== 0) {
+    throw new Error(`Reading the local clients failed: ${result.stderr}`);
+  }
+  const [answer] = z
+    .array(z.object({ results: z.array(z.object({ id: z.string() })) }))
+    .parse(JSON.parse(result.stdout));
+  return answer?.results.map(({ id }) => id) ?? [];
+};
+
 wrangler(["d1", "migrations", "apply", "DB", "--local"]);
+// The channels' releases are every client's: seeding moves them, so never
+// on a database with clients of its own.
+const others = otherClients();
+if (others.length > 0) {
+  throw new Error(
+    `The local admin has clients the seed didn't make (${others.join(", ")}): seeding sets every channel's release, so it would move them too. Start from an empty local database (delete apps/admin/.wrangler/state) to seed.`
+  );
+}
 const dir = mkdtempSync(path.join(tmpdir(), "seed-admin-"));
 try {
   const file = path.join(dir, "seed.sql");
