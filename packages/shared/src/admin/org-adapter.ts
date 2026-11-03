@@ -203,10 +203,11 @@ const factsOf = (interview: HeldInterview): { facts: number; out: number } =>
   };
 
 /** The day something happened, as the number of days since the interviews started. */
-/** Which Stephen held an interview and in which language, as Grasp OS's core says: none it doesn't say. */
+/** Which Stephen held an interview, in which language and when it last moved, as Grasp OS's core says: none it doesn't say. */
 const heldBy = (
   interview: HeldInterview
-): { stephen?: string; language?: string } => ({
+): { stephen?: string; language?: string; at: string } => ({
+  at: interview.updated,
   ...(interview.stephen === undefined ? {} : { stephen: interview.stephen }),
   ...(interview.language === undefined ? {} : { language: interview.language }),
 });

@@ -73,6 +73,8 @@ const organization = (
     finished: boolean;
     locale?: string;
     typed?: boolean;
+    /** The day it ended, as ISO time. */
+    on?: string;
   }[],
   channel?: string
 ): LabOrganization => {
@@ -91,8 +93,10 @@ const organization = (
       person: `p${at}`,
       kind: "own",
       startedAt: "2026-10-10T09:00:00.000Z",
-      completedAt: each.finished ? "2026-10-10T09:30:00.000Z" : null,
-      updatedAt: "2026-10-10T09:30:00.000Z",
+      completedAt: each.finished
+        ? (each.on ?? "2026-10-10T09:30:00.000Z")
+        : null,
+      updatedAt: each.on ?? "2026-10-10T09:30:00.000Z",
       agreed: each.finished,
       phase: each.finished ? "readback" : "steps",
       stoppedAt: each.finished ? null : "steps",
@@ -116,16 +120,18 @@ const organization = (
   };
 };
 
-/** `count` interviews of `version`, `finished` of them finished, in `locale`. */
+/** `count` interviews of `version`, `finished` of them finished, in `locale`, ended `on`. */
 const held = (
   version: string | undefined,
   count: number,
   finished: number,
-  locale?: string
+  locale?: string,
+  on?: string
 ) =>
   Array.from({ length: count }, (_, at) => ({
     ...(version === undefined ? {} : { version }),
     ...(locale === undefined ? {} : { locale }),
+    ...(on === undefined ? {} : { on }),
     finished: at < finished,
   }));
 
@@ -314,6 +320,39 @@ describe("live, group by group", () => {
       English: false,
       German: false,
     });
+  });
+
+  it("counts every release one Stephen was run as", () => {
+    const lab = labOf(
+      [run("r1", [0.6], {}, "talks-s"), run("r2", [0.6], {}, "talks-s")],
+      [organization("Bakkerij", [...held("r1", 3, 3), ...held("r2", 2, 1)])]
+    );
+
+    const all = lab.live?.groups.find((group) => group.id === "all");
+    expect([all?.now.finished, all?.now.started]).toStrictEqual([4, 5]);
+  });
+
+  it("sets the Stephen in use against the one people talked with before him, whatever order organizations come in", () => {
+    const older = organization(
+      "Molen",
+      held("v1", 10, 10, undefined, "2026-10-08T09:30:00.000Z")
+    );
+    const newer = organization(
+      "Bakkerij",
+      held("v2", 12, 6, undefined, "2026-10-10T09:30:00.000Z")
+    );
+
+    for (const organizations of [
+      [older, newer],
+      [newer, older],
+    ]) {
+      const lab = labOf([], organizations);
+      expect([lab.live?.now.name, lab.live?.before?.name]).toStrictEqual([
+        "Not measured",
+        "Not measured",
+      ]);
+      expect(lab.needs.map(({ id }) => id)).toContain("finished-all");
+    }
   });
 
   it("narrows real interviews to one release channel", () => {

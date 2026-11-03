@@ -448,29 +448,50 @@ const labNeeds = ({
 };
 
 /**
- * Live: the Stephen most people talk with now (by interviews started with his release), the
- * release before him that real people talked with, and every group's numbers with both.
+ * Live: the Stephen most people talk with now (by interviews started with his releases), the
+ * one people talked with before him, and every group's numbers with both. A row counts every
+ * release it was run as; which came before is told by when real people first talked with
+ * each, never by the order organizations or interviews happen to come in.
  */
 const liveOf = (
   versions: readonly LabVersion[],
-  organizations: readonly LabOrganization[]
+  organizations: readonly LabOrganization[],
+  releasesOf: (row: string) => string[]
 ): StephenLab["live"] => {
-  const withPeople = versions.filter(
-    (each) =>
-      each.version !== UNRECORDED && each.real !== null && each.release !== null
-  );
+  const interviews = organizations.flatMap(({ view }) => view.interviews);
+  // When real people first talked with a row, as ISO time; rows that never say come last.
+  const firstSeen = (row: string): string => {
+    const releases = releasesOf(row);
+    const [first = "~"] = interviews
+      .flatMap((interview) =>
+        interview.at !== undefined &&
+        releases.includes(interview.stephen ?? UNRECORDED)
+          ? [interview.at]
+          : []
+      )
+      .toSorted();
+    return first;
+  };
+  const withPeople = versions
+    .filter((each) => each.version !== UNRECORDED && each.real !== null)
+    .map((each) => ({ each, seen: firstSeen(each.version) }))
+    .toSorted((a, b) => a.seen.localeCompare(b.seen))
+    .map(({ each }) => each);
   const [now] = withPeople.toSorted(
     (a, b) => (b.real?.started ?? 0) - (a.real?.started ?? 0)
   );
-  if (now === undefined || now.release === null) {
+  if (now === undefined) {
     return null;
   }
   const before = withPeople[withPeople.indexOf(now) - 1] ?? null;
-  const interviews = organizations.flatMap(({ view }) => view.interviews);
   return {
     now,
     before,
-    groups: liveGroupsOf(interviews, now.release, before?.release ?? null),
+    groups: liveGroupsOf(
+      interviews,
+      releasesOf(now.version),
+      before === null ? null : releasesOf(before.version)
+    ),
   };
 };
 
@@ -548,13 +569,15 @@ export const stephenLabOf = ({
   const unmeasured = [...realVersions].filter(
     (release) => !rowOfRelease.has(release)
   );
+  // Every release real people talked with that belongs to one row.
+  const releasesOf = (row: string): string[] => [
+    ...[...rowOfRelease].flatMap(([release, mark]) =>
+      mark === row && realVersions.has(release) ? [release] : []
+    ),
+    ...(unmeasured.includes(row) ? [row] : []),
+  ];
   const realFor = (row: string): RealStanding | null => {
-    const releases = [
-      ...[...rowOfRelease].flatMap(([release, mark]) =>
-        mark === row && realVersions.has(release) ? [release] : []
-      ),
-      ...(unmeasured.includes(row) ? [row] : []),
-    ];
+    const releases = releasesOf(row);
     return releases.length === 0
       ? null
       : realOf(theirs, (interview) =>
@@ -580,7 +603,7 @@ export const stephenLabOf = ({
   const everyRun = [...open, ...hidden].toSorted((a, b) =>
     b.at.localeCompare(a.at)
   );
-  const live = liveOf(versions, theirs);
+  const live = liveOf(versions, theirs, releasesOf);
   return {
     versions,
     headline,

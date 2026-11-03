@@ -149,18 +149,22 @@ const groupsOf = (
 };
 
 /**
- * Every group, its numbers with the Stephen in use now (`now`) and with the
- * one before him (`before`, none when there is no earlier one), and whether
+ * Every group, its numbers with the Stephen in use now (`now`, every release
+ * he was run as) and with the one before him (`before`, none when there is no
+ * earlier one), and whether
  * either number fell by more than chance.
  */
 export const liveGroupsOf = (
   interviews: readonly Interview[],
-  now: string,
-  before: string | null
+  now: readonly string[],
+  before: readonly string[] | null
 ): LiveGroup[] => {
-  const withNow = interviews.filter((each) => each.stephen === now);
-  const withBefore =
-    before === null ? [] : interviews.filter((each) => each.stephen === before);
+  const heldBy = (releases: readonly string[]) =>
+    interviews.filter(
+      (each) => each.stephen !== undefined && releases.includes(each.stephen)
+    );
+  const withNow = heldBy(now);
+  const withBefore = before === null ? [] : heldBy(before);
   return groupsOf(withNow).flatMap(({ id, label, who, holds }) => {
     const nowTally = tallyOf(withNow.filter(holds));
     if (nowTally.started === 0) {
