@@ -117,6 +117,12 @@ export const adminInterviewSchema = z.object({
   rating: z.int().min(1).max(5).nullable(),
   typed: z.boolean(),
   interviewer: interviewerSchema.nullable(),
+  /**
+   * Which Stephen held its last turn: one name for every text of a release
+   * (`stephenVersion` in core's onboarding/lab-marks.ts). Null before core
+   * kept it; missing from a core older than this field (expand, then contract).
+   */
+  version: z.string().max(64).nullable().optional(),
 });
 export type AdminInterview = z.output<typeof adminInterviewSchema>;
 

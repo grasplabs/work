@@ -1,0 +1,1 @@
+ALTER TABLE `interview_settings` ADD `version` text;

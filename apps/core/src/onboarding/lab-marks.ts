@@ -50,3 +50,17 @@ export const labMarks: Record<
     },
   },
 };
+
+// Which Stephen this is, as one name for all of the marks above: the first
+// twelve hex digits of the SHA-256 of every mark, in the order they stand
+// here, one to a line. It changes whenever any text does, so an interview
+// that keeps it says which texts held it, in whatever language it ran, and
+// the Stephen Lab sets the interviews of one version beside its runs. A
+// test holds it to the marks.
+export const stephenVersion = "1bf63f92d3f9";
+
+/** Every mark above, in the order they stand: what `stephenVersion` is taken over. */
+export const everyLabMark = (): string[] =>
+  Object.values(labMarks).flatMap((kinds) =>
+    Object.values(kinds).flatMap((locales) => Object.values(locales))
+  );
