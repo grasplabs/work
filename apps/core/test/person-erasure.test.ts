@@ -25,7 +25,7 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm } from "./interview-link.ts";
+import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import {
   agree,
@@ -497,6 +497,70 @@ const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
   const person = await signedInApi(idp, "builder");
   await admin.api.members.remove(person.userId);
   return { admin, person };
+};
+
+/**
+ * A referral Max makes, naming Pim, while the person `erased` was on the
+ * list (Max or Pim, by the address that was theirs) is erased as the model
+ * reads it: the erasure runs from inside the faked provider's answer.
+ * What the referral then saved: who Max named, and whether Max moved.
+ */
+const referralWhileErased = async (erased: "max" | "pim") => {
+  // The test draws the referral itself, inside its faked provider (holdAlarm).
+  await holdAlarm();
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const { admin, person } = await removedPerson();
+  const store = onboardingStore(env);
+  const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+  await mapped(ids);
+  await onList(
+    "UPDATE people SET email = ? WHERE id = ?",
+    String(person.person.email),
+    ids[erased]
+  );
+  const works = await store.teamWorks(ids.team);
+  const rota = works.find(({ name }) => name === "planning the rota");
+  if (rota === undefined) {
+    throw new Error("Expected the team's map");
+  }
+  await agree(ids.max, [
+    fact("x1", "who", "Pim handles the new tickets, not Max."),
+    fact("x2", "work", "Max plans the rota with Lea."),
+  ]);
+  let asked = 0;
+  await answeringWith(
+    async () => {
+      asked += 1;
+      if (asked === 1) {
+        await admin.api.members.erase(
+          person.userId,
+          String(person.person.name)
+        );
+      }
+      // The model's answer, once: it names Pim.
+      return asked === 1
+        ? {
+            text: JSON.stringify({ does: rota.id, person: ids.pim }),
+            inputTokens: 100,
+            outputTokens: 20,
+          }
+        : undefined;
+    },
+    async () => await store.drawNext()
+  );
+  const after = await store.teamWorks(ids.team);
+  const { entries } = await store.staffLog({ what: "interview.referred" });
+  return {
+    asked,
+    maxOnRota: after.find(({ id }) => id === rota.id)?.doers.includes(ids.max),
+    // This team's referrals: the log holds earlier tests' too, whose people
+    // the list no longer has.
+    logged: entries
+      .filter(({ person: by }) => by?.id === ids.max)
+      .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
+  };
 };
 
 describe("erasing a person", () => {
@@ -1266,13 +1330,30 @@ describe("erasing a person", () => {
         .find(({ id }) => id === rota.id)
         ?.doers.includes(ids.max),
       // Who named whom: Max named nobody.
-      logged: entries.map(({ person: by, named }) => [
-        by?.id ?? null,
-        named?.id ?? null,
-      ]),
+      // This team's referrals: the log holds earlier tests' too, whose people
+      // the list no longer has.
+      logged: entries
+        .filter(({ person: by }) => by?.id === ids.max)
+        .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
     }).toStrictEqual({
       maxOnRota: true,
       logged: [[ids.max, null]],
+    });
+  });
+
+  it("saves nothing of a referral they made whose model call was under way as they were erased", async () => {
+    await expect(referralWhileErased("max")).resolves.toStrictEqual({
+      asked: 1,
+      maxOnRota: false,
+      logged: [],
+    });
+  });
+
+  it("saves nothing of a referral naming them whose model call was under way as they were erased", async () => {
+    await expect(referralWhileErased("pim")).resolves.toStrictEqual({
+      asked: 1,
+      maxOnRota: false,
+      logged: [],
     });
   });
 

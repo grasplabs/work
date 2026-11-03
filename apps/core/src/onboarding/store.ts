@@ -160,7 +160,11 @@ import {
   works,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
-import { erasedEmailsAmong, normalizedEmail } from "../erased-people.ts";
+import {
+  erasedEmailsAmong,
+  isErasedEmail,
+  normalizedEmail,
+} from "../erased-people.ts";
 import {
   deliverMail,
   dropMailAbout,
@@ -6742,6 +6746,22 @@ export class Onboarding extends DurableObject<Env> {
     );
     // What changed while it was read stands: read again.
     const said = await this.#mailContext();
+    // The person it names, erased while the model read (GRA-903): what it
+    // found is dropped. The last read before the save, which is
+    // synchronous from here on, so nothing of this object runs between
+    // the two; an erasure core records after it comes after the save, and
+    // its interview area takes what the save wrote (`eraseInterviewOf`).
+    const namedEmail =
+      found.who === null
+        ? undefined
+        : this.#roster()?.people.find(({ id }) => id === found.who)?.email;
+    if (
+      namedEmail !== undefined &&
+      (await isErasedEmail(this.env, namedEmail))
+    ) {
+      done();
+      return;
+    }
     const now = this.#roster();
     const { plan } = this.#row();
     if (now === null) {
@@ -6780,7 +6800,17 @@ export class Onboarding extends DurableObject<Env> {
       this.isOpen() &&
       takingPart(now, invite) &&
       !this.#linkFacts().sent.has(invite.id);
-    this.ctx.storage.transactionSync(() => {
+    const saved = this.ctx.storage.transactionSync(() => {
+      // Its maker erased while the model read: their erasure deleted the
+      // referral with their interview (`#erase`), so it saves nothing.
+      const [still] = this.#db
+        .select({ person: referrals.person })
+        .from(referrals)
+        .where(eq(referrals.person, personId))
+        .all();
+      if (still === undefined) {
+        return false;
+      }
       for (const work of change.works) {
         this.#db
           .update(works)
@@ -6810,8 +6840,9 @@ export class Onboarding extends DurableObject<Env> {
         this.#noted(invite.id, "onboarding.link.sent_referred", at, "grasp");
       }
       done();
+      return true;
     });
-    if (sending) {
+    if (saved && sending) {
       this.#deliverMailSoon();
     }
   }
