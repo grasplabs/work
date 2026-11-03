@@ -613,7 +613,10 @@ export const StephenLab = ({
     return stats.started === 0 ? [] : [{ clientId, name, stats }];
   });
   const unread = organizations.flatMap(({ admin }) =>
-    admin.state === "answered" ? [] : [admin]
+    admin.state === "answered" ||
+    (channel !== undefined && admin.client.channel !== channel)
+      ? []
+      : [admin]
   );
   // Read, with no interview started yet by anyone.
   const quiet = read.filter(({ view }) => view.interviews.length === 0).length;

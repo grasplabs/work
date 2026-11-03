@@ -442,6 +442,23 @@ describe("the overview", () => {
     ]);
   });
 
+  it("never calls a Stephen people talk with on another channel a candidate", () => {
+    const lab = stephenLabOf({
+      results: [run("v1", [0.6]), run("v2", [0.7])],
+      scores: [],
+      organizations: [
+        organization("Bakkerij", held("v1", 3, 3), "stable"),
+        organization("Molen", held("v2", 3, 3), "edge"),
+      ],
+      interviewer: "stephen",
+      now,
+      channel: "stable",
+    });
+
+    expect(lab.candidate).toBeNull();
+    expect(lab.needs.map(({ id }) => id)).not.toContain("candidate");
+  });
+
   it("holds a candidate back when any of the lab's numbers finds him worse, not only the one it leads with", () => {
     const lab = labOf(
       [

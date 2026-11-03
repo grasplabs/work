@@ -530,12 +530,13 @@ const realFiguresNow = (
 /** The newest Stephen the lab measured after the one in use (or any, before anyone talks with one) that no real person talks with yet. */
 const candidateOf = (
   versions: readonly LabVersion[],
-  inUse: LabVersion | null
+  inUse: LabVersion | null,
+  usedAnywhere: (row: string) => boolean
 ): LabVersion | null =>
   versions.findLast(
     (each) =>
       each.firstRun !== null &&
-      each.real === null &&
+      !usedAnywhere(each.version) &&
       (inUse?.firstRun === null ||
         inUse?.firstRun === undefined ||
         each.firstRun > inUse.firstRun)
@@ -711,7 +712,25 @@ export const stephenLabOf = ({
   );
   const live = liveOf(versions, theirs, releasesOf);
   const inUse = live?.now ?? null;
-  const candidate = candidateOf(versions, inUse);
+  // A candidate is one nobody talks with on any channel, whichever channel the page shows.
+  const usedReleases = new Set(
+    organizations.flatMap(({ view }) =>
+      view.interviews.flatMap((interview) =>
+        interview.interviewer === interviewer
+          ? [interview.stephen ?? UNRECORDED]
+          : []
+      )
+    )
+  );
+  const candidate = candidateOf(
+    versions,
+    inUse,
+    (row) =>
+      usedReleases.has(row) ||
+      [...rowOfRelease].some(
+        ([release, mark]) => mark === row && usedReleases.has(release)
+      )
+  );
   const lab = labNeeds({ versions, headline, lastRun: everyRun[0]?.at, now });
   return {
     versions,
