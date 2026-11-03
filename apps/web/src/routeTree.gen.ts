@@ -32,7 +32,6 @@ import { Route as ShellBrainIndexRouteImport } from './routes/_shell.brain.index
 import { Route as ShellBrainNoteIdRouteImport } from './routes/_shell.brain.$noteId'
 import { Route as ShellBrainActivityRouteImport } from './routes/_shell.brain.activity'
 import { Route as ShellBrainMemoryRouteImport } from './routes/_shell.brain.memory'
-import { Route as ShellDomainsIndexRouteImport } from './routes/_shell.domains.index'
 import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
@@ -55,18 +54,17 @@ import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.sett
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
 import { Route as ShellWorkflowsRequestsRouteImport } from './routes/_shell.workflows.requests'
+import { Route as AppsAppFullRouteImport } from './routes/apps.$app.full'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellAppsAppDataRouteImport } from './routes/_shell.apps.$app_.data'
+import { Route as ShellAppsAppDetailsRouteImport } from './routes/_shell.apps.$app_.details'
 import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
-import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
-import { Route as ShellDomainsEngineAppsScreenRouteImport } from './routes/_shell.domains.$engine.apps.$screen'
 import { Route as ShellSettingsPackagesWorkflowsWorkflowRouteImport } from './routes/_shell.settings.packages.workflows.$workflow'
-import { Route as DomainsEngineAppsScreenFullRouteImport } from './routes/domains.$engine.apps.$screen.full'
 import { Route as ShellWorkflowsAppWorkflowRunsRunRouteImport } from './routes/_shell.workflows.$app.$workflow_.runs.$run'
 
 const ShellRoute = ShellRouteImport.update({
@@ -183,11 +181,6 @@ const ShellBrainMemoryRoute = ShellBrainMemoryRouteImport.update({
   path: '/memory',
   getParentRoute: () => ShellBrainRoute,
 } as any)
-const ShellDomainsIndexRoute = ShellDomainsIndexRouteImport.update({
-  id: '/domains/',
-  path: '/domains/',
-  getParentRoute: () => ShellRoute,
-} as any)
 const ShellIntegrationsIndexRoute = ShellIntegrationsIndexRouteImport.update({
   id: '/integrations/',
   path: '/integrations/',
@@ -301,6 +294,11 @@ const ShellWorkflowsRequestsRoute = ShellWorkflowsRequestsRouteImport.update({
   path: '/workflows/requests',
   getParentRoute: () => ShellRoute,
 } as any)
+const AppsAppFullRoute = AppsAppFullRouteImport.update({
+  id: '/apps/$app/full',
+  path: '/apps/$app/full',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const KitComponentsNameRoute = KitComponentsNameRouteImport.update({
   id: '/kit_/components/$name',
   path: '/kit/components/$name',
@@ -316,6 +314,11 @@ const ShellAppsAppDataRoute = ShellAppsAppDataRouteImport.update({
   path: '/apps/$app/data',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellAppsAppDetailsRoute = ShellAppsAppDetailsRouteImport.update({
+  id: '/apps/$app_/details',
+  path: '/apps/$app/details',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellAppsAppSettingsRoute = ShellAppsAppSettingsRouteImport.update({
   id: '/apps/$app_/settings',
   path: '/apps/$app/settings',
@@ -327,11 +330,6 @@ const ShellBrainSectionsSectionIdRoute =
     path: '/sections/$sectionId',
     getParentRoute: () => ShellBrainRoute,
   } as any)
-const ShellDomainsEngineIndexRoute = ShellDomainsEngineIndexRouteImport.update({
-  id: '/domains/$engine/',
-  path: '/domains/$engine/',
-  getParentRoute: () => ShellRoute,
-} as any)
 const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
   id: '/links/$app/$surface',
   path: '/links/$app/$surface',
@@ -349,23 +347,11 @@ const ShellWorkflowsAppWorkflowRoute =
     path: '/workflows/$app/$workflow',
     getParentRoute: () => ShellRoute,
   } as any)
-const ShellDomainsEngineAppsScreenRoute =
-  ShellDomainsEngineAppsScreenRouteImport.update({
-    id: '/domains/$engine/apps/$screen',
-    path: '/domains/$engine/apps/$screen',
-    getParentRoute: () => ShellRoute,
-  } as any)
 const ShellSettingsPackagesWorkflowsWorkflowRoute =
   ShellSettingsPackagesWorkflowsWorkflowRouteImport.update({
     id: '/packages/workflows/$workflow',
     path: '/packages/workflows/$workflow',
     getParentRoute: () => ShellSettingsRoute,
-  } as any)
-const DomainsEngineAppsScreenFullRoute =
-  DomainsEngineAppsScreenFullRouteImport.update({
-    id: '/domains/$engine/apps/$screen/full',
-    path: '/domains/$engine/apps/$screen/full',
-    getParentRoute: () => rootRouteImport,
   } as any)
 const ShellWorkflowsAppWorkflowRunsRunRoute =
   ShellWorkflowsAppWorkflowRunsRunRouteImport.update({
@@ -413,25 +399,23 @@ export interface FileRoutesByFullPath {
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/workflows/requests': typeof ShellWorkflowsRequestsRoute
+  '/apps/$app/full': typeof AppsAppFullRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
   '/brain/': typeof ShellBrainIndexRoute
-  '/domains/': typeof ShellDomainsIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/apps/$app/data': typeof ShellAppsAppDataRoute
+  '/apps/$app/details': typeof ShellAppsAppDetailsRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
-  '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
-  '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesByTo {
@@ -471,25 +455,23 @@ export interface FileRoutesByTo {
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/workflows/requests': typeof ShellWorkflowsRequestsRoute
+  '/apps/$app/full': typeof AppsAppFullRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
   '/brain': typeof ShellBrainIndexRoute
-  '/domains': typeof ShellDomainsIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/apps/$app/data': typeof ShellAppsAppDataRoute
+  '/apps/$app/details': typeof ShellAppsAppDetailsRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/settings/packages': typeof ShellSettingsPackagesIndexRoute
-  '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
-  '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesById {
@@ -533,25 +515,23 @@ export interface FileRoutesById {
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/_shell/workflows/requests': typeof ShellWorkflowsRequestsRoute
+  '/apps/$app/full': typeof AppsAppFullRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
   '/_shell/brain/': typeof ShellBrainIndexRoute
-  '/_shell/domains/': typeof ShellDomainsIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/apps/$app_/data': typeof ShellAppsAppDataRoute
+  '/_shell/apps/$app_/details': typeof ShellAppsAppDetailsRoute
   '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
-  '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
-  '/_shell/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/_shell/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
-  '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/_shell/workflows/$app/$workflow_/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRouteTypes {
@@ -595,25 +575,23 @@ export interface FileRouteTypes {
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/workflows/requests'
+    | '/apps/$app/full'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps/'
     | '/brain/'
-    | '/domains/'
     | '/integrations/'
     | '/knowledge/'
     | '/settings/'
     | '/workflows/'
     | '/apps/$app/data'
+    | '/apps/$app/details'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/workflows/$app/$workflow'
-    | '/domains/$engine/'
     | '/settings/packages/'
-    | '/domains/$engine/apps/$screen'
     | '/settings/packages/workflows/$workflow'
-    | '/domains/$engine/apps/$screen/full'
     | '/workflows/$app/$workflow/runs/$run'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -653,25 +631,23 @@ export interface FileRouteTypes {
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/workflows/requests'
+    | '/apps/$app/full'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps'
     | '/brain'
-    | '/domains'
     | '/integrations'
     | '/knowledge'
     | '/settings'
     | '/workflows'
     | '/apps/$app/data'
+    | '/apps/$app/details'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/workflows/$app/$workflow'
-    | '/domains/$engine'
     | '/settings/packages'
-    | '/domains/$engine/apps/$screen'
     | '/settings/packages/workflows/$workflow'
-    | '/domains/$engine/apps/$screen/full'
     | '/workflows/$app/$workflow/runs/$run'
   id:
     | '__root__'
@@ -714,25 +690,23 @@ export interface FileRouteTypes {
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
     | '/_shell/workflows/requests'
+    | '/apps/$app/full'
     | '/kit_/components/$name'
     | '/kit_/examples/$name'
     | '/_shell/apps/'
     | '/_shell/brain/'
-    | '/_shell/domains/'
     | '/_shell/integrations/'
     | '/_shell/knowledge/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
     | '/_shell/apps/$app_/data'
+    | '/_shell/apps/$app_/details'
     | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/links/$app/$surface'
     | '/_shell/workflows/$app/$workflow'
-    | '/_shell/domains/$engine/'
     | '/_shell/settings/packages/'
-    | '/_shell/domains/$engine/apps/$screen'
     | '/_shell/settings/packages/workflows/$workflow'
-    | '/domains/$engine/apps/$screen/full'
     | '/_shell/workflows/$app/$workflow_/runs/$run'
   fileRoutesById: FileRoutesById
 }
@@ -746,9 +720,9 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
+  AppsAppFullRoute: typeof AppsAppFullRoute
   KitComponentsNameRoute: typeof KitComponentsNameRoute
   KitExamplesNameRoute: typeof KitExamplesNameRoute
-  DomainsEngineAppsScreenFullRoute: typeof DomainsEngineAppsScreenFullRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -914,13 +888,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellBrainMemoryRouteImport
       parentRoute: typeof ShellBrainRoute
     }
-    '/_shell/domains/': {
-      id: '/_shell/domains/'
-      path: '/domains'
-      fullPath: '/domains/'
-      preLoaderRoute: typeof ShellDomainsIndexRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/integrations/': {
       id: '/_shell/integrations/'
       path: '/integrations'
@@ -1075,6 +1042,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsRequestsRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/apps/$app/full': {
+      id: '/apps/$app/full'
+      path: '/apps/$app/full'
+      fullPath: '/apps/$app/full'
+      preLoaderRoute: typeof AppsAppFullRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/kit_/components/$name': {
       id: '/kit_/components/$name'
       path: '/kit/components/$name'
@@ -1096,6 +1070,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellAppsAppDataRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/apps/$app_/details': {
+      id: '/_shell/apps/$app_/details'
+      path: '/apps/$app/details'
+      fullPath: '/apps/$app/details'
+      preLoaderRoute: typeof ShellAppsAppDetailsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/apps/$app_/settings': {
       id: '/_shell/apps/$app_/settings'
       path: '/apps/$app/settings'
@@ -1109,13 +1090,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/brain/sections/$sectionId'
       preLoaderRoute: typeof ShellBrainSectionsSectionIdRouteImport
       parentRoute: typeof ShellBrainRoute
-    }
-    '/_shell/domains/$engine/': {
-      id: '/_shell/domains/$engine/'
-      path: '/domains/$engine'
-      fullPath: '/domains/$engine/'
-      preLoaderRoute: typeof ShellDomainsEngineIndexRouteImport
-      parentRoute: typeof ShellRoute
     }
     '/_shell/links/$app/$surface': {
       id: '/_shell/links/$app/$surface'
@@ -1138,26 +1112,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsAppWorkflowRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/domains/$engine/apps/$screen': {
-      id: '/_shell/domains/$engine/apps/$screen'
-      path: '/domains/$engine/apps/$screen'
-      fullPath: '/domains/$engine/apps/$screen'
-      preLoaderRoute: typeof ShellDomainsEngineAppsScreenRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/settings/packages/workflows/$workflow': {
       id: '/_shell/settings/packages/workflows/$workflow'
       path: '/packages/workflows/$workflow'
       fullPath: '/settings/packages/workflows/$workflow'
       preLoaderRoute: typeof ShellSettingsPackagesWorkflowsWorkflowRouteImport
       parentRoute: typeof ShellSettingsRoute
-    }
-    '/domains/$engine/apps/$screen/full': {
-      id: '/domains/$engine/apps/$screen/full'
-      path: '/domains/$engine/apps/$screen/full'
-      fullPath: '/domains/$engine/apps/$screen/full'
-      preLoaderRoute: typeof DomainsEngineAppsScreenFullRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/_shell/workflows/$app/$workflow_/runs/$run': {
       id: '/_shell/workflows/$app/$workflow_/runs/$run'
@@ -1248,16 +1208,14 @@ interface ShellRouteChildren {
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellWorkflowsRequestsRoute: typeof ShellWorkflowsRequestsRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
-  ShellDomainsIndexRoute: typeof ShellDomainsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellAppsAppDataRoute: typeof ShellAppsAppDataRoute
+  ShellAppsAppDetailsRoute: typeof ShellAppsAppDetailsRoute
   ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
-  ShellDomainsEngineIndexRoute: typeof ShellDomainsEngineIndexRoute
-  ShellDomainsEngineAppsScreenRoute: typeof ShellDomainsEngineAppsScreenRoute
   ShellWorkflowsAppWorkflowRunsRunRoute: typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 
@@ -1277,16 +1235,14 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellWorkflowsRequestsRoute: ShellWorkflowsRequestsRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
-  ShellDomainsIndexRoute: ShellDomainsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellAppsAppDataRoute: ShellAppsAppDataRoute,
+  ShellAppsAppDetailsRoute: ShellAppsAppDetailsRoute,
   ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
-  ShellDomainsEngineIndexRoute: ShellDomainsEngineIndexRoute,
-  ShellDomainsEngineAppsScreenRoute: ShellDomainsEngineAppsScreenRoute,
   ShellWorkflowsAppWorkflowRunsRunRoute: ShellWorkflowsAppWorkflowRunsRunRoute,
 }
 
@@ -1302,9 +1258,9 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
+  AppsAppFullRoute: AppsAppFullRoute,
   KitComponentsNameRoute: KitComponentsNameRoute,
   KitExamplesNameRoute: KitExamplesNameRoute,
-  DomainsEngineAppsScreenFullRoute: DomainsEngineAppsScreenFullRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

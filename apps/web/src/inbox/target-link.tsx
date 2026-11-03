@@ -32,10 +32,15 @@ export const TargetLink = ({
     );
   }
   if (destination.kind === "engine") {
+    const { engine: app, place } = destination;
+    if (place === undefined) {
+      return <Link params={{ app }} to="/apps/$app" {...props} />;
+    }
     return (
       <Link
-        params={{ engine: destination.engine }}
-        to="/domains/$engine"
+        params={{ app }}
+        search={place === "versions" ? { tab: "versions" } : {}}
+        to="/apps/$app/details"
         {...props}
       />
     );

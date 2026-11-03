@@ -1100,8 +1100,8 @@ export const appVersions = sqliteTable(
       .default(sql`'[]'`),
     /**
      * The names of the version's screens (JSON, `screensIn`), written when
-     * it is committed: so listing every screen someone can open, across
-     * their Apps, is one query and reads no files (`listScreens`). A row
+     * it is committed: so listing every App someone can open, with its
+     * pages, is one query and reads no files (`listAppOverviews`). A row
      * the previous release writes gets none (the default).
      */
     screens: text({ mode: "json" })

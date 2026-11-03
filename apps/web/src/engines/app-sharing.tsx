@@ -61,7 +61,7 @@ import { PersonOption } from "../people/person-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
 
-// Sharing an App (a domain's): whom it is open to besides its owner and
+// Sharing an App (an App's): whom it is open to besides its owner and
 // the admins, as a user (its screens) or a builder (its code, settings and
 // whom it is shared with), on its Members tab and from Share on its bar.
 // Its builders share it, change a role and unshare it; everyone with a role

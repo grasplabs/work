@@ -44,7 +44,7 @@ const router = createRouter({
 });
 
 // What the page throws and never catches, reported with the route's
-// pattern (such as `/domains/$engine`), never its URL.
+// pattern (such as `/apps/$app`), never its URL.
 reportUncaughtErrors(() => router.state.matches.at(-1)?.fullPath);
 
 declare module "@tanstack/react-router" {

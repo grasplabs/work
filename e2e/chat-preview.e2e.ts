@@ -193,7 +193,7 @@ export default function Tally() {
  * than the default 5 seconds.
  */
 const openTally = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/domains/${app}/apps/tally/full`);
+  await page.goto(`/apps/${app}/full?screen=tally`);
   const screen = page.frameLocator('iframe[title="tally app"]');
   await expect(screen.getByRole("status")).toContainText("in the App", {
     timeout: 20_000,
@@ -264,7 +264,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     failDrafts = true;
     await page.reload();
     await expect(
-      thread.getByText("The domains this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load.")
     ).toBeVisible();
     await expect(studio).toHaveCount(0);
     failDrafts = false;
@@ -272,7 +272,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Named by its top row's heading: the App's name.
     await expect(studio).toBeVisible();
     await expect(
-      thread.getByText("The domains this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load.")
     ).toHaveCount(0);
     await expect(studio).toContainText("Version 1 of 1");
     const chatBox = await thread.boundingBox();
@@ -298,11 +298,11 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
 
-    // A phone: the chat and the domain take turns, the domain first. The
+    // A phone: the chat and the App take turns, the App first. The
     // preview keeps what it shows through the turns: it isn't loaded anew.
     await page.setViewportSize({ width: 390, height: 844 });
     const showChat = page.getByRole("button", { name: "Chat", exact: true });
-    const showApp = page.getByRole("button", { name: "Domain", exact: true });
+    const showApp = page.getByRole("button", { name: "App", exact: true });
     await expect(showApp).toHaveAttribute("aria-pressed", "true");
     await expect(studio).toBeVisible();
     await expect(thread).toBeHidden();
@@ -329,9 +329,9 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(frame.getByRole("status")).toHaveText("3 in the preview");
     await page.setViewportSize({ width: 1280, height: 720 });
 
-    // View app opens the App itself.
-    await studio.getByRole("link", { name: "View app" }).click();
-    await expect(page).toHaveURL(new RegExp(`/domains/${app.id}$`, "u"));
+    // View App opens the App itself.
+    await studio.getByRole("link", { name: "View App" }).click();
+    await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
     ).toBeVisible();

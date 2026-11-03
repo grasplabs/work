@@ -406,7 +406,7 @@ export const StartAppRun = ({
   return (
     <StartDialog
       description={
-        <Trans>Starts it as you, on the domain&apos;s current version.</Trans>
+        <Trans>Starts it as you, on the App&apos;s current version.</Trans>
       }
       fields={undefined}
       jsonOptional

@@ -287,17 +287,6 @@ export interface AppOverview {
   contents: AppContents;
 }
 
-/**
- * One screen of an App's current version (`AppsApi.screens`), with what
- * a list of screens shows of its App: its name, where it stands and the
- * business process it serves.
- */
-export interface ListedScreen {
-  app: Pick<App, "id" | "name" | "status" | "process">;
-  /** The screen's name, as `AppContents.screens` gives it. */
-  screen: string;
-}
-
 /** An App's files by path. */
 export type AppFiles = Record<string, string>;
 
@@ -857,14 +846,8 @@ export interface AppsApi {
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**
-   * Every screen of the current version of each App the person has a role
-   * in, as `list` finds the Apps and `contents` names the screens, in one
-   * read: the newest App first, its screens by name.
-   */
-  screens: () => Promise<ListedScreen[]>;
-  /**
    * The Apps `list` gives, each with what `contents` says of it, in one
-   * read: the Domains page's cards.
+   * read: the Apps page's tiles, each App's screens its pages.
    */
   overview: () => Promise<AppOverview[]>;
   /**
@@ -1010,27 +993,25 @@ export const openCandidateStates = [
 
 /** Why a call to the App registry was refused. */
 export const appErrors = defineErrorFamily({
-  "app.invalid": "That isn't a valid request for a domain.",
-  "app.not_found": "There's no such domain.",
-  "app.member_invalid": "The domain can't be shared with them like that.",
+  "app.invalid": "That isn't a valid request for an App.",
+  "app.not_found": "There's no such App.",
+  "app.member_invalid": "The App can't be shared with them like that.",
   "app.responsible_invalid":
-    "Only a member of the organization who can open the domain can answer for it.",
+    "Only a member of the organization who can open the App can answer for it.",
   "app.audience_invalid":
-    "The domain can only be made for a member or a team of the organization.",
-  "app.integrations_full":
-    "The domain has as many integrations added as it may.",
+    "The App can only be made for a member or a team of the organization.",
+  "app.integrations_full": "The App has as many integrations added as it may.",
   "app.share_unreadable":
-    "This domain has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
+    "This App has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
   "app.unreadable":
-    "This domain has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
+    "This App has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
   "app.blueprint_not_found": "There's no such blueprint.",
-  "app.version_not_found": "The domain has no such version.",
-  "app.too_large": "The domain's files would be over its limits.",
+  "app.version_not_found": "The App has no such version.",
+  "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.v1_server":
-    "A domain no longer has files under app/: its server code is app.ts, schema.ts and its functions in operations/. Delete the files under app/ and commit again.",
-  "app.conflict":
-    "Someone else changed this domain at the same time. Try again.",
+    "An App no longer has files under app/: its server code is app.ts, schema.ts and its functions in operations/. Delete the files under app/ and commit again.",
+  "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.candidate_busy":
     "This version is already being checked to be made current. Try again in a moment.",
   "app.candidate_attempts":
@@ -1040,24 +1021,23 @@ export const appErrors = defineErrorFamily({
   "app.candidate_release_changed":
     "This version's sealed release no longer matches the one that was checked, so it can't be made current. Make the change again to check it anew.",
   "app.candidate_superseded":
-    "A newer change to this domain replaced this version's check before it finished. Make the version current again if you still want it.",
-  "app.not_running": "The domain has no current version to run yet.",
-  "app.no_version":
-    "Make a version of the domain current before publishing it.",
-  "app.link_taken": "Another domain has that link. Choose another.",
+    "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
+  "app.not_running": "The App has no current version to run yet.",
+  "app.no_version": "Make a version of the App current before publishing it.",
+  "app.link_taken": "Another App has that link. Choose another.",
   "app.invalid_link":
     "A link is lower-case letters and digits with single dashes between them, at most 48, and none the workspace already has a page at.",
-  "app.archived": "The domain is archived. A builder can restore it.",
-  "app.remove_unarchived": "Archive the domain before removing it.",
+  "app.archived": "The App is archived. A builder can restore it.",
+  "app.remove_unarchived": "Archive the App before removing it.",
   "app.remove_forbidden":
-    "Only the domain's owner or an admin of the organization removes it.",
+    "Only the App's owner or an admin of the organization removes it.",
   "app.stops_pending":
-    "Runs the domain started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
+    "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
   "app.not_published":
     "The App isn't published, so other Apps and workflows can't call it.",
-  "app.failed": "The domain's server code failed.",
+  "app.failed": "The App's server code failed.",
   "app.answer_invalid":
-    "The domain's server code answered with something other than plain data.",
+    "The App's server code answered with something other than plain data.",
   "app.checks_exhausted":
     "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may. Stop, and tell the person what still fails.",
   "app.creates_exhausted":

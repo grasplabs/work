@@ -59,14 +59,14 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
-// A domain's data, for its builders and the admins (core's app-data.ts):
+// An App's data, for its builders and the admins (core's app-data.ts):
 // pick a table, page through its records, open one to read its fields and
 // its change history, export a table as CSV and import CSV rows into one.
 // Reading only, but for an import, which core checks row by row and lands
 // whole or not at all.
 
 /**
- * `call`'s answer, or undefined once core says the domain's version moved
+ * `call`'s answer, or undefined once core says the App's version moved
  * on from the one the page read (`app_data.version_changed`), which
  * `onStale` hears: the page offers a reload rather than an error.
  */
@@ -99,7 +99,7 @@ const ops = {
 } as const satisfies Record<RecordChange["op"], unknown>;
 
 const sources = {
-  commit: msg({ message: "by the domain", context: "a change's source" }),
+  commit: msg({ message: "by the App", context: "a change's source" }),
   cascade: msg({
     message: "with a record it referred to",
     context: "a change's source: deleted with a record it pointed at",
@@ -138,7 +138,7 @@ const actorText = (actor: AuditActor): string => {
     case "app":
     case "guest": {
       const app = actor.appId;
-      return i18n._(msg`Domain ${app}`);
+      return i18n._(msg`App ${app}`);
     }
     case "system": {
       return i18n._(msg`Grasp`);
@@ -588,7 +588,7 @@ const TableData = ({
     return (
       <div className="flex flex-col items-start gap-2">
         <ErrorText>
-          {t`This domain changed. Reload to see its current version.`}
+          {t`This App changed. Reload to see its current version.`}
         </ErrorText>
         <Button
           onClick={() => {
@@ -759,7 +759,7 @@ const TableData = ({
   );
 };
 
-/** A domain's tables, one picked at a time. */
+/** An App's tables, one picked at a time. */
 export const AppData = ({
   app,
   version,
@@ -771,7 +771,7 @@ export const AppData = ({
   tables: AppDataTable[];
 }) => {
   const { t } = useLingui();
-  // The table picked, with the domain it was picked in: another domain
+  // The table picked, with the App it was picked in: another App
   // opened on the same page starts from its own first table.
   const [picked, setPicked] = useState({ app, table: tables[0]?.name });
   const wanted = picked.app === app ? picked.table : tables[0]?.name;
@@ -784,7 +784,7 @@ export const AppData = ({
             <Trans>No tables</Trans>
           </EmptyTitle>
           <EmptyDescription>
-            {t`The domain's live version keeps no data.`}
+            {t`The App's live version keeps no data.`}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -821,7 +821,7 @@ export const AppData = ({
           </Trans>
         </p>
       ) : null}
-      {/* Its own state for each domain and table: nothing read of one
+      {/* Its own state for each App and table: nothing read of one
           is shown, or kept, for another. */}
       <TableData
         app={app}

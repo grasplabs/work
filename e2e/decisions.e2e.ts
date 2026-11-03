@@ -150,7 +150,7 @@ const askedFor = async (builder: Person, decider: Person, page: Page) => {
       },
       "Approvals"
     );
-    await page.goto(`/domains/${app}/apps/asks/full`);
+    await page.goto(`/apps/${app}/full?screen=asks`);
     const kept = page
       .frameLocator('iframe[title="asks app"]')
       .getByRole("status", { name: "Recipients" });

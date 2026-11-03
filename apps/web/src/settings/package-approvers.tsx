@@ -241,7 +241,7 @@ export const PackageApprovers = ({
       }
       description={
         <Trans>
-          The people and teams who approve or deny the npm packages domains and
+          The people and teams who approve or deny the npm packages Apps and
           workflows ask for. No role includes this, not even admin: add yourself
           to approve packages.
         </Trans>

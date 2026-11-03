@@ -26,7 +26,7 @@ describe(tourStops, () => {
     for (const viewer of [admin, builder, user, staff]) {
       expect(tourStops(viewer)).toStrictEqual([
         "brain",
-        "domains",
+        "apps",
         "workflows",
         "integrations",
         "chat",

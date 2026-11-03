@@ -513,19 +513,19 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await signInTo(context, member);
   await page.goto("/knowledge");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
 
   // Signed out in another tab, or revoked: the page's connection, opened
   // while they were signed in, is refused at the next page they open.
   await endSession(member);
-  await nav.getByRole("link", { name: "Domains" }).click();
+  await nav.getByRole("link", { name: "Apps" }).click();
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible({
     timeout: reconnectMs,
   });
   expect(new URL(page.url()).pathname).toBe("/sign-in");
-  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/domains");
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/apps");
   await expect(nav).toHaveCount(0);
 });
 
@@ -545,9 +545,21 @@ test("says an address no page has, and an App that isn't there, are not found, i
       "The address may be wrong, or the page was moved or removed."
     )
   ).toBeVisible();
-  // In the frame: the sidebar is there to go on from.
+  // In the frame: the sidebar is there to go on from, with no Domains:
+  // each app is an App, under Apps.
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Domains" })).toHaveCount(0);
+
+  // Domains are gone: their address, and an App's under it, are no page.
+  for (const gone of ["/domains", "/domains/no-such-app"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one address at a time
+    await page.goto(gone);
+    // oxlint-disable-next-line no-await-in-loop -- one address at a time
+    await expect(
+      page.getByRole("heading", { name: "This page is not here" })
+    ).toBeVisible();
+  }
 
   // An App that isn't there, on its own page.
   await page.goto("/apps/no-such-app");

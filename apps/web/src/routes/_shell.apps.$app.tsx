@@ -1,6 +1,7 @@
-import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
+import { buttonVariants } from "@grasp-os/ui/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { LayoutGridIcon, Maximize2Icon } from "lucide-react";
 
 import { AppPage } from "../engines/app-page.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
@@ -12,11 +13,11 @@ import {
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
 
-// An App's own page (engines/app-page.tsx), at the address its links have
-// always had: the App's ID is its domain's, so an old link to an App opens
-// it here. Its screens open in the frame under its bar, the one in the
-// address's `screen` or else its first; an archived App opens none, as
-// nobody uses one until it is restored.
+// An App's own page (engines/app-page.tsx). Its pages (core's screens)
+// open in the frame under its bar, the one in the address's `screen` or
+// else its first; an archived App opens none, as nobody uses one until it
+// is restored. "Open full page" opens the open page outside the frame
+// (apps.$app.full.tsx).
 
 /** The screen to open: the one asked for, if the App has it, else its first. */
 const openScreen = (
@@ -54,11 +55,27 @@ const AppPageView = () => {
   return (
     <>
       <SiteHeader
+        actions={
+          open === undefined || view === "code" ? undefined : (
+            <Link
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+              params={{ app: id }}
+              search={{ screen: open }}
+              state={(previous) => ({ ...previous, screenOpening: opening })}
+              to="/apps/$app/full"
+            >
+              <Maximize2Icon data-icon="inline-start" />
+              <Trans>Open full page</Trans>
+            </Link>
+          )
+        }
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: app.name }]}
       />
       <AppPage
         app={app}
         identity={identity}
+        // Another App starts afresh: nothing the last one said stays.
+        key={app.id}
         contents={contents}
         open={open}
         view={view ?? "app"}
@@ -97,7 +114,7 @@ const AppPageView = () => {
 export const Route = createFileRoute("/_shell/apps/$app")({
   pendingComponent: PageLoading,
   component: AppPageView,
-  // The screen to open; any other value (an old or hand-typed address)
+  // The page to open; any other value (an old or hand-typed address)
   // opens the App's first.
   // `view=code` shows the App's code instead, to its builders.
   validateSearch: (

@@ -5,7 +5,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { AppWorkflowSummary, RunsPage } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tabs,
@@ -13,7 +12,6 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   Await,
@@ -21,7 +19,7 @@ import {
   Link,
   useRouterState,
 } from "@tanstack/react-router";
-import { CogIcon, LayoutGridIcon, PlusIcon } from "lucide-react";
+import { LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
 
@@ -69,13 +67,13 @@ import { listAppWorkflows, listRuns } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 
-// One engine (core's App), as in the prototype (`routes/engines/$engineId.tsx`):
-// its icon, name and what it is for, then its workflows (with their runs),
-// its apps (core's screens), the integrations it uses and, which the
-// prototype doesn't have, its members. Each tab's read is its own: one
-// that hangs or is refused leaves the others. Its status, and for its
-// builders publishing and archiving it, stand beside its name
-// (app-status.tsx); removing an engine waits on core (GRA-161).
+// An App's details, from Details on its own page (_shell.apps.$app.tsx):
+// its name and what it is for, then its workflows (with their runs), its
+// pages (core's screens), the integrations it uses, its resources,
+// webhooks, packages, settings screen, members and versions. Each tab's
+// read is its own: one that hangs or is refused leaves the others. Its
+// status, and for its builders publishing and archiving it, stand beside
+// its name (app-status.tsx).
 
 /** A read only one tab waits for: the page shows before it comes. */
 type Deferred<T> = Promise<Loaded<T>>;
@@ -182,7 +180,7 @@ const Workflows = ({
           <WorkflowsTable
             empty={
               <p className="text-muted-foreground">
-                <Trans>No workflow in this domain yet.</Trans>
+                <Trans>No workflow in this App yet.</Trans>
               </p>
             }
             rows={rows.filter(({ app }) => app === engine)}
@@ -210,8 +208,8 @@ const Workflows = ({
   );
 };
 
-/** One app (core's screen) of the engine, as the prototype's app card: it opens the app in the frame. */
-const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
+/** One page (core's screen) of the App: it opens the App on that page. */
+const PageCard = ({ app, screen }: { app: string; screen: string }) => (
   <li className="bg-card hover:border-faint relative flex min-w-0 items-center gap-3 rounded-xl border p-4 transition-colors">
     <span
       aria-hidden="true"
@@ -220,9 +218,10 @@ const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
       <LayoutGridIcon className="size-4" />
     </span>
     <Link
-      className="min-w-0 flex-1 truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-      params={{ engine, screen }}
-      to="/domains/$engine/apps/$screen"
+      className="min-w-0 flex-1 truncate font-medium capitalize outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
+      params={{ app }}
+      search={{ screen }}
+      to="/apps/$app"
     >
       {screen}
     </Link>
@@ -230,37 +229,23 @@ const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
 );
 
 /**
- * The engine's apps, or why there are none, and for someone who builds
- * (`builds`) the way to make a new one; for an admin, with whether their
- * code is approved for the engine's data (`approval`).
+ * The App's pages, or why it has none; for an admin, with whether their
+ * code is approved for the App's data (`approval`). A new page is made in
+ * the App's chat, as any change to it.
  */
-const Apps = ({
-  engine,
+const Pages = ({
+  app,
   contents,
   approval,
-  builds,
 }: {
-  engine: string;
+  app: string;
   contents: AppContents;
   approval: Deferred<ScreenTrustReview> | undefined;
-  builds: boolean;
 }) => {
   const { t } = useLingui();
   const none = contents.version === null || contents.screens.length === 0;
   return (
     <div className="flex flex-col gap-6">
-      {builds ? (
-        <Link
-          className={cn(
-            buttonVariants({ size: "sm", variant: "outline" }),
-            "self-end"
-          )}
-          to="/apps/new"
-        >
-          <PlusIcon data-icon="inline-start" />
-          <Trans>New app</Trans>
-        </Link>
-      ) : null}
       {none ? (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
           <span
@@ -271,16 +256,15 @@ const Apps = ({
           </span>
           <div className="flex max-w-prose flex-col gap-1">
             <span className="font-medium">
-              <Trans>No apps yet</Trans>
+              <Trans>No pages yet</Trans>
             </span>
             <p className="text-muted-foreground">
               {contents.version === null ? (
-                <Trans>This domain has no version to run yet.</Trans>
+                <Trans>This App has no version to run yet.</Trans>
               ) : (
                 <Trans>
-                  An app is what this domain&apos;s team works in, standing on
-                  its workflows and integrations. Ask Grasp in chat to build
-                  one.
+                  A page is what people open of this App. Ask Grasp in the
+                  App&apos;s chat to design one.
                 </Trans>
               )}
             </p>
@@ -288,15 +272,15 @@ const Apps = ({
         </div>
       ) : (
         <ul
-          aria-label={t`Apps`}
+          aria-label={t`Pages`}
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
         >
           {contents.screens.map((screen) => (
-            <AppCard engine={engine} key={screen} screen={screen} />
+            <PageCard app={app} key={screen} screen={screen} />
           ))}
         </ul>
       )}
-      {/* Also with no apps now: earlier versions' approvals can still be
+      {/* Also with no pages now: earlier versions' approvals can still be
           taken back. Not before a first version, which has nothing. */}
       {approval === undefined || contents.version === null ? null : (
         <Later promise={approval}>
@@ -318,7 +302,7 @@ const Integrations = ({
     {(used) =>
       used.length === 0 ? (
         <p className="text-muted-foreground">
-          <Trans>This domain doesn&apos;t use an integration yet.</Trans>
+          <Trans>This App doesn&apos;t use an integration yet.</Trans>
         </p>
       ) : (
         <div className="@container">
@@ -432,12 +416,12 @@ const SettingsScreen = ({
   );
 };
 
-/** What the domain is for, after the standard name of the process it serves, if any. */
+/** What the App is for, after the standard name of the process it serves, if any. */
 const AboutLine = ({ app }: { app: App }) => {
   const { i18n } = useLingui();
   const { process, description } = app;
   const name = process === null ? null : i18n._(processNames[process]);
-  // Not said twice: a domain named after its process.
+  // Not said twice: an App named after its process.
   if (name === null || name === app.name) {
     return description === "" ? null : (
       <p className="text-muted-foreground">{description}</p>
@@ -481,10 +465,10 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     useState<Deferred<DependencyApprovals>>();
   const { app, contents } = page;
   const { version } = contents;
-  // Where it opens, as the prototype's: a business process's domain on
+  // Where it opens, as the prototype's: an App for a business process on
   // its workflows, where its work is; one made for something else on its
-  // apps, which are what fill it.
-  const first = app.process === null ? "apps" : "workflows";
+  // pages, which are what fill it.
+  const first = app.process === null ? "pages" : "workflows";
   // Versions are for its builders, Grasp staff among them: core lists them
   // to no one else, so the tab isn't there for a user.
   const readsVersions = app.role === "builder";
@@ -543,14 +527,14 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           }
         }}
       >
-        {/* The prototype's order: Workflows, Apps, Integrations. */}
+        {/* The prototype's order: Workflows, Pages, Integrations. */}
         <TabsList variant="line">
           <TabsTrigger value="workflows">
             <Trans>Workflows</Trans>
             <Count count={contents.workflows.length} />
           </TabsTrigger>
-          <TabsTrigger value="apps">
-            <Trans>Apps</Trans>
+          <TabsTrigger value="pages">
+            <Trans>Pages</Trans>
             <Count count={contents.screens.length} />
           </TabsTrigger>
           {integrations === undefined ? null : (
@@ -597,14 +581,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             />
           </div>
         </TabsContent>
-        <TabsContent value="apps">
+        <TabsContent value="pages">
           <div className="pt-4">
-            <Apps
-              approval={approval}
-              builds={canBuild(identity.role)}
-              contents={contents}
-              engine={app.id}
-            />
+            <Pages app={app.id} approval={approval} contents={contents} />
           </div>
         </TabsContent>
         {integrations === undefined ? null : (
@@ -662,7 +641,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                 if (surface !== undefined) {
                   return <SettingsScreen engine={app.id} surface={surface} />;
                 }
-                // A domain without settings has no Settings tab: asked for
+                // An App without settings has no Settings tab: asked for
                 // by its address, the page opens on its first tab instead.
                 return loaded.state === "ready" ? null : (
                   <NotLoaded page={loaded} />
@@ -696,7 +675,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
  * The engine for someone core lets read nothing of it but its approved
  * packages: someone who may approve packages and isn't one of its
  * members. Only what `dependencies.approvals` answers, its name and its
- * approvals, and ending them; never its apps, workflows or members.
+ * approvals, and ending them; never its pages, workflows or members.
  */
 const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
   const { t } = useLingui();
@@ -704,7 +683,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
     <>
       <SiteHeader
         crumbs={[
-          { label: t`Domains`, to: "/domains" },
+          { label: t`Apps`, to: "/apps" },
           { label: listed.subject.name },
         ]}
       />
@@ -713,8 +692,8 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
           <PageHeaderTitle>{listed.subject.name}</PageHeaderTitle>
           <p className="text-muted-foreground">
             <Trans>
-              The packages approved for this domain. You see them because you
-              may approve packages; the rest of the domain is for its members.
+              The packages approved for this App. You see them because you may
+              approve packages; the rest of the App is for its members.
             </Trans>
           </p>
         </div>
@@ -738,9 +717,9 @@ const EnginePageView = () => {
   if (page.state !== "ready") {
     const notLoaded = (
       <PageNotLoaded
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`Domain` }]}
-        icon={CogIcon}
-        notFound={t`Domain not found`}
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
+        icon={LayoutGridIcon}
+        notFound={t`App not found`}
         page={page}
       />
     );
@@ -763,8 +742,13 @@ const EnginePageView = () => {
     <>
       <SiteHeader
         crumbs={[
-          { label: t`Domains`, to: "/domains" },
-          { label: page.data.app.name },
+          { label: t`Apps`, to: "/apps" },
+          {
+            label: page.data.app.name,
+            to: "/apps/$app",
+            params: { app: page.data.app.id },
+          },
+          { label: t`Details` },
         ]}
       />
       <EngineView key={page.data.app.id} page={page.data} />
@@ -772,7 +756,7 @@ const EnginePageView = () => {
   );
 };
 
-export const Route = createFileRoute("/_shell/domains/$engine/")({
+export const Route = createFileRoute("/_shell/apps/$app_/details")({
   pendingComponent: PageLoading,
   component: EnginePageView,
   // Which tab opens first: a navigation to the App's settings opens its own.
@@ -800,44 +784,40 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
       async () =>
         await loadFromCore(
           core,
-          async (session) => await listRuns(session, { app: params.engine })
+          async (session) => await listRuns(session, { app: params.app })
         )
     ),
     members: loadFromCore(
       core,
-      async (session) => await session.apps.members.list(params.engine)
+      async (session) => await session.apps.members.list(params.app)
     ),
     // Where the App's surfaces go: its Settings tab, if it declares one.
     surfaces: loadFromCore(
       core,
-      async (session) => await session.screens.surfaces(params.engine)
+      async (session) => await session.screens.surfaces(params.app)
     ),
     // Only for who decides it: the organization's own admins.
     approval: decidesRequests(identity)
       ? loadFromCore(
           core,
-          async (session) => await session.screenTrust.review(params.engine)
+          async (session) => await session.screenTrust.review(params.app)
         )
       : undefined,
     // Only for who may abandon a store's failed change: the organization's
     // own admins, never Grasp staff.
-    storeChanges: readStoreChanges(core, identity, params.engine),
+    storeChanges: readStoreChanges(core, identity, params.app),
     // For who reads them: admins, who decide them, and builders.
     resources: canBuild(identity.role)
       ? loadFromCore(
           core,
           async (session) =>
-            await loadResources(
-              session,
-              params.engine,
-              decidesRequests(identity)
-            )
+            await loadResources(session, params.app, decidesRequests(identity))
         )
       : undefined,
     integrations: canBuild(identity.role)
       ? loadFromCore(
           core,
-          async (session) => await loadIntegrations(session, params.engine)
+          async (session) => await loadIntegrations(session, params.app)
         )
       : undefined,
     // For its builders, admins among them, who approve: read once its tab
@@ -846,14 +826,14 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
       async () =>
         await loadFromCore(
           core,
-          async (session) => await session.apps.webhooks.list(params.engine)
+          async (session) => await session.apps.webhooks.list(params.app)
         )
     ),
     // Last, so the reads above start first. The engine, and its packages
     // for whoever core lets read them: their tab, or the packages alone
     // for who isn't a member.
     ...(await loadEnginePage(
-      engineReaders(core, params.engine),
+      engineReaders(core, params.app),
       canBuild(identity.role)
     )),
   }),

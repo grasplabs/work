@@ -11,7 +11,7 @@ import { peopleIn } from "./people.ts";
 /** Each stop's page and the start of his line there, in order. */
 const stops = [
   [/\/brain$/u, "This is the Brain."],
-  [/\/domains$/u, "These are your domains."],
+  [/\/apps$/u, "These are your Apps."],
   [/\/workflows$/u, "This is the work itself"],
   [/\/integrations$/u, "On this page you connect"],
   [/\/integrations$/u, "That’s the tour."],

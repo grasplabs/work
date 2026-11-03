@@ -188,7 +188,7 @@ const DockHeader = ({
   mode: "frame" | "drawer";
   onMove: (next: DockMode) => void;
   onNewChat: () => void;
-  /** New chat goes elsewhere (New app), so it is there before any chat is. */
+  /** New chat goes elsewhere (New App), so it is there before any chat is. */
   newChatAlways?: boolean;
 }) => {
   const { t } = useLingui();
@@ -391,7 +391,7 @@ const appChatOf = async (session: Session, app: string): Promise<string> => {
  * the brain's: New chat starts afresh here. An App's own (`app`): its chat
  * is the person's for the App (`chats.forApp`), made once they first ask
  * in it or open it; what they say moves on to the App's versions in Chat,
- * with the chat open; and New chat goes to New app.
+ * with the chat open; and New chat goes to New App.
  */
 const useSlotWays = (
   app: string | undefined,

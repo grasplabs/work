@@ -571,11 +571,11 @@ const ComposioFlow = ({
           <Trans>
             A tool switched on starts as Read where Composio says it only reads;
             Grasp doesn&apos;t check that. A Read tool runs without asking. A
-            call of a Write tool from chat, or from a person using a domain,
-            waits for that person to confirm it; a workflow&apos;s run makes it
-            as one of its steps. Press a tool&apos;s badge to change it. Mark a
-            tool Read only if it changes nothing: marked wrongly, it changes
-            things without asking.
+            call of a Write tool from chat, or from a person using an App, waits
+            for that person to confirm it; a workflow&apos;s run makes it as one
+            of its steps. Press a tool&apos;s badge to change it. Mark a tool
+            Read only if it changes nothing: marked wrongly, it changes things
+            without asking.
           </Trans>
         </p>
         {listed === undefined ? <LoadingLines /> : null}

@@ -108,9 +108,9 @@ const changeWords = {
 
 /** How the server code changed, as a whole sentence for its warning. */
 const serverChangeWarnings = {
-  added: msg`Added: it acts for whoever uses the domain, with everything the domain holds`,
-  modified: msg`Changed: it acts for whoever uses the domain, with everything the domain holds`,
-  removed: msg`Removed: it acts for whoever uses the domain, with everything the domain holds`,
+  added: msg`Added: it acts for whoever uses the App, with everything the App holds`,
+  modified: msg`Changed: it acts for whoever uses the App, with everything the App holds`,
+  removed: msg`Removed: it acts for whoever uses the App, with everything the App holds`,
 } as const;
 
 /** How a migration changed, with its table, as a whole sentence for its warning. */
@@ -274,7 +274,7 @@ const ReviewDetails = ({
       </blockquote>
       <p className="text-muted-foreground">
         {current === null
-          ? t`Nothing runs yet: this would be the domain's first current version.`
+          ? t`Nothing runs yet: this would be the App's first current version.`
           : t`Compared with version ${current}, which runs now.`}
       </p>
       <section aria-label={t`Files`} className="flex flex-col gap-1">
@@ -414,7 +414,7 @@ const ReviewDetails = ({
                 {workflow.steps === null ? (
                   <span className="text-muted-foreground">
                     {workflow.calls.length === 0
-                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings.`
+                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings.`
                       : t`Its steps can't be read from its code, so any step may do anything its code does, calling ${ph({ tools: formatList(workflow.calls) })}.`}
                   </span>
                 ) : (
@@ -459,11 +459,11 @@ const ReviewDetails = ({
         </section>
       )}
       <section
-        aria-label={t`What the domain holds`}
+        aria-label={t`What the App holds`}
         className="flex flex-col gap-1"
       >
         <h4 className="font-medium">
-          <Trans>What the domain holds</Trans>
+          <Trans>What the App holds</Trans>
         </h4>
         {review.grants.length === 0 ? (
           <p className="text-muted-foreground">
@@ -700,8 +700,8 @@ const PendingVersion = ({
             <Link
               className="underline underline-offset-3"
               hash={storeChangesAnchor}
-              params={{ engine: app.id }}
-              to="/domains/$engine"
+              params={{ app: app.id }}
+              to="/apps/$app/details"
             >
               {refused.link}
             </Link>
@@ -862,7 +862,7 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="font-medium">
-          <Trans>The domains this chat builds didn&apos;t load.</Trans>
+          <Trans>The Apps this chat builds didn&apos;t load.</Trans>
         </p>
         {/* Gone while trying, so the alert is announced again if it fails again. */}
         {retrying ? null : <NotLoaded page={failure} />}

@@ -212,7 +212,7 @@ const Dot = ({
 
 /** The business processes the lanes' workflows serve, for their marks. */
 export interface LaneProcesses {
-  /** By domain: the process each domain serves. */
+  /** By App: the process each App serves. */
   apps: ReadonlyMap<string, BusinessProcess | null>;
   /** By independent workflow: the process each serves. */
   independent: ReadonlyMap<string, BusinessProcess | null>;

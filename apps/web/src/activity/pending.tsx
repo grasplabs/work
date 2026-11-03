@@ -158,17 +158,17 @@ export const objectOf = (
     const writes = actions.includes("write");
     if (reads && writes) {
       return i18n._(
-        msg`Queries, mutations and actions of ${ph({ domain: engine })}`
+        msg`Queries, mutations and actions of ${ph({ app: engine })}`
       );
     }
     return writes
-      ? i18n._(msg`Mutations and actions of ${ph({ domain: engine })}`)
-      : i18n._(msg`Queries of ${ph({ domain: engine })}`);
+      ? i18n._(msg`Mutations and actions of ${ph({ app: engine })}`)
+      : i18n._(msg`Queries of ${ph({ app: engine })}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
     return i18n._(
-      msg`Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
+      msg`Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
   }
   if (object.type === "platform" && actions.includes("brain")) {
@@ -181,7 +181,7 @@ export const objectOf = (
     // Consent in plain words: what the App reads is published company-wide
     // on purpose (counts only, never a run), and it may show it to anyone.
     return i18n._(
-      msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
+      msg`Platform statistics. This App can read run and signal counts for every App, and may show them to anyone who uses it`
     );
   }
   if (object.type === "store") {
@@ -242,7 +242,7 @@ export const askedAgain = (
       );
 };
 
-const versionChanged = msg`Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again.`;
+const versionChanged = msg`Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again.`;
 
 /**
  * Grants `request` for `version`, the one the admin reviewed. Core refuses

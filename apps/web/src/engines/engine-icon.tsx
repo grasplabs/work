@@ -4,7 +4,7 @@ import { CogIcon } from "lucide-react";
 import { ProcessTile } from "../workflows/business-process.tsx";
 
 /**
- * A domain's icon on a grey tile, as the prototype draws an engine
+ * An App's icon on a grey tile, as the prototype draws an engine
  * (`components/engines/engine-icon.tsx`): its business process's, or a
  * cog for one that serves none.
  */

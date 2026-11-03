@@ -38,7 +38,7 @@ export const LeaveConfirmDialog = ({
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>
-          <Trans>Leave this app?</Trans>
+          <Trans>Leave this page?</Trans>
         </AlertDialogTitle>
         <AlertDialogDescription>
           <Trans>

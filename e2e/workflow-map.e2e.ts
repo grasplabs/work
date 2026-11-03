@@ -55,7 +55,7 @@ const mapFor = async (admin: Person): Promise<string> => {
 
 /** The map's screen in `page`, once it shows. */
 const openMap = async (page: Page, app: string) => {
-  await page.goto(`/domains/${app}/apps/map/full`);
+  await page.goto(`/apps/${app}/full?screen=map`);
   const screen = page.frameLocator('iframe[title="map app"]');
   // The first open builds the screen, which takes a while on a loaded machine.
   await expect(

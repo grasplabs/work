@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppVersions } from "./app-versions.tsx";
 
-// Revoking a domain's release and placing or lifting a legal hold on it,
+// Revoking an App's release and placing or lifting a legal hold on it,
 // on its Versions tab, against core's `apps.versions` as the page reaches
 // it over RPC (the boundary from the web app), faked: it keeps each
 // sealed release's revocation and holds, answers each change with the
@@ -290,7 +290,7 @@ const seenBy = async (viewer: Identity) => {
   return { asked, menu };
 };
 
-describe("A domain's releases, revoked or held, for its admins", () => {
+describe("An App's releases, revoked or held, for its admins", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

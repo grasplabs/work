@@ -115,7 +115,7 @@ const attempt = async (
  * returns the address of one, token and all, from the frame's import map.
  */
 const openScreen = async (page: Page): Promise<string> => {
-  await page.goto(`/domains/${app}/apps/plain/full`);
+  await page.goto(`/apps/${app}/full?screen=plain`);
   const screen = page.frameLocator('iframe[title="plain app"]');
   await expect(screen.getByRole("heading", { name: "Plain" })).toBeVisible({
     timeout: 30_000,

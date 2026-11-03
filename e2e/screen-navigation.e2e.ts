@@ -27,7 +27,7 @@ test("a screen opens another with its input, and leaving unsaved edits is confir
   }
   const page = await pageOf(builder);
   await page.clock.install();
-  await page.goto(`/domains/${app}/apps/home/full`);
+  await page.goto(`/apps/${app}/full?screen=home`);
   const start = page.frameLocator('iframe[title="home app"]');
   await expect(start.getByRole("heading", { name: "Start" })).toBeVisible({
     timeout: 20_000,
@@ -38,7 +38,7 @@ test("a screen opens another with its input, and leaving unsaved edits is confir
     .getByRole("button", { name: "Open note n42", exact: true })
     .click();
   // What it opens with is in the page's history, never its address.
-  await expect(page).toHaveURL(/\/apps\/note\/full$/u);
+  await expect(page).toHaveURL(/\/full\?screen=note$/u);
   const note = page.frameLocator('iframe[title="note app"]');
   await expect(note.getByRole("heading", { name: "Note n42" })).toBeVisible({
     timeout: 20_000,
@@ -50,7 +50,7 @@ test("a screen opens another with its input, and leaving unsaved edits is confir
   await expect(note.getByText("Refused 0")).toBeVisible();
 
   // Unsaved: going back asks once; staying keeps the screen and the edit.
-  const leave = page.getByRole("alertdialog", { name: "Leave this app?" });
+  const leave = page.getByRole("alertdialog", { name: "Leave this page?" });
   await note.getByLabel("Title").fill("Groceries");
   await note.getByRole("button", { name: "Back to start" }).click();
   await expect(leave).toBeVisible();
@@ -124,7 +124,7 @@ test("a new version made current switches a clean screen at once, and asks an ed
 
   // A clean screen in one tab: the start screen, which holds no form.
   const clean = await pageOf(builder);
-  await clean.goto(`/domains/${app}/apps/home/full`);
+  await clean.goto(`/apps/${app}/full?screen=home`);
   const start = clean.frameLocator('iframe[title="home app"]');
   await expect(start.getByRole("heading", { name: "Start" })).toBeVisible({
     timeout: 20_000,
@@ -135,7 +135,7 @@ test("a new version made current switches a clean screen at once, and asks an ed
 
   // An editor with unsaved edits in another.
   const dirty = await pageOf(builder);
-  await dirty.goto(`/domains/${app}/apps/home/full`);
+  await dirty.goto(`/apps/${app}/full?screen=home`);
   await dirty
     .frameLocator('iframe[title="home app"]')
     .getByRole("button", { name: "Open note n42", exact: true })
@@ -143,7 +143,7 @@ test("a new version made current switches a clean screen at once, and asks an ed
   const note = dirty.frameLocator('iframe[title="note app"]');
   await note.getByLabel("Title").fill("Groceries");
   const ask = dirty.getByRole("alertdialog", {
-    name: "A new version of this app is ready",
+    name: "A new version of this App is ready",
   });
 
   await releaseAgain("v2");
@@ -174,7 +174,7 @@ test("a new version made current switches a clean screen at once, and asks an ed
   await expect(note.getByLabel("Title")).toHaveValue("", { timeout: 20_000 });
   await expect(ask).toHaveCount(0);
   // What it saved is there, in the App's list.
-  await clean.goto(`/domains/${app}/apps/notes/full`);
+  await clean.goto(`/apps/${app}/full?screen=notes`);
   await expect(
     clean
       .frameLocator('iframe[title="notes app"]')
@@ -197,7 +197,7 @@ test("a new version made current switches a clean screen at once, and asks an ed
       .getByRole("heading", { name: "Start" })
   ).toBeVisible({ timeout: 20_000 });
   await expect(
-    dirty.getByRole("alertdialog", { name: "Leave this app?" })
+    dirty.getByRole("alertdialog", { name: "Leave this page?" })
   ).toHaveCount(0);
 });
 
@@ -225,7 +225,7 @@ test("a screen in the chat's side panel opens what it navigates to in the main p
   const home = panel.frameLocator('iframe[title="home app"]');
   // The screen asks to replace the page's entry: the panel's never does.
   await home.getByRole("button", { name: "Open note n42 in place" }).click();
-  await expect(page).toHaveURL(new RegExp(`/domains/${app}/apps/note$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=note$`, "u"));
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/\\?chat=${chat}`, "u"));
 });
@@ -252,7 +252,7 @@ test("screens that navigate as they mount go once in the tab, so they can't fill
       get: () => false,
     });
   });
-  await page.goto(`/domains/${app}/apps/takeoff/full`);
+  await page.goto(`/apps/${app}/full?screen=takeoff`);
   // The start goes on its own, once: the hop it opens may not go on.
   const hop = page.frameLocator('iframe[title="hop app"]');
   await expect(hop.getByRole("heading", { name: "Hop 1" })).toBeVisible({
@@ -272,7 +272,7 @@ test("screens that navigate as they mount go once in the tab, so they can't fill
   });
   await page.waitForTimeout(3000);
   await expect(takeoff.getByRole("heading", { name: "Takeoff" })).toBeVisible();
-  await expect(page).toHaveURL(/\/apps\/takeoff\/full$/u);
+  await expect(page).toHaveURL(/\/full\?screen=takeoff$/u);
 });
 
 test("the screens a click opens can't each go on its activation: one click leaves at most one entry of the person's and one of the screen's own", async ({
@@ -289,7 +289,7 @@ test("the screens a click opens can't each go on its activation: one click leave
     core[Symbol.dispose]();
   }
   const page = await pageOf(builder);
-  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page.goto(`/apps/${app}/full?screen=launch`);
   await page
     .frameLocator('iframe[title="launch app"]')
     .getByRole("button", { name: "Start hopping" })
@@ -320,7 +320,7 @@ test("screens that focus themselves on one click's activation can't each go on i
     core[Symbol.dispose]();
   }
   const page = await pageOf(builder);
-  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page.goto(`/apps/${app}/full?screen=launch`);
   await page
     .frameLocator('iframe[title="launch app"]')
     .getByRole("button", { name: "Start focused hopping" })
@@ -352,7 +352,7 @@ test("a screen's own code can't pass for the person acting, whatever it patches,
     core[Symbol.dispose]();
   }
   const page = await pageOf(builder);
-  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page.goto(`/apps/${app}/full?screen=launch`);
   await page
     .frameLocator('iframe[title="launch app"]')
     .getByRole("button", { name: "Start forging" })

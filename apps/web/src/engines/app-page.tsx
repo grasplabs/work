@@ -16,6 +16,7 @@ import {
   CodeIcon,
   DatabaseIcon,
   GlobeIcon,
+  InfoIcon,
   LayoutGridIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -34,11 +35,12 @@ import { buildsApp } from "./app-role.ts";
 import { useStatusMove } from "./app-status.tsx";
 
 // An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
-// with its name, its screens as tabs, its settings and the Publish menu;
-// under the bar, that it is archived, with Restore; then the open screen,
-// or, while it has none, that it is only described, with the way to
-// design it in the chat. The prototype's app is our App (a domain), its
-// tabs our App's screens.
+// with its name, its pages (core's screens) as tabs, its details, its
+// settings and the Publish menu; under the bar, that it is archived, with
+// Restore; then the open page, or, while it has none, that it is only
+// described, with the way to design it in the chat. Each app people see is
+// one App, with its own data, sharing and versions: the prototype's app is
+// our App, its tabs our App's pages.
 //
 // Changing it is the chat's, with no Edit button: for whoever changes it,
 // the chat bottom right is the App's own (the shell's dock, chat-dock.tsx),
@@ -48,9 +50,11 @@ import { useStatusMove } from "./app-status.tsx";
 // link (app-own-link.tsx); saving it as a blueprint, as the prototype's
 // does, waits on the blueprints page.
 //
-// Its builders also have its Code beside the App itself (app-code.tsx):
-// its files, read-only, and a draft's changes. Nobody else gets the tab,
-// as core refuses them the App's files all the same.
+// Beside the App itself, its Details (_shell.apps.$app_.details.tsx): its
+// workflows, integrations, members, versions and the rest. Its builders
+// also have its Code (app-code.tsx): its files, read-only, and a draft's
+// changes. Nobody else gets that tab, as core refuses them the App's files
+// all the same.
 
 /**
  * Opens the App's own chat in the dock, to change the App there: the
@@ -163,7 +167,7 @@ const ArchivedNotice = ({ app, builds }: { app: App; builds: boolean }) => {
       />
       <span className="min-w-0 flex-1 basis-64">
         <Trans>
-          This app is archived. It is kept as it was, and nobody works on it.
+          This App is archived. It is kept as it was, and nobody works on it.
         </Trans>
       </span>
       {builds ? (
@@ -198,7 +202,7 @@ const OnlyDescribed = ({
       </span>
       <p className="text-muted-foreground">
         <Trans>
-          This app has no screen yet. Grasp designs it with you in the chat.
+          This App has no page yet. Grasp designs it with you in the chat.
         </Trans>
       </p>
     </div>
@@ -211,7 +215,7 @@ const OnlyDescribed = ({
   </div>
 );
 
-/** The App's screens as tabs in its bar, the open one marked; none for one. */
+/** The App's pages (its screens) as tabs in its bar, the open one marked; none for one. */
 const ScreenTabs = ({
   app,
   screens,
@@ -226,7 +230,7 @@ const ScreenTabs = ({
     return null;
   }
   return (
-    <nav aria-label={t`Screens`} className="flex flex-wrap gap-1">
+    <nav aria-label={t`Pages`} className="flex flex-wrap gap-1">
       {screens.map((screen) => (
         <Link
           aria-current={screen === open ? "page" : undefined}
@@ -253,8 +257,19 @@ const ScreenTabs = ({
 /** What the page shows: the App itself, or its code. */
 export type AppPageView = "app" | "code";
 
-/** The App and its Code, for a builder, the shown one marked. */
-const ViewTabs = ({ app, view }: { app: string; view: AppPageView }) => {
+/**
+ * The App, its Details and, for a builder (`builds`), its Code, the shown
+ * one marked. Details is a page of its own.
+ */
+const ViewTabs = ({
+  app,
+  view,
+  builds,
+}: {
+  app: string;
+  view: AppPageView;
+  builds: boolean;
+}) => {
   const { t } = useLingui();
   return (
     <nav aria-label={t`App views`} className="flex gap-1">
@@ -274,19 +289,29 @@ const ViewTabs = ({ app, view }: { app: string; view: AppPageView }) => {
         <Trans>App</Trans>
       </Link>
       <Link
-        aria-current={view === "code" ? "page" : undefined}
-        className={buttonVariants({
-          size: "sm",
-          variant: view === "code" ? "secondary" : "ghost",
-        })}
+        className={buttonVariants({ size: "sm", variant: "ghost" })}
         params={{ app }}
-        replace
-        search={(held) => ({ ...held, view: "code" as const })}
-        to="/apps/$app"
+        to="/apps/$app/details"
       >
-        <CodeIcon data-icon="inline-start" />
-        <Trans>Code</Trans>
+        <InfoIcon data-icon="inline-start" />
+        <Trans>Details</Trans>
       </Link>
+      {builds ? (
+        <Link
+          aria-current={view === "code" ? "page" : undefined}
+          className={buttonVariants({
+            size: "sm",
+            variant: view === "code" ? "secondary" : "ghost",
+          })}
+          params={{ app }}
+          replace
+          search={(held) => ({ ...held, view: "code" as const })}
+          to="/apps/$app"
+        >
+          <CodeIcon data-icon="inline-start" />
+          <Trans>Code</Trans>
+        </Link>
+      ) : null}
     </nav>
   );
 };
@@ -367,7 +392,7 @@ export const AppPage = ({
               its builders, and an archived App says so under the bar. */}
           <h1 className="truncate text-base font-medium">{name}</h1>
         </span>
-        {builds ? <ViewTabs app={app.id} view={code ? "code" : "app"} /> : null}
+        <ViewTabs app={app.id} builds={builds} view={code ? "code" : "app"} />
         {code ? null : (
           <ScreenTabs app={app.id} open={open} screens={contents.screens} />
         )}

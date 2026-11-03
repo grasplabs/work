@@ -738,7 +738,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       await admin.api.screenTrust.revoke(app, artifact);
     }
     await expect(reader?.read()).rejects.toThrow(
-      "The approval of this app's code was taken back."
+      "The approval of this page's code was taken back."
     );
   });
 
@@ -758,7 +758,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     await expect(reader?.read()).rejects.toThrow(
-      "The approval of this app's code was taken back."
+      "The approval of this page's code was taken back."
     );
     await expect(
       codeOf(screen.channel.describe("attachments", id))

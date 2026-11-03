@@ -48,7 +48,7 @@ import {
 } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// An App's settings, a domain's as people read it (GRA-219) (grasplabs/prototype `components/apps/app-settings.tsx`):
+// An App's settings (GRA-219) (grasplabs/prototype `components/apps/app-settings.tsx`):
 // what it is called and what it is for, where it stands, who answers for it
 // and whom it is made for, and putting it away. Its builders change them
 // through core's audited calls (`apps.update`, `apps.archive`,
@@ -289,7 +289,7 @@ const AppSettings = ({
         </p>
       </div>
       <SettingsSection
-        description={t`What the domain is called and what it is for.`}
+        description={t`What the App is called and what it is for.`}
         title={t`General`}
       >
         <SettingsRow htmlFor="app-name" label={t`Name`}>
@@ -327,7 +327,7 @@ const AppSettings = ({
           <StatusBadge status={app.status} />
         </SettingsRow>
         <SettingsRow
-          description={t`Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with.`}
+          description={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
           htmlFor="app-audience"
           label={t`Made for`}
         >
@@ -367,7 +367,7 @@ const AppSettings = ({
         )}
       </SettingsSection>
       <SettingsSection
-        description={t`Who answers for the domain: who is asked about it and decides what changes.`}
+        description={t`Who answers for the App: who is asked about it and decides what changes.`}
         title={t({ message: "Owner", context: "who answers for an app" })}
       >
         {/* The platform's one owner control, as a workflow's line has it. */}
@@ -399,7 +399,7 @@ const AppSettings = ({
       />
       {builds ? (
         <SettingsSection
-          description={t`An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
+          description={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
           title={t`Putting it away`}
         >
           <PuttingAway app={app} />
@@ -435,9 +435,9 @@ const AppSettingsPage = () => {
   if (page.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`Domain` }]}
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
         icon={LayoutGridIcon}
-        notFound={t`Domain not found`}
+        notFound={t`App not found`}
         page={page}
       />
     );
@@ -447,8 +447,8 @@ const AppSettingsPage = () => {
     <>
       <SiteHeader
         crumbs={[
-          { label: t`Domains`, to: "/domains" },
-          { label: app.name },
+          { label: t`Apps`, to: "/apps" },
+          { label: app.name, to: "/apps/$app", params: { app: app.id } },
           { label: t`Settings` },
         ]}
       />

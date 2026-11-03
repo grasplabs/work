@@ -130,9 +130,9 @@ export const ToolPermissions = ({
       <p className="text-muted-foreground">
         <Trans>
           A Read tool runs without asking. A call of a Write tool from chat, or
-          from a person using a domain, waits for that person to confirm it.
-          Press a tool&apos;s badge to change it. Mark a tool Read only if it
-          changes nothing: marked wrongly, it changes things without asking.
+          from a person using an App, waits for that person to confirm it. Press
+          a tool&apos;s badge to change it. Mark a tool Read only if it changes
+          nothing: marked wrongly, it changes things without asking.
         </Trans>
       </p>
       {groups.map((group) => {

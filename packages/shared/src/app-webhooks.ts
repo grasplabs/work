@@ -132,7 +132,7 @@ export const webhookErrors = defineErrorFamily({
   "webhook.invalid_url":
     "Grasp sends webhooks only to https addresses on the public internet, with no user name, password or IP address in them.",
   "webhook.not_found": "There's no such webhook.",
-  "webhook.full": "The domain has as many webhooks as it may.",
+  "webhook.full": "The App has as many webhooks as it may.",
 });
 
 /**

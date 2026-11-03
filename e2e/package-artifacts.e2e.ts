@@ -285,7 +285,7 @@ test("a screen can't load a package's code, or bring in what the code would fetc
   }
   const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
-  await page.goto(`/domains/${app}/apps/widget/full`);
+  await page.goto(`/apps/${app}/full?screen=widget`);
   const screen = page.frameLocator('iframe[title="widget app"]');
   const probes = screen.getByRole("status", { name: "Probes" });
   await expect(probes).not.toBeEmpty({ timeout: 30_000 });

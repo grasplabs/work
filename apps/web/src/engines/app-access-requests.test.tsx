@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppAccessRequests } from "./app-access-requests.tsx";
 
-// Asking for access for a domain's App on its Integrations tab, against
+// Asking for access for an App's App on its Integrations tab, against
 // core's permissions, connections and collections as the page reaches them
 // over RPC (the boundary from the web app), faked: it keeps the App's
 // requests, each waiting for an admin, and refuses one as core does when
@@ -243,11 +243,11 @@ const listed = (): string[][] =>
   );
 
 const bindingOf = (): string | undefined => {
-  const box = field("Name in the app's code");
+  const box = field("Name in the App's code");
   return box instanceof HTMLInputElement ? box.value : undefined;
 };
 
-describe("Asking for access for a domain's app, for its builders", () => {
+describe("Asking for access for an App, for its builders", () => {
   afterEach(() => {
     unmount();
   });
@@ -326,7 +326,7 @@ describe("Asking for access for a domain's app, for its builders", () => {
     }).toStrictEqual({ told: true, open: true });
   });
 
-  it("is not offered on an archived domain, and shows nothing to who doesn't build it", async () => {
+  it("is not offered on an archived App, and shows nothing to who doesn't build it", async () => {
     const archived = fakeCore();
     await shown(archived.session, { app: { ...crm, status: "archived" } });
     const archivedAsks = button("Ask for access") !== undefined;

@@ -31,7 +31,7 @@ declare global {
  */
 const noMoreConnectionsMs = 2000;
 
-const timedOut = "This app didn't start in time.";
+const timedOut = "This page didn't start in time.";
 
 /**
  * A new App named `name` running the sample, released by `builder`, and
@@ -66,7 +66,7 @@ const releaseApp = async (
  * takes longer than the default 5 seconds.
  */
 const openScreen = async (page: Page, app: string) => {
-  await page.goto(`/domains/${app}/apps/notes/full`);
+  await page.goto(`/apps/${app}/full?screen=notes`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
@@ -100,7 +100,7 @@ test("two people see each other's notes live, in their theme, and a failing scre
   ]);
 
   // The page marks what the App draws as the App's, around the frame.
-  await expect(first.getByText("Domain app", { exact: true })).toBeVisible();
+  await expect(first.getByText("App page", { exact: true })).toBeVisible();
   await expect(first.getByRole("heading", { name: "Notes" })).toBeVisible();
 
   // The screen follows its page's theme.
@@ -220,7 +220,7 @@ test("a screen whose open core never answers is given up on in its time, and ope
       server.send(message);
     });
   });
-  await page.goto(`/domains/${app}/apps/notes/full`);
+  await page.goto(`/apps/${app}/full?screen=notes`);
   await stalled.promise;
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
@@ -260,7 +260,7 @@ test("moving to another App's screen never shows the App it left in the chrome",
     sample();
   });
   // Within the page, as a link would: a new document would start afresh.
-  const otherPath = `/domains/${other}/apps/notes/full`;
+  const otherPath = `/apps/${other}/full?screen=notes`;
   await page.evaluate((path) => {
     history.pushState(null, "", path);
     dispatchEvent(new PopStateEvent("popstate"));
@@ -281,7 +281,8 @@ test("moving to another App's screen never shows the App it left in the chrome",
   // The address changes a moment before the page renders for it. It has
   // rendered for the new App once its frame is no longer the one it had.
   const rendered = shown.filter(
-    ({ path, frame }) => path === otherPath && frame !== first?.frame
+    ({ path, frame }) =>
+      path === otherPath.split("?")[0] && frame !== first?.frame
   );
   const named = rendered.findIndex(({ name }) => name === "Tasks");
   expect({
@@ -316,7 +317,9 @@ test("a tab holds one connection to core for its shell and every App frame it op
   /** The App frame on the page, once its screen shows `name`. */
   const shows = async (name: string) => {
     const screen = page.frameLocator('iframe[title="notes app"]');
-    await expect(page.getByRole("heading", { exact: true, name })).toBeVisible({
+    await expect(
+      page.getByRole("heading", { exact: true, level: 1, name })
+    ).toBeVisible({
       timeout: 20_000,
     });
     await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
@@ -328,11 +331,11 @@ test("a tab holds one connection to core for its shell and every App frame it op
   // The shell, then one App's frame after another, and back to the first.
   await page.goto("/dashboard");
   await expect(page.getByRole("navigation").first()).toBeVisible();
-  await moveTo(`/domains/${app}/apps/notes`);
+  await moveTo(`/apps/${app}?screen=notes`);
   await shows("Notes");
-  await moveTo(`/domains/${other}/apps/notes`);
+  await moveTo(`/apps/${other}?screen=notes`);
   await shows("Board");
-  await moveTo(`/domains/${app}/apps/notes`);
+  await moveTo(`/apps/${app}?screen=notes`);
   const screen = await shows("Notes");
 
   // The frame reads and writes through that same connection.

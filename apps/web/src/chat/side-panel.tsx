@@ -100,7 +100,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
       void panel?.open({ app: app.id, screen: first, title: app.name });
     } else {
       const { name } = app;
-      setOpening({ state: "ready", data: t`${name} has no app to show.` });
+      setOpening({ state: "ready", data: t`${name} has no page to show.` });
     }
   };
   if (apps === undefined) {
@@ -121,7 +121,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
             aria-hidden="true"
             className="text-muted-foreground size-4"
           />
-          <Trans>Domains</Trans>
+          <Trans>Apps</Trans>
         </h2>
         {opening === undefined ? null : <OpeningNote opening={opening} />}
         {apps.data.length === 0 ? (
@@ -131,12 +131,12 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
                 <CogIcon />
               </EmptyMedia>
               <EmptyTitle>
-                <Trans>No domains yet</Trans>
+                <Trans>No Apps yet</Trans>
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the domain stands
-                  beside the chat, to preview before it is proposed.
+                  Ask Grasp to build one. While it works, the App stands beside
+                  the chat, to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
             </EmptyHeader>

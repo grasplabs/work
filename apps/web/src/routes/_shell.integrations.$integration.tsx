@@ -97,7 +97,7 @@ const HeldNotLoaded = ({
     return null;
   }
   return (
-    <ErrorText>{t`Which domains and agents hold permissions: ${why}`}</ErrorText>
+    <ErrorText>{t`Which Apps and agents hold permissions: ${why}`}</ErrorText>
   );
 };
 
@@ -276,7 +276,7 @@ const Tools = ({
 
 /**
  * What its connections reach: the tools a Composio connection's admin
- * allowed, or, for a native one, every tool, as domains and agents are
+ * allowed, or, for a native one, every tool, as Apps and agents are
  * granted them.
  */
 const Reaches = ({ integration }: { integration: Integration }) => {
@@ -285,7 +285,7 @@ const Reaches = ({ integration }: { integration: Integration }) => {
   if (allowed === undefined) {
     return (
       <Trans>
-        Every tool it has: domains and agents use only what they are granted.
+        Every tool it has: Apps and agents use only what they are granted.
       </Trans>
     );
   }
@@ -406,7 +406,7 @@ const Overview = ({
         </h2>
         <p className="text-muted-foreground">
           <Trans>
-            What its tools do, as its provider declares them. Domains and agents
+            What its tools do, as its provider declares them. Apps and agents
             use only what they are granted, and a tool that changes something
             waits for its person to confirm it.
           </Trans>

@@ -26,10 +26,9 @@ import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 // written down as what the browser did, never counted as blocked (core's
 // security-headers.ts).
 
-const timedOut = "This app didn't start in time.";
-const left = "This app left its frame and was stopped.";
-const disconnected =
-  "This app lost its connection to the page and was stopped.";
+const timedOut = "This page didn't start in time.";
+const left = "This page left its frame and was stopped.";
+const disconnected = "This page lost its connection to Grasp and was stopped.";
 
 /**
  * Stops the page's clock where it is: from here on, time passes only when
@@ -128,7 +127,7 @@ const releaseApp = async (
 };
 
 const screenPath = (app: string, screen: string): string =>
-  `/domains/${app}/apps/${screen}/full`;
+  `/apps/${app}/full?screen=${screen}`;
 
 /** The page's frame for a screen, emptied or not. */
 const frameOf = (page: Page) => page.locator("iframe");
@@ -301,7 +300,7 @@ test("a screen reaches nothing but its own App's functions", async ({
       document.body.dataset.remoteScript,
     ]),
     popups,
-    url: new URL(page.url()).pathname,
+    url: `${new URL(page.url()).pathname}${new URL(page.url()).search}`,
   }).toStrictEqual({
     hits: [],
     ran: [undefined, undefined, undefined],
@@ -381,7 +380,7 @@ test("a screen can't send its frame to another origin", async ({ pageOf }) => {
     .toBeTruthy();
   expect({
     carried: attacker.hits.filter((hit) => hit.startsWith("/left")),
-    url: new URL(page.url()).pathname,
+    url: `${new URL(page.url()).pathname}${new URL(page.url()).search}`,
   }).toStrictEqual({ carried: [], url: screenPath(attacking, "leaving") });
 });
 

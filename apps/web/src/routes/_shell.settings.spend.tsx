@@ -63,14 +63,14 @@ const Month = ({ spent, month }: { spent: number; month: string }) => {
   );
 };
 
-/** A workflow's name, with its domain's for an App's workflow. */
+/** A workflow's name, with its App's for an App's workflow. */
 const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
   const workflow = of.name ?? of.workflowId;
   if (of.appId === null) {
     return workflow;
   }
   const engine = of.appName ?? of.appId;
-  return i18n._(msg`${workflow} in ${ph({ domain: engine })}`);
+  return i18n._(msg`${workflow} in ${ph({ app: engine })}`);
 };
 
 /** The workflows whose model calls cost most this month, with their runs started this month. */

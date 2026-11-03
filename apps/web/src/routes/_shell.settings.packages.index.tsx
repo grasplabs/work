@@ -87,7 +87,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   if (shown.subjects.length === 0) {
     return (
       <p className="text-muted-foreground border-t px-5 py-4">
-        <Trans>No domain or workflow has approved packages.</Trans>
+        <Trans>No App or workflow has approved packages.</Trans>
       </p>
     );
   }
@@ -117,8 +117,8 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
                 {subject.type === "app" ? (
                   <Link
                     className="hover:underline focus-visible:underline"
-                    params={{ engine: subject.id }}
-                    to="/domains/$engine"
+                    params={{ app: subject.id }}
+                    to="/apps/$app/details"
                   >
                     {subject.name}
                   </Link>
@@ -134,7 +134,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
               </TableCell>
               <TableCell>
                 <Badge variant="outline">
-                  {subject.type === "workflow" ? t`Workflow` : t`Domain`}
+                  {subject.type === "workflow" ? t`Workflow` : t`App`}
                 </Badge>
               </TableCell>
               <TableCell>
@@ -202,8 +202,8 @@ const Packages = () => {
       <SettingsSection
         description={
           <Trans>
-            The domains and workflows that may use approved npm packages. Open
-            one to retire or revoke what was approved for it.
+            The Apps and workflows that may use approved npm packages. Open one
+            to retire or revoke what was approved for it.
           </Trans>
         }
         title={t`Packages`}

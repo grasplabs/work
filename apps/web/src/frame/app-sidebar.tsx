@@ -18,7 +18,6 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BrainIcon,
-  CogIcon,
   LayoutGridIcon,
   MessagesSquareIcon,
   WorkflowIcon,
@@ -39,7 +38,7 @@ import { SurfaceNav } from "./surface-nav.tsx";
 // onboarding alone get none: Grasp steers the onboarding from its admin.
 
 interface Section {
-  to: "/" | "/brain" | "/domains" | "/apps" | "/workflows" | "/integrations";
+  to: "/" | "/brain" | "/apps" | "/workflows" | "/integrations";
   label: MessageDescriptor;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -47,7 +46,6 @@ interface Section {
 const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/brain", label: msg`Brain`, icon: BrainIcon },
-  { to: "/domains", label: msg`Domains`, icon: CogIcon },
   { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
@@ -113,7 +111,7 @@ export const AppSidebar = ({
                     ))}
                     <DashboardItem />
                     {sections.slice(1).map((section) => {
-                      if (section.to === "/domains") {
+                      if (section.to === "/apps") {
                         return (
                           <Fragment key={section.to}>
                             <SectionItem section={section} />

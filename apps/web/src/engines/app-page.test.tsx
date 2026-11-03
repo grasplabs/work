@@ -154,6 +154,35 @@ describe(AppPage, () => {
     }).toStrictEqual({ edit: false, asked: [] });
   });
 
+  it("shows an App with two screens as one App with two pages, the open one marked, and its Details", async () => {
+    await shown(["home", "invoices"], async () => {
+      await Promise.resolve();
+      return appChat;
+    });
+
+    const pages = document.querySelector('nav[aria-label="Pages"]');
+    const views = document.querySelector('nav[aria-label="App views"]');
+    expect({
+      heading: [...document.querySelectorAll("h1")].map(
+        (each) => each.textContent
+      ),
+      pages: [...(pages?.querySelectorAll("a") ?? [])].map((link) => ({
+        name: link.textContent,
+        open: link.getAttribute("aria-current") === "page",
+      })),
+      details: [...(views?.querySelectorAll("a") ?? [])]
+        .find((link) => link.textContent === "Details")
+        ?.getAttribute("href"),
+    }).toStrictEqual({
+      heading: ["Invoices"],
+      pages: [
+        { name: "home", open: true },
+        { name: "invoices", open: false },
+      ],
+      details: `/apps/${app.id}/details`,
+    });
+  });
+
   it("designs an App with no screen yet in its own chat, leaving the person's other chat open", async () => {
     setActiveChat("chat-about-holidays");
     const { asked } = await shown([], async () => {

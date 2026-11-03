@@ -223,8 +223,8 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   // It has run, so it is at work; its line begins with its engine, which opens it.
   await expect(page.getByRole("heading", { name: "At work" })).toBeVisible();
   await expect(
-    row.getByRole("link", { name: `Open the domain ${name}` })
-  ).toHaveAttribute("href", `/domains/${app}`);
+    row.getByRole("link", { name: `Open the App ${name}` })
+  ).toHaveAttribute("href", `/apps/${app}/details`);
   // A run waits for a decision: it needs someone, and the tab counts it.
   await page.getByRole("tab", { name: /^Needs you/u }).click();
   await expect(page).toHaveURL(/tab=needs/u);
@@ -392,21 +392,21 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   ).toHaveCount(2, pageRead);
   await expect(stillWaiting).toHaveCount(0);
 
-  // An address filtering by a workflow the domain's current version
+  // An address filtering by a workflow the App's current version
   // doesn't list (renamed or removed since): it stays, as core still
   // filters kept runs by that name, and the Workflow filter shows it,
-  // said to be no longer the domain's, rather than the other workflows'
+  // said to be no longer the App's, rather than the other workflows'
   // runs under a filter that can't say why.
   await page.goto(`/workflows?tab=runs&app=${app}&workflow=retired-workflow`);
   await expect(page.getByRole("combobox", { name: "Workflow" })).toContainText(
-    "retired-workflow (no longer in this domain)",
+    "retired-workflow (no longer in this App)",
     pageRead
   );
   await expect(page).toHaveURL(/workflow=retired-workflow/u);
   await expect(page.getByText("No runs match these filters.")).toBeVisible();
-  // Another domain chosen is a new selection: the workflow goes with it.
-  const domain = page.getByRole("combobox", { name: "Domain" });
-  await domain.click();
+  // Another App chosen is a new selection: the workflow goes with it.
+  const appChoice = page.getByRole("combobox", { name: "App" });
+  await appChoice.click();
   await page.getByRole("option", { name: "All" }).click();
   await expect(page).not.toHaveURL(/workflow=/u);
 });
@@ -454,7 +454,7 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The App's workflows couldn't be read: the filter says so, and its runs
   // are listed all the same.
   await expect(
-    page.getByText("Couldn't load this domain's workflows.")
+    page.getByText("Couldn't load this App's workflows.")
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Workflow" })).toBeDisabled();
 });

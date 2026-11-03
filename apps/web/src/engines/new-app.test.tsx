@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { NewApp } from "./new-app.tsx";
 
-// The New app page against core's chats as the page reaches them over RPC
+// The New App page against core's chats as the page reaches them over RPC
 // (the boundary from the web app), faked: answering its question starts
 // a chat carrying it, and opens that chat.
 
@@ -161,7 +161,7 @@ describe("making a new app", () => {
       at: router.state.location.href,
       shown: document.body.textContent,
     }).toStrictEqual({
-      asked: "What should the app show, and for whom?",
+      asked: "What should the App show, and for whom?",
       calls: [
         "create A board of open invoices for the finance team",
         "send chat-1 A board of open invoices for the finance team (anthropic/claude)",

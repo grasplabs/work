@@ -183,9 +183,9 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
         </DialogTitle>
         <DialogDescription>
           <Trans>
-            An outside API that domains and workflows can call through Grasp,
-            once you allow them to: only this origin, with these methods, under
-            these paths.
+            An outside API that Apps and workflows can call through Grasp, once
+            you allow them to: only this origin, with these methods, under these
+            paths.
           </Trans>
         </DialogDescription>
       </DialogHeader>
@@ -427,8 +427,8 @@ const Revoke = ({
             </AlertDialogTitle>
             <AlertDialogDescription>
               <Trans>
-                Its credential is deleted, and every domain and workflow loses
-                it. Add it again to use it again.
+                Its credential is deleted, and every App and workflow loses it.
+                Add it again to use it again.
               </Trans>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -557,7 +557,7 @@ export const HttpConnections = ({
         {manages ? <AddHttpConnection /> : null}
       </div>
       <p className="text-muted-foreground">
-        {t`Outside APIs an admin approved, by origin, methods and paths. Domains and workflows call them only with a permission.`}
+        {t`Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission.`}
       </p>
       {shown.length === 0 ? null : (
         <ul className="flex flex-col gap-3">

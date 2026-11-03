@@ -125,7 +125,7 @@ const Packages = ({ review }: { review: DependencyReview }) => {
     <div className="flex flex-col gap-3">
       {previous === null ? (
         <p className="text-muted-foreground">
-          <Trans>No packages were approved for this domain before.</Trans>
+          <Trans>No packages were approved for this App before.</Trans>
         </p>
       ) : (
         <div className="text-muted-foreground flex flex-col gap-1">
@@ -357,7 +357,7 @@ export const PackagesDetails = ({
       {review === undefined ? (
         <div className="flex flex-col items-start gap-1">
           <Button
-            aria-label={t`Show the packages for ${ph({ domain: engine })}`}
+            aria-label={t`Show the packages for ${ph({ app: engine })}`}
             disabled={busy}
             onClick={onShow}
             variant="outline"
@@ -399,8 +399,8 @@ export const PackagesCard = ({
   // An App or a workflow, in one queue: what the packages are for says
   // which, and only an App has a page to go to.
   const engine = request.subject.name;
-  const kind = request.subject.type === "workflow" ? t`Workflow` : t`Domain`;
-  const who = t`Packages for ${ph({ domain: engine })}`;
+  const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
+  const who = t`Packages for ${ph({ app: engine })}`;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the card, and the reason, away.
   const decide = async (approved: boolean, said: string): Promise<void> => {
@@ -445,8 +445,8 @@ export const PackagesCard = ({
         request.subject.type === "app" ? (
           <Link
             className="hover:underline focus-visible:underline"
-            params={{ engine: request.subject.id }}
-            to="/domains/$engine"
+            params={{ app: request.subject.id }}
+            to="/apps/$app/details"
           >
             {who}
           </Link>
@@ -456,8 +456,8 @@ export const PackagesCard = ({
       }
       no={{
         label: t`Reject`,
-        name: t`Reject the packages for ${ph({ domain: engine })}`,
-        does: t`${ph({ domain: engine })} doesn't get these packages.`,
+        name: t`Reject the packages for ${ph({ app: engine })}`,
+        does: t`${ph({ app: engine })} doesn't get these packages.`,
         onPress: async () => {
           await decide(false, t`Rejected: ${who}.`);
         },
@@ -465,8 +465,8 @@ export const PackagesCard = ({
       pile={pile}
       yes={{
         label: t`Approve`,
-        name: t`Approve the packages for ${ph({ domain: engine })}`,
-        does: t`${ph({ domain: engine })} may use exactly these packages from now on.`,
+        name: t`Approve the packages for ${ph({ app: engine })}`,
+        does: t`${ph({ app: engine })} may use exactly these packages from now on.`,
         disabled: review === undefined,
         describedBy: review === undefined ? hintId : undefined,
         onPress: async () => {

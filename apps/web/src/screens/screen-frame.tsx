@@ -61,21 +61,21 @@ const pausedFor = (question: FrameQuestion): Error => {
 };
 
 const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
-  forbidden: msg`You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read.`,
-  "not-found": msg`This domain has no such app.`,
-  "not-running": msg`This domain has no version to run yet.`,
-  broken: msg`This app doesn't build. Ask a builder to fix it.`,
-  "timed-out": msg`This app didn't start in time.`,
-  left: msg`This app left its frame and was stopped.`,
-  disconnected: msg`This app lost its connection to the page and was stopped.`,
-  unreviewed: msg`Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page.`,
-  revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page.`,
-  "principal-changed": msg`Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now.`,
-  "bad-input": msg`This link opens the app with something it doesn't take. Open the app from its domain instead.`,
-  corrupt: msg`This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin.`,
-  "not-sealed": msg`This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again.`,
-  "version-revoked": msg`This version of the app was revoked and no longer runs. An admin can make another version current.`,
-  unknown: msg`The app couldn't be loaded.`,
+  forbidden: msg`You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read.`,
+  "not-found": msg`This App has no such page.`,
+  "not-running": msg`This App has no version to run yet.`,
+  broken: msg`This page doesn't build. Ask a builder to fix it.`,
+  "timed-out": msg`This page didn't start in time.`,
+  left: msg`This page left its frame and was stopped.`,
+  disconnected: msg`This page lost its connection to Grasp and was stopped.`,
+  unreviewed: msg`Nobody has approved this page's code for the App's data yet. An admin can approve it in the App's details.`,
+  revoked: msg`The approval of this page's code was taken back, and the page was stopped. An admin can approve it again in the App's details.`,
+  "principal-changed": msg`Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now.`,
+  "bad-input": msg`This link opens the page with something it doesn't take. Open the page from its App instead.`,
+  corrupt: msg`This page's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin.`,
+  "not-sealed": msg`This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again.`,
+  "version-revoked": msg`This version of the App was revoked and no longer runs. An admin can make another version current.`,
+  unknown: msg`The page couldn't be loaded.`,
 };
 
 interface StatusProps {
@@ -93,7 +93,7 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
   if (state.status === "updated") {
     // Only a screen holding unsaved edits shows this: one with nothing
     // to lose switches at once.
-    message = t`A new version of this domain is ready. It opens once your changes are saved.`;
+    message = t`A new version of this App is ready. It opens once your changes are saved.`;
   } else if (state.status === "signed-out") {
     message = t`Your session has ended. Sign in again to go on.`;
   } else if (state.status === "failed") {
@@ -429,7 +429,7 @@ const UpdateConfirmDialog = ({
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>
-          <Trans>A new version of this app is ready</Trans>
+          <Trans>A new version of this App is ready</Trans>
         </AlertDialogTitle>
         <AlertDialogDescription>
           <Trans>
@@ -713,7 +713,7 @@ export const ScreenFrame = ({
   return (
     <FramedScreen
       embedded={embedded}
-      label={t`Domain app`}
+      label={t`App page`}
       source={{
         app,
         screen,
@@ -765,8 +765,8 @@ export const PreviewFrame = ({
       }}
       title={
         screen === undefined
-          ? t`Preview of the draft's first app`
-          : t`Preview of the ${screen} app`
+          ? t`Preview of the draft's first page`
+          : t`Preview of the ${screen} page`
       }
     />
   );

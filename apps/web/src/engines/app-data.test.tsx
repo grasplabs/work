@@ -15,8 +15,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppData } from "./app-data.tsx";
 
-// A domain's data page (app-data.tsx), against core's `apps.data` as the
-// page reaches it: what one domain's page read never shows for another
+// An App's data page (app-data.tsx), against core's `apps.data` as the
+// page reaches it: what one App's page read never shows for another
 // opened on it, and every record opens, whatever fields its table has.
 // Core decides who may read what (core's app-data.test.ts).
 
@@ -33,7 +33,7 @@ const takenDown = (): void => {
   document.body.replaceChildren();
 };
 
-/** A table of `fields`, read and written by the domain's members. */
+/** A table of `fields`, read and written by the App's members. */
 const tableOf = (name: string, fields: string[]): AppDataTable => ({
   name,
   read: "appMembers",
@@ -46,7 +46,7 @@ const tableOf = (name: string, fields: string[]): AppDataTable => ({
   })),
 });
 
-/** The one record core holds of `table` in domain `app`. */
+/** The one record core holds of `table` in App `app`. */
 const recordOf = (app: string, table: string): AppDataRecord => ({
   id: `${app}-${table}-1`,
   owner: "builder",
@@ -56,13 +56,13 @@ const recordOf = (app: string, table: string): AppDataRecord => ({
   fields: { title: `${app}'s ${table}` },
 });
 
-/** Each domain's tables: the second's first declares no fields at all. */
+/** Each App's tables: the second's first declares no fields at all. */
 const tables: Record<string, AppDataTable[]> = {
   first: [tableOf("notes", ["title"])],
   second: [tableOf("bare", []), tableOf("notes", ["title"])],
 };
 
-/** The page, opened on domain `first`, with a button opening `second`. */
+/** The page, opened on App `first`, with a button opening `second`. */
 const shown = async () => {
   const apps = {
     data: {
@@ -173,10 +173,10 @@ const importable = (): boolean => {
   return button !== undefined && !button.disabled;
 };
 
-describe("a domain's data page", () => {
+describe("an App's data page", () => {
   afterEach(takenDown);
 
-  it("shows another domain opened on it from that domain's own first table and records", async () => {
+  it("shows another App opened on it from that App's own first table and records", async () => {
     await shown();
     await settled();
     expect(document.body.textContent).toContain("first's notes");

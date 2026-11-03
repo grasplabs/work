@@ -108,7 +108,7 @@ const engineOf = async (
 
 /** The engine's resource `alias`, on its page's Resources tab. */
 const resourceOn = async (page: Page, app: string, alias: string) => {
-  await page.goto(`/domains/${app}`);
+  await page.goto(`/apps/${app}/details`);
   await page.getByRole("tab", { name: "Resources" }).click();
   return page
     .getByRole("region", { name: "Resources" })
@@ -119,7 +119,7 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
 const letterOn = async (page: Page, app: string) =>
   await resourceOn(page, app, "letter");
 
-const unbound = "The domain's actions can't use it until an admin binds it.";
+const unbound = "The App's actions can't use it until an admin binds it.";
 
 test("an admin binds an engine's declared template and revokes it; its builder only sees", async ({
   pageOf,

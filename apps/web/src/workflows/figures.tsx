@@ -82,11 +82,11 @@ export const RunFiguresView = ({
           value={formatNumber(waiting)}
         />
       </dl>
-      {/* What core counts: the domains' workflows, never independent ones. */}
+      {/* What core counts: the Apps' workflows, never independent ones. */}
       {scope === "all" ? (
         <p className="text-muted-foreground">
           <Trans>
-            Counted over the workflows of the domains you can open; independent
+            Counted over the workflows of the Apps you can open; independent
             workflows aren&apos;t counted here.
           </Trans>
         </p>

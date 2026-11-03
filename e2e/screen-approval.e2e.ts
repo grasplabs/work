@@ -95,11 +95,11 @@ test("a screen gets its engine's data only while an admin's approval of its code
 
   // Nobody approved its code: the screen isn't started, and says why.
   const using = await pageOf(builder);
-  await using.goto(`/domains/${app}/apps/ledger/full`);
+  await using.goto(`/apps/${app}/full?screen=ledger`);
   const frame = using.locator('iframe[title="ledger app"]');
   await expect(
     using.getByText(
-      "Nobody has approved this app's code for the domain's data yet."
+      "Nobody has approved this page's code for the App's data yet."
     )
   ).toBeVisible({ timeout: 20_000 });
   await expect(frame).not.toHaveAttribute("src");
@@ -110,7 +110,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   await deciding.goto("/dashboard");
   await deciding
     .getByRole("region", { name: "Waiting elsewhere" })
-    .getByRole("link", { name: `Review the apps of ${name}` })
+    .getByRole("link", { name: `Review the pages of ${name}` })
     .click();
   const approval = deciding.getByRole("region", { name: "Approval" });
   const row = approval.getByRole("row", { name: /ledger/u });
@@ -124,7 +124,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   await code.getByText("screens/ledger.tsx").click();
   await expect(code).toContainText("export default function Ledger()");
   await approval
-    .getByRole("button", { name: "Approve the apps of version 1" })
+    .getByRole("button", { name: "Approve the pages of version 1" })
     .click();
   await expect(row).toContainText("Approved");
 
@@ -143,7 +143,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   await expect(row).toContainText("Approval taken back");
   await expect(
     using.getByText(
-      "The approval of this app's code was taken back, and the app was stopped."
+      "The approval of this page's code was taken back, and the page was stopped."
     )
   ).toBeVisible();
   await expect(frame).not.toHaveAttribute("src");

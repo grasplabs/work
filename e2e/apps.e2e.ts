@@ -8,8 +8,8 @@ import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // Reaching Apps from the product: sign in, find an App in the Apps list,
-// open it, and use its screen with live data from its App's functions; its
-// workflows and who opens it are a tab away. Only the people core opens
+// open it, and use its page with live data from its App's functions; its
+// workflows and who opens it are in its details. Only the people core opens
 // Apps to see them.
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -156,33 +156,52 @@ test.beforeAll(async () => {
   app = await newApp(builder, name);
 });
 
-test("a builder finds an engine in the list, opens it and uses its app with live data", async ({
+/** An App's registration with two screens, `home` and `counter`, of the counter's code. */
+const twoScreens = (): Record<string, string> => ({
+  ...counterApp(),
+  "app.ts": registration("counter").replace(
+    'screens: [{ name: "counter"',
+    'screens: [{ name: "home", path: "/home", source: "screens/home.tsx" }, { name: "counter"'
+  ),
+  "screens/home.tsx": screen,
+});
+
+test("a builder finds an App in the list, opens it and uses its page with live data", async ({
   pageOf,
 }) => {
-  // Seven more domains of this run's own, each with one app: five
-  // published, two drafts, so the Apps page offers its search and tabs.
-  // Their names carry `run`, which no other test's do.
+  // Seven more Apps of this run's own: five published, two drafts, so the
+  // Apps page offers its search and tabs. One of them, `books`, has two
+  // screens: it is one App with two pages, never two apps. Their names
+  // carry `run`, which no other test's do.
   const run = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
     String.fromCodePoint(97 + (byte % 26))
   ).join("");
   const published = ["books", "payroll", "stock", "fleet", "sales"];
   const drafts = ["hiring", "legal"];
-  await withApi(builder, async (api) => {
-    await Promise.all([
-      ...published.map(async (domain) => {
-        const { id } = await api.apps.create({ name: `${domain} ${run}` });
-        await release(api, id, counterApp(`${domain}app${run}`), "First");
+  const ids = await withApi(builder, async (api) => {
+    const made = await Promise.all([
+      ...published.map(async (each) => {
+        const { id } = await api.apps.create({ name: `${each} ${run}` });
+        await release(
+          api,
+          id,
+          each === "books" ? twoScreens() : counterApp(),
+          "First"
+        );
+        return [each, id] as const;
       }),
-      ...drafts.map(async (domain) => {
-        const { id } = await api.apps.create({ name: `${domain} ${run}` });
+      ...drafts.map(async (each) => {
+        const { id } = await api.apps.create({ name: `${each} ${run}` });
         const { version } = await api.apps.files.commit(
           id,
-          counterApp(`${domain}app${run}`),
+          counterApp(),
           "First"
         );
         await api.apps.versions.setCurrent(id, version);
+        return [each, id] as const;
       }),
     ]);
+    return new Map(made);
   });
 
   const page = await pageOf(builder);
@@ -190,7 +209,7 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Apps" }).click();
   const tiles = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
-  const search = page.getByRole("textbox", { name: "Search the apps" });
+  const search = page.getByRole("textbox", { name: "Search the Apps" });
   const tab = (label: string) =>
     page.getByRole("tab", { name: new RegExp(`^${label}`, "u") });
   /** What each tab counts, in the order they stand. */
@@ -201,62 +220,64 @@ test("a builder finds an engine in the list, opens it and uses its app with live
       )
     );
 
-  // A search by domain name finds that domain's apps, and the tabs count
-  // what it leaves: this run's seven, five published and two drafts.
+  // A search by name finds this run's Apps, one tile each whatever their
+  // screens, and the tabs count what it leaves: five published, two
+  // drafts.
   await search.fill(run);
   await expect(tiles).toHaveCount(7);
   expect(await counts()).toStrictEqual(["All7", "Published5", "Draft2"]);
   await tab("Draft").click();
   await expect(tiles).toHaveCount(2);
-  await expect(
-    tiles.getByRole("link", { name: `legalapp${run}` })
-  ).toBeVisible();
+  await expect(tiles.getByRole("link", { name: `legal ${run}` })).toBeVisible();
   await tab("Published").click();
   await expect(tiles).toHaveCount(5);
   await tab("All").click();
   await expect(tiles).toHaveCount(7);
 
-  // A search by an app's own name finds it alone, under its domain.
-  await search.fill(`payrollapp${run}`);
+  // The App with two screens is one tile, with two pages.
+  await search.fill(`books ${run}`);
   await expect(tiles).toHaveCount(1);
-  await expect(tiles).toContainText(`payroll ${run}`);
+  await expect(tiles).toContainText("2 pages");
   expect(await counts()).toStrictEqual(["All1", "Published1", "Draft0"]);
+  // Opened, its two pages are tabs in its bar.
+  await tiles.getByRole("link", { name: `books ${run}` }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/apps/${ids.get("books") ?? ""}$`, "u")
+  );
+  await expect(
+    page.getByRole("navigation", { name: "Pages" }).getByRole("link")
+  ).toHaveText(["counter", "home"]);
+  await page.goBack();
 
   // A search nothing matches says so, and lists nothing.
   await search.fill(`nothing-${run}`);
   await expect(
-    page.getByText(`No app is called “nothing-${run}”`)
+    page.getByText(`No App is called “nothing-${run}”`)
   ).toBeVisible();
   await expect(tiles).toHaveCount(0);
   expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
   await search.fill("");
 
-  // On the Apps page its app is a tile, under its domain's name, which
-  // opens the app on its App's page.
+  // On the Apps page each App is a tile with its name, which opens it on
+  // its own page, on its first page.
   const tile = tiles.filter({ hasText: name });
-  await tile.getByRole("link", { name: "counter" }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
-  );
+  await expect(tile).toContainText("1 page");
+  await tile.getByRole("link", { name }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   await counterScreen(page);
 
-  await nav.getByRole("link", { name: "Domains" }).click();
-
-  // Its card says what its version holds, as core counts it.
-  const card = page
-    .getByRole("list", { name: "Domains" })
-    .getByRole("listitem")
-    .filter({ hasText: name });
-  await expect(card).toContainText("Counts clicks");
-  await expect(card).toContainText("1 workflow");
-  await expect(card).toContainText("1 app");
-  await expect(card).toContainText("Version 1");
-  await card.getByRole("link", { name }).click();
-
+  // Its details: what its version holds, its workflows, integrations and
+  // members.
+  await page
+    .getByRole("navigation", { name: "App views" })
+    .getByRole("link", { name: "Details" })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/details$`, "u"));
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await expect(page.getByText("Counts clicks")).toBeVisible();
   await expect(page.getByText("Version 1")).toBeVisible();
-  // It opens on its apps, as the prototype's made engines do.
-  await expect(page.getByRole("tab", { name: /^Apps/u })).toHaveAttribute(
+  // It opens on its pages, as the prototype's made engines do.
+  await expect(page.getByRole("tab", { name: /^Pages/u })).toHaveAttribute(
     "aria-selected",
     "true"
   );
@@ -270,28 +291,28 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   // A builder sees the integrations it uses; this one uses none.
   await page.getByRole("tab", { name: "Integrations" }).click();
   await expect(
-    page.getByText("This domain doesn't use an integration yet.")
+    page.getByText("This App doesn't use an integration yet.")
   ).toBeVisible();
 
   await page.getByRole("tab", { name: "Members" }).click();
   await expect(page.getByText("Created by you.")).toBeVisible();
 
-  // Its apps open in the frame, under the way back to the engine.
-  await page.getByRole("tab", { name: /^Apps/u }).click();
+  // Its pages open on the App's own page, under the way back to Apps.
+  await page.getByRole("tab", { name: /^Pages/u }).click();
   await page
-    .getByRole("list", { name: "Apps" })
+    .getByRole("list", { name: "Pages" })
     .getByRole("link", { name: "counter" })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
+    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
   );
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
-      name,
+      name: "Apps",
     })
   ).toBeVisible();
   const counter = await counterScreen(page);
-  // One page heading: the app's chrome names the engine.
+  // One page heading: the App's bar names it.
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
@@ -299,20 +320,13 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
   await expect(
     page.getByRole("link", { name: "Open full page" })
-  ).toHaveAttribute("href", `/domains/${app}/apps/counter/full`);
+  ).toHaveAttribute("href", `/apps/${app}/full?screen=counter`);
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   pageOf,
 }) => {
-  const everyone = [
-    "Chat",
-    "Brain",
-    "Domains",
-    "Apps",
-    "Workflows",
-    "Integrations",
-  ];
+  const everyone = ["Chat", "Brain", "Apps", "Workflows", "Integrations"];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
@@ -329,9 +343,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     // every link but theirs, in one read of the page.
     const texts = await links.evaluateAll((found) =>
       found
-        .filter(
-          (link) => link.closest('[aria-label="Domain shortcuts"]') === null
-        )
+        .filter((link) => link.closest('[aria-label="App shortcuts"]') === null)
         .map((link) => link.textContent ?? "")
     );
     // The person menu, at the sidebar's foot, by their name; their role is
@@ -417,39 +429,31 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
   page,
   pageOf,
 }) => {
-  await page.goto(`/domains/${app}/apps/counter`);
+  await page.goto(`/apps/${app}?screen=counter`);
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
-  expect(returnTo).toBe(`/domains/${app}/apps/counter`);
+  expect(returnTo).toBe(`/apps/${app}?screen=counter`);
 
   const signedIn = await pageOf(builder);
   await signedIn.goto(
     `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
   );
   await expect(signedIn).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
+    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
   );
   await counterScreen(signedIn);
 });
 
-test("someone with the user role finds no engine to open", async ({
-  pageOf,
-}) => {
+test("someone with the user role finds no App to open", async ({ pageOf }) => {
   const page = await pageOf(user);
   // The Apps page has none for them, and no way to make one.
   await page.goto("/apps");
   await expect(
-    page.getByText("The apps your colleagues are making show here.")
+    page.getByText("The Apps your colleagues are making show here.")
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "New app" })).toHaveCount(0);
-  await page.goto("/domains");
-  await expect(
-    page.getByText("There are no domains you can open yet.", { exact: false })
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Chat" })).toBeVisible();
-  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "New App" })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -457,9 +461,9 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto("/sign-in?returnTo=%2Fdomains");
-  await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/domains");
+  await page.goto("/sign-in?returnTo=%2Fapps");
+  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/apps");
 
   for (const elsewhere of [
     "//evil.test/apps",
@@ -482,7 +486,7 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
   const page = await pageOf(builder);
   const gate = await callGate(page, '["workflows","runs"]');
   gate.hold();
-  await page.goto(`/domains/${app}`);
+  await page.goto(`/apps/${app}/details`);
 
   await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(
@@ -491,16 +495,16 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
   await expect(
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("tab", { name: /^Apps/u }).click();
+  await page.getByRole("tab", { name: /^Pages/u }).click();
   await expect(
-    page.getByRole("list", { name: "Apps" }).getByRole("link", {
+    page.getByRole("list", { name: "Pages" }).getByRole("link", {
       name: "counter",
     })
   ).toBeVisible();
   gate.release();
 });
 
-test("loading an app again after a new version shows that version, and the engine's first app when the one open is gone", async ({
+test("loading a page again after a new version shows that version, and the App's first page when the one open is gone", async ({
   pageOf,
 }) => {
   const swapped = await newApp(
@@ -509,7 +513,7 @@ test("loading an app again after a new version shows that version, and the engin
     counterApp()
   );
   const page = await pageOf(builder);
-  await page.goto(`/domains/${swapped}/apps/counter`);
+  await page.goto(`/apps/${swapped}?screen=counter`);
   await counterScreen(page);
 
   await withApi(builder, async (api) => {
@@ -521,9 +525,8 @@ test("loading an app again after a new version shows that version, and the engin
     );
   });
   // Told over the tab's connection, the screen holds nothing unsaved, so
-  // it loads again by itself: no timer, and nothing to click.
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${swapped}/apps/tally$`, "u")
-  );
+  // it loads again by itself: no timer, and nothing to click. The page
+  // asked for is gone, so the App opens on its first.
   await counterScreen(page, "tally app");
+  await expect(page.getByRole("navigation", { name: "Pages" })).toHaveCount(0);
 });
