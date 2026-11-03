@@ -461,6 +461,7 @@ const openingOf = (text: string, start: DockStart): ChatMessage => ({
   text,
   citations: [],
   code: [],
+  tools: [],
   asked: start.asked,
   end: "done",
   at: new Date(0).toISOString(),

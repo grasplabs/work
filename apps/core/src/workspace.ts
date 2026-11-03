@@ -565,10 +565,12 @@ const afterSchema = z.int().nonnegative().nullable();
 export const maxChatChars = 4_000_000;
 
 /**
- * Most ended code runs an object remembers, to refuse and log a call from
- * one: a few turns' worth (at most 30 runs each).
+ * Most ended runs an object remembers, code runs and tool calls alike
+ * (agent-tools.ts), to refuse and log a call from one: a few turns' worth.
+ * A turn opens at most 430: 30 code runs, and 20 tool calls in each of
+ * its 20 responses.
  */
-export const endedRunsKept = 1000;
+export const endedRunsKept = 3000;
 
 /**
  * Most code run records a chat keeps, newest first: a long chat's run

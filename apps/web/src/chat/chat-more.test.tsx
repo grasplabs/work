@@ -63,6 +63,7 @@ const firstUpdate: ChatUpdate = {
       text: answer,
       citations: [],
       code: [],
+      tools: [],
       end: "done",
       at: "2026-10-20T08:00:05.000Z",
     },

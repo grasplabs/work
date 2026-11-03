@@ -2,6 +2,7 @@ import type {
   ChatCode,
   ChatMessage,
   ChatPartial,
+  ChatToolCall,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 
@@ -37,15 +38,18 @@ export const signOf = ({
   ran,
 }: {
   partial: ChatPartial | null;
-  replies: readonly { code: readonly ChatCode[] }[];
+  replies: readonly {
+    code: readonly ChatCode[];
+    tools: readonly ChatToolCall[];
+  }[];
   ran: (callId: string) => boolean;
 }): WorkState => {
   const latest = partial ?? replies.at(-1);
   if (latest === undefined) {
     return "reading";
   }
-  const last = latest.code.at(-1);
-  if (last !== undefined && !ran(last.callId)) {
+  const steps = [latest.code.at(-1), latest.tools.at(-1)];
+  if (steps.some((step) => step !== undefined && !ran(step.callId))) {
     return "working";
   }
   return partial === null || partial.text.trim() === ""
