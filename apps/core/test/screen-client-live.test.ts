@@ -697,6 +697,119 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
     ).toBeFalsy();
   });
 });
+describe("live queries and a person's teams", { timeout: 180_000 }, () => {
+  it("never pushes what was read under a team the person has left, even a result that waited", async () => {
+    // The secrets table, read by the team each secret names.
+    const secretFiles = withSecrets();
+    const teamFiles: Record<string, string> = {
+      ...secretFiles,
+      "schema.ts": (secretFiles["schema.ts"] ?? "")
+        .replace(
+          "import { defineSchema, defineTable, v }",
+          "import { defineSchema, defineTable, rows, v }"
+        )
+        .replace(
+          "secrets: defineTable({ text: v.string() }),",
+          'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: [rows.team("team")] }),'
+        ),
+      "operations/notes.ts": (secretFiles["operations/notes.ts"] ?? "").replace(
+        "export const tell = mutation({\n  args: { text: v.string() },",
+        "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
+      ),
+      "app.ts": (secretFiles["app.ts"] ?? "").replace(
+        'secrets: { read: "appBuilders", write: "appBuilders" }',
+        'secrets: { read: "appMembers", write: "appMembers" }'
+      ),
+    };
+    const opened = await openedApp(teamFiles);
+    const member = await personApi("user");
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    // The builder and the member are both in Sales.
+    const sales = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Sales', 'organization', ?)"
+      ).bind(sales, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id) VALUES (?, ?, ?), (?, ?, ?)"
+      ).bind(
+        crypto.randomUUID(),
+        sales,
+        opened.builder.userId,
+        crypto.randomUUID(),
+        sales,
+        member.userId
+      ),
+    ]);
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    const tell = referenceTo<
+      { text: string; team: string },
+      unknown,
+      "mutation"
+    >(opened.release, "notes.tell");
+    const received: Push[] = [];
+    const first = Promise.withResolvers<null>();
+    // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+    const callback: (push: unknown) => void = async (push) => {
+      const read = pushSchema.parse(push);
+      received.push(read);
+      if (read.revision === 1) {
+        await first.promise;
+      }
+    };
+    // A second reader of the same query on the same connection, which
+    // holds nothing: the connection reads the query once for both, so
+    // what this one is pushed, the held one's next push was read as.
+    const seen: Push[] = [];
+    const watcher = member.api.screens.frame(opened.app, lease);
+    await watcher.watchQuery(requestOf(secrets, {}), callback);
+    await eventually(() => {
+      expect(received).toHaveLength(1);
+    });
+    await watcher.watchQuery(requestOf(secrets, {}), (push: unknown) => {
+      seen.push(pushSchema.parse(push));
+    });
+    // Sales' secret, read for the member while they are in Sales: the
+    // held reader's push of it waits.
+    await clientFor(opened).client.mutation(tell, {
+      text: "Sales only",
+      team: sales,
+    });
+    await eventually(() => {
+      expect(
+        seen.some(({ result }) => JSON.stringify(result).includes("Sales only"))
+      ).toBeTruthy();
+    });
+
+    // They leave Sales: core tells no one, and their next check reads it.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(sales, member.userId)
+      .run();
+    await pastAccessRecheck(async () => {
+      first.resolve(null);
+      await eventually(() => {
+        expect(received.length).toBeGreaterThan(1);
+      });
+    });
+
+    // Its next push is read again under the teams they have now.
+    expect(
+      received.some(({ result }) =>
+        JSON.stringify(result).includes("Sales only")
+      )
+    ).toBeFalsy();
+  });
+});
 describe(
   "live queries and a failure to try again",
   { timeout: 120_000 },

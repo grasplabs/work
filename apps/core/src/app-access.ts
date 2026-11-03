@@ -379,7 +379,10 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
  * What `by` may do through the functions of App `app`, read now, as
  * `requireStillOpen` reads it: a member of the App with any role in it, a
  * builder with that role (what `appMembers` and `appBuilders` tables
- * require). Refuses as `requireAppRole` does, `app.not_found` when they
+ * require), and the IDs of the teams they are in now (what a table's
+ * `team` row rules match, store-rules.ts: read here on every call, never
+ * from the session, so a team left or joined counts from the next read or
+ * commit). Refuses as `requireAppRole` does, `app.not_found` when they
  * have no role. For the operation host, which asks again just before a
  * mutation commits (operations.ts).
  */
@@ -393,7 +396,7 @@ export const operationRoles = async (
    * An archived App still refuses it.
    */
   inFlight = false
-): Promise<{ appMember: boolean; appBuilder: boolean }> => {
+): Promise<{ appMember: boolean; appBuilder: boolean; teams: string[] }> => {
   const row = await drizzle(env.DB)
     .select({ id: apps.id, owner: apps.ownerId, status: apps.status })
     .from(apps)
@@ -402,9 +405,10 @@ export const operationRoles = async (
   if (row === undefined) {
     throw appErrors.create("app.not_found");
   }
+  const teams = await teamsOf(env.DB, by.userId);
   const role = await requireAppRole(
     env,
-    { ...by, teams: await teamsOf(env.DB, by.userId) },
+    { ...by, teams },
     {
       id: appIdSchema.parse(row.id),
       owner: row.owner,
@@ -414,5 +418,9 @@ export const operationRoles = async (
   );
   // Nobody calls an archived App's functions, its builders included.
   requireNotArchived(row);
-  return { appMember: true, appBuilder: role === "builder" };
+  return {
+    appMember: true,
+    appBuilder: role === "builder",
+    teams: teams.map(({ id }) => id),
+  };
 };

@@ -68,11 +68,12 @@ const review: VersionReview = {
   grants: [],
   handsFilesToWorkflows: false,
   readsPeople: false,
+  rowRules: [],
   tests: { status: "none", failures: [] },
 };
 
 /** Core's `apps`, recording what the release asked of it. */
-const fakeApps = () => {
+const fakeApps = (reviewed: VersionReview = review) => {
   const calls: string[] = [];
   return {
     calls,
@@ -82,7 +83,7 @@ const fakeApps = () => {
         await Promise.resolve();
       },
       versions: {
-        review: async () => await Promise.resolve(review),
+        review: async () => await Promise.resolve(reviewed),
         setCurrent: async (app: string, version: number) => {
           calls.push(`setCurrent ${app} ${version}`);
           await Promise.resolve();
@@ -211,6 +212,44 @@ describe("releasing a version beside the chat", () => {
     await click("Make version 2 current");
 
     expect(calls).toStrictEqual([`setCurrent ${appId} 2`]);
+  });
+
+  it("shows who sees and changes which rows of each table that says so", async () => {
+    const { apps } = fakeApps({
+      ...review,
+      rowRules: [
+        {
+          table: "requests",
+          read: [
+            { kind: "owner" },
+            { kind: "team", field: "team" },
+            { kind: "role", role: "builder" },
+          ],
+          write: [{ kind: "person", field: "assignee" }],
+        },
+        // A table nobody writes (its write mode `none`).
+        {
+          table: "archive",
+          read: [{ kind: "team", field: "team" }],
+          write: null,
+        },
+      ],
+    });
+    await opened(appAt("published"), apps);
+    const section = document.querySelector(
+      'section[aria-label="Who sees which rows"]'
+    );
+
+    expect(
+      [...(section?.querySelectorAll("li > span") ?? [])].map(
+        (line) => line.textContent
+      )
+    ).toStrictEqual([
+      "Read by whoever added the row, members of the team in team, and the App's builders",
+      "Changed by the person in assignee, of the rows they can read",
+      "Read by members of the team in team",
+      "Changed by nobody",
+    ]);
   });
 
   it("only makes a published App's version current", async () => {

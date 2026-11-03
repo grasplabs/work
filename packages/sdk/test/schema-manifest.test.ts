@@ -13,7 +13,7 @@ import {
 } from "../src/host.ts";
 import type { SchemaAccess, SchemaManifest, TableAccess } from "../src/host.ts";
 import type { AnySchema } from "../src/value-schema.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type {
   SchemaDefinition,
   StringSchema,
@@ -675,6 +675,132 @@ describe("reading a manifest", () => {
     expect(codeOf(() => readAnything(manifest))).toBe(
       "schema.invalid_manifest"
     );
+  });
+});
+
+describe("row rules", () => {
+  const requestFields = {
+    title: v.string(),
+    team: v.string(),
+    assignee: v.person().optional(),
+    amount: v.number(),
+  };
+  /** A table declared with `rules` as data, as a manifest may hold any. */
+  const ruled = (rules: unknown): unknown => {
+    const table = defineTable(requestFields);
+    const declare: unknown = Reflect.get(table, "access");
+    if (typeof declare !== "function") {
+      throw new TypeError("A table has `access`");
+    }
+    return Reflect.apply(declare, table, [rules]);
+  };
+  const shared: SchemaAccess = {
+    tables: { requests: { read: "appMembers", write: "appMembers" } },
+  };
+  const ruledSchema = defineSchema({
+    requests: defineTable(requestFields).access({
+      read: [rows.owner(), rows.team("team"), rows.role("builder")],
+      write: [rows.person("assignee")],
+    }),
+  });
+
+  test("are part of the manifest, its hash and its diff, and read back as declared", async () => {
+    const manifest = schemaManifest(ruledSchema, shared);
+    const plain = schemaManifest(
+      defineSchema({ requests: defineTable(requestFields) }),
+      shared
+    );
+    expect(manifest.tables.requests?.rules).toStrictEqual({
+      read: [
+        { kind: "owner" },
+        { kind: "team", field: "team" },
+        { kind: "role", role: "builder" },
+      ],
+      write: [{ kind: "person", field: "assignee" }],
+    });
+    // A table without rules has no `rules` at all: its manifest is the
+    // one it had before rules existed.
+    expect(plain.tables.requests).not.toHaveProperty("rules");
+    await expect(schemaHash(manifest)).resolves.not.toBe(
+      await schemaHash(plain)
+    );
+    expect(readSchemaManifest(manifestText(manifest)).manifest).toStrictEqual(
+      manifest
+    );
+    expect(diffSchemaManifests(plain, manifest).access).toStrictEqual([
+      {
+        table: "requests",
+        before: { read: "appMembers", write: "appMembers" },
+        after: { read: "appMembers", write: "appMembers" },
+        rulesAfter: manifest.tables.requests?.rules,
+      },
+    ]);
+  });
+
+  test("refuse rules that name no field of their kind, or that are malformed", () => {
+    expect({
+      personOnText: codeOf(() => ruled({ read: [rows.person("team")] })),
+      teamOnNumber: codeOf(() => ruled({ read: [rows.team("amount")] })),
+      teamOnPerson: codeOf(() => ruled({ read: [rows.team("assignee")] })),
+      unknownField: codeOf(() => ruled({ read: [rows.person("manager")] })),
+      unknownRole: codeOf(() =>
+        ruled({ read: [{ kind: "role", role: "admin" }] })
+      ),
+      unknownKind: codeOf(() => ruled({ read: [{ kind: "everyone" }] })),
+      extraKey: codeOf(() =>
+        ruled({ read: [{ kind: "owner", field: "team" }] })
+      ),
+      empty: codeOf(() => ruled({ read: [] })),
+      neither: codeOf(() => ruled({})),
+      twice: codeOf(() => ruled({ read: [rows.owner(), rows.owner()] })),
+      unknownDirection: codeOf(() => ruled({ delete: [rows.owner()] })),
+      again: codeOf(() =>
+        defineTable(requestFields)
+          .access({ read: [rows.owner()] })
+          .access({ write: [rows.owner()] })
+      ),
+    }).toStrictEqual({
+      personOnText: "schema.invalid_rules",
+      teamOnNumber: "schema.invalid_rules",
+      teamOnPerson: "schema.invalid_rules",
+      unknownField: "schema.invalid_rules",
+      unknownRole: "schema.invalid_rules",
+      unknownKind: "schema.invalid_rules",
+      extraKey: "schema.invalid_rules",
+      empty: "schema.invalid_rules",
+      neither: "schema.invalid_rules",
+      twice: "schema.invalid_rules",
+      unknownDirection: "schema.invalid_rules",
+      again: "schema.invalid_rules",
+    });
+  });
+
+  test("need an access mode that reaches every row for the direction they choose rows in", () => {
+    const of = (read: TableAccess["read"], write: TableAccess["write"]) =>
+      codeOf(() =>
+        schemaManifest(ruledSchema, { tables: { requests: { read, write } } })
+      );
+    expect({
+      ownerRead: of("owner", "appMembers"),
+      ownerWrite: of("appMembers", "owner"),
+      members: of("appMembers", "appMembers"),
+      builders: of("appBuilders", "appBuilders"),
+      none: of("none", "none"),
+    }).toStrictEqual({
+      ownerRead: "schema.invalid_rules",
+      ownerWrite: "schema.invalid_rules",
+      members: "accepted",
+      builders: "accepted",
+      none: "schema.invalid_rules",
+    });
+  });
+
+  test("a manifest's rules are checked as a declaration's: a tampered one is refused", () => {
+    const text = manifestText(schemaManifest(ruledSchema, shared)).replace(
+      '{"field":"assignee","kind":"person"}',
+      '{"field":"team","kind":"person"}'
+    );
+    expect(codeOf(() => readSchemaManifest(text))).toBe("schema.invalid_rules");
   });
 });
 

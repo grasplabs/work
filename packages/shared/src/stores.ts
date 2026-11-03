@@ -318,13 +318,32 @@ export const storeIntentSchema = z.strictObject({
 });
 
 /**
+ * The most teams a commit or a read names for its person: far more than
+ * anyone is in, so a bound only against a request that is too large.
+ */
+export const callerTeamsMax = 1000;
+
+/**
+ * The IDs of the teams the person a commit or a read is for is in, as
+ * core read them for the invocation, from its own records (never from
+ * what App code sends): what a table's `team` row rules match. None for a
+ * visitor, and when left out.
+ */
+export const callerTeamsSchema = z
+  .array(identifierSchema)
+  .max(callerTeamsMax)
+  .optional();
+
+/**
  * Whether the person a commit or a read is for is a member or a builder
- * of the App it comes through, as core resolved it for the invocation:
- * what `appMembers` and `appBuilders` tables require.
+ * of the App it comes through, and the teams they are in, as core
+ * resolved them for the invocation: what `appMembers` and `appBuilders`
+ * tables require, and what row rules match.
  */
 export const writerRolesSchema = z.strictObject({
   appMember: z.boolean(),
   appBuilder: z.boolean(),
+  teams: callerTeamsSchema,
 });
 export type WriterRoles = z.infer<typeof writerRolesSchema>;
 

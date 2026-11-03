@@ -8,6 +8,7 @@ import {
 import { dataErrors } from "@grasp-os/shared/stores";
 
 import { tableIdLiteral, textExpression } from "./store-expressions.ts";
+import type { Fragment } from "./store-expressions.ts";
 
 // How a table's declared search index (`.searchIndex` in the schema)
 // becomes a full-text index in its store (store-host.ts), and the text an
@@ -59,6 +60,19 @@ import { tableIdLiteral, textExpression } from "./store-expressions.ts";
 //   FTS5 string, its quotes doubled, so it is only ever a phrase; the
 //   column filter and the prefix on the last word are the host's own, and
 //   the whole query is a bound parameter.
+// - A search counts, ranks or answers rows a table's read rules keep from
+//   the caller (store-rules.ts): the rules aren't in the index, so what it
+//   matches is counted joined to the records under their condition
+//   (`requireSearchable`), and the read itself joins under it as every
+//   query does. Accepted residual: its relevance (BM25) still weighs
+//   words by how often they stand in the whole index, rows the caller
+//   can't see included, as it does across owners. No score leaves the
+//   store but sealed in a cursor (store-cursors.ts), yet the order of the
+//   rows they can see moves with it: someone who plants rows of their own
+//   holding chosen words, and searches for two of them, can tell from
+//   which ranks first whether rows they can't see hold a word often. It
+//   tells a word's presence in bulk, never a row or its fields; closing
+//   it needs relevance computed over the caller's rows alone.
 // - A search reads another owner's records: the owner column narrows what
 //   the index answers, but the read itself joins `sdk_records` under the
 //   same `owner_id = ?` every query has (store-queries.ts), so a phrase
@@ -336,17 +350,26 @@ export const searchMatch = (
 /**
  * How many entries of `search` `match` matches, counted up to one past the
  * scan bound and no further: a search past it is refused before anything
- * ranks its matches.
+ * ranks its matches. With `rows` (a table's read rules as a condition on
+ * the caller's view, store-rules.ts), only the matches among the rows they
+ * admit count, joined to their records: what the caller can't read never
+ * moves the count, so a refusal tells nothing of it.
  */
 export const requireSearchable = (
   sql: Pick<SqlStorage, "exec">,
   search: PhysicalSearch,
-  match: string
+  match: string,
+  rows?: Fragment
 ): void => {
+  const matched =
+    rows === undefined
+      ? `SELECT rowid FROM ${search.name} WHERE ${search.name} MATCH ?`
+      : `SELECT 1 FROM (SELECT rowid AS doc FROM ${search.name} WHERE ${search.name} MATCH ?) AS hit JOIN sdk_search_docs ON sdk_search_docs.doc = hit.doc JOIN sdk_records ON sdk_records.table_id = sdk_search_docs.doc_table AND sdk_records.record_id = sdk_search_docs.doc_record WHERE ${rows.sql}`;
   const [row] = sql
     .exec<{ matches: number }>(
-      `SELECT count(*) AS matches FROM (SELECT rowid FROM ${search.name} WHERE ${search.name} MATCH ? LIMIT ${queryMaxScannedEntries + 1})`,
-      match
+      `SELECT count(*) AS matches FROM (${matched} LIMIT ${queryMaxScannedEntries + 1})`,
+      match,
+      ...(rows?.params ?? [])
     )
     .toArray();
   const matches = row?.matches ?? 0;

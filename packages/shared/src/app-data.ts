@@ -19,23 +19,33 @@ export type RecordChangeOp = (typeof recordChangeOps)[number];
 /**
  * What made a change: a commit of the App's (or a consumer's) mutation, a
  * cascade of a deletion (in that commit or after it, as the store's
- * cascade job), or an import of a table's CSV.
+ * cascade job), an import of a table's CSV, or a migration's transform
+ * rewriting a field a table's row rules read.
  */
-export const recordChangeSources = ["commit", "cascade", "import"] as const;
+export const recordChangeSources = [
+  "commit",
+  "cascade",
+  "import",
+  "migration",
+] as const;
 export type RecordChangeSource = (typeof recordChangeSources)[number];
 
 /**
  * Why a change keeps its fields' names but not their values: its table is
  * declared sensitive (`defineTable(...).sensitive()`), the values were
  * larger than a change keeps, the change didn't read them (a cascade job
- * deletes a record without loading it), or the person who made it was
- * erased, and what they wrote with them.
+ * deletes a record without loading it), the person who made it was
+ * erased, and what they wrote with them, or a migration rewrote it, which
+ * keeps no values: a record's history as
+ * a reader its table's row rules choose rows for reads it stops there,
+ * as its states before can't be told.
  */
 export const valuesLeftOutReasons = [
   "sensitive",
   "too_large",
   "unread",
   "erased",
+  "rewritten",
 ] as const;
 export type ValuesLeftOut = (typeof valuesLeftOutReasons)[number];
 
@@ -196,6 +206,8 @@ export const appDataErrors = defineErrorFamily({
   "app_data.export_too_large": `A table exports at most ${appDataExportMaxRecords} records.`,
   "app_data.version_changed":
     "This App changed. Reload to see its current version.",
+  "app_data.access_changed":
+    "Your teams changed while this ran, so the rows you may reach did too. Start it again.",
 });
 
 /** An App's data, through `apps.data`: for its builders and the admins. */

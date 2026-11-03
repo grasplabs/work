@@ -38,6 +38,7 @@ import {
 import type { FieldTypes, Fragment } from "./store-expressions.ts";
 import { defaultIndexName } from "./store-indexes.ts";
 import type { PhysicalIndex } from "./store-indexes.ts";
+import { ruleSql } from "./store-rules.ts";
 import { requireSearchable, searchMatch } from "./store-search.ts";
 import type { PhysicalSearch } from "./store-search.ts";
 
@@ -60,6 +61,19 @@ import type { PhysicalSearch } from "./store-search.ts";
 //   and pages are computed over the caller's records only, and the owner
 //   leads the index, so other owners' records are never scanned either.
 //   Nothing is filtered after the fact.
+// - A caller reads rows a table's row rules keep from them (store-rules.ts
+//   has their own threat model), through any path: the rules' condition
+//   (`ReadTable.rows`, from the pinned schema and core's scope) joins the
+//   owner predicate in the WHERE clause of every statement a read runs,
+//   `get`, a query's every terminal and page, a cursor's anchor, a
+//   search, a group and the related records `with` loads alike. A row it
+//   excludes never reaches JavaScript: it isn't counted, summed, grouped,
+//   ranked into a page or answered as a related record (it is null, as a
+//   missing one is), and it doesn't count against the scan bound either,
+//   so `data.scan_limit` tells nothing of how many rows the caller can't
+//   see. The rules aren't in the index, so SQLite steps over those rows
+//   inside the statement: the cost of a sparse view is time, bounded by
+//   the store's size, never what the caller learns.
 // - A record ID discloses another table's or owner's record: `get` looks a
 //   record up by its table and ID, under the same owner predicate, and
 //   answers null for a record that is missing, in another table or not
@@ -134,13 +148,39 @@ const managedBases: Readonly<Record<string, IndexBase>> = {
 const invalid = (issue: string): Error =>
   dataErrors.create("data.invalid_query", { issues: [issue] });
 
-/** A table of the pinned schema, and whether it is read by owner only. */
+/**
+ * A table of the pinned schema, whether it is read by owner only, and the
+ * condition its read rules set on a row for the caller.
+ */
 export interface ReadTable {
   readonly name: string;
   readonly tableId: string;
   readonly declared: ManifestTable;
   readonly ownerScoped: boolean;
+  /**
+   * The rows the caller may read, as a condition on `sdk_records`'s
+   * columns (`ruleSql`): undefined when the table's read rules (if it has
+   * any) admit every row of it to them.
+   */
+  readonly rows: Fragment | undefined;
 }
+
+/** `table`'s owner predicate and row condition, as WHERE terms. */
+const scopeTerms = (table: ReadTable, scope: ReadScope): Fragment[] => [
+  ...(table.ownerScoped
+    ? [{ sql: "owner_id = ?", params: [scope.principal] }]
+    : []),
+  ...(table.rows === undefined ? [] : [table.rows]),
+];
+
+/** `table`'s owner predicate and row condition, as `AND`ed onto a WHERE. */
+const scopeClause = (table: ReadTable, scope: ReadScope): Fragment => {
+  const terms = scopeTerms(table, scope);
+  return {
+    sql: terms.map(({ sql }) => ` AND ${sql}`).join(""),
+    params: terms.flatMap(({ params }) => params),
+  };
+};
 
 /**
  * Table `name` of the pinned schema, if the caller may read it: refused
@@ -169,7 +209,13 @@ export const readableTable = (
   if (!admitted) {
     throw dataErrors.create("data.access_denied", { table: name });
   }
-  return { name, tableId, declared, ownerScoped: mode === "owner" };
+  return {
+    name,
+    tableId,
+    declared,
+    ownerScoped: mode === "owner",
+    rows: ruleSql(declared.rules?.read, scope),
+  };
 };
 
 /** The types of `table`'s fields, as the emitter checks conditions by. */
@@ -491,14 +537,13 @@ export const readRecord = (
   request: GetRequest
 ): ReadDocument | null => {
   const table = readableTable(pinned, scope, request.table);
-  const owner = table.ownerScoped ? " AND owner_id = ?" : "";
-  const params = table.ownerScoped
-    ? [table.tableId, request.id, scope.principal]
-    : [table.tableId, request.id];
+  const scoped = scopeClause(table, scope);
   const [row] = sql
     .exec<ReadRow & { value_json: string }>(
-      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json FROM sdk_records WHERE table_id = ? AND record_id = ?${owner}`,
-      ...params
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
+      table.tableId,
+      request.id,
+      ...scoped.params
     )
     .toArray();
   if (row === undefined) {
@@ -625,10 +670,10 @@ export const planQuery = (
       : []),
   ];
   const seekTerms = seek?.terms ?? [];
+  const scoped = scopeTerms(table, scope);
   const where = [
     `table_id = ${tableIdLiteral(table.tableId)}`,
-    ...(table.ownerScoped ? ["owner_id = ?"] : []),
-    ...[access.where, ...seekTerms]
+    ...[...scoped, access.where, ...seekTerms]
       .map(({ sql }) => sql)
       .filter((term) => term !== ""),
   ];
@@ -640,7 +685,7 @@ export const planQuery = (
     statement: `SELECT ${columns.join(", ")} FROM sdk_records INDEXED BY ${access.index} WHERE ${where.join(" AND ")} ORDER BY ${order.join(", ")} LIMIT ${queryMaxScannedEntries + 1}`,
     params: [
       ...(filter?.params ?? []),
-      ...(table.ownerScoped ? [scope.principal] : []),
+      ...scoped.flatMap(({ params }) => params),
       ...access.where.params,
       ...seekTerms.flatMap(({ params }) => params),
     ],
@@ -913,12 +958,13 @@ const anchorValuesOf = (
   const columns = fields.map(
     (field, position) => `${fieldExpression(field)} AS o${position}`
   );
+  const scoped = scopeClause(table, scope);
   const [row] = sql
     .exec(
-      `SELECT ${["record_id", ...columns].join(", ")} FROM sdk_records WHERE table_id = ? AND record_id = ?${table.ownerScoped ? " AND owner_id = ?" : ""}`,
+      `SELECT ${["record_id", ...columns].join(", ")} FROM sdk_records WHERE table_id = ? AND record_id = ?${scoped.sql}`,
       table.tableId,
       id,
-      ...(table.ownerScoped ? [scope.principal] : [])
+      ...scoped.params
     )
     .toArray();
   if (row === undefined) {
@@ -977,7 +1023,8 @@ const scannedBytes = (scan: Scan, bytes: number): void => {
 // the caller has to the table they belong to, as `get` reads one: a table
 // the caller can't read at all is withheld (`{ _withheld: true }`) for
 // every record, and a record of it the caller may not see (another
-// owner's, or gone) is null, never told apart from one that doesn't exist.
+// owner's, one its read rules keep from them, or gone) is null, never told
+// apart from one that doesn't exist.
 // Every ID looked up counts as an entry against the read's scan bound,
 // and every related document's bytes against its byte bound, together
 // with what the read itself examined.
@@ -1086,11 +1133,12 @@ const recordsById = (
   for (const _id of ids) {
     scanned(scan, 0);
   }
+  const scoped = scopeClause(target, scope);
   const rows = sql.exec<ReadRow & { value_json: string; bytes: number }>(
-    `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${target.ownerScoped ? " AND owner_id = ?" : ""}`,
+    `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
     target.tableId,
     JSON.stringify([...ids]),
-    ...(target.ownerScoped ? [scope.principal] : [])
+    ...scoped.params
   );
   for (const row of rows) {
     scannedBytes(scan, row.bytes);
@@ -1241,9 +1289,10 @@ const searchPlan = (
     ...(filter === null ? [] : [`${filter.sql} AS matched`]),
     "hit.score AS o0",
   ];
+  const scoped = scopeTerms(table, scope);
   const where = [
     `sdk_records.table_id = ${tableIdLiteral(table.tableId)}`,
-    ...(table.ownerScoped ? ["owner_id = ?"] : []),
+    ...scoped.map(({ sql }) => sql),
     ...(seek === undefined
       ? []
       : ["(hit.score > ? OR (hit.score = ? AND record_id > ?))"]),
@@ -1254,7 +1303,7 @@ const searchPlan = (
     params: [
       ...(filter?.params ?? []),
       match,
-      ...(table.ownerScoped ? [scope.principal] : []),
+      ...scoped.flatMap(({ params }) => params),
       ...(seek === undefined ? [] : [seek.score, seek.score, seek.id]),
     ],
     filtered: filter !== null,
@@ -1281,7 +1330,10 @@ const searchMatches = (
     return [][Symbol.iterator]();
   }
   const match = searchMatch(search, terms, scope.principal);
-  requireSearchable(sql, search, match);
+  // Counted among the rows the caller may read, when rules choose them:
+  // a count of every match would tell how often a word stands in rows
+  // they can't see.
+  requireSearchable(sql, search, match, table.rows);
   return matchesOf(
     sql,
     searchPlan(scope, table, query, search, match, seek),

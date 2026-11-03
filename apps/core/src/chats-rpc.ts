@@ -54,6 +54,7 @@ import { z } from "zod";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
@@ -198,6 +199,16 @@ const buildsNow = async (
   }
 };
 
+/** A builder's roles in an App, with the teams they are in now, as a key. */
+const builderRolesKey = async (env: Env, userId: string): Promise<string> => {
+  const teams = await teamsOf(env.DB, userId);
+  return canonicalJson({
+    appMember: true,
+    appBuilder: true,
+    teams: teams.map(({ id }) => id).toSorted(),
+  });
+};
+
 /**
  * A page's live reads of its previews (query-subscriptions.ts): as the
  * person behind the connection's session, pushed only while they build
@@ -220,9 +231,12 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
       ? "open"
       : "role";
   },
+  // The teams they are in now with them, which a table's row rules read
+  // (store-rules.ts): a preview read under one set is never pushed under
+  // another, as for an App's own screens (query-subscriptions.ts).
   roles: async (by, app) =>
     (await buildsNow(env, by, app))
-      ? canonicalJson({ appMember: true, appBuilder: true })
+      ? await builderRolesKey(env, by.userId)
       : undefined,
   admit: async (by, app, cost) =>
     await appHost(env, app).admitLiveRead(by.userId, cost),

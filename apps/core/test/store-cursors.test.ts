@@ -18,7 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { cursorKeysOf, openCursor } from "../src/store-cursors.ts";
+import { cursorKeysOf, openCursor, sealCursor } from "../src/store-cursors.ts";
 import type { CursorBinding } from "../src/store-cursors.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
@@ -915,12 +915,8 @@ describe("seeks", () => {
   });
 });
 
-describe("a query's cursor from before searches", () => {
-  it("still opens: a query binds nothing of a search", async () => {
-    // Sealed by this module as it was before searches existed, under a
-    // store key of 0x11 bytes, for the binding below.
-    const issued =
-      "1.sT6LnPfRSu94IHbQqV82DL5zVEw2vDeYOqOWFKBF8hM7TzJWK-Ou_d8kC5lErwE9oO-IMV9i9w_XTg.9FpvHHaybSlfn5Ma37wGUvBiRqSNmqSlHJM1spVyfmw.DOZnTANzPkOEHathL9mnDlue1AGkzQ337WOnxczc18I";
+describe("a query's cursor", () => {
+  it("opens only for the teams and the kind of read it was sealed for", async () => {
     const binding: CursorBinding = {
       storeId: "store-1",
       schemaHash: "a".repeat(64),
@@ -928,6 +924,7 @@ describe("a query's cursor from before searches", () => {
       principal: "ada",
       appMember: true,
       appBuilder: false,
+      teams: ["sales", "support"],
       table: "notes",
       index: "by_title",
       range: [],
@@ -937,14 +934,34 @@ describe("a query's cursor from before searches", () => {
       searchGeneration: null,
     };
     const keys = await cursorKeysOf("11".repeat(32));
-    await expect(openCursor(keys, binding, issued)).resolves.toStrictEqual({
+    const issued = await sealCursor(keys, binding, {
       id: "n-1",
       values: [["t1"]],
     });
-    // A search's binding is another, which no query's cursor opens.
-    await expect(
-      openCursor(keys, { ...binding, search: "t1" }, issued)
-    ).rejects.toMatchObject({ code: "data.invalid_cursor" });
+    const opened = async (
+      changes: Partial<CursorBinding>
+    ): Promise<unknown> => {
+      try {
+        return await openCursor(keys, { ...binding, ...changes }, issued);
+      } catch (error) {
+        const code: unknown =
+          error instanceof Error ? Reflect.get(error, "code") : error;
+        return code;
+      }
+    };
+    expect({
+      // The same teams in another order are the same teams.
+      same: await opened({ teams: ["support", "sales"] }),
+      teamLeft: await opened({ teams: ["support"] }),
+      teamJoined: await opened({ teams: ["sales", "support", "board"] }),
+      // A search's binding is another, which no query's cursor opens.
+      search: await opened({ search: "t1" }),
+    }).toStrictEqual({
+      same: { id: "n-1", values: [["t1"]] },
+      teamLeft: "data.invalid_cursor",
+      teamJoined: "data.invalid_cursor",
+      search: "data.invalid_cursor",
+    });
   });
 });
 

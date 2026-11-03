@@ -18,7 +18,13 @@ export {
   SchemaDefinitionError,
   schemaLimits,
 } from "./schema.ts";
-export type { IndexBase, SchemaDefinitionCode } from "./schema.ts";
+export type {
+  IndexBase,
+  RowRole,
+  RowRule,
+  RowRules,
+  SchemaDefinitionCode,
+} from "./schema.ts";
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "./value-descriptor.ts";
 

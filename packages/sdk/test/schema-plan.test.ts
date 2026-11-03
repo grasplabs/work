@@ -7,7 +7,7 @@ import {
   schemaManifest,
 } from "../src/host.ts";
 import type { SchemaAccess, SchemaManifest, SchemaPlan } from "../src/host.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type { ValueShape } from "../src/values.ts";
 
 // How a store's data contract changes when it is handed a schema: which
@@ -440,6 +440,32 @@ describe("changes that need a migration", () => {
     expect(refusedOf(planSchemaChange(shared, v1))).toStrictEqual([
       { table: "notes", reason: "access_changed" },
     ]);
+  });
+
+  test("a changed row rule is refused, looser or tighter, as an access mode is", () => {
+    const shared: SchemaAccess = {
+      tables: { notes: { read: "appMembers", write: "appMembers" } },
+    };
+    const fields = { title: v.string(), team: v.string() };
+    const plain = schemaManifest(
+      defineSchema({ notes: defineTable(fields) }),
+      shared
+    );
+    const byTeam = schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({ read: [rows.team("team")] }),
+      }),
+      shared
+    );
+    expect({
+      added: refusedOf(planSchemaChange(plain, byTeam)),
+      removed: refusedOf(planSchemaChange(byTeam, plain)),
+      kept: planSchemaChange(byTeam, byTeam).accepted,
+    }).toStrictEqual({
+      added: [{ table: "notes", reason: "access_changed" }],
+      removed: [{ table: "notes", reason: "access_changed" }],
+      kept: true,
+    });
   });
 
   test("a required field left out is refused: the schema's inserts would lack it", () => {

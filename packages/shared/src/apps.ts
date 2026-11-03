@@ -299,6 +299,20 @@ export type FileDiff =
 /** How something differs from the current version. */
 export type ReviewChange = "added" | "modified" | "removed";
 
+/** One row rule, as a version's review shows it (`VersionReview.rowRules`). */
+export type ReviewedRowRule =
+  | { kind: "owner" }
+  | { kind: "person"; field: string }
+  | { kind: "team"; field: string }
+  | { kind: "role"; role: "builder" | "user" };
+
+/** A table's row rules, as a version's review shows them. */
+export interface TableRowRules {
+  table: string;
+  read: ReviewedRowRule[] | null;
+  write: ReviewedRowRule[] | null;
+}
+
 /**
  * What a version changes, as its reviewer reads it before making it
  * current (`AppVersionsApi.review`): worked out by core from the version
@@ -428,6 +442,18 @@ export interface VersionReview {
    * it. Null when its manifest can't be read.
    */
   readsPeople: boolean | null;
+  /**
+   * Who sees and changes which rows of its tables, for each table that
+   * declares row rules (`defineTable(...).access`, GRA-1482). `read`: its
+   * read rules, or null for reading left to the table's access mode.
+   * `write`: who changes its rows, as the store holds a write: its write
+   * rules; without them its read rules (for a write mode that reaches
+   * every row) or the owner (for an `owner` mode), each of the rows they
+   * can read too; null when nobody writes them (a `none` mode). A row
+   * reaches whoever any of a direction's rules admits. Null when its
+   * manifest can't be read.
+   */
+  rowRules: TableRowRules[] | null;
   /**
    * What the App asks for that no admin has granted yet: each waits for
    * an admin, whether the version is made current or not.

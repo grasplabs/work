@@ -12,6 +12,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type {
   AcceptedPlan,
+  ManifestTable,
   PlannedField,
   PreferencesContract,
   ReadManifest,
@@ -57,6 +58,7 @@ import {
   receiptScopeSchema,
   storedFieldsSchema,
   tableNameSchema,
+  writerRolesSchema,
 } from "@grasp-os/shared/stores";
 import type {
   AppliedContract,
@@ -137,6 +139,7 @@ import { recordBackfillAbandoned } from "./store-abandon.ts";
 import { keepStoreBackfillGoing } from "./store-backfill.ts";
 import {
   historyDueAt,
+  admittedHistoryOf,
   historyOf,
   pruneHistory,
   recordChangesIn,
@@ -146,6 +149,7 @@ import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
 import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
+import type { Fragment } from "./store-expressions.ts";
 import { defaultedFieldsOf, filledIn } from "./store-fills.ts";
 import type { DefaultedField, DefaultedFields } from "./store-fills.ts";
 import { installIndexes, planIndexes } from "./store-indexes.ts";
@@ -186,6 +190,8 @@ import type {
   RecordSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
+import { ruleSql } from "./store-rules.ts";
+import type { RuleCaller } from "./store-rules.ts";
 import {
   dropSearches,
   installSearches,
@@ -356,6 +362,32 @@ interface CascadeStart {
   readonly now: number;
 }
 
+/**
+ * `admits`, asked once for each distinct value of the fields `table`'s
+ * read rules read: the states a history is rebuilt through mostly share
+ * them, so a record with a long history costs a check per team or
+ * assignee it had, not per change.
+ */
+const admittedOnce = (
+  table: ManifestTable,
+  admits: (fields: StoreFields) => boolean
+): ((fields: StoreFields) => boolean) => {
+  const ruleFields = (table.rules?.read ?? [])
+    .map((rule) => ("field" in rule ? rule.field : undefined))
+    .filter((field) => field !== undefined);
+  const known = new Map<string, boolean>();
+  return (fields) => {
+    const key = canonicalJson(
+      ruleFields.map((field) =>
+        Object.hasOwn(fields, field) ? (fields[field] ?? null) : null
+      )
+    );
+    const answer = known.get(key) ?? admits(fields);
+    known.set(key, answer);
+    return answer;
+  };
+};
+
 /** Where a staged record is kept: its table and ID, which can't collide. */
 const keyOf = (tableId: string, recordId: string): string =>
   JSON.stringify([tableId, recordId]);
@@ -441,7 +473,7 @@ const importApplySchema = z.strictObject({
   importId: z.uuid(),
   principal: identifierSchema,
   actor: auditActorSchema,
-  roles: z.strictObject({ appMember: z.boolean(), appBuilder: z.boolean() }),
+  roles: writerRolesSchema,
   schemaHash: z.string().regex(/^[0-9a-f]{64}$/u),
   /** How many rows core staged: all of them must be there. */
   rows: z.int().min(1).max(appDataImportLimits.maxRows),
@@ -3011,6 +3043,13 @@ export class StoreHost {
     const opened = searchGenerationOf(
       this.#generationsOf(pinned, [query.table])
     );
+    // The teams, only when a `team` rule of the table reads them: a page
+    // read under other teams sees other rows then, and nothing else a
+    // cursor anchors depends on them (related records are read again
+    // under the reader's teams on every page).
+    const readsTeams = (
+      pinned.manifest.tables[query.table]?.rules?.read ?? []
+    ).some(({ kind }) => kind === "team");
     const binding: CursorBinding = {
       storeId,
       schemaHash: reader.schemaHash,
@@ -3018,6 +3057,7 @@ export class StoreHost {
       principal: reader.principal,
       appMember: reader.appMember,
       appBuilder: reader.appBuilder,
+      teams: readsTeams ? (reader.teams ?? []) : [],
       table: query.table,
       index: query.index,
       range: query.range,
@@ -3516,9 +3556,15 @@ export class StoreHost {
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       const readable = readableTable(pinned, reader, name);
-      if (readable.ownerScoped) {
+      // A record's history is read by whoever may read the record now:
+      // its owner for an `owner` table, whoever its read rules admit to it
+      // as it stands for a table with rules (store-rules.ts), and then only
+      // the changes whose every state they admit them to
+      // (`admittedHistoryOf`). One they may not read, or that is gone,
+      // shows none, as one with no history.
+      if (readable.ownerScoped || readable.rows !== undefined) {
         const row = this.#db
-          .select({ ownerId: records.ownerId })
+          .select({ ownerId: records.ownerId, valueJson: records.valueJson })
           .from(records)
           .where(
             and(
@@ -3527,8 +3573,25 @@ export class StoreHost {
             )
           )
           .get();
-        if (row?.ownerId !== reader.principal) {
+        const mayRead =
+          row !== undefined &&
+          (!readable.ownerScoped || row.ownerId === reader.principal) &&
+          this.#ruleAdmits(readable.rows, fieldsOf(row), row.ownerId);
+        if (!mayRead) {
           return { changes: [], next: null };
+        }
+        const { rows } = readable;
+        if (rows !== undefined) {
+          return admittedHistoryOf(
+            this.#db,
+            readable.tableId,
+            recordId,
+            after,
+            fieldsOf(row),
+            admittedOnce(readable.declared, (fields) =>
+              this.#ruleAdmits(rows, fields, row.ownerId)
+            )
+          );
         }
       }
       return historyOf(this.#db, readable.tableId, recordId, after);
@@ -3868,10 +3931,23 @@ export class StoreHost {
       }
       return tableId;
     };
-    /** Whether `roles` may write `table`, and whether only their own records. */
-    const writable = (table: string): { tableId: string; own: boolean } => {
+    const caller: RuleCaller = { principal, ...roles };
+    /**
+     * Whether `roles` may write `table`, whether only their own records,
+     * and the conditions its row rules set on a row they write: its read
+     * rules and its write rules (its read rules where it declares none
+     * for writing), both of which a row must pass before and after.
+     */
+    const writable = (
+      table: string
+    ): {
+      tableId: string;
+      own: boolean;
+      rows: readonly (Fragment | undefined)[];
+    } => {
       const tableId = tableIdOf(table);
-      const mode = pinned.manifest.tables[table]?.access.write ?? "none";
+      const declared = pinned.manifest.tables[table];
+      const mode = declared?.access.write ?? "none";
       const admitted =
         mode === "owner" ||
         (mode === "appMembers" && (roles.appMember || roles.appBuilder)) ||
@@ -3879,7 +3955,15 @@ export class StoreHost {
       if (!admitted) {
         throw dataErrors.create("data.write_denied", { table });
       }
-      return { tableId, own: mode === "owner" };
+      const rules = declared?.rules;
+      return {
+        tableId,
+        own: mode === "owner",
+        rows: [
+          ruleSql(rules?.read, caller),
+          ruleSql(rules?.write ?? rules?.read, caller),
+        ],
+      };
     };
     const staged = new Map<string, Staged>();
     const stage = (
@@ -3956,13 +4040,32 @@ export class StoreHost {
     afterGuards?.();
     const inserted: string[] = [];
     for (const write of writes) {
-      const { tableId, own } = writable(write.table);
+      const { tableId, own, rows } = writable(write.table);
+      /** Whether the table's read and write rules both admit the writer. */
+      const admits = (fields: StoreFields, owner: string): boolean =>
+        rows.every((condition) => this.#ruleAdmits(condition, fields, owner));
+      // A write reaches a row only while the table's read and write rules
+      // both admit the writer to it (as Postgres's row security's USING
+      // and WITH CHECK), and leaves it only where they still do: a write
+      // that would move a row out of their reach (another assignee,
+      // another team) is refused whole, and so is one that would make a
+      // row they can't read readable. `owner` never moves (the host keeps
+      // it), so a rule on it always holds after.
+      const keepsInReach = (entry: Staged): void => {
+        if (
+          entry.fields !== null &&
+          !admits(entry.fields, entry.base?.ownerId ?? principal)
+        ) {
+          throw dataErrors.create("data.write_denied", { table: write.table });
+        }
+      };
       if (write.op === "insert") {
         const entry = stage(write.table, tableId, write.id);
         if (entry.base !== undefined || entry.fields !== null) {
           throw conflict(write.table, write.id);
         }
         entry.fields = write.fields;
+        keepsInReach(entry);
         inserted.push(write.id);
         continue;
       }
@@ -3973,6 +4076,13 @@ export class StoreHost {
         write.expectedRevision,
         own
       );
+      // A row the rules keep from the writer, for reading or writing, is
+      // answered as one that isn't there, as `owner` answers another's
+      // (`at`): a patch, replacement or deletion learns nothing of it,
+      // and can't move it into their sight.
+      if (!admits(fields, entry.base?.ownerId ?? principal)) {
+        throw conflict(write.table, write.id);
+      }
       if (write.op === "delete") {
         entry.fields = null;
       } else if (write.op === "replace") {
@@ -3996,6 +4106,7 @@ export class StoreHost {
           )
         );
       }
+      keepsInReach(entry);
     }
     const cascadeJob = this.#cascade(staged, stage, preview);
     // What the commit writes gets the contract's defaulted fields it
@@ -4794,7 +4905,7 @@ export class StoreHost {
             (held.has(keyOf(toTableId, reference.id)) ||
               (read
                 ? this.#referable(pinned, byKey, principal, roles, target)
-                : this.#ownerAfter(byKey, principal, target) !== undefined));
+                : this.#recordAfter(byKey, principal, target) !== undefined));
           // No new reference to a record a cascade job is deleting: its
           // plan would never delete what refers to it.
           if (
@@ -4895,8 +5006,9 @@ export class StoreHost {
   /**
    * Whether record `target` exists once the commit's `staged` records are
    * written, and `principal` with `roles` may read it under the pinned
-   * schema's access: its table's read mode admits them, and for an
-   * `owner` table, the record is theirs (one this commit inserts is).
+   * schema's access: its table's read mode admits them, for an `owner`
+   * table the record is theirs (one this commit inserts is), and its
+   * table's read rules admit them to it as it is then.
    */
   #referable(
     pinned: PinnedSchema,
@@ -4905,9 +5017,10 @@ export class StoreHost {
     roles: WriterRoles,
     target: { table: string; tableId: string; recordId: string }
   ): boolean {
-    const mode = Object.hasOwn(pinned.manifest.tables, target.table)
-      ? pinned.manifest.tables[target.table]?.access.read
+    const declared = Object.hasOwn(pinned.manifest.tables, target.table)
+      ? pinned.manifest.tables[target.table]
       : undefined;
+    const mode = declared?.access.read;
     const admitted =
       mode === "owner" ||
       (mode === "appMembers" && (roles.appMember || roles.appBuilder)) ||
@@ -4915,23 +5028,31 @@ export class StoreHost {
     if (!admitted) {
       return false;
     }
-    const owner = this.#ownerAfter(staged, principal, target);
-    return owner !== undefined && (mode !== "owner" || owner === principal);
+    const after = this.#recordAfter(staged, principal, target);
+    return (
+      after !== undefined &&
+      (mode !== "owner" || after.owner === principal) &&
+      this.#ruleAdmits(
+        ruleSql(declared?.rules?.read, { principal, ...roles }),
+        after.fields,
+        after.owner
+      )
+    );
   }
 
   /**
-   * The owner of record `target` once the commit's `staged` records are
-   * written, or undefined when it doesn't exist then.
+   * The owner and fields of record `target` once the commit's `staged`
+   * records are written, or undefined when it doesn't exist then.
    */
-  #ownerAfter(
+  #recordAfter(
     staged: ReadonlyMap<string, Staged>,
     principal: string,
     target: { tableId: string; recordId: string }
-  ): string | undefined {
+  ): { owner: string; fields: StoreFields } | undefined {
     const entry = staged.get(keyOf(target.tableId, target.recordId));
     if (entry === undefined) {
-      return this.#db
-        .select({ owner: records.ownerId })
+      const row = this.#db
+        .select({ owner: records.ownerId, valueJson: records.valueJson })
         .from(records)
         .where(
           and(
@@ -4939,11 +5060,40 @@ export class StoreHost {
             eq(records.recordId, target.recordId)
           )
         )
-        .get()?.owner;
+        .get();
+      return row === undefined
+        ? undefined
+        : { owner: row.owner, fields: fieldsOf(row) };
     }
     return entry.fields === null
       ? undefined
-      : (entry.base?.ownerId ?? principal);
+      : { owner: entry.base?.ownerId ?? principal, fields: entry.fields };
+  }
+
+  /**
+   * Whether `rows` (one direction of a table's row rules as a condition,
+   * `ruleSql`) admits a record of these `fields` and `owner`: run by
+   * SQLite over the record as a commit leaves it, so a write is decided by
+   * the very condition a read of the stored record is. No condition admits
+   * every record.
+   */
+  #ruleAdmits(
+    rows: Fragment | undefined,
+    fields: StoreFields,
+    owner: string
+  ): boolean {
+    if (rows === undefined) {
+      return true;
+    }
+    const [row] = this.ctx.storage.sql
+      .exec<{ admitted: number }>(
+        `SELECT ${rows.sql} AS admitted FROM (SELECT ? AS value_json, ? AS owner_id)`,
+        ...rows.params,
+        storedText(fields),
+        owner
+      )
+      .toArray();
+    return row?.admitted === 1;
   }
 
   /**
@@ -5644,6 +5794,7 @@ export class StoreHost {
             )
           )
           .run();
+        this.#keepRewritten(record, valueJson);
         wrote = true;
       }
       dropWork(this.#db, target, tableId, record.recordId);
@@ -5903,7 +6054,62 @@ export class StoreHost {
         )
       )
       .run();
+    // No history row: a fill adds a defaulted field, never one a row rule
+    // reads (rules name fields their table had, and never change on it),
+    // so no history read by rules is rebuilt through it (`#keepRewritten`).
     return true;
+  }
+
+  /**
+   * Keeps in the record's history that a migration's transform rewrote it
+   * to `valueJson`, when the rewrite changed a field its table's read
+   * rules read (a team, an assignee): which fields changed, made by Grasp,
+   * never their values. A
+   * history read by row rules stops there (`admittedHistoryOf`), as what
+   * the record held before can't be told, so no state from before the
+   * move shows to someone it didn't admit. Any other rewrite keeps
+   * nothing: the states a history is rebuilt through differ only in fields
+   * no rule reads, which decide nothing of what it shows, and a migration
+   * of a large table doesn't crowd every edit out of the store's bounded
+   * history.
+   */
+  #keepRewritten(record: typeof records.$inferSelect, valueJson: string): void {
+    const rules =
+      this.#contractNow()?.tables[this.#tableName(record.tableId)]?.rules;
+    const ruleFields = (rules?.read ?? [])
+      .map((rule) => ("field" in rule ? rule.field : undefined))
+      .filter((field) => field !== undefined);
+    const before = fieldsOf(record);
+    const after = fieldsOf({ valueJson });
+    const moved = ruleFields.some(
+      (field) =>
+        canonicalJson(before[field] ?? null) !==
+        canonicalJson(after[field] ?? null)
+    );
+    if (!moved) {
+      return;
+    }
+    recordChangesIn(
+      this.#db,
+      [
+        {
+          tableId: record.tableId,
+          tableName: this.#tableName(record.tableId),
+          recordId: record.recordId,
+          before,
+          after,
+          rewritten: true,
+          sensitive: false,
+        },
+      ],
+      {
+        source: "migration",
+        actor: { type: "system" },
+        commit: null,
+        principal: record.ownerId,
+      },
+      Date.now()
+    );
   }
 
   /**

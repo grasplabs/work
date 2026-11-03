@@ -18,7 +18,7 @@ import { memberPeople } from "./app-people.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
+import { memberRole, teamsOf } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import {
@@ -588,7 +588,13 @@ export const callStoreOperation = async (
       await caller.stillAllowed?.();
       // A member of the store's App for the operations granted, never a
       // builder: what only its builders may read or write stays theirs.
-      return { appMember: true, appBuilder: false };
+      // The teams they are in now, for its tables' `team` row rules.
+      const teams = await teamsOf(env.DB, caller.principal);
+      return {
+        appMember: true,
+        appBuilder: false,
+        teams: teams.map(({ id }) => id),
+      };
     },
     // Who calls: the person the consumer acts for, a user of the store's
     // App, as the gate above has them.

@@ -42,8 +42,14 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   of every change made for them, whoever acted (store-host.ts,
 //   `forgetPerson`, by `principal` and the actor).
 // - The history leaking records the reader can't read: it is read only
-//   through a table the reader's roles may read, and for an `owner` table
-//   only of a record that is theirs now (app-data.ts, store-host.ts).
+//   through a table the reader's roles may read, for an `owner` table only
+//   of a record that is theirs now, and for a table with row rules only of
+//   a record its rules admit them to now, and then only the changes whose
+//   before and after states the rules admit them to, nothing past a change
+//   that kept no values (`admittedHistoryOf`; app-data.ts, store-host.ts).
+//   A migration that rewrites a field a read rule reads keeps such a
+//   change, so the states before a rewrite that moved the record into the
+//   reader's sight never show.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -66,6 +72,11 @@ export interface ChangeInput {
   readonly after: StoreFields | null;
   /** The fields were never read (a cascade job's deletion). */
   readonly unread?: true;
+  /**
+   * A migration's transform rewrote a field a row rule reads:
+   * which fields changed is kept, never their values.
+   */
+  readonly rewritten?: true;
   readonly sensitive: boolean;
 }
 
@@ -161,6 +172,8 @@ export const recordChangesIn = (
     let afterJson: string | null = null;
     if (change.unread === true) {
       leftOut = "unread";
+    } else if (change.rewritten === true) {
+      leftOut = "rewritten";
     } else if (change.sensitive) {
       leftOut = "sensitive";
     } else {
@@ -329,6 +342,110 @@ const changeOf = (row: typeof recordChanges.$inferSelect): RecordChange => ({
       : valuesSchema.parse(JSON.parse(row.afterJson)),
   valuesLeftOut: row.valuesLeftOut,
 });
+
+/** How many changes a history read by row rules reads at once. */
+const historyChunk = 100;
+
+/**
+ * The record as it was before `change`, from `after`, as it was just
+ * after it: each field the change named back at the value it had, or
+ * left out where it had none. Undefined when the change kept no values
+ * (`valuesLeftOut`), so what the record held before can't be told.
+ */
+const stateBefore = (
+  change: RecordChange,
+  after: StoreFields
+): StoreFields | undefined => {
+  if (change.op === "insert") {
+    return {};
+  }
+  const { before } = change;
+  if (before === null) {
+    return undefined;
+  }
+  const state: StoreFields = {};
+  for (const [name, value] of Object.entries(after)) {
+    if (!change.fields.includes(name)) {
+      Object.defineProperty(state, name, { enumerable: true, value });
+    }
+  }
+  for (const name of change.fields) {
+    const value = Object.hasOwn(before, name) ? before[name] : undefined;
+    if (value !== undefined) {
+      Object.defineProperty(state, name, { enumerable: true, value });
+    }
+  }
+  return state;
+};
+
+/**
+ * A page of the history of record `recordId` of table `tableId`, as a
+ * reader its table's read rules choose rows for may read it: only the
+ * changes whose record, before and after, the rules admitted them to
+ * (`admits`), so no state of the record they weren't let see shows, a
+ * team it was moved from included. Each state is the record as it stands
+ * now (`current`) with the newer changes undone, newest first; once a
+ * change kept no values (a sensitive table's, one too large), what came
+ * before can't be told, and nothing older shows. Newest first, before
+ * change `before` if given, with where the next page starts.
+ */
+export const admittedHistoryOf = (
+  db: DrizzleSqliteDODatabase,
+  tableId: string,
+  recordId: string,
+  before: number | null,
+  current: StoreFields,
+  admits: (fields: StoreFields) => boolean
+): { changes: RecordChange[]; next: number | null } => {
+  const shown: RecordChange[] = [];
+  let state: StoreFields | undefined = current;
+  // Read newest first, a chunk at a time, and only as far as needed: up
+  // to one change past a full page, or the first that kept no values,
+  // past which no state can be told. The changes newer than `before` are
+  // read too, as the states before them are rebuilt through them.
+  let older: number | null = null;
+  while (state !== undefined && shown.length <= recordChangeLimits.pageSize) {
+    const chunk = db
+      .select()
+      .from(recordChanges)
+      .where(
+        and(
+          eq(recordChanges.tableId, tableId),
+          eq(recordChanges.recordId, recordId),
+          older === null ? undefined : lt(recordChanges.id, older)
+        )
+      )
+      .orderBy(desc(recordChanges.id))
+      .limit(historyChunk)
+      .all();
+    for (const row of chunk) {
+      older = row.id;
+      const change = changeOf(row);
+      const after: StoreFields = state;
+      state = stateBefore(change, after);
+      const admitted =
+        admits(after) &&
+        (change.op === "insert" || (state !== undefined && admits(state)));
+      if (admitted && (before === null || change.id < before)) {
+        shown.push(change);
+      }
+      if (state === undefined || shown.length > recordChangeLimits.pageSize) {
+        break;
+      }
+    }
+    if (chunk.length < historyChunk) {
+      break;
+    }
+  }
+  const page = shown.slice(0, recordChangeLimits.pageSize);
+  return {
+    changes: page,
+    next:
+      shown.length > recordChangeLimits.pageSize
+        ? (page.at(-1)?.id ?? null)
+        : null,
+  };
+};
 
 /**
  * A page of the history of record `recordId` of table `tableId`, newest

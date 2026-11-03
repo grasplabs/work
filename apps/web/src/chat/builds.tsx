@@ -1,4 +1,9 @@
-import type { App, VersionReview } from "@grasp-os/shared/apps";
+import type {
+  App,
+  ReviewedRowRule,
+  TableRowRules,
+  VersionReview,
+} from "@grasp-os/shared/apps";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
@@ -251,6 +256,66 @@ const ServerCode = ({
   );
 };
 
+/** Who a table's row rules admit, as one phrase each, listed. */
+const RowRuleWords = ({ rules }: { rules: ReviewedRowRule[] }) => {
+  const { t } = useLingui();
+  const words = rules.map((rule) => {
+    if (rule.kind === "owner") {
+      return t`whoever added the row`;
+    }
+    if (rule.kind === "person") {
+      const { field } = rule;
+      return t`the person in ${field}`;
+    }
+    if (rule.kind === "team") {
+      const { field } = rule;
+      return t`members of the team in ${field}`;
+    }
+    return rule.role === "builder"
+      ? t`the App's builders`
+      : t`everyone who uses the App`;
+  });
+  return <>{formatList(words)}</>;
+};
+
+/** Each table's row rules, as a version's reviewer reads them. */
+const RowRules = ({ tables }: { tables: TableRowRules[] }) => (
+  <ul className="flex flex-col gap-2">
+    {tables.map(({ table, read, write }) => (
+      <li className="flex flex-col gap-1" key={table}>
+        <code className="font-mono">{table}</code>
+        {read === null ? null : (
+          <span>
+            <Trans>
+              Read by <RowRuleWords rules={read} />
+            </Trans>
+          </span>
+        )}
+        {write === null ? (
+          <span>
+            <Trans>Changed by nobody</Trans>
+          </span>
+        ) : (
+          <span>
+            {read === null ? (
+              <Trans>
+                Changed by <RowRuleWords rules={write} />
+              </Trans>
+            ) : (
+              // The store holds a write to the read rules too: no one
+              // changes a row they can't read.
+              <Trans>
+                Changed by <RowRuleWords rules={write} />, of the rows they can
+                read
+              </Trans>
+            )}
+          </span>
+        )}
+      </li>
+    ))}
+  </ul>
+);
+
 /** What a version changes, as core worked it out. */
 const ReviewDetails = ({
   review,
@@ -364,6 +429,23 @@ const ReviewDetails = ({
               ? t`Its code can't be read: it may read the name, email and teams of everyone in the organization`
               : t`It reads the name, email and teams of everyone in the organization`}
           </Badge>
+        </section>
+      )}
+      {review.rowRules?.length === 0 ? null : (
+        <section
+          aria-label={t`Who sees which rows`}
+          className="flex flex-col gap-1"
+        >
+          <h4 className="font-medium">
+            <Trans>Who sees which rows</Trans>
+          </h4>
+          {review.rowRules === null ? (
+            <Badge variant="attention">
+              {t`Its code can't be read: its tables may say who sees and changes which rows`}
+            </Badge>
+          ) : (
+            <RowRules tables={review.rowRules} />
+          )}
         </section>
       )}
       {review.workflows.length === 0 ? null : (

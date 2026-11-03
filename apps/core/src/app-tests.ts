@@ -18,7 +18,11 @@ import {
 } from "@grasp-os/sdk/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
-import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  identifierSchema,
+  storeIdSchema,
+} from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -313,11 +317,18 @@ const maxFixtureAnswers = 256 * 1024;
 /** A fixture as `tests/fixtures/<name>.json` declares it. */
 const fixtureSchema = z
   .strictObject({
-    /** Who the tests act as, by the name `t.as` takes, and their App role. */
+    /**
+     * Who the tests act as, by the name `t.as` takes, their App role and
+     * the teams they are in (team IDs, as a table's `team` row rules
+     * match them; none unless named).
+     */
     principals: z
       .record(
         z.string().regex(testNamePattern),
-        z.strictObject({ role: z.enum(["user", "builder"]) })
+        z.strictObject({
+          role: z.enum(["user", "builder"]),
+          teams: z.array(identifierSchema).max(20).optional(),
+        })
       )
       .refine(
         (principals) => {
@@ -406,7 +417,7 @@ const fixtureOf = (
   return parsed.success
     ? { fixture: parsed.data }
     : {
-        error: `its fixture ${path} isn't { "principals": { "<name>": { "role": "user" | "builder" } } }: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+        error: `its fixture ${path} isn't { "principals": { "<name>": { "role": "user" | "builder", "teams"?: ["<team ID>"] } } }: ${parsed.error.issues[0]?.message ?? "invalid"}`,
       };
 };
 
@@ -787,6 +798,14 @@ class FixtureSession extends TestTarget {
     return Object.hasOwn(workflows, alias) ? workflows[alias] : undefined;
   }
 
+  /** The teams principal `name` is in, in the fixture: none unless named. */
+  #teamsOf(name: string): string[] {
+    const principal = Object.hasOwn(this.#fixture.principals, name)
+      ? this.#fixture.principals[name]
+      : undefined;
+    return [...(principal?.teams ?? [])];
+  }
+
   /** The role principal `name` has in the fixture; throws for none. */
   #roleOf(name: unknown): "user" | "builder" {
     const principal =
@@ -890,11 +909,13 @@ class FixtureSession extends TestTarget {
           requestId,
           deadline: Math.min(wallEnd, live?.deadline ?? wallEnd),
           runId: null,
-          // The fixture's role, which nothing changes while the test runs.
+          // The fixture's role and teams, which nothing changes while the
+          // test runs.
           authorize: async () =>
             await Promise.resolve({
               appMember: true,
               appBuilder: role === "builder",
+              teams: this.#teamsOf(name),
             }),
           // No resources: outside systems aren't the tests' to reach.
           ...(live === undefined || this.#release.store === null
@@ -1119,6 +1140,7 @@ class FixtureSession extends TestTarget {
     const roles = canonicalJson({
       appMember: true,
       appBuilder: role === "builder",
+      teams: this.#teamsOf(name).toSorted(),
     });
     const queries = new QuerySubscriptions<Reader>(this.#env, {
       check: async () => {

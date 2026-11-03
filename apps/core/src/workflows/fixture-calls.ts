@@ -247,6 +247,9 @@ const fixtureOperation = async (
         runId: run.runId,
         // A member of the App, never a builder, as a workflow's store call
         // runs; once its record is gone (its test ended), nothing commits.
+        // In no team: a fixture's person is no member of the organization,
+        // so a table's `team` rules admit them to no row, where a real
+        // run's call reads its person's teams (store-operations.ts).
         authorize: async () => {
           await recordOf(env, run.runId);
           effect.requireHolds();

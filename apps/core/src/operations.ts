@@ -2435,9 +2435,18 @@ const spendRead = (budget: ReadBudget, staged: number): void => {
   }
 };
 
-/** Whether two role readings differ. */
+/** A role reading's teams, in one order, for comparing. */
+const teamsKey = (roles: WriterRoles): string =>
+  JSON.stringify((roles.teams ?? []).toSorted());
+
+/**
+ * Whether two role readings differ: in role, or in the teams a table's
+ * row rules read.
+ */
 const rolesDiffer = (one: WriterRoles, other: WriterRoles): boolean =>
-  one.appMember !== other.appMember || one.appBuilder !== other.appBuilder;
+  one.appMember !== other.appMember ||
+  one.appBuilder !== other.appBuilder ||
+  teamsKey(one) !== teamsKey(other);
 
 /** The read scope of an invocation: core's, and the pinned schema's hash. */
 const scopeOf = async (
@@ -2449,6 +2458,7 @@ const scopeOf = async (
   principal: invocation.principal,
   appMember: roles.appMember,
   appBuilder: roles.appBuilder,
+  ...(roles.teams === undefined ? {} : { teams: [...roles.teams] }),
   consumer: { ...invocation.consumer },
 });
 
