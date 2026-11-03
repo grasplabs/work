@@ -27,7 +27,7 @@ const openScreen = (
 
 const AppPageView = () => {
   const { app: id } = Route.useParams();
-  const { screen: asked } = Route.useSearch();
+  const { screen: asked, view } = Route.useSearch();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const router = useRouter();
@@ -56,7 +56,13 @@ const AppPageView = () => {
       <SiteHeader
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: app.name }]}
       />
-      <AppPage app={app} identity={identity} contents={contents} open={open}>
+      <AppPage
+        app={app}
+        identity={identity}
+        contents={contents}
+        open={open}
+        view={view ?? "app"}
+      >
         {open === undefined ? null : (
           <ScreenFrame
             app={id}
@@ -93,8 +99,13 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   component: AppPageView,
   // The screen to open; any other value (an old or hand-typed address)
   // opens the App's first.
-  validateSearch: (search: Record<string, unknown>): { screen?: string } =>
-    typeof search.screen === "string" ? { screen: search.screen } : {},
+  // `view=code` shows the App's code instead, to its builders.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { screen?: string; view?: "code" } => ({
+    ...(typeof search.screen === "string" ? { screen: search.screen } : {}),
+    ...(search.view === "code" ? { view: "code" } : {}),
+  }),
   loader: async ({ context: { core }, params }) =>
     await loadFromCore(core, async (session) => {
       const [app, contents] = await Promise.all([

@@ -1292,6 +1292,10 @@ msgstr "{total, plural, one {{count} de # herramienta permitida} other {{count} 
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {En {withPerson} de # ejecución hizo falta la decisión de una persona.} other {En {withPerson} de # ejecuciones hizo falta la decisión de una persona.}}"
 
+#: src/engines/app-code.tsx
+msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+msgstr "{unchanged, plural, one {⋯ # línea sin cambios} other {⋯ # líneas sin cambios}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} de {total} aún sin entrevistar"
@@ -2013,6 +2017,7 @@ msgid "Add webhook"
 msgstr "Añadir webhook"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Añadido"
@@ -2460,6 +2465,7 @@ msgid "Anything else?"
 msgstr "¿Algo más?"
 
 #: src/connections/request-app-dialog.tsx
+#: src/engines/app-page.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
@@ -2483,6 +2489,10 @@ msgstr "Aplicación no encontrada"
 #: src/settings/erasures.tsx
 msgid "App preferences and usage signals of their collections"
 msgstr "Preferencias de aplicaciones y señales de uso de sus colecciones"
+
+#: src/engines/app-page.tsx
+msgid "App views"
+msgstr "Vistas de la app"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -3351,6 +3361,7 @@ msgid "Change: {text}"
 msgstr "Cambiar: {text}"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 msgid "Changed"
 msgstr "Cambiado"
 
@@ -3449,6 +3460,11 @@ msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea 
 #: src/connections/tool-permissions.tsx
 msgid "Changes"
 msgstr "Cambia"
+
+#: src/engines/app-code.tsx
+msgctxt "what a draft changes in an app's code"
+msgid "Changes"
+msgstr "Cambios"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -3727,6 +3743,7 @@ msgstr "Cerrar las cuentas y preparar las cifras que mira la dirección."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-page.tsx
 msgid "Code"
 msgstr "Código"
 
@@ -4255,6 +4272,10 @@ msgstr "CRM"
 msgid "Current"
 msgstr "Actual"
 
+#: src/engines/app-code.tsx
+msgid "Current (version {current})"
+msgstr "Actual (versión {current})"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Plan actual"
@@ -4413,6 +4434,10 @@ msgstr "Eliminar este flujo de trabajo"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "¿Eliminar tu entrevista?"
+
+#: src/engines/app-code.tsx
+msgid "Deleted"
+msgstr "Eliminado"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -4793,6 +4818,10 @@ msgstr "Descargar tabla como Markdown"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Borrador"
+
+#: src/engines/app-code.tsx
+msgid "Draft (version {draft})"
+msgstr "Borrador (versión {draft})"
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -5284,6 +5313,7 @@ msgid "File"
 msgstr "Archivo"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -7932,6 +7962,10 @@ msgstr "Aún no hay chats aquí."
 msgid "No chats yet. What is asked above starts one, and it stays in this project."
 msgstr "Aún no hay chats. Lo que preguntes arriba empieza uno, y se queda en este proyecto."
 
+#: src/engines/app-code.tsx
+msgid "No code yet: Grasp writes the first version in the chat."
+msgstr "Aún no hay código: Grasp escribe la primera versión en el chat."
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "Aún sin conector"
@@ -8051,6 +8085,10 @@ msgstr "Aún no hay ningún modelo configurado en este despliegue."
 #: src/workflows/module-files.tsx
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama mediante una vinculación local."
+
+#: src/engines/app-code.tsx
+msgid "No newline at end of file"
+msgstr "Sin salto de línea al final del archivo"
 
 #: src/workflows/triggers.tsx
 msgid "No next run"
@@ -9963,6 +10001,10 @@ msgstr "Leyó lo que podría mejorarse"
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Solo lectura"
+
+#: src/engines/app-code.tsx
+msgid "Read-only. Changes to the code go through the chat."
+msgstr "Solo lectura. Los cambios en el código se hacen en el chat."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -12723,6 +12765,10 @@ msgstr "Los dominios y flujos de trabajo que pueden usar paquetes npm aprobados.
 msgid "The domains this chat builds didn't load."
 msgstr "Los dominios que crea este chat no se cargaron."
 
+#: src/engines/app-code.tsx
+msgid "The draft changes no file."
+msgstr "El borrador no cambia ningún archivo."
+
 #: src/chat/draft-versions.tsx
 msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
 msgstr "Los cambios del borrador se pierden, y el próximo cambio del agente empieza de nuevo desde la app tal como está. Sus versiones se conservan, así que puedes restaurar una."
@@ -13507,6 +13553,10 @@ msgstr "Esta versión cambia los datos del dominio y el cambio no se puede aplic
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Esta versión cambia los datos del dominio y el cambio no se puede aplicar: rellenar uno de sus nuevos campos haría un registro más grande de lo que puede ser un registro."
 
+#: src/engines/app-code.tsx
+msgid "This version has no files."
+msgstr "Esta versión no tiene archivos."
+
 #: src/screens/screen-frame.tsx
 msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Esta versión de la aplicación no se ha sellado, así que no se puede abrir. Un creador puede publicarla de nuevo."
@@ -13649,6 +13699,10 @@ msgstr "Mañana"
 #: src/onboarding/setup-steps.tsx
 msgid "Too large to read"
 msgstr "Demasiado grande para leerlo"
+
+#: src/engines/app-code.tsx
+msgid "Too many changes to show line by line"
+msgstr "Demasiados cambios para mostrarlos línea por línea"
 
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
@@ -14766,6 +14820,10 @@ msgstr "Qué recordar"
 msgid "What to remove"
 msgstr "Qué eliminar"
 
+#: src/engines/app-code.tsx
+msgid "What to show of the code"
+msgstr "Qué mostrar del código"
+
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Qué mostrar de las trazas"
@@ -14958,6 +15016,10 @@ msgstr "¿En qué idioma quieres hacer esta entrevista?"
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "¿Qué herramientas usa realmente la gente?"
+
+#: src/engines/app-code.tsx
+msgid "Which version"
+msgstr "Qué versión"
 
 #: src/dashboard/widget-board.tsx
 msgid "Which workflows failed most this month?"
