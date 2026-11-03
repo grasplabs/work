@@ -68,7 +68,54 @@ export const begun = (
   told: true,
   mode: by,
   startedAt: progress.startedAt ?? now,
+  seenAt: progress.seenAt ?? now,
 });
+
+/**
+ * Longer than this between two turns, they were away: called off, the page
+ * closed, back the next day. A long pause to think fits inside it; what is
+ * beyond it is not interview time.
+ */
+export const awayAfterMs = 5 * 60_000;
+
+/**
+ * The clock moved on to a turn at `at`: what of the gap since their last
+ * turn was beyond `awayAfterMs` is added to the time away. A page reopened
+ * and a tab left open come to the same, so it needs no visibility events.
+ * Before they start it stands still; an interview kept before this clock
+ * has no `seenAt`, and starts counting gaps from this turn.
+ */
+export const ticked = (
+  progress: InterviewProgress,
+  at: number
+): InterviewProgress => {
+  if (progress.startedAt === null) {
+    return progress;
+  }
+  const gap =
+    progress.seenAt === undefined ? 0 : Math.max(0, at - progress.seenAt);
+  return {
+    ...progress,
+    seenAt: at,
+    awayMs: (progress.awayMs ?? 0) + Math.max(0, gap - awayAfterMs),
+  };
+};
+
+/** The most minutes a turn may say, as core reads them (`interviewTurnRequestSchema`). */
+const mostMinutes = 240;
+
+/**
+ * The minutes the interview has taken at `at`, as Stephen is told them:
+ * from the start, less the time away. Someone back the next day is where
+ * they left off, not at the end of the clock (GRA-1468).
+ */
+export const minutesAt = (progress: InterviewProgress, at: number): number =>
+  progress.startedAt === null
+    ? 0
+    : Math.min(
+        mostMinutes,
+        Math.max(0, (at - progress.startedAt - (progress.awayMs ?? 0)) / 60_000)
+      );
 
 /** They stopped for now: their place is kept, and the link carries on later. */
 export const leftFor = (progress: InterviewProgress): InterviewProgress =>

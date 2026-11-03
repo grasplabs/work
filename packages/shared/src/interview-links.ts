@@ -174,6 +174,14 @@ export const interviewProgressSchema = z.strictObject({
   wants: z.enum(["answer", "file", "readback", "end"]),
   /** When they started talking, in ms since the epoch. */
   startedAt: z.number().nonnegative().nullable(),
+  /**
+   * Their last turn, in ms since the epoch, and the time between turns
+   * that was time away and is not counted in the minutes Stephen is told
+   * (the page's `ticked`). None on an interview kept before there was this
+   * clock: it counts from `startedAt`, as it did.
+   */
+  seenAt: z.number().nonnegative().optional(),
+  awayMs: z.number().nonnegative().optional(),
   confirmed: z.int().min(0).max(interviewLimits.facts),
   adding: z.boolean(),
   addedAt: z.number().nonnegative(),

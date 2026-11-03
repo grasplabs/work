@@ -307,6 +307,29 @@ describe("someone's own link", () => {
     expect(back.progress?.lines[1]?.text).toBe(sentinel);
   });
 
+  it("keeps the clock that leaves time away out of the minutes, and gives it back (GRA-1468)", async () => {
+    const { secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    const withClock = {
+      ...progress(),
+      seenAt: Date.now(),
+      awayMs: 20 * 60 * 60_000,
+    };
+    const saved = await save(secrets.oli, key, 0, withClock);
+    await expect(saved.json()).resolves.toStrictEqual({
+      saved: true,
+      version: 1,
+    });
+    const back = await sessionOf(await session(secrets.oli, key));
+    expect({
+      seenAt: back.progress?.seenAt,
+      awayMs: back.progress?.awayMs,
+    }).toStrictEqual({ seenAt: withClock.seenAt, awayMs: withClock.awayMs });
+    // A clock that is no clock is refused whole, as anything else would be.
+    const bad = await save(secrets.oli, key, 1, { ...progress(), awayMs: -5 });
+    expect(bad.ok).toBeFalsy();
+  });
+
   it("gives anyone else with the link, the admin too, nothing that was said (L3)", async () => {
     const { secrets } = await running();
     const { key } = await opened(secrets.oli);
