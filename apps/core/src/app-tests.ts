@@ -875,7 +875,11 @@ class FixtureSession extends TestTarget {
         const invocation: Invocation = {
           principal: `fixture-${name}`,
           // The fixture as the person calling, and nobody else to read.
-          people: fixturePeople(`fixture-${name}`, role),
+          people: fixturePeople(
+            `fixture-${name}`,
+            role,
+            this.#release.app.people === true
+          ),
           consumer: {
             resourceId: this.#release.manifest.resourceId,
             resourceVersion: this.#release.manifest.resourceVersion,

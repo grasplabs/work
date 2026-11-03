@@ -1,4 +1,9 @@
 import { peopleReferences } from "@grasp-os/sdk/host";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
@@ -6,7 +11,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction } from "../src/app-functions.ts";
+import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
+import type { RunCaller } from "../src/app-functions.ts";
+import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import {
@@ -15,17 +22,26 @@ import {
   teamMembers,
   teams,
 } from "../src/db/core/schema.ts";
+import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { auditedDuring, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Who calls an App, and the organization's people (app-people.ts), from
-// its threat model: who calls comes from core, for a builder, a user and
-// a visitor (app-visitor-calls.test.ts) alike; a screen can't name
-// someone else; a removed person is refused; the directory answers only
-// members, at most 100 a read, each read recorded.
+// its threat model: who calls comes from core, for a builder, a user, a
+// workflow run's person, an agent's person and a visitor
+// (app-visitor-calls.test.ts) alike; a screen can't name someone else; a
+// removed person is refused; only an App that declares it reads the
+// directory, which answers only members, at most 100 a read, each read
+// recorded as whoever made it.
 
-const peopleFiles: Record<string, string> = {
+const idp = mockIdp();
+
+/** The Directory App's files: it declares the directory unless `people` is false. */
+const peopleFiles = (people = true): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
@@ -90,18 +106,19 @@ export default app({
   operations: { dir: { me, meToo, meAgain, search, team } },
   internalOperations: {},
   screens: [],
+  ${people ? "people: true," : ""}
   uses: [],
 });
 `,
-};
+});
 
 type Sealed = Fixture & { release: Release };
 
 type Caller = Fixture["owner"];
 
 /** The Directory App, sealed and current, owned by a builder. */
-const directoryApp = async (): Promise<Sealed> => {
-  const fixture = await appWith(peopleFiles, "Directory");
+const directoryApp = async (people = true): Promise<Sealed> => {
+  const fixture = await appWith(peopleFiles(people), "Directory");
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
@@ -122,14 +139,14 @@ const share = async ({ app, owner }: Sealed, by: Caller): Promise<void> => {
 /** A member called `name`, in team `team` when given, as their session has them. */
 const member = async (
   name: string,
-  team?: { id: string; name: string }
+  { team, email }: { team?: { id: string; name: string }; email?: string } = {}
 ): Promise<Caller> => {
   const someone = await person("user");
-  await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?")
-    .bind(name, someone.userId)
+  await env.DB.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?")
+    .bind(name, email ?? someone.email, someone.userId)
     .run();
   if (team === undefined) {
-    return { ...someone, name };
+    return { ...someone, name, email: email ?? someone.email };
   }
   await drizzle(env.DB).insert(teamMembers).values({
     id: crypto.randomUUID(),
@@ -137,7 +154,7 @@ const member = async (
     userId: someone.userId,
     createdAt: new Date(),
   });
-  return { ...someone, name, teams: [team] };
+  return { ...someone, name, email: email ?? someone.email, teams: [team] };
 };
 
 /** A team of the organization. */
@@ -152,6 +169,19 @@ const newTeam = async (name: string): Promise<{ id: string; name: string }> => {
   return { id, name };
 };
 
+/** The request of `path` of the App with `input`, as a screen sends it. */
+const requestOf = (release: Release, path: string, input: unknown): string =>
+  JSON.stringify({
+    reference: {
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      contractId: path,
+      fingerprint: release.fingerprints[path] ?? "",
+      kind: release.app.operations[path]?.kind ?? "query",
+    },
+    input,
+  });
+
 /** What `by` gets calling `path` of the App with `input`, as a screen sends it. */
 const call = async (
   { app, release }: Sealed,
@@ -159,30 +189,40 @@ const call = async (
   path: string,
   input: unknown = {}
 ): Promise<OperationResult> => {
-  const operation = release.app.operations[path];
   const { result } = await callAppFunction(
     env,
     by,
     app,
-    JSON.stringify({
-      reference: {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: path,
-        fingerprint: release.fingerprints[path] ?? "",
-        kind: operation?.kind ?? "query",
-      },
-      input,
-    })
+    requestOf(release, path, input)
   );
   return result;
 };
+
+type PeopleReference = (typeof peopleReferences)[keyof typeof peopleReferences];
+
+/** The request a screen's `useCaller` or `usePeople` read sends. */
+const readRequestOf = (
+  reference: PeopleReference,
+  input: unknown,
+  forged: Record<string, unknown> = {}
+): string =>
+  JSON.stringify({
+    reference: {
+      resourceId: reference.resourceId,
+      resourceVersion: reference.resourceVersion,
+      contractId: reference.contractId,
+      fingerprint: reference.fingerprint,
+      kind: reference.kind,
+      ...forged,
+    },
+    input,
+  });
 
 /** What a screen's `useCaller` or `usePeople` read answers `by`. */
 const read = async (
   { app }: Sealed,
   by: Caller,
-  reference: (typeof peopleReferences)[keyof typeof peopleReferences],
+  reference: PeopleReference,
   input: unknown,
   /** What the screen sends of the reference in place of the SDK's. */
   forged: Record<string, unknown> = {}
@@ -191,17 +231,7 @@ const read = async (
     env,
     by,
     app,
-    JSON.stringify({
-      reference: {
-        resourceId: reference.resourceId,
-        resourceVersion: reference.resourceVersion,
-        contractId: reference.contractId,
-        fingerprint: reference.fingerprint,
-        kind: reference.kind,
-        ...forged,
-      },
-      input,
-    })
+    readRequestOf(reference, input, forged)
   );
   return result;
 };
@@ -216,10 +246,11 @@ const answerOf = (result: OperationResult): unknown => {
     : result.value;
 };
 
-/** A caller as a test compares it: who, by name and role. */
+/** A caller as a test compares it: who, by name, address and role. */
 const callerSchema = z.object({
   id: z.string(),
   name: z.string(),
+  email: z.string().nullable(),
   orgRole: z.string(),
 });
 
@@ -245,11 +276,27 @@ const namesOf = (page: unknown): unknown =>
 const valueOf = (result: OperationResult): Json =>
   result.ok ? result.value : result.error.code;
 
+/** The directory reads recorded in `events`: who read, and what. */
+const recordedReads = (
+  events: readonly {
+    action: string;
+    actor: { type: string };
+    detail: unknown;
+  }[]
+) =>
+  events
+    .filter(({ action }) => action.startsWith("app.people."))
+    .map(({ action, actor, detail }) => ({
+      action,
+      actor: "part" in actor ? actor.part : actor.type,
+      detail,
+    }));
+
 describe("who calls an App, and its people", { timeout: 120_000 }, () => {
   it("tell every kind of function who calls, from core: a builder and a user each as themselves, with their roles and teams", async () => {
     const app = await directoryApp();
     const sales = await newTeam(`Sales ${unique()}`);
-    const ana = await member(`Ana ${unique()}`, sales);
+    const ana = await member(`Ana ${unique()}`, { team: sales });
     await share(app, ana);
 
     expect({
@@ -281,12 +328,71 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     });
   });
 
+  it("tell a workflow run's call of the App who the run acts for", async () => {
+    const app = await directoryApp();
+    const ben = await member(`Ben ${unique()}`);
+    await share(app, ben);
+    const runId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'asker', 1, ?, 'running', ?, NULL)"
+    )
+      .bind(runId, app.app, ben.userId, Date.now())
+      .run();
+    const caller: RunCaller = {
+      run: {
+        app: appIdSchema.parse(app.app),
+        workflow: workflowIdSchema.parse("asker"),
+        runId: runIdSchema.parse(runId),
+        version: 1,
+        shareSubject: ben.userId,
+        authority: {
+          subject: { type: "app", appId: appIdSchema.parse(app.app) },
+          onBehalfOf: ben.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+      },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 30_000,
+      stillCurrent: async () => {
+        await Promise.resolve();
+      },
+      requireHolds: () => {
+        // The step's attempt holds its lease throughout.
+      },
+      held: () => {
+        throw new Error("Nothing is held here");
+      },
+    };
+
+    const answered = await callRunFunction(
+      env,
+      caller,
+      { contractId: "dir.me", kind: "query" },
+      {},
+      `step:${crypto.randomUUID()}`
+    );
+
+    expect(callerOf(answered)).toStrictEqual({
+      id: ben.userId,
+      name: ben.name,
+      email: ben.email,
+      orgRole: "user",
+    });
+  });
+
   it("are core's to say: a name or role the caller's identity claims, or a screen's reference, makes it nobody else", async () => {
     const app = await directoryApp();
     const ana = await member(`Ana ${unique()}`);
     await share(app, ana);
     // What a client could claim of itself: core reads its own record.
     const claimed = { ...ana, name: "The Admin", role: "admin" as const };
+    const anaAs = {
+      id: ana.userId,
+      name: ana.name,
+      email: ana.email,
+      orgRole: "user",
+    };
 
     expect({
       fromServer: callerOf(await call(app, claimed, "dir.me")),
@@ -324,9 +430,9 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         )
       ),
     }).toStrictEqual({
-      fromServer: { id: ana.userId, name: ana.name, orgRole: "user" },
-      fromScreen: { id: ana.userId, name: ana.name, orgRole: "user" },
-      otherApp: { id: ana.userId, name: ana.name, orgRole: "user" },
+      fromServer: anaAs,
+      fromScreen: anaAs,
+      otherApp: anaAs,
       naming: "contract.invalid_args",
       otherContract: "version.mismatch",
     });
@@ -354,19 +460,66 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     });
   });
 
-  it("answer only current members, with their name, email, teams and manager, and nothing else", async () => {
+  it("refuse the directory to an App that doesn't declare it, recorded, and still tell it who calls", async () => {
+    const app = await directoryApp(false);
+    const ana = await member(`Ana ${unique()}`);
+    await share(app, ana);
+
+    let answers: Record<string, unknown> = {};
+    const events = await auditedDuring(async () => {
+      answers = {
+        caller: callerOf(await call(app, ana, "dir.me")),
+        server: answerOf(
+          await call(app, ana, "dir.search", { query: "Ana", limit: 5 })
+        ),
+        screen: valueOf(
+          await read(app, ana, peopleReferences.search, { query: "Ana" })
+        ),
+      };
+    });
+
+    expect({ ...answers, recorded: recordedReads(events) }).toStrictEqual({
+      caller: {
+        id: ana.userId,
+        name: ana.name,
+        email: ana.email,
+        orgRole: "user",
+      },
+      server: "permission.denied",
+      screen: "permission.denied",
+      recorded: [
+        {
+          action: "app.people.refused",
+          actor: "server",
+          detail: { person: ana.userId, read: "search", reason: "undeclared" },
+        },
+        {
+          action: "app.people.refused",
+          actor: "screen",
+          detail: { person: ana.userId, read: "search", reason: "undeclared" },
+        },
+      ],
+    });
+  });
+
+  it("answer only current members, with their name, email and teams, and no placeholder address", async () => {
     const app = await directoryApp();
     const team = await newTeam(`Ops ${unique()}`);
     const surname = unique();
-    const cleo = await member(`Cleo ${surname}`, team);
-    const dirk = await member(`Dirk ${surname}`, team);
-    const gone = await member(`Gone ${surname}`, team);
+    const cleo = await member(`Cleo ${surname}`, { team });
+    const dirk = await member(`Dirk ${surname}`, {
+      team,
+      // Made from the directory, never signed in: no address of theirs.
+      email: `${crypto.randomUUID()}@directory.invalid`,
+    });
+    const gone = await member(`Gone ${surname}`, { team });
     await drizzle(env.DB).insert(memberRemovals).values({
       organizationId: "organization",
       userId: gone.userId,
       removedAt: new Date(),
     });
     await share(app, cleo);
+    await share(app, dirk);
 
     const answer = answerOf(
       await call(app, cleo, "dir.team", {
@@ -374,80 +527,180 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         ids: [dirk.userId, gone.userId, "nobody"],
       })
     );
-    const entry = (someone: Caller) => ({
+    const entry = (someone: Caller, email: string | null) => ({
       id: someone.userId,
       name: someone.name,
-      email: someone.email,
+      email,
       teams: [team],
-      manager: null,
     });
 
-    expect(answer).toStrictEqual({
-      page: { people: [entry(cleo), entry(dirk)], next: null },
-      found: [entry(dirk)],
+    expect({
+      answer,
+      dirkIs: callerOf(await call(app, dirk, "dir.me")),
+      placeholders: namesOf(
+        answerOf(
+          await call(app, cleo, "dir.search", {
+            query: "directory.invalid",
+            limit: 100,
+          })
+        )
+      ),
+    }).toStrictEqual({
+      answer: {
+        page: {
+          people: [entry(cleo, cleo.email), entry(dirk, null)],
+          next: null,
+        },
+        found: [entry(dirk, null)],
+      },
+      dirkIs: {
+        id: dirk.userId,
+        name: dirk.name,
+        email: null,
+        orgRole: "user",
+      },
+      placeholders: [],
     });
   });
 
-  it("bound every read to 100 people, page by page, and record each read without whom it found", async () => {
+  it("bound every read to 100 people, page by page, take a search literally, and record each read without whom it found", async () => {
     const app = await directoryApp();
     const surname = `Zed${unique()}`;
     const named = await Promise.all(
-      ["A", "B", "C"].map(async (first) => await member(`${first} ${surname}`))
+      ["A", "B", "C", "Émile"].map(
+        async (first) => await member(`${first} ${surname}`)
+      )
     );
     const [first] = named;
     if (first === undefined) {
       throw new Error("No member");
     }
     await share(app, first);
+    const search = async (query: string, limit = 100) =>
+      namesOf(answerOf(await call(app, first, "dir.search", { query, limit })));
 
     let firstPage: unknown;
+    let secondPage: unknown;
     const events = await auditedDuring(async () => {
       firstPage = answerOf(
         await call(app, first, "dir.search", { query: surname, limit: 2 })
       );
+      secondPage = answerOf(
+        await read(app, first, peopleReferences.search, {
+          query: surname,
+          limit: 2,
+          cursor: pageSchema.parse(firstPage).next,
+        })
+      );
     });
-    const { next } = pageSchema.parse(firstPage);
-    const secondPage = answerOf(
-      await read(app, first, peopleReferences.search, {
-        query: surname,
-        limit: 2,
-        cursor: next,
-      })
-    );
+
     expect({
       first: namesOf(firstPage),
-      next: typeof next,
       second: namesOf(secondPage),
-      tooMany: answerOf(
-        await call(app, first, "dir.search", { query: surname, limit: 101 })
-      ),
+      tooMany: await search(surname, 101),
       tooManyIds: valueOf(
         await read(app, first, peopleReferences.find, {
           ids: Array.from({ length: 101 }, () => crypto.randomUUID()),
         })
       ),
-      wildcard: namesOf(
-        answerOf(
-          await call(app, first, "dir.search", { query: "%", limit: 100 })
-        )
-      ),
-      recorded: events
-        .filter(({ action }) => action === "app.people.read")
-        .map(({ actor, detail }) => ({
-          actor: actor.type === "app" ? [actor.appId, actor.part] : actor.type,
-          detail,
-        })),
+      everyone: await search("@"),
+      oneLetter: await search(".a."),
+      // `%`, `_` and `\` are characters, never a pattern's wildcards or escape.
+      percent: await search(`A%${surname}`),
+      underscore: await search(`A_${surname}`),
+      backslash: await search(`A\\ ${surname}`),
+      accented: await search(`Émile ${surname}`),
+      recorded: recordedReads(events),
     }).toStrictEqual({
       first: [`A ${surname}`, `B ${surname}`],
-      next: "string",
-      second: [`C ${surname}`],
+      second: [`C ${surname}`, `Émile ${surname}`],
       tooMany: "contract.invalid_args",
       tooManyIds: "contract.invalid_args",
-      wildcard: [],
+      everyone: "contract.invalid_args",
+      oneLetter: "contract.invalid_args",
+      percent: [],
+      underscore: [],
+      backslash: [],
+      accented: [`Émile ${surname}`],
       recorded: [
         {
-          actor: [app.app, "server"],
+          action: "app.people.read",
+          actor: "server",
           detail: { person: first.userId, read: "search", count: 2 },
+        },
+        {
+          action: "app.people.read",
+          actor: "screen",
+          detail: { person: first.userId, read: "search", count: 2 },
+        },
+      ],
+    });
+  });
+});
+
+describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
+  it("is its person to the App, and is recorded as the agent when it reads the directory itself", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Directory" });
+    const { version } = await builder.api.apps.files.commit(
+      id,
+      peopleFiles(),
+      "First"
+    );
+    await builder.api.apps.versions.setCurrent(id, version);
+    const release = await loadRelease(env, appIdSchema.parse(id), version);
+    const chat = await chatOf(
+      builder.userId,
+      codeStep(`export default async (self, env) => {
+        const stream = (text) => new Blob([text]).stream();
+        const me = await env.apps.call(${JSON.stringify(id)}, stream(${JSON.stringify(requestOf(release, "dir.me", {}))}));
+        const search = await env.apps.call(${JSON.stringify(id)}, stream(${JSON.stringify(readRequestOf(peopleReferences.search, { query: "Person", limit: 1 }))}));
+        return { me: me.result, search: search.result };
+      };`),
+      says("Done.")
+    );
+    await requestGranted(idp, builder, {
+      subject: chat.agent,
+      object: { type: "app", appId: id },
+      actions: ["read"],
+      binding: "DIRECTORY",
+    });
+
+    await chat.ask("Who am I in the Directory App?");
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const returned = z
+      .object({
+        me: z.object({ ok: z.literal(true), value: z.string() }),
+        search: z.object({
+          ok: z.literal(true),
+          value: z.object({ people: z.array(z.unknown()) }),
+        }),
+      })
+      .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "{}"));
+    const events = await allEvents();
+
+    expect({
+      me: z
+        .object({ id: z.string(), kind: z.string() })
+        .parse(JSON.parse(returned.me.value)),
+      searched: returned.search.value.people.length,
+      recorded: events
+        .filter(
+          ({ action, target }) =>
+            action === "app.people.read" && target?.id === id
+        )
+        .map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      me: { id: builder.userId, kind: "person" },
+      searched: 1,
+      recorded: [
+        {
+          actor: {
+            type: "agent",
+            agentId: chat.agent.agentId,
+            onBehalfOf: builder.userId,
+          },
+          detail: { person: builder.userId, read: "search", count: 1 },
         },
       ],
     });

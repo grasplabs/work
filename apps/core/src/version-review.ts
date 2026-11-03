@@ -168,6 +168,30 @@ const handsFilesOf = async (
 };
 
 /**
+ * Whether version `proposed` reads the organization's people
+ * (`VersionReview.readsPeople`): every member's name, email and teams. Null
+ * when its manifest can't be read.
+ */
+const readsPeopleOf = async (
+  env: Env,
+  app: AppId,
+  proposed: { version: number; files: Readonly<Record<string, string>> }
+): Promise<boolean | null> => {
+  try {
+    const manifest = await versionManifest(
+      env,
+      app,
+      proposed.version,
+      proposed.files
+    );
+    return manifest?.people === true;
+  } catch (error) {
+    log.warn("version_review.manifest_unread", errorFields(error));
+    return null;
+  }
+};
+
+/**
  * The explicit migrations of version `proposed` the current version
  * (`before`) doesn't have as they are (see `VersionReview.migrations`),
  * read from each version's App manifest, so wherever and however they
@@ -868,6 +892,10 @@ export const reviewVersion = async (
     migrations,
     workflows,
     handsFilesToWorkflows: await handsFilesOf(env, found.id, {
+      version: row.version,
+      files,
+    }),
+    readsPeople: await readsPeopleOf(env, found.id, {
       version: row.version,
       files,
     }),

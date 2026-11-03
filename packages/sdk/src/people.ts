@@ -11,11 +11,12 @@ import type { Infer, InferInput } from "./values.ts";
 // anything a screen or App code sends: a screen that makes up a caller
 // fools only itself, and every decision that matters is the server's.
 //
-// The directory is read-only and bounded: a member finds people by ID, by
-// name or email, or by team, at most `peopleLimits.pageMax` a read, and
-// each person comes with their name, email, teams and manager, nothing
-// else. A visitor (someone outside the organization an App was shared
-// with) is told who they are, and is refused the directory.
+// The directory is read-only and bounded, and only an App that declares it
+// (`app({ people: true })`) reads it: a member finds people by ID, by name
+// or email, or by team, at most `peopleLimits.pageMax` a read, and each
+// person comes with their name, email and teams, nothing else. A visitor
+// (someone outside the organization an App was shared with) is told who
+// they are, and is refused the directory.
 
 /** The bounds of a directory read. */
 export const peopleLimits = {
@@ -25,13 +26,16 @@ export const peopleLimits = {
   pageDefault: 25,
   /** The longest search. */
   queryMaxLength: 100,
+  /** The fewest letters or digits a search holds: "@" lists nobody. */
+  queryMinCharacters: 2,
   /** The longest ID or cursor. */
   idMaxLength: 128,
 } as const;
 
 const id = v.string().min(1).max(peopleLimits.idMaxLength);
 const name = v.string();
-const email = v.string();
+/** Their address; null for someone who has no real one yet. */
+const email = v.string().nullable();
 const team = v.object({ id, name });
 
 /** A team, by ID and name. */
@@ -51,9 +55,13 @@ const personCaller = v.object({
 
 const visitorCaller = v.object({
   kind: v.literal("visitor"),
-  /** Who owns what they insert: no member's ID is ever one. */
+  /**
+   * Who owns what they insert, for this session only: it changes each
+   * time they sign in. Key what a visitor keeps by their `email`.
+   */
   id,
-  email,
+  /** The address they signed in with: the same each time. */
+  email: v.string(),
 });
 
 const caller = v.union(personCaller, visitorCaller);
@@ -65,16 +73,7 @@ export type VisitorCaller = Infer<typeof visitorCaller>;
 /** Who is calling: from core's verified identity, never from the client. */
 export type Caller = Infer<typeof caller>;
 
-const personSummary = v.object({ id, name, email });
-
-const person = v.object({
-  id,
-  name,
-  email,
-  teams: v.array(team),
-  /** Who they report to, when the organization's chart says; else null. */
-  manager: personSummary.nullable(),
-});
+const person = v.object({ id, name, email, teams: v.array(team) });
 
 /** A member of the organization, as the directory answers them. */
 export type Person = Infer<typeof person>;
@@ -161,10 +160,10 @@ export const peopleOperations: Readonly<
  */
 export const peopleFingerprints: Readonly<Record<PeopleOperationName, string>> =
   {
-    caller: "158b37a292bceef45df33dba25cd3530658b8baa704a561a0ad537f8b959396d",
-    find: "ace640e0e7bee1ebf1c02822ecb8d45bd93ecbee26b9efc7984a251984dca7bb",
-    search: "597a07e9e42a4a4ad6ac1f109aace57ce06d80be49d66140319af26b7e74a216",
-    team: "607fe481310cd2f8bf74b57d5f0e93c7ba5620117d6d67dc5499476696dec554",
+    caller: "87b560cef59fa7158b14044c8b1d156a01e4f7da27df445fbbf42154ee27bea1",
+    find: "f1538b1cacfa22be9293d76140ae785efa4a000e2d14ddaf3b5eb7bb4c1187bb",
+    search: "56bdf9f1ce66d252e0c36f25e4a0910560000532b910ed4ca77e7d88c3b964e5",
+    team: "bc78994e9287646b568949cdc4a0c38f6399c11cb6ed156bb0fda82121cb5482",
   };
 
 /** The reference a screen reads `Name` through. */
@@ -211,13 +210,18 @@ export interface PageOptions {
 }
 
 /**
- * The organization's people, read-only, for an App's members: never for a
- * visitor (`visitor.not_granted`). Each read answers at most 100.
+ * The organization's people, read-only, for the members of an App that
+ * declares it (`app({ people: true })`; `permission.denied` otherwise),
+ * never for a visitor (`visitor.not_granted`). Each read answers at most
+ * 100.
  */
 export interface PeopleDirectory {
   /** The people with these IDs (at most 100) who are members; others are left out. */
   readonly find: (ids: readonly string[]) => Promise<Person[]>;
-  /** Members whose name or email holds `query`, by name. */
+  /**
+   * Members whose name or email holds `query` (at least 2 letters or
+   * digits), by name.
+   */
   readonly search: (
     query: string,
     options?: PageOptions

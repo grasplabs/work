@@ -596,6 +596,7 @@ export const callStoreOperation = async (
       userId: caller.principal,
       roles: async () =>
         await Promise.resolve({ appMember: true, appBuilder: false }),
+      declared: release.app.people === true,
       actor: caller.actor,
       requestId: caller.requestId,
     }),

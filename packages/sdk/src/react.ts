@@ -332,7 +332,8 @@ export const useNavigate = (): Navigate => useClient().navigate;
 /**
  * Who is using the screen: a member of the organization (`kind:
  * "person"`, with their roles and teams), or a visitor the App was shared
- * with (`kind: "visitor"`); `undefined` while it loads. Core answers it
+ * with (`kind: "visitor"`, whose `id` is their session's: key a visitor by
+ * `email`); `undefined` while it loads. Core answers it
  * from who is signed in, never from the screen: show it, but decide what
  * someone may do in the App's server functions, with `ctx.caller`, which
  * no screen can change.
@@ -341,11 +342,11 @@ export const useCaller = (): Caller | undefined =>
   useQuery(peopleReferences.caller, {});
 
 /**
- * The organization's people, read-only, for a member: `find` by ID,
- * `search` by name or email, and `team` for a team's members, at most 100
- * a read, each person with only their name, email, teams and manager. A
- * visitor is refused every read (`visitor.not_granted`). Call it from an
- * event handler or an effect.
+ * The organization's people, read-only, for a member, in an App that
+ * declares it (`app({ people: true })`): `find` by ID, `search` by name or
+ * email, and `team` for a team's members, at most 100 a read, each person
+ * with only their name, email and teams. A visitor is refused every read
+ * (`visitor.not_granted`). Call it from an event handler or an effect.
  */
 export const usePeople = (): PeopleDirectory => {
   const client = useClient();

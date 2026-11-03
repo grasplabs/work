@@ -250,14 +250,17 @@ export interface CallerCtx {
   /**
    * Who the call is for: a member of the organization (`kind: "person"`),
    * with their roles and teams, or a visitor the App was shared with
-   * (`kind: "visitor"`). A workflow run's call is for the person the run
-   * acts for. Read as the call starts.
+   * (`kind: "visitor"`, whose `id` is their session's and changes each
+   * time they sign in: key a visitor by `email`). A workflow run's call is
+   * for the person the run acts for. Read as the call starts.
    */
   readonly caller: Caller;
   /**
-   * The organization's members, read-only: by ID, by name or email, or by
-   * team, at most 100 a read, each with only their name, email, teams and
-   * manager. A visitor's call is refused it (`visitor.not_granted`).
+   * The organization's members, read-only, for an App that declares it
+   * (`app({ people: true })`; `permission.denied` otherwise): by ID, by
+   * name or email, or by team, at most 100 a read, each with only their
+   * name, email and teams. A visitor's call is refused it
+   * (`visitor.not_granted`).
    */
   readonly people: PeopleDirectory;
 }

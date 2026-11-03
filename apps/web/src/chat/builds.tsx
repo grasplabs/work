@@ -354,6 +354,18 @@ const ReviewDetails = ({
           </Badge>
         </section>
       )}
+      {review.readsPeople === false ? null : (
+        <section aria-label={t`People`} className="flex flex-col gap-1">
+          <h4 className="font-medium">
+            <Trans>People</Trans>
+          </h4>
+          <Badge variant="attention">
+            {review.readsPeople === null
+              ? t`Its code can't be read: it may read the name, email and teams of everyone in the organization`
+              : t`It reads the name, email and teams of everyone in the organization`}
+          </Badge>
+        </section>
+      )}
       {review.workflows.length === 0 ? null : (
         <section aria-label={t`Workflows`} className="flex flex-col gap-1">
           <h4 className="font-medium">

@@ -1,6 +1,7 @@
 import {
   isPeopleOperationName,
   peopleFingerprints,
+  peopleLimits,
   peopleOperations,
   schemaFromDescriptor,
 } from "@grasp-os/sdk/host";
@@ -17,14 +18,16 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { notRemoved, organizationId } from "./auth/auth.ts";
-import { memberRole, teamsOf } from "./auth/identity.ts";
+import { currentMembership, notRemoved, organizationId } from "./auth/auth.ts";
+import { realEmail } from "./auth/directory-members.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
@@ -39,6 +42,11 @@ import { inList } from "./db/d1.ts";
 //   no read takes a person to be. A screen that shows another name fools
 //   only itself: the App's server code decides with `ctx.caller`, which
 //   no screen reaches.
+// - Any App, or an agent through one, harvests the organization: only an
+//   App that declares it reads the directory (`app({ people: true })`,
+//   which its versions' review shows); any other read is refused
+//   (`permission.denied`) and recorded (`app.people.refused`). An agent
+//   reads it only through such an App.
 // - A visitor reads the directory: a visitor's call has no directory,
 //   only who they are (their session's ID and address). Asking for it is
 //   refused as a function the App doesn't grant them, and recorded
@@ -46,32 +54,32 @@ import { inList } from "./db/d1.ts";
 // - Someone removed, or not a member, is read or reads: every read is of
 //   the organization's current members only (a membership, and no removal
 //   recorded); a caller who lost theirs is refused
-//   (`permission.person_inactive`), and the operation host's gate refuses
-//   their call before then anyway.
-// - App code enumerates the organization: each read answers at most 100
-//   people (`peopleLimits.pageMax`), a function makes at most its 100 host
-//   calls (operation-channel.ts), and every read of the directory is
-//   recorded (`app.people.read`): the App, the person it read for, which
-//   read and how many people it answered, never whom.
+//   (`permission.person_inactive`).
+// - Paging through everyone: each read answers at most 100 people
+//   (`peopleLimits.pageMax`), a function makes at most its 100 host calls
+//   (operation-channel.ts), a search needs at least 2 letters or digits
+//   ("@" matches nobody), and every read of the directory is recorded
+//   (`app.people.read`): the App, the person it read for, which read and
+//   how many people it answered, never whom.
 // - A read tells more than a directory entry: a person is their ID, name,
-//   email, teams and manager, read field by field, never their role,
-//   sessions or anything else of theirs. A team is its ID and name.
+//   email and teams, read field by field, never their role, sessions or
+//   anything else of theirs; the placeholder address of someone made from
+//   the directory who never signed in is null, and is never searched. A
+//   team is its ID and name.
 // - A read too large to bother with: arguments are checked by the SDK's
 //   declared contract (people.ts) before anything is read; a search is a
-//   bounded substring, its `%` and `_` taken literally.
-//
-// The organization's chart isn't kept yet, so a person's manager is null.
+//   bounded substring, its `%`, `_` and `\` taken literally.
 
 /** Who calls and what they may read, as core resolved it for one call. */
 export interface PeopleAccess {
   /** Who calls, read once and kept for the call. */
   readonly caller: () => Promise<Caller>;
   /**
-   * Reads the directory for the caller: absent for a visitor, whose call
-   * refuses it with `refuse`.
+   * Reads the directory for the caller: absent where they may not, whose
+   * reads `refuse` refuses.
    */
   readonly directory?: Directory;
-  /** Refuses a visitor the directory read `name`, recorded; never returns. */
+  /** Refuses the directory read `name`, recorded; never returns. */
   readonly refuse?: (name: PeopleOperationName) => Promise<never>;
 }
 
@@ -200,7 +208,7 @@ const teamsByPerson = async (
   return found;
 };
 
-/** `rows` as the directory answers them: with their teams, no manager yet. */
+/** `rows` as the directory answers them, with their teams. */
 const peopleOf = async (
   env: Env,
   rows: readonly { id: string; name: string; email: string }[]
@@ -212,9 +220,8 @@ const peopleOf = async (
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
-    email: row.email,
+    email: realEmail(row.email),
     teams: teamsOfPeople.get(row.id) ?? [],
-    manager: null,
   }));
 };
 
@@ -280,6 +287,12 @@ const pageOf = async (
 const likeLiteral = (text: string): string =>
   text.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 
+/** A letter or digit of any script. */
+const letterOrDigit = /[\p{L}\p{N}]/gu;
+
+/** The placeholder addresses of members who never signed in: never searched. */
+const placeholderPattern = "%@directory.invalid";
+
 /** The directory's reads, for a member: `find`, `search` and `team`. */
 const directoryReads: Readonly<
   Record<DirectoryRead, (env: Env, args: Record<string, Json>) => Promise<Json>>
@@ -301,10 +314,18 @@ const directoryReads: Readonly<
   },
   search: async (env, args) => {
     const query = typeof args.query === "string" ? args.query : "";
-    const pattern = `%${likeLiteral(query.toLowerCase())}%`;
+    // "@" or "." would match everyone: a search names someone.
+    if (
+      (query.match(letterOrDigit)?.length ?? 0) <
+      peopleLimits.queryMinCharacters
+    ) {
+      throw operationErrors.create("contract.invalid_args");
+    }
+    // LIKE folds ASCII case itself; any other letter matches as written.
+    const pattern = `%${likeLiteral(query)}%`;
     return await pageOf(
       env,
-      sql`(lower(${users.name}) LIKE ${pattern} ESCAPE '\\' OR lower(${users.email}) LIKE ${pattern} ESCAPE '\\')`,
+      sql`(${users.name} LIKE ${pattern} ESCAPE '\\' OR (${users.email} LIKE ${pattern} ESCAPE '\\' AND ${users.email} NOT LIKE ${placeholderPattern}))`,
       args
     );
   },
@@ -334,37 +355,46 @@ export interface MemberReader {
   readonly app: AppId;
   /** The member the call is for. */
   readonly userId: string;
-  /** Their roles in the App, read again now. */
+  /** Their roles in the App, as the call's gate read them last. */
   readonly roles: () => Promise<WriterRoles>;
-  /** Who the audit log names as reading: the App's server or its screen. */
+  /** Their teams, when the call has them already (their session's). */
+  readonly teams?: readonly TeamRef[];
+  /** Whether the App declares it reads the organization's people. */
+  readonly declared: boolean;
+  /** Who the audit log names as reading: the App's server or screen, or an agent. */
   readonly actor: AuditActor;
   readonly requestId: string;
 }
 
-/** Who `userId` is, as a member calling `app`: refused once they aren't one. */
+/**
+ * Who `userId` is, as a member calling the App: one read of their name,
+ * address and role, with the teams and App roles the call already has.
+ * Refused once they are no member.
+ */
 const personCaller = async (
   env: Env,
-  { userId, roles }: Pick<MemberReader, "userId" | "roles">
+  { userId, roles, teams: known }: MemberReader
 ): Promise<Caller> => {
-  const [orgRole, row, memberTeams, appRoles] = await Promise.all([
-    memberRole(env.DB, userId),
+  const [row, memberTeams, appRoles] = await Promise.all([
     drizzle(env.DB)
-      .select({ name: users.name, email: users.email })
+      .select({ name: users.name, email: users.email, role: members.role })
       .from(users)
-      .where(eq(users.id, userId))
+      .innerJoin(members, eq(members.userId, users.id))
+      .where(currentMembership(userId))
       .get(),
-    teamsOf(env.DB, userId),
+    known ?? teamsOf(env.DB, userId),
     roles(),
   ]);
-  if (orgRole === undefined || row === undefined) {
+  const orgRole = roleSchema.safeParse(row?.role);
+  if (row === undefined || !orgRole.success) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
     kind: "person",
     id: userId,
     name: row.name,
-    email: row.email,
-    orgRole,
+    email: realEmail(row.email),
+    orgRole: orgRole.data,
     appRole: appRoles.appBuilder ? "builder" : "user",
     teams: memberTeams.map(({ id, name }) => ({ id, name })),
   };
@@ -380,24 +410,37 @@ const once = <Answer>(read: () => Promise<Answer>): (() => Promise<Answer>) => {
 };
 
 /**
- * A member's access: who they are, and the directory, each read of which
- * is recorded as `app.people.read`.
+ * A member's access: who they are, and, when the App declares it, the
+ * directory, each read of which is recorded as `app.people.read`; an App
+ * that doesn't is refused each read, recorded as `app.people.refused`.
  */
 export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
   const caller = once(async () => await personCaller(env, reader));
+  const audit = async (action: string, detail: Record<string, Json>) => {
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: reader.actor,
+      action,
+      target: { type: "app", id: reader.app },
+      requestId: reader.requestId,
+      detail: { person: reader.userId, ...detail },
+    });
+  };
+  if (!reader.declared) {
+    return {
+      caller,
+      refuse: async (name) => {
+        await audit("app.people.refused", { read: name, reason: "undeclared" });
+        throw permissionErrors.create("permission.denied");
+      },
+    };
+  }
   return {
     caller,
     directory: async (name, args) => {
       // A member, with a role in the App, as the call found them.
       await caller();
       const answer = await directoryReads[name](env, args);
-      await keepAuditEvent(env, drizzle(env.DB), {
-        actor: reader.actor,
-        action: "app.people.read",
-        target: { type: "app", id: reader.app },
-        requestId: reader.requestId,
-        detail: { person: reader.userId, read: name, count: countOf(answer) },
-      });
+      await audit("app.people.read", { read: name, count: countOf(answer) });
       return answer;
     },
   };
@@ -423,23 +466,31 @@ export const visitorPeople = ({
 
 /**
  * What an App's tests are told of people (app-tests.ts): the fixture
- * principal as the person calling, in its role, and an empty directory,
- * as the tests reach no one outside them.
+ * principal as the person calling, in its role, and, when the App
+ * declares the directory, an empty one, as the tests reach no one outside
+ * them.
  */
 export const fixturePeople = (
   principal: string,
-  role: "user" | "builder"
+  role: "user" | "builder",
+  declared: boolean
 ): PeopleAccess => ({
   caller: async () =>
     await Promise.resolve({
       kind: "person",
       id: principal,
       name: principal,
-      email: "",
+      email: null,
       orgRole: role,
       appRole: role,
       teams: [],
     }),
-  directory: async (name) =>
-    await Promise.resolve(name === "find" ? [] : { people: [], next: null }),
+  ...(declared
+    ? {
+        directory: async (name: DirectoryRead) =>
+          await Promise.resolve(
+            name === "find" ? [] : { people: [], next: null }
+          ),
+      }
+    : {}),
 });

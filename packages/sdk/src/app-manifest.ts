@@ -420,22 +420,23 @@ export const readAppManifest = (text: string): AppManifest => {
   } catch {
     return refuse("The App's manifest isn't JSON.");
   }
-  if (
-    !hasExactly(data, [
-      "name",
-      "schema",
-      "operations",
-      "resources",
-      "browserResources",
-      "workflows",
-      "screens",
-      "surfaces",
-      "preferences",
-      "migrations",
-    ])
-  ) {
+  const keys = [
+    "name",
+    "schema",
+    "operations",
+    "resources",
+    "browserResources",
+    "workflows",
+    "screens",
+    "surfaces",
+    "preferences",
+    "migrations",
+  ];
+  // `people` only where the App reads the organization's people.
+  const readsPeople = isPlainObject(data) && data.people === true;
+  if (!hasExactly(data, readsPeople ? [...keys, "people"] : keys)) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, migrations }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, people?, migrations }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
@@ -514,6 +515,7 @@ export const readAppManifest = (text: string): AppManifest => {
       ...(data.preferences === null
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
+      ...(readsPeople ? { people: true } : {}),
       uses: [...resources.values(), ...browser.values(), ...workflows.values()],
       migrations: migrationsFrom(data.migrations),
     } as Parameters<typeof app>[0];

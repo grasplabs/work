@@ -1,7 +1,11 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
+import {
+  agentIdSchema,
+  appIdSchema,
+  storeIdSchema,
+} from "@grasp-os/shared/ids";
 import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -19,6 +23,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
+import type { WriterRoles } from "@grasp-os/shared/stores";
 import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -100,7 +105,8 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 
 /** What core resolved of the caller, for an invocation. */
 interface FunctionCaller {
-  readonly by: Pick<Identity, "userId" | "role">;
+  readonly by: Pick<Identity, "userId" | "role"> &
+    Partial<Pick<Identity, "teams">>;
   readonly requestId: string;
   readonly deadline: number;
   /**
@@ -255,10 +261,13 @@ export const invocationFor = async (
   // and each resource request (the operation host's one gate, `admit`).
   // A release revoked, a role lost or an agent's permission withdrawn
   // meanwhile stops a call already running.
+  // The roles the gate read last, which who calls is told (`people`).
+  let admitted: WriterRoles | undefined;
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    return await operationRoles(env, by, app);
+    admitted = await operationRoles(env, by, app);
+    return admitted;
   };
   const bindings = resourceBindingsFor(env, {
     app,
@@ -291,7 +300,9 @@ export const invocationFor = async (
     people: memberPeople(env, {
       app,
       userId: by.userId,
-      roles: async () => await operationRoles(env, by, app),
+      roles: async () => admitted ?? (await authorize()),
+      ...(by.teams === undefined ? {} : { teams: by.teams }),
+      declared: release.app.people === true,
       actor: delegateActorOf(authority),
       requestId,
     }),
@@ -476,6 +487,8 @@ export const runInvocationFor = async (
   // last, after every read, the step's attempt, so nothing runs for an
   // attempt the engine let go of meanwhile. The commit and the request
   // check the lease once more, synchronously, just before they start.
+  // The roles the gate read last, which who calls is told (`people`).
+  let admitted: WriterRoles | undefined;
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
     await requireApprovedVersion(env, app, version, auditRefusal);
@@ -492,6 +505,7 @@ export const runInvocationFor = async (
       true
     );
     await stillCurrent();
+    admitted = roles;
     return roles;
   };
   const bindings = resourceBindingsFor(env, {
@@ -516,18 +530,8 @@ export const runInvocationFor = async (
     people: memberPeople(env, {
       app,
       userId: authority.onBehalfOf,
-      roles: async () => {
-        const role = await memberRole(env.DB, authority.onBehalfOf);
-        if (role === undefined) {
-          throw permissionErrors.create("permission.person_inactive");
-        }
-        return await operationRoles(
-          env,
-          { userId: authority.onBehalfOf, role },
-          app,
-          true
-        );
-      },
+      roles: async () => admitted ?? (await authorize()),
+      declared: release.app.people === true,
       actor: runActorOf(run),
       requestId,
     }),
@@ -1039,6 +1043,7 @@ const answeredPeople = async (
     stillAllowed,
     deadline,
     requestId,
+    agent,
   }: {
     by: Pick<Identity, "userId" | "role" | "teams">;
     app: unknown;
@@ -1047,6 +1052,8 @@ const answeredPeople = async (
     stillAllowed: FunctionCallOptions["stillAllowed"];
     deadline: number;
     requestId: string;
+    /** The chat's agent making the read, when it is one's. */
+    agent: CallingAgent | undefined;
   }
 ): Promise<FunctionAnswer> => {
   try {
@@ -1067,7 +1074,21 @@ const answeredPeople = async (
         app,
         userId: by.userId,
         roles: async () => await operationRoles(env, by, app),
-        actor: { type: "app", appId: app, part: "screen" },
+        teams: by.teams,
+        declared: release.app.people === true,
+        // An agent's read is the agent's, for its person; any other is the
+        // App's screen's.
+        actor:
+          agent === undefined
+            ? { type: "app", appId: app, part: "screen" }
+            : delegateActorOf({
+                subject: {
+                  type: "agent",
+                  agentId: agentIdSchema.parse(agent.agentId),
+                },
+                onBehalfOf: by.userId,
+                mode: "interactive",
+              }),
         requestId,
       }),
       read,
@@ -1156,6 +1177,7 @@ const callFunction = async (
       stillAllowed,
       deadline,
       requestId,
+      agent,
     });
   }
   let release: Release;

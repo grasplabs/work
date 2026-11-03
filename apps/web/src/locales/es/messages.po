@@ -6652,6 +6652,10 @@ msgstr "Se abre para el miembro que lo creó, los administradores y quienes teng
 msgid "It reads no Knowledge."
 msgstr "No lee ningún Conocimiento."
 
+#: src/chat/builds.tsx
+msgid "It reads the name, email and teams of everyone in the organization"
+msgstr "Lee el nombre, el correo electrónico y los equipos de todas las personas de la organización"
+
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "No se basa en nada que puedas ver."
@@ -6759,6 +6763,10 @@ msgstr "Sus apps y flujos de trabajo funcionan con ella a partir de ahora. Grasp
 #: src/inbox/item-detail.tsx
 msgid "Its bindings"
 msgstr "Sus vínculos"
+
+#: src/chat/builds.tsx
+msgid "Its code can't be read: it may read the name, email and teams of everyone in the organization"
+msgstr "No se puede leer su código: puede leer el nombre, el correo electrónico y los equipos de todas las personas de la organización"
 
 #: src/chat/builds.tsx
 msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
@@ -9510,6 +9518,7 @@ msgstr "PDF, Word, Excel, PowerPoint o texto"
 msgid "Pending"
 msgstr "Pendiente"
 
+#: src/chat/builds.tsx
 #: src/engines/app-sharing.tsx
 #: src/settings/package-approvers.tsx
 #: src/workflows/share-workflow.tsx

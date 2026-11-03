@@ -707,6 +707,7 @@ export class SealedPreviews {
         requestId,
         deadline,
         draftFailure: options.draftFailure,
+        declared: release.app.people === true,
       });
       const observe = hasTables(release)
         ? (readSet: Record<string, number>) => {
@@ -831,7 +832,11 @@ export class SealedPreviews {
     }
     await this.#authorizer(chatId, personId, app, running)();
     const value = await answerPeople(
-      this.#peopleOf(chatId, personId, app, running, requestId),
+      this.#peopleOf(chatId, personId, app, running, {
+        requestId,
+        declared: release.app.people === true,
+        part: "screen",
+      }),
       read,
       call.input
     );
@@ -983,11 +988,14 @@ export class SealedPreviews {
       requestId,
       deadline,
       draftFailure,
+      declared,
     }: {
       store: OpenStore;
       requestId: string;
       deadline: number;
       draftFailure?: Invocation["draftFailure"];
+      /** Whether the draft declares it reads the organization's people. */
+      declared: boolean;
     }
   ): Invocation {
     return {
@@ -1005,7 +1013,11 @@ export class SealedPreviews {
         return await this.#authorizer(chatId, personId, app, running)();
       },
       // Who calls: the builder previewing it, the directory as theirs.
-      people: this.#peopleOf(chatId, personId, app, running, requestId),
+      people: this.#peopleOf(chatId, personId, app, running, {
+        requestId,
+        declared,
+        part: "server",
+      }),
     };
   }
 
@@ -1015,13 +1027,18 @@ export class SealedPreviews {
     personId: string,
     app: AppId,
     running: Running,
-    requestId: string
+    {
+      requestId,
+      declared,
+      part,
+    }: { requestId: string; declared: boolean; part: "server" | "screen" }
   ): PeopleAccess {
     return memberPeople(this.#env, {
       app,
       userId: personId,
       roles: this.#authorizer(chatId, personId, app, running),
-      actor: { type: "app", appId: app, part: "server" },
+      declared,
+      actor: { type: "app", appId: app, part },
       requestId,
     });
   }
@@ -1221,6 +1238,7 @@ export class SealedPreviews {
         store,
         requestId,
         deadline: Date.now() + platformLimits.serverInvocationWallMs,
+        declared: release.app.people === true,
       });
       reached = true;
       const answered = await callOperation(
