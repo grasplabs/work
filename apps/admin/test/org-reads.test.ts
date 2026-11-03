@@ -11,7 +11,7 @@ const client: GridRow = {
   id: "acme",
   name: "Acme",
   status: "active",
-  ring: 0,
+  channel: "stable",
   hostname: "acme.grasp.test",
   release: null,
   pinnedReleaseId: null,

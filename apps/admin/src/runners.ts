@@ -2,21 +2,18 @@
  * A client's runner: the one thing that may change what its account runs,
  * as `client_runs` names it: one of the admin's runs (src/workflow-runs.ts).
  * A provisioning attempt (a run per attempt, `<clientId>-p<random>`,
- * src/hosting/workflow.ts), a rollout while it deploys the client (the
- * rollout's run, or for a fleet client a child of it that claims it in
- * the rollout's name, src/rollout/workflow.ts), a rollback of the client
- * (its run, src/rollout/rollback.ts), or applying its settings (its run,
- * src/clients/apply.ts). Runs are never reused.
+ * src/hosting/workflow.ts), a deploy by the reconciler (its run,
+ * src/rollout/deploy.ts), or applying its settings (its
+ * run, src/clients/apply.ts). Runs are never reused.
  *
  * A runner claims the client with one conditional write that names the
  * runner it replaces (none, for a client without one), audited in the
  * same batch. However many act at once, one claim wins and only its
  * caller goes on, so a client has one runner: the precondition of a
  * deploy's D1 migrations and router map write (src/deploy/deploy.ts). A
- * rollout or a rollback releases its claim once it's done with the
- * client; a provisioning run's stays, naming the client's last run. Only
- * a rollback takes a client from a runner still going, and only from the
- * rollout it rolls back.
+ * deploy releases its claim once it's done with the client; a
+ * provisioning run's stays, naming the client's last run. No runner takes
+ * a client from another still going.
  *
  * One set of rules for every runner: each is a run, and it holds the
  * client while `client_runs` names it and its run hasn't ended
@@ -82,7 +79,7 @@ export const isReplaceable = (status: RunStatus): boolean =>
 
 /**
  * Whether a run in `status` has ended, finished or not: another kind of
- * runner, such as a rollout, may take the client over from it.
+ * runner, such as a deploy, may take the client over from it.
  */
 export const hasEnded = (status: RunStatus): boolean =>
   status === "complete" || isReplaceable(status);
@@ -94,8 +91,6 @@ const isMissingInstance = (error: unknown): boolean =>
 /** The workflow a runner of `kind` is a run of. */
 const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
   deploy: (env) => adminWorkflow(env, adminWorkflows.deploy),
-  rollout: (env) => adminWorkflow(env, adminWorkflows.rollout),
-  rollback: (env) => adminWorkflow(env, adminWorkflows.rollbackClient),
   apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
   provision_placed: (env) =>
     adminWorkflow(env, adminWorkflows.provisionPlacedClient),
@@ -237,8 +232,7 @@ export interface HeldClient {
   /**
    * The step that attempt is of: Workerflow's idempotency key, the same for
    * every attempt at one step of one run and different for any other. Runs
-   * under one runner id (a rollout's fleet clients, round after round)
-   * each count their attempts from 1, so the number alone can't tell them
+   * under one runner id each count their attempts from 1, so the number alone can't tell them
    * apart (`takeAttempt`).
    */
   attemptKey?: string;

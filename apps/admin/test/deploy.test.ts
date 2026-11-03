@@ -1,22 +1,28 @@
 import { env } from "cloudflare:workers";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
+  auditEvents,
   channels,
   clientDeploys,
+  clientProvisions,
   clientRuns,
   clients,
   clientWorkers,
 } from "../src/db/schema.ts";
 import { retryChannel } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
+import { checkRevocation } from "../src/rollout/shared-secrets.ts";
+import { deliveredShared } from "../src/rollout/targets.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
+import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
+import { livePlacedClient, placedRelease, scriptsOf } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
 import {
   deliverAlarm,
@@ -28,7 +34,11 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import {
+  emptyStoreSecret,
+  setStoreSecret,
+  useStoreSecrets,
+} from "./secrets-store.ts";
 
 // One client's deploy, as the reconciler starts it (src/rollout/deploy.ts,
 // src/rollout/reconciler.ts), broken where it can break. How it can fail,
@@ -37,13 +47,14 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a client deployed while another runner (an apply, provisioning) has it;
 // - an attempt that timed out, or lost its step's result, acting twice or
 //   counted failed;
-// - a deploy whose run was terminated left deploying for good.
+// - a deploy whose run was terminated left deploying for good;
+// - a change in Secrets Store (a value changed, put back, added or
+//   removed) never reaching a client, or reaching it again and again;
+// - a secrets deploy that failed never tried again once staff retry;
+// - an old secret called revocable while a client still runs it.
 
 const token = "test-deployer-token-deploy-8c4e1b";
 const cloudflare = mockCloudflareApi(token);
-
-/** A script's own path, below an account or a dispatch namespace. */
-const scriptPath = /\/scripts\/[^/]+$/u;
 
 /**
  * Holds the caller of the next Cloudflare call `matches` picks out, once
@@ -72,7 +83,7 @@ const heldAfter = (matches: (call: ApiCall) => boolean) => {
 
 /** A live client on `releaseId`, following Edge. */
 const live = async (releaseId: string): Promise<PlacedClient> =>
-  await livePlacedClient(cloudflare, 1, releaseId, { channel: "edge" });
+  await livePlacedClient(cloudflare, releaseId, { channel: "edge" });
 
 /** The release each of the client's Workers runs, by Worker. */
 const releasesOf = async (clientId: string) => {
@@ -90,6 +101,31 @@ const releasesOf = async (clientId: string) => {
 
 /** Both Workers on `releaseId`. */
 const on = (releaseId: string) => ({ connect: releaseId, core: releaseId });
+
+/** How many deploys of client `clientId` started, as the audit log keeps them. */
+const startedOf = async (clientId: string): Promise<number> =>
+  await db.$count(
+    auditEvents,
+    and(
+      eq(auditEvents.clientId, clientId),
+      eq(auditEvents.action, "deploy.start")
+    )
+  );
+
+/** The shared secrets client `clientId`'s operation last delivered, by name, whatever Worker holds them. */
+const deliveredNames = async (clientId: string): Promise<string[]> => {
+  const row = await db
+    .select({ progress: clientProvisions.progress })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  const delivered = deliveredShared(row?.progress ?? null);
+  return [
+    ...new Set(
+      Object.values(delivered).flatMap((prints) => Object.keys(prints))
+    ),
+  ].toSorted();
+};
 
 /** Client `clientId`'s last deploy: its release, status and error. */
 const deployOf = async (clientId: string) =>
@@ -112,13 +148,16 @@ const runnerOf = async (clientId: string) => {
   return row ?? null;
 };
 
-/** Whether `call` uploads a script of client `client`'s account. */
-const uploadOf =
-  (client: PlacedClient) =>
-  (call: ApiCall): boolean =>
+/** Whether `call` uploads one of client `client`'s scripts. */
+const uploadOf = async (
+  client: PlacedClient
+): Promise<(call: ApiCall) => boolean> => {
+  const { core, connect } = await scriptsOf(client.clientId);
+  return (call) =>
     call.method === "PUT" &&
-    call.path.startsWith(`/accounts/${client.account.id}/`) &&
-    scriptPath.test(call.path);
+    (call.path.endsWith(`/scripts/${core}`) ||
+      call.path.endsWith(`/scripts/${connect}`));
+};
 
 /**
  * The admin's runs as the test starts them, retries and sleeps going at
@@ -267,8 +306,8 @@ describe("a client's deploy", () => {
     const release = await placedRelease("feat(core): on a retry");
     // Each attempt is held once a script of the client was uploaded: the
     // first times out there, and its retry starts.
-    const first = heldAfter(uploadOf(client));
-    const retry = heldAfter(uploadOf(client));
+    const first = heldAfter(await uploadOf(client));
+    const retry = heldAfter(await uploadOf(client));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await using runs = followRuns();
     try {
@@ -372,7 +411,7 @@ describe("a client's deploy", () => {
     const before = await placedRelease("feat(core): before");
     const client = await live(before);
     const release = await placedRelease("feat(core): terminated");
-    const held = heldAfter(uploadOf(client));
+    const held = heldAfter(await uploadOf(client));
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await using runs = followRuns();
     let settled: Awaited<ReturnType<typeof deployOf>> = null;
@@ -404,4 +443,291 @@ describe("a client's deploy", () => {
       releases: on(release),
     });
   });
+});
+
+/** The shared-secret fingerprints client `clientId`'s operation last delivered, by Worker. */
+const printsOf = async (clientId: string) => {
+  const row = await db
+    .select({ progress: clientProvisions.progress })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  return deliveredShared(row?.progress ?? null);
+};
+
+describe("shared secrets as desired state", () => {
+  useStoreSecrets({ deployer: token });
+  beforeEach(setAsideEarlierTests);
+
+  it("deploys each client once when Secrets Store changes, then calls the changed secret revocable", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const first = await live(release);
+    const second = await live(release);
+    await using runs = followRuns();
+    // Given what the store holds by their deploys: nothing to do.
+    await runs.converge();
+    const before = [
+      await startedOf(first.clientId),
+      await startedOf(second.clientId),
+    ];
+    // Deploy platform copied a new Composio key into the store.
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-rotated"
+    );
+
+    await runs.converge();
+    // Settled: further ticks start nothing more.
+    await runs.converge();
+    const revocation = await checkRevocation(env);
+
+    expect({
+      before,
+      started: [
+        await startedOf(first.clientId),
+        await startedOf(second.clientId),
+      ],
+      deploys: [
+        await deployOf(first.clientId),
+        await deployOf(second.clientId),
+      ],
+      revocable:
+        typeof revocation === "string"
+          ? revocation
+          : revocation.revocable.includes("COMPOSIO_API_KEY"),
+      behind:
+        typeof revocation === "string"
+          ? revocation
+          : revocation.behind.COMPOSIO_API_KEY,
+    }).toStrictEqual({
+      before: [0, 0],
+      started: [1, 1],
+      deploys: [
+        { releaseId: release, status: "done", error: null },
+        { releaseId: release, status: "done", error: null },
+      ],
+      revocable: true,
+      behind: [],
+    });
+  });
+
+  it("deploys a client again when the store's earlier value is put back", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    const original = await printsOf(client.clientId);
+    await using runs = followRuns();
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-new"
+    );
+    await runs.converge();
+    const changed = await printsOf(client.clientId);
+
+    // Put back as it was.
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key"
+    );
+    await runs.converge();
+    await runs.converge();
+
+    expect({
+      changedAway:
+        changed.connect?.COMPOSIO_API_KEY !==
+        original.connect?.COMPOSIO_API_KEY,
+      restored: await printsOf(client.clientId),
+      started: await startedOf(client.clientId),
+    }).toStrictEqual({ changedAway: true, restored: original, started: 2 });
+  });
+
+  it("delivers a provider key added to the store to a client that didn't have it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    const before = await deliveredNames(client.clientId);
+    await setStoreSecret(
+      env.ANTHROPIC_API_KEY,
+      "ANTHROPIC_API_KEY",
+      "anthropic-key"
+    );
+
+    await runs.converge();
+    await runs.converge();
+    const after = await deliveredNames(client.clientId);
+
+    expect({
+      before: before.includes("ANTHROPIC_API_KEY"),
+      after: after.includes("ANTHROPIC_API_KEY"),
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      before: false,
+      after: true,
+      started: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it("takes a provider key removed from the store off a client that had it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    await setStoreSecret(
+      env.ANTHROPIC_API_KEY,
+      "ANTHROPIC_API_KEY",
+      "anthropic-key"
+    );
+    const client = await live(release);
+    await using runs = followRuns();
+    const before = await deliveredNames(client.clientId);
+    // Staff take the key out of the store.
+    await emptyStoreSecret(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
+
+    await runs.converge();
+    await runs.converge();
+    const after = await deliveredNames(client.clientId);
+
+    expect({
+      before: before.includes("ANTHROPIC_API_KEY"),
+      after: after.includes("ANTHROPIC_API_KEY"),
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      before: true,
+      after: false,
+      started: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it("leaves a client whose secrets deploy failed until staff retry, then deploys it again", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-rotated"
+    );
+    // The secrets deploy's first upload is refused: nothing is delivered.
+    cloudflare.failNext(await uploadOf(client), 400);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let failed: Awaited<ReturnType<typeof deployOf>> = null;
+    let whileFailed = 0;
+    try {
+      await runs.converge();
+      failed = await deployOf(client.clientId);
+      // Failed: ticks leave it for staff.
+      await runs.converge();
+      whileFailed = await startedOf(client.clientId);
+    } finally {
+      errors.mockRestore();
+    }
+
+    await retryChannel(env, staff, { channel: "edge" });
+    await runs.converge();
+
+    expect({
+      failed: failed?.status,
+      whileFailed,
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      failed: "failed",
+      whileFailed: 1,
+      started: 2,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it.each([
+    {
+      connect: "names the version its operation recorded",
+      answering: "recorded" as const,
+      held: false,
+    },
+    {
+      connect: "answers as an earlier version, its upload's",
+      answering: "earlier" as const,
+      held: true,
+    },
+    {
+      // What the probe recorded was an isolate of a version made before
+      // the run's last secret: a later read names the newest.
+      connect: "names a newer version than its operation recorded",
+      answering: "newer" as const,
+      held: true,
+    },
+    {
+      connect: "names no version (down, or no version metadata)",
+      answering: null,
+      held: true,
+    },
+  ])(
+    "calls a namespace connect's secret revocable only while core's health says connect $connect",
+    async ({ answering, held }) => {
+      const release = await placedRelease("feat(core): runs");
+      const internal = await live(release);
+      const { clientId } = internal;
+      const operation = await db
+        .select({ progress: clientProvisions.progress })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      const { shared } = z
+        .object({
+          shared: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(JSON.parse(operation?.progress ?? "{}"));
+      // Its connect in the namespace: drift reads it, as its core, through
+      // core's health, which names the version connect answers as. Its
+      // operation delivered the store's Composio key, as on record.
+      expect(shared.connect).toHaveProperty("COMPOSIO_API_KEY");
+
+      const connect = await db
+        .select({ scriptName: clientWorkers.scriptName })
+        .from(clientWorkers)
+        .where(
+          and(
+            eq(clientWorkers.clientId, clientId),
+            eq(clientWorkers.worker, "connect")
+          )
+        )
+        .get();
+      const [first] =
+        clientScripts(internal.account).get(connect?.scriptName ?? "")
+          ?.versions ?? [];
+      if (answering === "earlier") {
+        internal.core.connectAnswering = first?.id ?? null;
+      } else if (answering === "newer") {
+        await db
+          .update(clientWorkers)
+          .set({ versionId: first?.id ?? null })
+          .where(
+            and(
+              eq(clientWorkers.clientId, clientId),
+              eq(clientWorkers.worker, "connect")
+            )
+          );
+      } else if (answering === null) {
+        internal.core.connectAnswering = null;
+      }
+
+      const revocation = await checkRevocation(env);
+      expect(
+        typeof revocation === "string"
+          ? revocation
+          : {
+              revocable: revocation.revocable.includes("COMPOSIO_API_KEY"),
+              behind: revocation.behind.COMPOSIO_API_KEY,
+            }
+      ).toStrictEqual({ revocable: !held, behind: held ? [clientId] : [] });
+    }
+  );
 });

@@ -40,6 +40,11 @@ import {
   entitySources,
 } from "@grasp-os/brain/entities";
 import {
+  exportStatus,
+  prepareExport,
+  startExport,
+} from "@grasp-os/brain/exports";
+import {
   lessonLineage,
   lessonsFor,
   lessonsRetire,
@@ -83,6 +88,7 @@ import type {
   PurgePlan,
   PurgeResult,
   PurgeStatus,
+  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -109,6 +115,7 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
+import { coreExport } from "./brain-export.ts";
 import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
@@ -157,7 +164,7 @@ const allOf = (copies: readonly Copies[]): Copies => ({
  * from them, the Apps collection's entries and each person's Personal
  * collection.
  */
-const coreErasure = (env: Env): OnErase => {
+export const coreErasure = (env: Env): OnErase => {
   const readings = documentReadingErasure(env);
   return {
     ...allOf([
@@ -497,6 +504,48 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
           purgerOf(person),
           input,
           coreErasure(this.#env)
+        )
+    );
+  }
+
+  async prepareBrainExport(): Promise<{
+    collections: number;
+    documents: number;
+    token: string;
+    expiresAt: string;
+  }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await prepareExport(
+          brainOf(this.#env),
+          purgerOf(person),
+          coreExport(this.#env)
+        )
+    );
+  }
+
+  async startBrainExport(token: string): Promise<{ exportId: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await startExport(
+          brainOf(this.#env),
+          purgerOf(person),
+          token,
+          coreExport(this.#env)
+        )
+    );
+  }
+
+  async brainExportStatus(exportId: string): Promise<ExportStatus> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await exportStatus(
+          brainOf(this.#env),
+          purgerOf(person),
+          knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, exportId)
         )
     );
   }

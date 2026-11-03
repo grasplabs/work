@@ -12,10 +12,12 @@ import {
   clientWorkers,
 } from "../src/db/schema.ts";
 import type { Channel } from "../src/db/schema.ts";
+import { PlacementError, placeAndProvision } from "../src/hosting/placement.ts";
 import {
   pinClient,
   promoteRelease,
   retryChannel,
+  retryClient,
   setClientChannel,
 } from "../src/rollout/channels.ts";
 import { parallelDeploys } from "../src/rollout/desired.ts";
@@ -47,6 +49,8 @@ import { useStoreSecrets } from "./secrets-store.ts";
 //   staff retry;
 // - a release that reaches Edge while Edge deploys, dropped;
 // - a client moved to another channel left on its old channel's release;
+// - a new client started on a release its channel doesn't have, or on
+//   none while its channel has none;
 // - two ticks at once deploying one client twice, or more than
 //   `parallelDeploys` clients between them;
 // - a failure that lands mid-tick, missed by the rest of the tick;
@@ -57,7 +61,7 @@ const cloudflare = mockCloudflareApi(token);
 
 /** A live client on `releaseId`, following `channel`. */
 const live = async (channel: Channel, releaseId: string) =>
-  await livePlacedClient(cloudflare, 1, releaseId, { channel });
+  await livePlacedClient(cloudflare, releaseId, { channel });
 
 /** The release each of the client's Workers runs, by Worker. */
 const releasesOf = async (clientId: string) => {
@@ -104,9 +108,7 @@ const waitingClients = async (
     (_, index) => `${prefix}-${run}-${String(index).padStart(2, "0")}`
   );
   await Promise.all(
-    ids.map(
-      async (id) => await placedClientRecord(cloudflare, 1, { id, channel })
-    )
+    ids.map(async (id) => await placedClientRecord(cloudflare, { id, channel }))
   );
   await db
     .update(clients)
@@ -347,6 +349,52 @@ describe("release channels", () => {
     });
   });
 
+  it("retries a pinned client whose deploy failed when staff retry it, its channel going on meanwhile", async () => {
+    const before = await placedRelease("feat(core): before");
+    await releaseToEdge(env, [before]);
+    const pinned = await live("edge", before);
+    const other = await live("edge", before);
+    const pin = await placedRelease("feat(core): pinned to");
+    await using runs = followRuns();
+    // The pinned client's core upload is refused once.
+    cloudflare.failNext(await coreUpload(pinned.clientId), 400);
+    await pinClient(env, staff, { clientId: pinned.clientId, releaseId: pin });
+    await runs.converge();
+    const failed = await deployOf(pinned.clientId);
+    // A pinned client's failure never stops its channel: Edge's next
+    // release reaches the other client.
+    const next = await placedRelease("feat(core): next on edge");
+    await releaseToEdge(env, [next]);
+    await runs.converge();
+    const otherWhileFailed = await releasesOf(other.clientId);
+    const stillFailed = await deployOf(pinned.clientId);
+
+    await retryClient(env, staff, { clientId: pinned.clientId });
+    await runs.converge();
+
+    expect({
+      failed: failed?.status,
+      stillFailed: stillFailed?.status,
+      otherWhileFailed,
+      pinned: await releasesOf(pinned.clientId),
+      deploy: await deployOf(pinned.clientId),
+      retried: await db.$count(
+        auditEvents,
+        and(
+          eq(auditEvents.clientId, pinned.clientId),
+          eq(auditEvents.action, "client.retry")
+        )
+      ),
+    }).toStrictEqual({
+      failed: "failed",
+      stillFailed: "failed",
+      otherWhileFailed: on(next),
+      pinned: on(pin),
+      deploy: { releaseId: pin, status: "done", error: null },
+      retried: 1,
+    });
+  });
+
   it("picks up a release that reaches Edge mid-deploy on the next tick", async () => {
     const before = await placedRelease("feat(core): before");
     const edge = await live("edge", before);
@@ -402,6 +450,33 @@ describe("release channels", () => {
       onStable,
       onBeta: await releasesOf(moved.clientId),
     }).toStrictEqual({ onStable: on(before), onBeta: on(release) });
+  });
+
+  it("provisions a new client on its channel's release, and a Stable one waits while Stable has none", async () => {
+    const stableRelease = await placedRelease("feat(core): goes to stable");
+    const edgeRelease = await placedRelease("feat(core): only on edge");
+    const waiting = await placedClientRecord(cloudflare);
+    await releaseToEdge(env, [stableRelease]);
+    const refused = await placeAndProvision(env, staff, {
+      clientId: waiting.clientId,
+    }).then(
+      () => null,
+      (error: unknown) => (error instanceof PlacementError ? error.code : error)
+    );
+    await promoteTo("stable", stableRelease);
+    await releaseToEdge(env, [edgeRelease]);
+    await using runs = followRuns();
+
+    const runId = await placeAndProvision(env, staff, {
+      clientId: waiting.clientId,
+    });
+    await ended(adminWorkflows.provisionPlacedClient, runId);
+    await runs.converge();
+
+    expect({
+      refused,
+      provisioned: await releasesOf(waiting.clientId),
+    }).toStrictEqual({ refused: "no_release", provisioned: on(stableRelease) });
   });
 
   it("never deploys one client twice from two ticks at once", async () => {

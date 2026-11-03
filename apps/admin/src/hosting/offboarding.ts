@@ -11,7 +11,7 @@
  * - Every resource deleted is one its inventory records for its own
  *   deployment, named for it, in its own destination; every database is
  *   checked against the provider before anything is deleted. Nothing here
- *   runs by itself: no retry, clock or rollout ever deletes.
+ *   runs by itself: no retry, clock or deploy ever deletes.
  * - Each resource deleted is audited as it's recorded deleted, so a
  *   deletion that stops part way leaves a record of what it did.
  *

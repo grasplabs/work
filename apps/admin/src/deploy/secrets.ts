@@ -123,8 +123,8 @@ const derivedSecrets: Readonly<Record<string, readonly DerivedSecret[]>> = {
 
 /**
  * Client `clientId`'s core auth secret at `generation`, as its core has
- * it: what the admin signs what it tells core with keys derived from
- * (src/rollout/activity.ts).
+ * it: what the admin signs what it asks core with keys derived from
+ * (src/clients/onboarding.ts).
  */
 export const clientAuthSecret = async (
   secrets: Pick<DeploySecrets, "routerKey" | "clientKey">,

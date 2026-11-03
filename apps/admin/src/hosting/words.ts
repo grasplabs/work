@@ -51,7 +51,7 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
   operation_release_changed:
-    "Its provisioning is on a newer release already, or it's live: pick that release or a later one.",
+    "It's live already, or its provisioning changed release as this started: provisioning never changes what a live client runs.",
   unknown_worker: "The release has a Worker other than core and connect.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",
@@ -247,7 +247,7 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   hosted_on_prem:
     "It runs on its own premises: Grasp's cloud sets nothing up for it.",
   no_release:
-    "No imported release can provision it yet: CI publishes one per merge, and the admin imports it within 5 minutes. Look at Releases if none comes.",
+    "Its channel has no release yet: promote a release to it first, from Platform.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
@@ -298,7 +298,7 @@ export const notStartedWords = (why: NotStarted | null): string => {
     return "Not started: this admin's STAGE names no stage, so it has nowhere to place it.";
   }
   if (why === "no_release") {
-    return "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.";
+    return "Not started: its channel has no release yet. Promote a release to it first, from Platform.";
   }
   return "Not started: provision it from Hosting.";
 };
