@@ -1,3 +1,6 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { profileCalls } from "@grasp-os/open-workflow/calls";
+import { v } from "@grasp-os/sdk";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -11,7 +14,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  readApiStep,
+  says,
+} from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -198,6 +207,133 @@ describe("the agent building an independent workflow", () => {
     expect(
       new Set(events.map(({ actor }) => JSON.stringify(actor)))
     ).toStrictEqual(new Set([JSON.stringify(agentActor)]));
+  });
+
+  it("drafts a model step and a person's decision from the catalog it reads, and publishes them as catalog bindings, not code", async () => {
+    const name = `expenses-${unique()}`;
+    const { admin, chat, grant } = await setUp([]);
+    const judge = `judge-${unique()}`;
+    const approval = `approval-${unique()}`;
+    await admin.api.workflowResources.publishContract({
+      key: judge,
+      kind: "model",
+    });
+    await admin.api.workflowResources.publishContract({
+      key: approval,
+      kind: "decision",
+      input: JSON.stringify(v.object({ summary: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const definition = JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name,
+        version: "1.0.0",
+        title: name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: {
+              judge: { kind: "model", contract: judge },
+              approval: { kind: "decision", contract: approval },
+            },
+          },
+        },
+      },
+      input: { schema: objectSchema({ claim: { type: "string" } }) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        {
+          assess: {
+            call: "grasp.model",
+            with: {
+              binding: "judge",
+              instructions: "Summarise the expense claim for its approver.",
+              input: { claim: "${ $workflow.input.claim }" },
+              outputSchema: objectSchema({ summary: { type: "string" } }),
+            },
+            export: { as: "${ {summary: .summary} }" },
+          },
+        },
+        {
+          approve: {
+            call: "grasp.decision",
+            with: {
+              binding: "approval",
+              recipients: ["role:admin"],
+              prompt: "Approve this expense claim?",
+              input: { summary: "${ $context.summary }" },
+            },
+            export: { as: "${ {approved: .approved} }" },
+          },
+        },
+        {
+          finish: {
+            set: {
+              status:
+                '${ if $context.approved then "approved" else "declined" end }',
+            },
+          },
+        },
+      ],
+    });
+    const build = `export default async (self, env) => {
+      const catalog = await env.workflowBuild.catalog();
+      const created = await env.workflowBuild.create(${JSON.stringify(name)});
+      const started = await env.workflowBuild.draft(created.id);
+      const saved = await env.workflowBuild.edit(created.id, {
+        expectedRevision: started.revision,
+        source: ${JSON.stringify(definition)},
+        modules: {},
+      });
+      const published = await env.workflowBuild.publish(created.id, {
+        revision: saved.checkpoint.revision,
+        basedOn: null,
+      });
+      return {
+        catalog: catalog.filter(({ key }) => [${JSON.stringify(judge)}, ${JSON.stringify(approval)}].includes(key)),
+        problems: saved.problems,
+        bindings: published.bindings,
+      };
+    };`;
+    const provider = await fakeProvider(
+      readApiStep("workflowBuild"),
+      codeStep(build),
+      says("Drafted.")
+    );
+    await grant();
+
+    await chat.ask("Build me a workflow that approves expense claims");
+
+    // The declaration it read gives each of the profile's calls, so a
+    // judgement or an approval needn't be written as code.
+    const declared = JSON.stringify(provider.requests[1]?.body);
+    expect(
+      Object.keys(profileCalls).filter(
+        (call) => !declared.includes(`call: \\"${call}\\"`)
+      )
+    ).toStrictEqual([]);
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toStrictEqual({
+      // What a model contract and a decision contract take, as it binds
+      // them.
+      catalog: [
+        {
+          key: approval,
+          kind: "decision",
+          input: v.object({ summary: v.string() }).descriptor,
+          response: v.object({ comment: v.string() }).descriptor,
+        },
+        { key: judge, kind: "model" },
+      ].toSorted((a, b) => a.key.localeCompare(b.key)),
+      problems: [],
+      bindings: [
+        { alias: "approval", kind: "decision", contractId: approval },
+        { alias: "judge", kind: "model", contractId: judge },
+      ],
+    });
   });
 
   it("publishes nothing once its permission is revoked while the version is being built", async () => {

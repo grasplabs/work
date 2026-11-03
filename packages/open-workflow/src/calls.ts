@@ -29,27 +29,75 @@ import {
  * aren't available.
  */
 
-/** Named calls of the profile and the `with` fields each takes. */
-const namedCalls: Readonly<
-  Record<string, { required: readonly string[]; optional: readonly string[] }>
-> = {
-  "grasp.operation": { required: ["binding", "arguments"], optional: [] },
-  "grasp.connector": {
-    required: ["binding", "operation", "arguments"],
-    optional: [],
-  },
+/** A named call of the profile. */
+export interface ProfileCall {
+  /** The `with` fields it can't do without. */
+  readonly required: readonly string[];
+  /** The `with` fields it may take besides. */
+  readonly optional: readonly string[];
+  /** The kind of binding its `with.binding` names, if it takes one. */
+  readonly binding?: BindingKind;
+  /** What a step calls it for, in a sentence. */
+  readonly purpose: string;
+}
+
+/**
+ * Named calls of the profile: the `with` fields each takes, the binding
+ * kind it calls and what it is for. Whoever writes a definition (a person
+ * or the chat's agent) picks a step's call by its purpose, so a step that
+ * judges, reaches an outside system or asks a person isn't written as code.
+ */
+export const profileCalls: Readonly<Record<string, ProfileCall>> = {
   "grasp.model": {
     required: ["binding", "instructions", "input", "outputSchema"],
     optional: ["model", "maxOutputTokens"],
+    binding: "model",
+    purpose:
+      "A model's judgement: read, classify, extract, summarise or draft from `input` by `instructions`, answering in `outputSchema`.",
   },
-  "grasp.compute": { required: ["binding", "arguments"], optional: [] },
   "grasp.decision": {
     required: ["binding", "recipients", "prompt", "input"],
     optional: [],
+    binding: "decision",
+    purpose:
+      "A person's check or approval: asks `recipients` (`person:<id>`, `team:<id>` or `role:<name>`) the `prompt` and waits for their answer (`approved`, and the contract's response).",
   },
-  "grasp.now": { required: [], optional: [] },
-  "grasp.random": { required: [], optional: [] },
-  "grasp.sleepUntil": { required: ["timestamp"], optional: [] },
+  "grasp.connector": {
+    required: ["binding", "operation", "arguments"],
+    optional: [],
+    binding: "connector",
+    purpose:
+      "An outside system (mail, calendar, CRM, files and the like): one `operation` its connector contract allows, served through connect.",
+  },
+  "grasp.operation": {
+    required: ["binding", "arguments"],
+    optional: [],
+    binding: "operation",
+    purpose:
+      "An action with effects: a host operation from the catalog, or the workflow's own (`local:code/<file>.ts#<export>`) using its other bindings.",
+  },
+  "grasp.compute": {
+    required: ["binding", "arguments"],
+    optional: [],
+    binding: "compute",
+    purpose:
+      "A pure calculation in the workflow's own code (`local:code/<file>.ts#<export>`): no judgement, no outside system, no person; only what an expression can't compute.",
+  },
+  "grasp.now": {
+    required: [],
+    optional: [],
+    purpose: "The current time, recorded so a replay sees the same.",
+  },
+  "grasp.random": {
+    required: [],
+    optional: [],
+    purpose: "A random number, recorded so a replay sees the same.",
+  },
+  "grasp.sleepUntil": {
+    required: ["timestamp"],
+    optional: [],
+    purpose: "Waits until `timestamp`, in milliseconds since the epoch.",
+  },
 };
 
 /** The longest prompt a decision takes, as its description. */
@@ -228,7 +276,7 @@ const callWith = (
   pointer: string,
   site: Site
 ): void => {
-  const fields = namedCalls[call];
+  const fields = profileCalls[call];
   const withPointer = pointerJoin(pointer, "with");
   if (fields === undefined) {
     return;
@@ -311,13 +359,13 @@ export const checkCall = (
     });
     return;
   }
-  if (!Object.hasOwn(namedCalls, call)) {
+  if (!Object.hasOwn(profileCalls, call)) {
     checker.report.error(
       "call.unsupported",
       at(site, callPointer),
       protocolCalls.has(call)
         ? "Raw protocol calls aren't available: call an approved connector with grasp.connector."
-        : "Use a named Grasp call (grasp.operation, grasp.connector, grasp.model, grasp.compute, grasp.decision, grasp.now, grasp.random, grasp.sleepUntil) or a function in use.functions.",
+        : `Use a named Grasp call (${Object.keys(profileCalls).join(", ")}) or a function in use.functions.`,
       { reason: protocolCalls.has(call) ? "protocol call" : "unknown call" }
     );
     return;
