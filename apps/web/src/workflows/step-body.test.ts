@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { stepBodyAt } from "./step-body.ts";
+import { definitionTitle, stepBodyAt } from "./step-body.ts";
 
 // Reading the step a diagram's pointer names, from the text it was drawn
 // from: nested tasks and escaped IDs, and nothing for a pointer that names
@@ -41,5 +41,27 @@ describe("a step's body", () => {
       stepBodyAt(source, "/do/0/constructor"),
       stepBodyAt(source, "/__proto__/0/first"),
     ]).toStrictEqual(Array.from({ length: 9 }));
+  });
+});
+
+/** Definition text whose document is titled `title`. */
+const titled = (title: unknown): string =>
+  JSON.stringify({ document: { name: "invoice-intake", title }, do: [] });
+
+describe("a definition's title", () => {
+  it("is its document's title, trimmed, and nothing where it sets none or the text isn't JSON", () => {
+    expect([
+      definitionTitle(titled("  Invoice intake ")),
+      definitionTitle(titled("   ")),
+      definitionTitle(titled(7)),
+      definitionTitle(JSON.stringify({ document: { name: "x" } })),
+      definitionTitle("{ not yet"),
+    ]).toStrictEqual([
+      "Invoice intake",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

@@ -31,6 +31,18 @@ export const modelScripts = {
       says("Revenue by region, the deals that closed, and the pipeline."),
     ],
   },
+  /**
+   * A new workflow drawn in its chat: the person answers the page's own
+   * first question, which business process it is for, and Grasp asks on.
+   */
+  drawsWorkflow: {
+    opener: "Which business process is this workflow for?",
+    replies: [
+      says(
+        "Purchase-to-Pay, then. Where does a supplier's invoice come in, and who looks at it first?"
+      ),
+    ],
+  },
 } as const satisfies Record<string, ModelScript>;
 
 const textPartSchema = z.object({ type: z.literal("text"), text: z.string() });

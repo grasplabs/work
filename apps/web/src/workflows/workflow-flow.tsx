@@ -472,10 +472,12 @@ export const WorkflowFlow = ({
           ref={room}
         >
           {checkpoint === null ? (
-            <p className="text-muted-foreground text-center">
+            // Nothing passed yet, as a new workflow starts: its builders
+            // tell Grasp how the work runs, in its chat beside the Flow.
+            <p className="bg-card text-muted-foreground m-auto max-w-sm rounded-xl border px-5 py-4 text-center">
               <Trans>
-                It is drawn once a revision passes the check: check and save it
-                under Definition.
+                Nothing is drawn yet. Tell Grasp in the chat how this work runs
+                and its steps come here.
               </Trans>
             </p>
           ) : (

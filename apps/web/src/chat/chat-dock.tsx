@@ -1,3 +1,4 @@
+import type { ChatMessage } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
@@ -30,6 +31,8 @@ import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { useWorkflowStart } from "../workflows/draw-in-chat.ts";
+import type { DockStart } from "../workflows/draw-in-chat.ts";
 import { appSlot, setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { AskOrCompose } from "./asked-questions.tsx";
@@ -448,6 +451,55 @@ const useSlotWays = (
 };
 
 /**
+ * The opening of a chat with nothing in it yet, as Grasp's message: what
+ * the dock says before anything is asked, and its first question, which
+ * shows in place of the box as the agent's own questions do.
+ */
+const openingOf = (text: string, start: DockStart): ChatMessage => ({
+  id: 0,
+  role: "assistant",
+  text,
+  citations: [],
+  code: [],
+  asked: start.asked,
+  end: "done",
+  at: new Date(0).toISOString(),
+});
+
+/**
+ * What the box answers to in chat `chatId`: its messages, or, before
+ * anything is asked in it (as `DockThread` has it), the opening `start`
+ * asks, whose answer it takes first (`DockStart.answered`).
+ */
+const withOpening = (
+  chatId: string | undefined,
+  view: ReturnType<typeof useFollowedChat>["view"],
+  start: DockStart | undefined,
+  words: DockWords,
+  ask: (question: string) => Promise<void>
+): {
+  messages: readonly ChatMessage[];
+  answer: (answers: string) => Promise<void>;
+} => {
+  const empty =
+    chatId === undefined || (view.loaded && view.messages.length === 0);
+  if (!empty || start === undefined) {
+    return {
+      messages: view.messages,
+      answer: async (answers) => {
+        await ask(answers);
+      },
+    };
+  }
+  return {
+    messages: [openingOf(words.empty, start)],
+    answer: async (answers) => {
+      await ask(await start.answered(answers));
+    },
+  };
+};
+
+/**
  * The dock itself: on every page in the frame but Chat's, carrying on the
  * tab's open chat of `slot` (active-chat.ts); on an App's page for whoever
  * changes it, the App's own (`app`).
@@ -456,12 +508,15 @@ const Dock = ({
   slot,
   words,
   app,
+  start,
   models,
   retry,
 }: {
   slot: ChatSlot;
   words: DockWords;
   app?: string;
+  /** What it asks first, before anything is asked in its chat. */
+  start?: DockStart;
   /** The models a question may name; none while they are read. */
   models: Loaded<Offered> | undefined;
   /** Reads the models again, as after core was out of reach. */
@@ -514,18 +569,19 @@ const Dock = ({
   const dockId = useId();
   const hintId = useId();
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
+  const { messages, answer } = withOpening(chatId, view, start, words, ask);
   const box = (
     <AskOrCompose
       {...composer}
       compact
       describedBy={unfolds ? hintId : undefined}
-      messages={view.messages}
+      messages={messages}
       onAnswer={(answers) => {
         // As a question sent from the bar does: the reply shows.
         if (mode === "bar") {
           moveTo("frame");
         }
-        void ask(answers);
+        void answer(answers);
       }}
       label={words.title}
       onSend={() => {
@@ -631,6 +687,14 @@ export const ChatDock = () => {
   const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
   const loaded = appPage?.loaderData;
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
+  const workflowPage = useMatch({
+    from: "/_shell/workflows/$workflow",
+    shouldThrow: false,
+  });
+  const workflow = workflowPage?.loaderData?.resource;
+  const start = useWorkflowStart(
+    workflow?.state === "ready" ? workflow.data : undefined
+  );
   // Read here, once for every page, not by each dock: the brain's dock, each
   // App's and the chat's take each other's place between pages, and each
   // read them again when it did. Chat is the chat at full size, and a
@@ -682,16 +746,23 @@ export const ChatDock = () => {
       />
     );
   }
+  // Beside a workflow its builder draws, a new chat starts by asking how
+  // the work runs (workflows/draw-in-chat.ts); it is an ordinary chat.
   return (
     <Dock
       key="chat"
       models={models}
       retry={readAgain}
       slot="chat"
+      start={start}
       words={{
         title: t`Ask Grasp`,
-        placeholder: t`Ask Grasp`,
-        empty: t`Ask anything, or describe a process`,
+        placeholder:
+          start === undefined ? t`Ask Grasp` : t`Say how this work runs`,
+        empty:
+          start === undefined
+            ? t`Ask anything, or describe a process`
+            : t`Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go.`,
       }}
     />
   );

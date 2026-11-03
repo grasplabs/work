@@ -56,3 +56,26 @@ export const stepBodyAt = (
   const body = value[id];
   return isObject(body) ? body : undefined;
 };
+
+/**
+ * The title definition text `source` gives its workflow (`document.title`),
+ * trimmed: what its page heads it with, over its name. Undefined when the
+ * text isn't JSON or sets no title.
+ */
+export const definitionTitle = (
+  source: string | undefined
+): string | undefined => {
+  if (source === undefined) {
+    return undefined;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    return undefined;
+  }
+  const title = childOf(childOf(value, "document"), "title");
+  return typeof title === "string" && title.trim() !== ""
+    ? title.trim()
+    : undefined;
+};

@@ -1,97 +1,60 @@
-import { failureText } from "@grasp-os/shared/errors";
 import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Trans } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
 
+import { setActiveChat } from "../chat/active-chat.ts";
+import { setDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
-import { useCore } from "../use-core.ts";
+import { useCoreAction } from "../use-core-action.ts";
 
-// A new independent workflow by name (platform specification 13), for those
-// who build: the page's action, in the bar above it. The ones the person
-// has a role in are listed with the App's in the workflows overview. Core
-// decides who may create one and which names are free.
+// A new independent workflow (platform specification 13), for those who
+// build: the page's action, in the bar above it. As the prototype's New
+// workflow, it goes straight to the new workflow's page, its Flow empty
+// and Grasp's chat docked open beside it, asking how the work runs
+// (draw-in-chat.ts). Core decides who may create one and which names are
+// free: a name is the workflow's for good, so a new one takes a name
+// nobody had, made here.
 
-/** Creates a workflow named as typed, and opens it. */
-const NewWorkflowForm = () => {
-  const core = useCore();
-  const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string>();
-  const create = async (): Promise<void> => {
-    setBusy(true);
-    setFailure(undefined);
-    try {
-      const created = await core.withSession(
-        async (session) => await session.workflowResources.create(name)
-      );
-      await navigate({
-        to: "/workflows/$workflow",
-        params: { workflow: created.id },
-      });
-    } catch (error) {
-      setFailure(failureText(error));
-    }
-    setBusy(false);
-  };
-  return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void create();
-      }}
-    >
-      <Label htmlFor="new-workflow-name">
-        <Trans>Name of a new workflow</Trans>
-      </Label>
-      <div className="flex gap-2">
-        <Input
-          id="new-workflow-name"
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-          placeholder="invoice-approval"
-          value={name}
-        />
-        <Button disabled={busy || name === ""} type="submit">
-          <Trans>Create</Trans>
-        </Button>
-      </div>
-      <ErrorText>{failure}</ErrorText>
-    </form>
-  );
-};
+/** The name of a new workflow: one nobody had, as core's names go. */
+const newName = (): string => `new-workflow-${crypto.randomUUID().slice(0, 8)}`;
 
 /**
  * The page's one action, in the bar above it as the prototype has it: a
- * new workflow, named in a popover and opened once created.
+ * new workflow, opened on its Flow with Grasp's chat beside it.
  */
 export const NewWorkflow = () => {
-  const { t } = useLingui();
+  const navigate = useNavigate();
+  const { busy, failure, run } = useCoreAction();
+  const create = async (): Promise<void> => {
+    const created = await run(
+      async (session) => await session.workflowResources.create(newName())
+    );
+    if (created === undefined) {
+      return;
+    }
+    // A new chat, the person's like any other, docked open down the right
+    // beside the Flow it draws: the next question there starts it.
+    setActiveChat(undefined);
+    setDockMode("drawer");
+    await navigate({
+      to: "/workflows/$workflow",
+      params: { workflow: created.id },
+    });
+  };
   return (
-    <Popover>
-      <PopoverTrigger render={<Button size="sm" />}>
+    <span className="flex items-center gap-2">
+      <ErrorText>{failure}</ErrorText>
+      <Button
+        disabled={busy}
+        onClick={() => {
+          void create();
+        }}
+        size="sm"
+      >
         <PlusIcon data-icon="inline-start" />
         <Trans>New workflow</Trans>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
-        <PopoverHeader>
-          <PopoverTitle>{t`New workflow`}</PopoverTitle>
-        </PopoverHeader>
-        <NewWorkflowForm />
-      </PopoverContent>
-    </Popover>
+      </Button>
+    </span>
   );
 };
