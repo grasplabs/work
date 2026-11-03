@@ -262,6 +262,10 @@ test("Grasp's staff are sent to the admin dashboard, with nothing of the workspa
     })
   ).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
+  // A saved link to the company's onboarding, a route of its own outside
+  // the app, lands there too.
+  await page.goto("/setup?step=welcome");
+  await expect(page).toHaveURL(/\/staff$/u);
   expect(cspViolations).toStrictEqual([]);
 });
 
@@ -368,7 +372,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
 }) => {
   // Late in the serial run: what it keeps replaces the roster and the plan
   // the tests before it read.
-  const admin = await signInStaff();
+  const admin = await configuredAdmin();
   // The first test's plan runs from today with the agreements in, so the
   // store's alarm would send the links due under it to the staff list saved
   // below before its organization is confirmed and its own plan made. A
@@ -586,7 +590,7 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   cspViolations,
 }) => {
   // After the journey above: its list of four is there as the step arrives.
-  const admin = await signInStaff();
+  const admin = await configuredAdmin();
   await signInTo(page.context(), admin);
   // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
   const asked: { text: string; tone: unknown }[] = [];

@@ -57,8 +57,8 @@ import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 // step at a time below it, each fading in; the step is in the address, so
 // the browser's back and forward work too. Stephen says each step as it
 // arrives (setup-parts.tsx). Admins only: core refuses
-// everyone else, and anyone else is taken home. Grasp's staff have their
-// own side of it at /onboarding.
+// everyone else, and anyone else is taken home. Grasp's staff are sent to
+// /staff: they steer the onboarding from the admin dashboard.
 
 /** The suites whose directory the company step offers, in order. */
 const directorySuites = directorySuiteSchema.options;
@@ -536,6 +536,12 @@ export const Route = createFileRoute("/setup")({
           ...signInErrorSearch(location.search),
         },
       });
+    }
+    // Grasp's staff work from the admin dashboard, from a saved /setup
+    // link too (routes/staff.tsx).
+    if (identity.staff) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/staff", replace: true });
     }
     if (!isAdmin(identity.role)) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
