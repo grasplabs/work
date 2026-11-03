@@ -13,6 +13,7 @@ import {
   emailTriggerConfigSchema,
   scheduleTriggerConfigSchema,
   systemTriggerConfigSchema,
+  webhookTriggerConfigSchema,
   workflowTriggerCreateSchema,
 } from "@grasp-os/shared/workflow-triggers";
 import type {
@@ -43,6 +44,10 @@ import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
 import { quotaLimits } from "./workflows/quotas.ts";
+import {
+  webhookTokenOf,
+  webhookTriggerSecretOf,
+} from "./workflows/webhook-triggers.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one exact workflow version on its own. This is their
@@ -104,6 +109,13 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   copied. It is never changed: deleting the trigger and making another is
 //   how it changes. Its input is a fixed mapping as a connector trigger's
 //   is. Its mail starts runs as workflows/inbound-email.ts says.
+// - A webhook trigger started by anyone who learns its URL: its URL ends
+//   in a token of 128 random bits of its own, kept as an email trigger's
+//   address is, and every delivery must be signed with its secret, which
+//   is never stored and shown once, to its owner, as it is made (created
+//   or rotated). Its owner rotates it; whoever may stop the trigger
+//   revokes it. Its deliveries start runs as workflows/webhook-triggers.ts
+//   says.
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -226,6 +238,14 @@ const kindFieldsOf = async (
     );
     return { ...noKindFields, inputMapping: canonicalJson(input) };
   }
+  if (kind === "webhook") {
+    workflowResourceErrors.parse(
+      "workflow.resource_invalid",
+      webhookTriggerConfigSchema,
+      config
+    );
+    return noKindFields;
+  }
   if (kind === "system") {
     const { event } = workflowResourceErrors.parse(
       "workflow.resource_invalid",
@@ -278,6 +298,8 @@ export interface TriggerResource {
   workflowVersion: number;
   principal: string;
   enabled: boolean;
+  /** A webhook trigger's secret, as it was created: never kept. */
+  secret?: string;
 }
 
 const unavailable = () =>
@@ -363,6 +385,8 @@ export const createTriggerResource = async (
       enabled: true,
       createdAt: now,
       emailAddress: kind === "email" ? emailAddressOf() : null,
+      webhookToken: kind === "webhook" ? webhookTokenOf() : null,
+      webhookSecretGeneration: kind === "webhook" ? 1 : null,
     }),
     db.insert(triggerResourceVersions).values({
       triggerId: id,
@@ -425,6 +449,9 @@ export const createTriggerResource = async (
     workflowVersion: version,
     principal: by.userId,
     enabled: true,
+    ...(kind === "webhook"
+      ? { secret: await webhookTriggerSecretOf(env, id, 1) }
+      : {}),
   };
 };
 
@@ -722,6 +749,84 @@ export const setTriggerEnabled = async (
   ]);
 };
 
+/** Refuses a trigger that isn't a webhook trigger, as if it weren't there. */
+const requireWebhook = (trigger: TriggerResource): void => {
+  if (trigger.kind !== "webhook") {
+    throw unavailable();
+  }
+};
+
+/**
+ * Makes webhook trigger `id` a new secret, for its owner while they still
+ * build the workflow (`own`): its generation one more, so the old secret
+ * takes nothing from then on, and a revoked one is replaced. The new
+ * secret is answered this once, and audited as rotated, never itself.
+ */
+export const rotateWebhookSecret = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<{ secret: string }> => {
+  const trigger = await requireTriggerManager(env, by, id, "own");
+  requireWebhook(trigger);
+  const db = drizzle(env.DB);
+  const [[rotated]] = await auditedBatch(env, db, [
+    db
+      .update(triggerResources)
+      .set({
+        webhookSecretGeneration: sql`${triggerResources.webhookSecretGeneration} + 1`,
+        webhookSecretRevokedAt: null,
+      })
+      .where(
+        and(
+          eq(triggerResources.id, trigger.id),
+          isNull(triggerResources.deletedAt)
+        )
+      )
+      .returning({ generation: triggerResources.webhookSecretGeneration }),
+    outboxedIfChanged(
+      db,
+      entry(by, "trigger.webhook.secret_rotated", trigger.id)
+    ),
+  ]);
+  if (rotated === undefined || rotated.generation === null) {
+    throw unavailable();
+  }
+  return {
+    secret: await webhookTriggerSecretOf(env, trigger.id, rotated.generation),
+  };
+};
+
+/**
+ * Revokes webhook trigger `id`'s secret, for whoever may stop the trigger
+ * (`manage`): it takes no delivery until its owner makes a new one.
+ * Audited only when it had one.
+ */
+export const revokeWebhookSecret = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<void> => {
+  const trigger = await requireTriggerManager(env, by, id);
+  requireWebhook(trigger);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(triggerResources)
+      .set({ webhookSecretRevokedAt: new Date() })
+      .where(
+        and(
+          eq(triggerResources.id, trigger.id),
+          isNull(triggerResources.webhookSecretRevokedAt)
+        )
+      ),
+    outboxedIfChanged(
+      db,
+      entry(by, "trigger.webhook.secret_revoked", trigger.id)
+    ),
+  ]);
+};
+
 /** Deletes trigger `id` for `by`, who manages it: it starts nothing more. */
 export const deleteTriggerResource = async (
   env: Env,
@@ -761,6 +866,8 @@ interface TriggerRow {
   workflowVersion: number;
   principal: string;
   emailAddress: string | null;
+  webhookToken: string | null;
+  webhookSecretRevokedAt: Date | null;
   eventContract: string | null;
   eventType: string | null;
   scheduleCron: string | null;
@@ -846,6 +953,13 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
   address: row.emailAddress,
+  webhook:
+    row.webhookToken === null
+      ? null
+      : {
+          token: row.webhookToken,
+          secret: row.webhookSecretRevokedAt === null ? "active" : "revoked",
+        },
   // Stopped by its own failing starts (workflows/schedule-triggers.ts):
   // no next time, after `maxFailedStarts` in a row.
   stopped:
@@ -871,6 +985,8 @@ const triggersWhere = async (
       workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
       emailAddress: triggerResources.emailAddress,
+      webhookToken: triggerResources.webhookToken,
+      webhookSecretRevokedAt: triggerResources.webhookSecretRevokedAt,
       eventContract: triggerResourceVersions.eventContract,
       eventType: triggerResourceVersions.eventType,
       scheduleCron: triggerResourceVersions.scheduleCron,

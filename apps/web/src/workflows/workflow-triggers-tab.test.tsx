@@ -59,6 +59,7 @@ const stoppedSchedule: WorkflowTrigger = {
   },
   nextAt: null,
   address: null,
+  webhook: null,
   stopped: true,
 };
 
@@ -76,6 +77,7 @@ const othersMail: WorkflowTrigger = {
   },
   nextAt: null,
   address: null,
+  webhook: null,
   stopped: false,
 };
 
@@ -89,6 +91,7 @@ const ownMail: WorkflowTrigger = {
   config: { input: { fields: {}, defaults: {} } },
   nextAt: null,
   address: "trigger-0b7c",
+  webhook: null,
   stopped: false,
 };
 
