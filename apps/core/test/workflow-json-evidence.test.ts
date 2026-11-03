@@ -8,7 +8,7 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
@@ -33,6 +33,7 @@ import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { runEvidenceMaxRows } from "../src/workflows/run-evidence.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { runObject } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -651,6 +652,8 @@ const takingParent = async (by: Identity, admin: Identity, made: Made) => {
 };
 
 describe("a JSON workflow's recalled evidence", () => {
+  afterEach(endLiveResourceRuns);
+
   it("refuses its model call and its output once what it recalled can't be read, though it may as long as it can", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

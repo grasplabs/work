@@ -2,12 +2,13 @@
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
+  endLiveResourceRuns,
   greetingTasks,
   jsonWorkflowAppsOf,
   objectSchema,
@@ -51,6 +52,8 @@ const told = ({ steps }: WorkflowRunTrace) =>
   );
 
 describe("a JSON workflow run's history", () => {
+  afterEach(endLiveResourceRuns);
+
   it("tells a wait as waiting while the run sleeps, and as reached, with its end, once it slept", async () => {
     const builder = await signedIn("builder");
     const sleeping = await publishedWorkflow(builder, greetingTasks("PT1H"));
