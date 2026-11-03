@@ -335,9 +335,7 @@ const ChangedLines = ({
 
 /** One file's changed lines, with a few unchanged ones around them. */
 const FileChange = ({ diff }: { diff: FileDiff }) => {
-  const before = diff.change === "added" ? "" : diff.before;
-  const after = diff.change === "deleted" ? "" : diff.after;
-  const shown = changedLines(before, after);
+  const shown = changedLines(diff);
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border">
       <header className="bg-muted flex items-center gap-2 border-b px-4 py-2">

@@ -66,12 +66,33 @@ const schemaText = "export const schema = {};\n";
 const inboxText = "export default function Inbox() {}\n";
 const oldText = "export const legacy = true;\n";
 
-const filesOf: Record<number, AppFiles> = {
+/** Each version's files, by version. */
+type Versions = Record<number, AppFiles>;
+
+const smallVersions: Versions = {
   1: { "app.ts": appV1, "old.ts": oldText, "schema.ts": schemaText },
   2: {
     "app.ts": appV2,
     "schema.ts": schemaText,
     "screens/inbox.tsx": inboxText,
+  },
+};
+
+/** `count` lines, each `name` and its number. */
+const manyLines = (name: string, count: number): string =>
+  Array.from({ length: count }, (_, line) => `// ${name} ${line + 1}\n`).join(
+    ""
+  );
+
+/**
+ * Versions whose draft rewrites every line of data.ts (2,200 edits, past
+ * what is worked out line by line) and adds a 2,100-line report.ts.
+ */
+const largeVersions: Versions = {
+  1: { "data.ts": manyLines("old", 1100) },
+  2: {
+    "data.ts": manyLines("new", 1100),
+    "report.ts": manyLines("report", 2100),
   },
 };
 
@@ -93,7 +114,8 @@ const diffOf = (before: AppFiles, after: AppFiles): FileDiff[] =>
         : [{ path, change: "modified", before: old, after: now }];
     });
 
-const apps = {
+/** Core's Apps API, as far as the Code tab reads it, on `filesOf`. */
+const appsOn = (filesOf: Versions) => ({
   versions: {
     diff: async (
       _app: string,
@@ -110,7 +132,7 @@ const apps = {
       return filesOf[at ?? 2] ?? {};
     },
   },
-};
+});
 
 let root: Root | undefined;
 
@@ -130,8 +152,10 @@ const settled = async (): Promise<void> => {
  */
 const shown = async (
   role: ViewedApp["role"],
-  current: number | null = 1
+  current: number | null = 1,
+  versions: Versions = smallVersions
 ): Promise<void> => {
+  const apps = appsOn(versions);
   const core = {
     withSession: async <T,>(
       action: (session: { apps: typeof apps }) => Promise<T>
@@ -200,6 +224,7 @@ const fileShown = (): string =>
 const changesShown = () =>
   [...document.querySelectorAll("section")].map((section) => ({
     file: section.querySelector("h3")?.textContent,
+    text: section.textContent,
     lines: [...(section.querySelector("pre")?.children ?? [])].map(
       (line) => line.textContent
     ),
@@ -271,7 +296,9 @@ describe("An App's Code tab", () => {
     await shown("builder");
     await press(named("button", "Changes"));
 
-    expect(changesShown()).toStrictEqual([
+    expect(
+      changesShown().map(({ file, lines }) => ({ file, lines }))
+    ).toStrictEqual([
       {
         file: "app.ts",
         lines: [
@@ -313,6 +340,36 @@ describe("An App's Code tab", () => {
         { file: "schema.ts", added: true },
         { file: "screens/inbox.tsx", added: true },
       ],
+    });
+  });
+
+  it("says a file rewritten past what is worked out has too many changes, and shows a large new file whole", async () => {
+    await shown("builder", 1, largeVersions);
+    await press(named("button", "Changes"));
+    const [rewritten, added] = changesShown();
+
+    expect({
+      rewritten: {
+        file: rewritten?.file,
+        tooMany: rewritten?.text.includes(
+          "Too many changes to show line by line"
+        ),
+        lines: rewritten?.lines.length,
+      },
+      added: {
+        file: added?.file,
+        lines: added?.lines.length,
+        allAdded: added?.lines.every((line) => line?.startsWith("+ // report")),
+        last: added?.lines.at(-1),
+      },
+    }).toStrictEqual({
+      rewritten: { file: "data.ts", tooMany: true, lines: 0 },
+      added: {
+        file: "report.ts",
+        lines: 2100,
+        allAdded: true,
+        last: "+ // report 2100",
+      },
     });
   });
 });

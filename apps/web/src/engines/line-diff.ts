@@ -1,3 +1,4 @@
+import type { FileDiff } from "@grasp-os/shared/apps";
 import { structuredPatch } from "diff";
 
 // How a file's text differs between two versions, as the Code tab's
@@ -24,26 +25,47 @@ export interface DiffGap {
 /** Unchanged lines kept around each change. */
 const contextLines = 3;
 
-/** How many lines a file has; its last newline ends a line, not starts one. */
-const lineCount = (text: string): number =>
-  text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+/** A file's lines; its last newline ends a line, not starts one. */
+const linesOf = (text: string): string[] => {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines;
+};
 
 /**
- * The most lines added and removed worked out for one file. The diff runs
- * on the page's own thread, for each changed file of a draft: past this,
- * a file's change costs more than it shows, and it isn't worked out.
+ * The most lines added and removed worked out for one modified file. The
+ * diff runs on the page's own thread, for each changed file of a draft:
+ * past this, a file's change costs more than it shows, and it isn't
+ * worked out.
  */
 const maxEditLength = 2000;
 
 /**
- * The changed lines of `before` against `after`, each hunk's unchanged
- * lines around them, and gaps for the unchanged lines between; none when
- * it changes more lines than `maxEditLength`.
+ * How a file changed: an added file's lines all added, a deleted file's
+ * all removed, with nothing to compare; a modified file's changed lines,
+ * each hunk's unchanged lines around them and gaps for the unchanged
+ * lines between, or none when it changes more lines than `maxEditLength`.
  */
 export const changedLines = (
-  before: string,
-  after: string
+  diff: FileDiff
 ): (DiffLine | DiffGap)[] | undefined => {
+  if (diff.change === "added") {
+    return linesOf(diff.after).map((text, index) => ({
+      kind: "added",
+      text,
+      after: index + 1,
+    }));
+  }
+  if (diff.change === "deleted") {
+    return linesOf(diff.before).map((text, index) => ({
+      kind: "removed",
+      text,
+      before: index + 1,
+    }));
+  }
+  const { before, after } = diff;
   const patch = structuredPatch("", "", before, after, undefined, undefined, {
     context: contextLines,
     maxEditLength,
@@ -79,7 +101,7 @@ export const changedLines = (
     }
     next = Math.max(old, 1);
   }
-  const rest = lineCount(before) - next + 1;
+  const rest = linesOf(before).length - next + 1;
   if (hunks.length > 0 && rest > 0) {
     shown.push({ kind: "gap", lines: rest });
   }
