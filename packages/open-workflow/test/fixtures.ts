@@ -85,6 +85,11 @@ export const moduleEntries: Record<string, CatalogContract> = {
     input: text(v.array(v.number())),
     output: text(v.number()),
   },
+  "local:code/notify.ts#mail": {
+    kind: "operation",
+    input: text(v.object({ to: v.string() })),
+    output: text(v.null()),
+  },
   "local:code/notify.ts#notify": {
     kind: "operation",
     input: text(

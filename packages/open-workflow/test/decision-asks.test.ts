@@ -19,6 +19,7 @@ const deciding = (extra: Record<string, unknown>, timeout?: unknown) =>
       bindings: {
         approval: { kind: "decision", contract: "invoice-approval" },
         notify: { kind: "operation", contract: "local:code/notify.ts#notify" },
+        mail: { kind: "operation", contract: "local:code/notify.ts#mail" },
         loadNote: { kind: "operation", contract: "notes.get" },
         summaryModel: { kind: "model", contract: "note-summary" },
       },
@@ -98,16 +99,18 @@ describe("a decision's reminder and ask", () => {
     });
   });
 
-  it("refuses an ask that is no action of the workflow's own, and a reminder's time that isn't a literal duration", async () => {
+  it("refuses an ask that is no action of the workflow's own or takes something else than the host passes it, and a reminder's time that isn't a literal duration", async () => {
     await expect(
       Promise.all([
         refusals(deciding({ ask: "loadNote" })),
+        refusals(deciding({ ask: "mail" })),
         refusals(deciding({ ask: "summaryModel" })),
         refusals(deciding({ ask: "nobody" })),
         refusals(deciding({ remindAfter: "${ $workflow.input.amount }" })),
         refusals(deciding({ remindAfter: { hours: 0 } })),
       ])
     ).resolves.toStrictEqual([
+      [{ code: "binding.contract_mismatch", pointer: `${pointer}/ask` }],
       [{ code: "binding.contract_mismatch", pointer: `${pointer}/ask` }],
       [{ code: "binding.wrong_kind", pointer: `${pointer}/ask` }],
       [{ code: "binding.unknown", pointer: `${pointer}/ask` }],

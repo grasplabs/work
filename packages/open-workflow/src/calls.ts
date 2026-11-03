@@ -218,6 +218,24 @@ const checkModelCall = (args: CallArgs): void => {
   }
 };
 
+/** Someone a decision asks, as the host passes them to its ask action. */
+const sampleRecipient = {
+  userId: "user",
+  name: "Ada",
+  email: "ada@example.com",
+  link: "https://example.com/decisions/decision",
+};
+
+/**
+ * What the host passes a decision's ask action: a first ask, which may
+ * find nobody to ask, and a reminder, which never goes to nobody.
+ */
+const askSamples = [
+  { recipients: [sampleRecipient], reminder: false },
+  { recipients: [], reminder: false },
+  { recipients: [sampleRecipient], reminder: true },
+];
+
 /**
  * A decision's `ask`: an operation binding to one of the workflow's own
  * actions, which the host runs, in a step of its own, with the people it
@@ -236,12 +254,30 @@ const checkDecisionAsk = (
     args.site,
     "operation"
   );
-  if (binding !== undefined && !binding.contractKey.startsWith("local:")) {
+  if (binding === undefined) {
+    return;
+  }
+  if (!binding.contractKey.startsWith("local:")) {
     args.checker.report.error(
       "binding.contract_mismatch",
       at(args.site, pointer),
       "Name an operation binding of one of the workflow's own actions (local:code/<file>.ts#<export>).",
       { expected: "local action" }
+    );
+    return;
+  }
+  // What the host passes it, a first ask and a reminder alike: an action
+  // that takes neither would fail only once it is asked to tell someone.
+  const input = binding.contract?.input;
+  const takes = askSamples.every(
+    (sample) => input?.["~standard"].validate(sample).issues === undefined
+  );
+  if (input !== undefined && !takes) {
+    args.checker.report.error(
+      "binding.contract_mismatch",
+      at(args.site, pointer),
+      "Name an action that takes { recipients: [{ userId, name, email, link }], reminder }, as the host passes it.",
+      { expected: "{ recipients, reminder }" }
     );
   }
 };

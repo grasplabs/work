@@ -3,11 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import {
+  approvalWorkflow,
   asking as askingByAction,
   asksOf,
   confirmedAnswer,
   outputOf,
   reminding,
+  startedApproval,
+  week,
 } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -573,6 +576,8 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
     // Stopped while it waits for the reminder, as a deploy or a crash
     // does, and started again: its run replays what it asked.
     await stopped(run.run);
+    // Stopped before the reminder went out: it waits for it.
+    const beforeRestart = await asksOf(run);
     await resumed(run.run);
     const asks = await asksOf(run, 2);
     await confirmedAnswer(decider, decision, { approved: true });
@@ -589,6 +594,7 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
       })),
       output,
       // Told once each: nothing asked again once the run went on.
+      beforeRestart: beforeRestart.length,
       told: toldAfter.length,
       asked: audited.filter(
         ({ action }) => action === "workflow.decision.asked"
@@ -612,8 +618,36 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
         by: decider.userId,
         value: null,
       },
+      beforeRestart: 1,
       told: 2,
       asked: 2,
+    });
+  });
+
+  it("fails the run, never a catch's to take, when its action fails to tell its people", async () => {
+    const people = await owners();
+    const decider = await signedIn("user");
+    const workflow = await approvalWorkflow(people, {
+      from: `person:${decider.userId}`,
+      timeout: week,
+      failsToTell: true,
+    });
+    const run = await startedApproval(people.builder, workflow);
+    const ended = await outputOf(run);
+    const [decision] = await decider.api.decisions.waiting();
+    const answered =
+      decision?.run === run.run
+        ? await outcome(
+            confirmedAnswer(decider, decision.id, { approved: true })
+          )
+        : "not waiting";
+
+    expect({ ended, answered }).toStrictEqual({
+      // Its catch would have ended it with nobody's answer, as though
+      // nobody had been told.
+      ended: { status: "failed", code: "workflow.action_failed" },
+      // Nothing waits for an answer any more.
+      answered: "not waiting",
     });
   });
 
@@ -622,8 +656,8 @@ describe("a decision's reminder", { timeout: 60_000 }, () => {
     const decider = await signedIn("user");
     const workflow = await decidingWorkflow(people, {
       recipient: `person:${decider.userId}`,
-      timeout: 10,
-      remindAfter: 5,
+      timeout: 20,
+      remindAfter: 10,
     });
     const runId = await startedBy(people.builder, workflow.id);
     const decision = await decisionOf(decider, runId);

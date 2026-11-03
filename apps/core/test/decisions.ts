@@ -24,7 +24,9 @@ export type Person = Awaited<ReturnType<typeof signedInApi>>;
  * links, as a file of its run's (`ask.json`, then `reminder.json`), as an
  * action that mails them would send each once.
  */
-const askModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+const askModule = (
+  fails: boolean
+) => `import { action, resource, v } from "@grasp-os/sdk/action";
 
 const files = resource.files("files", { operations: ["write"] });
 const recipient = v.object({ userId: v.string(), name: v.string(), email: v.string(), link: v.string() });
@@ -34,6 +36,7 @@ export const ask = action({
   returns: v.null(),
   uses: [files],
   handler: async (ctx, args) => {
+    ${fails ? 'throw new Error("The mail server refused the message");' : ""}
     await ctx.resources.files.write({
       name: args.reminder ? "reminder.json" : "ask.json",
       type: "application/json",
@@ -98,6 +101,11 @@ export interface Asking {
   timeout: number;
   /** How long after asking it asks once more, in ms. */
   remindAfter?: number;
+  /**
+   * Whether its action fails to tell them, its decision inside a `try`
+   * whose catch would end the run with nobody's answer.
+   */
+  failsToTell?: boolean;
 }
 
 /**
@@ -111,9 +119,30 @@ export interface Asking {
 const approvalOf = (
   name: string,
   { contract, files }: { contract: string; files: string },
-  { from, timeout, remindAfter }: Asking
-): string =>
-  JSON.stringify({
+  { from, timeout, remindAfter, failsToTell = false }: Asking
+): string => {
+  const review = {
+    review: {
+      call: "grasp.decision",
+      with: {
+        binding: "approval",
+        recipients: [from],
+        prompt: "Approve the invoice",
+        input: { invoice: "${ $workflow.input.invoice }" },
+        ask: "ask",
+        ...(remindAfter === undefined
+          ? {}
+          : { remindAfter: { milliseconds: remindAfter } }),
+      },
+      timeout: { after: { milliseconds: timeout } },
+    },
+  };
+  const unanswered = {
+    unanswered: {
+      set: { answered: false, approved: false, by: "nobody", value: null },
+    },
+  };
+  return JSON.stringify({
     document: {
       dsl: "1.0.3",
       namespace: workflowNamespace,
@@ -141,35 +170,21 @@ const approvalOf = (
         value: responseSchema,
       }),
     },
-    do: [
-      {
-        review: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: [from],
-            prompt: "Approve the invoice",
-            input: { invoice: "${ $workflow.input.invoice }" },
-            ask: "ask",
-            ...(remindAfter === undefined
-              ? {}
-              : { remindAfter: { milliseconds: remindAfter } }),
-          },
-          timeout: { after: { milliseconds: timeout } },
-        },
-      },
-    ],
+    do: failsToTell
+      ? [{ guarded: { try: [review], catch: { do: [unanswered] } } }]
+      : [review],
   });
+};
 
 export const week = 7 * 86_400_000;
 
 /**
  * A decision a test acts on while it waits for the reminder: the reminder
- * is due five seconds after the ask, which leaves a slow runner room for
- * what a test does first (change a team, stop the run). The deadline, ten
- * seconds after the decision opened, leaves room after it.
+ * is due ten seconds after the ask, which leaves a slow runner room for
+ * what a test does first (change a team, stop the run); the deadline, ten
+ * seconds after that, room for what it does after.
  */
-export const reminding = { timeout: 10_000, remindAfter: 5000 };
+export const reminding = { timeout: 20_000, remindAfter: 10_000 };
 
 /**
  * A new approval workflow asking as `asking` says, published by
@@ -198,7 +213,7 @@ export const approvalWorkflow = async (
   await builder.api.workflowResources.publish(id, {
     definition: approvalOf(name, { contract, files }, asking),
     basedOn: null,
-    modules: { "code/ask.ts": askModule },
+    modules: { "code/ask.ts": askModule(asking.failsToTell === true) },
   });
   await admin.api.workflowResources.approveBinding(id, {
     alias: "approval",

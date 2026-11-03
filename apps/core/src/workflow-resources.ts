@@ -1581,11 +1581,18 @@ const steeringReview = async (
     if (call.name === "grasp.operation") {
       return [{ alias: call.binding, kind: "operation" }];
     }
+    // An action task's, or a decision's own action that tells its people.
+    let actionBinding: string | undefined;
     if (call.name === "grasp.action") {
-      const action = actions.find(({ binding }) => binding === call.binding);
+      actionBinding = call.binding;
+    } else if (call.name === "grasp.decision") {
+      actionBinding = call.ask?.binding;
+    }
+    if (actionBinding !== undefined) {
+      const action = actions.find(({ binding }) => binding === actionBinding);
       // An action the version doesn't seal: nothing to rule out.
       return action === undefined
-        ? [{ alias: call.binding, kind: "operation" }]
+        ? [{ alias: actionBinding, kind: "operation" }]
         : action.uses.flatMap(steered);
     }
     // The host's clock, randomness and sleep, a calculation (pure) and a

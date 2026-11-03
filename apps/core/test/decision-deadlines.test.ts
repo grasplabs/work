@@ -73,40 +73,47 @@ describe(
   () => {
     afterEach(endLiveResourceRuns);
 
-    it("remind nobody once a decision's deadline has passed, and tell nobody again", async () => {
-      const admin = await signedIn("admin");
-      const builder = await signedIn("builder");
-      const decider = await signedIn("user");
-      const { run, decision } = await asking(
-        { admin, builder },
-        { from: `person:${decider.userId}`, ...reminding }
-      );
-      // Stopped before its reminder is due, and resumed only once the
-      // decision's deadline has passed: the reminder would come too late.
-      await stopped(run.run);
-      await vi.waitFor(
-        async () => {
-          await expect(deadlinePassed(decision)).resolves.toBeTruthy();
-        },
-        { timeout: 20_000, interval: 100 }
-      );
-      await resumed(run.run);
-      const output = await outputOf(run);
-      const asks = await asksOf(run);
-      const audited = await allEvents();
+    it(
+      "remind nobody once a decision's deadline has passed, and tell nobody again",
+      { timeout: 90_000 },
+      async () => {
+        const admin = await signedIn("admin");
+        const builder = await signedIn("builder");
+        const decider = await signedIn("user");
+        const { run, decision } = await asking(
+          { admin, builder },
+          { from: `person:${decider.userId}`, ...reminding }
+        );
+        // Stopped before its reminder is due, and resumed only once the
+        // decision's deadline has passed: the reminder would come too late.
+        await stopped(run.run);
+        const before = await asksOf(run);
+        await vi.waitFor(
+          async () => {
+            await expect(deadlinePassed(decision)).resolves.toBeTruthy();
+          },
+          { timeout: 30_000, interval: 100 }
+        );
+        await resumed(run.run);
+        const output = await outputOf(run);
+        const asks = await asksOf(run);
+        const audited = await allEvents();
 
-      expect({
-        output,
-        asks: asks.map(({ reminder }) => reminder),
-        asked: audited.filter(
-          ({ action, target }) =>
-            action === "workflow.decision.asked" && target?.id === decision
-        ).length,
-      }).toStrictEqual({
-        output: { status: "failed", code: "workflow.decision_timed_out" },
-        asks: [false],
-        asked: 1,
-      });
-    });
+        expect({
+          output,
+          stoppedBeforeReminder: before.length,
+          asks: asks.map(({ reminder }) => reminder),
+          asked: audited.filter(
+            ({ action, target }) =>
+              action === "workflow.decision.asked" && target?.id === decision
+          ).length,
+        }).toStrictEqual({
+          output: { status: "failed", code: "workflow.decision_timed_out" },
+          stoppedBeforeReminder: 1,
+          asks: [false],
+          asked: 1,
+        });
+      }
+    );
   }
 );

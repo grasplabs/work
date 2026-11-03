@@ -1857,6 +1857,12 @@ export class ResourceRunHost
    * so each item of a loop takes its own.
    */
   readonly #decisions = new Map<string, string>();
+  /**
+   * The decision tasks' call steps, by name, whose ask or reminder failed
+   * (`#askOnce`): its people may have been told, so no catch takes it as a
+   * failure of a call that never went out.
+   */
+  readonly #askFailed = new Set<string>();
   /** The decision each ask or reminder step (`#askOnce`), by name, asks for. */
   readonly #asks = new Map<string, string>();
   readonly #decisionInputs = new Map<string, Json>();
@@ -2663,7 +2669,7 @@ export class ResourceRunHost
           // catch may take, an unknown outcome's, that it decided on.
           this.#failed(
             reached?.scope ?? [],
-            reached?.kind === "catch"
+            reached?.kind === "catch" || this.#askFailed.has(String(name))
               ? notCaught()
               : failureOf(
                   failedWith(error),
@@ -3831,9 +3837,26 @@ export class ResourceRunHost
    * them, once, in a step of its own, so a replay asks nobody again: by
    * the host's own notice (`askDeciders`), or, for a task that names an
    * action to (`ask`), by that action, in an attempt of its own, admitted
-   * and tried once as an action task's step is (`#asking`).
+   * and tried once as an action task's step is (`#asking`). One that
+   * fails fails its decision task as no catch takes (`#askFailed`): its
+   * people may have been told, and the run ends, its decision with it.
    */
   async #askOnce(
+    step: StepOf,
+    data: { input: Json; context: Json },
+    decision: string,
+    reminder: boolean
+  ): Promise<void> {
+    try {
+      await this.#askedIn(step, data, decision, reminder);
+    } catch (error) {
+      this.#askFailed.add(step.name);
+      throw error;
+    }
+  }
+
+  /** `#askOnce`'s work, which may fail. */
+  async #askedIn(
     step: StepOf,
     data: { input: Json; context: Json },
     decision: string,
@@ -5363,6 +5386,9 @@ export class ResourceRunHost
         this.#requireCurrent(attempt);
         await ResourceRunHost.#hostCall(attempt);
         this.#requireCurrent(attempt);
+        // Audited as asked before the action runs, as an App run's ask
+        // is (`step.decision`): an action refused after it fails the run,
+        // which no catch takes, so the ask is never taken as not made.
         const recipients = await recipientsNow(
           this.#env,
           this.#run.calling,
