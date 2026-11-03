@@ -35,6 +35,7 @@
     "./admin/onboarding-admin": "./src/admin/onboarding-admin.ts",
     "./admin/onboarding-admin-record": "./src/admin/onboarding-admin-record.ts",
     "./admin/stephen-lab": "./src/admin/stephen-lab.ts",
+    "./admin/stephen-live": "./src/admin/stephen-live.ts",
     "./admin/org-adapter": "./src/admin/org-adapter.ts",
     "./admin/org-record": "./src/admin/org-record.ts",
     "./admin/present": "./src/admin/present.ts",

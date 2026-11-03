@@ -23,12 +23,16 @@ import type { Bench, Result, Scores } from "../lab-runs.ts";
 import type { Interviewer } from "../onboarding.ts";
 import { stephenOf } from "./onboarding-admin-record.ts";
 import type { OrgView } from "./onboarding-admin.ts";
+import { liveGroupsOf } from "./stephen-live.ts";
+import type { LiveGroup } from "./stephen-live.ts";
 
 /** One organization's interviews, as the admin read them from its Grasp. */
 export interface LabOrganization {
   clientId: string;
   name: string;
   view: OrgView;
+  /** The release channel it follows (Edge, Beta or Stable), which the page can narrow real interviews to. */
+  channel?: string;
 }
 
 /** The numbers each version is shown by in the lab: what people get to say, the right next line, and notes that rest on what was said. */
@@ -117,6 +121,15 @@ export interface StephenLab {
   needs: LabNeed[];
   /** The newest runs, open and hidden, newest first. */
   runs: (Result | Scores)[];
+  /**
+   * Live: real interviews group by group with the Stephen most people talk with now, against the
+   * release before him; none before any interview says which Stephen held it.
+   */
+  live: {
+    now: LabVersion;
+    before: LabVersion | null;
+    groups: LiveGroup[];
+  } | null;
 }
 
 const mean = (values: readonly number[]): number =>
@@ -212,14 +225,6 @@ const realOf = (
   };
 };
 
-/** The share who finished of who started, or null with nobody started. */
-const finishedShare = (real: RealStanding | null): number | null =>
-  real === null || real.started === 0 ? null : real.finished / real.started;
-
-/** How many need to have started with each of two versions before a drop in who finishes is worth saying. */
-const LEAST_STARTED = 8;
-/** How far who finishes has to drop between two versions to be worth saying. */
-const LEAST_DROP = 0.15;
 /** After how many days without a lab run that is worth saying. */
 const QUIET_DAYS = 14;
 
@@ -356,31 +361,38 @@ const nameFor = (
   return `${interviewer === "claire" ? "Claire" : "Stephen"} ${at + 1}`;
 };
 
-/** Where finishing dropped from one version to the next, among versions enough people talked with. */
-const fewerFinishing = (versions: readonly LabVersion[]): LabNeed[] => {
-  const withPeople = versions.filter(
-    (each) =>
-      each.version !== UNRECORDED &&
-      each.real !== null &&
-      each.real.started >= LEAST_STARTED
-  );
-  return withPeople.flatMap((each, at) => {
-    const before = withPeople[at - 1];
-    const is = finishedShare(each.real);
-    const was = finishedShare(before?.real ?? null);
-    const dropped =
-      before !== undefined &&
-      is !== null &&
-      was !== null &&
-      was - is >= LEAST_DROP;
-    return dropped
-      ? [
-          {
-            id: `fewer-${each.version}`,
-            text: `Fewer people finish with ${each.name}: ${each.real?.finished} of ${each.real?.started}, against ${before.real?.finished} of ${before.real?.started} with ${before.name}.`,
-          },
-        ]
-      : [];
+/** What Live says needs one of us: a group that finishes less often, or rates him lower, with the Stephen in use than before him. */
+const liveNeeds = (live: StephenLab["live"]): LabNeed[] => {
+  if (live === null || live.before === null) {
+    return [];
+  }
+  const { now, before } = live;
+  const all = live.groups.find((group) => group.id === "all");
+  // A group that holds every interview on both sides says what "all" says already.
+  const repeatsAll = (group: LiveGroup): boolean =>
+    group.id !== "all" &&
+    all !== undefined &&
+    group.now.started === all.now.started &&
+    group.before?.started === all.before?.started;
+  return live.groups.flatMap((group) => {
+    if (repeatsAll(group)) {
+      return [];
+    }
+    const needs: LabNeed[] = [];
+    if (group.finishedFell && group.before !== null) {
+      needs.push({
+        id: `finished-${group.id}`,
+        text: `Fewer ${group.who} finish with ${now.name}: ${group.now.finished} of ${group.now.started}, against ${group.before.finished} of ${group.before.started} with ${before.name}, more than chance.`,
+      });
+    }
+    if (group.ratingFell) {
+      const who = `${group.who.charAt(0).toUpperCase()}${group.who.slice(1)}`;
+      needs.push({
+        id: `rating-${group.id}`,
+        text: `${who} rate ${now.name} lower than ${before.name}, more than chance.`,
+      });
+    }
+    return needs;
   });
 };
 
@@ -436,6 +448,33 @@ const labNeeds = ({
 };
 
 /**
+ * Live: the Stephen most people talk with now (by interviews started with his release), the
+ * release before him that real people talked with, and every group's numbers with both.
+ */
+const liveOf = (
+  versions: readonly LabVersion[],
+  organizations: readonly LabOrganization[]
+): StephenLab["live"] => {
+  const withPeople = versions.filter(
+    (each) =>
+      each.version !== UNRECORDED && each.real !== null && each.release !== null
+  );
+  const [now] = withPeople.toSorted(
+    (a, b) => (b.real?.started ?? 0) - (a.real?.started ?? 0)
+  );
+  if (now === undefined || now.release === null) {
+    return null;
+  }
+  const before = withPeople[withPeople.indexOf(now) - 1] ?? null;
+  const interviews = organizations.flatMap(({ view }) => view.interviews);
+  return {
+    now,
+    before,
+    groups: liveGroupsOf(interviews, now.release, before?.release ?? null),
+  };
+};
+
+/**
  * Everything the Stephen Lab page shows, for one interviewer: every version
  * with the lab's numbers and the real ones, the number it leads with, and
  * what needs one of us. `now` is when it is read, as ISO time.
@@ -446,12 +485,15 @@ export const stephenLabOf = ({
   organizations,
   interviewer,
   now,
+  channel,
 }: {
   results: readonly Result[];
   scores: readonly Scores[];
   organizations: readonly LabOrganization[];
   interviewer: Interviewer;
   now: string;
+  /** Only the organizations on this release channel; all of them without it. */
+  channel?: string;
 }): StephenLab => {
   const open = results
     .filter(
@@ -461,16 +503,21 @@ export const stephenLabOf = ({
   const hidden = scores.filter(
     (run) => run.stephen.interviewer === interviewer
   );
-  // Real interviews held by this interviewer, and by which Stephen.
-  const theirs = organizations.map((organization) => ({
-    ...organization,
-    view: {
-      ...organization.view,
-      interviews: organization.view.interviews.filter(
-        (interview) => interview.interviewer === interviewer
-      ),
-    },
-  }));
+  // Real interviews held by this interviewer, and by which Stephen, on the channel asked for.
+  const theirs = organizations
+    .filter(
+      (organization) =>
+        channel === undefined || organization.channel === channel
+    )
+    .map((organization) => ({
+      ...organization,
+      view: {
+        ...organization.view,
+        interviews: organization.view.interviews.filter(
+          (interview) => interview.interviewer === interviewer
+        ),
+      },
+    }));
   const realVersions = new Set(
     theirs.flatMap(({ view }) =>
       view.interviews.map((interview) => interview.stephen ?? UNRECORDED)
@@ -533,13 +580,15 @@ export const stephenLabOf = ({
   const everyRun = [...open, ...hidden].toSorted((a, b) =>
     b.at.localeCompare(a.at)
   );
+  const live = liveOf(versions, theirs);
   return {
     versions,
     headline,
     real: realOf(theirs, () => true),
+    live,
     needs: [
       ...labNeeds({ versions, headline, lastRun: everyRun[0]?.at, now }),
-      ...fewerFinishing(versions),
+      ...liveNeeds(live),
     ],
     runs: everyRun.slice(0, 20),
   };

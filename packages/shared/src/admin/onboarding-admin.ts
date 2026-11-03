@@ -921,6 +921,8 @@ export interface Interview {
   interviewer: Interviewer;
   /** Which Stephen held its last turn (`stephenVersion` in core's onboarding/lab-marks.ts); none where it isn't known. */
   stephen?: string;
+  /** The language its last turn was held in; none where it isn't known. */
+  language?: string;
 }
 
 /** The kinds of mistake an interviewer makes, as the review scores them. */

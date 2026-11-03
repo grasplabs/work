@@ -397,5 +397,13 @@ describe("an organization's interviews", () => {
       rated: rowOf(claire.html).includes("5.0 (1)"),
       leaked: missingIn(claire.html, [said, fact, linkCode]).length,
     }).toStrictEqual({ finished: true, rated: true, leaked: 3 });
+
+    // Every organization follows Stable here: on Edge there is no one to count.
+    const edge = await page("/lab?where=edge");
+    const stable = await page("/lab?where=stable");
+    expect({
+      edgeListed: edge.html.includes(`>${name}</a>`),
+      stableListed: stable.html.includes(`>${name}</a>`),
+    }).toStrictEqual({ edgeListed: false, stableListed: true });
   });
 });
