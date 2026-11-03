@@ -1271,6 +1271,20 @@ const buildDeclaration = `/**
  * (\`resource.workflow("alias", { input, output })\`) and bind it to the App
  * under that alias. A workflow already in the App, which a builder wrote,
  * you may delete but not change.
+ *
+ * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded:
+ * \`take\`/\`collect\` return at most 100 records, so lists page with
+ * \`.paginate({ pageSize, cursor })\` (screens: \`usePaginatedQuery\`), through
+ * any number of records, ordered along an index (\`.withIndex(name)\`, then
+ * \`.order("desc")\`). For a search box, declare
+ * \`.searchIndex(["name", "notes"])\` on the table in schema.ts and read
+ * \`ctx.db.search("customers", text)\`: best match first, \`.filter(...)\`
+ * and \`.paginate(...)\` as a query. For totals per status or month,
+ * \`.group({ by: ["status"], sum: ["amount"], avg: ["amount"] })\` (one or
+ * two fields, at most 100 groups). To show a record's related records,
+ * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
+ * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
+ * when the person can't read that table. Read the SDK's types for the rest.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */

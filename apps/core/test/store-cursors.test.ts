@@ -305,6 +305,40 @@ describe("pages", () => {
     });
   });
 
+  it("go through 1,200 records along an index, in its order, 100 at a time", async () => {
+    const fixture = await storeWith("appMembers");
+    const count = 1200;
+    // Titles in no order of creation: the index, not insertion, orders them.
+    const titles = Array.from(
+      { length: count },
+      (_, index) => `t${String((index * 7919) % count).padStart(5, "0")}`
+    );
+    await insertNotes(
+      fixture,
+      titles.map((title) => ({ title }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    for (const order of ["asc", "desc"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const { items, pages } = await allPages(
+        async (cursor) =>
+          await db
+            .query("notes")
+            .withIndex("by_title")
+            .order(order)
+            .paginate({ pageSize: 100, cursor })
+      );
+      const sorted = titles.toSorted();
+      expect({
+        titles: items.map(({ title }) => title),
+        pages: pages.length,
+      }).toStrictEqual({
+        titles: order === "asc" ? sorted : sorted.toReversed(),
+        pages: count / 100,
+      });
+    }
+  });
+
   it("carry on after a record inserted between them, without repeating any", async () => {
     const fixture = await storeWith("appMembers");
     await insertNotes(

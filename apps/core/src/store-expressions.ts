@@ -92,6 +92,32 @@ export const numberExpression = (field: string): string => {
   return `(CASE WHEN json_type(value_json, '$.${field}') IN ('integer', 'real') THEN json_extract(value_json, '$.${field}') END)`;
 };
 
+/**
+ * The JSON text of declared field `field`, for a group's key: `true`,
+ * `null`, `"text"` or a number as JSON writes them, and NULL for a field
+ * left out, so booleans stay booleans and null stays apart from absence.
+ * Throws for a name that isn't a declared field's.
+ */
+export const jsonExpression = (field: string): string => {
+  if (Object.hasOwn(managedColumns, field) || !declaredField.test(field)) {
+    throw new Error("Only a declared field is grouped by");
+  }
+  return `(value_json -> '$.${field}')`;
+};
+
+/**
+ * The text of declared field `field` in the JSON document `column` (a
+ * column, or a trigger's `new.value_json`), for a search index: its
+ * string, and NULL for anything else, which the index holds as nothing.
+ * Throws for a name that isn't a declared field's.
+ */
+export const textExpression = (column: string, field: string): string => {
+  if (Object.hasOwn(managedColumns, field) || !declaredField.test(field)) {
+    throw new Error("Only a declared field is searched");
+  }
+  return `(CASE json_type(${column}, '$.${field}') WHEN 'text' THEN json_extract(${column}, '$.${field}') END)`;
+};
+
 /** A host-minted table ID: a UUID, as `crypto.randomUUID` makes them. */
 const tableIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;

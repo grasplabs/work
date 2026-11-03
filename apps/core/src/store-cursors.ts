@@ -69,6 +69,8 @@ export interface CursorBinding {
   readonly range: readonly RangeBound[];
   readonly filter: FilterNode | null;
   readonly order: "asc" | "desc";
+  /** The text a search's pages look for; null for a query's. */
+  readonly search: string | null;
 }
 
 /** The keys a store seals and tags its cursors with. */
@@ -158,6 +160,7 @@ const digestOf = async (
       })),
       filter: binding.filter === null ? null : filterJson(binding.filter),
       order: binding.order,
+      search: binding.search,
       generation: withGeneration
         ? {
             resourceVersion: binding.consumer.resourceVersion,

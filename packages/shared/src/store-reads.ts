@@ -86,12 +86,32 @@ export type QueryTerminal =
   | { kind: "collect" }
   | { kind: "paginate"; pageSize: number; cursor: string | null }
   | { kind: "aggregate"; operation: "count" }
-  | { kind: "aggregate"; operation: "sum" | "min" | "max"; field: string };
+  | { kind: "aggregate"; operation: "sum" | "min" | "max"; field: string }
+  | GroupTerminal;
+
+/**
+ * A grouped aggregate: the records counted per distinct value of one or
+ * two scalar fields (`by`), with the sum, average, least or greatest of
+ * declared numeric fields in each group besides. A group's key holds each
+ * `by` field's value, null for an explicit null, and leaves out a field
+ * the group's records leave out.
+ */
+export interface GroupTerminal {
+  kind: "group";
+  by: string[];
+  sum: string[];
+  avg: string[];
+  min: string[];
+  max: string[];
+}
 
 /**
  * A query: which table, through which index (null: the default order, by
  * creation time), the range on that index, a filter, the order and the
- * terminal.
+ * terminal. With `search`, it reads the table's search index instead, in
+ * order of relevance, with no index, range or order of its own. With
+ * `with`, each record it returns carries the records its `v.id` fields
+ * name.
  */
 export interface QueryRequest {
   descriptorVersion: typeof readDescriptorVersion;
@@ -101,6 +121,10 @@ export interface QueryRequest {
   filter: FilterNode | null;
   order: "asc" | "desc";
   terminal: QueryTerminal;
+  /** The text to look for in the table's search index. */
+  search?: string;
+  /** The fields whose related records each returned record carries. */
+  with?: string[];
 }
 
 /** A record by ID, optionally asserting the revision the caller expects. */
@@ -291,3 +315,18 @@ export type WriteRequest =
       expectedRevision: number;
     }
   | { kind: "delete"; table: string; id: string; expectedRevision: number };
+
+/** What separates a search's words. */
+const searchSeparator = /\s+/u;
+
+/** A letter or digit: a word without one finds nothing. */
+const wordCharacter = /[\p{L}\p{N}]/u;
+
+/**
+ * The words a search's text looks for, in order: split at white space,
+ * each holding at least one letter or digit. A record matches when it
+ * holds every word, the last one as a prefix, so a search box finds as
+ * its person types.
+ */
+export const searchTerms = (text: string): string[] =>
+  text.split(searchSeparator).filter((term) => wordCharacter.test(term));

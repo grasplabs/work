@@ -162,6 +162,7 @@ import {
   planQuery,
   readableTable,
   readPage,
+  relatedTables,
   readRecord,
   runQuery,
   validates,
@@ -174,6 +175,7 @@ import type {
   RecordSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
+import { installSearches, planSearches } from "./store-search.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -1403,8 +1405,18 @@ export class StoreHost {
       // Planned table by table; nothing is written yet.
       // oxlint-disable-next-line no-await-in-loop -- see above
       const plan = await planIndexes(read.manifest, planned);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const searches = await planSearches(read.manifest, planned);
       const defined = this.ctx.storage.transactionSync(() =>
-        this.#defineIn(storeId, before, planned, plan, schemaHash, text, change)
+        this.#defineIn(
+          storeId,
+          before,
+          planned,
+          { indexes: plan, searches },
+          schemaHash,
+          text,
+          change
+        )
       );
       if (defined !== null) {
         // A target it made pending gets the alarm's look (#keepBackfillGoing).
@@ -1983,15 +1995,19 @@ export class StoreHost {
 
   /**
    * `defineTables`' one transaction: the schema's new tables with the IDs
-   * its indexes were planned for, the indexes, the schema, the contract
-   * and the consumer's receipt; null, with nothing written, if the tables
-   * or the contract changed since they were read.
+   * its indexes were planned for, the indexes and search indexes (each new
+   * search index built over the records already there), the schema, the
+   * contract and the consumer's receipt; null, with nothing written, if
+   * the tables or the contract changed since they were read.
    */
   #defineIn(
     storeId: StoreId,
     before: readonly { name: string; tableId: string }[],
     planned: Readonly<Record<string, string>>,
-    plan: Awaited<ReturnType<typeof planIndexes>>,
+    plan: {
+      readonly indexes: Awaited<ReturnType<typeof planIndexes>>;
+      readonly searches: Awaited<ReturnType<typeof planSearches>>;
+    },
     schemaHash: string,
     text: string,
     change: ContractChange
@@ -2054,7 +2070,8 @@ export class StoreHost {
         contract: this.#receive(schemaHash, change, now),
       };
     }
-    installIndexes(this.ctx.storage.sql, plan);
+    installIndexes(this.ctx.storage.sql, plan.indexes);
+    installSearches(this.ctx.storage.sql, plan.searches);
     // Applied again after an abandoned target held it (a later release
     // adding the reserved fields as they were): in force or pending once
     // more, as this change leaves it.
@@ -2360,8 +2377,11 @@ export class StoreHost {
     if (read.kind === "query" && read.query.terminal.kind === "paginate") {
       return await this.#page(storeId, reader, pinned, read.query, preview);
     }
-    const table = read.kind === "get" ? read.table : read.query.table;
-    return this.#readIn(storeId, pinned, reader, table, preview, (statements) =>
+    const names =
+      read.kind === "get"
+        ? [read.table]
+        : [read.query.table, ...relatedTables(pinned, read.query)];
+    return this.#readIn(storeId, pinned, reader, names, preview, (statements) =>
       indexRequired(() =>
         read.kind === "get"
           ? readRecord(statements, pinned, reader, read)
@@ -2371,8 +2391,9 @@ export class StoreHost {
   }
 
   /**
-   * Runs `read` (of `table`) in one transaction, with the generation of
-   * `table` taken first: what the read depended on, which a reader
+   * Runs `read` (of tables `names`, the first the one it queries, the others
+   * those its related records belong to) in one transaction, with their
+   * generations taken first: what the read depended on, which a reader
    * compares later (store-reader.ts), handed back with its answer and
    * added to a data error it fails with (`details.generations`), since a
    * read that failed after it looked at records (`data.not_unique`,
@@ -2389,13 +2410,13 @@ export class StoreHost {
     storeId: StoreId,
     pinned: PinnedSchema,
     reader: ReadScope,
-    table: string,
+    names: readonly string[],
     preview: Preview | undefined,
     read: (statements: RecordSql) => Answer
   ): { value: Answer; generations: Record<string, number> } {
     const run = () => {
       this.#bind(storeId, false);
-      const generations = this.#generationsOf(pinned, [table]);
+      const generations = this.#generationsOf(pinned, names);
       let readRecords = false;
       try {
         if (preview !== undefined) {
@@ -2880,6 +2901,7 @@ export class StoreHost {
       range: query.range,
       filter: query.filter,
       order: query.order,
+      search: query.search ?? null,
     };
     const anchor =
       terminal.cursor === null
@@ -2889,7 +2911,7 @@ export class StoreHost {
       storeId,
       pinned,
       reader,
-      query.table,
+      [query.table, ...relatedTables(pinned, query)],
       preview,
       (statements) =>
         indexRequired(() => readPage(statements, pinned, reader, query, anchor))
@@ -3022,6 +3044,7 @@ export class StoreHost {
       manifest,
       tableIds,
       indexes: await planIndexes(manifest, tableIds),
+      searches: await planSearches(manifest, tableIds),
     };
     // Kept only if no abandonment committed while its indexes were planned;
     // a commit checks again in its transaction anyway (`#requireInForce`).

@@ -2,6 +2,7 @@ import type { ValueDescriptor } from "@grasp-os/sdk";
 import {
   allowsNull,
   indexBase,
+  relationOf,
   schemaFromDescriptor,
 } from "@grasp-os/sdk/host";
 import type {
@@ -10,17 +11,24 @@ import type {
   SchemaManifest,
 } from "@grasp-os/sdk/host";
 import {
+  queryMaxGroups,
   queryMaxResults,
   queryMaxScannedBytes,
   queryMaxScannedEntries,
 } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
-import type { GetRequest, QueryRequest } from "@grasp-os/shared/store-reads";
+import { searchTerms } from "@grasp-os/shared/store-reads";
+import type {
+  GetRequest,
+  GroupTerminal,
+  QueryRequest,
+} from "@grasp-os/shared/store-reads";
 import { dataErrors, storedFieldsSchema } from "@grasp-os/shared/stores";
 
 import {
   fieldExpression,
   filterSql,
+  jsonExpression,
   numberExpression,
   isManagedField,
   nullSentinel,
@@ -30,6 +38,8 @@ import {
 import type { FieldTypes, Fragment } from "./store-expressions.ts";
 import { defaultIndexName } from "./store-indexes.ts";
 import type { PhysicalIndex } from "./store-indexes.ts";
+import { requireSearchable, searchMatch } from "./store-search.ts";
+import type { PhysicalSearch } from "./store-search.ts";
 
 // How a business store answers a read (store-host.ts): a record by ID, or
 // a query's descriptor (sdk/src/database.ts), executed against the store's
@@ -105,6 +115,8 @@ export interface PinnedSchema {
   readonly tableIds: Readonly<Record<string, string>>;
   /** The physical index of each declared index, by table and name. */
   readonly indexes: ReadonlyMap<string, ReadonlyMap<string, PhysicalIndex>>;
+  /** The full-text index of each table that declares one, by table. */
+  readonly searches: ReadonlyMap<string, PhysicalSearch>;
 }
 
 /** A record as a read returns it: managed fields, then declared ones. */
@@ -517,6 +529,7 @@ export type QueryAnswer =
   | ReadDocument[]
   | ReadDocument
   | PageAnswer
+  | GroupAnswer[]
   | number
   | null;
 
@@ -550,6 +563,10 @@ export interface PlanOptions {
   /** Whether to select the order fields' values, as `o0`, `o1`, …. */
   readonly anchors?: boolean;
   readonly seek?: Seek;
+  /** Declared fields whose JSON a group's key reads, as `g0`, `g1`, …. */
+  readonly groups?: readonly string[];
+  /** Declared numeric fields a group aggregates, as `n0`, `n1`, …. */
+  readonly numbers?: readonly string[];
 }
 
 /**
@@ -565,13 +582,33 @@ export const planQuery = (
   scope: ReadScope,
   table: ReadTable,
   query: QueryRequest,
-  { documents, aggregate, anchors = false, seek }: PlanOptions
+  {
+    documents,
+    aggregate,
+    anchors = false,
+    seek,
+    groups = [],
+    numbers = [],
+  }: PlanOptions
 ): Plan => {
   const access = accessOf(pinned, table, query);
   const filter =
     query.filter === null ? null : filterSql(typesOf(table), query.filter);
   const direction = query.order === "desc" ? "DESC" : "ASC";
-  const reads = documents || filter !== null || aggregate !== undefined;
+  const computed = [
+    ...(filter === null ? [] : [`${filter.sql} AS matched`]),
+    ...(aggregate === undefined
+      ? []
+      : [`${numberExpression(aggregate)} AS agg`]),
+    ...groups.map(
+      (field, position) => `${jsonExpression(field)} AS g${position}`
+    ),
+    ...numbers.map(
+      (field, position) => `${numberExpression(field)} AS n${position}`
+    ),
+  ];
+  // Whatever reads a document counts its bytes.
+  const reads = documents || computed.length > 0;
   const columns = [
     "record_id",
     "owner_id",
@@ -580,10 +617,7 @@ export const planQuery = (
     "updated_at",
     ...(documents ? ["value_json"] : []),
     ...(reads ? ["length(CAST(value_json AS BLOB)) AS bytes"] : []),
-    ...(filter === null ? [] : [`${filter.sql} AS matched`]),
-    ...(aggregate === undefined
-      ? []
-      : [`${numberExpression(aggregate)} AS agg`]),
+    ...computed,
     ...(anchors
       ? access.orderFields.map(
           (field, position) => `${fieldExpression(field)} AS o${position}`
@@ -929,13 +963,528 @@ export const pagePlans = (
   );
 };
 
+/** Counts `bytes` more of documents read against the scan's bound. */
+const scannedBytes = (scan: Scan, bytes: number): void => {
+  scan.bytes += bytes;
+  if (scan.bytes > queryMaxScannedBytes) {
+    throw dataErrors.create("data.scan_limit", { scanned: scan.entries });
+  }
+};
+
+// Related records (`with`): each record a read returns carries, under
+// `_with`, the records its `v.id` fields (or lists of them) name. They
+// are read in one statement per field, by primary key, under the access
+// the caller has to the table they belong to, as `get` reads one: a table
+// the caller can't read at all is withheld (`{ _withheld: true }`) for
+// every record, and a record of it the caller may not see (another
+// owner's, or gone) is null, never told apart from one that doesn't exist.
+// Every ID looked up counts as an entry against the read's scan bound,
+// and every related document's bytes against its byte bound, together
+// with what the read itself examined.
+
+/** What a related record the caller can't read shows instead. */
+const withheld = Object.freeze({ _withheld: true as const });
+
+/** The terminals that return records: the only ones `with` applies to. */
+const recordTerminals: ReadonlySet<string> = new Set([
+  "take",
+  "first",
+  "unique",
+  "collect",
+  "paginate",
+]);
+
+/** Field `field` of `table` as a relation, or `data.invalid_query`. */
+const relationIn = (
+  table: ReadTable,
+  field: string
+): { readonly table: string; readonly many: boolean } => {
+  const descriptor = Object.hasOwn(table.declared.fields, field)
+    ? table.declared.fields[field]
+    : undefined;
+  const relation =
+    descriptor === undefined ? undefined : relationOf(descriptor);
+  if (relation === undefined) {
+    throw invalid(
+      `\`${field}\` isn't a field of table \`${table.name}\` that holds record IDs`
+    );
+  }
+  return relation;
+};
+
+/**
+ * The tables `query` reads besides its own: those its relations name, as
+ * the pinned schema declares them. A relation that isn't one is left for
+ * the read to refuse.
+ */
+export const relatedTables = (
+  pinned: PinnedSchema,
+  query: QueryRequest
+): string[] => {
+  const declared = Object.hasOwn(pinned.manifest.tables, query.table)
+    ? pinned.manifest.tables[query.table]
+    : undefined;
+  const names = new Set<string>();
+  for (const field of query.with ?? []) {
+    const descriptor =
+      declared !== undefined && Object.hasOwn(declared.fields, field)
+        ? declared.fields[field]
+        : undefined;
+    const relation =
+      descriptor === undefined ? undefined : relationOf(descriptor);
+    if (relation !== undefined) {
+      names.add(relation.table);
+    }
+  }
+  return [...names];
+};
+
+/** The record IDs a document's field holds: one, a list, or none. */
+const idsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : [];
+};
+
+/**
+ * The records of `target` with IDs `ids` the caller may see, by ID: one
+ * statement, by primary key, under the owner predicate of an owner-only
+ * table.
+ */
+const recordsById = (
+  sql: RecordSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: ReadonlySet<string>,
+  scan: Scan
+): Map<string, ReadDocument> => {
+  const found = new Map<string, ReadDocument>();
+  if (ids.size === 0) {
+    return found;
+  }
+  for (const _id of ids) {
+    scanned(scan, 0);
+  }
+  const rows = sql.exec<ReadRow & { value_json: string; bytes: number }>(
+    `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${target.ownerScoped ? " AND owner_id = ?" : ""}`,
+    target.tableId,
+    JSON.stringify([...ids]),
+    ...(target.ownerScoped ? [scope.principal] : [])
+  );
+  for (const row of rows) {
+    scannedBytes(scan, row.bytes);
+    found.set(row.record_id, documentOf(target, row, row.value_json));
+  }
+  return found;
+};
+
+/**
+ * Adds to each of `documents` (records of `table`) the related records of
+ * `fields` under `_with`, as the header above says.
+ */
+const withRelated = (
+  sql: RecordSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  documents: readonly ReadDocument[],
+  fields: readonly string[],
+  scan: Scan
+): void => {
+  const relations = fields.map(
+    (field) => [field, relationIn(table, field)] as const
+  );
+  if (relations.length === 0 || documents.length === 0) {
+    return;
+  }
+  const related = documents.map((): Record<string, unknown> => ({}));
+  for (const [field, relation] of relations) {
+    let target: ReadTable | undefined;
+    try {
+      target = readableTable(pinned, scope, relation.table);
+    } catch (error) {
+      if (dataErrors.codeOf(error) !== "data.access_denied") {
+        throw error;
+      }
+    }
+    if (target === undefined) {
+      for (const shown of related) {
+        shown[field] = withheld;
+      }
+      continue;
+    }
+    const ids = new Set(
+      documents.flatMap((document) => idsIn(document[field]))
+    );
+    const found = recordsById(sql, scope, target, ids, scan);
+    for (const [position, document] of documents.entries()) {
+      const value = document[field];
+      const shown = related[position] ?? {};
+      if (relation.many) {
+        shown[field] = Array.isArray(value)
+          ? value.map((id: unknown) =>
+              typeof id === "string" ? (found.get(id) ?? null) : null
+            )
+          : null;
+      } else {
+        shown[field] =
+          typeof value === "string" ? (found.get(value) ?? null) : null;
+      }
+    }
+  }
+  for (const [position, document] of documents.entries()) {
+    document._with = related[position] ?? {};
+  }
+};
+
+/** Refuses `with` on a terminal that returns no records. */
+const requireRecordTerminal = (query: QueryRequest): void => {
+  if (query.with !== undefined && !recordTerminals.has(query.terminal.kind)) {
+    throw invalid(
+      "`with` loads related records for a terminal that returns records"
+    );
+  }
+};
+
+// Searches: a table's search index (store-search.ts), read in order of
+// relevance (FTS5's BM25, lower is better), the record ID breaking ties,
+// joined to the records themselves under the caller's access and filter.
+// What the index matches is counted first, within the scan bound, so no
+// search ranks more than that; then every record read counts against it
+// as any query's does. A page's cursor anchors at its last record's
+// relevance and ID; relevance moves as the table changes, so a record
+// changed between pages may move past or into a later page, as a page of
+// any query may.
+
+/** The search index `query` reads, or `data.invalid_query`. */
+const searchOf = (
+  pinned: PinnedSchema,
+  table: ReadTable,
+  query: QueryRequest
+): PhysicalSearch => {
+  if (query.index !== null || query.range.length > 0 || query.order !== "asc") {
+    throw invalid(
+      "A search reads its table's search index in order of relevance: it names no index, range or order"
+    );
+  }
+  const search = pinned.searches.get(table.name);
+  if (search === undefined) {
+    throw invalid(`Table \`${table.name}\` has no search index`);
+  }
+  return search;
+};
+
+/** Where a search's page starts: after its anchor's relevance and ID. */
+interface SearchSeek {
+  readonly score: number;
+  readonly id: string;
+}
+
+/** A search's anchor as a seek, or `data.cursor_expired`. */
+const searchSeekOf = (anchor: Anchor | null): SearchSeek | undefined => {
+  if (anchor === null) {
+    return undefined;
+  }
+  const [value] = anchor.values ?? [];
+  const [score] = value ?? [];
+  if (typeof score !== "number") {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  return { score, id: anchor.id };
+};
+
+/**
+ * The one statement a search of `table` runs for `scope`: the index's
+ * matches of `match`, each with its relevance, joined to their records
+ * under the owner predicate, the filter as a computed column, in order of
+ * relevance and then record ID, after `seek` when a page has one.
+ */
+const searchPlan = (
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  search: PhysicalSearch,
+  match: string,
+  seek: SearchSeek | undefined
+): Plan => {
+  const filter =
+    query.filter === null ? null : filterSql(typesOf(table), query.filter);
+  const columns = [
+    "record_id",
+    "owner_id",
+    "revision",
+    "created_at",
+    "updated_at",
+    "value_json",
+    "length(CAST(value_json AS BLOB)) AS bytes",
+    ...(filter === null ? [] : [`${filter.sql} AS matched`]),
+    "hit.score AS o0",
+  ];
+  const where = [
+    `sdk_records.table_id = ${tableIdLiteral(table.tableId)}`,
+    ...(table.ownerScoped ? ["owner_id = ?"] : []),
+    ...(seek === undefined
+      ? []
+      : ["(hit.score > ? OR (hit.score = ? AND record_id > ?))"]),
+  ];
+  return {
+    table,
+    statement: `SELECT ${columns.join(", ")} FROM (SELECT rowid AS doc, bm25(${search.name}) AS score FROM ${search.name} WHERE ${search.name} MATCH ?) AS hit JOIN sdk_search_docs ON sdk_search_docs.doc = hit.doc JOIN sdk_records ON sdk_records.table_id = sdk_search_docs.doc_table AND sdk_records.record_id = sdk_search_docs.doc_record WHERE ${where.join(" AND ")} ORDER BY hit.score, record_id LIMIT ${queryMaxScannedEntries + 1}`,
+    params: [
+      ...(filter?.params ?? []),
+      match,
+      ...(table.ownerScoped ? [scope.principal] : []),
+      ...(seek === undefined ? [] : [seek.score, seek.score, seek.id]),
+    ],
+    filtered: filter !== null,
+  };
+};
+
+/**
+ * The matches of a search, in order, after `anchor`: none, and nothing
+ * read, when its text holds no word to look for.
+ */
+const searchMatches = (
+  sql: RecordSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  anchor: Anchor | null,
+  scan: Scan
+): Iterator<Match> => {
+  const search = searchOf(pinned, table, query);
+  const seek = searchSeekOf(anchor);
+  const terms = searchTerms(query.search ?? "");
+  if (terms.length === 0) {
+    return [][Symbol.iterator]();
+  }
+  const match = searchMatch(search, terms, scope.principal);
+  requireSearchable(sql, search, match);
+  return matchesOf(
+    sql,
+    searchPlan(scope, table, query, search, match, seek),
+    scan
+  );
+};
+
+// Grouped aggregates (`group`): every record the query reads, within its
+// scan bound, counted into the group of its `by` fields' values, with the
+// sum, average, least and greatest of the numbers its aggregated fields
+// hold (never null, a field left out, a boolean or text). Groups are kept
+// as they appear, and a read that would make more than `queryMaxGroups`
+// fails (`data.group_limit`) rather than answering part; they are answered
+// in order of key, as SQLite orders values: left out, null, booleans,
+// numbers, then text.
+
+/** One group, as a grouped read answers it. */
+export interface GroupAnswer {
+  readonly key: Record<string, unknown>;
+  readonly count: number;
+  readonly sum: Record<string, number>;
+  readonly avg: Record<string, number | null>;
+  readonly min: Record<string, number | null>;
+  readonly max: Record<string, number | null>;
+}
+
+/** A group being counted. */
+interface GroupTally {
+  readonly parts: readonly (string | null)[];
+  count: number;
+  readonly sums: number[];
+  readonly counts: number[];
+  readonly least: (number | null)[];
+  readonly greatest: (number | null)[];
+}
+
+/** Where a key's JSON text sorts: left out, null, booleans, numbers, text. */
+const keyRank = (part: string | null): number => {
+  if (part === null) {
+    return 0;
+  }
+  if (part === "null") {
+    return 1;
+  }
+  if (part === "false" || part === "true") {
+    return 2;
+  }
+  return part.startsWith('"') ? 4 : 3;
+};
+
+/** Two keys' JSON texts, in order. */
+const compareParts = (
+  left: readonly (string | null)[],
+  right: readonly (string | null)[]
+): number => {
+  for (const [position, part] of left.entries()) {
+    const other = right[position] ?? null;
+    const rank = keyRank(part) - keyRank(other);
+    if (rank !== 0) {
+      return rank;
+    }
+    if (part === null || other === null || part === other) {
+      continue;
+    }
+    const value: unknown = JSON.parse(part);
+    const otherValue: unknown = JSON.parse(other);
+    if (typeof value === "number" && typeof otherValue === "number") {
+      return value - otherValue;
+    }
+    // Booleans and strings compare as SQLite does: false first, text by
+    // code point.
+    const text = String(value);
+    const otherText = String(otherValue);
+    if (text !== otherText) {
+      return text < otherText ? -1 : 1;
+    }
+  }
+  return 0;
+};
+
+/** The fields a group reads, checked against the pinned table. */
+const checkedGroup = (table: ReadTable, terminal: GroupTerminal): string[] => {
+  const types = typesOf(table);
+  for (const field of terminal.by) {
+    if (isManagedField(field) || types.base(field) === undefined) {
+      throw invalid(
+        `\`${field}\` isn't a declared scalar field of table \`${table.name}\``
+      );
+    }
+  }
+  const numbers = [
+    ...new Set([
+      ...terminal.sum,
+      ...terminal.avg,
+      ...terminal.min,
+      ...terminal.max,
+    ]),
+  ];
+  for (const field of numbers) {
+    if (isManagedField(field) || types.base(field) !== "number") {
+      throw invalid(
+        `\`${field}\` isn't a declared numeric field of table \`${table.name}\``
+      );
+    }
+  }
+  return numbers;
+};
+
+/** The groups of `matches` (each row with `g…` and `n…`), in key order. */
+const groupsOf = (
+  terminal: GroupTerminal,
+  numbers: readonly string[],
+  matches: Iterable<Match>
+): GroupAnswer[] => {
+  const tallies = new Map<string, GroupTally>();
+  for (const { row } of matches) {
+    const parts = terminal.by.map((_field, position) => {
+      const part = row[`g${position}`];
+      return typeof part === "string" ? part : null;
+    });
+    const id = JSON.stringify(parts);
+    let tally = tallies.get(id);
+    if (tally === undefined) {
+      if (tallies.size >= queryMaxGroups) {
+        throw dataErrors.create("data.group_limit", { groups: queryMaxGroups });
+      }
+      tally = {
+        parts,
+        count: 0,
+        sums: numbers.map(() => 0),
+        counts: numbers.map(() => 0),
+        least: numbers.map(() => null),
+        greatest: numbers.map(() => null),
+      };
+      tallies.set(id, tally);
+    }
+    tally.count += 1;
+    for (const [position] of numbers.entries()) {
+      const value = row[`n${position}`];
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        continue;
+      }
+      tally.sums[position] = (tally.sums[position] ?? 0) + value;
+      tally.counts[position] = (tally.counts[position] ?? 0) + 1;
+      const least = tally.least[position] ?? null;
+      const greatest = tally.greatest[position] ?? null;
+      tally.least[position] = least === null ? value : Math.min(least, value);
+      tally.greatest[position] =
+        greatest === null ? value : Math.max(greatest, value);
+    }
+  }
+  const at = (field: string): number => numbers.indexOf(field);
+  return [...tallies.values()]
+    .toSorted((left, right) => compareParts(left.parts, right.parts))
+    .map((tally) => {
+      const key: Record<string, unknown> = {};
+      for (const [position, field] of terminal.by.entries()) {
+        const part = tally.parts[position] ?? null;
+        if (part !== null) {
+          key[field] = JSON.parse(part);
+        }
+      }
+      const sum = Object.fromEntries(
+        terminal.sum.map((field) => [field, tally.sums[at(field)] ?? 0])
+      );
+      if (Object.values(sum).some((value) => !Number.isFinite(value))) {
+        throw dataErrors.create("data.aggregate_overflow");
+      }
+      const avg = Object.fromEntries(
+        terminal.avg.map((field) => {
+          const count = tally.counts[at(field)] ?? 0;
+          const total = tally.sums[at(field)] ?? 0;
+          if (count > 0 && !Number.isFinite(total)) {
+            throw dataErrors.create("data.aggregate_overflow");
+          }
+          return [field, count === 0 ? null : total / count];
+        })
+      );
+      return {
+        key,
+        count: tally.count,
+        sum,
+        avg,
+        min: Object.fromEntries(
+          terminal.min.map((field) => [field, tally.least[at(field)] ?? null])
+        ),
+        max: Object.fromEntries(
+          terminal.max.map((field) => [
+            field,
+            tally.greatest[at(field)] ?? null,
+          ])
+        ),
+      };
+    });
+};
+
+/** At most `limit` matches, as documents of `table`, with their relations. */
+const withDocuments = (
+  sql: RecordSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest,
+  matches: Iterator<Match>,
+  limit: number,
+  scan: Scan
+): ReadDocument[] => {
+  const documents = documentsOf(table, matches, limit);
+  withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
+  return documents;
+};
+
 /**
  * One page of `query` (a `paginate` terminal) for `scope` from `pinned`,
  * after `anchor` or from the start: at most `pageSize` records in order,
  * one more read to know whether more follow, and the last record's anchor
  * for the next page's cursor. Keyset paging: a record changed between
  * pages may move past or into a later page, as spec 9.2 allows; the
- * bounds of every other terminal apply across all of a page's seeks.
+ * bounds of every other terminal apply across all of a page's seeks, and
+ * to each page on its own, so pages go on through a table of any size.
+ * A search's page is ordered by relevance (`searchMatches`).
  */
 export const readPage = (
   sql: RecordSql,
@@ -949,45 +1498,124 @@ export const readPage = (
     throw new Error("Not a page");
   }
   const table = readableTable(pinned, scope, query.table);
-  const { orderFields } = accessOf(pinned, table, query);
   const scan: Scan = { entries: 0, bytes: 0 };
   const found: Match[] = [];
-  for (const plan of pagePlans(sql, pinned, scope, query, anchor)) {
-    if (found.length > terminal.pageSize) {
-      break;
-    }
-    for (const match of matchesOf(sql, plan, scan)) {
-      found.push(match);
+  let anchorFields: number;
+  if (query.search === undefined) {
+    anchorFields = accessOf(pinned, table, query).orderFields.length - 1;
+    for (const plan of pagePlans(sql, pinned, scope, query, anchor)) {
       if (found.length > terminal.pageSize) {
         break;
       }
+      for (const match of matchesOf(sql, plan, scan)) {
+        found.push(match);
+        if (found.length > terminal.pageSize) {
+          break;
+        }
+      }
+    }
+  } else {
+    anchorFields = 1;
+    const matches = searchMatches(
+      sql,
+      pinned,
+      scope,
+      table,
+      query,
+      anchor,
+      scan
+    );
+    while (found.length <= terminal.pageSize) {
+      const next = matches.next();
+      if (next.done === true) {
+        break;
+      }
+      found.push(next.value);
     }
   }
   const page = found.slice(0, terminal.pageSize);
   const lastMatch = page.at(-1);
+  const items = page.map(({ row, valueJson }) =>
+    documentOf(table, row, valueJson ?? "{}")
+  );
+  withRelated(sql, pinned, scope, table, items, query.with ?? [], scan);
   return {
-    items: page.map(({ row, valueJson }) =>
-      documentOf(table, row, valueJson ?? "{}")
-    ),
+    items,
     hasMore: found.length > terminal.pageSize,
     last:
       lastMatch === undefined
         ? undefined
         : {
             id: lastMatch.row.record_id,
-            values: orderFields
-              .slice(0, -1)
-              .map((_field, position) =>
-                anchorValueOf(lastMatch.row[`o${position}`])
-              ),
+            values: Array.from({ length: anchorFields }, (_field, position) =>
+              anchorValueOf(lastMatch.row[`o${position}`])
+            ),
           },
   };
 };
 
+/** Answers a search's terminal other than a page (`runQuery`). */
+const runSearch = (
+  sql: RecordSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  query: QueryRequest
+): QueryAnswer => {
+  const { terminal } = query;
+  const scan: Scan = { entries: 0, bytes: 0 };
+  const matches = (): Iterator<Match> =>
+    searchMatches(sql, pinned, scope, table, query, null, scan);
+  const read = (limit: number): ReadDocument[] =>
+    withDocuments(sql, pinned, scope, table, query, matches(), limit, scan);
+  switch (terminal.kind) {
+    case "take": {
+      return terminal.count === 0 ? [] : read(terminal.count);
+    }
+    case "first": {
+      return read(1)[0] ?? null;
+    }
+    case "collect": {
+      const found = read(queryMaxResults + 1);
+      if (found.length > queryMaxResults) {
+        throw dataErrors.create("data.result_limit", { table: table.name });
+      }
+      return found;
+    }
+    case "count": {
+      let count = 0;
+      const iterator = matches();
+      for (
+        let next = iterator.next();
+        next.done !== true;
+        next = iterator.next()
+      ) {
+        count += 1;
+      }
+      return count;
+    }
+    case "paginate": {
+      // Pages carry cursors, which the host signs (`StoreHost.read`).
+      throw new Error("A page is read with `readPage`");
+    }
+    case "unique":
+    case "aggregate":
+    case "group": {
+      throw invalid(
+        "A search answers `take`, `first`, `collect`, `count` or `paginate`"
+      );
+    }
+    default: {
+      return terminal satisfies never;
+    }
+  }
+};
+
 /**
  * Answers `query` for `scope` from `pinned`: one statement through the
- * index the query names, under the caller's access, bounded as the threat
- * model above says. A page is read with `readPage`.
+ * index the query names (or its table's search index), under the caller's
+ * access, bounded as the threat model above says, with the related
+ * records of its `with`. A page is read with `readPage`.
  */
 export const runQuery = (
   sql: RecordSql,
@@ -996,47 +1624,57 @@ export const runQuery = (
   query: QueryRequest
 ): QueryAnswer => {
   const table = readableTable(pinned, scope, query.table);
+  requireRecordTerminal(query);
+  if (query.search !== undefined) {
+    return runSearch(sql, pinned, scope, table, query);
+  }
   const { terminal } = query;
   const counting =
     terminal.kind === "count" ||
     (terminal.kind === "aggregate" && terminal.operation === "count");
+  const scan: Scan = { entries: 0, bytes: 0 };
   const plan = (): Plan =>
     planQuery(pinned, scope, table, query, { documents: !counting });
+  const read = (planned: Plan, limit: number): ReadDocument[] =>
+    withDocuments(
+      sql,
+      pinned,
+      scope,
+      table,
+      query,
+      matchesOf(sql, planned, scan),
+      limit,
+      scan
+    );
   switch (terminal.kind) {
     case "take": {
       // Planned even for none, so a query that isn't valid is refused.
       const planned = plan();
-      return terminal.count === 0
-        ? []
-        : documentsOf(table, matchesOf(sql, planned), terminal.count);
+      return terminal.count === 0 ? [] : read(planned, terminal.count);
     }
     case "first": {
-      return documentsOf(table, matchesOf(sql, plan()), 1)[0] ?? null;
+      return read(plan(), 1)[0] ?? null;
     }
     case "unique": {
-      const found = documentsOf(table, matchesOf(sql, plan()), 2);
+      const found = read(plan(), 2);
       if (found.length > 1) {
         throw dataErrors.create("data.not_unique", { table: table.name });
       }
       return found[0] ?? null;
     }
     case "collect": {
-      const found = documentsOf(
-        table,
-        matchesOf(sql, plan()),
-        queryMaxResults + 1
-      );
+      const found = read(plan(), queryMaxResults + 1);
       if (found.length > queryMaxResults) {
         throw dataErrors.create("data.result_limit", { table: table.name });
       }
       return found;
     }
     case "count": {
-      return countOf(matchesOf(sql, plan()));
+      return countOf(matchesOf(sql, plan(), scan));
     }
     case "aggregate": {
       if (terminal.operation === "count") {
-        return countOf(matchesOf(sql, plan()));
+        return countOf(matchesOf(sql, plan(), scan));
       }
       // Declared numeric fields only (spec 9.2), never a managed one.
       if (
@@ -1054,7 +1692,24 @@ export const runQuery = (
           planQuery(pinned, scope, table, query, {
             documents: false,
             aggregate: terminal.field,
-          })
+          }),
+          scan
+        )
+      );
+    }
+    case "group": {
+      const numbers = checkedGroup(table, terminal);
+      return groupsOf(
+        terminal,
+        numbers,
+        matchesOf(
+          sql,
+          planQuery(pinned, scope, table, query, {
+            documents: false,
+            groups: terminal.by,
+            numbers,
+          }),
+          scan
         )
       );
     }
