@@ -272,9 +272,9 @@ export const chatDrafts = sqliteTable(
     revision: integer().notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /**
-     * The code step (its tool call's ID, `ChatCode.callId`) whose code
-     * wrote the draft's latest revision, from the code run's own record
-     * (`chat_code_runs`): where the chat's thread shows the draft's
+     * The code step or tool call (its tool call's ID: `ChatCode.callId`,
+     * `ChatToolCall.callId`) that wrote the draft's latest revision, from
+     * its run's own record (`chat_code_runs`): where the chat's thread shows the draft's
      * preview. Null once its changes are dropped, and for a revision the
      * previous release wrote.
      */

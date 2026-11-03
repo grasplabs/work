@@ -70,6 +70,7 @@ const failedWith = (failures: readonly unknown[]): ChatMessage[] =>
       text: "",
       citations: [],
       code: [],
+      tools: [],
       end: "failed",
       at,
     };

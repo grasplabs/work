@@ -295,6 +295,8 @@ const functionCall = (text: string): DraftCall => {
 export interface DraftFiles {
   /** The version it is over; null for an App with none yet. */
   base: number | null;
+  /** The draft's revision: what a write may be made over (`write`). */
+  revision: number;
   /** The paths it changed (null content: deleted), sorted. */
   changed: string[];
   /** Every file of the App as the draft has it, by path. */
@@ -506,6 +508,11 @@ export interface SubmittedJob {
   status: "running";
   revision: number;
 }
+
+/** The draft revision a `write` must be over, when it names one. */
+const overSchema = z
+  .strictObject({ revision: z.number().int().min(0) })
+  .optional();
 
 /** What `submit` takes: a check, or a proposal with its message. */
 const jobRequestSchema = z.discriminatedUnion("kind", [
@@ -793,6 +800,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const draft = await draftOf(this.env, this.ctx.props, id);
         return {
           base: draft.base,
+          revision: draft.revision,
           changed: Object.keys(draft.changes).toSorted(),
           files: Object.fromEntries(await draftFiles(this.env, id, draft)),
         };
@@ -809,17 +817,24 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * the chat's draft of `app`, refused as a whole as the changes of a
    * commit would be, or when it writes a file under `workflows/`, which
    * the agent never does (it may delete one). The version it is over, and
-   * what it changed.
+   * what it changed. With `over`, only over that revision of the draft
+   * (`files`): refused if it moved since, so a write made from what was
+   * read never lands over a discard or a restore after the read.
    */
   async write(
     app: unknown,
-    changes: unknown
-  ): Promise<Omit<DraftFiles, "files">> {
+    changes: unknown,
+    over?: unknown
+  ): Promise<Omit<DraftFiles, "files" | "revision">> {
     return await this.#build(
       "build.write",
       async (by) => {
         const id = await this.#buildable(by, app);
+        const expected = appErrors.parse("app.invalid", overSchema, over);
         const draft = await draftOf(this.env, this.ctx.props, id);
+        if (expected !== undefined && expected.revision !== draft.revision) {
+          throw appErrors.create("app.conflict");
+        }
         const base = await draftFiles(this.env, id, {
           base: draft.base,
           changes: {},
@@ -1310,9 +1325,12 @@ build: {
    * version it is over (the App's latest when the draft began), and the
    * paths it changed.
    */
-  files(app: string): Promise<{ base: number | null; changed: string[]; files: Record<string, string> }>;
-  /** Writes files into the draft: new content by path, or null to delete one. */
-  write(app: string, changes: Record<string, string | null>): Promise<{ base: number | null; changed: string[] }>;
+  files(app: string): Promise<{ base: number | null; revision: number; changed: string[]; files: Record<string, string> }>;
+  /**
+   * Writes files into the draft: new content by path, or null to delete one.
+   * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
+   */
+  write(app: string, changes: Record<string, string | null>, over?: { revision: number }): Promise<{ base: number | null; changed: string[] }>;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
   /**

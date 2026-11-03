@@ -5,6 +5,7 @@ import type {
   ChatOutput,
   ChatPartial,
   ChatReasoning,
+  ChatToolCall,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import {
@@ -31,6 +32,7 @@ import {
   TraceLine,
   TraceTitle,
 } from "@grasp-os/ui/components/trace";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
 import {
@@ -143,6 +145,166 @@ const stepStatusOf = (
   return running ? "running" : "stopped";
 };
 
+/** A step's status, said short: on every step's line but one done well. */
+const useStatusLabel = (): ((status: StepStatus) => string) => {
+  const { t } = useLingui();
+  return (status) =>
+    ({
+      writing: t`Writing`,
+      running: t`Running`,
+      done: t`Done`,
+      failed: t`Failed`,
+      stopped: t`Stopped`,
+    })[status];
+};
+
+/** A text a tool call was given, by its field; an ellipsis while none has arrived. */
+const fieldOf = (input: Record<string, unknown>, field: string): string => {
+  const value = input[field];
+  return typeof value === "string" ? value : "…";
+};
+
+/** The paths of the files a call writes (`files`, by path), as far as they came. */
+const pathsOf = (input: Record<string, unknown>): string[] => {
+  const { files } = input;
+  return typeof files === "object" && files !== null ? Object.keys(files) : [];
+};
+
+/**
+ * What a call of one of Grasp's tools did, in a line: in the past once it
+ * is done, as it goes while it is written, runs, failed or was stopped.
+ */
+const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
+  const { t } = useLingui();
+  /** What a `writeFile` call wrote: its file, or how many. */
+  const wrote = (input: Record<string, unknown>, done: boolean): string => {
+    const [file, ...others] = pathsOf(input);
+    if (file !== undefined && others.length === 0) {
+      return done ? t`Wrote ${file}` : t`Writing ${file}`;
+    }
+    const count = others.length + (file === undefined ? 0 : 1);
+    return done
+      ? t`${plural(count, { one: "Wrote # file", other: "Wrote # files" })}`
+      : t`${plural(count, { one: "Writing # file", other: "Writing # files" })}`;
+  };
+  return ({ tool, input }, done) => {
+    const name = fieldOf(input, "name");
+    const path = fieldOf(input, "path");
+    const text = fieldOf(input, "text");
+    const query = fieldOf(input, "query");
+    const binding = fieldOf(input, "binding");
+    switch (tool) {
+      case "createApp": {
+        return done ? t`Created the App ${name}` : t`Creating the App ${name}`;
+      }
+      case "readFile": {
+        return done ? t`Read ${path}` : t`Reading ${path}`;
+      }
+      case "writeFile": {
+        return wrote(input, done);
+      }
+      case "editFile": {
+        return done ? t`Edited ${path}` : t`Editing ${path}`;
+      }
+      case "searchFiles": {
+        return done
+          ? t`Searched the App's files for ${text}`
+          : t`Searching the App's files for ${text}`;
+      }
+      case "searchBrain": {
+        return done
+          ? t`Searched the brain for ${query}`
+          : t`Searching the brain for ${query}`;
+      }
+      case "requestConnection": {
+        return done
+          ? t`Asked to connect ${binding}`
+          : t`Asking to connect ${binding}`;
+      }
+      case "editWorkflow": {
+        return done ? t`Edited a workflow` : t`Editing a workflow`;
+      }
+      default: {
+        return done ? t`Used ${tool}` : t`Using ${tool}`;
+      }
+    }
+  };
+};
+
+/** One part of a step, opened: a heading, and its text as code. */
+const StepPart = ({
+  heading,
+  text,
+  failed = false,
+}: {
+  heading: ReactNode;
+  text: string;
+  failed?: boolean;
+}) => (
+  <section className="flex flex-col gap-2">
+    <h4 className="text-xs font-medium tracking-wide uppercase">{heading}</h4>
+    <pre
+      className={
+        failed
+          ? "bg-destructive/10 text-destructive overflow-x-auto rounded-md p-3 text-xs"
+          : "bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs"
+      }
+    >
+      <code className="font-mono">{text}</code>
+    </pre>
+  </section>
+);
+
+/**
+ * One call of Grasp's tools, folded: a line saying what it did, and what
+ * it was given and what came of it on opening.
+ */
+const ToolStep = ({
+  call,
+  result,
+  writing,
+  running,
+}: {
+  call: ChatToolCall;
+  result: Result | undefined;
+  writing: boolean;
+  running: boolean;
+}) => {
+  const status = stepStatusOf(result, writing, running);
+  const summary = useToolSummary()(call, status === "done");
+  const label = useStatusLabel()(status);
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>
+        <TraceLine status={lineStatus[status]}>
+          <TraceIcon>{statusIcon[status]}</TraceIcon>
+          <TraceTitle>{summary}</TraceTitle>
+          {status === "done" ? null : (
+            <TraceDescription>{label}</TraceDescription>
+          )}
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <div className="flex flex-col gap-4 py-1">
+          <StepPart
+            heading={<Trans>Input</Trans>}
+            text={JSON.stringify(call.input, null, 2)}
+          />
+          {result === undefined ? null : (
+            <StepPart
+              failed={result.failed}
+              heading={
+                result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
+              }
+              text={result.text}
+            />
+          )}
+        </div>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+};
+
 /** One code step, folded: its status, and the code and result on opening. */
 const CodeStep = ({
   code,
@@ -160,15 +322,8 @@ const CodeStep = ({
   /** Whether the agent is working on the chat now. */
   running: boolean;
 }) => {
-  const { t } = useLingui();
   const status = stepStatusOf(result, writing, running);
-  const label = {
-    writing: t`Writing`,
-    running: t`Running`,
-    done: t`Done`,
-    failed: t`Failed`,
-    stopped: t`Stopped`,
-  }[status];
+  const label = useStatusLabel()(status);
   return (
     <TraceCollapsible>
       <TraceCollapsibleTrigger>
@@ -182,39 +337,18 @@ const CodeStep = ({
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
         <div className="flex flex-col gap-4 py-1">
-          <section className="flex flex-col gap-2">
-            <h4 className="text-xs font-medium tracking-wide uppercase">
-              <Trans>Code</Trans>
-            </h4>
-            <pre className="bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs">
-              <code className="font-mono">{code.code}</code>
-            </pre>
-          </section>
+          <StepPart heading={<Trans>Code</Trans>} text={code.code} />
           {result !== undefined || output === undefined ? null : (
-            <section className="flex flex-col gap-2">
-              <h4 className="text-xs font-medium tracking-wide uppercase">
-                <Trans>Output</Trans>
-              </h4>
-              <pre className="bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs">
-                <code className="font-mono">{output}</code>
-              </pre>
-            </section>
+            <StepPart heading={<Trans>Output</Trans>} text={output} />
           )}
           {result === undefined ? null : (
-            <section className="flex flex-col gap-2">
-              <h4 className="text-xs font-medium tracking-wide uppercase">
-                {result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>}
-              </h4>
-              <pre
-                className={
-                  result.failed
-                    ? "bg-destructive/10 text-destructive overflow-x-auto rounded-md p-3 text-xs"
-                    : "bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs"
-                }
-              >
-                <code className="font-mono">{result.text}</code>
-              </pre>
-            </section>
+            <StepPart
+              failed={result.failed}
+              heading={
+                result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
+              }
+              text={result.text}
+            />
           )}
         </div>
       </TraceCollapsibleContent>
@@ -485,7 +619,7 @@ const ReplySteps = ({
   thinking,
   top,
 }: {
-  reply: Pick<ChatPartial, "code"> & { reasoning?: ChatReasoning };
+  reply: Pick<ChatPartial, "code" | "tools"> & { reasoning?: ChatReasoning };
   results: ReadonlyMap<string, Result>;
   output: ChatOutput | null;
   writing: boolean;
@@ -497,7 +631,8 @@ const ReplySteps = ({
   if (
     top === undefined &&
     reply.reasoning === undefined &&
-    reply.code.length === 0
+    reply.code.length === 0 &&
+    reply.tools.length === 0
   ) {
     return null;
   }
@@ -507,16 +642,37 @@ const ReplySteps = ({
       {reply.reasoning === undefined ? null : (
         <Reasoning reasoning={reply.reasoning} thinking={thinking} />
       )}
-      {reply.code.map((code) => (
-        <Fragment key={code.callId}>
-          <CodeStep
-            code={code}
-            output={output?.callId === code.callId ? output.text : undefined}
-            result={results.get(code.callId)}
-            running={running}
-            writing={writing}
-          />
-          <WidgetLines callId={code.callId} />
+      {/* Each step where the response made it: the calls of its tools
+          before each code step, then those after its last. */}
+      {[...reply.code, undefined].map((code, before) => (
+        <Fragment key={code?.callId ?? "end"}>
+          {reply.tools
+            .filter(({ codeBefore }) =>
+              code === undefined ? codeBefore >= before : codeBefore === before
+            )
+            .map((call) => (
+              <ToolStep
+                call={call}
+                key={call.callId}
+                result={results.get(call.callId)}
+                running={running}
+                writing={writing}
+              />
+            ))}
+          {code === undefined ? null : (
+            <>
+              <CodeStep
+                code={code}
+                output={
+                  output?.callId === code.callId ? output.text : undefined
+                }
+                result={results.get(code.callId)}
+                running={running}
+                writing={writing}
+              />
+              <WidgetLines callId={code.callId} />
+            </>
+          )}
         </Fragment>
       ))}
     </Trace>
@@ -692,7 +848,12 @@ const Reply = ({
           reply={reply}
           results={results}
           running={running}
-          thinking={writing && answer === "" && reply.code.length === 0}
+          thinking={
+            writing &&
+            answer === "" &&
+            reply.code.length === 0 &&
+            reply.tools.length === 0
+          }
           top={top}
           writing={writing}
         />
@@ -774,6 +935,7 @@ const progressOf = (
     partial !== null &&
     (partial.text.trim() !== "" ||
       partial.code.length > 0 ||
+      partial.tools.length > 0 ||
       partial.reasoning.trim() !== "")
       ? partial
       : null;
