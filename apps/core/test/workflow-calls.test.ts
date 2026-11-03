@@ -89,6 +89,7 @@ import {
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import {
@@ -4057,6 +4058,16 @@ const withSlowChecks = async (test: () => Promise<void>): Promise<void> => {
   }
 };
 
+/** The wakes owed to independent run `runId`, still waiting to be sent. */
+const wakesOwed = async (runId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
+  )
+    .bind(runId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
 /** Once the engine has run `runId` waiting: on its held call's wake. */
 const waiting = async (runId: string): Promise<void> => {
   await vi.waitFor(
@@ -4069,8 +4080,10 @@ const waiting = async (runId: string): Promise<void> => {
 
 describe("runs started by a restricted App, waiting on a held call", () => {
   beforeAll(chooseModel);
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
+    // A test that times out leaves its run waiting on its held call.
+    await endLiveResourceRuns();
   });
 
   it("go on as soon as their person decides it, long before the next timed check: confirmed, it is sent once; declined, the run ends", async () => {
@@ -4260,6 +4273,145 @@ describe("runs started by a restricted App, waiting on a held call", () => {
       });
     });
   });
+
+  it("go on once their person confirms, though connect couldn't say for a moment whether it still waited", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Connect fails the run's first question of whether it still waits:
+    // the check is asked again, never taken as an answer.
+    const { CONNECT: connect } = env;
+    let failures = 1;
+    env.CONNECT = new Proxy(connect, {
+      get: (target, name) => {
+        if (name === "anyPending" && failures > 0) {
+          failures -= 1;
+          return async () => {
+            await Promise.resolve();
+            throw new Error("Connect didn't answer");
+          };
+        }
+        const real: unknown = Reflect.get(target, name);
+        return real;
+      },
+    });
+    try {
+      await waiting(runId);
+      await confirmPendingAction(env, ada, held.id, held.inputHash);
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+      expect({ failures, end: endOf(run), sent: sent.calls }).toStrictEqual({
+        failures: 0,
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    } finally {
+      env.CONNECT = connect;
+    }
+  });
+
+  it("go on as soon as connect decided their person's confirmation, though its answer was lost", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+      const starter = await startingApp(ada, admin, workflow.id, {
+        restricted: true,
+      });
+      const runId = await starter.start(serving);
+      const held = await heldFor(ada, runId);
+      await waiting(runId);
+      // Connect confirms and sends, and its answer never reaches core.
+      const { CONNECT: connect } = env;
+      env.CONNECT = new Proxy(connect, {
+        get: (target, name) => {
+          const real: unknown = Reflect.get(target, name);
+          if (name !== "confirmAction" || typeof real !== "function") {
+            return real;
+          }
+          return async (...args: unknown[]): Promise<never> => {
+            await Reflect.apply(real, target, args);
+            throw new Error("Connect's answer was lost");
+          };
+        },
+      });
+      let confirmed: unknown;
+      try {
+        confirmed = await settledCode(
+          signedIn.api.pendingActions.confirm(held.id, held.inputHash)
+        );
+      } finally {
+        env.CONNECT = connect;
+      }
+      // Only the wake core owed before it asked connect ends the wait
+      // within the test: its next timed check is minutes away.
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+      expect({ confirmed, end: endOf(run), sent: sent.calls }).toStrictEqual({
+        confirmed: "internal.unexpected",
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    });
+  });
+
+  it("wake nothing on a confirmation that is refused, however often it is asked, so the run keeps its steps", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const { workflow, mail, serving, permissionId } = await mailingWorkflow(
+        ada,
+        admin
+      );
+      const starter = await startingApp(ada, admin, workflow.id, {
+        restricted: true,
+      });
+      const runId = await starter.start(serving);
+      const held = await heldFor(ada, runId);
+      await waiting(runId);
+      await revokePermission(env, admin, permissionId);
+      // Enough confirmations, each refused, that the run's steps (60 in
+      // tests) would run out did each wake it: none of them is a decision,
+      // so none wakes the step.
+      const confirmations = 40;
+      const refused = new Set<unknown>();
+      for (let tries = 0; tries < confirmations; tries += 1) {
+        refused.add(
+          // oxlint-disable-next-line no-await-in-loop -- one at a time
+          await settledCode(
+            signedIn.api.pendingActions.confirm(held.id, held.inputHash)
+          )
+        );
+      }
+      const stillWaiting = await liveStatus(runId);
+      const owed = await wakesOwed(runId);
+      await signedIn.api.pendingActions.decline(held.id);
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+
+      expect({
+        refused,
+        stillWaiting,
+        owed,
+        end: endOf(run),
+        sent: sent.calls,
+      }).toStrictEqual({
+        refused: new Set(["workflow.call_denied"]),
+        stillWaiting: "waiting",
+        owed: 0,
+        // Its step runs again once declined, and its call is refused.
+        end: { status: "failed", code: "workflow.call_denied" },
+        sent: 0,
+      });
+    });
+  });
 });
 
 /**
@@ -4308,16 +4460,6 @@ const heldSend = async (
     throw new Error("Nothing held");
   }
   return held;
-};
-
-/** The wakes owed to independent run `runId`, still waiting to be sent. */
-const wakesOwed = async (runId: string): Promise<number> => {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
-  )
-    .bind(runId)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
 };
 
 describe("the wakes a held call's decision owes", () => {
