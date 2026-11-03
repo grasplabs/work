@@ -191,8 +191,9 @@ const readResultSchema = z.strictObject({
 const claimedSchema = z.union([
   z.strictObject({
     held: z.strictObject({ receiptId: z.string(), fence: z.number().int() }),
+    startedAt: z.number().int(),
   }),
-  z.strictObject({ outcome: committedSchema }),
+  z.strictObject({ outcome: committedSchema, startedAt: z.number().int() }),
 ]);
 
 const claimedOf = (answered: string): Claimed =>

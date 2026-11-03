@@ -1,3 +1,5 @@
+import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
+import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
@@ -746,6 +748,103 @@ export const appIntegrations = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.appId, table.source, table.connectorId] }),
   ]
+);
+
+/**
+ * A company's webhooks for an App (src/app-webhooks.ts): the https URL
+ * Grasp POSTs the App's `events` to. Its secret is derived from its ID,
+ * never kept. `approved_by` and `approved_at` say which admin let the
+ * App's data go to the URL, and when; null until one did. A URL never
+ * changes, so an approval is always of the URL it was given for.
+ * `dropped` counts the deliveries it missed because too many were
+ * waiting.
+ */
+export const appWebhooks = sqliteTable(
+  "app_webhooks",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    url: text().notNull(),
+    events: text({ mode: "json" }).notNull().$type<AppWebhookEvent[]>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
+    dropped: integer().notNull().default(0),
+  },
+  (table) => [index("app_webhooks_app").on(table.appId)]
+);
+
+/**
+ * The deliveries waiting for, or made to, a webhook (src/app-webhooks.ts):
+ * core's outbox, drained every minute through connect. Each is one event,
+ * once per webhook (`dedupe`); its ID is its idempotency key. `values`
+ * holds what a form sent only when the webhook was approved as it was
+ * sent, and is cleared once the delivery settles. `delivery_at` is when
+ * it is next due, or the lease of the drain sending it. `person_id` is
+ * who sent a `form_sent`'s form (null for any other event), so erasing
+ * them takes their forms' deliveries out (person-erasure.ts).
+ */
+export const appWebhookDeliveries = sqliteTable(
+  "app_webhook_deliveries",
+  {
+    id: text().primaryKey(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => appWebhooks.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    event: text({ enum: appWebhookEvents }).notNull(),
+    dedupe: text().notNull(),
+    occurredAt: timestamp("occurred_at").notNull(),
+    version: integer(),
+    submission: text(),
+    operation: text(),
+    values: text({ mode: "json" }).$type<Json>(),
+    valuesLeftOut: integer("values_left_out", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    attempts: integer().notNull().default(0),
+    deliveryAt: timestamp("delivery_at"),
+    deliveredAt: timestamp("delivered_at"),
+    /** `delivered`, or why it was given up on: a refusal or the last failure. */
+    outcome: text(),
+    personId: text("person_id"),
+  },
+  (table) => [
+    index("app_webhook_deliveries_person").on(table.personId),
+    uniqueIndex("app_webhook_deliveries_dedupe").on(
+      table.webhookId,
+      table.dedupe
+    ),
+    index("app_webhook_deliveries_due")
+      .on(table.deliveryAt)
+      .where(sql`delivered_at IS NULL`),
+    index("app_webhook_deliveries_settled")
+      .on(table.deliveredAt)
+      .where(sql`delivered_at IS NOT NULL`),
+  ]
+);
+
+/**
+ * The forms an App's screens sent that its webhooks were told of
+ * (src/app-webhook-queue.ts): one per submission, whoever sent it to
+ * whichever function under whichever key, in whichever run (`id`, a hash
+ * of all of it), so each run is told once. `told_at` is when; `claim`
+ * is the batch's that told it, which alone counts what it told.
+ */
+export const appFormSubmissions = sqliteTable(
+  "app_form_submissions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    toldAt: timestamp("told_at").notNull(),
+    claim: text().notNull(),
+  },
+  (table) => [index("app_form_submissions_told").on(table.toldAt)]
 );
 
 /**

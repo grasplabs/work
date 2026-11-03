@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
+import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
@@ -962,6 +963,7 @@ export interface AppsApi {
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
+  readonly webhooks: AppWebhooksApi;
 }
 
 /**

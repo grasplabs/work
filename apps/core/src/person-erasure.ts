@@ -19,6 +19,7 @@ import {
   accounts,
   appVisitorCodes,
   appVisitorSessions,
+  appWebhookDeliveries,
   erasedSubjects,
   channelAccounts,
   channelConversations,
@@ -498,11 +499,17 @@ const workspaceArea: ErasureStep = {
 /**
  * What they left in the company's Apps that is theirs alone (GRA-1184):
  * their preferences in every App's store (`sdk_preferences`, a host-owned
- * table no App code reaches), and the usage signals computed for them as
+ * table no App code reaches), what the forms they sent held in each
+ * store's outbox for its webhooks, and the usage signals computed for them as
  * the owner of
  * Knowledge collections (what others asked there, counted, and what they
  * haven't read or reviewed), which the daily computation no longer makes
- * for anyone erased (knowledge/signals.ts). The Apps' records they own are
+ * for anyone erased (knowledge/signals.ts), and the deliveries of the
+ * forms they sent to the Apps' webhooks (app-webhooks.ts): one still
+ * waiting carries what they sent out of the company, so it goes unsent,
+ * and one settled names them by ID only, so it goes too. None is queued
+ * for them after this (`queueFormSent`). What the forms wrote is the
+ * App's, in its store. The Apps' records they own are
  * the company's (`_ownerId` names them), and stay. Every store is asked,
  * whether or not they were a member of its App now: a store's row is never
  * deleted (a deleted store keeps it, `deleted_at` set), so every store
@@ -521,10 +528,13 @@ const apps: ErasureStep = {
       // oxlint-disable-next-line no-await-in-loop -- one store at a time
       await inJurisdiction(env, env.DATA_STORES)
         .getByName(storeId)
-        .forgetPreferences(storeId, userId);
+        .forgetPerson(storeId, userId);
     }
     await db.batch([
       db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
+      db
+        .delete(appWebhookDeliveries)
+        .where(eq(appWebhookDeliveries.personId, userId)),
       completed(db, userId, "apps"),
     ]);
   },

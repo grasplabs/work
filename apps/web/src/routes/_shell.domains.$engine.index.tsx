@@ -40,6 +40,7 @@ import {
   StatusNote,
 } from "../engines/app-status.tsx";
 import { AppVersions } from "../engines/app-versions.tsx";
+import { AppWebhooks, WebhookList } from "../engines/app-webhooks.tsx";
 import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { SaveAsBlueprint } from "../engines/blueprints.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
@@ -463,6 +464,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     integrations,
     approval,
     resources,
+    webhooks,
     storeChanges,
     packages,
     surfaces,
@@ -486,6 +488,8 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   // Versions are for its builders, Grasp staff among them: core lists them
   // to no one else, so the tab isn't there for a user.
   const readsVersions = app.role === "builder";
+  // Webhooks too: core lists them to its builders alone.
+  const readsWebhooks = app.role === "builder";
   const tab = asked === "versions" && !readsVersions ? undefined : asked;
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
@@ -567,6 +571,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
+          {readsWebhooks ? (
+            <TabsTrigger value="webhooks">
+              <Trans>Webhooks</Trans>
+            </TabsTrigger>
+          ) : null}
           <PackagesTab packages={packages} />
           <SettingsTab surfaces={surfaces} />
           <TabsTrigger value="members">
@@ -625,6 +634,19 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </div>
           </TabsContent>
         )}
+        {readsWebhooks ? (
+          <TabsContent value="webhooks">
+            <div className="pt-4">
+              <AppWebhooks app={app.id}>
+                <Later promise={webhooks().read}>
+                  {(listed) => (
+                    <WebhookList identity={identity} webhooks={listed} />
+                  )}
+                </Later>
+              </AppWebhooks>
+            </div>
+          </TabsContent>
+        ) : null}
         <TabsContent value="packages">
           <div className="pt-4">
             {packagesRead === undefined ? null : (
@@ -818,6 +840,15 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
           async (session) => await loadIntegrations(session, params.engine)
         )
       : undefined,
+    // For its builders, admins among them, who approve: read once its tab
+    // is opened, which only they are shown.
+    webhooks: onFirstUse(
+      async () =>
+        await loadFromCore(
+          core,
+          async (session) => await session.apps.webhooks.list(params.engine)
+        )
+    ),
     // Last, so the reads above start first. The engine, and its packages
     // for whoever core lets read them: their tab, or the packages alone
     // for who isn't a member.

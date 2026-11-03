@@ -458,6 +458,10 @@ const keyedAnswer = async (
     operation,
     stage: "admission",
   });
+  // A screen's form, told to the App's webhooks once the run succeeds,
+  // named as its own release resolves it (action-invocation.ts); a
+  // portable host's is not.
+  const tellsForm = caller.portableSession === undefined;
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
@@ -470,6 +474,7 @@ const keyedAnswer = async (
     streaming: false,
     attach: false,
     ...(build === undefined ? {} : { pinnedVersion: build.version }),
+    ...(tellsForm ? { form: { key } } : {}),
   });
   const text = await new Response(frames).text();
   const frame = text
@@ -606,9 +611,16 @@ const boundedCall = async (
             text,
             Date.now() + screenCallMs,
             windowCharger(env, person, id),
-            // A portable host has no lease: nothing pins its calls.
-            portableSession === undefined && build !== undefined
-              ? { pinnedVersion: build.version }
+            // A portable host has no lease: nothing pins its calls, and no
+            // form it sends is told to the App's webhooks. A screen's keyed
+            // mutation commits its form with its writes.
+            portableSession === undefined
+              ? {
+                  ...(build === undefined
+                    ? {}
+                    : { pinnedVersion: build.version }),
+                  tellsForm: true,
+                }
               : {}
           )
         )
@@ -1173,6 +1185,9 @@ const appStreamResponse = async (
         requested: await invocation.cancel(person.userId),
       });
     }
+    // A start's form, told to the App's webhooks once its run succeeds,
+    // named as its own release resolves it (action-invocation.ts).
+    const tellsForm = action === "stream";
     // Admitted as a start is, against the person's access now, which the
     // invocation compares with the access it started under.
     const access = await accessOf(env, person, id);
@@ -1185,6 +1200,7 @@ const appStreamResponse = async (
       streaming: true,
       attach: action === "attach",
       ...(build === undefined ? {} : { pinnedVersion: build.version }),
+      ...(tellsForm ? { form: { key } } : {}),
     });
     // The release it runs under, besides the caller's: a join or an attach
     // may follow a run a release published since started.

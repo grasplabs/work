@@ -162,6 +162,12 @@ const typeRules: readonly {
   // host access, and its calls, recorded once a window, act on the App.
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
+  // An App's webhooks (core's src/app-webhooks.ts): an admin letting its
+  // data go to one's URL, a delivery given up, and connect sending one
+  // (`webhook.call`); adding and removing one are the App's configuration.
+  { action: "app.webhook.approved", type: "decision" },
+  { action: "app.webhook.undeliverable", type: "action" },
+  { action: "webhook.call", type: "action" },
   // Visitors of a published App (core's src/app-visitors.ts): who may
   // visit, a visitor signing in and out, and each refusal, are who gets
   // in; a code mailed is something done for them.

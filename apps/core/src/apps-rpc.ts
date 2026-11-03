@@ -31,6 +31,7 @@ import {
   setAppVisitorGrants,
 } from "./app-visitor-calls.ts";
 import { appVisitors, setAppVisitors } from "./app-visitors.ts";
+import { AppWebhooksRpc } from "./app-webhooks.ts";
 import {
   appContents,
   createApp,
@@ -46,7 +47,7 @@ import type { SessionCheck } from "./session-check.ts";
 
 /**
  * A signed-in person's `apps`, with `apps.files`, `apps.versions`,
- * `apps.members`, `apps.blueprints` and `apps.integrations`, in SessionRpc's form. The App
+ * `apps.members`, `apps.blueprints`, `apps.integrations` and `apps.webhooks`, in SessionRpc's form. The App
  * functions check the person's role in the App and validate what the
  * client sent.
  */
@@ -58,6 +59,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #members: AppMembersRpc;
   readonly #blueprints: AppBlueprintsRpc;
   readonly #integrations: AppIntegrationsRpc;
+  readonly #webhooks: AppWebhooksRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -68,6 +70,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     this.#members = new AppMembersRpc(env, check);
     this.#blueprints = new AppBlueprintsRpc(env, check);
     this.#integrations = new AppIntegrationsRpc(env, check);
+    this.#webhooks = new AppWebhooksRpc(env, check);
   }
 
   get files(): AppFilesRpc {
@@ -88,6 +91,10 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   get integrations(): AppIntegrationsRpc {
     return this.#integrations;
+  }
+
+  get webhooks(): AppWebhooksRpc {
+    return this.#webhooks;
   }
 
   async create(app: NewApp): Promise<App> {

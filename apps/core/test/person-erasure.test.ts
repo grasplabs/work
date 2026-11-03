@@ -13,6 +13,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
+import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
@@ -1910,10 +1911,11 @@ describe("erasing a person", () => {
     });
   });
 
-  it("forgets their preferences in every App's store and their own Knowledge signals, and leaves everyone else's", async () => {
+  it("forgets their preferences and what their forms sent in every App's store, and their own Knowledge signals, and leaves everyone else's", async () => {
     const { admin, person } = await removedPerson();
     const other = await signedInApi(idp, "user");
     const { storeId } = await appWithPreferences();
+    const later = Date.now() + 3_600_000;
     await inStore(storeId, (sql) => {
       for (const who of [person.userId, other.userId]) {
         sql.exec(
@@ -1921,6 +1923,29 @@ describe("erasing a person", () => {
           who,
           JSON.stringify({ theme: "dark" }),
           Date.now()
+        );
+        // A form each sent, committed and still to be handed to the App's
+        // webhooks, with what it held.
+        const receipt = `receipt-${who}`;
+        sql.exec(
+          "INSERT INTO sdk_mutation_receipts (receipt_id, scope, principal, input_hash, fence, deadline, created_at, retain_until, outcome, committed_at, \"commit\") VALUES (?, '{}', ?, 'h', 1, ?, ?, ?, 'null', ?, 1)",
+          receipt,
+          who,
+          later,
+          Date.now(),
+          later,
+          Date.now()
+        );
+        sql.exec(
+          "INSERT INTO sdk_change_outbox (id, receipt_id, position, kind, intent, created_at, next_attempt_at) VALUES (?, ?, 0, 'app.form_sent', ?, ?, ?)",
+          `${receipt}:1:0`,
+          receipt,
+          JSON.stringify({
+            kind: "app.form_sent",
+            data: { userId: who, values: { note: `from ${who}` } },
+          }),
+          Date.now(),
+          later
         );
       }
     });
@@ -1956,16 +1981,106 @@ describe("erasing a person", () => {
             )
             .one().count
       );
+    const formSentBy = async (who: string) =>
+      await inStore(
+        storeId,
+        (sql) =>
+          sql
+            .exec<{ sent: string | null }>(
+              "SELECT json_extract(intent, '$.data.values') AS sent FROM sdk_change_outbox WHERE json_extract(intent, '$.data.userId') = ?",
+              who
+            )
+            .one().sent
+      );
     expect({
       theirs: await preferencesOf(person.userId),
       others: await preferencesOf(other.userId),
+      theirForm: await formSentBy(person.userId),
+      otherForm: await formSentBy(other.userId),
       theirSignals: await rowsOf("knowledge_signals", "owner", person.userId),
       otherSignals: await rowsOf("knowledge_signals", "owner", other.userId),
     }).toStrictEqual({
       theirs: 0,
       others: 1,
+      theirForm: null,
+      otherForm: JSON.stringify({ note: `from ${other.userId}` }),
       theirSignals: 0,
       otherSignals: 1,
     });
+  });
+
+  it("takes out the deliveries of the forms they sent to an App's webhooks, waiting or settled, queues none of theirs after, and leaves everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const other = await signedInApi(idp, "user");
+    const app = crypto.randomUUID();
+    const webhook = crypto.randomUUID();
+    const created = Date.now() - 60_000;
+    // An App with a webhook an admin approved for its data, so a form's
+    // delivery carries what was sent.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Requests', '', ?, ?)"
+      ).bind(app, admin.userId, created),
+      env.DB.prepare(
+        "INSERT INTO app_webhooks (id, app_id, url, events, created_by, created_at, approved_by, approved_at) VALUES (?, ?, 'https://hooks.example.com/in', ?, ?, ?, ?, ?)"
+      ).bind(
+        webhook,
+        app,
+        JSON.stringify(["form_sent"]),
+        admin.userId,
+        created,
+        admin.userId,
+        created
+      ),
+    ]);
+    const form = async (userId: string, key: string) => {
+      await queueFormSent(
+        env,
+        formSubmissionOf({
+          app,
+          userId,
+          call: {
+            reference: {
+              resourceId: "requests",
+              resourceVersion: 1,
+              kind: "action",
+              contractId: "requests",
+              fingerprint: "f",
+            },
+            input: { reason: `${key} of ${userId}` },
+          },
+          key,
+          operation: "requests.send",
+          startedAt: Date.now(),
+        })
+      );
+    };
+    await form(person.userId, "waiting");
+    await form(person.userId, "settled");
+    await form(other.userId, "waiting");
+    // One of theirs sent already: its values cleared, as a settled one's are.
+    await env.DB.prepare(
+      `UPDATE app_webhook_deliveries SET delivered_at = ?, outcome = 'delivered', "values" = NULL
+       WHERE webhook_id = ? AND submission = 'settled'`
+    )
+      .bind(Date.now(), webhook)
+      .run();
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // A form of theirs still kept untold, in a run's receipt, as they were
+    // erased.
+    await form(person.userId, "late");
+
+    const { results } = await env.DB.prepare(
+      `SELECT submission, "values" AS sent FROM app_webhook_deliveries WHERE webhook_id = ?`
+    )
+      .bind(webhook)
+      .all<{ submission: string; sent: string | null }>();
+    expect(results).toStrictEqual([
+      {
+        submission: "waiting",
+        sent: JSON.stringify({ reason: `waiting of ${other.userId}` }),
+      },
+    ]);
   });
 });
