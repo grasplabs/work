@@ -8,14 +8,6 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
   Field,
   FieldDescription,
   FieldLabel,
@@ -33,6 +25,7 @@ import type { ReactNode } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A domain's webhooks (core's app-webhooks.ts): https addresses its
@@ -59,73 +52,6 @@ const eventNames = {
 /** A webhook event, as people read it. */
 const eventLabel = (event: AppWebhookEvent): string =>
   i18n._(eventNames[event]);
-
-/** Shows `secret` once, with the way to copy it. */
-const SecretDialog = ({
-  secret,
-  onClose,
-}: {
-  secret: string | undefined;
-  onClose: () => void;
-}) => {
-  const { t } = useLingui();
-  const [copied, setCopied] = useState(false);
-  const copy = async (): Promise<void> => {
-    if (secret === undefined) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(secret);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-  return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (!open) {
-          setCopied(false);
-          onClose();
-        }
-      }}
-      open={secret !== undefined}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>The webhook&apos;s secret</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              Every delivery is signed with it, so the receiver can tell it came
-              from Grasp. Copy it now: Grasp won&apos;t show it again.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <Input aria-label={t`Secret`} readOnly value={secret ?? ""} />
-        <DialogFooter>
-          <Button
-            onClick={() => {
-              void copy();
-            }}
-            variant="outline"
-          >
-            {copied ? <Trans>Copied</Trans> : <Trans>Copy</Trans>}
-          </Button>
-          <Button
-            onClick={() => {
-              setCopied(false);
-              onClose();
-            }}
-          >
-            <Trans>Done</Trans>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 /** Adding a webhook: its address, and the events it is sent. */
 const AddWebhook = ({
@@ -340,11 +266,18 @@ export const AppWebhooks = ({
       </p>
       {children}
       <AddWebhook app={app} onSecret={setSecret} />
-      <SecretDialog
+      <ShownOnceDialog
+        description={
+          <Trans>
+            Every delivery is signed with it, so the receiver can tell it came
+            from Grasp.
+          </Trans>
+        }
         onClose={() => {
           setSecret(undefined);
         }}
         secret={secret}
+        title={<Trans>The webhook&apos;s secret</Trans>}
       />
     </div>
   );

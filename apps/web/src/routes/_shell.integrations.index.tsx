@@ -1,3 +1,4 @@
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -26,14 +27,17 @@ import { useState } from "react";
 import { connectionErrorMessage } from "../connection-errors.ts";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { groupLabel } from "../connections/groups.ts";
+import {
+  HttpConnections,
+  httpConnectionsMatching,
+} from "../connections/http-connections.tsx";
 import { IntegrationRow } from "../connections/integration-row.tsx";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationsSection } from "../connections/integrations-section.tsx";
 import {
-  countByGroup,
+  filterCounts,
   integrationsOf,
-  keeps,
   roundedDown,
   sectionsOf,
 } from "../connections/integrations.ts";
@@ -282,16 +286,33 @@ const MoreApps = ({
   );
 };
 
-/** The filters to choose from, each with how many apps it holds. */
-const useChoices = (integrations: Integration[]): Choice[] => {
+/**
+ * How many HTTP connections show under `filter` and the search `q`: they
+ * list apart, under every filter but a kind of app.
+ */
+const httpShownUnder = (
+  filter: IntegrationFilter,
+  connections: readonly ListedConnection[],
+  q: string | undefined
+): number =>
+  filter.show === "group" ? 0 : httpConnectionsMatching(connections, q).length;
+
+/**
+ * The filters to choose from, each with how many apps it holds: All and
+ * Connected count HTTP connections too, as both list them.
+ */
+const useChoices = (
+  integrations: Integration[],
+  connections: readonly ListedConnection[]
+): Choice[] => {
   const { t, i18n } = useLingui();
-  const perGroup = countByGroup(integrations);
+  const counts = filterCounts(integrations, connections);
   return [
     {
       id: "all",
       filter: { show: "all" },
       label: t({ message: "All", context: "filter: every integration" }),
-      count: integrations.length,
+      count: counts.all,
     },
     {
       id: "connected",
@@ -300,15 +321,13 @@ const useChoices = (integrations: Integration[]): Choice[] => {
         message: "Connected",
         context: "filter: the integrations that are connected",
       }),
-      count: integrations.filter((integration) =>
-        keeps({ show: "connected" }, integration)
-      ).length,
+      count: counts.connected,
     },
     ...catalogGroups.map((group) => ({
       id: `group:${group}`,
       filter: { show: "group" as const, group },
       label: i18n._(groupLabel[group]),
-      count: perGroup.get(group) ?? 0,
+      count: counts.groups.get(group) ?? 0,
     })),
   ];
 };
@@ -422,20 +441,25 @@ const Integrations = () => {
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
   const { t, i18n } = useLingui();
+  const listed = connections.state === "ready" ? connections.data : undefined;
+  // What is counted before they are read: none.
+  const known = listed ?? [];
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
-    connections.state === "ready" ? connections.data : []
+    known
   );
   const filter = filterOf(search);
-  const choices = useChoices(integrations);
+  const choices = useChoices(integrations, known);
   // Before it is known which workflows use what: the sections as they
   // stand then, and the count of what shows, which doesn't change after.
   const first = sectionsOf(integrations, filter, q);
+  const httpShown = httpShownUnder(filter, known, q);
   const shown =
     first.lapsed.length +
     first.connected.length +
     first.unused.length +
-    first.others.length;
+    first.others.length +
+    httpShown;
   const loaded = catalog.state === "ready" && connections.state === "ready";
   const about = formatNumber(roundedDown(integrations.length));
   const [requesting, setRequesting] = useState(false);
@@ -548,6 +572,14 @@ const Integrations = () => {
               />
             )}
           </Await>
+          {/* Outside APIs an admin approved: no catalog app, so no kind. */}
+          {filter.show === "group" ? null : (
+            <HttpConnections
+              connections={listed}
+              identity={identity}
+              search={q}
+            />
+          )}
           {/* The apps asked for have no kind, and none is connected. */}
           {filter.show === "all" ? (
             <RequestedApps requests={requests} search={q} />

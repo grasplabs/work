@@ -5,6 +5,8 @@ import type {
 import { connectorEventActions } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
+import { workflowWebhookHeaders } from "@grasp-os/shared/workflow-triggers";
+import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,11 +31,18 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { CalendarClockIcon, MailIcon, PlugIcon, ZapIcon } from "lucide-react";
+import {
+  CalendarClockIcon,
+  MailIcon,
+  PlugIcon,
+  LinkIcon,
+  ZapIcon,
+} from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatList } from "../format.ts";
+import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -52,6 +61,13 @@ import { useCore } from "../use-core.ts";
 // its owner. Core decides every change again (trigger-resources.ts) and
 // what it refuses is said where it was asked; nothing starts until an
 // admin grants the trigger `start` on the workflow.
+//
+// A webhook trigger (GRA-1478) takes signed POSTs at a URL of its own:
+// the URL shows with a way to copy it to whoever sees the trigger, and
+// its secret only once, as core answers it on create or rotate, in a
+// dialog kept above the list so reading the list again never takes it
+// away. Its owner rotates the secret; whoever manages it revokes it; both
+// ask first.
 
 /** The provider whose connections report events of `type`. */
 const providerOf = (type: ConnectorEventType): string =>
@@ -139,6 +155,9 @@ const KindIcon = ({ kind }: { kind: WorkflowTrigger["kind"] }) => {
   if (kind === "email") {
     return <MailIcon aria-hidden="true" className="mt-0.5 size-4" />;
   }
+  if (kind === "webhook") {
+    return <LinkIcon aria-hidden="true" className="mt-0.5 size-4" />;
+  }
   return kind === "connector" ? (
     <PlugIcon aria-hidden="true" className="mt-0.5 size-4" />
   ) : (
@@ -178,6 +197,193 @@ const TriggerState = ({ trigger }: { trigger: WorkflowTrigger }) => {
   );
 };
 
+/**
+ * Where webhook trigger `token` takes deliveries: on this page's own
+ * origin, as core serves both the app and the webhooks.
+ */
+const webhookUrlOf = (token: string): string =>
+  `${globalThis.location.origin}${workflowWebhookPath}/${token}`;
+
+/** How many of a webhook token's last characters name it on the tab. */
+const tokenEnding = 4;
+
+/** How a sender signs a delivery, by the headers core reads. */
+const SigningNote = () => {
+  const headers = formatList(Object.values(workflowWebhookHeaders));
+  return (
+    <p className="text-muted-foreground text-sm">
+      <Trans>
+        To start a run, POST its input as JSON to the URL, signed with the
+        secret as{" "}
+        <a
+          className="underline underline-offset-2"
+          href="https://www.standardwebhooks.com"
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Standard Webhooks
+        </a>{" "}
+        describes, in the headers {headers}. A delivery more than five minutes
+        old is refused.
+      </Trans>
+    </p>
+  );
+};
+
+/**
+ * A confirmation before `onConfirm`, behind a small button. It closes as
+ * soon as it is confirmed, and confirms nothing while a change runs, so a
+ * second click can't make the change twice (rotating again would end the
+ * secret just shown); what goes wrong shows in the row.
+ */
+const Confirmed = ({
+  button,
+  label,
+  title,
+  description,
+  confirm,
+  busy,
+  onConfirm,
+}: {
+  button: string;
+  /** The button's name with the trigger it is for, for screen readers. */
+  label: string;
+  title: string;
+  description: string;
+  confirm: string;
+  busy: boolean;
+  onConfirm: () => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        aria-label={label}
+        disabled={busy}
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="sm"
+        variant="outline"
+      >
+        {button}
+      </Button>
+      <AlertDialog onOpenChange={setOpen} open={open}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{title}</AlertDialogTitle>
+            <AlertDialogDescription>{description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              <Trans>Cancel</Trans>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                onConfirm();
+              }}
+              variant="destructive"
+            >
+              {confirm}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+};
+
+/**
+ * A webhook trigger's URL, with a way to copy it, whether its secret takes
+ * deliveries, and how to sign one; for its owner, a new secret; for
+ * whoever manages it, revoking the secret. Both ask first.
+ */
+const WebhookDetails = ({
+  webhook,
+  mayRotate,
+  mayRevoke,
+  busy,
+  onRotate,
+  onRevoke,
+}: {
+  webhook: NonNullable<WorkflowTrigger["webhook"]>;
+  mayRotate: boolean;
+  mayRevoke: boolean;
+  busy: boolean;
+  onRotate: () => void;
+  onRevoke: () => void;
+}) => {
+  const { t } = useLingui();
+  const url = webhookUrlOf(webhook.token);
+  const revoked = webhook.secret === "revoked";
+  // Names this trigger's buttons apart from another webhook's on the tab.
+  const ending = webhook.token.slice(-tokenEnding);
+  return (
+    <div className="flex flex-col gap-2 pl-7">
+      <div className="flex min-w-0 items-center gap-2">
+        <Input aria-label={t`Webhook URL`} readOnly value={url} />
+        <CopyButton
+          label={t`Copy the URL of the webhook ending ${ending}`}
+          text={url}
+        />
+      </div>
+      {revoked ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="attention">
+            <Trans>Secret revoked</Trans>
+          </Badge>
+          <span className="text-muted-foreground">
+            <Trans>
+              It takes no delivery until whoever made it makes a new secret.
+            </Trans>
+          </span>
+        </p>
+      ) : null}
+      <SigningNote />
+      {mayRotate || (mayRevoke && !revoked) ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {mayRotate ? (
+            <Confirmed
+              busy={busy}
+              button={revoked ? t`Make a new secret` : t`Rotate the secret`}
+              confirm={revoked ? t`Make a new secret` : t`Rotate the secret`}
+              label={
+                revoked
+                  ? t`Make a new secret for the webhook ending ${ending}`
+                  : t`Rotate the secret of the webhook ending ${ending}`
+              }
+              description={
+                revoked
+                  ? t`Senders must sign with the new secret, which you see only once.`
+                  : t`The current secret stops working at once: senders must sign with the new one, which you see only once.`
+              }
+              onConfirm={onRotate}
+              title={
+                revoked
+                  ? t`Make a new secret?`
+                  : t`Rotate the webhook's secret?`
+              }
+            />
+          ) : null}
+          {mayRevoke && !revoked ? (
+            <Confirmed
+              busy={busy}
+              button={t`Revoke the secret`}
+              confirm={t`Revoke the secret`}
+              label={t`Revoke the secret of the webhook ending ${ending}`}
+              description={t`No delivery starts a run until whoever made the trigger makes a new secret.`}
+              onConfirm={onRevoke}
+              title={t`Revoke the webhook's secret?`}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 /** One trigger: what starts it, its version, where it stands, and what the reader may change. */
 const TriggerRow = ({
   trigger,
@@ -186,6 +392,7 @@ const TriggerRow = ({
   me,
   builder,
   onChanged,
+  onSecret,
 }: {
   trigger: WorkflowTrigger;
   connections: readonly ListedConnection[];
@@ -193,6 +400,8 @@ const TriggerRow = ({
   me: string;
   builder: boolean;
   onChanged: () => Promise<void>;
+  /** A webhook trigger's new secret, to show once. */
+  onSecret: (secret: string) => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
@@ -237,6 +446,27 @@ const TriggerRow = ({
           ) : null}
         </span>
       </div>
+      {trigger.webhook === null ? null : (
+        <WebhookDetails
+          busy={busy}
+          // Core makes a new secret only for its owner while they build
+          // the workflow, and lets whoever manages it revoke one.
+          mayRevoke={manages}
+          mayRotate={own && builder}
+          onRevoke={() => {
+            void change(
+              async (triggers) => await triggers.revokeWebhookSecret(trigger.id)
+            );
+          }}
+          onRotate={() => {
+            void change(async (triggers) => {
+              const { secret } = await triggers.rotateWebhookSecret(trigger.id);
+              onSecret(secret);
+            });
+          }}
+          webhook={trigger.webhook}
+        />
+      )}
       {manages ? (
         <div className="flex flex-wrap items-center gap-2 pl-7">
           {/* Turning it on runs it as its owner, so core asks them to
@@ -352,21 +582,27 @@ const ownTimeZone = (): string =>
   Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** The kinds of trigger a builder adds here. */
-const addedKinds = ["schedule", "connector", "email"] as const;
+const addedKinds = ["schedule", "connector", "email", "webhook"] as const;
 
 type AddedKind = (typeof addedKinds)[number];
 
-/** A new trigger, for a builder: a schedule, a connection's event or an email, for one version. */
+/**
+ * A new trigger, for a builder: a schedule, a connection's event, an email
+ * or a signed webhook call, for one version.
+ */
 const AddTrigger = ({
   workflow,
   versions,
   connections,
   onAdded,
+  onSecret,
 }: {
   workflow: string;
   versions: readonly number[];
   connections: readonly ListedConnection[];
   onAdded: () => Promise<void>;
+  /** A new webhook trigger's secret, to show once. */
+  onSecret: (secret: string) => void;
 }) => {
   const { t } = useLingui();
   const ids = useId();
@@ -389,6 +625,10 @@ const AddTrigger = ({
   );
 
   const configOf = (): unknown => {
+    // A delivery's body is its run's input, as is: nothing to configure.
+    if (kind === "webhook") {
+      return {};
+    }
     if (kind === "schedule") {
       const parsed = jsonOf(input);
       if (!parsed.ok) {
@@ -443,6 +683,9 @@ const AddTrigger = ({
       setInput("{}");
       setMapping("{}");
     }
+    if (created?.secret !== undefined) {
+      onSecret(created.secret);
+    }
     // Read again however it ended, as the rows' own changes are: a trigger
     // core saved before its answer was lost shows, rather than being added
     // twice on a retry.
@@ -481,6 +724,9 @@ const AddTrigger = ({
             </NativeSelectOption>
             <NativeSelectOption value="email">
               {t`An email to its own address`}
+            </NativeSelectOption>
+            <NativeSelectOption value="webhook">
+              {t`A signed call to its own URL`}
             </NativeSelectOption>
           </NativeSelect>
         </div>
@@ -648,6 +894,15 @@ const AddTrigger = ({
           </div>
         </div>
       ) : null}
+      {kind === "webhook" ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            It gets a URL of its own and a secret, which you see only once, as
+            it is added. Each signed POST to the URL starts a run, with the body
+            as its input.
+          </Trans>
+        </p>
+      ) : null}
       <ErrorText>{problem ?? failure}</ErrorText>
       <div>
         <Button disabled={busy} size="sm" type="submit">
@@ -700,12 +955,14 @@ const TriggersRead = ({
   builder,
   generation,
   onChanged,
+  onSecret,
 }: {
   workflow: string;
   me: string;
   builder: boolean;
   generation: number;
   onChanged: () => void;
+  onSecret: (secret: string) => void;
 }) => {
   const core = useCore();
   const [read, setRead] = useState<Read>();
@@ -775,6 +1032,7 @@ const TriggersRead = ({
               key={trigger.id}
               me={me}
               onChanged={changed}
+              onSecret={onSecret}
               trigger={trigger}
               versions={read.versions}
             />
@@ -785,6 +1043,7 @@ const TriggersRead = ({
         <AddTrigger
           connections={read.connections}
           onAdded={changed}
+          onSecret={onSecret}
           versions={read.versions}
           workflow={workflow}
         />
@@ -805,8 +1064,24 @@ export const TriggersTabContent = ({
 }) => {
   // One more each time a change asks for the triggers to be read again.
   const [generation, setGeneration] = useState(0);
+  // A webhook trigger's secret as core just answered it: kept here, above
+  // the list, so reading it again never takes the secret away unseen.
+  const [secret, setSecret] = useState<string>();
   return (
     <TabsContent value="triggers">
+      <ShownOnceDialog
+        description={
+          <Trans>
+            Senders sign every delivery with it, so Grasp can tell a call is
+            theirs.
+          </Trans>
+        }
+        onClose={() => {
+          setSecret(undefined);
+        }}
+        secret={secret}
+        title={<Trans>The webhook&apos;s secret</Trans>}
+      />
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6 pb-8">
         <p className="text-muted-foreground">
           <Trans>
@@ -822,6 +1097,7 @@ export const TriggersTabContent = ({
           onChanged={() => {
             setGeneration((current) => current + 1);
           }}
+          onSecret={setSecret}
           workflow={workflow}
         />
       </div>

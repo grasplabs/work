@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   beyond,
+  filterCounts,
   find,
   integrationsOf,
   keeps,
@@ -188,6 +189,46 @@ describe("filters, search and sections", () => {
         [zapier, linear].filter((integration) => integration !== undefined)
       ).map(({ id }) => id)
     ).toStrictEqual(["linear", "zapier"]);
+  });
+
+  it("counts live HTTP connections under All and Connected, as both list them, but under no kind of app", () => {
+    const http = (status: ListedConnection["status"]): ListedConnection => ({
+      ...connection("http", "shared", status),
+      source: "http",
+      http: {
+        name: "Billing API",
+        origin: "https://billing.example.com",
+        pathPrefixes: ["/"],
+        methods: ["GET"],
+        credentialHeader: "x-api-key",
+      },
+    });
+    const listed: ListedConnection[] = [
+      connection("google", "personal", "needs_reauth"),
+      http("active"),
+      http("disconnected"),
+      // One whose summary connect couldn't read: not listed, so not counted.
+      { ...connection("http", "shared", "active"), source: "http" },
+    ];
+    const integrations = integrationsOf(
+      [
+        entry("microsoft", ["Email"], { group: "Email and calendar" }),
+        entry("google", ["Email"], { group: "Email and calendar" }),
+        entry("hubspot", ["CRM"], { group: "CRM" }),
+      ],
+      listed
+    );
+    const counts = filterCounts(integrations, listed);
+
+    expect({
+      all: counts.all,
+      connected: counts.connected,
+      groups: Object.fromEntries(counts.groups),
+    }).toStrictEqual({
+      all: 4,
+      connected: 2,
+      groups: { "Email and calendar": 2, CRM: 1 },
+    });
   });
 
   it("rounds a count down to say more than it", () => {
