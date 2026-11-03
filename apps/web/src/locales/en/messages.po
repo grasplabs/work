@@ -1292,6 +1292,10 @@ msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of it
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 
+#: src/engines/app-code.tsx
+msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+msgstr "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} of {total} not interviewed yet"
@@ -2013,6 +2017,7 @@ msgid "Add webhook"
 msgstr "Add webhook"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Added"
@@ -2460,6 +2465,7 @@ msgid "Anything else?"
 msgstr "Anything else?"
 
 #: src/connections/request-app-dialog.tsx
+#: src/engines/app-page.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
@@ -2483,6 +2489,10 @@ msgstr "App not found"
 #: src/settings/erasures.tsx
 msgid "App preferences and usage signals of their collections"
 msgstr "App preferences and usage signals of their collections"
+
+#: src/engines/app-page.tsx
+msgid "App views"
+msgstr "App views"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -3351,6 +3361,7 @@ msgid "Change: {text}"
 msgstr "Change: {text}"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 msgid "Changed"
 msgstr "Changed"
 
@@ -3447,6 +3458,11 @@ msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 
 #: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Changes"
+
+#: src/engines/app-code.tsx
+msgctxt "what a draft changes in an app's code"
 msgid "Changes"
 msgstr "Changes"
 
@@ -3727,6 +3743,7 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-page.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -4255,6 +4272,10 @@ msgstr "CRM"
 msgid "Current"
 msgstr "Current"
 
+#: src/engines/app-code.tsx
+msgid "Current (version {current})"
+msgstr "Current (version {current})"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Current plan"
@@ -4413,6 +4434,10 @@ msgstr "Delete this workflow"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Delete your interview?"
+
+#: src/engines/app-code.tsx
+msgid "Deleted"
+msgstr "Deleted"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -4793,6 +4818,10 @@ msgstr "Download table as Markdown"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Draft"
+
+#: src/engines/app-code.tsx
+msgid "Draft (version {draft})"
+msgstr "Draft (version {draft})"
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -5284,6 +5313,7 @@ msgid "File"
 msgstr "File"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -7932,6 +7962,10 @@ msgstr "No chats here yet."
 msgid "No chats yet. What is asked above starts one, and it stays in this project."
 msgstr "No chats yet. What is asked above starts one, and it stays in this project."
 
+#: src/engines/app-code.tsx
+msgid "No code yet: Grasp writes the first version in the chat."
+msgstr "No code yet: Grasp writes the first version in the chat."
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "No connector yet"
@@ -9963,6 +9997,10 @@ msgstr "Read what could be improved"
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Read-only"
+
+#: src/engines/app-code.tsx
+msgid "Read-only. Changes to the code go through the chat."
+msgstr "Read-only. Changes to the code go through the chat."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -12723,6 +12761,10 @@ msgstr "The domains and workflows that may use approved npm packages. Open one t
 msgid "The domains this chat builds didn't load."
 msgstr "The domains this chat builds didn't load."
 
+#: src/engines/app-code.tsx
+msgid "The draft changes no file."
+msgstr "The draft changes no file."
+
 #: src/chat/draft-versions.tsx
 msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
 msgstr "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
@@ -13506,6 +13548,10 @@ msgstr "This version changes the domain's data, and the change can't be applied:
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+
+#: src/engines/app-code.tsx
+msgid "This version has no files."
+msgstr "This version has no files."
 
 #: src/screens/screen-frame.tsx
 msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
@@ -14766,6 +14812,10 @@ msgstr "What to remember"
 msgid "What to remove"
 msgstr "What to remove"
 
+#: src/engines/app-code.tsx
+msgid "What to show of the code"
+msgstr "What to show of the code"
+
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "What to show of the traces"
@@ -14958,6 +15008,10 @@ msgstr "Which language do you want to do this interview in?"
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "Which tools do people actually use?"
+
+#: src/engines/app-code.tsx
+msgid "Which version"
+msgstr "Which version"
 
 #: src/dashboard/widget-board.tsx
 msgid "Which workflows failed most this month?"

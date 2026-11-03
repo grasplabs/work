@@ -1292,6 +1292,10 @@ msgstr "{total, plural, one {{count} van # tool toegestaan} other {{count} van #
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {Bij {withPerson} van # run was een beslissing van een persoon nodig.} other {Bij {withPerson} van # runs was een beslissing van een persoon nodig.}}"
 
+#: src/engines/app-code.tsx
+msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
+msgstr "{unchanged, plural, one {⋯ # ongewijzigde regel} other {⋯ # ongewijzigde regels}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} van {total} nog niet geïnterviewd"
@@ -2013,6 +2017,7 @@ msgid "Add webhook"
 msgstr "Webhook toevoegen"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Toegevoegd"
@@ -2460,6 +2465,7 @@ msgid "Anything else?"
 msgstr "Nog iets?"
 
 #: src/connections/request-app-dialog.tsx
+#: src/engines/app-page.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
@@ -2483,6 +2489,10 @@ msgstr "App niet gevonden"
 #: src/settings/erasures.tsx
 msgid "App preferences and usage signals of their collections"
 msgstr "App-voorkeuren en gebruikssignalen van hun collecties"
+
+#: src/engines/app-page.tsx
+msgid "App views"
+msgstr "Weergaven van de app"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -3351,6 +3361,7 @@ msgid "Change: {text}"
 msgstr "Aanpassen: {text}"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 msgid "Changed"
 msgstr "Gewijzigd"
 
@@ -3449,6 +3460,11 @@ msgstr "Gewijzigd: leest en herschrijft elk record van {table}, van wie het ook 
 #: src/connections/tool-permissions.tsx
 msgid "Changes"
 msgstr "Wijzigt"
+
+#: src/engines/app-code.tsx
+msgctxt "what a draft changes in an app's code"
+msgid "Changes"
+msgstr "Wijzigingen"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -3727,6 +3743,7 @@ msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-page.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -4255,6 +4272,10 @@ msgstr "CRM"
 msgid "Current"
 msgstr "Huidig"
 
+#: src/engines/app-code.tsx
+msgid "Current (version {current})"
+msgstr "Huidig (versie {current})"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Huidig abonnement"
@@ -4413,6 +4434,10 @@ msgstr "Deze workflow verwijderen"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Je interview verwijderen?"
+
+#: src/engines/app-code.tsx
+msgid "Deleted"
+msgstr "Verwijderd"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
@@ -4793,6 +4818,10 @@ msgstr "Tabel downloaden als Markdown"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Concept"
+
+#: src/engines/app-code.tsx
+msgid "Draft (version {draft})"
+msgstr "Concept (versie {draft})"
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -5284,6 +5313,7 @@ msgid "File"
 msgstr "Bestand"
 
 #: src/chat/builds.tsx
+#: src/engines/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -7932,6 +7962,10 @@ msgstr "Hier zijn nog geen chats."
 msgid "No chats yet. What is asked above starts one, and it stays in this project."
 msgstr "Nog geen chats. Wat je hierboven vraagt, begint er een, en die blijft in dit project."
 
+#: src/engines/app-code.tsx
+msgid "No code yet: Grasp writes the first version in the chat."
+msgstr "Nog geen code: Grasp schrijft de eerste versie in de chat."
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "Nog geen connector"
@@ -9963,6 +9997,10 @@ msgstr "Gelezen wat er beter kan"
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Alleen-lezen"
+
+#: src/engines/app-code.tsx
+msgid "Read-only. Changes to the code go through the chat."
+msgstr "Alleen lezen. Wijzigingen in de code gaan via de chat."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -12723,6 +12761,10 @@ msgstr "De domeinen en workflows die goedgekeurde npm-pakketten mogen gebruiken.
 msgid "The domains this chat builds didn't load."
 msgstr "De domeinen die deze chat bouwt, zijn niet geladen."
 
+#: src/engines/app-code.tsx
+msgid "The draft changes no file."
+msgstr "Het concept wijzigt geen bestand."
+
 #: src/chat/draft-versions.tsx
 msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
 msgstr "De wijzigingen van het concept verdwijnen, en de volgende wijziging van de agent begint opnieuw bij de app zoals die is. De versies blijven bewaard, zodat je er een kunt herstellen."
@@ -13506,6 +13548,10 @@ msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
+
+#: src/engines/app-code.tsx
+msgid "This version has no files."
+msgstr "Deze versie heeft geen bestanden."
 
 #: src/screens/screen-frame.tsx
 msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
@@ -14766,6 +14812,10 @@ msgstr "Wat te onthouden"
 msgid "What to remove"
 msgstr "Wat te verwijderen"
 
+#: src/engines/app-code.tsx
+msgid "What to show of the code"
+msgstr "Wat van de code getoond wordt"
+
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Wat van de sporen te tonen"
@@ -14958,6 +15008,10 @@ msgstr "In welke taal wil je dit interview doen?"
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "Welke tools gebruiken mensen echt?"
+
+#: src/engines/app-code.tsx
+msgid "Which version"
+msgstr "Welke versie"
 
 #: src/dashboard/widget-board.tsx
 msgid "Which workflows failed most this month?"

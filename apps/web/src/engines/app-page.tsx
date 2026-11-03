@@ -13,6 +13,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   ChevronDownIcon,
+  CodeIcon,
   GlobeIcon,
   LayoutGridIcon,
   LinkIcon,
@@ -26,6 +27,7 @@ import { appSlot, setActiveChat } from "../chat/active-chat.ts";
 import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AppCode } from "./app-code.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { buildsApp } from "./app-role.ts";
 import { useStatusMove } from "./app-status.tsx";
@@ -44,6 +46,10 @@ import { useStatusMove } from "./app-status.tsx";
 // room for it as a drawer. The Publish menu also gives the App its own
 // link (app-own-link.tsx); saving it as a blueprint, as the prototype's
 // does, waits on the blueprints page.
+//
+// Its builders also have its Code beside the App itself (app-code.tsx):
+// its files, read-only, and a draft's changes. Nobody else gets the tab,
+// as core refuses them the App's files all the same.
 
 /**
  * Opens the App's own chat in the dock, to change the App there: the
@@ -243,6 +249,70 @@ const ScreenTabs = ({
   );
 };
 
+/** What the page shows: the App itself, or its code. */
+export type AppPageView = "app" | "code";
+
+/** The App and its Code, for a builder, the shown one marked. */
+const ViewTabs = ({ app, view }: { app: string; view: AppPageView }) => {
+  const { t } = useLingui();
+  return (
+    <nav aria-label={t`App views`} className="flex gap-1">
+      <Link
+        aria-current={view === "app" ? "page" : undefined}
+        className={buttonVariants({
+          size: "sm",
+          variant: view === "app" ? "secondary" : "ghost",
+        })}
+        params={{ app }}
+        replace
+        search={{}}
+        to="/apps/$app"
+      >
+        <LayoutGridIcon data-icon="inline-start" />
+        <Trans>App</Trans>
+      </Link>
+      <Link
+        aria-current={view === "code" ? "page" : undefined}
+        className={buttonVariants({
+          size: "sm",
+          variant: view === "code" ? "secondary" : "ghost",
+        })}
+        params={{ app }}
+        replace
+        search={{ view: "code" }}
+        to="/apps/$app"
+      >
+        <CodeIcon data-icon="inline-start" />
+        <Trans>Code</Trans>
+      </Link>
+    </nav>
+  );
+};
+
+/** Under the bar, unless the code is shown: the open screen, or that it has none. */
+const AppBody = ({
+  open,
+  archived,
+  editable,
+  onOpenChat,
+  children,
+}: {
+  open: string | undefined;
+  archived: boolean;
+  editable: boolean;
+  onOpenChat: () => void;
+  children: ReactNode;
+}) =>
+  open === undefined ? (
+    <div className="px-4 pt-4 md:px-6">
+      {archived ? null : (
+        <OnlyDescribed editable={editable} onOpenChat={onOpenChat} />
+      )}
+    </div>
+  ) : (
+    <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+  );
+
 /**
  * The App's page: its bar, then under it that it is archived, then its
  * open screen (`children`), or that it has none. Only one who builds it
@@ -253,6 +323,7 @@ export const AppPage = ({
   app,
   contents,
   open,
+  view = "app",
   identity,
   children,
 }: {
@@ -260,6 +331,8 @@ export const AppPage = ({
   contents: AppContents;
   /** The screen open, of `contents.screens`; none while it has none. */
   open: string | undefined;
+  /** The App itself, or its code: the code only for its builders. */
+  view?: AppPageView;
   identity: Pick<Identity, "staff">;
   children: ReactNode;
 }) => {
@@ -268,6 +341,7 @@ export const AppPage = ({
   const builds = buildsApp(app, identity);
   const archived = app.status === "archived";
   const editable = builds && !archived;
+  const code = builds && view === "code";
   const chat = useAppChat(app.id);
   // The App's chat as a drawer down the right takes its room from the page.
   const drawer = useDockMode() === "drawer" && editable;
@@ -291,7 +365,10 @@ export const AppPage = ({
               its builders, and an archived App says so under the bar. */}
           <h1 className="truncate text-base font-medium">{name}</h1>
         </span>
-        <ScreenTabs app={app.id} open={open} screens={contents.screens} />
+        {builds ? <ViewTabs app={app.id} view={code ? "code" : "app"} /> : null}
+        {code ? null : (
+          <ScreenTabs app={app.id} open={open} screens={contents.screens} />
+        )}
         <span className="ml-auto flex items-start gap-2">
           <Link
             aria-label={t`Settings of ${name}`}
@@ -315,14 +392,19 @@ export const AppPage = ({
           <ArchivedNotice app={app} builds={builds} />
         </div>
       ) : null}
-      {open === undefined ? (
-        <div className="px-4 pt-4 md:px-6">
-          {archived ? null : (
-            <OnlyDescribed editable={editable} onOpenChat={chat.handleOpen} />
-          )}
+      {code ? (
+        <div className="flex min-h-0 flex-1 flex-col p-4 md:px-6">
+          <AppCode app={app} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <AppBody
+          archived={archived}
+          editable={editable}
+          onOpenChat={chat.handleOpen}
+          open={open}
+        >
+          {children}
+        </AppBody>
       )}
     </div>
   );
