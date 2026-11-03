@@ -1339,7 +1339,17 @@ const buildDeclaration = `/**
  * two fields, at most 100 groups). To show a record's related records,
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
- * when the person can't read that table.
+ * when the person can't read that table. To say who sees and changes which
+ * rows (a team's requests for that team, an assignee's for them), give the
+ * table row rules in schema.ts with \`rows\` from @grasp-os/sdk:
+ * \`.access({ read: [rows.owner(), rows.person("assignee"), rows.team("team"), rows.role("builder")], write: [rows.owner(), rows.role("builder")] })\`,
+ * \`assignee\` a \`v.person()\` field and \`team\` a text field holding a
+ * team's ID, and its access in app.ts \`appMembers\` (or \`appBuilders\`).
+ * A row reaches whoever any rule admits; a write changes only a row the
+ * read and the write rules both admit the writer to (without write rules,
+ * the read rules), and one that would move it out of them is refused
+ * (\`data.write_denied\`). Give the App's test fixture's principals the
+ * teams team rules read: \`{ "role": "user", "teams": ["sales"] }\`.
  *
  * Every server function's \`ctx.caller\` is who calls, from Grasp's
  * sign-in, with no permission:

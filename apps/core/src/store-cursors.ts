@@ -64,6 +64,11 @@ export interface CursorBinding {
   readonly principal: string;
   readonly appMember: boolean;
   readonly appBuilder: boolean;
+  /**
+   * The teams the caller was in, which a table's `team` row rules read:
+   * a page read under other teams sees other rows.
+   */
+  readonly teams: readonly string[];
   readonly table: string;
   readonly index: string | null;
   readonly range: readonly RangeBound[];
@@ -159,6 +164,7 @@ const digestOf = async (
       principal: binding.principal,
       appMember: binding.appMember,
       appBuilder: binding.appBuilder,
+      teams: binding.teams.toSorted(),
       table: binding.table,
       index: binding.index,
       range: binding.range.map(({ field, op, value }) => ({

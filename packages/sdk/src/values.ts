@@ -32,10 +32,13 @@ import type { AnySchema, DescriptorDraft } from "./value-schema.ts";
 // Baseflare's value validators (MIT, © 2026 Baseflare contributors:
 // packages/baseflare/src/values/types.ts), as is the record ID format.
 
-export { defineSchema, defineTable } from "./schema.ts";
+export { defineSchema, defineTable, rows } from "./schema.ts";
 export type {
   IndexDefinition,
   IndexField,
+  RowRole,
+  RowRule,
+  RowRules,
   SchemaDefinition,
   TableDefinition,
 } from "./schema.ts";

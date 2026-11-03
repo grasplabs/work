@@ -216,7 +216,9 @@ export interface TestEffects {
 export interface AppTestContext {
   /**
    * The principal the suite's fixture (`tests/fixtures/<fixtures>.json`)
-   * names `name`; the test fails if it names none.
+   * names `name`; the test fails if it names none. A fixture names each
+   * one's App role and, for a table's `team` row rules, the teams they
+   * are in: `{ "principals": { "ada": { "role": "user", "teams": ["sales"] } } }`.
    */
   as: (name: string) => Promise<TestPrincipal>;
   /**

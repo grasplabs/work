@@ -3293,6 +3293,11 @@ msgid "By {by}"
 msgstr "By {by}"
 
 #: src/engines/app-data.tsx
+msgctxt "a change's source: a new version's migration rewrote it"
+msgid "by a migration"
+msgstr "by a migration"
+
+#: src/engines/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "by an import"
@@ -3570,6 +3575,18 @@ msgstr "Changed a workflow's parameter"
 #: src/activity/audit-words.ts
 msgid "Changed an App"
 msgstr "Changed an App"
+
+#: src/chat/builds.tsx
+msgid "Changed by <0/>"
+msgstr "Changed by <0/>"
+
+#: src/chat/builds.tsx
+msgid "Changed by <0/>, of the rows they can read"
+msgstr "Changed by <0/>, of the rows they can read"
+
+#: src/chat/builds.tsx
+msgid "Changed by nobody"
+msgstr "Changed by nobody"
 
 #: src/activity/audit-words.ts
 msgid "Changed knowledge"
@@ -5278,6 +5295,10 @@ msgstr "Everyone in the organization, and their agents."
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 
+#: src/chat/builds.tsx
+msgid "everyone who uses the App"
+msgstr "everyone who uses the App"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Everything"
@@ -6944,6 +6965,10 @@ msgstr "Its code can't be read: it may read the name, email and teams of everyon
 msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
 msgstr "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its tables may say who sees and changes which rows"
+msgstr "Its code can't be read: its tables may say who sees and changes which rows"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of an App's"
 msgid "Its code uses it"
@@ -7704,6 +7729,10 @@ msgstr "Members and roles"
 #: src/settings/teams.tsx
 msgid "Members of {name}"
 msgstr "Members of {name}"
+
+#: src/chat/builds.tsx
+msgid "members of the team in {field}"
+msgstr "members of the team in {field}"
 
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
@@ -10246,6 +10275,10 @@ msgstr "Read an email attachment"
 #: src/activity/pending.tsx
 msgid "read and change every record of {tables}"
 msgstr "read and change every record of {tables}"
+
+#: src/chat/builds.tsx
+msgid "Read by <0/>"
+msgstr "Read by <0/>"
 
 #: src/activity/pending.tsx
 msgid "read every record of {tables}"
@@ -12991,6 +13024,10 @@ msgstr "The App's actions reach a model, an integration, knowledge or a template
 msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
 msgstr "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
 
+#: src/chat/builds.tsx
+msgid "the App's builders"
+msgstr "the App's builders"
+
 #: src/engines/resource-bindings.tsx
 msgid "The App's current version declares no resource for its actions."
 msgstr "The App's current version declares no resource for its actions."
@@ -13354,6 +13391,10 @@ msgstr "The part of the address before the @, on the mail domain set up for Gras
 #: src/settings/package-approvers.tsx
 msgid "The people and teams who approve or deny the npm packages Apps and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
 msgstr "The people and teams who approve or deny the npm packages Apps and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
+
+#: src/chat/builds.tsx
+msgid "the person in {field}"
+msgstr "the person in {field}"
 
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
@@ -14520,6 +14561,10 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/engines/app-data.tsx
+msgid "Values aren't kept: Grasp rewrote the record."
+msgstr "Values aren't kept: Grasp rewrote the record."
+
+#: src/engines/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
 msgstr "Values aren't kept: the table is sensitive."
 
@@ -15523,6 +15568,10 @@ msgstr "Who reaches him here"
 msgid "Who reaches him in {name}"
 msgstr "Who reaches him in {name}"
 
+#: src/chat/builds.tsx
+msgid "Who sees which rows"
+msgstr "Who sees which rows"
+
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Who uses it"
@@ -15534,6 +15583,10 @@ msgstr "Who would you like to talk with?"
 #: src/onboarding/setup-steps.tsx
 msgid "Who’s who at your company?"
 msgstr "Who’s who at your company?"
+
+#: src/chat/builds.tsx
+msgid "whoever added the row"
+msgstr "whoever added the row"
 
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx

@@ -13,6 +13,7 @@ import {
 } from "./schema.ts";
 import type {
   AnyTable,
+  RowRules,
   SchemaDefinition,
   SchemaDefinitionCode,
   TableState,
@@ -29,7 +30,9 @@ import type { AnySchema } from "./value-schema.ts";
 //
 // It holds everything that decides what a record may be and who may reach
 // it: each table's field descriptors (defaults and constraints included),
-// its indexes, in field order, and its access modes, with the versions of
+// its indexes, in field order, its access modes and its row rules (only a
+// table that declares them has them, so a table without keeps the
+// manifest it had), with the versions of
 // the manifest and descriptor formats and the managed fields the host
 // adds. Its text is canonical (shared/json.ts): object keys sorted, arrays
 // in order. So declaring fields, tables or indexes in another order hashes
@@ -106,6 +109,8 @@ export interface ManifestTable {
    * declares it hashes as it always did.
    */
   readonly sensitive?: true;
+  /** Its row rules (`.access`), only for a table that declares them. */
+  readonly rules?: RowRules;
 }
 
 /** A schema's canonical manifest. */
@@ -237,6 +242,34 @@ const accessOf = (
 };
 
 /**
+ * Refuses row rules for a direction whose access mode they don't narrow:
+ * rules choose rows among those a mode lets someone reach, so they need a
+ * mode that reaches every row of the table (`appMembers` or
+ * `appBuilders`). `owner` already narrows to one person's rows, and a
+ * rule that widened it would leave two places saying who reads a row;
+ * `rows.owner()` says it among the rules instead. `none` reaches no row,
+ * so rules for it would say who reaches rows that nobody reaches.
+ */
+const checkRulesFit = (
+  table: string,
+  access: ManifestAccess,
+  rules: RowRules | undefined
+): void => {
+  for (const direction of ["read", "write"] as const) {
+    const mode = access[direction];
+    if (
+      rules?.[direction] !== undefined &&
+      (mode === "owner" || mode === "none")
+    ) {
+      refuse(
+        "schema.invalid_rules",
+        `${quoted(table, "Table")} has row rules for ${direction === "read" ? "reading" : "writing"}, which choose among the rows its ${direction} access reaches, so that access is \`appMembers\` or \`appBuilders\` (\`rows.owner()\` among the rules says \`owner\`).`
+      );
+    }
+  }
+};
+
+/**
  * A manifest's canonical text: the same for the same schema and access,
  * whatever order they were declared in.
  */
@@ -267,23 +300,31 @@ export const schemaManifest = (
     descriptorVersion,
     managedFields,
     tables: mapOf(
-      Object.entries(tables).map(([name, table]) => [
-        name,
-        {
-          fields: table.fields,
-          indexes: mapOf(
-            table.indexes.map((index) => [index.name, { fields: index.fields }])
-          ),
-          ...(table.searchIndex === undefined
-            ? {}
-            : { searchIndex: { fields: table.searchIndex } }),
-          // Every table has its own entry: `accessOf` made one for each.
-          access: (Object.hasOwn(accesses, name)
-            ? accesses[name]
-            : undefined) ?? { read: "none", write: "none" },
-          ...(table.sensitive === true ? { sensitive: true as const } : {}),
-        },
-      ])
+      Object.entries(tables).map(([name, table]) => {
+        // Every table has its own entry: `accessOf` made one for each.
+        const tableAccess = (Object.hasOwn(accesses, name)
+          ? accesses[name]
+          : undefined) ?? { read: "none", write: "none" };
+        checkRulesFit(name, tableAccess, table.rules);
+        return [
+          name,
+          {
+            fields: table.fields,
+            indexes: mapOf(
+              table.indexes.map((index) => [
+                index.name,
+                { fields: index.fields },
+              ])
+            ),
+            ...(table.searchIndex === undefined
+              ? {}
+              : { searchIndex: { fields: table.searchIndex } }),
+            access: tableAccess,
+            ...(table.sensitive === true ? { sensitive: true as const } : {}),
+            ...(table.rules === undefined ? {} : { rules: table.rules }),
+          },
+        ];
+      })
     ),
   };
   // A schema a store's host would refuse to read is refused here, where
@@ -313,6 +354,7 @@ interface ReadTable extends AnyTable {
   readonly index: (name: string, fields: readonly unknown[]) => ReadTable;
   readonly searchIndex: (fields: readonly unknown[]) => ReadTable;
   readonly sensitive: () => ReadTable;
+  readonly access: (rules: unknown) => ReadTable;
 }
 
 // SAFETY: `defineTable` and a table's `index` check at run time all that
@@ -325,8 +367,8 @@ const declareTable = defineTable as (
 
 /**
  * Whether a manifest's table has exactly its keys: `fields`, `indexes` and
- * `access`, a `searchIndex` if it has one, and `sensitive: true` if
- * declared.
+ * `access`, a `searchIndex` and `rules` if it has them, and
+ * `sensitive: true` if declared.
  */
 const isTableShaped = (input: unknown): input is Record<string, unknown> => {
   const searched = isPlainObject(input) && Object.hasOwn(input, "searchIndex");
@@ -339,6 +381,9 @@ const isTableShaped = (input: unknown): input is Record<string, unknown> => {
       ...(searched ? ["searchIndex"] : []),
       "access",
       ...(declaresSensitive ? ["sensitive"] : []),
+      ...(isPlainObject(input) && Object.hasOwn(input, "rules")
+        ? ["rules"]
+        : []),
     ]) &&
     (!declaresSensitive || input.sensitive === true)
   );
@@ -349,12 +394,13 @@ const readTable = (
   name: string,
   input: unknown
 ): { table: AnyTable; access: ManifestAccess } => {
+  const ruled = isPlainObject(input) && Object.hasOwn(input, "rules");
   if (!isTableShaped(input)) {
     return invalid(
-      `${quoted(name, "Table")} is \`{ fields, indexes, searchIndex?, access }\`, and \`sensitive: true\` if declared, and nothing else.`
+      `${quoted(name, "Table")} is \`{ fields, indexes, searchIndex?, access, rules? }\`, and \`sensitive: true\` if declared, and nothing else.`
     );
   }
-  const { fields, indexes, searchIndex, access } = input;
+  const { fields, indexes, searchIndex, access, rules } = input;
   if (!(isPlainObject(fields) && isPlainObject(indexes))) {
     return invalid(`${quoted(name, "Table")}'s fields and indexes are maps.`);
   }
@@ -403,6 +449,10 @@ const readTable = (
       );
     }
     table = table.searchIndex(searchIndex.fields);
+  }
+  if (ruled) {
+    // Declared as an author would: `.access` checks them whole.
+    table = table.access(rules);
   }
   if (!hasExactly(access, ["read", "write"])) {
     return invalid(`${quoted(name, "Table")}'s access is \`{ read, write }\`.`);

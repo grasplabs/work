@@ -2251,3 +2251,225 @@ describe("a store operation starting a workflow", () => {
     });
   });
 });
+
+/** A CRM whose leads its people read and change by team and by assignee. */
+const leadsCrmFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  leads: defineTable({ name: v.string(), team: v.string(), assignee: v.person().optional() }).access({
+    read: [rows.team("team"), rows.person("assignee")],
+  }),
+});
+`,
+  "operations/leads.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const add = mutation({
+  args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("leads", args);
+    return null;
+  },
+});
+
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("leads").take(100)).map(({ name }) => name).toSorted(),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, list } from "./operations/leads.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Leads",
+  schema,
+  access: { tables: { leads: { read: "appMembers", write: "appMembers" } } },
+  operations: { leads: { add, list } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
+
+/** An App that reads and adds the CRM's leads through its public operations. */
+const leadsDeskFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const crm = resource.store("crm", {
+  operations: {
+    "leads.list": { kind: "query", args: {}, returns: v.array(v.string()) },
+    "leads.add": {
+      kind: "mutation",
+      args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
+      returns: v.null(),
+    },
+  },
+});
+
+/** What a call answered, as JSON, or the code it failed with. */
+const attempt = async (work: () => Promise<unknown>): Promise<string> => {
+  try {
+    return JSON.stringify(await work());
+  } catch (error) {
+    return \`error:\${String(Reflect.get(Object(error), "code"))}\`;
+  }
+};
+
+export const list = action({
+  args: {},
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx) => await attempt(() => ctx.resources.crm.call("leads.list", {})),
+});
+
+export const add = action({
+  args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("leads.add", args)),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, crm, list } from "./operations/desk.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: { desk: { add, list } },
+  internalOperations: {},
+  screens: [],
+  uses: [crm],
+});
+`,
+};
+
+/** Puts `people` in a new team, in core's records; answers its ID. */
+const teamOf = async (...people: Person[]): Promise<string> => {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, ?, 'organization', ?)"
+  )
+    .bind(id, `Team ${id}`, Date.now())
+    .run();
+  for (const one of people) {
+    // oxlint-disable-next-line no-await-in-loop -- a handful of rows
+    await env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id) VALUES (?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), id, one.userId)
+      .run();
+  }
+  return id;
+};
+
+describe("a store's public operations and its tables' row rules", () => {
+  it("hold another App's and a workflow's calls to the rows the person they act for may reach, by team and by assignee", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(leadsCrmFiles, "Leads");
+    const desk = await sealedApp(leadsDeskFiles, "Desk");
+    await bind(
+      admin,
+      desk,
+      await deskGrant(admin, desk, crm, ["leads.list", "leads.add"])
+    );
+    // Desk's owner is in Sales; the admin in Support; Ada, whose workflow
+    // calls the CRM, in Sales too.
+    const sales = await teamOf(desk.owner, ada);
+    const support = await teamOf(admin);
+    const viaDesk = async (by: Person, path: string, input: unknown = {}) =>
+      await call(by, desk, path, input);
+    const added = {
+      own: await viaDesk(desk.owner, "desk.add", { name: "Acme", team: sales }),
+      // A Support lead, assigned to Desk's owner, who reads it as its assignee.
+      assigned: await viaDesk(admin, "desk.add", {
+        name: "Initech",
+        team: support,
+        assignee: desk.owner.userId,
+      }),
+      hidden: await viaDesk(admin, "desk.add", {
+        name: "Globex",
+        team: support,
+      }),
+      // Not into a team they aren't in.
+      otherTeam: await viaDesk(desk.owner, "desk.add", {
+        name: "Umbrella",
+        team: support,
+      }),
+    };
+    const key = await contractOf(admin, crm.release, "leads.add");
+    const workflow = await workflowOf(ada, key, {
+      ...byName,
+      team: "${ $workflow.input.who }",
+    });
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["leads.add"],
+      },
+      null
+    );
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "leads.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    const run = async (name: string, team: string) =>
+      await outcome(
+        callApprovedStoreOperation(
+          env,
+          { id: workflow.id, version: 1, approval, restrictedRun: null },
+          { name, team },
+          {
+            actor: { type: "person", userId: ada.userId },
+            principal: ada.userId,
+            requestId: crypto.randomUUID(),
+            deadline: Date.now() + 30_000,
+            idempotencyKey: `step-${unique()}`,
+            runId: null,
+          }
+        )
+      );
+    const ran = {
+      ownTeam: await run("Hooli", sales),
+      otherTeam: await run("Wayne", support),
+    };
+    expect({
+      added,
+      ran,
+      deskOwnerReads: await viaDesk(desk.owner, "desk.list"),
+      adminReads: await viaDesk(admin, "desk.list"),
+    }).toStrictEqual({
+      added: {
+        own: null,
+        assigned: null,
+        hidden: null,
+        // Refused: a consumer is told no more than that it isn't served,
+        // and nothing of it lands, as the reads below show.
+        otherTeam: "error:resource.unavailable",
+      },
+      ran: { ownTeam: "ok", otherTeam: "resource.unavailable" },
+      deskOwnerReads: ["Acme", "Hooli", "Initech"],
+      adminReads: ["Globex", "Initech"],
+    });
+  });
+});

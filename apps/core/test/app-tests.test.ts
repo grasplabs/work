@@ -331,6 +331,79 @@ describe("an App's tests", { timeout: 180_000 }, () => {
     await expect(fixturesLeft()).resolves.toBe(0);
   });
 
+  it("give each principal the teams its fixture names, as a table's team rules read them", async () => {
+    const built = await appWith({
+      "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  deals: defineTable({ title: v.string(), team: v.string() }).access({
+    read: [rows.team("team")],
+  }),
+});
+`,
+      "operations/deals.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const add = mutation({
+  args: { title: v.string(), team: v.string() },
+  returns: v.id("deals"),
+  handler: async (ctx, args) => await ctx.db.insert("deals", args),
+});
+
+export const titles = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) =>
+    (await ctx.db.query("deals").take(100)).map((deal) => deal.title),
+});
+`,
+      "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, titles } from "./operations/deals.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Deals",
+  schema,
+  access: { tables: { deals: { read: "appMembers", write: "appMembers" } } },
+  operations: { deals: { add, titles } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+      "tests/fixtures/deals.json": JSON.stringify({
+        principals: {
+          seller: { role: "user", teams: ["sales"] },
+          helper: { role: "user", teams: ["support"] },
+        },
+      }),
+      "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+import { api } from "#grasp";
+
+export default appTest({
+  fixtures: "deals",
+  tests: {
+    "each team reads its own deals, and adds none for another": async (t) => {
+      const seller = await t.as("seller");
+      const helper = await t.as("helper");
+      await seller.mutation(api.deals.add, { title: "Acme", team: "sales" });
+      t.equal(await seller.query(api.deals.titles, {}), ["Acme"]);
+      t.equal(await helper.query(api.deals.titles, {}), []);
+      await t.rejectsCode(
+        seller.mutation(api.deals.add, { title: "Globex", team: "support" }),
+        "data.write_denied"
+      );
+    },
+  },
+});
+`,
+    });
+    await activateVersion(env, built.owner, built.app, 1);
+    await expect(findApp(env, built.app)).resolves.toMatchObject({
+      currentVersion: 1,
+    });
+  });
+
   it("refuse the version while one fails, naming each failing test and why", async () => {
     const built = await appWith({
       ...appFiles,

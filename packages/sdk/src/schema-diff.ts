@@ -6,10 +6,11 @@ import type {
   ManifestTable,
   SchemaManifest,
 } from "./schema-manifest.ts";
+import type { RowRules } from "./schema.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // What changed between two versions of a schema, read from their canonical
-// manifests: every table, field, index and access mode added, removed or
+// manifests: every table, field, index, access mode and row rule added, removed or
 // changed, each with what it was and what it is. It is structure, not a
 // summary, so what plans a schema change (which changes are safe to apply
 // on their own, which need a migration) decides from the descriptors
@@ -45,11 +46,16 @@ export interface IndexChange {
   readonly after?: readonly string[];
 }
 
-/** A table's access, before and after; one side is missing for a table added or removed. */
+/**
+ * A table's access, before and after: its modes, and its row rules when it
+ * has any. One side is missing for a table added or removed.
+ */
 export interface AccessChange {
   readonly table: string;
   readonly before?: ManifestAccess;
   readonly after?: ManifestAccess;
+  readonly rulesBefore?: RowRules;
+  readonly rulesAfter?: RowRules;
 }
 
 /**
@@ -123,6 +129,32 @@ const emptyTable: ManifestTable = {
   },
 };
 
+/**
+ * How a table's access (its modes and its row rules) differs, if it does;
+ * always for a table on one side only.
+ */
+const accessChangeOf = (
+  table: string,
+  before: ManifestTable | undefined,
+  after: ManifestTable | undefined
+): AccessChange | undefined => {
+  const unchanged =
+    before !== undefined &&
+    after !== undefined &&
+    same(before.access, after.access) &&
+    same(before.rules ?? null, after.rules ?? null);
+  if (unchanged) {
+    return undefined;
+  }
+  return {
+    table,
+    ...(before === undefined ? {} : { before: before.access }),
+    ...(after === undefined ? {} : { after: after.access }),
+    ...(before?.rules === undefined ? {} : { rulesBefore: before.rules }),
+    ...(after?.rules === undefined ? {} : { rulesAfter: after.rules }),
+  };
+};
+
 /** What differs in one table, which may exist on one side only. */
 const diffTable = (
   table: string,
@@ -164,16 +196,9 @@ const diffTable = (
       });
     }
   }
-  if (
-    before === undefined ||
-    after === undefined ||
-    !same(was.access, is.access)
-  ) {
-    diff.access.push({
-      table,
-      ...(before === undefined ? {} : { before: before.access }),
-      ...(after === undefined ? {} : { after: after.access }),
-    });
+  const access = accessChangeOf(table, before, after);
+  if (access !== undefined) {
+    diff.access.push(access);
   }
 };
 

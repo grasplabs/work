@@ -105,6 +105,10 @@ const sources = {
     context: "a change's source: deleted with a record it pointed at",
   }),
   import: msg({ message: "by an import", context: "a change's source" }),
+  migration: msg({
+    message: "by a migration",
+    context: "a change's source: a new version's migration rewrote it",
+  }),
 } as const satisfies Record<RecordChange["source"], unknown>;
 
 const leftOut = {
@@ -112,6 +116,7 @@ const leftOut = {
   too_large: msg`Values aren't kept: they were too large.`,
   unread: msg`Values weren't read.`,
   erased: msg`Values were erased with the person who wrote them.`,
+  rewritten: msg`Values aren't kept: Grasp rewrote the record.`,
 } as const satisfies Record<
   NonNullable<RecordChange["valuesLeftOut"]>,
   unknown

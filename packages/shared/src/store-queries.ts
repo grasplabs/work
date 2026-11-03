@@ -33,6 +33,7 @@ import type {
   WriteFields,
   WriteRequest,
 } from "./store-reads.ts";
+import { callerTeamsSchema } from "./stores.ts";
 
 // The host's schema of a read (store-reads.ts has the shapes and what
 // they mean): how a store checks a descriptor App code built, trusting
@@ -268,6 +269,8 @@ export const readScopeSchema = z.strictObject({
   principal: identifierSchema,
   appMember: z.boolean(),
   appBuilder: z.boolean(),
+  /** The teams the reader is in, for `team` row rules (`writerRolesSchema`). */
+  teams: callerTeamsSchema,
   consumer: z.strictObject({
     resourceId: identifierSchema,
     resourceVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),

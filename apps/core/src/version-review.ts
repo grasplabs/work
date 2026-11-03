@@ -5,10 +5,11 @@ import {
 } from "@grasp-os/compiler";
 import { readOutline } from "@grasp-os/sdk/describe";
 import { descriptorFromText } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
+import type { AppManifest, RowRule } from "@grasp-os/sdk/host";
 import type {
   AppFiles,
   ReviewChange,
+  TableRowRules,
   VersionReview,
 } from "@grasp-os/shared/apps";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
@@ -122,6 +123,54 @@ const boundTakesFile = async (
       takesFile(descriptorFromText(JSON.stringify(parsed.data.input)))
     );
   });
+};
+
+/**
+ * The row rules of version `proposed`'s tables (`VersionReview.rowRules`),
+ * as its schema's manifest holds them: what the store will enforce, read
+ * from the version, never from what its proposer says of it. Null when
+ * its manifest can't be read.
+ */
+const rowRulesOf = async (
+  env: Env,
+  app: AppId,
+  proposed: { version: number; files: Readonly<Record<string, string>> }
+): Promise<TableRowRules[] | null> => {
+  let manifest: AppManifest | undefined;
+  try {
+    manifest = await versionManifest(
+      env,
+      app,
+      proposed.version,
+      proposed.files
+    );
+  } catch (error) {
+    log.warn("version_review.manifest_unread", errorFields(error));
+    return null;
+  }
+  return Object.entries(manifest?.schema.tables ?? {})
+    .filter(([, table]) => table.rules !== undefined)
+    .map(([table, { rules, access }]) => {
+      // Who changes its rows, as the store holds writes: its write rules;
+      // without them its read rules, for a write mode that reaches every
+      // row; under `owner` the owner (of the rows they can read, the
+      // review says), and under `none` nobody.
+      const writeRules = (): readonly RowRule[] | undefined => {
+        if (access.write === "none") {
+          return undefined;
+        }
+        if (access.write === "owner") {
+          return rules?.read === undefined ? undefined : [{ kind: "owner" }];
+        }
+        return rules?.write ?? rules?.read;
+      };
+      const write = writeRules();
+      return {
+        table,
+        read: rules?.read === undefined ? null : [...rules.read],
+        write: write === undefined ? null : [...write],
+      };
+    });
 };
 
 /**
@@ -896,6 +945,10 @@ export const reviewVersion = async (
       files,
     }),
     readsPeople: await readsPeopleOf(env, found.id, {
+      version: row.version,
+      files,
+    }),
+    rowRules: await rowRulesOf(env, found.id, {
       version: row.version,
       files,
     }),

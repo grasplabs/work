@@ -189,9 +189,10 @@ interface Snapshot {
 }
 
 /**
- * The roles `by` reads App `app`'s tables with (`operationRoles`), as a
- * key: what decides which records a read sees, so a result read under
- * one is never pushed under another.
+ * The roles `by` reads App `app`'s tables with (`operationRoles`), and
+ * the teams a table's row rules read, as a key: what decides which
+ * records a read sees, so a result read under one is never pushed under
+ * another.
  */
 const rolesOf = async (
   env: Env,
@@ -199,8 +200,8 @@ const rolesOf = async (
   app: AppId
 ): Promise<string | undefined> => {
   try {
-    const { appMember, appBuilder } = await operationRoles(env, by, app);
-    return canonicalJson({ appMember, appBuilder });
+    const { appMember, appBuilder, teams } = await operationRoles(env, by, app);
+    return canonicalJson({ appMember, appBuilder, teams: teams.toSorted() });
   } catch (error) {
     // No answer (the database away for a moment): thrown, so the gate
     // refuses as one to try again, never as though the role were gone.

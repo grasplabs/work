@@ -3293,6 +3293,11 @@ msgid "By {by}"
 msgstr "Von {by}"
 
 #: src/engines/app-data.tsx
+msgctxt "a change's source: a new version's migration rewrote it"
+msgid "by a migration"
+msgstr "durch eine Migration"
+
+#: src/engines/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "durch einen Import"
@@ -3570,6 +3575,18 @@ msgstr "Einen Parameter eines Workflows geändert"
 #: src/activity/audit-words.ts
 msgid "Changed an App"
 msgstr "Eine App geändert"
+
+#: src/chat/builds.tsx
+msgid "Changed by <0/>"
+msgstr "Geändert von <0/>"
+
+#: src/chat/builds.tsx
+msgid "Changed by <0/>, of the rows they can read"
+msgstr "Geändert von <0/>, bei den Zeilen, die sie lesen können"
+
+#: src/chat/builds.tsx
+msgid "Changed by nobody"
+msgstr "Von niemandem geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed knowledge"
@@ -5278,6 +5295,10 @@ msgstr "Alle in der Organisation und ihre Agenten."
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Alle, mit denen es geteilt wird, und ihre Agenten lesen es als akzeptiert. Dein eigener Eintrag bleibt, wie er ist."
 
+#: src/chat/builds.tsx
+msgid "everyone who uses the App"
+msgstr "allen, die die App nutzen"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Everything"
@@ -6944,6 +6965,10 @@ msgstr "Sein Code kann nicht gelesen werden: Es kann Name, E-Mail-Adresse und Te
 msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
 msgstr "Sein Code kann nicht gelesen werden: Seine Bildschirme und sein Servercode dürfen Dateien, die Personen lesen können, an die verknüpften Workflows übergeben"
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its tables may say who sees and changes which rows"
+msgstr "Sein Code kann nicht gelesen werden: Seine Tabellen können festlegen, wer welche Zeilen sieht und ändert"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of an App's"
 msgid "Its code uses it"
@@ -7704,6 +7729,10 @@ msgstr "Mitglieder und Rollen"
 #: src/settings/teams.tsx
 msgid "Members of {name}"
 msgstr "Mitglieder von {name}"
+
+#: src/chat/builds.tsx
+msgid "members of the team in {field}"
+msgstr "Mitgliedern des Teams in {field}"
 
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
@@ -10246,6 +10275,10 @@ msgstr "Einen E-Mail-Anhang gelesen"
 #: src/activity/pending.tsx
 msgid "read and change every record of {tables}"
 msgstr "jeden Datensatz von {tables} lesen und ändern"
+
+#: src/chat/builds.tsx
+msgid "Read by <0/>"
+msgstr "Gelesen von <0/>"
 
 #: src/activity/pending.tsx
 msgid "read every record of {tables}"
@@ -12991,6 +13024,10 @@ msgstr "Die Aktionen der App erreichen ein Modell, eine Integration, Wissen oder
 msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
 msgstr "Die Aktionen der App erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
 
+#: src/chat/builds.tsx
+msgid "the App's builders"
+msgstr "den Buildern der App"
+
 #: src/engines/resource-bindings.tsx
 msgid "The App's current version declares no resource for its actions."
 msgstr "Die aktuelle Version der App deklariert keine Ressource für ihre Aktionen."
@@ -13354,6 +13391,10 @@ msgstr "Der Teil der Adresse vor dem @, auf der für Grasp eingerichteten Mail-D
 #: src/settings/package-approvers.tsx
 msgid "The people and teams who approve or deny the npm packages Apps and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
 msgstr "Die Personen und Teams, die die npm-Pakete freigeben oder ablehnen, die Apps und Workflows anfragen. Keine Rolle umfasst das, auch nicht Admin: Fügen Sie sich selbst hinzu, um Pakete freizugeben."
+
+#: src/chat/builds.tsx
+msgid "the person in {field}"
+msgstr "der Person in {field}"
 
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
@@ -14520,6 +14561,10 @@ msgid "UTC"
 msgstr "UTC"
 
 #: src/engines/app-data.tsx
+msgid "Values aren't kept: Grasp rewrote the record."
+msgstr "Werte werden nicht gespeichert: Grasp hat den Datensatz neu geschrieben."
+
+#: src/engines/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
 msgstr "Werte werden nicht gespeichert: Die Tabelle ist sensibel."
 
@@ -15523,6 +15568,10 @@ msgstr "Wer ihn hier erreicht"
 msgid "Who reaches him in {name}"
 msgstr "Wer ihn in {name} erreicht"
 
+#: src/chat/builds.tsx
+msgid "Who sees which rows"
+msgstr "Wer welche Zeilen sieht"
+
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wer es nutzt"
@@ -15534,6 +15583,10 @@ msgstr "Mit wem möchten Sie sprechen?"
 #: src/onboarding/setup-steps.tsx
 msgid "Who’s who at your company?"
 msgstr "Wer ist wer in Ihrem Unternehmen?"
+
+#: src/chat/builds.tsx
+msgid "whoever added the row"
+msgstr "der Person, die die Zeile hinzugefügt hat"
 
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx

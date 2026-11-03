@@ -327,7 +327,8 @@ type DocOf<
 /**
  * What `.with` loads for a field holding `Value`: the record it names
  * (null when the field holds none, or names none the caller may see:
- * missing, deleted or another owner's), a list of them for a list of IDs,
+ * missing, deleted, another owner's, or one its table's row rules keep
+ * from them), a list of them for a list of IDs,
  * or `Withheld` when the caller can't read the table at all.
  */
 export type Related<Value, Tables extends AnyTables> = [
@@ -491,7 +492,8 @@ export type Query<
    * Each record it returns with the records its `v.id` fields (or lists
    * of them) name, under `_with`: loaded together, a statement per field,
    * at most 4 fields, under the caller's access to their tables. A record
-   * the caller may not see (missing, deleted, another owner's) is null; a
+   * the caller may not see (missing, deleted, another owner's, or one its
+   * table's row rules keep from them) is null; a
    * table the caller can't read at all is `{ _withheld: true }`. Only for
    * terminals that return records.
    *
@@ -1598,21 +1600,32 @@ export interface DatabaseWriter<
     table: TableName,
     fields: ObjectInput<Tables[TableName]["fields"]>
   ) => Promise<Id<TableName>>;
-  /** Stages setting some fields of record `id`, at `expectedRevision`. */
+  /**
+   * Stages setting some fields of record `id`, at `expectedRevision`. A
+   * record the table's row rules keep from the caller (for reading or
+   * writing) fails the commit as a missing one does (`data.conflict`); a
+   * change that would move it out of their rules, `data.write_denied`.
+   */
   readonly patch: <TableName extends keyof Tables & string>(
     table: TableName,
     id: Id<NoInfer<TableName>>,
     fields: PatchFields<Tables[TableName]>,
     options: PatchOptions<Tables[TableName]>
   ) => Promise<void>;
-  /** Stages replacing every field of record `id`, at `expectedRevision`. */
+  /**
+   * Stages replacing every field of record `id`, at `expectedRevision`,
+   * refused under row rules as `patch` is.
+   */
   readonly replace: <TableName extends keyof Tables & string>(
     table: TableName,
     id: Id<NoInfer<TableName>>,
     fields: ObjectInput<Tables[TableName]["fields"]>,
     options: WriteOptions
   ) => Promise<void>;
-  /** Stages deleting record `id`, at `expectedRevision`. */
+  /**
+   * Stages deleting record `id`, at `expectedRevision`: one the table's
+   * row rules keep from the caller fails as a missing one does.
+   */
   readonly delete: <TableName extends keyof Tables & string>(
     table: TableName,
     id: Id<NoInfer<TableName>>,

@@ -46,9 +46,9 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 //
 // Anything else needs explicit intent in a migration and is refused here:
 // a field whose descriptor changed in any way (type, constraint, default,
-// presence, reference policy), and a changed access mode, either way: a
-// looser mode exposes records, a tighter one would leave older versions
-// reading under the looser one.
+// presence, reference policy), and a changed access mode or row rule,
+// either way: a looser one exposes records, a tighter one would leave
+// older versions reading under the looser one.
 //
 // A table declared sensitive (`TableDefinition.sensitive`) changes no
 // data, and no plan: the store keeps which tables any schema declared so
@@ -250,6 +250,7 @@ const mergedTable = (
     ? {}
     : { searchIndex: declared.searchIndex }),
   access: kept.access,
+  ...(kept.rules === undefined ? {} : { rules: kept.rules }),
 });
 
 /** The contract after a safe change: the union, read back canonical. */

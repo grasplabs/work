@@ -20,8 +20,9 @@ import type { Infer, ValueShape } from "./values.ts";
 // The same declaration is what records are validated against, what types
 // `Doc` and `Id`, what a store's host is handed (its canonical manifest,
 // schema-manifest.ts) and what two versions are compared by. Which tables a
-// caller may read or write is declared beside it (an App's `access`), never
-// in it.
+// caller may read or write is declared beside it (an App's `access`); which
+// rows of a table, by who they are (`.access` with `rows`, below), with the
+// table, since its rules name its fields.
 //
 // Adapted from Baseflare's `defineSchema` and `defineTable` (MIT, © 2026
 // Baseflare contributors: packages/baseflare/src/server/schema), without
@@ -83,6 +84,7 @@ export type SchemaDefinitionCode =
   | "schema.unknown_table"
   | "schema.too_large"
   | "schema.invalid_access"
+  | "schema.invalid_rules"
   | "schema.invalid_manifest";
 
 /**
@@ -112,6 +114,70 @@ export interface IndexDefinition {
   readonly name: string;
   readonly fields: readonly string[];
 }
+
+/**
+ * A role in an App a row rule may name: `builder`, or `user`, which
+ * everyone with a role in the App holds: its builders too, and whoever
+ * calls the public operations of a store it serves (another App's or a
+ * workflow's people, who are its members for those operations).
+ */
+export type RowRole = "builder" | "user";
+
+/**
+ * Who a row of a table reaches, for reading or for writing, as one rule:
+ *
+ * - `owner`: the person who inserted it (`_ownerId`);
+ * - `person`: the person its `v.person()` field `field` names;
+ * - `team`: a member of the team whose ID its text field `field` holds;
+ * - `role`: whoever holds App role `role`, whatever the row holds.
+ *
+ * A row reaches whoever any of a table's rules admits.
+ */
+export type RowRule<Field extends string = string> =
+  | { readonly kind: "owner" }
+  | { readonly kind: "person"; readonly field: Field }
+  | { readonly kind: "team"; readonly field: Field }
+  | { readonly kind: "role"; readonly role: RowRole };
+
+/** At least one rule, as a table's `.access` takes them. */
+export type RowRuleList<Field extends string = string> = readonly [
+  RowRule<Field>,
+  ...RowRule<Field>[],
+];
+
+/** A table's row rules: for reading, writing, or both. */
+export interface RowRules<Field extends string = string> {
+  readonly read?: RowRuleList<Field>;
+  readonly write?: RowRuleList<Field>;
+}
+
+/** The most rules one direction of a table holds. */
+export const rowRuleMax = 8;
+
+/**
+ * The rules a table's `.access` takes:
+ *
+ * ```ts
+ * defineTable({ title: v.string(), assignee: v.person(), team: v.string() })
+ *   .access({
+ *     read: [rows.owner(), rows.person("assignee"), rows.team("team"), rows.role("builder")],
+ *     write: [rows.owner(), rows.person("assignee"), rows.role("builder")],
+ *   });
+ * ```
+ */
+export const rows = Object.freeze({
+  /** The person who inserted the row. */
+  owner: (): RowRule<never> => Object.freeze({ kind: "owner" as const }),
+  /** The person the row's `v.person()` field `field` names. */
+  person: <const Field extends string>(field: Field): RowRule<Field> =>
+    Object.freeze({ kind: "person" as const, field }),
+  /** A member of the team whose ID the row's text field `field` holds. */
+  team: <const Field extends string>(field: Field): RowRule<Field> =>
+    Object.freeze({ kind: "team" as const, field }),
+  /** Whoever holds App role `role`: `builder`, or `user` for everyone. */
+  role: (role: RowRole): RowRule<never> =>
+    Object.freeze({ kind: "role" as const, role }),
+});
 
 /** A value that is a whole scalar, one of a single base type. */
 type IsScalar<Value> = [NonNullable<Value>] extends [never]
@@ -214,6 +280,23 @@ export interface TableDefinition<
    * Once any schema handed to a store declares a table so, it stays so.
    */
   readonly sensitive: () => TableDefinition<Fields, Indexes, Searchable>;
+  /**
+   * The same table with row rules (`rows`): which of its rows each caller
+   * reads, and which they write, once the table's access mode (an App's
+   * `access`) lets them reach the table at all. Each direction declared
+   * lists at least one rule, and a row reaches whoever any of them
+   * admits. Writing a row takes both: a write changes only a row its
+   * read and its write rules admit the writer to, and leaves it where
+   * they both still do. Without write rules, its read rules are its
+   * write rules too; without read rules, reading is the access mode's
+   * alone. The store enforces them on every read and write: no App code
+   * gets past them. A direction with rules has the access mode
+   * `appMembers` or `appBuilders` (`rows.owner()` is how a rule says
+   * `owner`). A table has one set of rules.
+   */
+  readonly access: (
+    rules: RowRules<SearchField<Fields>>
+  ) => TableDefinition<Fields, Indexes, Searchable>;
   /** Its indexes, by name, for types only: never set. */
   readonly "~indexes"?: Indexes;
   /** Whether it has a search index, for types only: never set. */
@@ -306,6 +389,8 @@ export interface TableState {
   readonly searchIndex?: readonly string[];
   /** Declared sensitive (`TableDefinition.sensitive`); left out otherwise. */
   readonly sensitive?: true;
+  /** Its row rules, as `.access` declared them; none without. */
+  readonly rules?: RowRules;
 }
 
 /** Every table `defineTable` made; nothing else is one. */
@@ -536,6 +621,125 @@ const checkedSearchFields = (
   return Object.freeze(fields);
 };
 
+const roleNames: ReadonlySet<unknown> = new Set<RowRole>(["builder", "user"]);
+
+const isRowRole = (value: unknown): value is RowRole => roleNames.has(value);
+
+const refuseRule = (message: string): never =>
+  refuse("schema.invalid_rules", message);
+
+/** A person or team rule's field, checked against its table. */
+const checkedRuleField = (
+  state: TableState,
+  kind: "person" | "team",
+  field: unknown
+): string => {
+  const descriptor =
+    typeof field === "string" && Object.hasOwn(state.fields, field)
+      ? state.fields[field]
+      : undefined;
+  if (typeof field !== "string" || descriptor === undefined) {
+    return refuseRule(`A ${kind} rule names a field of its table.`);
+  }
+  if (kind === "person" && descriptor.kind !== "person") {
+    return refuseRule(
+      `A person rule names a \`v.person()\` field; \`${field}\` isn't one.`
+    );
+  }
+  if (
+    kind === "team" &&
+    (descriptor.kind === "person" || indexBase(descriptor) !== "string")
+  ) {
+    return refuseRule(
+      `A team rule names a text field holding a team's ID; \`${field}\` isn't one.`
+    );
+  }
+  return field;
+};
+
+/** One row rule of unknown origin, checked against its table. */
+const checkedRule = (state: TableState, rule: unknown): RowRule => {
+  if (!isPlainObject(rule)) {
+    return refuseRule("A row rule is one `rows` made.");
+  }
+  const keys = Object.keys(rule).toSorted().join(",");
+  const { kind } = rule;
+  if (kind === "owner" && keys === "kind") {
+    return Object.freeze({ kind });
+  }
+  if (kind === "role" && keys === "kind,role") {
+    const { role } = rule;
+    if (!isRowRole(role)) {
+      return refuseRule("A role rule names `builder` or `user`.");
+    }
+    return Object.freeze({ kind, role });
+  }
+  if ((kind === "person" || kind === "team") && keys === "field,kind") {
+    return Object.freeze({
+      kind,
+      field: checkedRuleField(state, kind, rule.field),
+    });
+  }
+  return refuseRule(
+    "A row rule is `rows.owner()`, `rows.person(field)`, `rows.team(field)` or `rows.role(role)`."
+  );
+};
+
+/** One direction's rules, checked: at least one, none twice. */
+const checkedRuleList = (
+  state: TableState,
+  list: unknown
+): RowRuleList | undefined => {
+  if (list === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(list) || list.length === 0 || list.length > rowRuleMax) {
+    return refuseRule(
+      `Each direction of a table's rules lists between 1 and ${rowRuleMax} rules.`
+    );
+  }
+  const seen = new Set<string>();
+  const checked = list.map((rule: unknown) => {
+    const one = checkedRule(state, rule);
+    const key = JSON.stringify(one);
+    if (seen.has(key)) {
+      refuseRule("A table's rules name one rule twice.");
+    }
+    seen.add(key);
+    return one;
+  });
+  const [first, ...others] = checked;
+  if (first === undefined) {
+    throw new Error("A checked rule list is empty");
+  }
+  return Object.freeze([first, ...others]);
+};
+
+/** A table's row rules of unknown origin, checked against it. */
+const checkedRules = (state: TableState, rules: unknown): RowRules => {
+  const known =
+    isPlainObject(rules) &&
+    Object.keys(rules).length > 0 &&
+    Object.keys(rules).every((key) => key === "read" || key === "write");
+  if (!known) {
+    return refuseRule(
+      "A table's rules are `{ read?, write? }`, at least one of them."
+    );
+  }
+  const read = checkedRuleList(
+    state,
+    Object.hasOwn(rules, "read") ? rules.read : undefined
+  );
+  const write = checkedRuleList(
+    state,
+    Object.hasOwn(rules, "write") ? rules.write : undefined
+  );
+  return Object.freeze({
+    ...(read === undefined ? {} : { read }),
+    ...(write === undefined ? {} : { write }),
+  });
+};
+
 /**
  * A table of these fields and indexes, registered as genuine. Typed as any
  * table: what `.index` answers is typed by `TableDefinition`.
@@ -578,6 +782,14 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
       });
     },
     sensitive: () => tableOf(shape, { ...state, sensitive: true }),
+    access: (rules: unknown) => {
+      if (state.rules !== undefined) {
+        refuseRule(
+          "A table has one set of row rules, for reading and writing."
+        );
+      }
+      return tableOf(shape, { ...state, rules: checkedRules(state, rules) });
+    },
   });
   tableStates.set(table, state);
   return table;

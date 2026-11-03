@@ -39,6 +39,7 @@ import { requireNotArchived } from "./app-access.ts";
 import { loadRelease } from "./app-releases.ts";
 import { appFor } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -58,13 +59,16 @@ import { requireNotStaff } from "./sharing.ts";
 //   export checks again before every page it reads.
 // - The browser reaching past what the table's access lets the person
 //   read: every read goes through the store's own read path, scoped to
-//   the person with a member's and builder's roles, under the schema of
-//   the App's current version, so `none` refuses, and `owner` shows only
-//   the person's own records, and history only of those.
+//   the person with a member's and builder's roles and the teams they are
+//   in now, under the schema of the App's current version, so `none`
+//   refuses, `owner` shows only the person's own records, and row rules
+//   (store-rules.ts) only the rows they admit the person to, and history
+//   only of those.
 // - An import writing what App code couldn't: every row is checked
 //   against the table's schema in core first, then lands through the
 //   store's own checks for a commit's insert (the table's write access
-//   for those roles, IDs not in use, references to records that exist),
+//   for those roles, its write rules, IDs not in use, references to
+//   records that exist),
 //   as new records owned by the importer, recorded in the history as an
 //   import by them. An archived App takes none.
 // - A half-landed import: rows are checked first, all of them, and any
@@ -74,6 +78,12 @@ import { requireNotStaff } from "./sharing.ts";
 //   parsed (its bytes, by the request's schema) and as it is read (rows,
 //   columns, errors reported). An export stops past
 //   `appDataExportMaxRecords`, never truncating silently.
+// - A transfer outliving a team the person left: their teams are read
+//   again with their session and role before every page an export reads
+//   and before an import lands, the page read and the rows landed under
+//   those, and a team lost or joined since the transfer began stops it
+//   (`app_data.access_changed`) rather than go on under rows chosen by
+//   the teams it began with.
 // - An export or import mixing two versions: an export reads every page
 //   of the version it began on and stops (`app_data.version_changed`)
 //   once another is made current; an import checked against one version
@@ -117,6 +127,10 @@ const opened = async (
   if (release.store === null) {
     return { app };
   }
+  // The teams they are in now, from core's records: what a table's `team`
+  // row rules match (store-rules.ts), for the browser, an export and an
+  // import alike.
+  const teams = await teamsOf(env.DB, by.userId);
   return {
     app,
     store: {
@@ -128,6 +142,7 @@ const opened = async (
         principal: by.userId,
         appMember: true,
         appBuilder: true,
+        teams: teams.map(({ id }) => id),
         consumer: { resourceId: app.id, resourceVersion: version },
       },
       tables: release.app.schema.tables,
@@ -177,6 +192,25 @@ const tableOf = (open: Opened, name: unknown): ManifestTable => {
     throw appDataErrors.create("app_data.no_table");
   }
   return table;
+};
+
+/** The teams `open` was read under, in one order, for comparing. */
+const teamsKey = (open: Opened): string =>
+  JSON.stringify((open.scope.teams ?? []).toSorted());
+
+/**
+ * Refuses (`app_data.access_changed`) to go on with work on `table` that
+ * `open` began once `now`, read again just before the next step, holds
+ * other teams and the table has a `team` read rule: the rows it lets them
+ * reach changed, so nothing begun under the old ones reads or writes on
+ * under them. Teams no rule of the table reads change nothing of it.
+ */
+const requireSameTeams = (open: Opened, now: Opened, table: string): void => {
+  const { rules } = tableOf(open, table);
+  const readsTeams = (rules?.read ?? []).some(({ kind }) => kind === "team");
+  if (readsTeams && teamsKey(now) !== teamsKey(open)) {
+    throw appDataErrors.create("app_data.access_changed");
+  }
 };
 
 const fieldOf = ([name, descriptor]: [
@@ -625,13 +659,18 @@ const reported = (
   more: errors.length > appDataImportLimits.maxErrors,
 });
 
-/** What an import into `table` of `open`'s store does, for `by`. */
+/**
+ * What an import into `table` of `open`'s store does, for `by`, who is
+ * read again (`recheck`: their session, role and teams) just before it
+ * lands.
+ */
 const importRows = async (
   env: Env,
   by: Identity,
   input: unknown,
   table: string,
-  request: unknown
+  request: unknown,
+  recheck: () => Promise<Opened>
 ): Promise<AppDataImportResult> => {
   const { version, csv, mapping } = appDataErrors.parse(
     "app_data.invalid",
@@ -676,13 +715,15 @@ const importRows = async (
         .map((fields, offset) => ({ id: ids[from + offset] ?? "", fields })),
     });
   }
-  // Their role read again just before it lands: one lost while the
-  // batches went lands nothing.
-  const still = await openedStore(env, by, input);
+  // Their session, role and teams read again just before it lands: a
+  // role or a team lost while the batches went lands nothing, and the
+  // rows land under the teams they are in now, never those it began with.
+  const still = await recheck();
   requireNotArchived(still.app);
   if (still.version !== open.version) {
     throw appDataErrors.create("app_data.version_changed");
   }
+  requireSameTeams(open, still, table);
   try {
     // Its audit event lands with its rows, in the store's transaction:
     // in the log exactly when they are in the store, and once, as a
@@ -691,8 +732,12 @@ const importRows = async (
       importId,
       principal: by.userId,
       actor: actorOf(by),
-      roles: { appMember: true, appBuilder: true },
-      schemaHash: open.scope.schemaHash,
+      roles: {
+        appMember: true,
+        appBuilder: true,
+        teams: [...(still.scope.teams ?? [])],
+      },
+      schemaHash: still.scope.schemaHash,
       rows: rows.length,
       audit: { app: open.app.id, version: open.version, table },
     });
@@ -739,6 +784,10 @@ const exportStream = (
           if (now.version !== open.version) {
             throw appDataErrors.create("app_data.version_changed");
           }
+          // Their teams too: a page is read under the teams they are in
+          // now, and a team lost or joined meanwhile stops the export
+          // rather than go on through rows chosen under the old ones.
+          requireSameTeams(open, now, table);
           if (!started) {
             started = true;
             controller.enqueue(
@@ -746,7 +795,7 @@ const exportStream = (
             );
             return;
           }
-          const page = await readPage(open, table, queryMaxResults, cursor);
+          const page = await readPage(now, table, queryMaxResults, cursor);
           count += page.records.length;
           if (count > appDataExportMaxRecords) {
             throw appDataErrors.create("app_data.export_too_large");
@@ -918,7 +967,19 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
   ): Promise<AppDataImportResult> {
     return await withPerson(
       this.#check,
-      async (by) => await importRows(this.#env, by, app, table, request)
+      async (by) =>
+        await importRows(
+          this.#env,
+          by,
+          app,
+          table,
+          request,
+          async () =>
+            await withPerson(
+              this.#check,
+              async (now) => await openedStore(this.#env, now, app)
+            )
+        )
     );
   }
 }

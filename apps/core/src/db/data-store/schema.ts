@@ -7,6 +7,10 @@
  * this layout is a platform upgrade, migrated on the first wake-up after a
  * release.
  */
+import {
+  recordChangeSources,
+  valuesLeftOutReasons,
+} from "@grasp-os/shared/app-data";
 import { storeIntentKinds } from "@grasp-os/shared/stores";
 import { sql } from "drizzle-orm";
 import {
@@ -887,7 +891,7 @@ export const recordChanges = sqliteTable(
     tableName: text("table_name").notNull(),
     recordId: text("record_id").notNull(),
     op: text({ enum: ["insert", "update", "delete"] }).notNull(),
-    source: text({ enum: ["commit", "cascade", "import"] }).notNull(),
+    source: text({ enum: recordChangeSources }).notNull(),
     actor: text().notNull(),
     /**
      * The person the change was made for (the commit's principal, the
@@ -904,7 +908,7 @@ export const recordChanges = sqliteTable(
     afterJson: text("after_json"),
     /** Why the values aren't kept, if they aren't. */
     valuesLeftOut: text("values_left_out", {
-      enum: ["sensitive", "too_large", "unread", "erased"],
+      enum: valuesLeftOutReasons,
     }),
   },
   (table) => [
