@@ -33,7 +33,7 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   const dialog = page.getByRole("dialog", { name: "Erase Person?" });
   // Who it is, as core has them now, and what goes and stays.
   await expect(dialog).toContainText(leaving.email);
-  await expect(dialog).toContainText("Their email address and every sign-in");
+  await expect(dialog).toContainText("Email and sign-ins");
   await expect(dialog).toContainText(
     "Their name, on what they did, so it stays traceable"
   );
