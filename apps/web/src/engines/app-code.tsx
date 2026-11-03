@@ -17,7 +17,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { diffLines, withContext } from "./line-diff.ts";
+import { changedLines } from "./line-diff.ts";
 
 // An App's code on its page, for its builders (app-page.tsx's Code tab):
 // the files of its current version as a tree, the one picked shown
@@ -291,7 +291,7 @@ const GapText = ({ unchanged }: { unchanged: number }) => (
 const FileChange = ({ diff }: { diff: FileDiff }) => {
   const before = diff.change === "added" ? "" : diff.before;
   const after = diff.change === "deleted" ? "" : diff.after;
-  const shown = withContext(diffLines(before, after));
+  const shown = changedLines(before, after);
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border">
       <header className="bg-muted flex items-center gap-2 border-b px-4 py-2">

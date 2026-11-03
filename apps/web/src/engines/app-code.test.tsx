@@ -47,8 +47,17 @@ const builtApp = (role: ViewedApp["role"]): ViewedApp => ({
   role,
 });
 
-const appV1 = 'export const title = "Invoices";\nexport const limit = 10;\n';
-const appV2 = 'export const title = "Invoices";\nexport const limit = 25;\n';
+/** app.ts, with its limit far enough down that the lines above it fold. */
+const appWith = (limit: number): string =>
+  [
+    'export const title = "Invoices";',
+    ...Array.from({ length: 6 }, (_, note) => `// Note ${note + 1}`),
+    `export const limit = ${limit};`,
+    "// End",
+    "",
+  ].join("\n");
+const appV1 = appWith(10);
+const appV2 = appWith(25);
 const schemaText = "export const schema = {};\n";
 const inboxText = "export default function Inbox() {}\n";
 
@@ -225,27 +234,35 @@ describe("An App's Code tab", () => {
     });
   });
 
-  it("shows the draft's changed lines against the current version", async () => {
+  it("shows the draft's changed lines against the current version, with a few around them", async () => {
     await shown("builder");
     await press(named("button", "Changes"));
+    const sections = [...document.querySelectorAll("section")];
 
-    expect({
-      files: [...document.querySelectorAll("section h3")].map(
-        (heading) => heading.textContent
-      ),
-      removed: [...document.querySelectorAll("del")].map(
-        (line) => line.textContent
-      ),
-      added: [...document.querySelectorAll("ins")].map(
-        (line) => line.textContent
-      ),
-    }).toStrictEqual({
-      files: ["app.ts", "screens/inbox.tsx"],
-      removed: ["- export const limit = 10;"],
-      added: [
-        "+ export const limit = 25;",
-        "+ export default function Inbox() {}",
-      ],
-    });
+    expect(
+      sections.map((section) => ({
+        file: section.querySelector("h3")?.textContent,
+        lines: [...(section.querySelector("pre")?.children ?? [])].map(
+          (line) => line.textContent
+        ),
+      }))
+    ).toStrictEqual([
+      {
+        file: "app.ts",
+        lines: [
+          "⋯ 4 unchanged lines",
+          "  // Note 4",
+          "  // Note 5",
+          "  // Note 6",
+          "- export const limit = 10;",
+          "+ export const limit = 25;",
+          "  // End",
+        ],
+      },
+      {
+        file: "screens/inbox.tsx",
+        lines: ["+ export default function Inbox() {}"],
+      },
+    ]);
   });
 });
