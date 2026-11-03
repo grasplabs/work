@@ -149,6 +149,7 @@ describe(ChatThread, () => {
     await thread([asked], {
       text: "",
       code: [],
+      tools: [],
       reasoning: "Add two to two.",
     });
 
@@ -168,6 +169,7 @@ describe(ChatThread, () => {
         text: "Four.",
         citations: [],
         code: [],
+        tools: [],
         reasoning: { text: "Add two to two.", ms: 3400 },
         end: "done",
         at: "2026-10-27T09:00:05.000Z",
@@ -196,6 +198,7 @@ describe(ChatThread, () => {
           text: "",
           citations: [],
           code: [{ callId: "step", code: "await env.dashboard.makeWidget()" }],
+          tools: [],
           end: "done",
           at,
         },
@@ -233,10 +236,75 @@ describe(ChatThread, () => {
     });
   });
 
+  it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "write",
+            tool: "writeFile",
+            input: {
+              app: "app_1",
+              path: "screens/desk.tsx",
+              content: "export default",
+            },
+          },
+          {
+            callId: "search",
+            tool: "searchBrain",
+            input: { query: "expense policy" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "write",
+        text: 'Returned:\n{"changed":["screens/desk.tsx"]}',
+        failed: false,
+        at,
+      },
+    ]);
+    const lines = [...document.querySelectorAll("button[aria-expanded]")].map(
+      (line) => line.textContent
+    );
+    await act(async () => {
+      document.querySelector<HTMLElement>("button[aria-expanded]")?.click();
+      await Promise.resolve();
+    });
+    const opened = firstStep().shows;
+
+    expect({
+      lines,
+      given: opened?.includes('"path": "screens/desk.tsx"'),
+      came: opened?.includes('{"changed":["screens/desk.tsx"]}'),
+      code: document.body.textContent.includes("Code step"),
+    }).toStrictEqual({
+      // The search has no result yet, and Grasp has stopped: it never ran.
+      lines: [
+        "Wrote screens/desk.tsx",
+        "Searching the brain for expense policyStopped",
+      ],
+      given: true,
+      came: true,
+      code: false,
+    });
+  });
+
   it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
     await thread([asked], {
       text: "It adds up.\n\nFour, as **two** and two.",
       code: [],
+      tools: [],
       reasoning: "",
     });
     const landing = [...document.querySelectorAll("span.animate-in")].map(
@@ -254,6 +322,7 @@ describe(ChatThread, () => {
         text: "Four, as **two** and two.",
         citations: [],
         code: [],
+        tools: [],
         end: "done",
         at: "2026-10-27T09:00:05.000Z",
       },
@@ -292,6 +361,7 @@ describe(ChatThread, () => {
         text: "The weekly report takes most.",
         citations: [],
         code: [],
+        tools: [],
         end: "done",
         at,
       },

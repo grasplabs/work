@@ -20,14 +20,19 @@ describe("what the sign shows", () => {
   it("follows what the answer being written shows: its words, or the code it writes", () => {
     expect(
       signOf({
-        partial: { text: "So", code: [], reasoning: "" },
+        partial: { text: "So", code: [], tools: [], reasoning: "" },
         replies: [],
         ran: nothingRan,
       })
     ).toBe("writing");
     expect(
       signOf({
-        partial: { text: "Let me look.", code: [step("a")], reasoning: "" },
+        partial: {
+          text: "Let me look.",
+          code: [step("a")],
+          tools: [],
+          reasoning: "",
+        },
         replies: [],
         ran: nothingRan,
       })
@@ -35,21 +40,25 @@ describe("what the sign shows", () => {
     // Words that are not there yet are not being written.
     expect(
       signOf({
-        partial: { text: " ", code: [], reasoning: "" },
-        replies: [{ code: [step("a")] }],
+        partial: { text: " ", code: [], tools: [], reasoning: "" },
+        replies: [{ code: [step("a")], tools: [] }],
         ran: () => true,
       })
     ).toBe("thinking");
   });
 
   it("works while the code of its last answer runs, and thinks once it has the result", () => {
-    const replies = [{ code: [step("a")] }];
+    const replies = [{ code: [step("a")], tools: [] }];
     expect(signOf({ partial: null, replies, ran: nothingRan })).toBe("working");
     expect(
       signOf({ partial: null, replies, ran: (callId) => callId === "a" })
     ).toBe("thinking");
     expect(
-      signOf({ partial: null, replies: [{ code: [] }], ran: nothingRan })
+      signOf({
+        partial: null,
+        replies: [{ code: [], tools: [] }],
+        ran: nothingRan,
+      })
     ).toBe("thinking");
   });
 });

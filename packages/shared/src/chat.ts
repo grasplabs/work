@@ -349,6 +349,26 @@ export interface ChatCode {
   code: string;
 }
 
+/**
+ * A call of one of the agent's tools made for what it does most (core's
+ * agent-tools.ts: `writeFile`, `searchBrain`, …), which the thread shows as
+ * one line saying what it did, where a code step shows its code. Its
+ * result is a `result` message by the same `callId`, as a code step's is.
+ */
+export interface ChatToolCall {
+  callId: string;
+  /** The tool, by its name. */
+  tool: string;
+  /**
+   * What it was given, as far as it has streamed in. While the response is
+   * written, each text in it is cut short (`chatToolPreviewChars`).
+   */
+  input: Record<string, unknown>;
+}
+
+/** Most characters of each text a tool call's input shows while it is written. */
+export const chatToolPreviewChars = 200;
+
 /** How one of the agent's responses ended. */
 export type ChatReplyEnd =
   /** It answered, or asked for code to run. */
@@ -542,6 +562,8 @@ export type ChatMessage =
       citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
+      /** The calls of its other tools, each shown as one line. */
+      tools: ChatToolCall[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
       /**
@@ -589,6 +611,8 @@ export type ChatMessage =
 export interface ChatPartial {
   text: string;
   code: ChatCode[];
+  /** Its calls of other tools so far, their texts cut short. */
+  tools: ChatToolCall[];
   /** What the model thought so far (`ChatReasoning.text`); empty for nothing. */
   reasoning: string;
 }
@@ -614,6 +638,8 @@ export interface ChatPartialUpdate {
   text: string;
   /** Every code step of the response, each as its own text is. */
   code: { callId: string; from: number; code: string }[];
+  /** Every other tool call of the response, whole: their texts are cut short. */
+  tools: ChatToolCall[];
   /** What the model thought, as `from` and `text` are for its answer. */
   reasoning: { from: number; text: string };
 }
@@ -643,6 +669,7 @@ export const applyPartial = (
         code
       ),
     })),
+    tools: update.tools,
     reasoning: extended(
       shown?.reasoning ?? "",
       update.reasoning.from,

@@ -2844,6 +2844,10 @@ msgstr "Beantragt am"
 msgid "Asked the agent to fix a run"
 msgstr "Den Agenten gebeten, einen Lauf zu beheben"
 
+#: src/chat/thread.tsx
+msgid "Asked to connect {binding}"
+msgstr "Verbindung {binding} angefragt"
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Asked to connect again on {since}."
 msgstr "Am {since} zur erneuten Verbindung aufgefordert."
@@ -2859,6 +2863,10 @@ msgstr "Das Senden, Bearbeiten oder Löschen einer Chat-App-Nachricht als Bot de
 #: src/brain/brain-log.tsx
 msgid "Asked: {title}"
 msgstr "Gefragt: {title}"
+
+#: src/chat/thread.tsx
+msgid "Asking to connect {binding}"
+msgstr "Verbindung {binding} wird angefragt"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
@@ -4241,6 +4249,14 @@ msgstr "Ein Team angelegt"
 msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
 msgstr "Von Ihnen erstellt. Es öffnet sich für Sie, die Admins und alle, mit denen es geteilt ist."
 
+#: src/chat/thread.tsx
+msgid "Created the App {name}"
+msgstr "App {name} erstellt"
+
+#: src/chat/thread.tsx
+msgid "Creating the App {name}"
+msgstr "App {name} wird erstellt"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Critical"
@@ -4896,6 +4912,22 @@ msgstr "Projekt bearbeiten"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit the instructions"
 msgstr "Anweisungen bearbeiten"
+
+#: src/chat/thread.tsx
+msgid "Edited {path}"
+msgstr "{path} bearbeitet"
+
+#: src/chat/thread.tsx
+msgid "Edited a workflow"
+msgstr "Einen Workflow bearbeitet"
+
+#: src/chat/thread.tsx
+msgid "Editing {path}"
+msgstr "{path} wird bearbeitet"
+
+#: src/chat/thread.tsx
+msgid "Editing a workflow"
+msgstr "Ein Workflow wird bearbeitet"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -6350,6 +6382,7 @@ msgstr "Eigenständig"
 msgid "Independent workflow"
 msgstr "Eigenständiger Workflow"
 
+#: src/chat/thread.tsx
 #: src/workflows/test-run.tsx
 msgid "Input"
 msgstr "Eingabe"
@@ -9887,6 +9920,10 @@ msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lesen"
 
+#: src/chat/thread.tsx
+msgid "Read {path}"
+msgstr "{path} gelesen"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "Die Statistiken einer Domäne gelesen"
@@ -9976,6 +10013,10 @@ msgstr "{file} wird gelesen"
 #: src/brain/thinking/use-thinking.ts
 msgid "Reading {name}"
 msgstr "Lese {name}"
+
+#: src/chat/thread.tsx
+msgid "Reading {path}"
+msgstr "{path} wird gelesen"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11069,9 +11110,25 @@ msgstr "Oben durchsucht. Danach wandern Ereignisse ins Archiv."
 msgid "Searched knowledge"
 msgstr "Im Wissen gesucht"
 
+#: src/chat/thread.tsx
+msgid "Searched the App's files for {text}"
+msgstr "In den Dateien der App nach {text} gesucht"
+
 #: src/activity/audit-words.ts
 msgid "Searched the audit trail"
 msgstr "Im Audit-Trail gesucht"
+
+#: src/chat/thread.tsx
+msgid "Searched the brain for {query}"
+msgstr "Im Gehirn nach {query} gesucht"
+
+#: src/chat/thread.tsx
+msgid "Searching the App's files for {text}"
+msgstr "Suche nach {text} in den Dateien der App"
+
+#: src/chat/thread.tsx
+msgid "Searching the brain for {query}"
+msgstr "Suche nach {query} im Gehirn"
 
 #: src/engines/app-webhooks.tsx
 msgid "Secret"
@@ -14013,6 +14070,10 @@ msgstr "Standard verwenden"
 msgid "Use your organization’s account to go on."
 msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
 
+#: src/chat/thread.tsx
+msgid "Used {tool}"
+msgstr "{tool} verwendet"
+
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "Ein verbundenes Tool verwendet"
@@ -14029,6 +14090,10 @@ msgstr "Verwendet von"
 #: src/labels.ts
 msgid "User"
 msgstr "Nutzer"
+
+#: src/chat/thread.tsx
+msgid "Using {tool}"
+msgstr "{tool} wird verwendet"
 
 #. A time zone
 #: src/routes/_shell.settings.workspace.tsx
@@ -15313,6 +15378,10 @@ msgstr "Schreibt"
 msgid "Writing “{title}”…"
 msgstr "„{title}“ wird geschrieben …"
 
+#: src/chat/thread.tsx
+msgid "Writing {path}"
+msgstr "{path} wird geschrieben"
+
 #: src/dashboard/widget-progress.tsx
 msgid "Writing the widget…"
 msgstr "Das Widget wird geschrieben …"
@@ -15338,6 +15407,10 @@ msgstr "In einem Chat geschrieben"
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
 msgstr "In einem Dokument geschrieben"
+
+#: src/chat/thread.tsx
+msgid "Wrote {path}"
+msgstr "{path} geschrieben"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"

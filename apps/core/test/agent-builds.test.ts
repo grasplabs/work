@@ -18,6 +18,8 @@ import {
   says,
   setObjectEnv,
   testRunOpening,
+  toolResults,
+  toolStep,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
@@ -146,7 +148,8 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
  * building doesn't need but whose revocation ends what the agent does.
  */
 const setUp = async (
-  replies: ProviderReply[],
+  /** The model's replies, or those it gives about the released App. */
+  replies: ProviderReply[] | ((existing: string) => ProviderReply[]),
   role: "admin" | "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
@@ -156,7 +159,10 @@ const setUp = async (
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
   const others = { admin, builder };
   const person = role === "user" ? await signedInApi(idp, role) : others[role];
-  const chat = await chatOf(person.userId, ...replies);
+  const chat = await chatOf(
+    person.userId,
+    ...(typeof replies === "function" ? replies(existing) : replies)
+  );
   const grant = async () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
@@ -317,6 +323,15 @@ const changedSteps = (workflows: VersionReview["workflows"]) =>
   workflows.map(({ steps }) =>
     steps?.map(({ name, change, sharedCode }) => ({ name, change, sharedCode }))
   );
+
+/** The model renames the Ledger in its AGENTS.md, with `editFile`. */
+const editing = (app: string) =>
+  toolStep("editFile", {
+    app,
+    path: "AGENTS.md",
+    oldText: "# Ledger",
+    newText: "# Ledger desk",
+  });
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("repairs a restyled button without the person, in a draft nobody else sees, and puts nothing live", async () => {
@@ -710,6 +725,84 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       unshared: appErrors.create("app.not_found").message,
       sharedCall: roleErrors.create("role.forbidden").message,
       unsharedCall: appErrors.create("app.not_found").message,
+    });
+  });
+
+  it("writes and edits a draft's files with tools of their own, editing only a file it read, as its person's own build", async () => {
+    const { person, chat } = await setUp((app) => [
+      editing(app),
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      editing(app),
+      toolStep("writeFile", { app, path: "screens/desk.tsx", content: fixed }),
+      codeStep(`export default async (self, env) => {
+        const { files } = await env.build.files(${JSON.stringify(app)});
+        return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"] };
+      };`),
+      says("Done."),
+    ]);
+
+    await chat.ask("Name the desk, and add its screen");
+
+    const steps = await toolResults(chat.stub, chat.chat.id);
+    const [unread, read, edited, written, draft] = steps;
+    const events = await allEvents();
+    const writes = events.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chat.chat.id &&
+        detail.method === "build.write"
+    );
+    expect({
+      unread: [unread?.tool, unread?.isError],
+      unreadSays: unread?.text.includes("Read AGENTS.md with readFile"),
+      read: [read?.tool, read?.isError, read?.text.includes("# Ledger")],
+      edited: [edited?.tool, edited?.isError],
+      written: [written?.tool, written?.isError],
+      draft: returned(draft?.text),
+      // Each write the person's own, by the agent acting for them.
+      writes: writes.map(({ actor, detail }) => [actor, detail.outcome]),
+    }).toStrictEqual({
+      unread: ["editFile", true],
+      unreadSays: true,
+      read: ["readFile", false, true],
+      edited: ["editFile", false],
+      written: ["writeFile", false],
+      draft: { agents: "# Ledger desk\n", desk: fixed },
+      writes: Array.from({ length: 2 }, () => [
+        {
+          type: "agent",
+          agentId: chat.agent.agentId,
+          onBehalfOf: person.userId,
+        },
+        "ok",
+      ]),
+    });
+  });
+
+  it("refuses a file write for someone who doesn't build the App, as it refuses their code", async () => {
+    const { chat } = await setUp(
+      (app) => [
+        toolStep("writeFile", { app, path: "a.md", content: "a" }),
+        codeStep(
+          tryEach({
+            write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" })`,
+          })
+        ),
+        says("No."),
+      ],
+      "user"
+    );
+
+    await chat.ask("Change the Ledger");
+
+    const [tool, code] = await toolResults(chat.stub, chat.chat.id);
+    const refused = appErrors.create("app.not_found").message;
+    expect({
+      tool: [tool?.isError, tool?.text.includes(refused)],
+      code: returned(code?.text),
+    }).toStrictEqual({
+      tool: [true, true],
+      code: { write: refused },
     });
   });
 
