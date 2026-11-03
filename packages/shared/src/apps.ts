@@ -182,6 +182,7 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "settings",
   "setup",
   "sign-in",
+  "staff",
   "workflows",
 ]);
 
