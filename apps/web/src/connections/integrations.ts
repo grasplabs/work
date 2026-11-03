@@ -5,6 +5,7 @@ import type {
   ListedConnection,
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
+import type { HttpConnectionSummary } from "@grasp-os/shared/http-connections";
 import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
@@ -309,6 +310,53 @@ export const countByGroup = (
     counts.set(group, (counts.get(group) ?? 0) + 1);
   }
   return counts;
+};
+
+/** An HTTP connection, as listed: its summary beside the connection. */
+export interface HttpListed {
+  connection: ListedConnection;
+  http: HttpConnectionSummary;
+}
+
+/**
+ * The live HTTP connections among `connections`, newest first as listed:
+ * the ones the Integrations page lists apart and counts, so its counts
+ * never take in one it doesn't show.
+ */
+export const httpConnectionsOf = (
+  connections: readonly ListedConnection[]
+): HttpListed[] =>
+  connections.flatMap((connection) =>
+    connection.source === "http" &&
+    connection.status !== "disconnected" &&
+    connection.http !== undefined
+      ? [{ connection, http: connection.http }]
+      : []
+  );
+
+/**
+ * How many each filter holds: every integration and every live HTTP
+ * connection under All; what is connected, HTTP connections included,
+ * under Connected (both list under those filters); and the integrations
+ * of each kind of app, which an HTTP connection isn't.
+ */
+export const filterCounts = (
+  integrations: readonly Integration[],
+  connections: readonly ListedConnection[]
+): {
+  all: number;
+  connected: number;
+  groups: ReadonlyMap<CatalogGroup, number>;
+} => {
+  const http = httpConnectionsOf(connections).length;
+  return {
+    all: integrations.length + http,
+    connected:
+      integrations.filter((integration) =>
+        keeps({ show: "connected" }, integration)
+      ).length + http,
+    groups: countByGroup(integrations),
+  };
 };
 
 /** A count rounded down to a round number, to say "more than" it: 1,487 is more than 1,400. */

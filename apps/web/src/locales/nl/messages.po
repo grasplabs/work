@@ -1473,6 +1473,10 @@ msgstr "12 maanden"
 msgid "2 Inventory"
 msgstr "2 Inventarisatie"
 
+#: src/connections/http-connections.tsx
+msgid "A bearer token"
+msgstr "Een bearer-token"
+
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
 msgstr "Een builder vroeg om deze versie van {name} live te zetten: goedgekeurd is het de versie waarmee het bedrijf werkt. Stuur hem terug om de versie te houden die nu draait."
@@ -1743,6 +1747,10 @@ msgstr "Zoeken op een deel van een woord vindt die nog. Ga terug en voeg elke zu
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Een zoekopdracht in {where} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
 
+#: src/connections/http-connections.tsx
+msgid "A secret in a header"
+msgstr "Een geheim in een header"
+
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"
 msgid "A shared chat"
@@ -1755,6 +1763,10 @@ msgstr "Een gedeelde chat met {people}"
 #: src/brain/share-record.tsx
 msgid "A shared chat with only you in it"
 msgstr "Een gedeelde chat met alleen jou erin"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A signed call to its own URL"
+msgstr "Een ondertekende aanroep van een eigen URL"
 
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
@@ -2005,6 +2017,10 @@ msgstr "Een trigger toevoegen"
 msgid "Add a widget"
 msgstr "Een widget toevoegen"
 
+#: src/connections/http-connections.tsx
+msgid "Add an HTTP connection"
+msgstr "Een HTTP-verbinding toevoegen"
+
 #: src/engines/app-integrations.tsx
 msgid "Add an integration"
 msgstr "Een integratie toevoegen"
@@ -2017,6 +2033,10 @@ msgstr "Goedkeurder toevoegen"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Add documents"
 msgstr "Documenten toevoegen"
+
+#: src/connections/http-connections.tsx
+msgid "Add HTTP connection"
+msgstr "HTTP-verbinding toevoegen"
 
 #: src/workflows/module-files.tsx
 msgid "Add module"
@@ -2033,6 +2053,10 @@ msgstr "records aan {tables} toevoegen"
 #: src/interview/closed.tsx
 msgid "Add something"
 msgstr "Iets toevoegen"
+
+#: src/connections/http-connections.tsx
+msgid "Add the connection"
+msgstr "Verbinding toevoegen"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Add the trigger"
@@ -2075,6 +2099,10 @@ msgstr "Heeft een webhook aan een domein toegevoegd"
 msgctxt "why an integration is one of a domain's"
 msgid "Added by hand"
 msgstr "Met de hand toegevoegd"
+
+#: src/connections/http-connections.tsx
+msgid "Added on"
+msgstr "Toegevoegd op"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -2255,6 +2283,10 @@ msgstr "Alle teams"
 msgid "All workflow tests pass."
 msgstr "Alle workflowtests slagen."
 
+#: src/connections/http-connections.tsx
+msgid "Allow at least one method."
+msgstr "Sta minstens één methode toe."
+
 #: src/interview/sound-check.tsx
 msgid "Allow the microphone when your browser asks."
 msgstr "Sta de microfoon toe als je browser erom vraagt."
@@ -2396,6 +2428,10 @@ msgstr "Een https-adres op het openbare internet, zonder gebruikersnaam, wachtwo
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
+
+#: src/connections/http-connections.tsx
+msgid "An outside API that domains and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
+msgstr "Een externe API die domeinen en workflows via Grasp kunnen aanroepen, zodra je ze dat toestaat: alleen deze origin, met deze methoden, onder deze paden."
 
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
@@ -2927,6 +2963,10 @@ msgstr "om"
 msgid "At {step}: {error}"
 msgstr "Bij {step}: {error}"
 
+#: src/connections/http-connections.tsx
+msgid "At least {shortest} characters. Grasp keeps it sealed and never shows it again, not even to you. To change it, add another connection and revoke this one."
+msgstr "Minstens {shortest} tekens. Grasp houdt het verzegeld en laat het nooit meer zien, ook niet aan jou. Om het te wijzigen, voeg je een andere verbinding toe en trek je deze in."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "At this pace"
 msgstr "In dit tempo"
@@ -3068,6 +3108,10 @@ msgstr "Tot nu toe gefactureerd"
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Facturatie"
+
+#: src/connections/http-connections.tsx
+msgid "Billing API"
+msgstr "Facturatie-API"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Billing details"
@@ -3274,6 +3318,7 @@ msgstr "Niet leesbaar"
 #: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
+#: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-access-requests.tsx
@@ -3740,6 +3785,7 @@ msgstr "Filters wissen"
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
@@ -3760,6 +3806,7 @@ msgstr "Filters wissen"
 #: src/screens/app-panel.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
+#: src/shown-once.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
 #: src/workflows/share-workflow.tsx
@@ -4205,15 +4252,15 @@ msgstr "Kopenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
-#: src/engines/app-webhooks.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
+#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
-#: src/engines/app-webhooks.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
+#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopiëren"
 
@@ -4228,6 +4275,10 @@ msgstr "Code kopiëren"
 #: src/knowledge/copy-skill.tsx
 msgid "Copy into Our skills"
 msgstr "Kopiëren naar Our skills"
+
+#: src/shown-once.tsx
+msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
+msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
 
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
@@ -4252,6 +4303,14 @@ msgstr "Antwoord kopiëren"
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Kopieer de link voor {name}"
+
+#: src/shown-once.tsx
+msgid "Copy the secret"
+msgstr "Geheim kopiëren"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Copy the URL of the webhook ending {ending}"
+msgstr "URL kopiëren van de webhook die eindigt op {ending}"
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
@@ -4331,6 +4390,10 @@ msgstr "App {name} gemaakt"
 #: src/chat/thread.tsx
 msgid "Creating the App {name}"
 msgstr "App {name} maken"
+
+#: src/connections/http-connections.tsx
+msgid "Credential"
+msgstr "Inloggegeven"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -4827,10 +4890,10 @@ msgid "Don’t upload interview recordings or their captions: interviews go thro
 msgstr "Upload geen opnames van interviews of hun ondertitels: interviews gaan via de interviewflow."
 
 #: src/chat/thread.tsx
-#: src/engines/app-webhooks.tsx
 #: src/engines/blueprints.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
+#: src/shown-once.tsx
 msgid "Done"
 msgstr "Klaar"
 
@@ -4973,6 +5036,10 @@ msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/connections/http-connections.tsx
+msgid "Each allows everything under it; / allows all paths."
+msgstr "Elk staat alles eronder toe; / staat alle paden toe."
+
 #: src/settings/erasures.tsx
 msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
 msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw geprobeerd tot het klaar is, ook nadat u dit sluit."
@@ -4989,6 +5056,10 @@ msgstr "Elk domein is één deel van het bedrijf: de workflows, apps en koppelin
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Elke factuur als pdf, zodra hij is uitgegeven."
+
+#: src/connections/http-connections.tsx
+msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
+msgstr "Elk padprefix begint met /, op een eigen regel, zonder query of puntsegmenten."
 
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
@@ -5176,8 +5247,8 @@ msgid "Every client question or complaint, from the first message until it is so
 msgstr "Elke vraag of klacht van een klant, van het eerste bericht tot ze is opgelost."
 
 #: src/engines/app-webhooks.tsx
-msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp. Copy it now: Grasp won't show it again."
-msgstr "Elke bezorging wordt ermee ondertekend, zodat de ontvanger kan zien dat die van Grasp komt. Kopieer het nu: Grasp toont het niet nog een keer."
+msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
+msgstr "Elke levering wordt ermee ondertekend, zodat de ontvanger weet dat die van Grasp komt."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5784,6 +5855,10 @@ msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In voorbereiding"
 
+#: src/connections/http-connections.tsx
+msgid "Give it a name of at most {longest} characters."
+msgstr "Geef het een naam van hoogstens {longest} tekens."
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Given up {date}"
 msgstr "Opgegeven op {date}"
@@ -6162,6 +6237,10 @@ msgstr "Hij wist het niet"
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Hij stopt overal buiten Grasp met antwoorden en zegt dat één keer tegen wie schrijft. De chat van Grasp blijft werken."
 
+#: src/connections/http-connections.tsx
+msgid "Header name"
+msgstr "Headernaam"
+
 #: src/interview/before.tsx
 msgid "Hear both again"
 msgstr "Allebei nog eens horen"
@@ -6331,6 +6410,14 @@ msgstr "Hoe je organisatie in Grasp heet."
 msgctxt "kind of app"
 msgid "HR"
 msgstr "HR"
+
+#: src/connections/http-connections.tsx
+msgid "HTTP connections"
+msgstr "HTTP-verbindingen"
+
+#: src/connections/http-connections.tsx
+msgid "https:// and a public host name, with nothing after it."
+msgstr "https:// en een openbare hostnaam, zonder iets erachter."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
@@ -6671,6 +6758,10 @@ msgstr "Het is niet gebeurd: {who}"
 msgid "it didn't pass"
 msgstr "ze slaagde niet"
 
+#: src/connections/http-connections.tsx
+msgid "It doesn't work now. An admin can revoke it and add it again with a new credential."
+msgstr "Hij werkt nu niet. Een beheerder kan hem intrekken en opnieuw toevoegen met nieuwe inloggegevens."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Ze faalde op haar testrecords toen de versie werd verzegeld: ze draait op geen enkel record, en de versie kan niet actueel worden gemaakt"
@@ -6678,6 +6769,10 @@ msgstr "Ze faalde op haar testrecords toen de versie werd verzegeld: ze draait o
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 msgstr "Het mislukte terwijl er namens jou werd gehandeld. Vraag de agent om het te herstellen: er begint een nieuwe chat, met het foutrapport van de run als bijlage."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It gets a URL of its own and a secret, which you see only once, as it is added. Each signed POST to the URL starts a run, with the body as its input."
+msgstr "Hij krijgt een eigen URL en een geheim, dat je maar één keer ziet, bij het toevoegen. Elke ondertekende POST naar de URL start een run, met de body als invoer."
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -6811,6 +6906,10 @@ msgstr "Hij stopt meteen, ook lopende aanroepen, en kan nooit meer draaien. Hij 
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Hij stopt waar hij is en gaat nooit verder. Wat hij al deed, blijft gedaan. Dit kan niet ongedaan worden gemaakt."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It takes no delivery until whoever made it makes a new secret."
+msgstr "Hij neemt geen levering aan totdat degene die hem maakte een nieuw geheim maakt."
+
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
 msgstr "Het wacht sinds {since} op jou."
@@ -6895,6 +6994,10 @@ msgstr "De code kan niet worden gelezen: de schermen en servercode mogen bestand
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
 msgstr "Zijn code gebruikt hem"
+
+#: src/connections/http-connections.tsx
+msgid "Its credential is deleted, and every domain and workflow loses it. Add it again to use it again."
+msgstr "De inloggegevens worden verwijderd en elk domein en elke workflow verliest hem. Voeg hem opnieuw toe om hem weer te gebruiken."
 
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
@@ -7516,6 +7619,18 @@ msgstr "Hoofdmenu"
 msgid "Make {name} an admin?"
 msgstr "{name} beheerder maken?"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Make a new secret"
+msgstr "Nieuw geheim maken"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Make a new secret for the webhook ending {ending}"
+msgstr "Nieuw geheim maken voor de webhook die eindigt op {ending}"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Make a new secret?"
+msgstr "Nieuw geheim maken?"
+
 #: src/workflows/requests/request-detail.tsx
 msgid "Make a workflow of it"
 msgstr "Er een workflow van maken"
@@ -7649,6 +7764,14 @@ msgstr "Genoemd"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Berichten"
+
+#: src/connections/http-connections.tsx
+msgid "Methods"
+msgstr "Methoden"
+
+#: src/connections/http-connections.tsx
+msgid "Methods it allows"
+msgstr "Toegestane methoden"
 
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
@@ -7829,6 +7952,7 @@ msgid "Muted"
 msgstr "Gedempt"
 
 #: src/chat/project-dialog.tsx
+#: src/connections/http-connections.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
@@ -8149,6 +8273,10 @@ msgstr "Nog geen code: Grasp schrijft de eerste versie in de chat."
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "Nog geen connector"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No delivery starts a run until whoever made the trigger makes a new secret."
+msgstr "Geen levering start een run totdat degene die de trigger maakte een nieuw geheim maakt."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No domain has a model bound to it."
@@ -9394,6 +9522,10 @@ msgstr "of kies ze op je computer"
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Of trek je terug: niets van wat je zei wordt nog gebruikt, en je kunt het hier nog steeds lezen."
 
+#: src/connections/http-connections.tsx
+msgid "Origin"
+msgstr "Origin"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Oslo"
@@ -9446,6 +9578,10 @@ msgstr "Our skills heeft al een skill op {path}: pas die aan."
 #: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Uitvoer"
+
+#: src/connections/http-connections.tsx
+msgid "Outside APIs an admin approved, by origin, methods and paths. Domains and workflows call them only with a permission."
+msgstr "Externe API's die een beheerder heeft goedgekeurd, per origin, methoden en paden. Domeinen en workflows roepen ze alleen aan met een toestemming."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Outside Grasp this month, against what the plan includes."
@@ -9597,6 +9733,14 @@ msgstr "Pad"
 #: src/workflows/module-files.tsx
 msgid "Path of a new module"
 msgstr "Pad van een nieuwe module"
+
+#: src/connections/http-connections.tsx
+msgid "Path prefixes it allows, one per line"
+msgstr "Toegestane padprefixen, één per regel"
+
+#: src/connections/http-connections.tsx
+msgid "Paths"
+msgstr "Paden"
 
 #: src/settings/stephen-card.tsx
 #: src/voice/sound-controls.tsx
@@ -10823,9 +10967,22 @@ msgstr "Revisie {revision} doorstaat de controle van het profiel en kan worden g
 msgid "Revoke"
 msgstr "Intrekken"
 
+#: src/connections/http-connections.tsx
+msgctxt "revoke an HTTP connection"
+msgid "Revoke"
+msgstr "Intrekken"
+
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
 msgstr "Toestemming van {holder} intrekken"
+
+#: src/connections/http-connections.tsx
+msgid "Revoke {name}, added {added}"
+msgstr "{name} intrekken, toegevoegd op {added}"
+
+#: src/connections/http-connections.tsx
+msgid "Revoke {name}, added {added}?"
+msgstr "{name} intrekken, toegevoegd op {added}?"
 
 #: src/engines/resource-bindings.tsx
 msgid "Revoke the binding of {alias}"
@@ -10835,6 +10992,10 @@ msgstr "Koppeling van {alias} intrekken"
 msgid "Revoke the binding of {alias}?"
 msgstr "Koppeling van {alias} intrekken?"
 
+#: src/connections/http-connections.tsx
+msgid "Revoke the connection"
+msgstr "Verbinding intrekken"
+
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}"
 msgstr "Pakketten voor {domain} intrekken"
@@ -10842,6 +11003,18 @@ msgstr "Pakketten voor {domain} intrekken"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakketten voor {domain} intrekken?"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Revoke the secret"
+msgstr "Geheim intrekken"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Revoke the secret of the webhook ending {ending}"
+msgstr "Geheim intrekken van de webhook die eindigt op {ending}"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Revoke the webhook's secret?"
+msgstr "Het geheim van de webhook intrekken?"
 
 #: src/engines/release-controls.tsx
 msgid "Revoke this version"
@@ -10934,6 +11107,18 @@ msgstr "Rome"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Room used"
 msgstr "Gebruikte ruimte"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Rotate the secret"
+msgstr "Geheim vernieuwen"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Rotate the secret of the webhook ending {ending}"
+msgstr "Geheim vernieuwen van de webhook die eindigt op {ending}"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Rotate the webhook's secret?"
+msgstr "Het geheim van de webhook vernieuwen?"
 
 #: src/engines/app-data.tsx
 msgid "Row {row} {where}: {message}"
@@ -11364,9 +11549,14 @@ msgstr "Zoekt in de bestanden van de App naar {text}"
 msgid "Searching the brain for {query}"
 msgstr "Zoekt in het brein naar {query}"
 
-#: src/engines/app-webhooks.tsx
+#: src/connections/http-connections.tsx
+#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheim"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Secret revoked"
+msgstr "Geheim ingetrokken"
 
 #: src/routes/_shell.settings.tsx
 msgid "Security"
@@ -11464,6 +11654,14 @@ msgstr "Aanvraag versturen"
 msgid "Send version {version} of {who} back"
 msgstr "Versie {version} van {who} terugsturen"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Senders must sign with the new secret, which you see only once."
+msgstr "Afzenders moeten ondertekenen met het nieuwe geheim, dat je maar één keer ziet."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Senders sign every delivery with it, so Grasp can tell a call is theirs."
+msgstr "Afzenders ondertekenen elke levering ermee, zodat Grasp weet dat een aanroep van hen komt."
+
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11492,6 +11690,10 @@ msgstr "Teruggestuurd: {who}, versie {version}."
 msgctxt "what an App's screen sends with an answer to a decision"
 msgid "Sent by the app"
 msgstr "Meegestuurd door de app"
+
+#: src/connections/http-connections.tsx
+msgid "Sent in <0>{header}</0>, never shown"
+msgstr "Verstuurd in <0>{header}</0>, nooit getoond"
 
 #: src/brain/brain-log.tsx
 msgid "Sent to the {who}"
@@ -12917,6 +13119,14 @@ msgstr "Het Brain van het bedrijf: {percent}% bekend. Donkere stippen zijn wat i
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "De koppeling werkt niet meer. Workflows die hem gebruiken, wachten tot iemand opnieuw inlogt."
 
+#: src/connections/http-connections.tsx
+msgid "The credential needs a header name (letters, digits and dashes) and a secret of at least {shortest} plain ASCII characters, on one line."
+msgstr "De inloggegevens hebben een headernaam nodig (letters, cijfers en streepjes) en een geheim van minstens {shortest} gewone ASCII-tekens, op één regel."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The current secret stops working at once: senders must sign with the new one, which you see only once."
+msgstr "Het huidige geheim werkt meteen niet meer: afzenders moeten ondertekenen met het nieuwe, dat je maar één keer ziet."
+
 #: src/engines/resource-bindings.tsx
 msgid "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
 msgstr "De huidige versie declareert hem anders dan de versie waarvoor de koppeling is goedgekeurd. Koppel hem opnieuw om goed te keuren wat hij nu declareert."
@@ -13180,6 +13390,10 @@ msgstr "De vorige"
 msgid "The organization has no teams yet."
 msgstr "De organisatie heeft nog geen teams."
 
+#: src/connections/http-connections.tsx
+msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
+msgstr "De origin is https:// en een openbare hostnaam, zonder iets erachter: https://api.example.com."
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "The packages approved for this domain. You see them because you may approve packages; the rest of the domain is for its members."
 msgstr "De pakketten die voor dit domein zijn goedgekeurd. Je ziet ze omdat je pakketten mag goedkeuren; de rest van het domein is voor de leden."
@@ -13366,6 +13580,7 @@ msgid "The way some told it"
 msgstr "Zoals sommigen het vertelden"
 
 #: src/engines/app-webhooks.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "The webhook's secret"
 msgstr "Het geheim van de webhook"
 
@@ -13931,6 +14146,10 @@ msgstr "Aan iedereen bij {company}"
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Om privé te houden wie er sprak, ontbreekt een team tot vijf van zijn mensen gevraagd zijn, en zijn aantal tot er drie gehoord zijn. Geen van beide betekent dat niemand meedeed."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "To start a run, POST its input as JSON to the URL, signed with the secret as <0>Standard Webhooks</0> describes, in the headers {headers}. A delivery more than five minutes old is refused."
+msgstr "Om een run te starten, POST je de invoer als JSON naar de URL, ondertekend met het geheim zoals <0>Standard Webhooks</0> beschrijft, in de headers {headers}. Een levering die ouder is dan vijf minuten wordt geweigerd."
+
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
 msgstr "Naar de teamleiders. Alle anderen volgen zodra hun teamleider heeft gesproken."
@@ -13957,6 +14176,7 @@ msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
 msgstr "Vandaag"
 
+#: src/connections/http-connections.tsx
 #: src/onboarding/hr-leads.tsx
 msgid "Token"
 msgstr "Token"
@@ -14759,6 +14979,10 @@ msgstr "We openen je platform zodra we alles met je hebben nagelopen. Je hoort v
 #: src/onboarding/setup-steps.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "We willen minder tijd kwijt zijn aan herhaalwerk, zodat er meer tijd is voor onze klanten. Het gaat om hoe het werk loopt, niet om banen."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Webhook URL"
+msgstr "Webhook-URL"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Webhooks"

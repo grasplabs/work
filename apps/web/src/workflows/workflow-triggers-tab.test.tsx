@@ -95,6 +95,30 @@ const ownMail: WorkflowTrigger = {
   stopped: false,
 };
 
+const webhookSecret = "whsec_c2hvd24tb25seS1vbmNl";
+
+const ownWebhook: WorkflowTrigger = {
+  ...base,
+  id: "trigger-webhook",
+  kind: "webhook",
+  owner: "me",
+  principal: "me",
+  enabled: true,
+  config: {},
+  nextAt: null,
+  address: null,
+  webhook: { token: "token-0b7c", secret: "active" },
+  stopped: false,
+};
+
+const othersWebhook: WorkflowTrigger = {
+  ...ownWebhook,
+  id: "trigger-others-webhook",
+  owner: "someone-else",
+  principal: "someone-else",
+  webhook: { token: "token-9f1d", secret: "active" },
+};
+
 const connection = (
   id: string,
   provider: string,
@@ -138,7 +162,29 @@ const shown = async (
       if (changeFails) {
         throw new Error("The trigger couldn't be read back.");
       }
-      return stoppedSchedule;
+      const webhook =
+        typeof input === "object" &&
+        input !== null &&
+        Reflect.get(input, "kind") === "webhook";
+      return webhook
+        ? { ...ownWebhook, secret: webhookSecret }
+        : stoppedSchedule;
+    },
+    rotateWebhookSecret: async (id: string) => {
+      await Promise.resolve();
+      asked.push({ rotateWebhookSecret: id });
+      if (changeFails) {
+        throw new Error("The secret couldn't be made.");
+      }
+      return { secret: `${webhookSecret}-rotated` };
+    },
+    revokeWebhookSecret: async (id: string) => {
+      await Promise.resolve();
+      asked.push({ revokeWebhookSecret: id });
+      if (changeFails) {
+        throw new Error("The secret couldn't be revoked.");
+      }
+      return ownWebhook;
     },
     setEnabled: async (id: string, enabled: boolean) => {
       await Promise.resolve();
@@ -258,6 +304,12 @@ const fill = async (label: string, value: string): Promise<void> => {
     await settled();
   });
 };
+
+/** The secret the page shows, if it shows one. */
+const secretShown = (): string | undefined =>
+  [...document.querySelectorAll("input")].find(
+    (input) => input.getAttribute("aria-label") === "Secret"
+  )?.value;
 
 /** Submits the Add a trigger form. */
 const submit = async (): Promise<void> => {
@@ -468,6 +520,147 @@ describe("a workflow's Triggers tab", () => {
       readAfterAdding: listReads > afterChange,
       said: document.body.textContent.includes("couldn't be read back"),
     }).toStrictEqual({ readAgain: true, readAfterAdding: true, said: true });
+  });
+
+  it("shows a new webhook trigger's secret once, as core answered it, and never again once closed", async () => {
+    const asked = await shown(true, false, false, []);
+    await fill("What starts it", "webhook");
+    await submit();
+    const shownOnce = secretShown();
+    const warned = document.body.textContent.includes("you won't see it again");
+    await press("Done");
+
+    expect({
+      asked,
+      shownOnce,
+      warned,
+      afterClosing: secretShown(),
+    }).toStrictEqual({
+      asked: [
+        {
+          create: {
+            kind: "webhook",
+            workflowId: "workflow-1",
+            version: 2,
+            config: {},
+          },
+        },
+      ],
+      shownOnce: webhookSecret,
+      warned: true,
+      afterClosing: undefined,
+    });
+  });
+
+  it("shows a webhook trigger's URL with its token, and how to sign a delivery", async () => {
+    await shown(true, false, false, [ownWebhook]);
+    const url = [...document.querySelectorAll("input")].find(
+      (input) => input.getAttribute("aria-label") === "Webhook URL"
+    )?.value;
+
+    expect({
+      url,
+      copy: buttons("Copy").length,
+      signing: document.body.textContent.includes("Standard Webhooks"),
+    }).toStrictEqual({
+      url: `${globalThis.location.origin}/api/workflow-webhooks/token-0b7c`,
+      copy: 1,
+      signing: true,
+    });
+  });
+
+  it("copies a webhook's URL, says so, and still names which webhook the button is for", async () => {
+    await shown(true, false, false, [ownWebhook]);
+    await press("Copy");
+    const [button] = buttons("Copied");
+
+    expect({
+      copied: await navigator.clipboard.readText(),
+      name: button?.getAttribute("aria-label"),
+      announced: [...document.querySelectorAll("output[aria-live]")].some(
+        (region) => region.textContent === "Copied"
+      ),
+    }).toStrictEqual({
+      copied: `${globalThis.location.origin}/api/workflow-webhooks/token-0b7c`,
+      name: "Copy the URL of the webhook ending 0b7c",
+      announced: true,
+    });
+  });
+
+  it("rotates its owner's webhook secret only once they confirm, and shows the new one once", async () => {
+    const asked = await shown(true, false, false, [ownWebhook]);
+    await press("Rotate the secret");
+    const beforeConfirming = asked.length;
+    // The dialog's own button, after the row's.
+    await press("Rotate the secret", 1);
+    // Closed as confirmed: only the row's button is left, so the secret
+    // just shown can't be rotated away by a second click.
+    const left = buttons("Rotate the secret").length;
+
+    expect({
+      beforeConfirming,
+      asked,
+      left,
+      shown: secretShown(),
+    }).toStrictEqual({
+      beforeConfirming: 0,
+      asked: [{ rotateWebhookSecret: "trigger-webhook" }],
+      left: 1,
+      shown: `${webhookSecret}-rotated`,
+    });
+  });
+
+  it("closes the confirmation and says why in the row when rotating or revoking fails", async () => {
+    await shown(true, false, true, [ownWebhook]);
+    await press("Rotate the secret");
+    await press("Rotate the secret", 1);
+    const rotating = {
+      left: buttons("Rotate the secret").length,
+      said: document.body.textContent.includes("The secret couldn't be made."),
+    };
+    await press("Revoke the secret");
+    await press("Revoke the secret", 1);
+
+    expect({
+      rotating,
+      revoking: {
+        left: buttons("Revoke the secret").length,
+        said: document.body.textContent.includes(
+          "The secret couldn't be revoked."
+        ),
+      },
+      secret: secretShown(),
+    }).toStrictEqual({
+      rotating: { left: 1, said: true },
+      revoking: { left: 1, said: true },
+      secret: undefined,
+    });
+  });
+
+  it("lets a builder revoke another's webhook secret once they confirm, but not rotate it", async () => {
+    const asked = await shown(true, false, false, [othersWebhook]);
+    const rotate = buttons("Rotate the secret").length;
+    await press("Revoke the secret");
+    const beforeConfirming = asked.length;
+    await press("Revoke the secret", 1);
+
+    expect({ rotate, beforeConfirming, asked }).toStrictEqual({
+      rotate: 0,
+      beforeConfirming: 0,
+      asked: [{ revokeWebhookSecret: "trigger-others-webhook" }],
+    });
+  });
+
+  it("says a revoked webhook secret takes nothing, and offers its owner a new one", async () => {
+    await shown(true, false, false, [
+      { ...ownWebhook, webhook: { token: "token-0b7c", secret: "revoked" } },
+    ]);
+
+    expect({
+      revoked: document.body.textContent.includes("Secret revoked"),
+      newOne: buttons("Make a new secret").length,
+      revoke: buttons("Revoke the secret").length,
+    }).toStrictEqual({ revoked: true, newOne: 1, revoke: 0 });
   });
 
   it("says a stopped trigger someone turned off is off", async () => {
