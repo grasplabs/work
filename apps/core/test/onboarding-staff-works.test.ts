@@ -8,13 +8,13 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approveAgreed } from "./interview-link.ts";
+import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
@@ -200,6 +200,11 @@ const knownOf = async (team: string, id: string) => {
 };
 
 describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
+  // Every test draws its team's work itself (`drawn`), with the provider's
+  // replies faked around each `drawNext`; the alarm each agreement sets
+  // would draw outside them (`holdAlarm`).
+  beforeEach(holdAlarm);
+
   it("is staff's alone: a member and the company's admin reach none of it", async () => {
     const { booking } = await drawn();
     const { api: admin } = await signedInApi(idp, "admin");
