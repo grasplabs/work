@@ -4,7 +4,11 @@ import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import * as schema from "../src/db/schema.ts";
-import { erasureInventory, noPerson } from "../src/person-erasure-inventory.ts";
+import {
+  erasureInventory,
+  noPerson,
+  reviewedPersonColumns,
+} from "../src/person-erasure-inventory.ts";
 
 // What erasing a person does to every place connect keeps data, about them
 // or not (GRA-903, GRA-1189): each table is classified in
@@ -38,5 +42,22 @@ describe("the inventory of what erasing a person does in connect", () => {
         : []
     );
     expect(unexplained).toStrictEqual([]);
+  });
+
+  it("has reviewed every column that names a person, on every table", () => {
+    const changed = [...tables].flatMap(([name, table]) => {
+      const columns = getTableConfig(table)
+        .columns.map((column) => column.name)
+        .filter((column) => personColumn.test(column))
+        .toSorted();
+      const reviewed = reviewedPersonColumns[name] ?? [];
+      return columns.join(",") === [...reviewed].toSorted().join(",")
+        ? []
+        : [{ table: name, columns, reviewed }];
+    });
+    const stale = Object.keys(reviewedPersonColumns).filter(
+      (name) => !tables.has(name)
+    );
+    expect({ changed, stale }).toStrictEqual({ changed: [], stale: [] });
   });
 });

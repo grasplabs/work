@@ -14,6 +14,7 @@ import {
   erasureAreas,
   erasureInventory,
   noPerson,
+  reviewedPersonColumns,
 } from "../src/person-erasure-inventory.ts";
 
 // What erasing a person does to every place core keeps data, about them
@@ -64,6 +65,23 @@ describe("the inventory of what erasing a person does", () => {
         : []
     );
     expect(unexplained).toStrictEqual([]);
+  });
+
+  it("has reviewed every column that names a person, on every table", () => {
+    const changed = [...tables].flatMap(([name, table]) => {
+      const columns = getTableConfig(table)
+        .columns.map((column) => column.name)
+        .filter((column) => personColumn.test(column))
+        .toSorted();
+      const reviewed = reviewedPersonColumns[name] ?? [];
+      return columns.join(",") === [...reviewed].toSorted().join(",")
+        ? []
+        : [{ table: name, columns, reviewed }];
+    });
+    const stale = Object.keys(reviewedPersonColumns).filter(
+      (name) => !tables.has(name)
+    );
+    expect({ changed, stale }).toStrictEqual({ changed: [], stale: [] });
   });
 
   it("names a known erasure area for every table it erases", () => {

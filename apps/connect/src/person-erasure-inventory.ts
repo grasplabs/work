@@ -51,3 +51,27 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   audit_outbox: { kept: "audit events on their way to the log (D2)" },
   audit_outbox_rejected: { kept: "audit events the log refused (D2)" },
 };
+
+/**
+ * The columns of each table that name or hold a person
+ * (@grasp-os/shared/person-columns), as they were reviewed when the table
+ * was classified above; a table with none isn't listed. A column added to
+ * a table already classified fails the test until it is listed here, and
+ * whether the table's classification still holds for it is decided then.
+ */
+export const reviewedPersonColumns: Readonly<
+  Record<string, readonly string[]>
+> = {
+  call_changes: ["on_behalf_of"],
+  composio_flows: ["user_id"],
+  connections: [
+    "account_email",
+    "account_senders",
+    "connected_by",
+    "owner_user_id",
+  ],
+  erased_people: ["user_id"],
+  idempotent_calls: ["on_behalf_of", "subject_id", "subject_type"],
+  oauth_flows: ["user_id"],
+  pending_actions: ["on_behalf_of", "subject_id", "subject_type"],
+};
