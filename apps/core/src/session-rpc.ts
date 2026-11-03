@@ -20,7 +20,6 @@ import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
 import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
-import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
@@ -90,7 +89,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #notifications: NotificationsRpc;
   readonly #waiting: WaitingRpc;
   readonly #onboarding: OnboardingRpc;
-  readonly #onboardingStaff: OnboardingStaffRpc;
   readonly #onboardingGate: OnboardingGateRpc;
 
   /** `sessionId`: the session the connection is signed in with. */
@@ -151,7 +149,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       bindings: this.#workflowResources,
     });
     this.#onboarding = new OnboardingRpc(env, check);
-    this.#onboardingStaff = new OnboardingStaffRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
     // Its report read through the namespaces above, with their checks.
     this.#dashboard = new DashboardRpc(env, full, {
@@ -185,10 +182,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get onboarding(): OnboardingRpc {
     return this.#onboarding;
-  }
-
-  get onboardingStaff(): OnboardingStaffRpc {
-    return this.#onboardingStaff;
   }
 
   get onboardingGate(): OnboardingGateRpc {

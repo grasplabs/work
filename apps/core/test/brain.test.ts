@@ -10,17 +10,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { mondayOf } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
-import {
-  auditedDuring,
-  openRpc,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // The company brain's workspace (`brain.read`, brain-rpc.ts), assembled
@@ -78,13 +72,6 @@ const kickoffReading = {
   ],
 };
 
-/** Grasp's staff, signed in to the deployment. */
-const staffApi = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
-
 /**
  * Staff bring the kickoff in, read by the fake provider as `reading`, and
  * keep the sponsor's `answers`.
@@ -93,13 +80,13 @@ const bringInKickoff = async (
   answers: Partial<Record<VisionField, string>> = {},
   reading: typeof kickoffReading = kickoffReading
 ): Promise<void> => {
-  const staff = await staffApi();
+  const staff = adminKickoff();
   await fakeProvider({
     text: JSON.stringify(reading),
     inputTokens: 900,
     outputTokens: 300,
   });
-  await staff.onboardingStaff.saveKickoff({
+  await staff.saveKickoff({
     locale: "en",
     transcript: { text: kickoffTranscript },
   });
@@ -107,7 +94,7 @@ const bringInKickoff = async (
     const text = answers[field];
     if (text !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one answer after another
-      await staff.onboardingStaff.answerKickoff(field, text);
+      await staff.answerKickoff(field, text);
     }
   }
 };
@@ -700,12 +687,10 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("gives the brain the kickoff's vision and teams as records every member reads, each once, a new vision whenever it changes", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    const staff = await staffApi();
+    const staff = adminKickoff();
     await bringInKickoff();
     const answerPain = async (text: string) =>
-      await keptBy(
-        async () => await staff.onboardingStaff.answerKickoff("pain", text)
-      );
+      await keptBy(async () => await staff.answerKickoff("pain", text));
     const said = `Clients wait ${unique()} weeks.`;
     const before = await member.api.brain.read();
 
@@ -798,10 +783,10 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("retires what a replaced kickoff gave the brain, keeping it, and reads the new one's vision and teams alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    const staff = await staffApi();
+    const staff = adminKickoff();
     // A first transcript, without the sponsor's answer about the pain.
     await bringInKickoff();
-    await staff.onboardingStaff.answerKickoff("pain", "");
+    await staff.answerKickoff("pain", "");
     await bringInKickoff();
     const first = await member.api.brain.read();
     const firstIds = first.teams.flatMap(({ id }) =>
@@ -1013,7 +998,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
 
   it("refuses a transcript whose reading began before a content purge, so its words never come back", async () => {
     const admin = await signedInApi(idp, "admin");
-    const staff = await staffApi();
+    const staff = adminKickoff();
     const term = `Zq${unique()}`;
     const { id: collectionId } = await admin.api.knowledge.createCollection({
       name: `Purged ${unique()}`,
@@ -1052,7 +1037,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     /** The save, as its code: `saved`, or why it was refused. */
     const saving = async (): Promise<string> => {
       try {
-        await staff.onboardingStaff.saveKickoff({
+        await staff.saveKickoff({
           locale: "en",
           transcript: { text: `${kickoffTranscript}\nAnna (CEO): ${term}.` },
         });
@@ -1078,7 +1063,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("forgets the kickoff a content purge reaches, so no answer after gives the brain its words again", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    const staff = await staffApi();
+    const staff = adminKickoff();
     const term = `Zq${unique()}`;
     await bringInKickoff({ pain: `Clients wait for ${term}.` });
     const { id: collectionId } = await admin.api.knowledge.createCollection({
@@ -1101,12 +1086,12 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // An answer at the same time as the purge, then two after it, as
     // Greptile's case: another field, then the pain.
     const [during] = await Promise.allSettled([
-      staff.onboardingStaff.answerKickoff("goals", "Faster closing."),
+      staff.answerKickoff("goals", "Faster closing."),
       admin.api.knowledge.purge(input, plan.token),
     ]);
     const answered = await Promise.allSettled([
-      staff.onboardingStaff.answerKickoff("goals", "Faster closing."),
-      staff.onboardingStaff.answerKickoff("pain", "Late reports."),
+      staff.answerKickoff("goals", "Faster closing."),
+      staff.answerKickoff("pain", "Late reports."),
     ]);
     const read = await member.api.brain.read();
     const kickoff = await onboardingStore(env).kickoff();
@@ -1127,7 +1112,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
 
   it("keeps the kickoff's records once their write failed, from the store's alarm", async () => {
     const member = await signedInApi(idp, "user");
-    const staff = await staffApi();
+    const staff = adminKickoff();
     await bringInKickoff();
     const pain = `Late reports ${unique()}.`;
     // D1 refuses the brain's write of the vision naming this answer, and
@@ -1140,7 +1125,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     let answered: unknown;
     let before: string;
     try {
-      answered = await staff.onboardingStaff.answerKickoff("pain", pain);
+      answered = await staff.answerKickoff("pain", pain);
       before = JSON.stringify(await member.api.brain.read());
     } finally {
       await env.DB.exec(`DROP TRIGGER IF EXISTS ${trigger}`);

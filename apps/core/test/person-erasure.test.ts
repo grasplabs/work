@@ -27,6 +27,7 @@ import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import {
   agree,
   fact,
@@ -551,15 +552,15 @@ const referralWhileErased = async (erased: "max" | "pim") => {
     async () => await store.drawNext()
   );
   const after = await store.teamWorks(ids.team);
-  const { entries } = await store.staffLog({ what: "interview.referred" });
+  const entries = await onboardingLog("interview.referred", store);
   return {
     asked,
     maxOnRota: after.find(({ id }) => id === rota.id)?.doers.includes(ids.max),
     // This team's referrals: the log holds earlier tests' too, whose people
     // the list no longer has.
     logged: entries
-      .filter(({ person: by }) => by?.id === ids.max)
-      .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
+      .filter(({ about }) => about === ids.max)
+      .map(({ about, named }) => [about, named]),
   };
 };
 
@@ -1323,7 +1324,7 @@ describe("erasing a person", () => {
     );
 
     const after = await store.teamWorks(ids.team);
-    const { entries } = await store.staffLog({ what: "interview.referred" });
+    const entries = await onboardingLog("interview.referred", store);
     expect({
       // Max is moved onto the work they do, as any referral moves them.
       maxOnRota: after
@@ -1333,8 +1334,8 @@ describe("erasing a person", () => {
       // This team's referrals: the log holds earlier tests' too, whose people
       // the list no longer has.
       logged: entries
-        .filter(({ person: by }) => by?.id === ids.max)
-        .map(({ person: by, named }) => [by?.id ?? null, named?.id ?? null]),
+        .filter(({ about }) => about === ids.max)
+        .map(({ about, named }) => [about, named]),
     }).toStrictEqual({
       maxOnRota: true,
       logged: [[ids.max, null]],
@@ -1395,7 +1396,7 @@ describe("erasing a person", () => {
       return rows.length;
     };
     const state = async () => {
-      const { entries } = await store.staffLog({ what: "interview.referred" });
+      const entries = await onboardingLog("interview.referred", store);
       const after = await store.teamWorks(ids.team);
       return {
         pimAsked: await askedOf(ids.pim),
@@ -1409,8 +1410,8 @@ describe("erasing a person", () => {
           .find(({ id }) => id === tickets.id)
           ?.doers.includes(ids.pim),
         logged: entries
-          .filter(({ person: by }) => by?.id === ids.max)
-          .map(({ named }) => named?.id ?? null),
+          .filter(({ about }) => about === ids.max)
+          .map(({ named }) => named),
       };
     };
     const before = await state();

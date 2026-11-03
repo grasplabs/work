@@ -48,8 +48,7 @@ import { readOrganization } from "./organization.ts";
 //   log can't take it, nothing is.
 // - What anyone said reaching the admin: interviews leave the store as
 //   numbers (`Onboarding.adminFacts`), and the answer is only what the
-//   schema names. Nobody at Grasp reads what anyone said (GRA-329): a
-//   staff look at one interview is its numbers too (onboarding/staff-rpc.ts).
+//   schema names. Nobody at Grasp reads what anyone said (GRA-329).
 //
 // - Grasp reading on after the company said stop: once the company's
 //   admin ends Grasp's staff access (onboarding/gate.ts), this read is
@@ -225,8 +224,8 @@ const stephenOf = async (
 
 /**
  * Everything the admin reads of this client, from what core holds, at
- * `now`: for the admin's read below, and staff's in the onboarding area
- * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
+ * `now`, for the admin's read below. Only what the schema names may
+ * leave core.
  * It is all the admin shows of the onboarding it steers: a command's
  * effect (admin-command.ts) shows in the next one.
  */

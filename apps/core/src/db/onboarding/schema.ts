@@ -326,8 +326,9 @@ export const events = sqliteTable("events", {
 });
 
 /**
- * Grasp's staff's own notes on the onboarding: who wrote them and when.
- * Only staff read them.
+ * Grasp's staff's own notes on the onboarding, which nothing reads or
+ * writes any more. Kept while the release before still uses it (expand,
+ * then contract); dropped in a follow-up once this one is deployed.
  */
 export const notes = sqliteTable("notes", {
   id: integer().primaryKey({ autoIncrement: true }),

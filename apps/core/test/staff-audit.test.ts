@@ -406,11 +406,8 @@ describe("Grasp staff's views, audited", () => {
 
     const events = await auditedDuring(
       async () => {
-        await outcome(api.onboardingStaff.newStart(person));
-        await outcome(api.onboardingStaff.sendMailAgain(person));
-        await outcome(api.onboardingStaff.remind([person]));
-        await outcome(api.onboardingStaff.deleteInterview(person));
-        await outcome(api.onboardingStaff.interview(person));
+        await outcome(api.onboarding.linksTaken([person]));
+        await outcome(api.onboarding.settle(person, "both"));
       },
       { staffAccesses: true }
     );
@@ -420,13 +417,7 @@ describe("Grasp staff's views, audited", () => {
       surfaces: views.map(({ detail }) => detail.surface),
       named: JSON.stringify(views).includes(person),
     }).toStrictEqual({
-      surfaces: [
-        "onboardingStaff.newStart",
-        "onboardingStaff.sendMailAgain",
-        "onboardingStaff.remind",
-        "onboardingStaff.deleteInterview",
-        "onboardingStaff.interview",
-      ],
+      surfaces: ["onboarding.linksTaken", "onboarding.settle"],
       named: false,
     });
   });
@@ -564,7 +555,7 @@ describe("Grasp staff's views, audited", () => {
     }
 
     expect(calls.length).toBeGreaterThan(100);
-    expect(onboarding).toBeGreaterThan(30);
+    expect(onboarding).toBeGreaterThan(20);
     expect({ unaudited, naming }).toStrictEqual({ unaudited: [], naming: [] });
   });
 

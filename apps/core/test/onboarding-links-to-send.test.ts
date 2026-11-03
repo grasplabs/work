@@ -3,15 +3,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // The links the company's admin takes to send themselves (GRA-357), over
 // `/rpc`: everyone who takes part, with their own link once it is out, and
@@ -45,12 +39,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 /** The leads' links, and a team without a lead, go out at once. */
 const started = async () => {
   const { api, userId } = await signedInApi(idp, "admin");
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  const staff = core.authenticate();
   await api.onboarding.saveRoster(roster);
   await api.onboarding.savePlan({ start: today() });
-  await staff.onboardingStaff.setAgreements({
+  await adminCommands().setAgreements({
     processing: true,
     assessment: true,
     council: "none",

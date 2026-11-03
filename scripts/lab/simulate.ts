@@ -8,6 +8,7 @@
  */
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 
+import { adminCommand } from "../seed/admin-command.ts";
 import { inTurns, linkOn, linksOf } from "./core.ts";
 import type { Core } from "./core.ts";
 import type { AnswerKey } from "./keys/types.ts";
@@ -42,7 +43,10 @@ const deviceKey = async (
 ): Promise<string | null | undefined> => {
   let session = await link.open(person.key);
   if (session.state === "elsewhere") {
-    await core.session.api.onboardingStaff.newStart(person.id);
+    await adminCommand({
+      type: "onboarding.new_start",
+      payload: { person: person.id },
+    });
     session = await link.open();
   }
   if (session.state === "elsewhere") {

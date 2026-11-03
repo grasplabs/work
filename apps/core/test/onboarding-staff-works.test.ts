@@ -13,44 +13,31 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
-import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
-  openRpc,
   outcome,
   routed,
-  signedIn,
-  signedInApi,
-  staffPerson,
   unique,
   withSignIn,
 } from "./sign-in.ts";
 
-// Every piece of work for Grasp's staff (GRA-377, staff-rpc.ts): as drawn
-// from what its people agreed to, with the organization's own rules for
-// when one is known, counted as known by hand, and drawn again. The model
-// provider is the outside system, faked behind connect. The ways it can
-// fail, tried here:
+// Every piece of work for Grasp's staff (GRA-377), as Grasp's admin reads
+// it in the snapshot and steers it with commands: as drawn from what its
+// people agreed to, with the organization's own rules for when one is
+// known, counted as known by hand, and drawn again. The model provider is
+// the outside system, faked behind connect. The ways it can fail, tried
+// here:
 //
-// - Anyone but staff reading what people agreed to, or changing how far
-//   the work is known: a member, the company's admin.
 // - A read of what people said, by name, without a trace in the audit
 //   log; or a trace that names them.
 // - Each person's numbers merged into one on the way out.
 // - Counting by hand hiding a difference nobody can explain.
 // - Drawing again a piece of work nobody agreed to anything about.
 
-const idp = mockIdp();
 const dayMs = 24 * 60 * 60 * 1000;
 const sessionKey = z.object({ key: z.string().optional() });
-
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
 
 const fact = (id: string, record: string): InterviewFact => ({
   id,
@@ -205,32 +192,14 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
   // would draw outside them (`holdAlarm`).
   beforeEach(holdAlarm);
 
-  it("is staff's alone: a member and the company's admin reach none of it", async () => {
-    const { booking } = await drawn();
-    const { api: admin } = await signedInApi(idp, "admin");
-    const { api: user } = await signedInApi(idp, "user");
-    const refused = await Promise.all(
-      [admin, user].flatMap((api) => [
-        outcome(api.onboardingStaff.works()),
-        outcome(api.onboardingStaff.setRules(null)),
-        outcome(api.onboardingStaff.countAsKnown(booking, true)),
-        outcome(api.onboardingStaff.drawWorkAgain(booking)),
-      ])
-    );
-    expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
-  });
-
   it("shows staff each piece of work with each person's numbers apart and its open questions, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();
-    const staff = await asStaff();
 
     const reads: StaffWorks[] = [];
-    const events = await auditedDuring(
-      async () => {
-        reads.push(await staff.onboardingStaff.works());
-      },
-      { staffAccesses: true }
-    );
+    const events = await auditedDuring(async () => {
+      const { works } = await adminSnapshot();
+      reads.push(works);
+    });
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
     const numbers = (person: string) => {
@@ -266,8 +235,8 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       mia: [[60, 90], null, 1],
       open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,
-      // On record as a staff look (staff-audit.ts), naming no one.
-      audited: [["staff.accessed", "staff", undefined]],
+      // On record as the admin's read, naming no one.
+      audited: [["admin.snapshot.read", "staff", "organization"]],
       named: false,
     });
   });
@@ -318,7 +287,6 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
 
   it("knows a piece of work under the organization's own rules, and counts one as known by hand", async () => {
     const { ids, booking } = await drawn();
-    const staff = await asStaff();
     // Two of the three who do it talked: too few under the starting rules,
     // enough under rules that ask two and take any share of new facts.
     const starting = await knownOf(ids.team, booking);
@@ -335,7 +303,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     const reset = await knownOf(ids.team, booking);
     await adminCommands().countAsKnown(booking, true);
     const byHand = await knownOf(ids.team, booking);
-    const { counted } = await staff.onboardingStaff.works();
+    const {
+      works: { counted },
+    } = await adminSnapshot();
     await adminCommands().countAsKnown(booking, false);
     const left = await knownOf(ids.team, booking);
     expect({
@@ -370,7 +340,6 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
   it("draws a piece of work again when staff ask, and not one nobody agreed to anything about", async () => {
     const { booking, filing } = await drawn();
     const store = onboardingStore(env);
-    const staff = await asStaff();
     const before = await store.drawNext();
     await adminCommands().drawWorkAgain(booking);
     const again = reply({
@@ -381,7 +350,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       await store.drawNext(),
       await store.drawNext(),
     ]);
-    const { works } = await staff.onboardingStaff.works();
+    const {
+      works: { works },
+    } = await adminSnapshot();
     expect({
       before,
       result,
