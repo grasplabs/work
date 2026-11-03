@@ -18,6 +18,8 @@ import {
   says,
   setObjectEnv,
   testRunOpening,
+  toolResults,
+  toolStep,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
@@ -146,7 +148,8 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
  * building doesn't need but whose revocation ends what the agent does.
  */
 const setUp = async (
-  replies: ProviderReply[],
+  /** The model's replies, or those it gives about the released App. */
+  replies: ProviderReply[] | ((existing: string) => ProviderReply[]),
   role: "admin" | "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
@@ -156,7 +159,10 @@ const setUp = async (
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
   const others = { admin, builder };
   const person = role === "user" ? await signedInApi(idp, role) : others[role];
-  const chat = await chatOf(person.userId, ...replies);
+  const chat = await chatOf(
+    person.userId,
+    ...(typeof replies === "function" ? replies(existing) : replies)
+  );
   const grant = async () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
@@ -204,6 +210,57 @@ const slowFilesDuring = async (
   } finally {
     env.FILES = files;
     await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+  }
+};
+
+/** A gate one read of core's files waits at (`gatedFilesDuring`). */
+interface FilesGate {
+  /** Set once the read reached the gate. */
+  reached: boolean;
+  /** The read goes on once this is set. */
+  released: boolean;
+}
+
+/**
+ * Runs `during` with the first read of core's files whose key `gated`
+ * picks held at `gate` until it is released; every other read goes
+ * straight through. Plain flags, each side polling the other's: the read
+ * runs in another request's context, where a promise this test resolves
+ * would never settle. Set back however it ends.
+ */
+const gatedFilesDuring = async (
+  gated: (key: string) => boolean,
+  gate: FilesGate,
+  during: () => Promise<void>
+): Promise<void> => {
+  const { FILES: files } = env;
+  const held = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "get" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          const [key] = args;
+          if (!gate.reached && typeof key === "string" && gated(key)) {
+            gate.reached = true;
+            while (!gate.released) {
+              // oxlint-disable-next-line no-await-in-loop -- polls the gate
+              await scheduler.wait(20);
+            }
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  env.FILES = held;
+  try {
+    await during();
+  } finally {
+    gate.released = true;
+    env.FILES = files;
   }
 };
 
@@ -318,6 +375,15 @@ const changedSteps = (workflows: VersionReview["workflows"]) =>
     steps?.map(({ name, change, sharedCode }) => ({ name, change, sharedCode }))
   );
 
+/** The model renames the Ledger in its AGENTS.md, with `editFile`. */
+const editing = (app: string) =>
+  toolStep("editFile", {
+    app,
+    path: "AGENTS.md",
+    oldText: "# Ledger",
+    newText: "# Ledger desk",
+  });
+
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("repairs a restyled button without the person, in a draft nobody else sees, and puts nothing live", async () => {
     const { builder, person, chat, grant } = await setUp([
@@ -410,6 +476,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [draft, after] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(draft?.text)).toStrictEqual({
       base: 1,
+      revision: 1,
       changed: ["notes.md"],
       files: { "AGENTS.md": "# Ledger\n", "notes.md": "the agent's" },
     });
@@ -713,6 +780,219 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("writes and edits a draft's files with tools of their own, editing only a file it read, as its person's own build", async () => {
+    const { person, chat, existing } = await setUp((app) => [
+      editing(app),
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      editing(app),
+      toolStep("writeFile", {
+        app,
+        files: { "screens/desk.tsx": fixed, "notes.md": "Desk notes" },
+      }),
+      codeStep(`export default async (self, env) => {
+        const { files } = await env.build.files(${JSON.stringify(app)});
+        return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"], notes: files["notes.md"] };
+      };`),
+      says("Done."),
+      // The next question's edit, which the person's discard overtakes.
+      toolStep("editFile", {
+        app,
+        path: "AGENTS.md",
+        oldText: "# Ledger desk",
+        newText: "# Ledger book",
+      }),
+      says("It moved."),
+    ]);
+
+    await chat.ask("Name the desk, and add its screen");
+
+    const steps = await toolResults(chat.stub, chat.chat.id);
+    const [unread, read, edited, written, draft] = steps;
+    const events = await allEvents();
+    const writes = events.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chat.chat.id &&
+        detail.method === "build.write"
+    );
+    expect({
+      unread: [unread?.tool, unread?.isError],
+      unreadSays: unread?.text.includes("Read AGENTS.md with readFile"),
+      read: [read?.tool, read?.isError, read?.text.includes("# Ledger")],
+      edited: [edited?.tool, edited?.isError],
+      written: [written?.tool, written?.isError],
+      draft: returned(draft?.text),
+      // Each write the person's own, by the agent acting for them.
+      writes: writes.map(({ actor, detail }) => [actor, detail.outcome]),
+    }).toStrictEqual({
+      unread: ["editFile", true],
+      unreadSays: true,
+      read: ["readFile", false, true],
+      edited: ["editFile", false],
+      written: ["writeFile", false],
+      draft: { agents: "# Ledger desk\n", desk: fixed, notes: "Desk notes" },
+      writes: Array.from({ length: 2 }, () => [
+        {
+          type: "agent",
+          agentId: chat.agent.agentId,
+          onBehalfOf: person.userId,
+        },
+        "ok",
+      ]),
+    });
+
+    // The person discards the draft while an edit has read it and not
+    // yet written: the edit is refused, and the discard stands.
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    // The edit's read of the App's files waits at this gate, after it read
+    // the draft's revision and before it writes.
+    const gate: FilesGate = { reached: false, released: false };
+    await gatedFilesDuring(
+      (key) => key.startsWith(`apps/${existing}/trees/`),
+      gate,
+      async () => {
+        const reply = chat.ask("Call it the Ledger book");
+        await vi.waitFor(
+          () => {
+            expect(gate.reached).toBeTruthy();
+          },
+          { timeout: 15_000, interval: 20 }
+        );
+        await chat.stub.discardDraft(chatId, person.userId, existing, {
+          type: "person",
+          userId: person.userId,
+        });
+        gate.released = true;
+        await reply;
+      }
+    );
+    const results = await toolResults(chat.stub, chatId);
+    const overtaken = results.at(-1);
+    const { changes } = await chat.stub.draft(chatId, existing);
+    expect({
+      overtaken: [overtaken?.tool, overtaken?.isError],
+      conflict: overtaken?.text.includes(
+        appErrors.create("app.conflict").message
+      ),
+      draft: changes,
+    }).toStrictEqual({
+      overtaken: ["editFile", true],
+      conflict: true,
+      draft: {},
+    });
+  });
+
+  it("searches a draft's files in a folder or all of them, ignoring case, up to a hundred lines and how many more", async () => {
+    const many = Array.from({ length: 105 }, () => "an alpha line").join("\n");
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: {
+          "screens/a.tsx": "Alpha\nbeta\nalphabet",
+          "screens/b.tsx": "ALPHA",
+          "screensaver.md": "alpha",
+          "operations/x.ts": "alpha",
+          "many.md": many,
+        },
+      }),
+      toolStep("searchFiles", { app, text: "aLpHa", path: "screens" }),
+      toolStep("searchFiles", { app, text: "an alpha" }),
+      toolStep("readFile", { app, path: "screens/a.tsx" }),
+      toolStep("readFile", { app, path: "many.md", fromLine: 104 }),
+      says("Found."),
+    ]);
+
+    await chat.ask("Where does alpha come up?");
+
+    const [, inFolder, everywhere, whole, end] = await toolResults(
+      chat.stub,
+      chat.chat.id
+    );
+    const capped = z
+      .object({ matches: z.array(z.string()), leftOut: z.number() })
+      .parse(returned(everywhere?.text));
+    expect({
+      inFolder: returned(inFolder?.text),
+      capped: [capped.matches.length, capped.leftOut, capped.matches[0]],
+      // A file as its own text, whole or in part, saying which part.
+      whole: whole?.text,
+      end: end?.text,
+    }).toStrictEqual({
+      // Not `screensaver.md`, which only starts like the folder.
+      inFolder: {
+        matches: [
+          "screens/a.tsx:1:Alpha",
+          "screens/a.tsx:3:alphabet",
+          "screens/b.tsx:1:ALPHA",
+        ],
+      },
+      capped: [100, 5, "many.md:1:an alpha line"],
+      whole: "Returned:\nAlpha\nbeta\nalphabet",
+      end: "Returned:\nan alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]",
+    });
+  });
+
+  it("refuses a write of more files than one call takes in a few words, without its files", async () => {
+    const content = "x".repeat(1000);
+    const { chat, existing } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: Object.fromEntries(
+          Array.from({ length: 51 }, (_, at) => [`notes/${at}.md`, content])
+        ),
+      }),
+      says("Too many."),
+    ]);
+
+    await chat.ask("Write fifty-one notes");
+
+    const [refused] = await toolResults(chat.stub, chat.chat.id);
+    const { changes } = await chat.stub.draft(
+      chatIdSchema.parse(chat.chat.id),
+      existing
+    );
+    expect({
+      refused: refused?.isError,
+      short: (refused?.text.length ?? Infinity) < 500,
+      quotes: refused?.text.includes(content),
+      says: refused?.text.startsWith("writeFile refused its input:"),
+      changes,
+    }).toStrictEqual({
+      refused: true,
+      short: true,
+      quotes: false,
+      says: true,
+      changes: {},
+    });
+  });
+
+  it("refuses a file write for someone who doesn't build the App, as it refuses their code", async () => {
+    const { chat } = await setUp(
+      (app) => [
+        toolStep("writeFile", { app, files: { "a.md": "a" } }),
+        codeStep(
+          tryEach({
+            write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" })`,
+          })
+        ),
+        says("No."),
+      ],
+      "user"
+    );
+
+    await chat.ask("Change the Ledger");
+
+    const [tool, code] = await toolResults(chat.stub, chat.chat.id);
+    const refused = appErrors.create("app.not_found").message;
+    expect({
+      tool: [tool?.isError, tool?.text.includes(refused)],
+      code: returned(code?.text),
+    }).toStrictEqual({
+      tool: [true, true],
+      code: { write: refused },
+    });
+  });
+
   it("writes no App code from a restricted chat, though building needs no grant", async () => {
     const calls = tryEach({
       create: `(await env.build.create({ name: "Refused" })).name`,
@@ -755,6 +1035,43 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await expect(
       chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
     ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+  });
+
+  it("lands no file write the person stopped while it was under way", async () => {
+    const { chat, existing } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: { "screens/late.tsx": "export default () => null;" },
+      }),
+      says("Never asked."),
+    ]);
+
+    // The write is let in at once, then waits on the App's files while the
+    // person presses Stop: refused as it commits.
+    await slowFilesDuring(chat.stub, async () => {
+      const reply = chat.ask("Write it.");
+      await vi.waitFor(
+        async () => {
+          await expect(
+            transcript(chat.stub, chat.chat.id)
+          ).resolves.toHaveLength(3);
+        },
+        { timeout: 10_000 }
+      );
+      await chat.stub.cancel(chat.chat.id, chat.personId);
+      await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
+    });
+
+    const [written] = await toolResults(chat.stub, chat.chat.id);
+    expect({
+      written: [written?.tool, written?.isError],
+      cancelled: written?.text.startsWith("Error (cancelled)"),
+      draft: await chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing),
+    }).toStrictEqual({
+      written: ["writeFile", true],
+      cancelled: true,
+      draft: { base: null, changes: {}, revision: 0 },
+    });
   });
 
   it("commits no proposal whose run ran out of time while it was checked", async () => {

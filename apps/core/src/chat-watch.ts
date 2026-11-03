@@ -54,6 +54,7 @@ export const partialUpdate = (
       );
       return { callId, from: step.from, code: step.added };
     }),
+    tools: now.tools,
   };
 };
 

@@ -80,6 +80,9 @@ catalog:
   "@better-auth/sso": 1.7.14
   "@earendil-works/pi-agent-core": 1.4.0
   "@earendil-works/pi-ai": 1.4.0
+  # TypeBox, as pi-ai uses it: the schemas of the chat agent's tools
+  # (apps/core/src/agent-tools.ts) checked without echoing their input.
+  typebox: 1.3.27
   "@modelcontextprotocol/sdk": 1.32.2
   better-auth: 1.7.14
   # The admin's Cloudflare Access check.
