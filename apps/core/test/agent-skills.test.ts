@@ -30,8 +30,8 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 // GRA-310), through the chat, as its agent uses them. The ways they could
 // fail, tried here at core's boundary (the Brain's own tests try every
 // rule, packages/brain/test/skills.test.ts):
-// - an agent without the brain permission, or without read of the skills'
-//   collection, selects or reads a skill;
+// - a chat selects or reads a skill in a collection its person can't read
+//   (a person's own chat reads what they may read, with no grant);
 // - a skill is selected whose required capability the agent doesn't hold,
 //   or isn't for one it holds by a grant of the calling chat's alone; a
 //   capability core names can't be required at all;
@@ -96,7 +96,7 @@ const resultOf = (value: unknown) => {
 };
 
 describe("a chat's skills", setUpTime, () => {
-  it("selects a skill only under the agent's grants, pins it, and reads that version after it is retired, until its read is revoked", async () => {
+  it("selects a skill its person may read with no grant, pins it, and reads that version after it is retired", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const knowledge: KnowledgeApi = admin.api.knowledge;
@@ -126,34 +126,13 @@ describe("a chat's skills", setUpTime, () => {
     );
     const { stub, agent, newChat } = await personalChatsOf(
       person.userId,
-      // Before any grant.
-      select("refund"),
-      says("No skills."),
-      // Granted the brain and the collection.
       select("refund"),
       select("payout"),
       says("Selected."),
       // The skill retired since.
       select("refund"),
       read,
-      says("Pinned."),
-      // Its collection's read revoked.
-      read,
-      says("Gone.")
-    );
-    const ungranted = await newChat();
-    await ungranted.ask("How do I refund?");
-
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const collectionGrant = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId)
+      says("Pinned.")
     );
     const granted = await newChat();
     await granted.ask("How do I refund, and pay out?");
@@ -167,20 +146,12 @@ describe("a chat's skills", setUpTime, () => {
     const retired = await newChat();
     await retired.ask("And now?");
 
-    await admin.api.permissions.revoke(collectionGrant);
-    const revoked = await newChat();
-    await revoked.ask("And now?");
-
-    // Each turn under the brain grant recalls for its question first: the
-    // last steps of each are this test's calls.
     const last = async (chatId: string, count: number) => {
       const results = await codeResults(stub, chatId);
       return results.slice(-count).map(({ text }) => returned(text));
     };
-    const [before] = await last(ungranted.chat.id, 1);
     const [refund, payout] = await last(granted.chat.id, 2);
     const [afterRetiring, pinned] = await last(retired.chat.id, 2);
-    const [afterRevoking] = await last(revoked.chat.id, 1);
     const pinnedRead = readSchema.parse(pinned);
 
     // Recorded by the Brain: what was selected, never the skill's text.
@@ -200,7 +171,6 @@ describe("a chat's skills", setUpTime, () => {
     );
 
     expect({
-      before: typeof before === "string" && before.length > 0,
       refund: resultOf(refund),
       payout: resultOf(payout),
       afterRetiring: resultOf(afterRetiring),
@@ -208,20 +178,16 @@ describe("a chat's skills", setUpTime, () => {
         version: pinnedRead.skill.version,
         retired: pinnedRead.text.includes("retired"),
       },
-      afterRevoking,
       selections: selections.map(({ detail }) => ({
         result: detail.result,
         reason: detail.reason,
       })),
       texts: JSON.stringify(selections).includes("Check the order first"),
     }).toStrictEqual({
-      before: true,
       refund: { skill: "refunds", version: 1 },
       payout: { none: "no_match" },
       afterRetiring: { none: "no_match" },
       pinned: { version: 1, retired: false },
-      afterRevoking:
-        "There's no such memory, source or receipt, or you can't see it.",
       selections: [
         { result: "skill", reason: null },
         { result: "none", reason: "no_match" },
@@ -366,7 +332,7 @@ describe("a chat's skills", setUpTime, () => {
     }).toStrictEqual({ count: 4, rejected: [] });
   });
 
-  it("keeps what a skill read rests on with the chat: once the agent may no longer read its collection, the read is withheld from every later request", async () => {
+  it("keeps what a skill read rests on with the chat: once it is gone, the read is withheld from every later request", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const { id: collectionId } = await admin.api.knowledge.createCollection({
@@ -383,7 +349,7 @@ describe("a chat's skills", setUpTime, () => {
       ),
       ifVersion: 0,
     });
-    const { provider, ask, agent } = await chatOf(
+    const { provider, ask } = await chatOf(
       person.userId,
       calling(
         `env.brain.skillsRead({ documentId: "${skill.id}", version: 1 }).then(({ text }) => text)`
@@ -392,23 +358,14 @@ describe("a chat's skills", setUpTime, () => {
       says("Hello again."),
       says("Still here.")
     );
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const grant = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId)
-    );
 
-    // Words no section holds: the turn's own recall finds nothing to quote.
     await ask("Zebras?");
     await ask("Giraffes?");
     const before = provider.requests.length;
-    await admin.api.permissions.revoke(grant);
+    // Erased from the Brain, as a purge erases it.
+    await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+      .bind(skill.id)
+      .run();
     await ask("Okapis?");
 
     const sent = provider.requests.map(({ body }) => JSON.stringify(body));

@@ -2025,8 +2025,9 @@ export class Workspace extends DurableObject<Env> {
         loader: quietLoader(this.env.LOADER),
         sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
-        // The Brain's recall before the first request, under the agent's
-        // own grant, as its code would recall (GRA-1029).
+        // The Brain's recall before the first request, as its code would
+        // recall (GRA-1029), once an admin granted the agent the brain; its
+        // code reads the brain without one (knowledge/access.ts `isOwnChat`).
         recallFirst: readsBrain,
         ...(await this.#thinking(readsBrain, shared, personId)),
         signal: cancel.signal,

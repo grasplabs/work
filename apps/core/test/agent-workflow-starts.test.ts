@@ -1,8 +1,4 @@
-import {
-  collectionIdSchema,
-  chatIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
+import { chatIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
@@ -20,7 +16,8 @@ import { openTestRun, personalChatsOf } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { newTeam } from "./knowledge.ts";
+import { callAuth, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A chat's agent asking to start an independent workflow
 // (agent-workflows.ts, `start`; held-starts.ts), from its threat model:
@@ -584,26 +581,18 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     });
   });
 
-  it("holds a confirmed start to what its chat had read: refused once the agent may no longer read it", async () => {
+  it("holds a confirmed start to what its chat had read: refused once its person may no longer read it", async () => {
     const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const { workflow, builder } = await workflowFor(person.userId);
     const chats = await personalChatsOf(person.userId);
     await grantStart(builder, chats.agent.agentId, workflow.id);
     const { chatId, inRun } = await chatOf(chats, person);
+    const teamId = await newTeam(admin, [person]);
     const { id: handbook } = await admin.api.knowledge.createCollection({
       name: `Handbook ${unique()}`,
-      access: "everyone",
-      sensitive: false,
-    });
-    const readId = await requestGranted(idp, builder, {
-      subject: { type: "agent", agentId: chats.agent.agentId },
-      object: {
-        type: "collection",
-        collectionId: collectionIdSchema.parse(handbook),
-      },
-      actions: ["read"],
-      binding: `HANDBOOK_${unique().toUpperCase().replaceAll("-", "_")}`,
+      access: "teams",
+      teams: [teamId],
     });
     // What the chat had read before its agent asked.
     await runInDurableObject(chats.stub, (_object, state) => {
@@ -628,7 +617,11 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     };
 
     const kept = await confirmedRun("kept");
-    await admin.api.permissions.revoke(readId);
+    // The person leaves the team: the handbook is no longer theirs.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
     const revoked = await confirmedRun("revoked");
     const pinned = await env.DB.prepare(
       "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
@@ -639,7 +632,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     expect({ kept, revoked, pinned: pinned.results }).toStrictEqual({
       // Its chat's reads still readable: it runs to its end.
       kept: { status: "completed", code: null },
-      // The agent's read of what its chat read revoked: its output, which
+      // Its person's read of what its chat read gone: its output, which
       // its input may have carried, never leaves it.
       revoked: { status: "failed", code: "brain.revoked" },
       pinned: [{ source: handbook, chat: chatId }],

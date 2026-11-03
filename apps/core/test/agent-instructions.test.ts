@@ -172,17 +172,8 @@ describe("a chat's instructions and memory", setUpTime, () => {
       text: "# A note",
       ifVersion: 0,
     });
+    // No grant: a person's own chat lists the skills they may read.
     const { ask, agent, chat } = await chatOf(person.userId, says("Hi."));
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, withSkill.id, "SKILLS")
-    );
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, withoutSkill.id, "NOTES")
-    );
 
     const answer = await ask("Hi.");
 
@@ -202,20 +193,24 @@ describe("a chat's instructions and memory", setUpTime, () => {
       },
       { timeout: 10_000, interval: 50 }
     );
+    // Other tests' skills it may read are listed too: only these count.
+    const { skills: _skills, ...detail } = read?.detail ?? {};
     expect({
       sources: {
         skills: answer.provenance.sources.includes(withSkill.id),
         notes: answer.provenance.sources.includes(withoutSkill.id),
       },
       read: {
-        provenance: read?.provenance,
-        detail: read?.detail,
+        provenance: [withSkill.id, skill.id, withoutSkill.id].map((id) =>
+          read?.provenance?.includes(id)
+        ),
+        detail,
       },
     }).toStrictEqual({
       sources: { skills: true, notes: false },
       read: {
-        provenance: [withSkill.id, skill.id],
-        detail: { read: "skills", skills: 1, sensitive: false, chat: chat.id },
+        provenance: [true, true, false],
+        detail: { read: "skills", sensitive: false, chat: chat.id },
       },
     });
   });
@@ -294,11 +289,15 @@ describe("a chat's instructions and memory", setUpTime, () => {
       },
       { timeout: 10_000, interval: 50 }
     );
-    expect(turns.map(({ detail }) => detail)).toStrictEqual(
+    // What it lists is whatever other tests left the person to read.
+    expect(
+      turns.map(
+        ({ detail: { collections: _collections, skills: _skills, ...rest } }) =>
+          rest
+      )
+    ).toStrictEqual(
       Array.from({ length: 2 }, () => ({
         method: "knowledge.catalog",
-        collections: 0,
-        skills: 0,
         turn: true,
         chat: chat.id,
         outcome: "ok",

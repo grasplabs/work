@@ -1,17 +1,21 @@
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 
-import { grantedPermissions } from "../permissions.ts";
+import { grantedPermissions, requireActivePerson } from "../permissions.ts";
+import { isOwnChat } from "./access.ts";
 import type { Reader } from "./access.ts";
 
 // Who may recall, as core decides it: Knowledge's `recall` port
-// (ports.ts). A person recalls what they may read; an App, run or agent
-// only under an active `brain` grant, from the collections it was granted.
+// (ports.ts). A person recalls what they may read, and so does the agent
+// of their own chat (`isOwnChat`): the chat is their tool. An App, a run,
+// or an agent in a chat others share, only under an active `brain` grant,
+// from the collections it was granted.
 
 /**
  * Whether `authority` holds an active `brain` grant, read now: what an
- * App, run or agent needs to recall. A chat asks it before recalling for
- * a question (agent.ts), and recall asks it again as it reads.
+ * App, run or agent in a chat others share needs to recall. In a person's
+ * own chat, which reads the Brain without one, it is what has the chat
+ * recall before each question (workspace.ts, agent.ts).
  */
 export const hasBrainGrant = async (
   env: Env,
@@ -24,12 +28,19 @@ export const hasBrainGrant = async (
   );
 };
 
-/** Refuses, as `brain.denied`, an App, run or agent without a `brain` grant. */
+/**
+ * Refuses, as `brain.denied`, an App, run or agent without a `brain`
+ * grant; a person's own chat needs none, only its person still a member.
+ */
 export const requireRecall = async (
   env: Env,
   reader: Reader
 ): Promise<void> => {
   if (reader.type === "person") {
+    return;
+  }
+  if (await isOwnChat(env, reader)) {
+    await requireActivePerson(env, reader.authority);
     return;
   }
   if (!(await hasBrainGrant(env, reader.authority))) {

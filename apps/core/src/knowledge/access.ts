@@ -26,7 +26,7 @@ import {
   teamMembers,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { grantedPermissions } from "../permissions.ts";
+import { grantedPermissions, requireActivePerson } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 
@@ -40,9 +40,10 @@ import type { WorkContext } from "../restricted.ts";
 // they own. An App or agent reads the collections it has a permission to
 // read, never a personal one, and of those only the ones the person it
 // acts for may read too
-// (R5): a grant never reaches past that person. The one exception is an
-// agent's memory (`readableForPerson`), which reads what the person may
-// read, without a grant, and only their memory files. What anyone reads is
+// (R5): a grant never reaches past that person. The exceptions read what
+// the person may read, without a grant: an agent's memory
+// (`readableForPerson`), only their memory files, and the agent of a
+// person's own chat (`isOwnChat`), their own tool. What anyone reads is
 // marked with where it came from and recorded in the audit log, and
 // restricted data puts the chat or App an App or agent works in in
 // restricted mode (`noteProvenance`).
@@ -358,13 +359,50 @@ const grantedToRead = async (
   return ids;
 };
 
+/**
+ * The collections the person `userId` may read themselves, their teams
+ * read now, as a condition on `collections`, but never one for admins: what
+ * an agent reads without a permission, in the contexts that are that
+ * person's own (their memory, memory.ts; their own chat, `isOwnChat`).
+ */
+export const readableForPerson = async (
+  env: Env,
+  db: DrizzleD1Database,
+  userId: string
+): Promise<SQL> => {
+  const teams = await teamsOf(env.DB, userId);
+  return await readableBy(env, {
+    userId,
+    teamIds: teams.map(({ id }) => id),
+    admin: false,
+  });
+};
+
+/**
+ * Whether `reader` is the agent of a person's own chat: the organization's
+ * agent, in a chat nobody else shares. The chat is the person's own tool,
+ * as an assistant they use themselves is: it reads what they may read,
+ * with no grant (`collectionsAllowed`, the Brain's recall in
+ * recall-grants.ts). Still as a delegate, so what it reads restricts the
+ * chat and is recorded as the agent's for them. An App, a run, a chat
+ * others share, and a stub built from a grant (`permissionId`) read only
+ * under grants.
+ */
+export const isOwnChat = async (env: Env, reader: Reader): Promise<boolean> =>
+  reader.type === "delegate" &&
+  reader.permissionId === undefined &&
+  reader.authority.subject.type === "agent" &&
+  reader.context.type === "chat" &&
+  (await audienceOf(env, reader.context)) === undefined;
+
 /** The collections a reader may read, and for a delegate, those granted. */
 export interface CollectionsAllowed {
   /** A condition on `collections`. */
   condition: SQL;
   /**
    * The collections an App or agent is granted to read, read now (every
-   * collection's own rule applies on top); undefined for a person.
+   * collection's own rule applies on top); undefined for a person and
+   * a person's own chat, which need none.
    */
   granted: readonly string[] | undefined;
   /**
@@ -376,7 +414,9 @@ export interface CollectionsAllowed {
 
 /**
  * The collections `reader` may read (`condition`), and those an App or
- * agent is granted.
+ * agent is granted. A person's own chat reads what its person may read
+ * (`isOwnChat`): their own, their teams' and everyone's collections, but
+ * not one for admins, which agents never read.
  */
 export const collectionsAllowed = async (
   env: Env,
@@ -396,6 +436,14 @@ export const collectionsAllowed = async (
     };
   }
   const { authority, permissionId, context } = reader;
+  if (await isOwnChat(env, reader)) {
+    await requireActivePerson(env, authority);
+    return {
+      condition: await readableForPerson(env, db, authority.onBehalfOf),
+      granted: undefined,
+      shared: false,
+    };
+  }
   const [granted, audience] = await Promise.all([
     grantedToRead(env, authority, permissionId),
     audienceCondition(env, context),
@@ -436,27 +484,6 @@ export const allowedCollections = async (
 ): Promise<SQL> => {
   const { condition } = await collectionsAllowed(env, db, reader);
   return condition;
-};
-
-/**
- * The collections the person `userId` may read themselves, their teams
- * read now, as a condition on `collections`. Only for memory (memory.ts):
- * an agent's memory is the person's own files and the company's, which it
- * gets without a permission, in the contexts that are that person's own.
- * Every other read by an App or agent goes through `allowedCollections`.
- */
-export const readableForPerson = async (
-  env: Env,
-  db: DrizzleD1Database,
-  userId: string
-): Promise<SQL> => {
-  const teams = await teamsOf(env.DB, userId);
-  // Memory is the person's own files and the company's: never admins'.
-  return await readableBy(env, {
-    userId,
-    teamIds: teams.map(({ id }) => id),
-    admin: false,
-  });
 };
 
 /** Who read, as the audit log names them. */

@@ -1379,8 +1379,8 @@ const buildDeclaration = `/**
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
- * this. A visitor's call can't tell anyone. Read the SDK's types for the
- * rest.
+ * this. A visitor's call can't tell anyone. For the rest, \`check\`
+ * type-checks against the SDK and names what doesn't fit.
  *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths

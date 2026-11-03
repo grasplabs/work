@@ -87,7 +87,7 @@ const reading = (read: string) =>
   );
 
 describe("a chat's entity and relation reads", setUpTime, () => {
-  it("read what the chat's sources say, each with its passage, once the agent holds the brain permission", async () => {
+  it("read what the chat's sources say, each with its passage, with no grant", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const thing = `Onboarding ${unique()}`;
@@ -111,31 +111,19 @@ describe("a chat's entity and relation reads", setUpTime, () => {
         ],
       }
     );
-    const { stub, agent, newChat } = await personalChatsOf(
+    const { stub, newChat } = await personalChatsOf(
       person.userId,
-      readRelations(thing),
-      says("I can't read the brain."),
       readApiStep("brain"),
       readRelations(thing),
       says("Anna owns it."),
       listEverything,
       says("I need a name.")
     );
-    await requestGranted(idp, admin, readCollection(agent, collectionId));
-    const before = await newChat();
-    await before.ask("Who owns onboarding?");
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const after = await newChat();
     await after.ask("Who owns onboarding?");
     const listing = await newChat();
     await listing.ask("Who do you know?");
 
-    const [refused] = await codeResults(stub, before.chat.id);
     const reads = await codeResults(stub, after.chat.id);
     const listings = await codeResults(stub, listing.chat.id);
     const relations: unknown = JSON.parse(
@@ -153,11 +141,8 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       )
       .join("");
 
-    expect({
-      refused: refused?.text.includes("may not use that part of the Brain"),
-      // No list of every name for a caller that isn't a person.
-      listed: listings.at(-1)?.text,
-    }).toStrictEqual({ refused: true, listed: "Returned:\nbrain.invalid" });
+    // No list of every name for a caller that isn't a person.
+    expect(listings.at(-1)?.text).toBe("Returned:\nbrain.invalid");
     // The declaration says the shape the call answers with.
     expect(declared).toContain(
       "Promise<{ relations: Relation[]; truncated: boolean }>"

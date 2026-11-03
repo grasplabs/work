@@ -43,11 +43,12 @@ import {
 } from "./sign-in.ts";
 
 // `env.knowledge` in a chat's code: the chat's agent reading Knowledge for
-// its person. These tests start from the ways it can fail: the agent reads
-// a collection it wasn't granted, or one its person can't read (R5); a
-// read leaves no trace in the audit log; and what one turn read reaches a
-// model in a later turn, or after a restart, that the client's rules
-// forbid for it, because the chat forgot it had read it.
+// its person. A person's own chat is their tool: it reads what they may
+// read, with no grant. These tests start from the ways it can fail: the
+// agent reads a collection its person can't read (R5); a read leaves no
+// trace in the audit log; and what one turn read reaches a model in a
+// later turn, or after a restart, that the client's rules forbid for it,
+// because the chat forgot it had read it.
 
 const idp = mockIdp();
 
@@ -162,7 +163,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       ),
       says("Sixteen weeks (Handbook, leave.md).")
     );
-    await grantRead(admin, agent, collectionId);
 
     const reply = await ask("How long is parental leave?");
 
@@ -241,13 +241,14 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
   });
 
-  it("can't read a collection the agent wasn't granted, or one its person can't read", async () => {
+  it("reads what its person may read with no grant, never a collection they can't", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const teamId = await newTeam(admin, []);
-    const [granted, notGranted, team] = await Promise.all([
-      collectionWithNote(admin, { name: "Granted", access: "everyone" }),
-      collectionWithNote(admin, { name: "Not granted", access: "everyone" }),
+    const [everyone, theirs, team] = await Promise.all([
+      collectionWithNote(admin, { name: "Everyone", access: "everyone" }),
+      // Another person's own.
+      collectionWithNote(admin, { name: "Theirs", access: "me" }),
       // A team the chat's person isn't in.
       collectionWithNote(admin, {
         name: "Team",
@@ -255,7 +256,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         teams: [teamId],
       }),
     ]);
-    const ids = [granted.noteId, notGranted.noteId, team.noteId];
+    const ids = [everyone.noteId, theirs.noteId, team.noteId];
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
       codeStep(
@@ -276,24 +277,37 @@ describe("a chat's Knowledge", setUpTime, () => {
       ),
       says("Done.")
     );
-    await grantRead(admin, agent, granted.collectionId);
+    // A grant for a collection the person can't read reaches none of it.
     await grantRead(admin, agent, team.collectionId);
 
     await ask("What can you read?");
 
     const [result] = await codeResults(stub, chat.id);
     const notFound = knowledgeErrors.create("knowledge.not_found").message;
-    expect(result?.text).toBe(
-      `Returned:\n${JSON.stringify({
-        catalog: [granted.collectionId],
-        found: [granted.collectionId],
-        reads: [
-          ["ok", "ok"],
-          [notFound, notFound],
-          [notFound, notFound],
-        ],
-      })}`
-    );
+    const read = z
+      .object({
+        catalog: z.array(z.string()),
+        found: z.array(z.string()),
+        reads: z.array(z.array(z.string())),
+      })
+      .parse(JSON.parse(result?.text.replace(/^Returned:\n/u, "") ?? ""));
+    const mine = (collections: string[]) =>
+      [everyone, theirs, team].flatMap(({ collectionId }, index) =>
+        collections.includes(collectionId) ? [index] : []
+      );
+    expect({
+      catalog: mine(read.catalog),
+      found: mine(read.found),
+      reads: read.reads,
+    }).toStrictEqual({
+      catalog: [0],
+      found: [0],
+      reads: [
+        ["ok", "ok"],
+        [notFound, notFound],
+        [notFound, notFound],
+      ],
+    });
     // The catalog, which Knowledge doesn't record, is recorded as a call.
     const events = await eventsOf(agent.agentId, (all) =>
       all.some(
@@ -307,12 +321,12 @@ describe("a chat's Knowledge", setUpTime, () => {
           ({ action, detail }) =>
             action === "agent.call" && detail.turn !== true
         )
-        .map(({ detail }) => detail)
+        // The skills of every test's collections the person may read.
+        .map(({ detail: { skills: _skills, ...detail } }) => detail)
     ).toStrictEqual([
       {
         method: "knowledge.catalog",
-        collections: 1,
-        skills: 0,
+        collections: read.catalog.length,
         chat: chat.id,
         outcome: "ok",
         reason: null,
@@ -335,7 +349,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       says("Note."),
       says("Still here.")
     );
-    await grantRead(admin, agent, collectionId);
 
     await ask("Read the note.");
     await ask("And now?");
@@ -352,7 +365,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     ).toStrictEqual([[], [collectionId], [collectionId], [collectionId]]);
   });
 
-  it("reads in every chat of the workspace under one grant, each chat keeping its own sources", async () => {
+  it("reads in every chat of its person, each chat keeping its own sources", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const { collectionId, noteId } = await collectionWithNote(admin, {
@@ -371,8 +384,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       says("Note here too.")
     );
     const other = await stub.createChat("Other", person.userId, agent.agentId);
-    // Granted once, to the workspace's agent.
-    await grantRead(admin, agent, collectionId);
 
     const first = await ask("Read the note.");
     // Another chat of the workspace hasn't read anything yet: its first
@@ -427,22 +438,24 @@ describe("a chat's Knowledge", setUpTime, () => {
     const owner = await newAdmin();
     const someoneElse = await newAdmin();
     const teamId = await newTeam(owner, []);
-    const granted = await overdueIn(owner, {
-      name: "Granted",
+    const everyone = await overdueIn(owner, {
+      name: "Everyone",
       access: "everyone",
     });
-    // The agent may not read it.
+    // Their own: their own chat reads it.
+    const own = await overdueIn(owner, {
+      name: "Own",
+      access: "me",
+    });
+    // Sensitive: never surfaced.
     await overdueIn(owner, {
-      name: "Not granted",
-      access: "everyone",
-    });
-    const sensitive = await overdueIn(owner, {
       name: "Sensitive",
       access: "teams",
       teams: [teamId],
       sensitive: true,
     });
-    const theirs = await overdueIn(someoneElse, {
+    // Someone else's: no signal of the person's own.
+    await overdueIn(someoneElse, {
       name: "Theirs",
       access: "everyone",
     });
@@ -455,21 +468,20 @@ describe("a chat's Knowledge", setUpTime, () => {
       ),
       says("One document is past its review date.")
     );
-    for (const collectionId of [granted, sensitive, theirs]) {
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await grantRead(owner, agent, collectionId);
-    }
 
     const reply = await ask("Anything I should look at?");
 
     const [result] = await codeResults(stub, chat.id);
+    const signals = z
+      .array(z.tuple([z.string(), z.string()]))
+      .parse(JSON.parse(result?.text.replace(/^Returned:\n/u, "") ?? ""));
     const events = await eventsOf(
       agent.agentId,
       (all) => modelCalls(all).length === 2
     );
     expect({
       reply,
-      result: result?.text,
+      result: signals.toSorted(([, a], [, b]) => a.localeCompare(b)),
       calls: events
         .filter(
           ({ action, detail }) =>
@@ -490,8 +502,10 @@ describe("a chat's Knowledge", setUpTime, () => {
         check: null,
         channelText: null,
       },
-      result: `Returned:\n${JSON.stringify([["overdue_review", granted]])}`,
-      calls: [{ method: "knowledge.signals", signals: 1, outcome: "ok" }],
+      result: [everyone, own]
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((id) => ["overdue_review", id]),
+      calls: [{ method: "knowledge.signals", signals: 2, outcome: "ok" }],
     });
   });
 
@@ -527,7 +541,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       ifVersion: 0,
     });
     const answer = `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see [Travel](grasp:note/${unread}), [Minutes](grasp:note/${secret}) and [nothing](grasp:note/not-a-document).`;
-    const { agent, newChat } = await personalChatsOf(
+    const { newChat } = await personalChatsOf(
       person.userId,
       // Before its code read anything: the note is read only after.
       says(`Let me look [Parental leave](grasp:note/${read}).`),
@@ -538,7 +552,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       // The same words in another chat of the person's, whose code read nothing.
       says(answer)
     );
-    await grantRead(admin, agent, collectionId);
     const reading = await newChat();
     await reading.ask("Parental leave?");
     await reading.ask("How long is parental leave?");
@@ -656,7 +669,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     /** Where the words `linked` start in the answer as it is stored and shown, its quotes left out. */
     const at = (linked: string): number =>
       answer.replaceAll(/ "[^"]*"\)/gu, ")").indexOf(`[${linked}]`);
-    const { ask, agent } = await chatOf(
+    const { ask } = await chatOf(
       person.userId,
       codeStep(
         `export default async (self, env) => { for (const id of ${JSON.stringify(ids)}) { await env.knowledge.read(id); } return "read"; };`
@@ -664,8 +677,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       says(answer),
       says(answer)
     );
-    await grantRead(admin, agent, handbook);
-    await grantRead(admin, agent, plans);
 
     const first = await ask(
       "When does the route depart, and how long is leave?"
@@ -743,12 +754,11 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
     const answer = `Sixteen weeks [Parental leave](grasp:note/${documentId}).`;
     const { reply, release } = pausedReply(says(answer), 1);
-    const { agent, provider, newChat } = await personalChatsOf(
+    const { provider, newChat } = await personalChatsOf(
       person.userId,
       codeStep(readCode(documentId)),
       reply
     );
-    await grantRead(admin, agent, collectionId);
     const { chat, ask } = await newChat();
 
     const turn = ask("How long is parental leave?");
@@ -815,20 +825,26 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
   });
 
-  it("withholds what an earlier turn read from every later request once its agent may no longer read it, and audits it once", async () => {
+  it("withholds what an earlier turn read from every later request once its person may no longer read it, and audits it once", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
     const secret = `CANARY-${unique()}`;
     const kept = `KEPT-${unique()}`;
     const [plans, handbook] = await Promise.all(
       [
-        { name: "Plans", text: `# Route plan\n\nDeparts ${secret}.` },
+        {
+          name: "Plans",
+          text: `# Route plan\n\nDeparts ${secret}.`,
+          teams: [teamId],
+        },
         { name: "Handbook", text: `# Leave\n\nLeave lasts ${kept}.` },
-      ].map(async ({ name, text }) => {
-        const { id: collectionId } = await admin.knowledge.createCollection({
-          name: `${name} ${unique()}`,
-          access: "everyone",
-        });
+      ].map(async ({ name, text, teams }) => {
+        const { id: collectionId } = await admin.knowledge.createCollection(
+          teams === undefined
+            ? { name: `${name} ${unique()}`, access: "everyone" }
+            : { name: `${name} ${unique()}`, access: "teams", teams }
+        );
         const { id: documentId } = await admin.knowledge.saveDocument({
           collectionId,
           path: "doc.md",
@@ -850,19 +866,17 @@ describe("a chat's Knowledge", setUpTime, () => {
       says("Still not."),
       says(`It departs ${secret}.`)
     );
-    const grant = async (collectionId: string) =>
-      await requestGranted(
-        idp,
-        admin,
-        readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
-      );
-    await grant(handbook?.collectionId ?? "");
-    const plansGrant = await grant(plans?.collectionId ?? "");
+    const membership = async (change: "add" | "remove") =>
+      await callAuth(`/organization/${change}-team-member`, admin.session, {
+        teamId,
+        userId: person.userId,
+      });
 
     await ask("How long is leave?");
     await ask("When does the route plan depart?");
     const beforeRevoke = provider.requests.length;
-    await admin.api.permissions.revoke(plansGrant);
+    // The person leaves the team: the plans are no longer theirs to read.
+    await membership("remove");
     await ask("And now?");
     await ask("And now?");
     const afterRevoke = provider.requests.slice(beforeRevoke - 1);
@@ -889,8 +903,8 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `Returned:\n# Route plan\n\nDeparts ${secret}.`,
     });
 
-    // Granted again, it may be sent again.
-    await grant(plans?.collectionId ?? "");
+    // Back in the team, it may be sent again.
+    await membership("add");
     await ask("And now?");
     expect(JSON.stringify(provider.requests.at(-1)?.body)).toContain(secret);
 
@@ -966,7 +980,6 @@ describe("a chat's Knowledge", setUpTime, () => {
       says("Found it."),
       says("Gone.")
     );
-    await grantRead(admin, agent, collectionId);
     await ask("What's the code?");
     await ask("Find the word.");
     const before = JSON.stringify(provider.requests.at(-1)?.body);
@@ -1029,7 +1042,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     // Reads the plan, then reads it again until it can't: the person left
     // the team meanwhile. Leaving a team revokes no permission, so the run
     // ends as it ran.
-    const { stub, provider, ask, agent } = await chatOf(
+    const { stub, provider, ask } = await chatOf(
       person.userId,
       codeStep(
         `export default async (self, env) => {
@@ -1043,11 +1056,6 @@ describe("a chat's Knowledge", setUpTime, () => {
         };`
       ),
       says(`It departs ${secret}.`)
-    );
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
     );
     const recorded = async () =>
       await runInDurableObject(
@@ -1080,10 +1088,12 @@ describe("a chat's Knowledge", setUpTime, () => {
   it("sends only the latest of its memory and skills: a skill it can no longer read never reaches the model again", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
     const marker = `SKILL-${unique()}`;
     const { id: collectionId } = await admin.knowledge.createCollection({
       name: `Handbooks ${unique()}`,
-      access: "everyone",
+      access: "teams",
+      teams: [teamId],
     });
     await admin.knowledge.saveDocument({
       collectionId,
@@ -1091,18 +1101,16 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `---\nname: route-check\ndescription: Check routes with ${marker}.\n---\n# Route check`,
       ifVersion: 0,
     });
-    const { provider, ask, agent } = await chatOf(
+    const { provider, ask } = await chatOf(
       person.userId,
       says("Noted."),
       says("Noted again.")
     );
-    const grant = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
-    );
     await ask("Hello.");
-    await admin.api.permissions.revoke(grant);
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
     await ask("Hello again.");
 
     expect(
@@ -1124,15 +1132,17 @@ describe("a chat's Knowledge", setUpTime, () => {
       (all) => modelCalls(all).length === 1
     );
     expect(
-      modelCalls(events).map(({ provenance }) => provenance)
-    ).toStrictEqual([[]]);
+      modelCalls(events).map(({ provenance }) =>
+        provenance?.includes("collection-1")
+      )
+    ).toStrictEqual([false]);
   });
 
-  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+  it("recalls for a chat with no grant, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    // Granted and readable by the person, but without the word.
+    // Readable by the person, but without the word.
     const { id: handbook } = await admin.knowledge.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
@@ -1143,7 +1153,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: "# Other\nNothing of it here.",
       ifVersion: 0,
     });
-    // Granted, holding the word, but a team's the person isn't in.
+    // Holding the word, but a team's the person isn't in.
     const team = await newTeam(admin, [admin]);
     const { id: teamOnly } = await admin.knowledge.createCollection({
       name: `Team ${unique()}`,
@@ -1156,7 +1166,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `# Plan\n${word}`,
       ifVersion: 0,
     });
-    // Readable by the person, holding the word, but never granted.
+    // Readable by the person, holding the word.
     const { id: ungranted } = await admin.knowledge.createCollection({
       name: `Ungranted ${unique()}`,
       access: "everyone",
@@ -1172,50 +1182,28 @@ describe("a chat's Knowledge", setUpTime, () => {
     const recallStep = codeStep(
       `export default async (self, env) => { const outcome = async (pending) => { try { const pack = await pending; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await ${asked()}, await ${asked([handbook])}, await ${asked([ungranted])}, await ${asked([teamOnly])}]; };`
     );
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       person.userId,
       recallStep,
-      says("Nothing."),
-      recallStep,
-      says("Still nothing."),
-      recallStep,
-      says("Refused.")
+      says("Nothing.")
     );
-    await grantRead(admin, agent, handbook);
-    await grantRead(admin, agent, teamOnly);
-    // Without the Brain permission: refused.
-    const before = await ask("What is the plan?");
-    const brainGrant = await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const after = await ask("What is the plan, now?");
-    // Revoked: refused again, from the next call.
-    await admin.api.permissions.revoke(brainGrant);
-    await ask("And now?");
+    // No grant: a person's own chat reads what they may read.
+    const { provenance } = await ask("What is the plan?");
     const results = await codeResults(stub, chat.id);
     expect({
       results: results.map(({ text }) => text),
-      before: before.provenance,
-      after: after.provenance,
+      read: [handbook, ungranted, teamOnly].map((id) =>
+        provenance?.sources.includes(id)
+      ),
+      restricted: provenance?.restricted,
     }).toStrictEqual({
-      results: [
-        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
-        // Once granted, the turn recalls for the question first: never
-        // from the plan its person can't read.
-        expect.not.stringContaining(word),
-        // Never wider than its grants, nor than what its person may read:
-        // naming either is refused as not found.
-        'Returned:\n[0,0,"brain.not_found","brain.not_found"]',
-        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
-      ],
-      before: { sources: [], restricted: false },
-      // The word is only in a collection the person can't read; the
-      // collection it was told to read is the chat's source even though
-      // nothing was found there.
-      after: { sources: [handbook], restricted: false },
+      // Never from the plan its person can't read: naming it is refused as
+      // not found.
+      results: ['Returned:\n[1,0,1,"brain.not_found"]'],
+      // Every collection it read is the chat's source, found or not, and
+      // never one the person can't read.
+      read: [true, true, false],
+      restricted: false,
     });
   });
 });
@@ -1289,7 +1277,6 @@ describe("a chat's recall before a question", setUpTime, () => {
       person.userId,
       says("Seven.")
     );
-    await grantRead(admin, agent, collectionId);
     await grantBrain(admin, agent);
 
     const reply = await ask(word);
@@ -1302,7 +1289,8 @@ describe("a chat's recall before a question", setUpTime, () => {
       inResult: request?.results.includes(fact),
       elsewhere: request?.rest.includes(fact),
       cites: result?.text.includes(documentId),
-      provenance: reply.provenance,
+      read: reply.provenance?.sources.includes(collectionId),
+      restricted: reply.provenance?.restricted,
     }).toStrictEqual({
       answer: "Seven.",
       // Answered from the evidence, without a search of its own.
@@ -1310,7 +1298,8 @@ describe("a chat's recall before a question", setUpTime, () => {
       inResult: true,
       elsewhere: false,
       cites: true,
-      provenance: { sources: [collectionId], restricted: false },
+      read: true,
+      restricted: false,
     });
     // Audited as the agent's recall: a read of what it returned.
     const events = await eventsOf(agent.agentId, (all) =>
@@ -1323,12 +1312,11 @@ describe("a chat's recall before a question", setUpTime, () => {
     ).toStrictEqual([expect.objectContaining({ via: "recall", hits: 1 })]);
   });
 
-  it("never hands the model what the person or the agent may not read", async () => {
+  it("never hands the model what the person may not read, though the agent was granted it", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const teamCanary = `team canary ${unique()}`;
-    const ungrantedCanary = `ungranted canary ${unique()}`;
     // Granted to the agent, but a team's the person isn't in.
     const team = await newTeam(admin, [admin]);
     const { id: teamOnly } = await admin.knowledge.createCollection({
@@ -1342,22 +1330,10 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Plan ${word}\n\n${teamCanary}`,
       ifVersion: 0,
     });
-    // Readable by the person, but not granted to the agent.
-    const { id: ungranted } = await admin.knowledge.createCollection({
-      name: `Open ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: ungranted,
-      path: "plan.md",
-      text: `# Plan ${word}\n\n${ungrantedCanary}`,
-      ifVersion: 0,
-    });
     const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       says("I can't find it.")
     );
-    await grantRead(admin, agent, teamOnly);
     await grantBrain(admin, agent);
 
     const reply = await ask(word);
@@ -1366,18 +1342,16 @@ describe("a chat's recall before a question", setUpTime, () => {
     const [result] = await codeResults(stub, chat.id);
     expect({
       team: sent.includes(teamCanary),
-      ungranted: sent.includes(ungrantedCanary),
       recalled: result?.text.includes('"evidence":[]'),
-      provenance: reply.provenance,
+      teamSource: reply.provenance?.sources.includes(teamOnly),
     }).toStrictEqual({
       team: false,
-      ungranted: false,
       recalled: true,
-      provenance: { sources: [], restricted: false },
+      teamSource: false,
     });
   });
 
-  it("recalls nothing without the Brain permission", async () => {
+  it("recalls nothing before a question until an admin grants the agent the brain", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
@@ -1392,11 +1366,10 @@ describe("a chat's recall before a question", setUpTime, () => {
       text: `# Code ${word}\n\n${fact}.`,
       ifVersion: 0,
     });
-    const { stub, chat, provider, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask } = await chatOf(
       person.userId,
       says("Let me look.")
     );
-    await grantRead(admin, agent, collectionId);
 
     const reply = await ask(word);
 
@@ -1405,11 +1378,11 @@ describe("a chat's recall before a question", setUpTime, () => {
       sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
         fact
       ),
-      provenance: reply.provenance,
+      read: reply.provenance?.sources.includes(collectionId),
     }).toStrictEqual({
       steps: [],
       sent: false,
-      provenance: { sources: [], restricted: false },
+      read: false,
     });
   });
 
@@ -1441,7 +1414,6 @@ describe("a chat's recall before a question", setUpTime, () => {
       says("Near the limit."),
       says("With room.")
     );
-    await grantRead(admin, agent, collectionId);
     await grantBrain(admin, agent);
     const question = (chars: number) =>
       `${word} ${"x".repeat(chars - word.length - 1)}`;
@@ -1506,7 +1478,6 @@ describe("a chat's recall before a question", setUpTime, () => {
       person.userId,
       says("I couldn't read Knowledge in time.")
     );
-    await grantRead(admin, agent, collectionId);
     await grantBrain(admin, agent);
     // Too short for any run to finish: only for this test's turn.
     const restore = await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
@@ -1533,18 +1504,23 @@ describe("a chat's recall before a question", setUpTime, () => {
     });
   });
 
-  it("withholds what a recall handed over once its document is gone or purged, or the Brain permission is revoked, though its collection may still be read, and audits it", async () => {
+  it("withholds what a recall handed over once its document is gone or purged, or its person may no longer read it, and audits it", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
-    /** A chat whose first turn recalled `fact`, from a collection it keeps. */
-    const recalled = async () => {
+    const teamId = await newTeam(admin, [person]);
+    /**
+     * A chat whose first turn recalled `fact`, from a collection it keeps:
+     * for everyone, or for the person's team.
+     */
+    const recalled = async (access: "everyone" | "teams" = "everyone") => {
       const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
       const code = `depot${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
       const fact = `The depot code is ${code}`;
-      const { id: collectionId } = await admin.knowledge.createCollection({
-        name: `Handbook ${unique()}`,
-        access: "everyone",
-      });
+      const { id: collectionId } = await admin.knowledge.createCollection(
+        access === "teams"
+          ? { name: `Handbook ${unique()}`, access, teams: [teamId] }
+          : { name: `Handbook ${unique()}`, access }
+      );
       const { id: documentId } = await admin.knowledge.saveDocument({
         collectionId,
         path: "depot.md",
@@ -1556,8 +1532,8 @@ describe("a chat's recall before a question", setUpTime, () => {
         says("Noted."),
         says("And again.")
       );
-      await grantRead(admin, chat.agent, collectionId);
-      const brainGrant = await grantBrain(admin, chat.agent);
+      // The grant has the chat recall before each question.
+      await grantBrain(admin, chat.agent);
       await chat.ask(word);
       /** Whether the next turn's first request still sent the fact. */
       const next = async () => {
@@ -1569,7 +1545,7 @@ describe("a chat's recall before a question", setUpTime, () => {
           withheld: body.includes(withheldResult),
         };
       };
-      return { ...chat, code, collectionId, documentId, brainGrant, next };
+      return { ...chat, code, collectionId, documentId, next };
     };
     /** The sources of the chat's `chat.history_withheld` events. */
     const withheldOf = async (agentId: string, chatId: string) => {
@@ -1604,8 +1580,12 @@ describe("a chat's recall before a question", setUpTime, () => {
     const plan = await admin.knowledge.preparePurge(purge);
     await admin.knowledge.purge(purge, plan.token);
     const afterPurge = await purged.next();
-    const revoked = await recalled();
-    await admin.api.permissions.revoke(revoked.brainGrant);
+    const revoked = await recalled("teams");
+    // The person leaves the team: the collection is no longer theirs.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
     const afterRevoke = await revoked.next();
 
     expect({
@@ -1629,7 +1609,10 @@ describe("a chat's recall before a question", setUpTime, () => {
       purgedSources: [
         `brain-document:${purged.collectionId}/${purged.documentId}`,
       ],
-      revokedSources: ["brain-grant"],
+      revokedSources: [
+        revoked.collectionId,
+        `brain-document:${revoked.collectionId}/${revoked.documentId}`,
+      ].toSorted((a, b) => a.localeCompare(b)),
     });
   });
 });

@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { workspace } from "../src/durable-objects.ts";
+import { keepAudience } from "../src/knowledge/access.ts";
 import { catalogMaxCharacters } from "../src/knowledge/catalog.ts";
 import type { WorkContext } from "../src/restricted.ts";
 import { requestGranted } from "./apps.ts";
@@ -30,7 +31,10 @@ import {
 } from "./sign-in.ts";
 
 // The agent's Knowledge tools (`KNOWLEDGE` in its env, across every
-// collection it may read) and the same reads for people and Apps. These
+// collection it may read) and the same reads for people and Apps. The
+// agent works here in a chat others share, its person among them, where it
+// reads only under grants; in a person's own chat it reads what they may
+// read (agent-knowledge.test.ts). These
 // tests start from the ways they can fail: an agent reads a whole long
 // document to find one section; the catalog grows past what fits in an
 // agent's context, or carries restricted data into it unrestricted; the
@@ -56,14 +60,36 @@ const newAgent = () => ({
   agentId: `agent-${unique()}`,
 });
 
-/** The Knowledge tools of `agent` acting for `person`, in `context`. */
+/**
+ * A chat of `agent`'s workspace others share, with `person` its only
+ * member: one where the agent reads under its grants.
+ */
+const sharedChat = async (
+  agent: ReturnType<typeof newAgent>,
+  person: Person
+): Promise<Extract<WorkContext, { type: "chat" }>> => {
+  const chat = await newChat(agent);
+  await keepAudience(env, chat, person.userId, {
+    members: [person.userId],
+    outsiders: false,
+  });
+  return chat;
+};
+
+/**
+ * The Knowledge tools of `agent` acting for `person`, in `context`: by
+ * default a chat others share (`sharedChat`).
+ */
 const toolsOf = async (
   agent: ReturnType<typeof newAgent>,
   person: Person,
   context?: WorkContext
 ): Promise<KnowledgeTools> => {
   const tools = knowledgeIn(
-    await envOf(actingFor(agent, person.userId), context)
+    await envOf(
+      actingFor(agent, person.userId),
+      context ?? (await sharedChat(agent, person))
+    )
   );
   if (!tools) {
     throw new Error("No KNOWLEDGE binding");
@@ -436,7 +462,8 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("list the collections and skills they may read in a small catalog, without restricting their chat", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const teamId = await newTeam(admin, []);
+    // The admin is in it: a chat others share reads no owner's exception.
+    const teamId = await newTeam(admin, [admin]);
     const [handbook, payroll, hidden] = await Promise.all([
       admin.knowledge.createCollection({
         name: `Handbook ${unique()}`,
@@ -479,7 +506,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
       admin,
       readCollection(agent, payroll.id, "PAYROLL")
     );
-    const chat = await newChat(agent);
+    const chat = await sharedChat(agent, admin);
     const knowledge = await toolsOf(agent, admin, chat);
 
     const catalog = await knowledge.catalog();
@@ -571,7 +598,8 @@ describe("an agent's Knowledge tools", setUpTime, () => {
     const admin = await personOf("admin");
     const outsider = await personOf("user");
     const agent = newAgent();
-    const teamId = await newTeam(admin, []);
+    // The admin is in it: a chat others share reads no owner's exception.
+    const teamId = await newTeam(admin, [admin]);
     const [granted, team, other] = await Promise.all([
       collectionWithNote(admin, { name: "Granted", access: "everyone" }),
       collectionWithNote(admin, {
@@ -646,7 +674,8 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("put their chat in restricted mode on reading a sensitive collection", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const teamId = await newTeam(admin, []);
+    // The admin is in it: a chat others share reads no owner's exception.
+    const teamId = await newTeam(admin, [admin]);
     const payroll = await collectionWithNote(admin, {
       name: "Payroll",
       access: "teams",
@@ -667,7 +696,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
     ];
     const results = await Promise.all(
       reads.map(async (read) => {
-        const chat = await newChat(agent);
+        const chat = await sharedChat(agent, admin);
         const { provenance } = await read(await toolsOf(agent, admin, chat));
         const restricted = await workspace(
           env,
@@ -705,7 +734,7 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
     await requestGranted(idp, admin, readCollection(agent, collectionId));
     await requestGranted(idp, admin, readCollection(app, collectionId));
     // The chat the agent reads in, which each of its reads names.
-    const chat = await newChat(agent);
+    const chat = await sharedChat(agent, admin);
     const knowledge = await toolsOf(agent, admin, chat);
     const appReader = collectionIn(
       await envOf(actingFor(app, admin.userId), app),

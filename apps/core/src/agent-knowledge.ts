@@ -38,12 +38,13 @@ import { agentKnowledgeSignals } from "./knowledge/signals.ts";
 
 // Knowledge for a chat's code: `await env.knowledge.search("leave policy")`.
 // The agent's Knowledge tools (knowledge/tools.ts), read as the chat's
-// agent acting for its person: only the collections the agent was granted
-// to read that the person may read too, checked again on every call
-// (knowledge/access.ts). Every read but the catalog is recorded in the
-// audit log there, and puts the chat in restricted mode when it read a
-// sensitive collection. Here it is also recorded with the chat, which
-// every later model request carries as provenance. The catalog and the
+// agent acting for its person: in their own chat what they may read, in a
+// chat others share only the collections the agent was granted that all of
+// them may read, checked again on every call (knowledge/access.ts). Every
+// read but the catalog is recorded in the audit log there, and puts the
+// chat in restricted mode when it read a sensitive collection. Here it is
+// also recorded with the chat, which every later model request carries as
+// provenance. The catalog and the
 // usage signals of the person's own collections hold nothing of a
 // sensitive collection, and are recorded as the chat's calls.
 
