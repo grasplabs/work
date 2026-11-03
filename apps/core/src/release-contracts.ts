@@ -1,5 +1,6 @@
 import { v } from "@grasp-os/sdk";
 import type { ValueSchema } from "@grasp-os/sdk";
+import { httpActionSchemas } from "@grasp-os/shared/http-connections";
 import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resources";
 
 // The general catalog contracts every release ships (GRA-1469), installed
@@ -44,6 +45,31 @@ export const modelStepContract = "grasp/model-step";
  */
 export const approvalContract = "grasp/approval";
 
+/**
+ * An outside API's requests (GRA-1478, `grasp.connector`): `get` reads and
+ * `send` changes, on an HTTP connection an admin approved and binds, with
+ * the very schemas connect serves for one (`httpActionSchemas`), as JSON
+ * Schema envelopes, which connect confirms are its own. Which origin,
+ * paths and methods are reached is the connection's, never the contract's.
+ * A binding is served only by a connection that serves every operation of
+ * its contract, so a read-only API binds `httpReadContract`.
+ */
+export const httpContract = "grasp/http";
+
+/** An outside API's reads alone (`get`), for a connection allowing no change. */
+export const httpReadContract = "grasp/http-read";
+
+/** An action's schema, as an envelope of its JSON Schema. */
+const enveloped = (document: unknown): string =>
+  JSON.stringify({ format: "json", document });
+
+/** The HTTP contracts' `get`. */
+const httpGet = {
+  input: enveloped(httpActionSchemas.get.input),
+  output: enveloped(httpActionSchemas.get.output),
+  readOnly: true,
+};
+
 /** The contracts this release ships, by key. */
 export const releaseContracts: readonly CatalogContractDefinition[] = [
   { key: modelStepContract, kind: "model" },
@@ -56,5 +82,18 @@ export const releaseContracts: readonly CatalogContractDefinition[] = [
     response: JSON.stringify(
       v.union(v.null(), v.object({ comment: v.string() })).descriptor
     ),
+  },
+  { key: httpReadContract, kind: "connector", operations: { get: httpGet } },
+  {
+    key: httpContract,
+    kind: "connector",
+    operations: {
+      get: httpGet,
+      send: {
+        input: enveloped(httpActionSchemas.send.input),
+        output: enveloped(httpActionSchemas.send.output),
+        readOnly: false,
+      },
+    },
   },
 ];

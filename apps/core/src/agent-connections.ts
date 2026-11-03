@@ -600,7 +600,13 @@ const connectionsDeclaration = `/**
 connections: {
   /** The connections this chat may use, and the actions each allows. */
   list(): Promise<{ name: string; connectionId: string; resource: string | null; actions: string[] }[]>;
-  /** The connections you may ask for, the actions each has, and who decides. */
+  /**
+   * The connections you may ask for, the actions each has, and who decides.
+   * One \`forAppsOnly\` (provider \`http\`) is an outside API an admin
+   * approved: only an App or a workflow you build uses it, asked for with
+   * \`env.build.requestPermission\` or \`env.workflowBuild.requestPermission\`;
+   * this chat never calls or asks for it.
+   */
   available(): Promise<{
     connectionId: string;
     provider: string;
@@ -608,6 +614,7 @@ connections: {
     scope: "personal" | "shared";
     actions: string[];
     decidedBy: "person" | "admin";
+    forAppsOnly?: true;
   }[]>;
   /**
    * Asks to use one of \`available\` in this chat, with only the actions

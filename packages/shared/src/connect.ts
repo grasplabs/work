@@ -14,6 +14,11 @@ import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import { hrProviderSchema } from "./hr.ts";
+import { httpConnectionSchema } from "./http-connections.ts";
+import type {
+  HttpConnectionInput,
+  HttpConnectionSummary,
+} from "./http-connections.ts";
 import {
   chatIdSchema,
   connectionIdSchema,
@@ -283,6 +288,16 @@ export const connectWithKeySchema = z.strictObject({
 });
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
+/**
+ * An admin approving an HTTP connection (GRA-1478): one origin, its paths
+ * and methods, and the credential connect keeps sealed and never answers.
+ */
+export const createHttpConnectionSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connection: httpConnectionSchema,
+});
+export type CreateHttpConnection = z.input<typeof createHttpConnectionSchema>;
+
 export const disconnectSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: connectionIdSchema,
@@ -379,8 +394,11 @@ export const revokeByHandAt = (provider: string): string | undefined =>
 /** One connection, as people see it: never its tokens. */
 export interface ConnectionSummary {
   id: string;
-  /** Who holds its tokens and carries out its actions: connect, or Composio. */
-  source: CatalogSource;
+  /**
+   * Who holds its tokens and carries out its actions: connect (a native
+   * connector, or an HTTP connection's requests), or Composio.
+   */
+  source: ConnectionSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */
   provider: string;
   scope: ConnectionScope;
@@ -416,6 +434,11 @@ export interface ConnectionSummary {
    * changes the tools. Absent for a native connection.
    */
   toolResources?: Record<string, string>;
+  /**
+   * An HTTP connection's origin, paths, methods and the header its
+   * credential goes in: never the credential. Absent for any other.
+   */
+  http?: HttpConnectionSummary;
 }
 
 /**
@@ -435,7 +458,7 @@ export type ComposioAccountState = "active" | "stopped" | "unread";
  */
 export interface OrganizationConnection {
   id: string;
-  source: CatalogSource;
+  source: ConnectionSource;
   provider: string;
   scope: ConnectionScope;
   status: "active" | "needs_reauth";
@@ -494,8 +517,11 @@ export interface ConnectionOwner {
    * (`needs_reauth`), or was disconnected: its owner is kept either way.
    */
   status: "active" | "needs_reauth" | "disconnected";
-  /** Who carries out its actions: a native connector, or Composio. */
-  source: CatalogSource;
+  /**
+   * Who carries out its actions: a native connector, Composio, or connect
+   * sending an HTTP connection's requests.
+   */
+  source: ConnectionSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */
   provider: string;
   /** The account's ID at the provider (Microsoft: its Entra object ID). */
@@ -582,6 +608,17 @@ export interface ConnectionsApi extends StephenReachApi {
   }) => Promise<{ url: string }>;
   list: () => Promise<ListedConnection[]>;
   disconnect: (connectionId: string) => Promise<{ revoked: boolean }>;
+  /**
+   * Approves an outside API as an HTTP connection (GRA-1478): one https
+   * origin on a public host, the methods and path prefixes it allows, and
+   * its credential, which connect keeps sealed and never answers back.
+   * Apps and workflows then use it as any connection, once an admin
+   * grants them `get` or `send` on it. Admins only, never Grasp staff;
+   * audited. It is never edited: disconnect it and approve another.
+   */
+  createHttp: (
+    connection: HttpConnectionInput
+  ) => Promise<{ connectionId: string }>;
   /**
    * What can be connected: the native providers, and Composio's
    * toolkits while connect has a Composio key. Admins see every entry,
@@ -691,6 +728,12 @@ export interface ConnectionsApi extends StephenReachApi {
 /** Who carries out a catalog entry's actions: our connector, or Composio. */
 export const catalogSourceSchema = z.enum(["native", "composio"]);
 export type CatalogSource = z.infer<typeof catalogSourceSchema>;
+
+/**
+ * Who carries out a connection's actions: a catalog entry's source, or
+ * connect itself for an HTTP connection (GRA-1478), which no catalog lists.
+ */
+export type ConnectionSource = CatalogSource | "http";
 
 /** A Composio toolkit's slug, such as `hubspot`. */
 export const composioToolkitSchema = z
@@ -1760,6 +1803,14 @@ export interface WebhookApi {
    * `appWebhookLimits.timeoutMs`; audited, by its origin and status only.
    */
   webhookPost: (post: WebhookPost) => Promise<WebhookOutcome>;
+  /**
+   * Approves an HTTP connection (GRA-1478), for an admin who isn't staff:
+   * its origin checked, its host resolved to public addresses only, its
+   * credential sealed. Audited, never with the credential.
+   */
+  createHttpConnection: (
+    request: CreateHttpConnection
+  ) => Promise<{ connectionId: string }>;
 }
 
 /**
@@ -2082,6 +2133,8 @@ export const connectionErrors = defineErrorFamily({
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
+  "connection.http_origin_refused":
+    "That origin can't be approved: it must be an https origin whose name leads only to public internet addresses.",
   "connection.tools_changed":
     "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
 });
@@ -2293,6 +2346,8 @@ export const connectErrors = defineErrorFamily({
     "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin can.",
   "connect.resource_not_pointed":
     "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
+  "connect.http_refused":
+    "That request isn't one this connection allows: its method, path or headers, or where its host leads, aren't what an admin approved. Nothing was sent.",
   "connect.mailbox_not_pointed":
     "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });

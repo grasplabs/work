@@ -35,9 +35,10 @@ export const composioTool = (
 /**
  * Whether a call of `tool`, as connect takes it to be (above), is handled
  * as a side effect: anything not declared read-only may change something.
- * So is every call on a Composio server from a context that read
- * restricted data (`restricted`), reads too: its input goes to a third
- * party and may carry that data, so the person it acts for decides (R12).
+ * So is every call on a Composio server or an HTTP connection from a
+ * context that read restricted data (`restricted`), reads too: its input
+ * goes to a third party and may carry that data (an HTTP read's path and
+ * query), so the person it acts for decides (R12).
  * Like any side effect of a workflow run it then needs an idempotency key:
  * without one it is refused, not held (for a call a person is there for,
  * connect makes the key as it holds it; call.ts). Its answer is then kept
@@ -48,7 +49,7 @@ export const hasSideEffect = (
   tool: McpTool,
   kind: ServerKind,
   restricted: boolean
-): boolean => !tool.readOnly || (restricted && kind === "composio");
+): boolean => !tool.readOnly || (restricted && kind !== "native");
 
 /**
  * Keeps a call for one resource on that resource. The capability names the
@@ -83,11 +84,13 @@ export const checkResourceScope = (
 /**
  * Whether a tool's error result means the call did nothing at all
  * (`notPerformedMetaKey`), so its idempotency key is free again. Only a
- * native connector is taken at its word: a remote server's tool that acted
- * and then said it hadn't would have its side effect run twice.
+ * native connector, or connect's own HTTP requests (which
+ * say so only of a request they never sent), is taken at its word: a
+ * remote server's tool that acted and then said it hadn't would have its
+ * side effect run twice.
  */
 export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
-  kind === "native" && result.notPerformed;
+  kind !== "composio" && result.notPerformed;
 
 /**
  * Whether a side effect's error result leaves open whether it acted, so it

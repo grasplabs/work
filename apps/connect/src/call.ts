@@ -41,6 +41,13 @@ import type { Connection } from "./connections.ts";
 import { nativeAction, nativeRelease, nativeServer } from "./connectors.ts";
 import { connections } from "./db/schema.ts";
 import {
+  httpConfigOf,
+  httpServer,
+  httpTool,
+  requireHttpRequest,
+} from "./http-connections.ts";
+import type { HttpTrace } from "./http-connections.ts";
+import {
   effectKeyOf,
   hashCall,
   idempotencyStore,
@@ -217,6 +224,11 @@ export interface CallProgress extends Repeat {
    * unknown outcome a run waits on for its person to resolve.
    */
   native?: boolean;
+  /**
+   * An HTTP connection's request (GRA-1478): its method and path once it
+   * is checked, its status and size once answered, for the audit log.
+   */
+  http?: HttpTrace;
 }
 
 type Input = Record<string, Json>;
@@ -269,7 +281,8 @@ const actionFor = async (
   env: Env,
   connection: Connection,
   claims: CapabilityClaims,
-  action: string
+  action: string,
+  progress: CallProgress
 ): Promise<{
   tool: McpTool;
   recovery: RecoveryMode;
@@ -300,6 +313,25 @@ const actionFor = async (
           claims,
           native.declared.routes.filter(({ method }) => method === "GET")
         ),
+    };
+  }
+  if (connection.serverKind === "http") {
+    // Connect's own requests: what the admin allowed of the connection.
+    const config = await httpConfigOf(env, connection.id);
+    const tool = config === undefined ? undefined : httpTool(config, action);
+    if (tool === undefined) {
+      throw connectErrors.create("connect.action_not_found");
+    }
+    const server = httpServer(env, connection, progress);
+    // A request of unknown outcome is never recovered: nobody can know
+    // what the API does with a repeat.
+    return {
+      tool,
+      recovery: "none",
+      release: null,
+      takesFiles: false,
+      open: async () => await Promise.resolve(server),
+      openLookup: async () => await Promise.resolve(server),
     };
   }
   // Only a tool the admin allowed and Grasp classed, asked for before
@@ -968,7 +1000,7 @@ export const carryOut = async (
   }
 
   const { tool, recovery, release, takesFiles, open, openLookup } =
-    await actionFor(env, connection, claims, call.action);
+    await actionFor(env, connection, claims, call.action, progress);
   const sideEffect = hasSideEffect(
     tool,
     connection.serverKind,
@@ -979,6 +1011,9 @@ export const carryOut = async (
   checkResourceScope(resource, tool, input);
   requirePointedMailbox(claims, connection, call.action, tool, input);
   requirePointedResource(claims, connection, call.action, input);
+  // Before it is held or its key claimed: an HTTP request the connection
+  // doesn't allow, or a host that leads inside, is refused unsent.
+  await requireHttpRequest(env, connection, call.action, input, progress);
   const files = await requireFiles(takesFiles, input, call.attachments);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above

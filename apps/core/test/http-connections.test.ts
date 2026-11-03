@@ -1,0 +1,404 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import type { OperationResult } from "@grasp-os/shared/operations";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { callAppFunction } from "../src/app-functions.ts";
+import { loadRelease } from "../src/app-releases.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
+import { httpContract } from "../src/release-contracts.ts";
+import {
+  httpApiInsideOrigin,
+  httpApiOrigin,
+  httpApiReceivedUrl,
+} from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
+import {
+  definitionOf,
+  endedRun,
+  jsonWorkflowAppsOf,
+  publishedWorkflow,
+  startedBy,
+} from "./json-workflow-apps.ts";
+import { signedInApi, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
+
+// An outside API an admin approved as an HTTP connection (GRA-1478), used
+// by an App's action as a connector resource: through core's binding and
+// permission checks and the real connect, with only the API and the DNS
+// resolver faked (connect-providers.ts).
+
+const idp = mockIdp();
+
+const secret = "the-billing-api-test-credential";
+
+/** An App whose actions read and create invoices at the billing API. */
+const billingFiles = (): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/billing.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const billing = resource.connector("billing", {
+  contract: "http.request@1",
+  actions: ["get", "send"],
+});
+
+export const open = action({
+  args: {},
+  returns: v.object({ status: v.number(), count: v.number() }),
+  uses: [billing],
+  handler: async (ctx) => {
+    const response = await ctx.resources.billing.fetch("/v1/invoices?status=open", {
+      headers: { accept: "application/json" },
+    });
+    const listed: { invoices: unknown[] } = await response.json();
+    return { status: response.status, count: listed.invoices.length };
+  },
+});
+
+export const create = action({
+  args: { amount: v.number() },
+  returns: v.number(),
+  uses: [billing],
+  handler: async (ctx, args) => {
+    const response = await ctx.resources.billing.fetch("/v1/invoices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amount: args.amount }),
+    });
+    return response.status;
+  },
+});
+
+/** Asks for what the admin never approved: the answer is its code. */
+export const stray = action({
+  args: { path: v.string() },
+  returns: v.string(),
+  uses: [billing],
+  handler: async (ctx, args) => {
+    try {
+      const response = await ctx.resources.billing.fetch(args.path);
+      return String(response.status);
+    } catch (error) {
+      return String(Reflect.get(Object(error), "code"));
+    }
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { billing, create, open, stray } from "./operations/billing.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Invoices",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { billing: { open, create, stray } },
+  internalOperations: {},
+  screens: [],
+  uses: [billing],
+});
+`,
+});
+
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
+
+/** What reached the outside API, in order. */
+const received = async () => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  const response = await providers.fetch(httpApiReceivedUrl);
+  return z
+    .array(
+      z.object({
+        url: z.string(),
+        method: z.string(),
+        headers: z.record(z.string(), z.string()),
+        body: z.string(),
+      })
+    )
+    .parse(await response.json());
+};
+
+/** The error code `work` fails with, or "ok". */
+const failure = async (work: () => Promise<unknown>): Promise<string> => {
+  try {
+    await work();
+  } catch (error) {
+    return error instanceof Error ? String(Reflect.get(error, "code")) : "?";
+  }
+  return "ok";
+};
+
+/** The Invoices App, current, bound to an HTTP connection an admin approved. */
+const invoicesApp = async () => {
+  const admin = await signedInApi(idp, "admin");
+  const builder = await signedInApi(idp, "builder");
+  const { connectionId } = await admin.api.connections.createHttp({
+    name: "Billing API",
+    origin: httpApiOrigin,
+    pathPrefixes: ["/v1"],
+    methods: ["GET", "POST"],
+    credential: { kind: "bearer", token: secret },
+  });
+  const created = await builder.api.apps.create({ name: "Invoices" });
+  await builder.api.apps.files.commit(created.id, billingFiles(), "First");
+  await builder.api.apps.versions.setCurrent(created.id, 1);
+  const requested = await builder.api.permissions.request({
+    subject: { type: "app", appId: created.id },
+    object: { type: "connection", connectionId },
+    actions: ["get", "send"],
+    binding: "BILLING",
+  });
+  await admin.api.permissions.grant(requested.id, { version: 1 });
+  await admin.api.resourceBindings.approve({
+    app: created.id,
+    alias: "billing",
+    target: { kind: "connector", permissionId: requested.id },
+    reviewed: { version: 1 },
+  });
+  const release = await loadRelease(env, created.id, 1);
+  const by: Identity = await builder.api.whoami();
+  return { admin, builder, by, release, connectionId };
+};
+
+type Invoices = Awaited<ReturnType<typeof invoicesApp>>;
+
+/** Calls `path` of the App as its builder, under the call key `key`. */
+const call = async (
+  { by, release }: Pick<Invoices, "by" | "release">,
+  path: string,
+  input: unknown,
+  key?: string
+): Promise<OperationResult> => {
+  const operation = release.app.operations[path];
+  const answered = await callAppFunction(
+    env,
+    by,
+    release.manifest.resourceId,
+    JSON.stringify({
+      reference: {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: path,
+        fingerprint: release.fingerprints[path] ?? "",
+        kind: operation?.kind ?? "action",
+      },
+      input,
+      ...(key === undefined ? {} : { idempotencyKey: key }),
+    })
+  );
+  return answered.result;
+};
+
+describe("an App calling an outside API", () => {
+  it("is approved only by an admin, on an origin whose name leads to the public internet, never showing its credential", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const connection = {
+      name: "Billing API",
+      origin: httpApiOrigin,
+      methods: ["GET" as const],
+      credential: { kind: "bearer" as const, token: secret },
+    };
+    const refused = [
+      await failure(
+        async () => await builder.api.connections.createHttp(connection)
+      ),
+      await failure(
+        async () =>
+          await admin.api.connections.createHttp({
+            ...connection,
+            origin: httpApiInsideOrigin,
+          })
+      ),
+      await failure(
+        async () =>
+          await admin.api.connections.createHttp({
+            ...connection,
+            origin: "https://169.254.169.254",
+          })
+      ),
+    ];
+    const { connectionId } = await admin.api.connections.createHttp(connection);
+    const listed = await admin.api.connections.list();
+
+    expect(refused).toStrictEqual([
+      "role.forbidden",
+      "connection.http_origin_refused",
+      "connection.invalid",
+    ]);
+    expect(listed.find(({ id }) => id === connectionId)).toMatchObject({
+      source: "http",
+      http: { origin: httpApiOrigin, credentialHeader: "authorization" },
+    });
+    expect(JSON.stringify(listed)).not.toContain(secret);
+  });
+
+  it("reads through its binding with the credential connect adds, sends once its person confirms, and is refused off the approved paths or origin", async () => {
+    const invoices = await invoicesApp();
+    const before = await received();
+    const opened = await call(invoices, "billing.open", {});
+    const created = await call(
+      invoices,
+      "billing.create",
+      { amount: 10 },
+      "k1"
+    );
+    for (const held of await invoices.builder.api.pendingActions.list()) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await invoices.builder.api.pendingActions.confirm(
+        held.id,
+        held.inputHash
+      );
+    }
+    const confirmed = await call(
+      invoices,
+      "billing.create",
+      { amount: 10 },
+      "k1"
+    );
+    const strays = await Promise.all(
+      ["/v1/moved", "/admin", "/v1/../admin"].map(
+        async (path) => await call(invoices, "billing.stray", { path })
+      )
+    );
+    const all = await received();
+    const reached = all.slice(before.length);
+
+    expect(opened).toStrictEqual({
+      ok: true,
+      value: { status: 200, count: 1 },
+    });
+    expect(created).toMatchObject({
+      ok: false,
+      error: { code: "resource.awaiting_confirmation" },
+    });
+    expect(confirmed).toStrictEqual({ ok: true, value: 201 });
+    expect(strays).toStrictEqual(
+      ["/v1/moved", "/admin", "/v1/../admin"].map(() => ({
+        ok: true,
+        value: "resource.not_allowed",
+      }))
+    );
+    // The redirect's request went out; the stray paths' never did. The
+    // credential went with each, and came back with none.
+    expect({
+      reached: reached.map(({ method, url, headers, body }) => ({
+        sent: `${method} ${url}`,
+        authorization: headers.authorization,
+        body,
+      })),
+      secretShown: JSON.stringify([opened, confirmed, strays]).includes(secret),
+    }).toStrictEqual({
+      reached: [
+        {
+          sent: `GET ${httpApiOrigin}/v1/invoices?status=open`,
+          authorization: `Bearer ${secret}`,
+          body: "",
+        },
+        {
+          sent: `POST ${httpApiOrigin}/v1/invoices`,
+          authorization: `Bearer ${secret}`,
+          body: '{"amount":10}',
+        },
+        {
+          sent: `GET ${httpApiOrigin}/v1/moved`,
+          authorization: `Bearer ${secret}`,
+          body: "",
+        },
+      ],
+      secretShown: false,
+    });
+  });
+});
+
+/** A JSON workflow creating an invoice for `who` through binding `api`. */
+const invoicingTasks = [
+  {
+    create: {
+      call: "grasp.connector",
+      with: {
+        binding: "api",
+        operation: "send",
+        arguments: {
+          method: "POST",
+          path: "/v1/invoices",
+          headers: { "content-type": "application/json" },
+          body: "${ {who: $workflow.input.who} | tostring }",
+        },
+      },
+      output: { as: '${ {status: (.status | tostring) + " " + .body} }' },
+    },
+  },
+];
+
+describe("a JSON workflow calling an outside API", () => {
+  it("binds the release's HTTP contract to a connection an admin approved, and sends through connect", async () => {
+    const { signedIn } = jsonWorkflowAppsOf(idp);
+    const admin = await signedIn("admin");
+    const builder = await signedIn("builder");
+    await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
+    const { connectionId } = await admin.api.connections.createHttp({
+      name: "Billing API",
+      origin: httpApiOrigin,
+      pathPrefixes: ["/v1/invoices"],
+      methods: ["GET", "POST"],
+      credential: { kind: "header", header: "x-api-key", secret },
+    });
+    const workflow = await publishedWorkflow(builder, (name) =>
+      definitionOf(name, invoicingTasks, {
+        bindings: { api: { kind: "connector", contract: httpContract } },
+      })
+    );
+    const requested = await builder.api.permissions.request({
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId },
+      actions: ["get", "send"],
+      binding: `API_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await admin.api.permissions.grant(requested.id, { version: null });
+    await admin.api.workflowResources.approveBinding(workflow.id, {
+      alias: "api",
+      target: {
+        kind: "connector",
+        permissionId: requested.id,
+        contract: "http.request@1",
+      },
+      reviewed: { version: 1 },
+    });
+    const before = await received();
+    const runId = await startedBy(builder, workflow.id, { who: "Ada" });
+    const run = await endedRun(builder, workflow.id, runId);
+    const all = await received();
+    const reached = all.slice(before.length);
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { status: '201 {"created":{"who":"Ada"}}' },
+    });
+    expect(
+      reached.map(({ method, url, headers, body }) => ({
+        method,
+        url,
+        key: headers["x-api-key"],
+        body,
+      }))
+    ).toStrictEqual([
+      {
+        method: "POST",
+        url: `${httpApiOrigin}/v1/invoices`,
+        key: secret,
+        body: '{"who":"Ada"}',
+      },
+    ]);
+  });
+});
