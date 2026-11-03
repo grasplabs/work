@@ -20,7 +20,10 @@
  *   card <person>            a role card with its link, for whoever plays it
  *   simulate                 a model plays everyone who hasn't talked yet:
  *                            --seed 2 for another mix of people, --ideal for
- *                            people who tell all they know, --only a,b,
+ *                            people who tell all they know, --people v1 for
+ *                            one temper each that never changes (people v2,
+ *                            a mix and a state that drifts, is the default),
+ *                            --only a,b,
  *                            --interviewer claire, --parallel 2
  *   score                    the score card of every interview that counts
  *                            (--label <name>)
@@ -57,6 +60,7 @@ import { linksOf, openCore, spentLine } from "./core.ts";
 import { hiddenKeyIds, isHidden, keyOf, openKeys } from "./keys/index.ts";
 import { problemsIn } from "./keys/types.ts";
 import type { AnswerKey } from "./keys/types.ts";
+import { peopleVersionOf } from "./people-v2.ts";
 import {
   cardsFolder,
   keepCards,
@@ -83,6 +87,7 @@ const { positionals, values } = parseArgs({
     practice: { type: "string" },
     seed: { type: "string" },
     ideal: { type: "boolean", default: false },
+    people: { type: "string" },
     only: { type: "string" },
     interviewer: { type: "string" },
     parallel: { type: "string" },
@@ -203,6 +208,7 @@ const playRest = async (): Promise<void> => {
       only: values.only === undefined ? null : values.only.split(","),
       seed: countOf(values.seed, 1),
       ideal: values.ideal,
+      people: peopleVersionOf(values.people),
       interviewer: values.interviewer === "claire" ? "claire" : "stephen",
       parallel: countOf(values.parallel, 2),
       log,

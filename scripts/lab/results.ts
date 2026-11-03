@@ -120,8 +120,8 @@ export const resultSchema = z.object({
   stephen: stephenVersionSchema,
   /** How the models were reached: always the local core's gateway, never anyone's subscription. */
   via: labViaSchema,
-  /** Whole interviews only: "real" when the people had tempers, with the seed that says who had which; "ideal" when they told all they knew. */
-  people: z.enum(["real", "ideal", "person"]).optional(),
+  /** Whole interviews only: "real" when the people had one temper each (people v1), "v2" when they had a mix and a state that drifts, with the seed that says who had which; "ideal" when they told all they knew. */
+  people: z.enum(["real", "v2", "ideal", "person"]).optional(),
   seed: z.int().optional(),
   cases: z.array(caseScoreSchema),
   spent: z.string(),
