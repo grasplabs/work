@@ -3,6 +3,7 @@ import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
+  AppMessageNotification,
   GapAskedNotification,
   RunFailedNotification,
   TriggerStoppedNotification,
@@ -60,6 +61,7 @@ export type InboxKind =
   | "stoppedSchedule"
   | "revokedPackage"
   | "stoppedEvents"
+  | "appMessage"
   | "bindingApproval"
   | "decision";
 
@@ -68,6 +70,7 @@ export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   | { kind: "engine"; engine: string }
+  | { kind: "app"; app: string; screen?: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
   | { kind: "brain" }
@@ -94,6 +97,7 @@ export type InboxSource =
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "revoked"; notification: PackageRevokedNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
+  | { type: "appMessage"; notification: AppMessageNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -144,6 +148,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
   stoppedEvents: "workflows",
+  appMessage: "apps",
   bindingApproval: "workflows",
   decision: "workflows",
 };
@@ -702,6 +707,34 @@ const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** What an App the person can open told them, opened on the App's page (the screen it named, if any). */
+const appMessageItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "app_message") {
+      return [];
+    }
+    const { app, appName, title, body, screen, at } = notification;
+    return [
+      {
+        id: `appMessage:${notification.id}`,
+        kind: "appMessage",
+        title,
+        context: appName,
+        body: body === null ? [] : [body],
+        facts: [
+          { label: t`App`, value: appName },
+          { label: t`Sent`, value: formatDateTime(at) },
+        ],
+        about:
+          screen === null ? { kind: "app", app } : { kind: "app", app, screen },
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "appMessage", notification },
+      },
+    ];
+  });
+
 /**
  * A decision a workflow's run waits for the person to answer: answered on
  * its own page, where they review what it is about and confirm.
@@ -816,6 +849,7 @@ export const inboxItems = (
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
     ...(failed === undefined ? [] : revokedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedEventsItems(failed, me)),
+    ...(failed === undefined ? [] : appMessageItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };

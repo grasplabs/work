@@ -29,6 +29,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { peopleAlias } from "@grasp-os/shared/notifications";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
@@ -84,6 +85,7 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import type { PeopleNotifications } from "./app-notifications.ts";
 import { answerPeople } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
@@ -212,6 +214,14 @@ import type {
 //   fingerprint, which core takes from the manifest, never App code), and
 //   core stages it only as workflow-notifications.ts admits it, as an
 //   intent of the commit, in the commit's bound with its starts.
+// - App code tells people it shouldn't, or floods them: a send to people
+//   (`peopleAlias`, an alias no App can declare) goes through
+//   `Invocation.notifyPeople` alone, after the one gate (`admit`), which decides
+//   whom it reaches and holds the App's limits (app-notifications.ts); a
+//   call with none (a visitor's, a run's) is refused. A mutation's is
+//   staged as an intent of its commit, in the commit's bound with its
+//   starts; an action's is keyed by its place among its sends, so a call
+//   made again under the same key tells nobody twice.
 
 /**
  * How core starts the workflows an App binds, for one invocation: the
@@ -299,6 +309,12 @@ export interface Invocation {
    * without it, as for starts (`workflows`).
    */
   readonly notifications?: WorkflowNotifications;
+  /**
+   * How core tells people for this call (`ctx.notifyPeople` of an action,
+   * `ctx.afterCommit.notifyPeople` of a mutation, app-notifications.ts); none
+   * told without it: a visitor's call and a workflow run's have none.
+   */
+  readonly notifyPeople?: PeopleNotifications;
   /**
    * Keeps the evidence of a use refused at the host's admission
    * (`UseRefusal`): the first of a caller's call, nested calls included,
@@ -2263,6 +2279,54 @@ const startCall = async (
   };
 };
 
+/**
+ * The person or team and the notification a send to people asks for
+ * (`[to, notification]`, the runner's `ctx.notifyPeople`), or
+ * `resource.not_allowed` for any other request of `peopleAlias`.
+ */
+const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
+  const asked = jsonOf(args);
+  if (
+    method !== "notify" ||
+    asked === undefined ||
+    !isJsonArray(asked) ||
+    asked.length !== 2
+  ) {
+    throw operationErrors.create("resource.not_allowed");
+  }
+  const [to = null, notification = null] = asked;
+  return [to, notification];
+};
+
+/**
+ * An action's send to people, under `key` (derived from the action's call
+ * key and its place among its sends), through core's `PeopleNotifications`
+ * for the invocation, after the one gate (`admit`): how many were told.
+ * `resource.unavailable` where core tells nobody for the call.
+ */
+const notifyPeopleCall = async (
+  run: Run,
+  request: { method: unknown; args: unknown },
+  key: readonly string[],
+  /** Runs the send itself as an effect under way (`runAction`). */
+  sending: <Answer>(work: () => Promise<Answer>) => Promise<Answer>
+): Promise<Json> => {
+  const [to, notification] = peopleArgs(request.method, request.args);
+  await admit(run.invocation);
+  const { notifyPeople: people } = run.invocation;
+  if (people === undefined) {
+    throw operationErrors.create("resource.unavailable");
+  }
+  requireNotCancelled(run);
+  if (Date.now() >= run.invocation.deadline) {
+    throw hostError(operationErrors.create("operation.deadline_exceeded"));
+  }
+  const receipt = await sending(
+    async () => await people.send(to, notification, key.join(":"))
+  );
+  return { delivered: receipt.delivered };
+};
+
 /** Whether `operation` lists a workflow under `alias`. */
 const startsWorkflow = (
   operation: OperationManifest,
@@ -3312,6 +3376,29 @@ const runMutation = async (
           // lists, staged for its commit and made from its outbox after.
           // Any other resource is refused as a mutation's always is.
           resource: async (alias, method, callArgs) => {
+            if (alias === peopleAlias) {
+              const { notifyPeople: people } = invocation;
+              if (people === undefined) {
+                throw operationErrors.create("resource.unavailable");
+              }
+              const [to, notification] = peopleArgs(method, callArgs);
+              // Its place first, as a start's: the commit's bound counts
+              // it with them, refused before core reads anything.
+              if (placed >= commitMaxIntents) {
+                throw operationErrors.create("operation.call_limit", {
+                  maxStarts: commitMaxIntents,
+                });
+              }
+              placed += 1;
+              await admit(invocation);
+              const intent: NonNullable<Commit["intents"]>[number] = {
+                kind: "app.notify",
+                data: people.intent(to, notification),
+              };
+              staging.reserve(intent);
+              intents.push(intent);
+              return null;
+            }
             if (method === "notify") {
               const asked = workflowNotification(run, operation, {
                 alias,
@@ -3550,8 +3637,9 @@ const runAction = async (
     }
   };
   let starts = 0;
+  let sends = 0;
   const derived = async (
-    what: "call" | "resource" | "start",
+    what: "call" | "resource" | "start" | "notify",
     count: number
   ): Promise<readonly string[]> => [
     "derived",
@@ -3582,6 +3670,17 @@ const runAction = async (
         : await effect(async () => await callNested(kind, path, callArgs)),
     resource: async (alias, method, callArgs) => {
       spendCall(run.budget, "requests");
+      // People it tells: its own place among its sends.
+      if (alias === peopleAlias) {
+        sends += 1;
+        const sendKey = await derived("notify", sends);
+        return await notifyPeopleCall(
+          run,
+          { method, args: callArgs },
+          sendKey,
+          effect
+        );
+      }
       // A workflow it starts: its own place among its starts.
       if (startsWorkflow(operation, alias)) {
         starts += 1;

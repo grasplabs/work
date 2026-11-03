@@ -59,11 +59,14 @@ import { rowsOf } from "./sharing.ts";
 // connector-source-notices.ts as connect's audit events reach core), or
 // that packages of an App or workflow they build or approved were revoked
 // as malware (`package_revoked`, written by dependencies/requests.ts in
-// the batch that revokes them). A question is listed while it is open:
+// the batch that revokes them), or what an App's server code told them
+// (`app_message`, written by app-notifications.ts). A question is listed
+// while it is open:
 // once anyone answers or closes it, it goes from the list by itself; a
 // stopped trigger while it is still theirs and not deleted; a revocation
 // while they can still open the App or workflow, or approve packages, who
-// see every App's and workflow's approvals anyway.
+// see every App's and workflow's approvals anyway; an App's message while
+// they can still open the App.
 //
 // A workflow's failure tells who it acted for (who started the run, or,
 // for a run a trigger started, the App's owner when it failed), while
@@ -118,7 +121,7 @@ export const failureNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${told}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${told}`
       )
       .onConflictDoUpdate({
         target: [
@@ -159,7 +162,7 @@ export const stopNoticed = (
   return db
     .insert(notifications)
     .select(
-      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
     );
 };
 
@@ -189,7 +192,7 @@ export const eventsStopNoticed = (
   return db
     .insert(notifications)
     .select(
-      sql`SELECT ${notice.id}, ${notice.personId}, 'events_stopped', NULL, NULL, NULL, NULL, NULL, ${at}, ${at}, NULL, NULL, NULL, NULL, NULL, ${notice.connection}, ${notice.type}, ${notice.resource}, ${notice.reason} WHERE ${activeMember(notice.personId)}`
+      sql`SELECT ${notice.id}, ${notice.personId}, 'events_stopped', NULL, NULL, NULL, NULL, NULL, ${at}, ${at}, NULL, NULL, NULL, NULL, NULL, ${notice.connection}, ${notice.type}, ${notice.resource}, ${notice.reason}, NULL, NULL, NULL WHERE ${activeMember(notice.personId)}`
     )
     .onConflictDoNothing({ target: notifications.id });
 };
@@ -223,7 +226,7 @@ export const revocationNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'package_revoked', ${app}, ${workflow}, NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, ${revoked.name}, ${revoked.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
       )
   );
 };
@@ -250,7 +253,7 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
     eq(notifications.personId, person.userId),
     or(
       and(
-        eq(notifications.type, "run_failed"),
+        inList(notifications.type, ["run_failed", "app_message"]),
         isNotNull(apps.id),
         appsFoundBy(env, person)
       ),
@@ -311,7 +314,8 @@ interface ListedRow {
     | "gap_asked"
     | "trigger_stopped"
     | "package_revoked"
-    | "events_stopped";
+    | "events_stopped"
+    | "app_message";
   app: string | null;
   appName: string | null;
   workflow: string | null;
@@ -328,6 +332,9 @@ interface ListedRow {
   eventType: string | null;
   eventResource: string | null;
   stopReason: "refused" | "failed" | null;
+  title: string | null;
+  body: string | null;
+  screen: string | null;
   updatedAt: Date;
   readAt: Date | null;
 }
@@ -382,6 +389,26 @@ const revokedOf = (row: ListedRow): Notification[] => {
       ];
 };
 
+/** The `app_message` notification a listed row holds, if it reads. */
+const appMessageOf = (row: ListedRow): Notification[] => {
+  const { app, appName, title } = row;
+  return app === null || appName === null || title === null
+    ? []
+    : [
+        {
+          id: row.id,
+          type: "app_message",
+          app,
+          appName,
+          title,
+          body: row.body,
+          screen: row.screen,
+          at: row.updatedAt.toISOString(),
+          read: row.readAt !== null,
+        },
+      ];
+};
+
 /** The notification a listed row holds; none for a row it can't read. */
 const notificationOf = (row: ListedRow): Notification[] => {
   const at = row.updatedAt.toISOString();
@@ -421,6 +448,9 @@ const notificationOf = (row: ListedRow): Notification[] => {
   }
   if (row.type === "package_revoked") {
     return revokedOf(row);
+  }
+  if (row.type === "app_message") {
+    return appMessageOf(row);
   }
   if (row.type === "trigger_stopped") {
     return row.trigger === null ||
@@ -511,6 +541,12 @@ export const listNotifications = async (
         eventType: notifications.eventType,
         eventResource: notifications.eventResource,
         stopReason: notifications.stopReason,
+        // Named, as the workflow's: `body` is the gap's record's too.
+        title: sql<string | null>`${notifications.title}`.as("message_title"),
+        body: sql<string | null>`${notifications.body}`.as("message_body"),
+        screen: sql<string | null>`${notifications.screen}`.as(
+          "message_screen"
+        ),
         updatedAt: notifications.updatedAt,
         readAt: notifications.readAt,
       })

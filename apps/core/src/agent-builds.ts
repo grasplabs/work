@@ -1339,7 +1339,7 @@ const buildDeclaration = `/**
  * two fields, at most 100 groups). To show a record's related records,
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
- * when the person can't read that table. Read the SDK's types for the rest.
+ * when the person can't read that table.
  *
  * Every server function's \`ctx.caller\` is who calls, from Grasp's
  * sign-in, with no permission:
@@ -1358,6 +1358,19 @@ const buildDeclaration = `/**
  * while loading; for showing, never deciding) and \`usePeople()\` (the same
  * three reads). The top-level \`people\` path is the platform's: no
  * function registers there.
+ *
+ * To tell people about something in the App (a request to approve, an
+ * order shipped), an action calls
+ * \`ctx.notifyPeople(to, { title, body, link })\` (await sends one at a
+ * time) and a mutation \`ctx.afterCommit.notifyPeople(to, { ... })\`,
+ * sent once it commits: \`to\` is a person's or a team's ID, \`link\` the
+ * name of the App's screen it opens on (optional, never a URL). It reaches
+ * their Grasp notifications; only members who can open the App are told
+ * (anyone else is skipped), at most 50 people a send and 200 notifications
+ * an App an hour, a title of 120 characters and a body of 1000. A
+ * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
+ * this. A visitor's call can't tell anyone. Read the SDK's types for the
+ * rest.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */

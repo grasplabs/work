@@ -22,6 +22,7 @@ import {
   roleFromMembers,
   rowsOf as memberRowsOf,
 } from "./sharing.ts";
+import type { SharedRole } from "./sharing.ts";
 
 // Who may do what in an App (App roles). An App is open to:
 //
@@ -88,27 +89,43 @@ export const requireNotArchived = (app: Pick<App, "status">): void => {
   }
 };
 
-/** `appRole`, as if the App were published. */
-const roleRegardlessOfStatus = async (
-  env: Env,
-  by: Person,
-  app: Pick<App, "id" | "owner">
-): Promise<{ role: AppRole; shared: boolean } | undefined> => {
+/**
+ * `by`'s role in an App, from what decides it: whether they own it
+ * (`owns`), the roles of its shares that are theirs, as a person or through
+ * a team (`shares`), and its status; and whether that role comes from whom
+ * it is shared with (`shared`), rather than from being an admin or its
+ * owner. Undefined when they have none. The one rule, for one person
+ * (`appRole`) as for many at once (app-notifications.ts): an admin builds
+ * every App; its owner has the role their role in the organization caps;
+ * anyone else the highest of their shares, capped the same way; and a
+ * draft or archived App is open to its builders alone.
+ */
+export const decidedAppRole = (
+  by: Pick<Identity, "role">,
+  {
+    owns,
+    shares,
+    status,
+  }: {
+    owns: boolean;
+    shares: readonly SharedRole[];
+    status: App["status"];
+  }
+): { role: AppRole; shared: boolean } | undefined => {
+  let found: { role: AppRole; shared: boolean } | undefined;
   if (isAdmin(by.role)) {
-    return { role: "builder", shared: false };
+    found = { role: "builder", shared: false };
+  } else if (owns) {
+    found = { role: ceilingOf(by), shared: false };
+  } else {
+    const role = roleFromMembers(by, shares);
+    found = role === undefined ? undefined : { role, shared: true };
   }
-  if (app.owner === by.userId) {
-    return { role: ceilingOf(by), shared: false };
+  // Only a published App is open to those who don't build it.
+  if (found?.role === "user" && status !== "published") {
+    return undefined;
   }
-  const rows = await drizzle(env.DB)
-    .select({ role: appMembers.role })
-    .from(appMembers)
-    .where(and(eq(appMembers.appId, app.id), rowsOf(by)));
-  const role = roleFromMembers(
-    by,
-    rows.map((row) => row.role)
-  );
-  return role === undefined ? undefined : { role, shared: true };
+  return found;
 };
 
 /**
@@ -121,12 +138,20 @@ const appRole = async (
   by: Person,
   app: Pick<App, "id" | "owner" | "status">
 ): Promise<{ role: AppRole; shared: boolean } | undefined> => {
-  const found = await roleRegardlessOfStatus(env, by, app);
-  // Only a published App is open to those who don't build it.
-  if (found?.role === "user" && app.status !== "published") {
-    return undefined;
-  }
-  return found;
+  const owns = app.owner === by.userId;
+  // Whom it is shared with matters only to someone neither admin nor owner.
+  const rows =
+    isAdmin(by.role) || owns
+      ? []
+      : await drizzle(env.DB)
+          .select({ role: appMembers.role })
+          .from(appMembers)
+          .where(and(eq(appMembers.appId, app.id), rowsOf(by)));
+  return decidedAppRole(by, {
+    owns,
+    shares: rows.map((row) => row.role),
+    status: app.status,
+  });
 };
 
 /**

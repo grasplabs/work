@@ -552,11 +552,21 @@ const purgedTables = [
 const formValuesCleared = sql`json_set(${outbox.intent}, '$.data.values', json('null'))`;
 
 /**
- * An entry's intent once it is settled: a form's without its values, as
- * nothing hands it over again; any other's as it was.
+ * A send to people without what it said (`app.notify`, core's
+ * app-notifications.ts): its title and body are kept only to tell them,
+ * and the notifications they got hold them from then on.
  */
-const settledIntent = sql`CASE WHEN ${outbox.kind} = 'app.form_sent'
-  THEN ${formValuesCleared} ELSE ${outbox.intent} END`;
+const notificationCleared = sql`json_set(${outbox.intent}, '$.data.notification', json('null'))`;
+
+/**
+ * An entry's intent once it is settled: a form's without its values, and
+ * a send to people without what it said, as nothing hands either over
+ * again; any other's as it was.
+ */
+const settledIntent = sql`CASE ${outbox.kind}
+  WHEN 'app.form_sent' THEN ${formValuesCleared}
+  WHEN 'app.notify' THEN ${notificationCleared}
+  ELSE ${outbox.intent} END`;
 
 /** How long one alarm goes on deleting cascade jobs' batches. */
 const cascadeBudgetMs = 5000;

@@ -993,6 +993,7 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
     decision: t`Review and answer`,
     revoked: t`Remove the package`,
     stoppedEvents: t`Open the connection`,
+    appMessage: t`Open the App`,
   };
   const label = labels[item.source.type] ?? t`Review`;
   return (

@@ -2475,6 +2475,7 @@ msgstr "Autre chose ?"
 #: src/connections/request-app-dialog.tsx
 #: src/engines/app-page.tsx
 #: src/engines/screen-approval.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
 msgstr "Application"
@@ -5617,6 +5618,11 @@ msgstr "De"
 #: src/onboarding/about-story.tsx
 msgid "From all of that, I work out where AI saves your team the most time."
 msgstr "À partir de tout cela, je détermine où l’IA fait gagner le plus de temps à votre équipe."
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: something an App told the person"
+msgid "From an App"
+msgstr "D’une application"
 
 #: src/knowledge/purge.tsx
 msgid "From every version of the first {first} files of this collection; purge again for the rest."
@@ -9153,6 +9159,10 @@ msgstr "Ouverte depuis le {date}. Tant qu’elle reste sans réponse, cette vale
 #: src/settings/where-stephen.tsx
 msgid "Open Stephen in {app}, in a new tab"
 msgstr "Ouvrir Stephen dans {app}, dans un nouvel onglet"
+
+#: src/inbox/item-detail.tsx
+msgid "Open the App"
+msgstr "Ouvrir l’application"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx

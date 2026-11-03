@@ -11,6 +11,8 @@ import type {
   ActionCtx,
   ArgsOf,
   MutationCtx,
+  NotifyReceipt,
+  PeopleNotification,
   QueryCtx,
   RunHandle,
 } from "../src/server.ts";
@@ -266,9 +268,13 @@ action({
   uses: [get, create, mail, help, summarizer, secret],
   handler: async (ctx, args) => {
     expectTypeOf(ctx).toExtend<ActionCtx<readonly [typeof get]>>();
-    // No database, and no notifications.
+    // No database, and no notifications of runs: it tells people only.
     expectTypeOf(ctx).not.toHaveProperty("db");
     expectTypeOf(ctx).not.toHaveProperty("notify");
+    expectTypeOf(ctx.notifyPeople).parameter(0).toEqualTypeOf<string>();
+    expectTypeOf(
+      ctx.notifyPeople
+    ).returns.resolves.toEqualTypeOf<NotifyReceipt>();
     const note = await ctx.runQuery(get, { id: args.noteId });
     expectTypeOf(note).toExtend<{ title: string } | null>();
     // @ts-expect-error -- a mutation isn't a query
@@ -401,6 +407,10 @@ mutation({
   handler: async (ctx, args) => {
     // @ts-expect-error -- it lists no workflow
     await ctx.afterCommit.start(followUp, { noteId: args.noteId });
+    // Tells people once it commits, whatever it lists.
+    await ctx.afterCommit.notifyPeople("person", { title: "Done" });
+    // @ts-expect-error -- a title is required
+    await ctx.afterCommit.notifyPeople("person", { body: "Done" });
     return null;
   },
 });
@@ -502,7 +512,7 @@ mutation({
 });
 
 // A query reads only, and an action has no transaction to stage one in:
-// neither has `notify`.
+// neither has `notify`. An action tells people (`notifyPeople`).
 query({
   args: {},
   returns: v.null(),
@@ -516,6 +526,9 @@ action({
   returns: v.null(),
   handler: (ctx) => {
     expectTypeOf(ctx).not.toHaveProperty("notify");
+    expectTypeOf(ctx.notifyPeople)
+      .parameter(1)
+      .toEqualTypeOf<PeopleNotification>();
     return null;
   },
 });

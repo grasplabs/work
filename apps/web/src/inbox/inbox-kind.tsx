@@ -3,6 +3,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {
+  BellIcon,
   CalendarOffIcon,
   CircleCheckIcon,
   CircleHelpIcon,
@@ -76,6 +77,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Not hearing",
     context: "inbox item kind: a mailbox or drive connect stopped hearing",
   }),
+  appMessage: msg({
+    message: "From an App",
+    context: "inbox item kind: something an App told the person",
+  }),
   bindingApproval: msg({
     message: "Bindings",
     context:
@@ -105,6 +110,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,
+  appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };

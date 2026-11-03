@@ -31,6 +31,7 @@ import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
 import { callTimeoutMs } from "./app-call-timeout.ts";
+import { appPeopleNotifications } from "./app-notifications.ts";
 import {
   answerPeople,
   isPeoplePath,
@@ -344,6 +345,11 @@ export const invocationFor = async (
             release,
             agent ?? null
           ),
+          // The people the App tells, through the platform's
+          // notifications, as the App for the person calling. None for a
+          // run's chain: a workflow tells people its own way, decided on
+          // its own.
+          notifyPeople: appPeopleNotifications(env, authority, agent ?? null),
         }),
   };
 };

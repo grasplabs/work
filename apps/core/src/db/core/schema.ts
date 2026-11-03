@@ -3414,6 +3414,7 @@ export const notifications = sqliteTable(
         "trigger_stopped",
         "package_revoked",
         "events_stopped",
+        "app_message",
       ],
     }).notNull(),
     appId: text("app_id"),
@@ -3452,6 +3453,15 @@ export const notifications = sqliteTable(
     eventType: text("event_type"),
     eventResource: text("event_resource"),
     stopReason: text("stop_reason", { enum: ["refused", "failed"] }),
+    /**
+     * What an `app_message` row's App told the person
+     * (app-notifications.ts): its title, its body (null for none) and the
+     * App's screen it opens on (null for the App's first); its `app_id` is
+     * the App.
+     */
+    title: text(),
+    body: text(),
+    screen: text(),
   },
   (table) => [
     // A person's list, latest first.
@@ -3464,6 +3474,10 @@ export const notifications = sqliteTable(
     uniqueIndex("notifications_unread_idx")
       .on(table.personId, table.type, table.appId, table.workflowId)
       .where(sql`read_at IS NULL`),
+    // What an App sent in the last hour: its hourly limit.
+    index("notifications_app_sent_idx")
+      .on(table.appId, table.createdAt)
+      .where(sql`type = 'app_message'`),
     // A person is asked about a gap once.
     uniqueIndex("notifications_gap_idx")
       .on(table.personId, table.gapId)
