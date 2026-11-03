@@ -1212,7 +1212,9 @@ export const installBuiltinBlueprint = async (
           db,
           installEntry("blueprint.changed", id, {
             name,
-            description,
+            // Content, not an identifier, so by its SHA-256, as the audit
+            // log keeps identifier-sized values only.
+            description: await sha256Hex(description),
             tree: tree.tree,
             release: compilerVersion,
             // What copies ask for and get, by the SHA-256 of each as stored.

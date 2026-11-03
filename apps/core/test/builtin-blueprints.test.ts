@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { appLimits } from "@grasp-os/shared/app-limits";
 import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type {
@@ -75,13 +76,16 @@ const ensureInstalled = async (): Promise<boolean> =>
   await builtins(env).ensureInstalled(await fingerprintOf(release));
 
 /**
- * This release, with `hello` changed as `change` says: another release,
- * with the digest its build would embed.
+ * This release, with each built-in changed as `change` says of it: another
+ * release, with the digest its build would embed.
  */
-const releaseWith = (change: Partial<BuiltinBlueprint>): Release => {
-  const blueprints = release.blueprints.map((blueprint) =>
-    blueprint.id === "hello" ? { ...blueprint, ...change } : blueprint
-  );
+const releaseChanging = (
+  change: (blueprint: BuiltinBlueprint) => Partial<BuiltinBlueprint>
+): Release => {
+  const blueprints = release.blueprints.map((blueprint) => ({
+    ...blueprint,
+    ...change(blueprint),
+  }));
   return {
     ...release,
     blueprints,
@@ -90,6 +94,13 @@ const releaseWith = (change: Partial<BuiltinBlueprint>): Release => {
       .digest("hex"),
   };
 };
+
+/**
+ * This release, with `hello` changed as `change` says: another release,
+ * with the digest its build would embed.
+ */
+const releaseWith = (change: Partial<BuiltinBlueprint>): Release =>
+  releaseChanging((blueprint) => (blueprint.id === "hello" ? change : {}));
 
 /** Where `hello` keeps its greeting, a function of its release. */
 const greetings = "operations/greetings.ts";
@@ -269,6 +280,13 @@ const refusingDeletes = (files: R2Bucket): R2Bucket =>
     },
   });
 
+/** `one` before `other`, by their IDs. */
+const byId = (one: { id: string }, other: { id: string }): number =>
+  one.id.localeCompare(other.id);
+
+/** A built-in's name, as a changed release names it. */
+const renamed = (name: string): string => `${name}, changed`;
+
 const writesBlueprint = /^update "blueprints"/iu;
 
 /** `racingDb`, racing the batch that changes a blueprint. */
@@ -428,26 +446,51 @@ describe("the built-in blueprints", () => {
     await reinstall();
   });
 
-  it("take a changed name and description, audited", async () => {
+  it("each take a changed name and the longest description an App may have, audited", async () => {
     const admin = await signedInApi(idp, "admin");
     await reinstall();
+    // Every built-in the release ships, the tests' own and the real ones:
+    // one the install rejects leaves every install after it partial.
+    const description = "d".repeat(appLimits.descriptionLength);
     const events = await auditedDuring(async () => {
       await expect(
-        install(releaseWith({ name: "Hi", description: "Says hi." }))
+        install(
+          releaseChanging(({ name }) => ({ name: renamed(name), description }))
+        )
       ).resolves.toBeTruthy();
     });
+    const ids = new Set(release.blueprints.map(({ id }) => id));
     const listed = await admin.api.apps.blueprints.list();
     expect({
       listed: listed
-        .filter(({ id }) => id === "hello")
-        .map(({ name, description }) => [name, description]),
+        .filter(({ id }) => ids.has(id))
+        .toSorted(byId)
+        .map(({ id, name, description: listedDescription }) => [
+          id,
+          name,
+          listedDescription,
+        ]),
       audited: events
-        .filter(({ target }) => target?.id === "hello")
-        .map(({ action, detail }) => [action, detail.name, detail.description]),
+        .filter(({ target }) => ids.has(target?.id ?? ""))
+        .map(({ action, target, detail }) => ({
+          id: target?.id ?? "",
+          action,
+          name: detail.name,
+          description: detail.description,
+        }))
+        .toSorted(byId),
     }).toStrictEqual({
-      listed: [["Hi", "Says hi."]],
-      // What it became: with the events before it, what it was.
-      audited: [["blueprint.changed", "Hi", "Says hi."]],
+      listed: release.blueprints
+        .toSorted(byId)
+        .map(({ id, name }) => [id, renamed(name), description]),
+      // What each became, the description by its SHA-256: the audit log
+      // keeps identifiers, never content.
+      audited: release.blueprints.toSorted(byId).map(({ id, name }) => ({
+        id,
+        action: "blueprint.changed",
+        name: renamed(name),
+        description: createHash("sha256").update(description).digest("hex"),
+      })),
     });
 
     await reinstall();
