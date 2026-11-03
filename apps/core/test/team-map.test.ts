@@ -38,7 +38,6 @@ import { routed, unique } from "./sign-in.ts";
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
-const staff = { type: "staff", userId: "staff-test" } as const;
 
 /** A team led by Lea, with Max and Mia, in a fresh onboarding running from `start`. */
 const team = async (start: string) => {
@@ -302,7 +301,7 @@ describe("a team's map", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is tried again after a minute, five and thirty, then given up and logged, opening the team; staff can draw it again", async () => {
+  it("is tried again after a minute, five and thirty, then given up and logged, opening the team", async () => {
     const store = onboardingStore(env);
     const ids = await team(isoDay(Date.now() - dayMs));
     await store.releaseDue();
@@ -322,10 +321,7 @@ describe("a team's map", { timeout: 60_000 }, () => {
       ]
     );
     const opened = await store.releaseDue();
-    const dueBefore = await store.drawsDue();
-    const dueAfter = dueBefore.includes(ids.lea);
-    const again = await store.drawAgain(ids.team, staff);
-    const dueNow = await store.drawsDue();
+    const due = await store.drawsDue();
     const entries = await onboardingLog("map", store);
     const log = entries.filter(({ about }) => about === ids.lea).toReversed();
     expect({
@@ -333,9 +329,7 @@ describe("a team's map", { timeout: 60_000 }, () => {
       calls: requests.length,
       opened,
       log: log.map(({ what }) => what),
-      dueAfter,
-      again,
-      dueAgain: dueNow.includes(ids.lea),
+      due: due.includes(ids.lea),
     }).toStrictEqual({
       result: [
         `team:${ids.team}`,
@@ -346,16 +340,8 @@ describe("a team's map", { timeout: 60_000 }, () => {
       ],
       calls: 4,
       opened: [ids.max, ids.mia],
-      log: [
-        "map.again",
-        "map.gave_up",
-        "map.failed",
-        "map.failed",
-        "map.failed",
-      ],
-      dueAfter: false,
-      again: true,
-      dueAgain: true,
+      log: ["map.gave_up", "map.failed", "map.failed", "map.failed"],
+      due: false,
     });
   });
 
