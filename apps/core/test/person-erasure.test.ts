@@ -11,7 +11,7 @@ import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -25,7 +25,7 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, holdAlarm } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import {
   agree,
@@ -1157,6 +1157,14 @@ describe("erasing a person", () => {
   });
 
   it("never names them in a referral someone else makes after their erasure, though their entry stays", async () => {
+    // The test draws the referral itself, inside its faked provider: the
+    // store's own alarm, armed half a second on by Max's agreement, would
+    // otherwise draw it first outside it, fail, and put it off a minute
+    // (holdAlarm).
+    await holdAlarm();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
     const { admin, person } = await removedPerson();
     const store = onboardingStore(env);
     const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
