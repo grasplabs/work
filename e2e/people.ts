@@ -320,6 +320,7 @@ const cast = {
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
   revokesByHand: { admin: "admin", owner: "user" },
+  memberErasure: { admin: "admin", leaving: "user" },
   workspaceSettings: { admin: "admin", member: "user" },
   memberInvites: { admin: "admin" },
   teams: { admin: "admin", member: "user" },
