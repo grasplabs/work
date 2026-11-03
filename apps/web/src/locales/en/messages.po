@@ -8016,6 +8016,10 @@ msgstr "Let me put it all together for you."
 msgid "Let people ask Stephen to start it"
 msgstr "Let people ask Stephen to start it"
 
+#: src/activity/audit-words.ts
+msgid "Let someone visit a domain"
+msgstr "Let someone visit a domain"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "Let the interviews run again"
@@ -13027,6 +13031,10 @@ msgstr "Signed in for the first time, after joining from the directory"
 msgid "Signed in to a connection again"
 msgstr "Signed in to a connection again"
 
+#: src/activity/audit-words.ts
+msgid "Signed in to a domain as a visitor"
+msgstr "Signed in to a domain as a visitor"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Signed in with"
@@ -13034,6 +13042,10 @@ msgstr "Signed in with"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Signed off"
 msgstr "Signed off"
+
+#: src/activity/audit-words.ts
+msgid "Signed out of a domain as a visitor"
+msgstr "Signed out of a domain as a visitor"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -13614,6 +13626,10 @@ msgstr "Stopped on {date}"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Stopped schedule"
+
+#: src/activity/audit-words.ts
+msgid "Stopped someone visiting a domain"
+msgstr "Stopped someone visiting a domain"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -16283,12 +16299,20 @@ msgid "Was refused adding a member to a domain"
 msgstr "Was refused adding a member to a domain"
 
 #: src/activity/audit-words.ts
+msgid "Was refused as a domain's visitor"
+msgstr "Was refused as a domain's visitor"
+
+#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Was refused packages known as malware"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
 msgstr "Was refused packages nobody approved"
+
+#: src/activity/audit-words.ts
+msgid "Was sent a code to visit a domain"
+msgstr "Was sent a code to visit a domain"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"
