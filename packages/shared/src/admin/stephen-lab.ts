@@ -23,8 +23,8 @@ import type { Bench, Result, Scores } from "../lab-runs.ts";
 import type { Interviewer } from "../onboarding.ts";
 import { stephenOf } from "./onboarding-admin-record.ts";
 import type { OrgView } from "./onboarding-admin.ts";
-import { liveGroupsOf } from "./stephen-live.ts";
-import type { LiveGroup } from "./stephen-live.ts";
+import { liveGroupsOf, realFiguresOf, tallyOf } from "./stephen-live.ts";
+import type { LiveGroup, RealFigure } from "./stephen-live.ts";
 
 /** One organization's interviews, as the admin read them from its Grasp. */
 export interface LabOrganization {
@@ -100,6 +100,8 @@ export interface LabVersion {
 export interface LabNeed {
   id: string;
   text: string;
+  /** Where it is dealt with: a section of the page (`#live`) or another page. */
+  href: string;
 }
 
 /** The one number the Lab leads with, against the version before it, measured alike. */
@@ -116,6 +118,14 @@ export interface LabHeadline {
 export interface StephenLab {
   versions: LabVersion[];
   headline: LabHeadline | null;
+  /** The lab's numbers the page leads with, each against the version before it: heard, then the right line at hard turns. */
+  figures: LabHeadline[];
+  /** Real people's numbers the page leads with: finished, notes kept and rating, with the Stephen in use against the one before. */
+  realFigures: RealFigure[];
+  /** The Stephen most real people talk with now; none before any interview says. */
+  inUse: LabVersion | null;
+  /** The newest Stephen the lab measured that no real person talks with yet. */
+  candidate: LabVersion | null;
   /** Every organization together. */
   real: RealStanding;
   needs: LabNeed[];
@@ -251,73 +261,69 @@ const casesOver = (
 };
 
 /**
- * The newest Stephen against the one before, as the lab compares two runs
+ * One number of the newest Stephen against the one before, as the lab compares two runs
  * (`compare`, scripts/lab/round.ts): over the cases both were measured on,
  * with what the earlier one moves by chance as the bar.
  */
-const headlineOf = (
+const figureOf = (
   open: readonly Result[],
   hidden: readonly Scores[],
-  ordered: readonly string[]
+  ordered: readonly string[],
+  number: LabNumber
 ): LabHeadline | null => {
-  for (const number of LAB_NUMBERS) {
-    const measured = ordered.filter(
-      (version) => newestAlike(open, version, number.bench).length > 0
-    );
-    const version = measured.at(-1);
-    if (version === undefined) {
-      continue;
-    }
-    const now = newestAlike(open, version, number.bench);
-    const [first] = now;
-    if (first === undefined) {
-      continue;
-    }
-    const key = alikeKey(first);
-    const standing = standingOf(open, hidden, version, number);
-    if (standing === null) {
-      continue;
-    }
-    // The version before, measured alike: never set beside one measured another way.
-    const previous = measured
-      .slice(0, -1)
-      .toReversed()
-      .find((each) =>
-        open.some(
-          (run) =>
-            versionOfRun(run) === each &&
-            run.bench === number.bench &&
-            alikeKey(run) === key
-        )
-      );
-    const alike = open.filter((run) => alikeKey(run) === key);
-    const was =
-      previous === undefined
-        ? null
-        : standingOf(alike, hidden, previous, number);
-    const before =
-      previous === undefined ? [] : newestAlike(alike, previous, number.bench);
-    const compared = compare(
-      casesOver(before, number.metric),
-      casesOver(now, number.metric),
-      noiseOf(before)
-    ).find((each) => each.metric === number.metric);
-    return {
-      label: number.label,
-      version,
-      value: standing.value,
-      before:
-        previous === undefined || was === null || compared === undefined
-          ? null
-          : { version: previous, value: was.value },
-      verdict: was === null ? null : (compared?.verdict ?? null),
-      hiddenChange:
-        was === null || standing.hidden === null || was.hidden === null
-          ? null
-          : standing.hidden - was.hidden,
-    };
+  const measured = ordered.filter(
+    (version) => newestAlike(open, version, number.bench).length > 0
+  );
+  const version = measured.at(-1);
+  if (version === undefined) {
+    return null;
   }
-  return null;
+  const now = newestAlike(open, version, number.bench);
+  const [first] = now;
+  if (first === undefined) {
+    return null;
+  }
+  const key = alikeKey(first);
+  const standing = standingOf(open, hidden, version, number);
+  if (standing === null) {
+    return null;
+  }
+  // The version before, measured alike: never set beside one measured another way.
+  const previous = measured
+    .slice(0, -1)
+    .toReversed()
+    .find((each) =>
+      open.some(
+        (run) =>
+          versionOfRun(run) === each &&
+          run.bench === number.bench &&
+          alikeKey(run) === key
+      )
+    );
+  const alike = open.filter((run) => alikeKey(run) === key);
+  const was =
+    previous === undefined ? null : standingOf(alike, hidden, previous, number);
+  const before =
+    previous === undefined ? [] : newestAlike(alike, previous, number.bench);
+  const compared = compare(
+    casesOver(before, number.metric),
+    casesOver(now, number.metric),
+    noiseOf(before)
+  ).find((each) => each.metric === number.metric);
+  return {
+    label: number.label,
+    version,
+    value: standing.value,
+    before:
+      previous === undefined || was === null || compared === undefined
+        ? null
+        : { version: previous, value: was.value },
+    verdict: was === null ? null : (compared?.verdict ?? null),
+    hiddenChange:
+      was === null || standing.hidden === null || was.hidden === null
+        ? null
+        : standing.hidden - was.hidden,
+  };
 };
 
 /** Versions in the order the lab first measured them, each with when that was. */
@@ -382,6 +388,7 @@ const liveNeeds = (live: StephenLab["live"]): LabNeed[] => {
     if (group.finishedFell && group.before !== null) {
       needs.push({
         id: `finished-${group.id}`,
+        href: "#live",
         text: `Fewer ${group.who} finish with ${now.name}: ${group.now.finished} of ${group.now.started}, against ${group.before.finished} of ${group.before.started} with ${before.name}, more than chance.`,
       });
     }
@@ -389,6 +396,7 @@ const liveNeeds = (live: StephenLab["live"]): LabNeed[] => {
       const who = `${group.who.charAt(0).toUpperCase()}${group.who.slice(1)}`;
       needs.push({
         id: `rating-${group.id}`,
+        href: "#live",
         text: `${who} rate ${now.name} lower than ${before.name}, more than chance.`,
       });
     }
@@ -418,12 +426,14 @@ const labNeeds = ({
   if (inUse !== undefined && Object.keys(inUse.lab).length === 0) {
     needs.push({
       id: "untested",
+      href: "#versions",
       text: `${heldWords(inUse.real?.started ?? 0)} with a Stephen the lab never measured. Run the benches on that release.`,
     });
   }
   if (headline?.verdict === "worse" && headline.before !== null) {
     needs.push({
       id: "worse",
+      href: "#versions",
       text: `${headline.label}: ${nameOf(headline.version)} does worse in the lab than ${nameOf(headline.before.version)}, ${percent(headline.value)} against ${percent(headline.before.value)}, more than chance moves it.`,
     });
   }
@@ -434,6 +444,7 @@ const labNeeds = ({
   if (hiddenDisagrees) {
     needs.push({
       id: "hidden",
+      href: "#runs",
       text: `${headline.label}: ${nameOf(headline.version)} does better on the open companies but not on the hidden ones. Don't release it yet.`,
     });
   }
@@ -442,7 +453,11 @@ const labNeeds = ({
       ? null
       : Math.floor((Date.parse(now) - Date.parse(lastRun)) / 86_400_000);
   if (days !== null && days > QUIET_DAYS) {
-    needs.push({ id: "quiet", text: `The lab hasn't run in ${days} days.` });
+    needs.push({
+      id: "quiet",
+      href: "#runs",
+      text: `The lab hasn't run in ${days} days.`,
+    });
   }
   return needs;
 };
@@ -493,6 +508,93 @@ const liveOf = (
       before === null ? null : releasesOf(before.version)
     ),
   };
+};
+
+/** The lab's numbers the page leads with: what people get to say in a whole interview, and the right next line at hard turns. */
+const FIGURE_BENCHES: ReadonlySet<Bench> = new Set(["whole", "ask"]);
+
+/** Finished, notes kept and rating: with the Stephen in use against the one before, or, before any interview says which Stephen, every interview together. */
+const realFiguresNow = (
+  live: StephenLab["live"],
+  organizations: readonly LabOrganization[]
+): RealFigure[] => {
+  const all = live?.groups.find((group) => group.id === "all");
+  return all === undefined
+    ? realFiguresOf(
+        tallyOf(organizations.flatMap(({ view }) => view.interviews)),
+        null
+      )
+    : realFiguresOf(all.now, all.before);
+};
+
+/** The newest Stephen the lab measured after the one in use (or any, before anyone talks with one) that no real person talks with yet. */
+const candidateOf = (
+  versions: readonly LabVersion[],
+  inUse: LabVersion | null
+): LabVersion | null =>
+  versions.findLast(
+    (each) =>
+      each.firstRun !== null &&
+      each.real === null &&
+      (inUse?.firstRun === null ||
+        inUse?.firstRun === undefined ||
+        each.firstRun > inUse.firstRun)
+  ) ?? null;
+
+/** A number the lab says not to release a Stephen on: worse than chance, or better only on the open companies. */
+const holdsBack = (figure: LabHeadline): boolean =>
+  figure.verdict === "worse" ||
+  (figure.verdict === "better" &&
+    figure.hiddenChange !== null &&
+    figure.hiddenChange <= 0);
+
+/**
+ * Once people talk with a Stephen, a newer one waits for its first step out
+ * of the lab, unless any of the lab's numbers says not to take it: then
+ * that is said instead, once (the number the Lab leads with says it already).
+ */
+const candidateNeeds = ({
+  candidate,
+  figures,
+  headline,
+  versions,
+}: {
+  candidate: LabVersion | null;
+  figures: readonly LabHeadline[];
+  headline: LabHeadline | null;
+  versions: readonly LabVersion[];
+}): LabNeed[] => {
+  if (candidate === null) {
+    return [];
+  }
+  const against = figures.find(
+    (figure) => figure.version === candidate.version && holdsBack(figure)
+  );
+  if (against === undefined) {
+    return [
+      {
+        id: "candidate",
+        href: "/platform/releases",
+        text: `${candidate.name} is measured in the lab and nobody talks with him yet. Put his release on Edge.`,
+      },
+    ];
+  }
+  if (against === headline) {
+    return [];
+  }
+  const before =
+    versions.find((each) => each.version === against.before?.version)?.name ??
+    "the Stephen before";
+  return [
+    {
+      id: "held-back",
+      href: "#versions",
+      text:
+        against.verdict === "worse"
+          ? `${candidate.name} isn't ready for Edge: ${against.label} is worse in the lab than with ${before}, more than chance.`
+          : `${candidate.name} isn't ready for Edge: ${against.label} is better on the open companies but not on the hidden ones.`,
+    },
+  ];
 };
 
 /**
@@ -599,18 +701,39 @@ export const stephenLabOf = ({
       real: realFor(version),
     })
   );
-  const headline = headlineOf(open, hidden, measured);
+  const measuredBy = LAB_NUMBERS.flatMap((number) => {
+    const figure = figureOf(open, hidden, measured, number);
+    return figure === null ? [] : [{ number, figure }];
+  });
+  const headline = measuredBy[0]?.figure ?? null;
   const everyRun = [...open, ...hidden].toSorted((a, b) =>
     b.at.localeCompare(a.at)
   );
   const live = liveOf(versions, theirs, releasesOf);
+  const inUse = live?.now ?? null;
+  const candidate = candidateOf(versions, inUse);
+  const lab = labNeeds({ versions, headline, lastRun: everyRun[0]?.at, now });
   return {
     versions,
     headline,
+    figures: measuredBy.flatMap(({ number, figure }) =>
+      FIGURE_BENCHES.has(number.bench) ? [figure] : []
+    ),
+    realFigures: realFiguresNow(live, theirs),
+    inUse,
+    candidate,
     real: realOf(theirs, () => true),
     live,
     needs: [
-      ...labNeeds({ versions, headline, lastRun: everyRun[0]?.at, now }),
+      ...lab,
+      ...(inUse === null
+        ? []
+        : candidateNeeds({
+            candidate,
+            figures: measuredBy.map(({ figure }) => figure),
+            headline,
+            versions,
+          })),
       ...liveNeeds(live),
     ],
     runs: everyRun.slice(0, 20),

@@ -398,6 +398,88 @@ describe("live, group by group", () => {
   });
 });
 
+describe("the overview", () => {
+  it("leads with heard and the right line in the lab, and finished, notes kept and rating with the Stephen in use", () => {
+    const lab = labOf(
+      [
+        run("v1", [0.6]),
+        run("v1", [1], { bench: "ask" }),
+        run("v2", [0.7]),
+        run("v3", [0.8]),
+      ],
+      [organization("Bakkerij", [...held("v1", 10, 10), ...held("v2", 12, 6)])]
+    );
+
+    expect({
+      lab: lab.figures.map(({ label }) => label),
+      real: lab.realFigures.map(({ id, value, change }) => [
+        id,
+        Math.round((value ?? 0) * 100),
+        change,
+      ]),
+      inUse: lab.inUse?.name,
+      candidate: lab.candidate?.name,
+    }).toStrictEqual({
+      lab: ["Heard", "Right line"],
+      real: [
+        ["finished", 50, "worse"],
+        ["kept", 91, "within chance"],
+        ["rating", 400, "within chance"],
+      ],
+      inUse: "Stephen 2",
+      candidate: "Stephen 3",
+    });
+  });
+
+  it("says a candidate waits for Edge, and opens where each need is dealt with", () => {
+    const lab = labOf(
+      [run("v1", [0.6]), run("v2", [0.7])],
+      [organization("Bakkerij", held("v1", 3, 3))]
+    );
+
+    expect(lab.needs.map(({ id, href }) => [id, href])).toStrictEqual([
+      ["candidate", "/platform/releases"],
+    ]);
+  });
+
+  it("holds a candidate back when any of the lab's numbers finds him worse, not only the one it leads with", () => {
+    const lab = labOf(
+      [
+        run("v1", [0.6, 0.6]),
+        run("v1", [0.6, 0.6]),
+        run("v1", [0.9, 0.9], { bench: "ask" }),
+        run("v1", [0.9, 0.9], { bench: "ask" }),
+        run("v2", [0.8, 0.8]),
+        run("v2", [0.8, 0.8]),
+        run("v2", [0.3, 0.3], { bench: "ask" }),
+        run("v2", [0.3, 0.3], { bench: "ask" }),
+      ],
+      [organization("Bakkerij", held("v1", 3, 3))]
+    );
+
+    expect(lab.needs.map(({ id, href }) => [id, href])).toStrictEqual([
+      ["held-back", "#versions"],
+    ]);
+    expect(lab.needs[0]?.text).toBe(
+      "Stephen 2 isn't ready for Edge: Right line is worse in the lab than with Stephen 1, more than chance."
+    );
+  });
+
+  it("holds a candidate back when the lab finds him worse", () => {
+    const lab = labOf(
+      [
+        run("v1", [0.8, 0.8]),
+        run("v1", [0.8, 0.8]),
+        run("v2", [0.4, 0.4]),
+        run("v2", [0.4, 0.4]),
+      ],
+      [organization("Bakkerij", held("v1", 3, 3))]
+    );
+
+    expect(lab.needs.map(({ id }) => id)).toStrictEqual(["worse"]);
+  });
+});
+
 describe("one Stephen run as two releases", () => {
   it("keeps the real interviews of his earlier release with him when only Claire's texts changed", () => {
     const lab = labOf(

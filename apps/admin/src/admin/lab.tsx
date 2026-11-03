@@ -30,7 +30,12 @@ import type {
   LabVersion,
   StephenLab as Lab,
 } from "@grasp-os/shared/admin/stephen-lab";
-import type { LiveGroup, Tally } from "@grasp-os/shared/admin/stephen-live";
+import type {
+  Change,
+  LiveGroup,
+  RealFigure,
+  Tally,
+} from "@grasp-os/shared/admin/stephen-live";
 import { meansOf, shown } from "@grasp-os/shared/lab-compare";
 import type { Verdict } from "@grasp-os/shared/lab-compare";
 import type { Result, Scores } from "@grasp-os/shared/lab-runs";
@@ -187,40 +192,117 @@ const changeWords = (lab: Lab, headline: LabHeadline): string => {
   return `${signed} points since ${name}, ${verdictWords[verdict]}`;
 };
 
-/** One number from the lab and one from real people, each saying where it comes from. */
-const WhereHeStands = ({ lab }: { lab: Lab }) => {
-  const { headline, real } = lab;
-  const rated =
-    real.rating.count === 0
-      ? "nobody rated it yet"
-      : `rated ${oneDecimal.format(real.rating.average)} by ${real.rating.count}`;
-  return (
-    <section
-      aria-label="Where he stands"
-      className="bg-border grid grid-cols-1 gap-px overflow-hidden rounded-xl border sm:grid-cols-2"
-    >
-      <Figure
-        label={
-          headline === null ? "In the lab" : `${headline.label}, in the lab`
-        }
-        sub={
-          headline === null
-            ? "No lab run is kept yet: vp run lab bench, and commit its results"
-            : changeWords(lab, headline)
-        }
-        value={headline === null ? "–" : percent.format(headline.value)}
-      />
-      <Figure
-        label="Finished, with real people"
-        ring={{ value: real.finished, of: real.started }}
-        sub={real.started === 0 ? "no interview started yet" : rated}
-        value={`${real.finished} of ${real.started}`}
-      />
-    </section>
-  );
+/** How a number of real people moved since the Stephen before, in a few words. */
+const realChangeWords: Record<Change, string> = {
+  better: "better, more than chance",
+  worse: "worse, more than chance",
+  "within chance": "within chance",
+  "too few": "too few to say",
 };
 
-/** What needs one of us, or that nothing does. */
+/** A real number as the page shows it: a share in percent, a rating to one decimal. */
+const realValue = (figure: RealFigure, value: number | null): string => {
+  if (value === null) {
+    return "–";
+  }
+  return figure.id === "rating"
+    ? oneDecimal.format(value)
+    : percent.format(value);
+};
+
+/** What a real number with nothing to count yet says: ratings are optional, and a finished interview can hold no notes. */
+const emptyWords: Record<RealFigure["id"], string> = {
+  finished: "no interview started yet",
+  kept: "no notes to count yet",
+  rating: "nobody rated yet",
+};
+
+/** Where a real number comes from, and how it moved since the Stephen before. */
+const realSub = (figure: RealFigure, lab: Lab): string => {
+  const now = lab.live?.now.name;
+  const before = lab.live?.before?.name;
+  if (figure.of === 0) {
+    return emptyWords[figure.id];
+  }
+  const held = now === undefined ? "every interview" : `with ${now}`;
+  const counted =
+    figure.id === "finished"
+      ? held
+      : `${held}, ${figure.of} ${figure.id === "rating" ? "rated" : "finished"}`;
+  if (
+    before === undefined ||
+    figure.change === null ||
+    figure.before === null
+  ) {
+    return counted;
+  }
+  return `${counted}; ${realValue(figure, figure.before)} with ${before}, ${realChangeWords[figure.change]}`;
+};
+
+/** Which Stephen people talk with now, and the one waiting in the lab. */
+const inUseWords = (lab: Lab): string => {
+  const inUse =
+    lab.inUse === null
+      ? "No interview says which Stephen held it yet."
+      : `In use: ${lab.inUse.name}.`;
+  const candidate =
+    lab.candidate === null
+      ? ""
+      : ` Candidate: ${lab.candidate.name}, in the lab only.`;
+  return `${inUse}${candidate}`;
+};
+
+/**
+ * Where he stands in five numbers: heard and the right line at hard turns
+ * in the lab, then finished, notes kept and rating with real people, each
+ * against the Stephen before and saying when the change is within chance.
+ */
+const WhereHeStands = ({ lab }: { lab: Lab }) => (
+  <section aria-label="Where he stands" className="flex flex-col gap-2">
+    <p className="text-muted-foreground">{inUseWords(lab)}</p>
+    <div className="bg-border grid grid-cols-1 gap-px overflow-hidden rounded-xl border sm:grid-cols-2 lg:grid-cols-5">
+      {lab.figures.length === 0 ? (
+        <Figure
+          label="In the lab"
+          sub="No lab run is kept yet: vp run lab bench, and commit its results"
+          value="–"
+        />
+      ) : (
+        lab.figures.map((figure) => (
+          <Figure
+            key={figure.label}
+            label={`${figure.label}, in the lab`}
+            sub={changeWords(lab, figure)}
+            value={percent.format(figure.value)}
+          />
+        ))
+      )}
+      {lab.realFigures.map((figure) =>
+        figure.id === "finished" ? (
+          <Figure
+            key={figure.id}
+            label="Finished, with real people"
+            ring={{
+              value: Math.round((figure.value ?? 0) * figure.of),
+              of: figure.of,
+            }}
+            sub={realSub(figure, lab)}
+            value={`${Math.round((figure.value ?? 0) * figure.of)} of ${figure.of}`}
+          />
+        ) : (
+          <Figure
+            key={figure.id}
+            label={`${figure.label}, with real people`}
+            sub={realSub(figure, lab)}
+            value={realValue(figure, figure.value)}
+          />
+        )
+      )}
+    </div>
+  </section>
+);
+
+/** What needs one of us, or that nothing does, each opening where it is dealt with. */
 const NeedsUs = ({ needs }: { needs: readonly LabNeed[] }) =>
   needs.length === 0 ? (
     <Section description="Nothing needs us." title="Needs us" />
@@ -228,8 +310,13 @@ const NeedsUs = ({ needs }: { needs: readonly LabNeed[] }) =>
     <Section title="Needs us">
       <ul className="border-t">
         {needs.map((need) => (
-          <li className="border-b px-6 py-3 last:border-b-0" key={need.id}>
-            {need.text}
+          <li className="border-b last:border-b-0" key={need.id}>
+            <a
+              className="hover:bg-muted/50 block px-6 py-3 transition-colors"
+              href={need.href}
+            >
+              {need.text}
+            </a>
           </li>
         ))}
       </ul>
@@ -254,6 +341,7 @@ const labCell = (
 const Versions = ({ versions }: { versions: readonly LabVersion[] }) => (
   <Section
     description="Each Stephen as the lab measured him on practice companies, and as real people met him. A change to him ships as a release; the name is the same in both places."
+    id="versions"
     title="By version"
   >
     <div className="@container border-t">
@@ -354,6 +442,7 @@ const Runs = ({ lab }: { lab: Lab }) => {
   return (
     <Section
       description="Kept with the change each one measured. Set two side by side with vp run lab compare."
+      id="runs"
       title="Lab runs"
     >
       <div className="@container border-t">
@@ -449,6 +538,7 @@ const Live = ({ live }: { live: Lab["live"] }) => {
   return (
     <Section
       description={`Real interviews with ${live.now.name}, the Stephen most people talk with now, against ${before}: by voice or typed, lead or team member, and language. A drop is marked only when it is larger than chance, with five interviews or more on each side.`}
+      id="live"
       title="Live"
     >
       <div className="@container border-t">

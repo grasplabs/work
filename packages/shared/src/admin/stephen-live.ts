@@ -17,7 +17,12 @@ export interface Tally {
   finished: number;
   /** Every rating someone gave, 1 to 5. */
   ratings: number[];
+  /** Of each finished interview's notes, the share the person left in. */
+  kept: number[];
 }
+
+/** How a number moved from one Stephen to the next: past chance either way, within it, or on too few interviews to say. */
+export type Change = "better" | "worse" | "within chance" | "too few";
 
 /** One group, with the Stephen in use now and the one before him. */
 export interface LiveGroup {
@@ -37,6 +42,8 @@ export interface LiveGroup {
 export const LEAST_EACH = 5;
 /** How many standard errors a drop has to be. */
 const ERRORS = 2;
+/** Below this two numbers are the same; what's left is how floats add up. */
+const TIE = 1e-9;
 
 const LANGUAGES: Record<string, string> = {
   en: "English",
@@ -49,11 +56,17 @@ const LANGUAGES: Record<string, string> = {
 /** A language's name, or its code when it isn't one of Stephen's. */
 export const languageName = (code: string): string => LANGUAGES[code] ?? code;
 
-const tallyOf = (interviews: readonly Interview[]): Tally => ({
+/** What some interviews came to. */
+export const tallyOf = (interviews: readonly Interview[]): Tally => ({
   started: interviews.length,
   finished: interviews.filter((interview) => interview.approved).length,
   ratings: interviews.flatMap((interview) =>
     interview.rating === null ? [] : [interview.rating]
+  ),
+  kept: interviews.flatMap((interview) =>
+    interview.approved && interview.facts > 0
+      ? [(interview.facts - interview.out) / interview.facts]
+      : []
   ),
 });
 
@@ -73,33 +86,112 @@ const variance = (values: readonly number[]): number => {
   );
 };
 
-/** Whether fewer finished now than before, by more than chance. */
-export const finishedFell = (now: Tally, before: Tally): boolean => {
-  if (now.started < LEAST_EACH || before.started < LEAST_EACH) {
-    return false;
+/**
+ * How a share moved, `count` of `of` now against before: a two-proportion
+ * test at two standard errors, with `LEAST_EACH` or more on each side.
+ */
+export const shareChange = (
+  now: { count: number; of: number },
+  before: { count: number; of: number }
+): Change => {
+  if (now.of < LEAST_EACH || before.of < LEAST_EACH) {
+    return "too few";
   }
-  const was = before.finished / before.started;
-  const is = now.finished / now.started;
-  const pooled =
-    (before.finished + now.finished) / (before.started + now.started);
-  const error = Math.sqrt(
-    pooled * (1 - pooled) * (1 / before.started + 1 / now.started)
-  );
-  return was - is > ERRORS * error && was > is;
+  const difference = now.count / now.of - before.count / before.of;
+  const pooled = (before.count + now.count) / (before.of + now.of);
+  const error = Math.sqrt(pooled * (1 - pooled) * (1 / before.of + 1 / now.of));
+  if (Math.abs(difference) <= ERRORS * error + TIE) {
+    return "within chance";
+  }
+  return difference > 0 ? "better" : "worse";
 };
 
-/** Whether people rate him lower now than before, by more than chance. */
-export const ratingFell = (now: Tally, before: Tally): boolean => {
-  if (now.ratings.length < LEAST_EACH || before.ratings.length < LEAST_EACH) {
-    return false;
+/**
+ * How a mean moved, of `now` against `before`: two standard errors of the
+ * difference, with `LEAST_EACH` or more values on each side.
+ */
+export const meanChange = (
+  now: readonly number[],
+  before: readonly number[]
+): Change => {
+  if (now.length < LEAST_EACH || before.length < LEAST_EACH) {
+    return "too few";
   }
-  const drop = mean(before.ratings) - mean(now.ratings);
+  const difference = mean(now) - mean(before);
   const error = Math.sqrt(
-    variance(before.ratings) / before.ratings.length +
-      variance(now.ratings) / now.ratings.length
+    variance(before) / before.length + variance(now) / now.length
   );
-  return drop > ERRORS * error && drop > 0;
+  if (Math.abs(difference) <= ERRORS * error + TIE) {
+    return "within chance";
+  }
+  return difference > 0 ? "better" : "worse";
 };
+
+/** Whether fewer finished now than before, by more than chance. */
+export const finishedFell = (now: Tally, before: Tally): boolean =>
+  shareChange(
+    { count: now.finished, of: now.started },
+    { count: before.finished, of: before.started }
+  ) === "worse";
+
+/** Whether people rate him lower now than before, by more than chance. */
+export const ratingFell = (now: Tally, before: Tally): boolean =>
+  meanChange(now.ratings, before.ratings) === "worse";
+
+/** One of the numbers of real people the Lab leads with, with the Stephen in use now and the one before. */
+export interface RealFigure {
+  id: "finished" | "kept" | "rating";
+  label: string;
+  /** A share from 0 to 1, or a rating from 1 to 5; none before anyone counts. */
+  value: number | null;
+  /** How many it rests on. */
+  of: number;
+  before: number | null;
+  change: Change | null;
+}
+
+const share = (tally: Tally): number | null =>
+  tally.started === 0 ? null : tally.finished / tally.started;
+
+const average = (values: readonly number[]): number | null =>
+  values.length === 0 ? null : mean(values);
+
+/** Finished, notes kept and rating, now against before: `before` is none where there was no Stephen before. */
+export const realFiguresOf = (
+  now: Tally,
+  before: Tally | null
+): RealFigure[] => [
+  {
+    id: "finished",
+    label: "Finished",
+    value: share(now),
+    of: now.started,
+    before: before === null ? null : share(before),
+    change:
+      before === null
+        ? null
+        : shareChange(
+            { count: now.finished, of: now.started },
+            { count: before.finished, of: before.started }
+          ),
+  },
+  {
+    id: "kept",
+    label: "Notes kept",
+    value: average(now.kept),
+    of: now.kept.length,
+    before: before === null ? null : average(before.kept),
+    change: before === null ? null : meanChange(now.kept, before.kept),
+  },
+  {
+    id: "rating",
+    label: "Rating",
+    value: average(now.ratings),
+    of: now.ratings.length,
+    before: before === null ? null : average(before.ratings),
+    change: before === null ? null : meanChange(now.ratings, before.ratings),
+  },
+];
 
 /** The groups interviews are seen in: all of them, by channel, by role, and by language. */
 const groupsOf = (
