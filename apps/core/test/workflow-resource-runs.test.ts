@@ -17,7 +17,7 @@ import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
@@ -53,6 +53,7 @@ import {
 } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import {
@@ -282,6 +283,8 @@ const settledInEngine = async (id: string | null) =>
   );
 
 describe("runs of JSON workflows", () => {
+  afterEach(endLiveResourceRuns);
+
   it("fails a run of a version published for another expression evaluator, evaluating nothing", async () => {
     const by = await builder();
     const workflow = await published(by, (name) =>
@@ -642,6 +645,8 @@ const startsSwept = async (ids: readonly string[]): Promise<string[]> => {
 };
 
 describe("the retention of what starts of JSON workflows kept", () => {
+  afterEach(endLiveResourceRuns);
+
   it("asks connect to drop only what runs that ended held, never about a start that ran nothing, though another run is live", async () => {
     const by = await builder();
     const workflow = await waitingWorkflow(by);
@@ -750,6 +755,8 @@ describe("the retention of what starts of JSON workflows kept", () => {
 });
 
 describe("the bounds on runs of JSON workflows", () => {
+  afterEach(endLiveResourceRuns);
+
   it("fails an attempt whose expressions spend more than its budget together, each one within its own", async () => {
     const by = await builder();
     // Each runs well within one evaluation's fuel; together they are over
@@ -1557,6 +1564,8 @@ describe("a run's host, against a forged module", () => {
 });
 
 describe("whose word a run's row takes, and whose clock", () => {
+  afterEach(endLiveResourceRuns);
+
   it("audits a control settled once, though a screen and the engine settle it in the same millisecond", async () => {
     const by = await builder();
     const waiting = await waitingWorkflow(by);
@@ -2125,6 +2134,8 @@ describe(
   "the lineage quotas of runs of JSON workflows",
   { timeout: 90_000 },
   () => {
+    afterEach(endLiveResourceRuns);
+
     it("admits each attempt against the run's own lineage and its workflow's slots, settling it with what it used and the expressions it evaluated", async () => {
       const by = await builder();
       const workflow = await published(by, greetThenCall);

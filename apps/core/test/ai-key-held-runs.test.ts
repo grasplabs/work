@@ -1,6 +1,6 @@
 import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { wakeAiWaits } from "../src/workflows/ai-waits.ts";
 import { mockIdp } from "./idp.ts";
@@ -9,6 +9,7 @@ import {
   askingWorkflow,
   askTask,
   endedRun,
+  endLiveResourceRuns,
   jsonWorkflowAppsOf,
   runFor,
   runOnce,
@@ -127,6 +128,8 @@ describe(
   "a JSON workflow's model call when the organization's AI provider fails it",
   { timeout: 90_000 },
   () => {
+    afterEach(endLiveResourceRuns);
+
     it("stops showing the run as waiting once its call, made again after the wait, fails and the workflow takes the failure", async () => {
       // Timed tries a minute apart: only the replacement's wake can resume
       // the run within the test.

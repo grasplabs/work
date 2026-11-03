@@ -1,6 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   cancelRepairAfterMs,
@@ -13,15 +13,16 @@ import {
   called,
   controlCommand,
   endedRun,
+  endLiveResourceRuns,
   greetingTasks,
   jsonWorkflowAppsOf,
+  outcomeOf,
   publishedWorkflow,
   screenOf,
   staged,
   startCommand,
   startedBy,
   startedOf,
-  outcomeOf,
 } from "./json-workflow-apps.ts";
 import {
   finished,
@@ -80,6 +81,8 @@ const receiptOf = async (run: string) =>
     .first<string>("state");
 
 describe("an independent workflow's run object", { timeout: 60_000 }, () => {
+  afterEach(endLiveResourceRuns);
+
   it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
     const builder = await signedIn("builder");
     const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
