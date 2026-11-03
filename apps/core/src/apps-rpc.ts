@@ -17,6 +17,7 @@ import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
+import { AppDataRpc } from "./app-data.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
@@ -47,7 +48,7 @@ import type { SessionCheck } from "./session-check.ts";
 
 /**
  * A signed-in person's `apps`, with `apps.files`, `apps.versions`,
- * `apps.members`, `apps.blueprints`, `apps.integrations` and `apps.webhooks`, in SessionRpc's form. The App
+ * `apps.members`, `apps.blueprints`, `apps.integrations`, `apps.webhooks` and `apps.data`, in SessionRpc's form. The App
  * functions check the person's role in the App and validate what the
  * client sent.
  */
@@ -60,6 +61,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #blueprints: AppBlueprintsRpc;
   readonly #integrations: AppIntegrationsRpc;
   readonly #webhooks: AppWebhooksRpc;
+  readonly #data: AppDataRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -71,6 +73,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     this.#blueprints = new AppBlueprintsRpc(env, check);
     this.#integrations = new AppIntegrationsRpc(env, check);
     this.#webhooks = new AppWebhooksRpc(env, check);
+    this.#data = new AppDataRpc(env, check);
   }
 
   get files(): AppFilesRpc {
@@ -95,6 +98,10 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   get webhooks(): AppWebhooksRpc {
     return this.#webhooks;
+  }
+
+  get data(): AppDataRpc {
+    return this.#data;
   }
 
   async create(app: NewApp): Promise<App> {

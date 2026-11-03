@@ -32,6 +32,8 @@ import type {
   StoredPreferences,
   BackfillAbandon,
   BackfillAbandonment,
+  ImportApply,
+  ImportBatch,
   BackfillOutcome,
   BackfillRestart,
   BackfillStatus,
@@ -227,6 +229,40 @@ export class DataStore extends DurableObject<Env> {
     return JSON.stringify(
       await this.#live().read(storeId, scope, request, staged)
     );
+  }
+
+  /**
+   * `StoreHost.history`, as the JSON text of its page: a change's values
+   * are JSON, which RPC types can't carry deeply (`openStore` parses it).
+   */
+  async history(
+    storeId: StoreId,
+    scope: ReadScope,
+    table: string,
+    id: string,
+    before: number | null
+  ): Promise<string> {
+    return JSON.stringify(
+      await this.#live().history(storeId, scope, table, id, before)
+    );
+  }
+
+  /** `StoreHost.stageImport`. */
+  async stageImport(storeId: StoreId, batch: ImportBatch): Promise<void> {
+    await this.#live().stageImport(storeId, batch);
+  }
+
+  /** `StoreHost.sensitiveTables`. */
+  sensitiveTables(storeId: StoreId): string[] {
+    return this.#live().sensitiveTables(storeId);
+  }
+
+  /** `StoreHost.applyImport`. */
+  async applyImport(
+    storeId: StoreId,
+    landing: ImportApply
+  ): Promise<{ inserted: number }> {
+    return await this.#live().applyImport(storeId, landing);
   }
 
   /** `StoreHost.generations`. */

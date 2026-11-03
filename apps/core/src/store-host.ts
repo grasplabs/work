@@ -19,6 +19,8 @@ import type {
   SchemaManifest,
   SchemaPlan,
 } from "@grasp-os/sdk/host";
+import { appDataImportLimits } from "@grasp-os/shared/app-data";
+import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -104,10 +106,12 @@ import {
   commitWriters,
   fileEvents,
   files,
+  importRows,
   migrationWork,
   outbox,
   preferences,
   receipts,
+  recordChanges,
   recordRefs,
   records,
   reservedFields,
@@ -131,6 +135,13 @@ import {
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { recordBackfillAbandoned } from "./store-abandon.ts";
 import { keepStoreBackfillGoing } from "./store-backfill.ts";
+import {
+  historyDueAt,
+  historyOf,
+  pruneHistory,
+  recordChangesIn,
+} from "./store-changes.ts";
+import type { ChangeInput } from "./store-changes.ts";
 import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
 import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
@@ -340,6 +351,8 @@ interface CascadeStart {
   readonly resourceId: string | null;
   /** The workflow run the commit was made in, if any. */
   readonly runId: string | null;
+  /** Who made the commit: whom its deletions' change history names. */
+  readonly actor: AuditActor;
   readonly now: number;
 }
 
@@ -382,6 +395,64 @@ const page = 100;
 
 /** A cascade job's row. */
 type CascadeJob = typeof cascadeJobs.$inferSelect;
+
+/** Whether `manifest` declares its table `table` sensitive. */
+const declaredSensitive = (
+  manifest: SchemaManifest | undefined,
+  table: string
+): boolean =>
+  manifest !== undefined &&
+  Object.hasOwn(manifest.tables, table) &&
+  manifest.tables[table]?.sensitive === true;
+
+/** A staged record as its change history records it (store-changes.ts). */
+const changeInputOf = (
+  entry: Staged,
+  sensitive: (table: string) => boolean
+): ChangeInput => ({
+  tableId: entry.tableId,
+  tableName: entry.table,
+  recordId: entry.recordId,
+  before: entry.base === undefined ? undefined : fieldsOf(entry.base),
+  after: entry.fields,
+  sensitive: sensitive(entry.table),
+});
+
+/** How long an import's staged rows wait to land before a later import drops them. */
+const importStagedMs = 60 * 60 * 1000;
+
+/** One batch of an import's rows, as core stages them (`stageImport`). */
+const importBatchSchema = z.strictObject({
+  importId: z.uuid(),
+  principal: identifierSchema,
+  table: tableNameSchema,
+  /** Where the batch's first row is among the import's rows. */
+  from: z.int().min(0).max(appDataImportLimits.maxRows),
+  rows: z
+    .array(z.strictObject({ id: recordIdSchema, fields: storedFieldsSchema }))
+    .min(1)
+    .max(appDataImportLimits.batchRows),
+});
+export type ImportBatch = z.input<typeof importBatchSchema>;
+
+/** An import landing (`applyImport`): whose, as whom, under which schema. */
+const importApplySchema = z.strictObject({
+  storeId: storeIdSchema,
+  importId: z.uuid(),
+  principal: identifierSchema,
+  actor: auditActorSchema,
+  roles: z.strictObject({ appMember: z.boolean(), appBuilder: z.boolean() }),
+  schemaHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  /** How many rows core staged: all of them must be there. */
+  rows: z.int().min(1).max(appDataImportLimits.maxRows),
+  /** What its audit event names: the App, its version and the table. */
+  audit: z.strictObject({
+    app: identifierSchema,
+    version: z.int().min(1),
+    table: tableNameSchema,
+  }),
+});
+export type ImportApply = Omit<z.input<typeof importApplySchema>, "storeId">;
 
 /** A member of a cascade batch, with its record's owner; null once gone. */
 interface CascadeBatchMember extends Record<string, SqlStorageValue> {
@@ -541,6 +612,8 @@ const purgedTables = [
   "sdk_cascade_jobs",
   "sdk_mutation_receipts",
   "sdk_preferences",
+  "sdk_record_changes",
+  "sdk_import_rows",
   "sdk_tables",
 ] as const;
 
@@ -2080,6 +2153,7 @@ export class StoreHost {
     if (all.length > storeMaxTables) {
       throw dataErrors.create("data.too_many_tables");
     }
+    this.#markSensitive(readSchemaManifest(text).manifest);
     if (change.replay) {
       return {
         ...definedTables(names, all),
@@ -2650,7 +2724,9 @@ export class StoreHost {
    * preferences (their row, its value and its last write's receipt), and
    * the values of the forms they sent kept in the outbox for the App's
    * webhooks, handed over or not (core queues none of theirs after). A
-   * store never set up holds none, and is set up by nothing here. Answers
+   * store never set up holds none, and is set up by nothing here. The
+   * values the store's change history kept of changes made for them, or
+   * by them, and an import of theirs never landed, go too. Answers
    * how many preference rows went (0 or 1).
    */
   forgetPerson(storeId: StoreId, personId: string): { forgotten: number } {
@@ -2685,6 +2761,26 @@ export class StoreHost {
           )
         )
         .run();
+      // The values of the changes made for them, whoever acted (they, an
+      // agent, a workflow run or another App), and of those they made for
+      // anyone: what was written may be about them. Who acted and which
+      // fields changed stay, the company's record.
+      this.#db
+        .update(recordChanges)
+        .set({ beforeJson: null, afterJson: null, valuesLeftOut: "erased" })
+        .where(
+          and(
+            isNotNull(recordChanges.beforeJson),
+            or(
+              eq(recordChanges.principal, person),
+              sql`json_extract(${recordChanges.actor}, '$.userId') = ${person}`,
+              sql`json_extract(${recordChanges.actor}, '$.onBehalfOf') = ${person}`
+            )
+          )
+        )
+        .run();
+      // An import of theirs staged and never landed: its values go.
+      this.#db.delete(importRows).where(eq(importRows.principal, person)).run();
       return { forgotten: gone.length };
     });
   }
@@ -3115,6 +3211,331 @@ export class StoreHost {
   }
 
   /**
+   * Whether a table's change history keeps field names only: any schema
+   * handed to the store declared it sensitive (`sdk_tables.sensitive`,
+   * set by `#markSensitive`), whatever schema a writer is pinned to.
+   * Call it inside a transaction.
+   */
+  #sensitivity(): (table: string) => boolean {
+    const sensitive = new Set(
+      this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.sensitive, true))
+        .all()
+        .map(({ name }) => name)
+    );
+    return (table) => sensitive.has(table);
+  }
+
+  /**
+   * Marks the tables `manifest` declares sensitive as the store's sensitive
+   * tables, for good, inside `#defineIn`'s transaction: the values their
+   * history kept before are cleared in the same transaction, so a table
+   * declared sensitive late keeps none of them.
+   */
+  #markSensitive(manifest: SchemaManifest): void {
+    const declared = Object.keys(manifest.tables).filter((table) =>
+      declaredSensitive(manifest, table)
+    );
+    if (declared.length === 0) {
+      return;
+    }
+    const marked = this.#db
+      .update(tables)
+      .set({ sensitive: true })
+      .where(and(inArray(tables.name, declared), eq(tables.sensitive, false)))
+      .returning({ tableId: tables.tableId })
+      .all()
+      .map(({ tableId }) => tableId);
+    if (marked.length === 0) {
+      return;
+    }
+    this.#db
+      .update(recordChanges)
+      .set({ beforeJson: null, afterJson: null, valuesLeftOut: "sensitive" })
+      .where(
+        and(
+          inArray(recordChanges.tableId, marked),
+          isNotNull(recordChanges.beforeJson)
+        )
+      )
+      .run();
+  }
+
+  /**
+   * Stages one batch of import `importId`'s rows: new records of `table`
+   * for `principal`, as core checked them against the table's schema
+   * (app-data.ts). Nothing of it is a record until `applyImport` lands
+   * every batch at once; rows an import left staged longer than
+   * `importStagedMs` go with the store's alarm (`runAlarm`). A batch at a
+   * place already staged, or for an import of another person or table,
+   * is refused.
+   */
+  async stageImport(storeId: StoreId, batch: ImportBatch): Promise<void> {
+    const { importId, principal, table, from, rows } = dataErrors.parse(
+      "data.invalid",
+      importBatchSchema,
+      batch
+    );
+    if (from + rows.length > appDataImportLimits.maxRows) {
+      throw dataErrors.create("data.invalid", {
+        issues: [`An import holds at most ${appDataImportLimits.maxRows} rows`],
+      });
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const now = Date.now();
+      const other = this.#db
+        .select({ one: sql`1` })
+        .from(importRows)
+        .where(
+          and(
+            eq(importRows.importId, importId),
+            or(
+              sql`${importRows.principal} <> ${principal}`,
+              sql`${importRows.tableName} <> ${table}`
+            )
+          )
+        )
+        .get();
+      if (other !== undefined) {
+        throw dataErrors.create("data.invalid", {
+          issues: ["That import is another's"],
+        });
+      }
+      for (const [offset, { id, fields }] of rows.entries()) {
+        this.#db
+          .insert(importRows)
+          .values({
+            importId,
+            position: from + offset,
+            principal,
+            tableName: table,
+            recordId: id,
+            valueJson: storedText(fields),
+            stagedAt: now,
+          })
+          .run();
+      }
+    });
+    // Its cleanup, should the import never land.
+    await this.schedule();
+  }
+
+  /**
+   * Retention, as the alarm runs it: the change history past its bounds
+   * or its age (`pruneHistory`), and rows an import staged more than
+   * `importStagedMs` ago and never landed, a page at a time.
+   */
+  #sweepRetention(): void {
+    const now = Date.now();
+    pruneHistory(this.ctx.storage, this.#db, now);
+    this.ctx.storage.transactionSync(() => {
+      this.#db.run(
+        sql`DELETE FROM ${importRows} WHERE rowid IN (SELECT rowid FROM ${importRows} WHERE ${importRows.stagedAt} < ${now - importStagedMs} ORDER BY ${importRows.stagedAt} LIMIT ${purgePage})`
+      );
+    });
+  }
+
+  /**
+   * Lands import `importId`: every row core staged (`stageImport`), as
+   * new records of `principal`'s, in one transaction, all of them or none.
+   * Each is checked as a commit's insert is (`#apply`: the table's write
+   * access under the schema `schemaHash`, for the roles core resolved just
+   * before; IDs not in use; references to records that exist), gets its
+   * defaulted fields, and is recorded in the store's change history as an
+   * import by `actor`. Its staged rows go in the same transaction, landed
+   * or not. Answers how many records it inserted.
+   */
+  async applyImport(
+    storeId: StoreId,
+    landing: ImportApply
+  ): Promise<{ inserted: number }> {
+    const parsed = dataErrors.parse("data.invalid", importApplySchema, {
+      ...landing,
+      storeId,
+    });
+    const pinned = await this.#pinned(storeId, parsed.schemaHash);
+    const where = eq(importRows.importId, parsed.importId);
+    let inserted: number;
+    try {
+      inserted = this.#landImport(parsed, pinned);
+    } catch (error) {
+      // Refused: its staged rows go now, in a transaction of their own.
+      this.ctx.storage.transactionSync(() => {
+        this.#db.delete(importRows).where(where).run();
+      });
+      throw error;
+    }
+    // Its event, kept with the rows it landed, handed to core now as far
+    // as it goes; the alarm hands over whatever this doesn't.
+    await this.schedule();
+    try {
+      await this.files.flushEvents();
+    } catch (error) {
+      log.warn("store.import_event_deferred", errorFields(error));
+    }
+    return { inserted };
+  }
+
+  /** `applyImport`'s transaction: answers how many records it inserted. */
+  #landImport(
+    {
+      storeId,
+      importId,
+      principal,
+      actor,
+      roles,
+      schemaHash,
+      rows,
+      audit,
+    }: z.output<typeof importApplySchema>,
+    pinned: PinnedSchema
+  ): number {
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId);
+      const now = Date.now();
+      const where = eq(importRows.importId, importId);
+      const staged = this.#db
+        .select()
+        .from(importRows)
+        .where(where)
+        .orderBy(asc(importRows.position))
+        .all();
+      this.#db.delete(importRows).where(where).run();
+      if (
+        staged.length !== rows ||
+        staged.some(
+          (row, at) =>
+            row.position !== at ||
+            row.principal !== principal ||
+            row.tableName !== staged[0]?.tableName
+        )
+      ) {
+        throw dataErrors.create("data.invalid", {
+          issues: ["The import's rows aren't all staged"],
+        });
+      }
+      this.#requireInForce(schemaHash);
+      const writes = staged.map((row): StoredWrite => ({
+        op: "insert",
+        table: row.tableName,
+        id: row.recordId,
+        fields: storedFieldsSchema.parse(JSON.parse(row.valueJson)),
+      }));
+      const { staged: written } = this.#apply(
+        pinned,
+        principal,
+        roles,
+        writes,
+        []
+      );
+      this.#requireNotDeleting(written);
+      this.#flush(written, principal, schemaHash, now);
+      this.#indexReferences(pinned, written, principal, roles);
+      // An import may newly hold no file: none of the App's files
+      // resources lets a CSV attach one.
+      const contract = this.#contractNow() ?? pinned.manifest;
+      this.files.index(
+        written,
+        principal,
+        (table) => contract.tables[table]?.fields,
+        [],
+        () => false
+      );
+      const counted = this.#db
+        .update(store)
+        .set({ commits: sql`${store.commits} + 1` })
+        .returning({ commits: store.commits })
+        .get();
+      if (counted === undefined) {
+        throw new Error("A bound store has no row");
+      }
+      const sensitive = this.#sensitivity();
+      recordChangesIn(
+        this.#db,
+        written.map((entry) => changeInputOf(entry, sensitive)),
+        { source: "import", actor, principal, commit: counted.commits },
+        now
+      );
+      // In the transaction that lands it: an import is in the audit log
+      // exactly when its rows are in the store.
+      this.#keepEvent(actor, "app.data.imported", {
+        target: { type: "app", id: audit.app },
+        detail: {
+          table: audit.table,
+          version: audit.version,
+          rows: written.length,
+          importId,
+        },
+      });
+      return written.length;
+    });
+  }
+
+  /**
+   * The table names of the store that are sensitive (`sdk_tables`): their
+   * history keeps field names only.
+   */
+  sensitiveTables(storeId: StoreId): string[] {
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      return this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.sensitive, true))
+        .all()
+        .map(({ name }) => name);
+    });
+  }
+
+  /**
+   * A page of the change history of record `id` of `table`, newest first,
+   * before change `before` if given, for `scope` (store-changes.ts): only
+   * through a table the schema `scope` is pinned to lets them read
+   * (`data.access_denied` otherwise), and of an `owner` table only while
+   * the record is theirs, as a read of it would show it; none otherwise.
+   */
+  async history(
+    storeId: StoreId,
+    scope: ReadScope,
+    table: string,
+    id: string,
+    before: number | null
+  ): Promise<RecordChangePage> {
+    const reader = dataErrors.parse("data.invalid", readScopeSchema, scope);
+    const name = dataErrors.parse("data.invalid", tableNameSchema, table);
+    const recordId = dataErrors.parse("data.invalid", recordIdSchema, id);
+    const after = dataErrors.parse(
+      "data.invalid",
+      z.int().min(1).nullable(),
+      before
+    );
+    const pinned = await this.#pinned(storeId, reader.schemaHash);
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const readable = readableTable(pinned, reader, name);
+      if (readable.ownerScoped) {
+        const row = this.#db
+          .select({ ownerId: records.ownerId })
+          .from(records)
+          .where(
+            and(
+              eq(records.tableId, readable.tableId),
+              eq(records.recordId, recordId)
+            )
+          )
+          .get();
+        if (row?.ownerId !== reader.principal) {
+          return { changes: [], next: null };
+        }
+      }
+      return historyOf(this.#db, readable.tableId, recordId, after);
+    });
+  }
+
+  /**
    * Claims a mutation's receipt for a new attempt, before its handler
    * runs: a new receipt, or the fence of the one it has moved on, keeping
    * it at least a retention from now. Answers the outcome instead when
@@ -3203,6 +3624,7 @@ export class StoreHost {
     const {
       storeId,
       principal,
+      actor,
       roles,
       schemaHash,
       receipt: held,
@@ -3286,6 +3708,7 @@ export class StoreHost {
                 resourceId:
                   writer?.resourceId ?? resourceOfScope(receipt.scope),
                 runId: receipt.runId,
+                actor,
                 now,
               }),
               members: cascadeJob.members.size,
@@ -3321,6 +3744,35 @@ export class StoreHost {
       if (counted === undefined) {
         throw new Error("A bound store has no row");
       }
+      // Every record it changed, in its history, in this transaction: what
+      // its writes changed, then what its cascade deleted.
+      const sensitive = this.#sensitivity();
+      const changed = (cascade: boolean): ChangeInput[] =>
+        staged
+          .filter(({ cascaded: by }) => (by === true) === cascade)
+          .map((entry) => changeInputOf(entry, sensitive));
+      recordChangesIn(
+        this.#db,
+        changed(false),
+        {
+          source: "commit",
+          actor,
+          principal: principal.userId,
+          commit: counted.commits,
+        },
+        now
+      );
+      recordChangesIn(
+        this.#db,
+        changed(true),
+        {
+          source: "cascade",
+          actor,
+          principal: principal.userId,
+          commit: counted.commits,
+        },
+        now
+      );
       // Whom a cascade deleted records of, kept with the receipt: the
       // deletion is attributable to this commit's principal.
       const cascaded = staged.flatMap(
@@ -3782,7 +4234,7 @@ export class StoreHost {
    */
   #startCascadeJob(
     plan: CascadePlan,
-    { receiptId, principal, resourceId, runId, now }: CascadeStart
+    { receiptId, principal, resourceId, runId, actor, now }: CascadeStart
   ): string {
     const jobId = crypto.randomUUID();
     this.#db
@@ -3793,6 +4245,7 @@ export class StoreHost {
         principal,
         resourceId,
         runId,
+        actor: JSON.stringify(actor),
         rootTableId: plan.root.tableId,
         rootRecordId: plan.root.recordId,
         planned: plan.members.size,
@@ -3827,14 +4280,40 @@ export class StoreHost {
     detail: Record<string, string | number | null>,
     provenance: readonly string[] = []
   ): void {
+    this.#keepEvent({ type: "person", userId: principal }, action, {
+      target: { type: "store", id: this.#storeId() },
+      detail,
+      provenance,
+    });
+  }
+
+  /**
+   * Keeps an audit event, `action` by `actor`, in the transaction the
+   * caller runs: handed to core with the store's other events
+   * (`FileHost.flushEvents`), so it is recorded exactly when what it
+   * records commits. Identifiers and counts only.
+   */
+  #keepEvent(
+    actor: AuditActor,
+    action: string,
+    {
+      target,
+      detail,
+      provenance = [],
+    }: {
+      target: { type: string; id: string };
+      detail: Record<string, string | number | null>;
+      provenance?: readonly string[];
+    }
+  ): void {
     const now = Date.now();
     const event: AuditEvent = auditEventSchema.parse({
       id: crypto.randomUUID(),
       at: new Date(now).toISOString(),
       source: "core",
-      actor: { type: "person", userId: principal },
+      actor,
       action,
-      target: { type: "store", id: this.#storeId() },
+      target,
       provenance,
       detail,
     });
@@ -4007,6 +4486,27 @@ export class StoreHost {
         () => false
       );
       this.#cascadeBatchEvents(job, deleted);
+      // In the history too, as the commit's actor's: a deletion that never
+      // read the record's fields keeps none of them.
+      recordChangesIn(
+        this.#db,
+        deleted.map(({ tableId, table, recordId }): ChangeInput => ({
+          tableId,
+          tableName: table,
+          recordId,
+          before: {},
+          after: null,
+          unread: true,
+          sensitive: false,
+        })),
+        {
+          source: "cascade",
+          actor: auditActorSchema.parse(JSON.parse(job.actor)),
+          principal: job.principal,
+          commit: null,
+        },
+        Date.now()
+      );
       const done = job.deleted + deleted.length;
       const left = this.#db
         .select({ one: sql`1` })
@@ -6594,6 +7094,12 @@ export class StoreHost {
       log.error("store.files_sweep_failed", errorFields(error));
     }
     try {
+      this.#sweepRetention();
+    } catch (error) {
+      failed = true;
+      log.error("store.retention_failed", errorFields(error));
+    }
+    try {
       await this.#keepBackfillGoing();
     } catch (error) {
       // Not the alarm's failure: its next look is a lease's time away
@@ -6722,7 +7228,18 @@ export class StoreHost {
         and(isNull(cascadeJobs.finishedAt), isNotNull(cascadeJobs.failedAt))
       )
       .get();
+    // Retention: the history's next due, and an import's staged rows
+    // never landed.
+    // The oldest by its index: a seek, never a scan.
+    const staged = this.#db
+      .select({ at: importRows.stagedAt })
+      .from(importRows)
+      .orderBy(asc(importRows.stagedAt))
+      .limit(1)
+      .get();
     const times = [
+      historyDueAt(this.#db, Date.now()),
+      typeof staged?.at === "number" ? staged.at + importStagedMs : null,
       cascading === undefined ? null : Date.now(),
       typeof failedJob?.at === "number"
         ? failedJob.at + cascadeFailedRetryMs

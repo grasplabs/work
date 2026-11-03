@@ -141,6 +141,13 @@
       "when": 1793711858765,
       "tag": "0019_search_docs",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793716856293,
+      "tag": "0020_record_changes",
+      "breakpoints": true
     }
   ]
 }

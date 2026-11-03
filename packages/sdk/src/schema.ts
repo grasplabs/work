@@ -208,6 +208,12 @@ export interface TableDefinition<
       >(
         fields: Keys
       ) => TableDefinition<Fields, Indexes, true>;
+  /**
+   * The same table, its data declared sensitive: the store's change
+   * history of its records keeps which fields changed, never their values.
+   * Once any schema handed to a store declares a table so, it stays so.
+   */
+  readonly sensitive: () => TableDefinition<Fields, Indexes, Searchable>;
   /** Its indexes, by name, for types only: never set. */
   readonly "~indexes"?: Indexes;
   /** Whether it has a search index, for types only: never set. */
@@ -298,6 +304,8 @@ export interface TableState {
   readonly indexes: readonly IndexDefinition[];
   /** The text fields its search index covers, in order; none without one. */
   readonly searchIndex?: readonly string[];
+  /** Declared sensitive (`TableDefinition.sensitive`); left out otherwise. */
+  readonly sensitive?: true;
 }
 
 /** Every table `defineTable` made; nothing else is one. */
@@ -569,6 +577,7 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
         searchIndex: checkedSearchFields(state, keys),
       });
     },
+    sensitive: () => tableOf(shape, { ...state, sensitive: true }),
   });
   tableStates.set(table, state);
   return table;

@@ -761,6 +761,7 @@ const callAsVisitor = async (
           version,
           principal,
           email: session.address,
+          actor: { type: "visitor", appId, sessionId: session.id },
           stillAllowed: async (path) => {
             const live = await sessionById(env, session.id);
             const now = await publishedApp(env, appId);

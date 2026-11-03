@@ -108,6 +108,7 @@ const commitNote = async (
   const { receiptId, fence }: Held = claimed.held;
   const commit: Omit<Commit, "storeId"> = {
     principal: { userId: by.userId },
+    actor: { type: "person", userId: by.userId },
     roles: memberRoles,
     stagedAt: Date.now(),
     schemaHash,

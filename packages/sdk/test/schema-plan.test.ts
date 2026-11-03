@@ -600,3 +600,31 @@ describe("a table an explicit migration transforms", () => {
     });
   });
 });
+
+describe("a table declared sensitive", () => {
+  const plain = schemaManifest(
+    defineSchema({ notes: defineTable(noteFields) }),
+    ownerOnly
+  );
+  const sensitive = schemaManifest(
+    defineSchema({ notes: defineTable(noteFields).sensitive() }),
+    ownerOnly
+  );
+
+  test("leaves a table that never declares it as it was, and reads back as declared", () => {
+    expect(manifestText(plain)).not.toContain("sensitive");
+    expect(
+      readSchemaManifest(manifestText(sensitive)).manifest.tables.notes
+    ).toMatchObject({ sensitive: true });
+    expect(() =>
+      readSchemaManifest(
+        manifestText(sensitive).replace('"sensitive":true', '"sensitive":false')
+      )
+    ).toThrow(/sensitive/u);
+  });
+
+  test("needs no migration, declared or left out again", () => {
+    expect(planSchemaChange(plain, sensitive).accepted).toBeTruthy();
+    expect(planSchemaChange(sensitive, plain).accepted).toBeTruthy();
+  });
+});

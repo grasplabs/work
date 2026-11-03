@@ -552,6 +552,7 @@ export const callStoreOperation = async (
   const version = release.manifest.resourceVersion;
   const invocation: Invocation = {
     principal: caller.principal,
+    actor: caller.actor,
     consumer: {
       resourceId: consumer.subject.id,
       resourceVersion: consumer.version,

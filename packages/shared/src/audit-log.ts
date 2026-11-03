@@ -171,6 +171,10 @@ const typeRules: readonly {
   // An App's webhooks (core's src/app-webhooks.ts): an admin letting its
   // data go to one's URL, a delivery given up, and connect sending one
   // (`webhook.call`); adding and removing one are the App's configuration.
+  // An App's data read and changed from its page (core's src/app-data.ts):
+  // a builder or admin exporting a table, and importing rows into one.
+  { action: "app.data.exported", type: "read" },
+  { action: "app.data.imported", type: "action" },
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },
   { action: "webhook.call", type: "action" },

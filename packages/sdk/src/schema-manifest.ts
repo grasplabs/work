@@ -100,6 +100,12 @@ export interface ManifestTable {
   readonly indexes: Readonly<Record<string, ManifestIndex>>;
   readonly searchIndex?: ManifestIndex;
   readonly access: ManifestAccess;
+  /**
+   * Declared sensitive (`TableDefinition.sensitive`): its change history
+   * keeps field names only. Left out otherwise, so a table that never
+   * declares it hashes as it always did.
+   */
+  readonly sensitive?: true;
 }
 
 /** A schema's canonical manifest. */
@@ -275,6 +281,7 @@ export const schemaManifest = (
           access: (Object.hasOwn(accesses, name)
             ? accesses[name]
             : undefined) ?? { read: "none", write: "none" },
+          ...(table.sensitive === true ? { sensitive: true as const } : {}),
         },
       ])
     ),
@@ -305,6 +312,7 @@ const invalid = (message: string): never =>
 interface ReadTable extends AnyTable {
   readonly index: (name: string, fields: readonly unknown[]) => ReadTable;
   readonly searchIndex: (fields: readonly unknown[]) => ReadTable;
+  readonly sensitive: () => ReadTable;
 }
 
 // SAFETY: `defineTable` and a table's `index` check at run time all that
@@ -315,22 +323,35 @@ const declareTable = defineTable as (
   fields: Readonly<Record<string, AnySchema>>
 ) => ReadTable;
 
+/**
+ * Whether a manifest's table has exactly its keys: `fields`, `indexes` and
+ * `access`, a `searchIndex` if it has one, and `sensitive: true` if
+ * declared.
+ */
+const isTableShaped = (input: unknown): input is Record<string, unknown> => {
+  const searched = isPlainObject(input) && Object.hasOwn(input, "searchIndex");
+  const declaresSensitive =
+    isPlainObject(input) && Object.hasOwn(input, "sensitive");
+  return (
+    hasExactly(input, [
+      "fields",
+      "indexes",
+      ...(searched ? ["searchIndex"] : []),
+      "access",
+      ...(declaresSensitive ? ["sensitive"] : []),
+    ]) &&
+    (!declaresSensitive || input.sensitive === true)
+  );
+};
+
 /** One table of a manifest of unknown origin, declared again from it. */
 const readTable = (
   name: string,
   input: unknown
 ): { table: AnyTable; access: ManifestAccess } => {
-  const searched = isPlainObject(input) && Object.hasOwn(input, "searchIndex");
-  if (
-    !hasExactly(
-      input,
-      searched
-        ? ["fields", "indexes", "searchIndex", "access"]
-        : ["fields", "indexes", "access"]
-    )
-  ) {
+  if (!isTableShaped(input)) {
     return invalid(
-      `${quoted(name, "Table")} is \`{ fields, indexes, searchIndex?, access }\` and nothing else.`
+      `${quoted(name, "Table")} is \`{ fields, indexes, searchIndex?, access }\`, and \`sensitive: true\` if declared, and nothing else.`
     );
   }
   const { fields, indexes, searchIndex, access } = input;
@@ -369,7 +390,7 @@ const readTable = (
     }
     table = table.index(index, definition.fields);
   }
-  if (searched) {
+  if (Object.hasOwn(input, "searchIndex")) {
     if (
       !(
         hasExactly(searchIndex, ["fields"]) &&
@@ -386,7 +407,10 @@ const readTable = (
   if (!hasExactly(access, ["read", "write"])) {
     return invalid(`${quoted(name, "Table")}'s access is \`{ read, write }\`.`);
   }
-  return { table, access: tableAccessOf(name, access) };
+  return {
+    table: input.sensitive === true ? table.sensitive() : table,
+    access: tableAccessOf(name, access),
+  };
 };
 
 /** What a manifest read back declares: its schema, and its manifest. */

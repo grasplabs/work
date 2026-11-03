@@ -707,6 +707,7 @@ const call = async (
     { manifest, run },
     {
       principal: owner.userId,
+      actor: { type: "person", userId: owner.userId },
       consumer: { resourceId: appId, resourceVersion: 1 },
       store,
       requestId: crypto.randomUUID(),

@@ -118,6 +118,7 @@ const commit = async (
   }
   const { inserted } = await store.commit({
     principal: { userId: principal },
+    actor: { type: "person", userId: principal },
     roles: memberRoles,
     stagedAt: Date.now(),
     schemaHash,

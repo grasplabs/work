@@ -83,8 +83,8 @@ const inputHash = "c".repeat(64);
  */
 const commitIn = async (
   store: OpenStore,
-  commit: Omit<Commit, "storeId" | "receipt" | "roles" | "stagedAt"> &
-    Partial<Pick<Commit, "roles" | "stagedAt">>
+  commit: Omit<Commit, "storeId" | "receipt" | "roles" | "stagedAt" | "actor"> &
+    Partial<Pick<Commit, "roles" | "stagedAt" | "actor">>
 ): Promise<Committed> => {
   const claimed = await store.claim({
     scope: { ...scope, principal: commit.principal.userId },
@@ -99,6 +99,7 @@ const commitIn = async (
   return await store.commit({
     roles: memberRoles,
     stagedAt: Date.now(),
+    actor: { type: "person", userId: commit.principal.userId },
     ...commit,
     receipt: claimed.held,
   });
@@ -2565,6 +2566,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
         roles: { appMember: true, appBuilder: false },
         stagedAt: Date.now(),
         principal: ada,
+        actor: { type: "person", userId: ada.userId },
         schemaHash: cascadeHash,
         writes: [
           { op: "delete", table: "notes", id: note, expectedRevision: 1 },
