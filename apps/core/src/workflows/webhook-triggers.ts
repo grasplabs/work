@@ -7,8 +7,8 @@ import {
   workflowWebhookErrors,
   workflowWebhookHeaders,
   workflowWebhookLimits,
-  workflowWebhookPath,
 } from "@grasp-os/shared/workflow-triggers";
+import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -70,6 +70,9 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   (`startOnce`); past it the sender is told to try again later (503,
 //   `retry-after`), and nothing is held back for it: it retries under the
 //   same `webhook-id`, which starts one run however often it is sent.
+//   Before any of it, the router counts every request to a webhook URL per
+//   client address and per URL (`WEBHOOK_RATE_LIMIT`, apps/router), and
+//   answers 429 past either, before core looks the URL up or reads a byte.
 //   An unsigned request costs a lookup by a unique index and an HMAC, and
 //   is logged by reason, never audited: an unauthenticated sender can't
 //   fill the audit log. Each signed delivery is audited: its start with

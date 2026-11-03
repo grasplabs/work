@@ -6,16 +6,15 @@ import {
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import {
-  workflowWebhookHeaders,
-  workflowWebhookPath,
-} from "@grasp-os/shared/workflow-triggers";
+import { workflowWebhookHeaders } from "@grasp-os/shared/workflow-triggers";
+import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 import { env } from "cloudflare:workers";
 import { Webhook } from "standardwebhooks";
 import { describe, expect, it } from "vite-plus/test";
 
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
@@ -406,6 +405,56 @@ describe("a workflow's webhook trigger", () => {
       },
       inputs: [],
       audited: ["workflow.start_invalid"],
+    });
+  });
+
+  it("tells a sender past the hour's room to try again, holding nothing back, and starts one run once it has room", async () => {
+    const { trigger } = await webhookTrigger();
+    const token = trigger.webhook?.token ?? "";
+    const secret = trigger.secret ?? "";
+    // The hour's room taken by earlier deliveries.
+    const now = Date.now();
+    await env.DB.batch(
+      Array.from({ length: triggeredRunsPerHour }, (_, index) =>
+        env.DB.prepare(
+          "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+        ).bind(trigger.id, `earlier-${index}`, now)
+      )
+    );
+    const full = await send(token, secret, invoice, { id: "msg_busy" });
+    const holds = await env.DB.prepare(
+      "SELECT COUNT(*) AS kept FROM connector_trigger_holds WHERE trigger_id = ?"
+    )
+      .bind(trigger.id)
+      .first<{ kept: number }>();
+    const whileFull = await runInputsOf(trigger.id);
+    // An hour on: the room is free again.
+    await env.DB.prepare("DELETE FROM trigger_hour_slots WHERE trigger_id = ?")
+      .bind(trigger.id)
+      .run();
+    const retried = await send(token, secret, invoice, {
+      id: "msg_busy",
+      skew: 30,
+    });
+    const again = await send(token, secret, invoice, {
+      id: "msg_busy",
+      skew: 60,
+    });
+
+    expect({
+      full: full.status,
+      retryAfter: full.headers.get("retry-after"),
+      holds: holds?.kept,
+      whileFull,
+      retried: [retried.status, again.status],
+      inputs: await runInputsOf(trigger.id),
+    }).toStrictEqual({
+      full: 503,
+      retryAfter: "60",
+      holds: 0,
+      whileFull: [],
+      retried: [202, 202],
+      inputs: [{ invoice: "INV-1", amount: 120 }],
     });
   });
 

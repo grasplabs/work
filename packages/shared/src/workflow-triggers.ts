@@ -131,12 +131,6 @@ export const emailTriggerConfigSchema = z.strictObject({
  */
 export const webhookTriggerConfigSchema = z.strictObject({});
 
-/**
- * Where a webhook trigger takes deliveries: `<path>/<token>`, its token
- * 128 random bits of its own (`WorkflowTrigger.webhook`).
- */
-export const workflowWebhookPath = "/api/workflow-webhooks";
-
 /** What a webhook trigger's delivery may be, by what it bounds. */
 export const workflowWebhookLimits = {
   /** The most bytes of a delivery's body. */
