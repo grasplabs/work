@@ -4,9 +4,14 @@ import {
   filterMaxDepth,
   filterMaxInValues,
   filterMaxNodes,
+  groupMaxAggregates,
+  groupMaxFields,
   queryDefaultPageSize,
+  queryMaxRelations,
   queryMaxResults,
   queryMaxStringLength,
+  searchMaxTerms,
+  searchTextMaxLength,
 } from "@grasp-os/shared/store-limits";
 import {
   boundValuesIssue,
@@ -14,6 +19,7 @@ import {
   filterChildren,
   rangeShapeIssue,
   readDescriptorVersion,
+  searchTerms,
 } from "@grasp-os/shared/store-reads";
 import type {
   FilterNode,
@@ -26,7 +32,7 @@ import type {
   WriteRequest,
 } from "@grasp-os/shared/store-reads";
 
-import { allowsNull, indexBase, tablesOf } from "./schema.ts";
+import { allowsNull, indexBase, relationOf, tablesOf } from "./schema.ts";
 import type {
   AnyTable,
   IndexBase,
@@ -51,8 +57,14 @@ import type { Id, ObjectInput, ObjectOutput } from "./values.ts";
 //
 // Every terminal is bounded: `take` and `collect` return at most 100
 // records (`collect` fails rather than truncates), a page holds at most
-// 100, and there is no way to iterate a whole table. Longer lists page;
+// 100, and there is no way to iterate a whole table in one read. Longer
+// lists page, through a table of any size, each page bounded on its own;
 // large exports and aggregates are a workflow's.
+//
+// Besides queries: `search(table, text)` reads a table's full-text search
+// index in order of relevance; `group` counts and aggregates per value of
+// one or two fields, at most 100 groups; `with` loads the records a
+// query's `v.id` fields name, under the caller's access to their tables.
 //
 // Adapted from Baseflare's query builder and structured filters (MIT,
 // © 2026 Baseflare contributors: packages/baseflare/src/server/db), with
@@ -274,40 +286,223 @@ export type PaginationResult<Item> =
   | { items: Item[]; nextCursor: null; hasMore: false }
   | { items: Item[]; nextCursor: string; hasMore: true };
 
-/** A query's terminals: each reads, bounded. */
-export interface QueryReads<Document> {
+/**
+ * A related record `.with` couldn't show: the caller can't read its table.
+ * Field names never start with `_`, so no record is ever this.
+ */
+export interface Withheld {
+  readonly _withheld: true;
+}
+
+/** The scalar fields of a record a grouped read may group by. */
+type GroupField<Document> = {
+  [Key in keyof Document & string]: Key extends `_${string}`
+    ? never
+    : IsComparable<Document[Key]> extends true
+      ? Key
+      : never;
+}[keyof Document & string];
+
+/** The fields of a record `.with` follows: a `v.id`, or a list of them. */
+type RelationField<Document> = {
+  [Key in keyof Document & string]: Key extends `_${string}`
+    ? never
+    : [NonNullable<Document[Key]>] extends [never]
+      ? never
+      : [NonNullable<Document[Key]>] extends [Id]
+        ? Key
+        : [NonNullable<Document[Key]>] extends [readonly Id[]]
+          ? Key
+          : never;
+}[keyof Document & string];
+
+/** A table's record by the table's name, typed by the schema's tables. */
+type DocOf<
+  Tables extends AnyTables,
+  TableName,
+> = TableName extends keyof Tables & string
+  ? Doc<Tables[TableName], TableName>
+  : never;
+
+/**
+ * What `.with` loads for a field holding `Value`: the record it names
+ * (null when the field holds none, or names none the caller may see:
+ * missing, deleted or another owner's), a list of them for a list of IDs,
+ * or `Withheld` when the caller can't read the table at all.
+ */
+export type Related<Value, Tables extends AnyTables> = [
+  NonNullable<Value>,
+] extends [Id<infer TableName>]
+  ? DocOf<Tables, TableName> | null | Withheld
+  : [NonNullable<Value>] extends [readonly Id<infer TableName>[]]
+    ? (DocOf<Tables, TableName> | null)[] | null | Withheld
+    : never;
+
+/** A record with the related records of `Fields`, as `.with` answers it. */
+export type WithRelated<
+  Document,
+  Fields extends keyof Document,
+  Tables extends AnyTables,
+> = Simplify<
+  Omit<Document, "_with"> & {
+    readonly _with: Simplify<
+      (Document extends { readonly _with: infer Before } ? Before : unknown) & {
+        readonly [Field in Fields]-?: Related<Document[Field], Tables>;
+      }
+    >;
+  }
+>;
+
+/**
+ * What `group` takes: the one or two fields to group by, and the declared
+ * numeric fields to sum, average, or take the least or greatest of in
+ * each group (at most 8 of these together).
+ */
+export interface GroupOptions<
+  Document,
+  By extends GroupField<Document>,
+  Sum extends NumericField<Document>,
+  Avg extends NumericField<Document>,
+  Min extends NumericField<Document>,
+  Max extends NumericField<Document>,
+> {
+  readonly by: readonly [By] | readonly [By, By];
+  readonly sum?: readonly Sum[];
+  readonly avg?: readonly Avg[];
+  readonly min?: readonly Min[];
+  readonly max?: readonly Max[];
+}
+
+/**
+ * One group: its key (each `by` field's value, null for an explicit null,
+ * left out where its records leave the field out), how many records it
+ * holds, and its aggregates. A sum of no numbers is 0; an average, least
+ * or greatest of none is null.
+ */
+export interface Group<
+  Document,
+  By extends keyof Document,
+  Sum extends string,
+  Avg extends string,
+  Min extends string,
+  Max extends string,
+> {
+  readonly key: Simplify<Pick<Document, By>>;
+  readonly count: number;
+  readonly sum: Readonly<Record<Sum, number>>;
+  readonly avg: Readonly<Record<Avg, number | null>>;
+  readonly min: Readonly<Record<Min, number | null>>;
+  readonly max: Readonly<Record<Max, number | null>>;
+}
+
+/** A query's terminals that return records: each reads, bounded. */
+export interface RecordReads<Document> {
   /** At most `count` records, 0 to 100. */
   readonly take: <const Count extends number>(
     count: Bounded<Count, ResultCount>
   ) => Promise<Document[]>;
   /** The first record, or null. */
   readonly first: () => Promise<Document | null>;
-  /** The only record, or null; `data.not_unique` if there are more. */
-  readonly unique: () => Promise<Document | null>;
   /** How many records there are, within the host's scan bound. */
   readonly count: () => Promise<number>;
   /** Every record, at most 100; `data.result_limit` if there are more. */
   readonly collect: () => Promise<Document[]>;
-  /** One page, of `pageSize` records (50 unless set) from `cursor`. */
+  /**
+   * One page, of `pageSize` records (50 unless set) from `cursor`. Pages
+   * go on through a table of any size: each costs only what it reads.
+   */
   readonly paginate: <
     const PageSize extends number = typeof queryDefaultPageSize,
   >(
     options: PaginationOptions<PageSize>
   ) => Promise<PaginationResult<Document>>;
-  /** A count, or the sum, least or greatest of a declared numeric field. */
-  readonly aggregate: Aggregate<Document>;
 }
 
 /**
- * A query that can be read: its terminals, more filters, and its order
- * while it has none (`Ordered`): a query is ordered once.
+ * A search of one table's search index (`ctx.db.search`): its records in
+ * order of relevance, best first, the record ID breaking ties. Filter it,
+ * load related records, and read it with any terminal that returns
+ * records. Relevance moves with every write to the table, so a search's
+ * page cursor expires after any write to it (`data.cursor_expired`):
+ * start again from the first page then, rather than skip or repeat
+ * records.
+ */
+export type SearchQuery<
+  Document,
+  Tables extends AnyTables = AnyTables,
+> = RecordReads<Document> & {
+  /** Only the records `filter` matches, besides the search. */
+  readonly filter: (
+    filter: QueryFilter<Document>
+  ) => SearchQuery<Document, Tables>;
+  /** Each record with the records its `fields` name (`Query.with`). */
+  readonly with: <const Fields extends readonly RelationField<Document>[]>(
+    ...fields: Fields
+  ) => SearchQuery<WithRelated<Document, Fields[number], Tables>, Tables>;
+};
+
+/** A query's terminals: each reads, bounded. */
+export interface QueryReads<Document> extends RecordReads<Document> {
+  /** The only record, or null; `data.not_unique` if there are more. */
+  readonly unique: () => Promise<Document | null>;
+  /** A count, or the sum, least or greatest of a declared numeric field. */
+  readonly aggregate: Aggregate<Document>;
+  /**
+   * The records counted per distinct value of one or two scalar fields
+   * (`by`), with sums, averages, least and greatest values of declared
+   * numeric fields per group, ordered by key: at most 100 groups
+   * (`data.group_limit` past it, never a part), over the records the
+   * query reads within the host's scan bound. Larger reports are a
+   * workflow's, in pages.
+   *
+   * ```ts
+   * const byStatus = await ctx.db
+   *   .query("orders")
+   *   .withIndex("by_region", (range) => range.eq("region", "EU"))
+   *   .group({ by: ["status"], sum: ["amount"], avg: ["amount"] });
+   * // [{ key: { status: "open" }, count: 12, sum: { amount: 4200 }, avg: { amount: 350 }, min: {}, max: {} }, ...]
+   * ```
+   */
+  readonly group: <
+    const By extends GroupField<Document>,
+    const Sum extends NumericField<Document> = never,
+    const Avg extends NumericField<Document> = never,
+    const Min extends NumericField<Document> = never,
+    const Max extends NumericField<Document> = never,
+  >(
+    options: GroupOptions<Document, By, Sum, Avg, Min, Max>
+  ) => Promise<Group<Document, By, Sum, Avg, Min, Max>[]>;
+}
+
+/**
+ * A query that can be read: its terminals, more filters, related records,
+ * and its order while it has none (`Ordered`): a query is ordered once.
  */
 export type Query<
   Document,
   Ordered extends boolean = false,
+  Tables extends AnyTables = AnyTables,
 > = QueryReads<Document> & {
   /** Only the records `filter` matches, besides any filter so far. */
-  readonly filter: (filter: QueryFilter<Document>) => Query<Document, Ordered>;
+  readonly filter: (
+    filter: QueryFilter<Document>
+  ) => Query<Document, Ordered, Tables>;
+  /**
+   * Each record it returns with the records its `v.id` fields (or lists
+   * of them) name, under `_with`: loaded together, a statement per field,
+   * at most 4 fields, under the caller's access to their tables. A record
+   * the caller may not see (missing, deleted, another owner's) is null; a
+   * table the caller can't read at all is `{ _withheld: true }`. Only for
+   * terminals that return records.
+   *
+   * ```ts
+   * const orders = await ctx.db.query("orders").with("customer").take(20);
+   * orders[0]._with.customer; // Doc<"customers"> | null | { _withheld: true }
+   * ```
+   */
+  readonly with: <const Fields extends readonly RelationField<Document>[]>(
+    ...fields: Fields
+  ) => Query<WithRelated<Document, Fields[number], Tables>, Ordered, Tables>;
 } & (Ordered extends true
     ? unknown
     : {
@@ -315,7 +510,9 @@ export type Query<
          * The order to read in, along the index (or by creation time),
          * with the record ID breaking ties. Ascending unless set.
          */
-        readonly order: (direction: "asc" | "desc") => Query<Document, true>;
+        readonly order: (
+          direction: "asc" | "desc"
+        ) => Query<Document, true, Tables>;
       });
 
 /** `aggregate`'s operations. */
@@ -335,19 +532,32 @@ export interface Aggregate<Document> {
 export type QueryInitializer<
   Table extends AnyTable,
   TableName extends string,
-> = Query<Doc<Table, TableName>> & {
+  Tables extends AnyTables = AnyTables,
+> = Query<Doc<Table, TableName>, false, Tables> & {
   /**
    * Reads through index `name`, in its order, within the range `range`
    * builds: equality on its first fields, then a lower and/or upper bound
-   * on the next.
+   * on the next. Ordered by its fields, any page of it is as cheap as the
+   * first.
    */
   readonly withIndex: <const Name extends keyof IndexesOf<Table> & string>(
     name: Name,
     range?: (
       range: IndexRangeBuilder<Doc<Table, TableName>, IndexFields<Table, Name>>
     ) => IndexRange
-  ) => Query<Doc<Table, TableName>>;
+  ) => Query<Doc<Table, TableName>, false, Tables>;
 };
+
+/** The tables of a schema that declare a search index. */
+type SearchableTable<Tables extends AnyTables> = {
+  [TableName in keyof Tables & string]: Tables[TableName] extends {
+    readonly "~searchable"?: infer Searchable;
+  }
+    ? true extends Searchable
+      ? TableName
+      : never
+    : never;
+}[keyof Tables & string];
 
 /** What `get` may assert. */
 export interface GetOptions {
@@ -372,7 +582,28 @@ export interface DatabaseReader<Tables extends AnyTables> {
   /** A query of `table`; nothing is read until a terminal is called. */
   readonly query: <TableName extends keyof Tables & string>(
     table: TableName
-  ) => QueryInitializer<Tables[TableName], TableName>;
+  ) => QueryInitializer<Tables[TableName], TableName, Tables>;
+  /**
+   * A search of `table`'s search index (`.searchIndex` in the schema) for
+   * `text`: records holding every word of it in the indexed fields (the
+   * last word as a prefix, so a search box finds as its person types,
+   * case and accents ignored), best match first. At most 8 words and 256
+   * characters; text with no words finds nothing. The table's matches are
+   * ranked within the host's scan bound: a word so common it matches more
+   * fails (`data.scan_limit`), so narrow the text. Nothing is read until a
+   * terminal is called.
+   *
+   * ```ts
+   * const page = await ctx.db
+   *   .search("customers", args.text)
+   *   .filter({ archived: false })
+   *   .paginate(args.pagination);
+   * ```
+   */
+  readonly search: <TableName extends SearchableTable<Tables>>(
+    table: TableName,
+    text: string
+  ) => SearchQuery<Doc<Tables[TableName], TableName>, Tables>;
 }
 
 /**
@@ -811,6 +1042,10 @@ interface QueryState {
   readonly order: "asc" | "desc";
   /** Whether `.order` was called: a query is ordered once. */
   readonly ordered: boolean;
+  /** The text a search looks for; none for a query. */
+  readonly search: string | undefined;
+  /** The fields whose related records it loads (`.with`), in order. */
+  readonly related: readonly string[];
 }
 
 /** A query's filters as one tree, or null for none. */
@@ -828,6 +1063,7 @@ const filterOf = (filters: readonly FilterNode[]): FilterNode | null => {
  */
 interface RuntimeQuery {
   readonly filter: (filter: unknown) => RuntimeQuery;
+  readonly with: (...fields: unknown[]) => RuntimeQuery;
   readonly order: (direction: unknown) => RuntimeQuery;
   readonly take: (count: unknown) => Promise<unknown>;
   readonly first: () => Promise<unknown>;
@@ -836,6 +1072,7 @@ interface RuntimeQuery {
   readonly collect: () => Promise<unknown>;
   readonly paginate: (options: unknown) => Promise<unknown>;
   readonly aggregate: (options: unknown) => Promise<unknown>;
+  readonly group: (options: unknown) => Promise<unknown>;
 }
 
 /** The reader as this module builds it, taking anything. */
@@ -848,7 +1085,143 @@ interface RuntimeReader {
   readonly query: (table: unknown) => RuntimeQuery & {
     readonly withIndex: (index: unknown, build?: unknown) => RuntimeQuery;
   };
+  readonly search: (table: unknown, text: unknown) => RuntimeQuery;
 }
+
+/** The terminals that return records, which `.with` and a search take. */
+const recordTerminals: ReadonlySet<QueryTerminal["kind"]> = new Set([
+  "take",
+  "first",
+  "unique",
+  "collect",
+  "paginate",
+]);
+
+/** The fields `.with` adds to `related`, checked: relations of the table. */
+const relatedOf = (
+  table: TableState,
+  related: readonly string[],
+  fields: readonly unknown[]
+): readonly string[] => {
+  const all = [...related];
+  for (const field of fields) {
+    const descriptor =
+      typeof field === "string" && Object.hasOwn(table.fields, field)
+        ? table.fields[field]
+        : undefined;
+    if (
+      typeof field !== "string" ||
+      descriptor === undefined ||
+      relationOf(descriptor) === undefined
+    ) {
+      return refuse(
+        "query.invalid_terminal",
+        "`.with` names fields of the table that hold a record ID (`v.id`) or a list of them."
+      );
+    }
+    if (!all.includes(field)) {
+      all.push(field);
+    }
+  }
+  if (all.length === 0 || all.length > queryMaxRelations) {
+    return refuse(
+      "query.invalid_terminal",
+      `\`.with\` loads the related records of 1 to ${queryMaxRelations} fields.`
+    );
+  }
+  return Object.freeze(all);
+};
+
+/** The declared numeric fields an aggregate list names, checked. */
+const numericFieldsOf = (
+  table: TableState,
+  value: unknown,
+  what: string
+): string[] => {
+  if (value === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (field) =>
+        typeof field === "string" &&
+        Object.hasOwn(table.fields, field) &&
+        baseOf(table, field) === "number"
+    )
+  ) {
+    return refuse(
+      "query.invalid_terminal",
+      `\`group\`'s \`${what}\` lists declared numeric fields of the table.`
+    );
+  }
+  return value.map(String);
+};
+
+/** The terminal `group(options)` asks for, checked. */
+const groupTerminal = (table: TableState, options: unknown): QueryTerminal => {
+  if (!hasOnly(options, ["by", "sum", "avg", "min", "max"])) {
+    return refuse(
+      "query.invalid_terminal",
+      "`group` takes `{ by, sum?, avg?, min?, max? }`."
+    );
+  }
+  const { by } = options;
+  if (
+    !Array.isArray(by) ||
+    by.length === 0 ||
+    by.length > groupMaxFields ||
+    new Set(by).size !== by.length ||
+    !by.every(
+      (field) =>
+        typeof field === "string" &&
+        Object.hasOwn(table.fields, field) &&
+        baseOf(table, field) !== undefined
+    )
+  ) {
+    return refuse(
+      "query.invalid_terminal",
+      `\`group\` groups by 1 to ${groupMaxFields} different scalar fields of the table.`
+    );
+  }
+  const terminal = {
+    kind: "group" as const,
+    by: by.map(String),
+    sum: numericFieldsOf(table, options.sum, "sum"),
+    avg: numericFieldsOf(table, options.avg, "avg"),
+    min: numericFieldsOf(table, options.min, "min"),
+    max: numericFieldsOf(table, options.max, "max"),
+  };
+  const aggregates =
+    terminal.sum.length +
+    terminal.avg.length +
+    terminal.min.length +
+    terminal.max.length;
+  if (aggregates > groupMaxAggregates) {
+    return refuse(
+      "query.invalid_terminal",
+      `\`group\` computes at most ${groupMaxAggregates} aggregates, all together.`
+    );
+  }
+  return terminal;
+};
+
+/** The text `search` looks for, checked. */
+const searchTextOf = (text: unknown): string => {
+  if (typeof text !== "string" || text.length > searchTextMaxLength) {
+    return refuse(
+      "query.invalid_terminal",
+      `A search's text is a string of at most ${searchTextMaxLength} characters.`
+    );
+  }
+  if (searchTerms(text).length > searchMaxTerms) {
+    return refuse(
+      "query.invalid_terminal",
+      `A search looks for at most ${searchMaxTerms} words.`
+    );
+  }
+  return text;
+};
 
 /** The terminal `aggregate(options)` asks for, checked. */
 const aggregateTerminal = (
@@ -919,6 +1292,12 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
     if (issue !== undefined) {
       refuse("query.invalid_filter", `${issue}.`);
     }
+    if (query.related.length > 0 && !recordTerminals.has(terminal.kind)) {
+      refuse(
+        "query.invalid_terminal",
+        "`.with` loads related records for a terminal that returns records: `take`, `first`, `unique`, `collect` or `paginate`."
+      );
+    }
     // A copy of its own for the executor: what it does with it can't
     // change this query or any read after.
     const request: QueryRequest = structuredClone({
@@ -929,8 +1308,20 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
       filter,
       order: query.order,
       terminal,
+      ...(query.search === undefined ? {} : { search: query.search }),
+      ...(query.related.length === 0 ? {} : { with: [...query.related] }),
     });
     return await execute({ kind: "query", query: request });
+  };
+  const searched = query.search !== undefined;
+  /** Refuses a terminal or modifier a search doesn't have. */
+  const notForSearch = (what: string): void => {
+    if (searched) {
+      refuse(
+        "query.invalid_terminal",
+        `A search is read in order of relevance: it has no \`${what}\`.`
+      );
+    }
   };
   return Object.freeze({
     filter: (filter: unknown) => {
@@ -952,7 +1343,13 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
       }
       return queryOf({ ...query, filters }, execute);
     },
+    with: (...fields: unknown[]) =>
+      queryOf(
+        { ...query, related: relatedOf(query.state, query.related, fields) },
+        execute
+      ),
     order: (direction: unknown) => {
+      notForSearch("order");
       if (query.ordered) {
         return refuse("query.invalid_terminal", "A query is ordered once.");
       }
@@ -967,12 +1364,21 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
     take: async (count: unknown) =>
       await run({ kind: "take", count: checkedCount(count, 0, "`take`") }),
     first: async () => await run({ kind: "first" }),
-    unique: async () => await run({ kind: "unique" }),
+    unique: async () => {
+      notForSearch("unique");
+      return await run({ kind: "unique" });
+    },
     count: async () => await run({ kind: "count" }),
     collect: async () => await run({ kind: "collect" }),
     paginate: async (options: unknown) => await run(pageTerminal(options)),
-    aggregate: async (options: unknown) =>
-      await run(aggregateTerminal(query.state, options)),
+    aggregate: async (options: unknown) => {
+      notForSearch("aggregate");
+      return await run(aggregateTerminal(query.state, options));
+    },
+    group: async (options: unknown) => {
+      notForSearch("group");
+      return await run(groupTerminal(query.state, options));
+    },
   });
 };
 
@@ -1050,6 +1456,8 @@ export const databaseReader = <Tables extends AnyTables>(
         filters: [],
         order: "asc",
         ordered: false,
+        search: undefined,
+        related: [],
       };
       return Object.freeze({
         ...queryOf(base, execute),
@@ -1104,6 +1512,29 @@ export const databaseReader = <Tables extends AnyTables>(
           );
         },
       });
+    },
+    search: (table: unknown, text: unknown) => {
+      const { name, state } = stateOf(table);
+      if (state.searchIndex === undefined) {
+        return refuse(
+          "query.unknown_index",
+          `Table \`${name}\` has no search index: declare one with \`.searchIndex([...fields])\`.`
+        );
+      }
+      return queryOf(
+        {
+          table: name,
+          state,
+          index: null,
+          range: [],
+          filters: [],
+          order: "asc",
+          ordered: true,
+          search: searchTextOf(text),
+          related: [],
+        },
+        execute
+      );
     },
   };
   // SAFETY: each method checks at run time what `DatabaseReader` types (a

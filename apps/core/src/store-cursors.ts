@@ -69,6 +69,16 @@ export interface CursorBinding {
   readonly range: readonly RangeBound[];
   readonly filter: FilterNode | null;
   readonly order: "asc" | "desc";
+  /** The text a search's pages look for; null for a query's. */
+  readonly search: string | null;
+  /**
+   * For a search, its table's generation when the page was read: a
+   * search's order is its relevance, which any write to the table moves,
+   * so its cursor expires with the generation rather than seek on scores
+   * that no longer hold. Null for a query's, whose keyset is the record's
+   * own values.
+   */
+  readonly searchGeneration: number | null;
 }
 
 /** The keys a store seals and tags its cursors with. */
@@ -158,11 +168,17 @@ const digestOf = async (
       })),
       filter: binding.filter === null ? null : filterJson(binding.filter),
       order: binding.order,
+      // A search's own, and only a search's: a query's digest is what it
+      // was before searches, so its cursors still open.
+      ...(binding.search === null ? {} : { search: binding.search }),
       generation: withGeneration
         ? {
             resourceVersion: binding.consumer.resourceVersion,
             schemaHash: binding.schemaHash,
             emitterVersion,
+            ...(binding.searchGeneration === null
+              ? {}
+              : { searchGeneration: binding.searchGeneration }),
           }
         : null,
     })

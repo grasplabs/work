@@ -134,6 +134,13 @@
       "when": 1792559663321,
       "tag": "0018_cascade_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1793711858765,
+      "tag": "0019_search_docs",
+      "breakpoints": true
     }
   ]
 }
