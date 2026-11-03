@@ -4,8 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
-import { asking, week } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  decidingWorkflow,
+  decisionOf,
+  endLiveResourceRuns,
+  jsonWorkflowAppsOf,
+  startedBy,
+} from "./json-workflow-apps.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -103,7 +109,10 @@ const failing = workflowFiles(
 );
 
 describe("what waits", slow, () => {
-  afterEach(endLiveRuns);
+  afterEach(async () => {
+    await endLiveRuns();
+    await endLiveResourceRuns();
+  });
 
   it("holds a person's write for them alone, and runs it once on their approval through the feed", async () => {
     const person = await signedInApi(idp, "user");
@@ -282,13 +291,17 @@ describe("what waits", slow, () => {
     });
   });
 
-  it("lists a decision a run waits on for the person it is from, urgent, to answer on its page", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const decider = await signedInApi(idp, "user");
-    const { decision } = await asking(builder, {
-      from: `person:${decider.userId}`,
-      timeout: week,
-    });
+  it("lists a decision a run waits on for the person it asks, urgent, to answer on its page", async () => {
+    const { signedIn } = jsonWorkflowAppsOf(idp);
+    const admin = await signedIn("admin");
+    const builder = await signedIn("builder");
+    const decider = await signedIn("user");
+    const workflow = await decidingWorkflow(
+      { admin, builder },
+      { recipient: `person:${decider.userId}` }
+    );
+    const runId = await startedBy(builder, workflow.id);
+    const decision = await decisionOf(decider, runId);
 
     const [item] = await itemsOf(decider, "decision");
     expect({

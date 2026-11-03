@@ -13,7 +13,7 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { newWebSocketRpcSession } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
@@ -44,6 +44,7 @@ import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import {
   called,
+  endLiveResourceRuns,
   following,
   greetingOf,
   jsonWorkflowAppsOf,
@@ -304,6 +305,8 @@ describe(
   "a screen's typed workflow through the real host",
   { timeout: 120_000 },
   () => {
+    afterEach(endLiveResourceRuns);
+
     it("starts a run once per key, follows it to its end with its output, and tells the person they may start one", async () => {
       const fixture = await boundApp();
       const { builder, app, reference } = fixture;
@@ -2555,6 +2558,8 @@ describe(
   "a screen's typed workflow run while it compensates",
   { timeout: 120_000 },
   () => {
+    afterEach(endLiveResourceRuns);
+
     withRollbacks();
 
     /**

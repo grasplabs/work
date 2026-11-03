@@ -65,6 +65,14 @@ const progressSaying = (term: string): InterviewProgress => ({
   addedAt: 0,
 });
 
+/** Every interview as kept, read one at a time as a purge reads them. */
+const interviewsKept = async (store: ReturnType<typeof onboardingStore>) => {
+  const people = await store.interviewPeople();
+  return await Promise.all(
+    people.map(async (person) => await store.interviewStored(person))
+  );
+};
+
 /**
  * An onboarding whose one lead is talking, having said `term`, their team
  * described as `does`; their link's marks, and who they are.
@@ -143,7 +151,7 @@ describe("a content purge of the interviews", () => {
     const { mark, key } = await talking(term);
     await purgeTerm(term);
     const store = onboardingStore(env);
-    const said = await store.interviewsSaid();
+    const said = await interviewsKept(store);
     // The device still holds the copy it saved, at the version it had.
     const stale = await store.saveInterview(mark, key, 1, progressSaying(term));
     const events = await allEvents();
@@ -217,7 +225,7 @@ describe("a content purge of the interviews", () => {
       { actor: { type: "system" }, userId: "system" },
       (text) => text.replaceAll(term, "(removed)")
     );
-    const said = await store.interviewsSaid();
+    const said = await interviewsKept(store);
 
     expect({
       tries,
