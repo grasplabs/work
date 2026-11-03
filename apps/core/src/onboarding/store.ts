@@ -160,7 +160,7 @@ import {
   works,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
-import { erasedEmailsAmong } from "../erased-people.ts";
+import { erasedEmailsAmong, normalizedEmail } from "../erased-people.ts";
 import {
   deliverMail,
   dropMailAbout,
@@ -6726,7 +6726,7 @@ export class Onboarding extends DurableObject<Env> {
         people: roster.people
           .filter(
             ({ id, away, email }) =>
-              id !== personId && !away && !erased.has(email)
+              id !== personId && !away && !erased.has(normalizedEmail(email))
           )
           .map(({ id, name, title, team }) => ({
             id,

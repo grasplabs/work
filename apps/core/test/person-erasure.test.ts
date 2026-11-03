@@ -1213,12 +1213,26 @@ describe("erasing a person", () => {
     });
     const { admin, person } = await removedPerson();
     const store = onboardingStore(env);
-    const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
+    const ids = await onboardingTeam([
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+    ]);
     await mapped(ids);
-    // Pim was them: the list has them by the address that was theirs.
+    // Noor and Pim were them: the list has them twice, by the address that
+    // was theirs, spelled two ways, as an address may be.
+    const email = String(person.person.email);
     await onList(
       "UPDATE people SET email = ? WHERE id = ?",
-      String(person.person.email),
+      email.toUpperCase(),
+      ids.noor
+    );
+    await onList(
+      "UPDATE people SET email = ? WHERE id = ?",
+      ` ${email.toLowerCase()} `,
       ids.pim
     );
     await admin.api.members.erase(person.userId, String(person.person.name));
@@ -1228,15 +1242,15 @@ describe("erasing a person", () => {
       throw new Error("Expected the team's map");
     }
 
-    // Max says the tickets are Pim's, and the model names Pim for them.
+    // Max says the tickets are Noor's, and the model names Noor for them.
     await agree(ids.max, [
-      fact("x1", "who", "Pim handles the new tickets, not Max."),
+      fact("x1", "who", "Noor handles the new tickets, not Max."),
       fact("x2", "work", "Max plans the rota with Lea."),
     ]);
     await answering(
       [
         {
-          text: JSON.stringify({ does: rota.id, person: ids.pim }),
+          text: JSON.stringify({ does: rota.id, person: ids.noor }),
           inputTokens: 100,
           outputTokens: 20,
         },
