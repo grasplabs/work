@@ -23,8 +23,9 @@ import { manifestHash, newRecordId } from "./store-schemas.ts";
 
 // A search index through the life of its store (store-search.ts): a
 // search's pages expire with any write to its table, rather than seek on
-// relevance that moved; deleted text leaves the store's pages once the
-// alarm optimizes the index; a cascade and a migration's rewrite reach the
+// relevance that moved; a record's old text leaves the store's pages in
+// the same write as its change or deletion; a cascade and a migration's
+// rewrite reach the
 // index as any write does; and a deleted store's purge drops the index
 // with its records.
 
