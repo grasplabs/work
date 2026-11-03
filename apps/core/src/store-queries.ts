@@ -106,7 +106,7 @@ import type { PhysicalSearch } from "./store-search.ts";
 //   still read by members under the older hash. So the hash must be the
 //   consumer's own pinned manifest's (GRA-244), and a hash a newer
 //   access mode superseded must be retired once no consumer is pinned to
-//   it (GRA-246); this store keeps every hash it was handed until then.
+//   it (GRA-1480); this store keeps every hash it was handed until then.
 
 /** A store's record of one schema: what reads pinned to it are checked by. */
 export interface PinnedSchema {

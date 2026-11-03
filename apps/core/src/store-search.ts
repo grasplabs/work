@@ -39,7 +39,7 @@ import { tableIdLiteral, textExpression } from "./store-expressions.ts";
 //
 // Search indexes, like indexes, are never retired yet: a table's index
 // that no retained version declares any more stays, kept in step, until
-// versions are retired (GRA-246) and drop what none of them pins.
+// versions are retired (GRA-1480) and drop what none of them pins.
 //
 // Like an index (store-indexes.ts), a search index is named by the hash of
 // its definition (its format's version, the table, the owner column and
