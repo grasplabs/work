@@ -213,6 +213,57 @@ const slowFilesDuring = async (
   }
 };
 
+/** A gate one read of core's files waits at (`gatedFilesDuring`). */
+interface FilesGate {
+  /** Set once the read reached the gate. */
+  reached: boolean;
+  /** The read goes on once this is set. */
+  released: boolean;
+}
+
+/**
+ * Runs `during` with the first read of core's files whose key `gated`
+ * picks held at `gate` until it is released; every other read goes
+ * straight through. Plain flags, each side polling the other's: the read
+ * runs in another request's context, where a promise this test resolves
+ * would never settle. Set back however it ends.
+ */
+const gatedFilesDuring = async (
+  gated: (key: string) => boolean,
+  gate: FilesGate,
+  during: () => Promise<void>
+): Promise<void> => {
+  const { FILES: files } = env;
+  const held = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "get" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          const [key] = args;
+          if (!gate.reached && typeof key === "string" && gated(key)) {
+            gate.reached = true;
+            while (!gate.released) {
+              // oxlint-disable-next-line no-await-in-loop -- polls the gate
+              await scheduler.wait(20);
+            }
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  env.FILES = held;
+  try {
+    await during();
+  } finally {
+    gate.released = true;
+    env.FILES = files;
+  }
+};
+
 /** The methods of the chat's calls refused because their run had ended. */
 const endedRefusals = async (chatId: string): Promise<unknown[]> => {
   const events = await allEvents();
@@ -790,23 +841,28 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // The person discards the draft while an edit has read it and not
     // yet written: the edit is refused, and the discard stands.
     const chatId = chatIdSchema.parse(chat.chat.id);
-    const { length: before } = await transcript(chat.stub, chatId);
-    await slowFilesDuring(chat.stub, async () => {
-      const reply = chat.ask("Call it the Ledger book");
-      await vi.waitFor(
-        async () => {
-          const now = await transcript(chat.stub, chatId);
-          expect(now.length).toBeGreaterThan(before + 1);
-          expect(now.at(-1)?.role).toBe("assistant");
-        },
-        { timeout: 10_000, interval: 50 }
-      );
-      await chat.stub.discardDraft(chatId, person.userId, existing, {
-        type: "person",
-        userId: person.userId,
-      });
-      await reply;
-    });
+    // The edit's read of the App's files waits at this gate, after it read
+    // the draft's revision and before it writes.
+    const gate: FilesGate = { reached: false, released: false };
+    await gatedFilesDuring(
+      (key) => key.startsWith(`apps/${existing}/trees/`),
+      gate,
+      async () => {
+        const reply = chat.ask("Call it the Ledger book");
+        await vi.waitFor(
+          () => {
+            expect(gate.reached).toBeTruthy();
+          },
+          { timeout: 15_000, interval: 20 }
+        );
+        await chat.stub.discardDraft(chatId, person.userId, existing, {
+          type: "person",
+          userId: person.userId,
+        });
+        gate.released = true;
+        await reply;
+      }
+    );
     const results = await toolResults(chat.stub, chatId);
     const overtaken = results.at(-1);
     const { changes } = await chat.stub.draft(chatId, existing);
