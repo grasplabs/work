@@ -27,6 +27,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appIntegrations,
   appMembers,
+  projectItems,
   appVersions,
   appResourceBindings,
   appWebhookDeliveries,
@@ -166,6 +167,16 @@ const endedWith = (
         )
       ),
     db.delete(appMembers).where(and(eq(appMembers.appId, appId), gone)),
+    // Out of every project too: a removed App takes no project's room.
+    db
+      .delete(projectItems)
+      .where(
+        and(
+          eq(projectItems.itemType, "app"),
+          eq(projectItems.itemId, appId),
+          gone
+        )
+      ),
     db
       .delete(appIntegrations)
       .where(and(eq(appIntegrations.appId, appId), gone)),

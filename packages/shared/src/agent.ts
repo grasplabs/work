@@ -2,24 +2,8 @@ import {
   chatFileMaxBytes,
   chatFilesMax,
   chatFilesPerQuestionMax,
-  projectDocumentMaxKb,
-  projectDocumentsMax,
-  projectGoalMaxLength,
-  projectNameMaxLength,
-  projectsMax,
 } from "./chat.ts";
 import { defineErrorFamily } from "./errors.ts";
-
-/** Each place a thousands comma goes in a whole number's digits. */
-const thousands = /\B(?=(?:\d{3})+$)/gu;
-
-/**
- * `count` as English writes it, `4,000`, without `toLocaleString`: this
- * module loads as core starts, and ICU's first number format costs about
- * 15 ms of CPU there.
- */
-const grouped = (count: number): string =>
-  String(count).replaceAll(thousands, ",");
 
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
@@ -39,13 +23,6 @@ export const agentErrors = defineErrorFamily({
     "This chat is too long to go on. Start a new chat to ask more.",
   "agent.run_ended":
     "This code run has ended, so its APIs don't answer any more.",
-  "agent.project_not_found": "There's no such project.",
-  "agent.invalid_project": `A project's name is 1 to ${projectNameMaxLength} characters, and its goal at most ${grouped(projectGoalMaxLength)}.`,
-  "agent.too_many_projects": `You have ${projectsMax} projects, the most a person keeps. Delete one to make another.`,
-  "agent.invalid_project_document": `A project document is a .md, .txt, .csv or .json file of at most ${projectDocumentMaxKb} KB, named once in its project.`,
-  "agent.too_many_project_documents": `A project has at most ${projectDocumentsMax} documents. Remove one to add another.`,
-  "agent.project_document_not_found":
-    "There's no such document in the project.",
   "agent.file_unsupported":
     "Only PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV and JSON files can be attached, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
   "agent.file_too_large": `A file attached to a question is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,

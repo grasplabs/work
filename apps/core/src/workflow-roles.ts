@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import { activeMember, organizationId } from "./auth/auth.ts";
+import { viaProjectSql } from "./project-sql.ts";
 
 // Who has a role in an independent workflow, as SQL read in the statement
 // that decides: what a start requires of the person it acts for
@@ -10,8 +11,8 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 
 /**
  * That `person` has a role in workflow `id` now, as SQL: an admin of the
- * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now (Better Auth's `team_members`, read in
+ * organization, its owner, or someone it is shared with, as a person,
+ * through a team or through a project they are in now (Better Auth's `team_members`, read in
  * this statement, never the session's list of teams). Only while they
  * are an active member.
  */
@@ -31,4 +32,7 @@ export const workflowRoleSql = (
       JOIN team_members ON team_members.team_id = shared.member_id
         AND team_members.user_id = ${person}
       WHERE shared.workflow_resource_id = ${id}
-        AND shared.member_type = 'team')))`;
+        AND shared.member_type = 'team')
+    OR EXISTS (SELECT 1 FROM workflow_resource_members AS shared
+      WHERE shared.workflow_resource_id = ${id}
+        AND ${viaProjectSql(sql.raw("shared.member_type"), sql.raw("shared.member_id"), person)})))`;

@@ -46,9 +46,12 @@ export const workflowNameSchema = z
     "Lowercase letters, digits and dashes, starting and ending with a letter or digit"
   );
 
-/** Whom a workflow is shared with, and in which role. */
+/**
+ * Whom a workflow is shared with, and in which role: a person, a team, or
+ * everyone in a project (@grasp-os/shared/projects).
+ */
 export const workflowMemberSchema = z.strictObject({
-  type: z.enum(["person", "team"]),
+  type: z.enum(["person", "team", "project"]),
   id: identifierSchema,
 });
 
@@ -904,16 +907,26 @@ export interface WorkflowVersionSource {
   files: Record<string, string>;
 }
 
-/** The organization's people and teams, by name, to share a workflow with. */
+/**
+ * The organization's people and teams, by name, to share a workflow with,
+ * and the projects the person builds, whose everyone it may be shared with.
+ */
 export interface WorkflowShareCandidates {
   people: { id: string; name: string }[];
   teams: { id: string; name: string }[];
+  projects: { id: string; name: string }[];
 }
 
 /** Someone a workflow is shared with. */
 export interface WorkflowMember {
-  type: "person" | "team";
+  type: "person" | "team" | "project";
   id: string;
+  /**
+   * A project's name, for a project row: null for a project the person
+   * isn't in, whose name is its members' alone. People and teams are
+   * named from the share candidates.
+   */
+  projectName?: string | null;
   role: WorkflowRole;
   addedBy: string;
   addedAt: string;

@@ -1,5 +1,5 @@
 import { appChangesSchema, appErrors } from "@grasp-os/shared/apps";
-import type { App, AppAnswerer, AppMemberRef } from "@grasp-os/shared/apps";
+import type { App, AppAnswerer, AppAudience } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
@@ -23,6 +23,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
+import { viaProjectSql } from "./project-sql.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
 
@@ -48,7 +49,7 @@ const holds = (column: SQLiteColumn, value: string | null): SQL =>
   sql`${column} IS ${value}`;
 
 /** That `audience` is a member or a team of the organization now, as SQL. */
-const ofOrganization = (audience: AppMemberRef): SQL =>
+const ofOrganization = (audience: AppAudience): SQL =>
   audience.type === "team"
     ? sql`EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${audience.id} AND ${teams.organizationId} = ${organizationId})`
     : activeMember(audience.id);
@@ -56,7 +57,7 @@ const ofOrganization = (audience: AppMemberRef): SQL =>
 /** `app.audience_invalid` unless `audience` is of the organization now. */
 const requireAudience = async (
   env: Env,
-  audience: AppMemberRef
+  audience: AppAudience
 ): Promise<void> => {
   const found = await drizzle(env.DB).get<{ ok: number } | undefined>(
     sql`SELECT 1 AS ok WHERE ${ofOrganization(audience)}`
@@ -72,8 +73,8 @@ const requireAudience = async (
  * organization who can open it (`openTo`) as its status lets them
  * (app-access.ts). A draft or an archived App is open only to whoever
  * builds it: an admin, or a builder by role in the organization who owns
- * it or with whom it is shared as a builder, as a person or through a
- * team.
+ * it or with whom it is shared as a builder, as a person, through a
+ * team or through a project.
  */
 const mayAnswer = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId)} AND ${openTo(userId, app)}
@@ -88,7 +89,8 @@ const mayAnswer = (userId: string | SQLiteColumn, app: string): SQL => sql`(
           AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId})
             OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (
               SELECT ${teamMembers.teamId} FROM ${teamMembers}
-              WHERE ${teamMembers.userId} = ${userId})))
+              WHERE ${teamMembers.userId} = ${userId}))
+            OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, userId)})
       )
     ))
   )
@@ -197,7 +199,7 @@ const planAudience = async (
   env: Env,
   plan: Plan,
   row: Row,
-  audience: AppMemberRef | null
+  audience: AppAudience | null
 ): Promise<void> => {
   // None is null on both sides: clearing what is clear changes nothing.
   if (

@@ -25,6 +25,7 @@ import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ProjectsRpc } from "./projects.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
@@ -66,6 +67,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
+  readonly #projects: ProjectsRpc;
   readonly #decisions: DecisionsRpc;
   readonly #heldStarts: HeldStartsRpc;
   readonly #dependencies: DependenciesRpc;
@@ -112,6 +114,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
+    this.#projects = new ProjectsRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
     this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
@@ -242,6 +245,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get workflowResources(): WorkflowResourcesRpc {
     return this.#workflowResources;
+  }
+
+  get projects(): ProjectsRpc {
+    return this.#projects;
   }
 
   get decisions(): DecisionsRpc {

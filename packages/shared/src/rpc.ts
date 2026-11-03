@@ -24,6 +24,7 @@ import type { OnboardingApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
+import type { ProjectsApi } from "./projects.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
@@ -134,6 +135,11 @@ export interface SessionApi {
    * for those with a role in them.
    */
   readonly workflowResources: WorkflowResourcesApi;
+  /**
+   * Projects: groupings of Apps and workflows the person is in, and what
+   * is filed in them that they may open. Filing never shares.
+   */
+  readonly projects: ProjectsApi;
   /**
    * What core tells the person: the workflows that failed while acting for
    * them.

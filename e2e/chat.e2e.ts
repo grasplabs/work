@@ -20,7 +20,7 @@ import type { Person } from "./people.ts";
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
-/** The window of the person's chats and projects, opened from its icon. */
+/** The window of the person's chats, opened from its icon. */
 const chatsWindow = async (page: Page) => {
   await page.getByRole("button", { name: "Chats", exact: true }).click();
   const window = page.getByRole("dialog", { name: "Chats" });
@@ -33,14 +33,6 @@ const rowOf = (window: ReturnType<Page["getByRole"]>, title: string) =>
   window
     .getByRole("option")
     .filter({ has: window.page().getByText(title, { exact: true }) });
-
-const regExpSyntax = /[$()*+.?[\\\]^{|}]/gu;
-
-/** A project in the window's column, by its name, with its count of chats. */
-const scopeOf = (window: ReturnType<Page["getByRole"]>, name: string) =>
-  window.getByRole("navigation", { name: "Projects" }).getByRole("button", {
-    name: new RegExp(`^${name.replaceAll(regExpSyntax, "\\$&")} \\d+$`, "u"),
-  });
 
 /**
  * Waits until the page reads nothing from core for its pages: the router it
@@ -215,7 +207,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Found by what was said in it, which its title no longer holds, with
   // the line it was said in under the title; a word nobody said finds
   // nothing.
-  const search = chats.getByLabel("Search chats and projects");
+  const search = chats.getByLabel("Search chats");
   await search.fill(`ben ${tag}`);
   await expect(rowOf(chats, title)).toContainText(`Send Ben invoice ${tag}.`);
   await expect(rowOf(chats, title).locator("mark")).toHaveText("Ben");
@@ -388,121 +380,6 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await expect(
     page.getByRole("button", { name: `Remove ${plan}` })
   ).toHaveCount(0);
-});
-
-test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("chat");
-  const page = await pageOf(user);
-  const tag = crypto.randomUUID().slice(0, 8);
-  const first = `First about ${tag}.`;
-  const second = `Second about ${tag}.`;
-  const projectName = `Board report ${tag}`;
-  await page.goto("/");
-  const asked = async (box: string, question: string): Promise<void> => {
-    await page.getByLabel(box).fill(question);
-    await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expect(page).toHaveURL(/[?&]chat=/u);
-  };
-  await asked("Your question", first);
-
-  // A new project from the window, with a goal and a document; a PDF
-  // isn't taken.
-  let chats = await chatsWindow(page);
-  await expect(rowOf(chats, first)).toBeVisible();
-  await chats.getByRole("button", { name: "New project" }).click();
-  const dialog = page.getByRole("dialog", { name: "New project" });
-  await dialog.getByLabel("Name").fill(projectName);
-  await dialog.getByLabel("Goal").fill("Get the board report out by Friday.");
-  const documents = dialog.getByLabel("Documents", { exact: true });
-  await documents.setInputFiles({
-    name: "report.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.7"),
-  });
-  await expect(dialog).toContainText(
-    "A project takes Markdown, text, CSV and JSON files."
-  );
-  await documents.setInputFiles({
-    name: "brief.md",
-    mimeType: "text/markdown",
-    buffer: Buffer.from("# Brief\n\nRevenue first."),
-  });
-  await expect(
-    dialog.getByRole("list", { name: "Documents in this project" })
-  ).toHaveText("brief.md");
-  await dialog.getByRole("button", { name: "Create project" }).click();
-  await expect(dialog).toHaveCount(0);
-  // The window shows the new project, which holds no chat yet.
-  const projects = chats.getByRole("navigation", { name: "Projects" });
-  const project = scopeOf(chats, projectName);
-  await expect(project).toHaveAttribute("aria-pressed", "true");
-  await expect(chats).toContainText("No chats here yet.");
-
-  // Moved in from the chat's menu, by keyboard.
-  await projects.getByRole("button", { name: /^All chats/u }).click();
-  await chats.getByRole("button", { name: `More for ${first}` }).focus();
-  await page.keyboard.press("Enter");
-  await page.getByRole("menuitem", { name: "Move to project" }).focus();
-  await page.keyboard.press("ArrowRight");
-  await page.getByRole("menuitem", { name: projectName }).focus();
-  await page.keyboard.press("Enter");
-  await project.click();
-  await expect(rowOf(chats, first)).toBeVisible();
-  // The open chat says which project it is in, and leads to its page.
-  await page.keyboard.press("Escape");
-  const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
-  await expect(crumbs).toContainText(projectName);
-  await crumbs.getByRole("link", { name: projectName }).click();
-
-  // The project's page: its goal as its instructions, its document and
-  // the room it takes, and its chats.
-  await expect(page).toHaveURL(/\/projects\//u);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectName);
-  const reads = page.getByRole("complementary", {
-    name: "What Grasp reads in this project",
-  });
-  await expect(reads).toContainText("Get the board report out by Friday.");
-  await expect(
-    reads.getByRole("list", { name: "Documents in this project" })
-  ).toHaveText("brief.md");
-  await expect(reads).toContainText("of the project’s room used");
-  const projectChats = page.getByRole("region", { name: "Chats" });
-  await expect(projectChats.getByRole("link", { name: first })).toBeVisible();
-
-  // A chat started from the project is in it.
-  await asked(`Start a chat in ${projectName}`, second);
-  chats = await chatsWindow(page);
-  await project.click();
-  await expect(rowOf(chats, first)).toBeVisible();
-  await expect(rowOf(chats, second)).toBeVisible();
-
-  // Taken out of it from its menu: it stays among all chats.
-  await chats.getByRole("button", { name: `More for ${first}` }).click();
-  await page.getByRole("menuitem", { name: "Move to project" }).click();
-  await page.getByRole("menuitem", { name: "Take out of the project" }).click();
-  await expect(rowOf(chats, first)).toHaveCount(0);
-  await projects.getByRole("button", { name: /^All chats/u }).click();
-  await expect(rowOf(chats, first)).toBeVisible();
-
-  // Deleted from its page: its chats stay.
-  await project.click();
-  await chats.getByRole("link", { name: "Instructions and files" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectName);
-  await page
-    .getByRole("button", { name: `More for the project ${projectName}` })
-    .click();
-  await page.getByRole("menuitem", { name: "Delete project" }).click();
-  await page
-    .getByRole("dialog", { name: `Delete the project “${projectName}”?` })
-    .getByRole("button", { name: "Delete project" })
-    .click();
-  await expect(page).not.toHaveURL(/\/projects\//u);
-  chats = await chatsWindow(page);
-  await expect(scopeOf(chats, projectName)).toHaveCount(0);
-  await expect(rowOf(chats, first)).toBeVisible();
-  await expect(rowOf(chats, second)).toBeVisible();
 });
 
 test("a person starts a chat from one of the questions under the box", async ({

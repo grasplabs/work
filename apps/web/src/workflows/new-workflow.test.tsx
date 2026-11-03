@@ -145,19 +145,15 @@ const fakeCore = () => {
         await Promise.resolve();
         return {};
       },
-      create: async (
-        title: string,
-        projectId?: string | null
-      ): Promise<ChatSummary> => {
+      create: async (title: string): Promise<ChatSummary> => {
         await Promise.resolve();
-        asked.push(["chat", title, projectId]);
+        asked.push(["chat", title]);
         return {
           id: "new-chat",
           title,
           createdAt: "2026-11-03T09:00:00.000Z",
           lastAt: "2026-11-03T09:00:00.000Z",
           running: false,
-          projectId: null,
           appId: null,
           via: "web",
         };
@@ -479,7 +475,7 @@ describe("New workflow", () => {
 
     expect({
       process: fake.asked.find(([call]) => call === "setProcess"),
-      // An ordinary chat, in no project, named after the question.
+      // An ordinary chat, named after the question.
       chat: fake.asked.find(([call]) => call === "chat"),
       sent: fake.asked.find(([call]) => call === "send"),
       open: activeChat(),
@@ -489,7 +485,6 @@ describe("New workflow", () => {
       chat: [
         "chat",
         "Which business process is this workflow for? Purchase-to-Pay",
-        null,
       ],
       sent: ["send", "new-chat", asked],
       open: "new-chat",

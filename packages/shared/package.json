@@ -125,6 +125,7 @@
     "./platform-limits": "./src/platform-limits.ts",
     "./platform-measures": "./src/platform-measures.ts",
     "./portable": "./src/portable.ts",
+    "./projects": "./src/projects.ts",
     "./provision-probe": "./src/provision-probe.ts",
     "./quiet-isolate": "./src/quiet-isolate.ts",
     "./quiet-loader": "./src/quiet-loader.ts",

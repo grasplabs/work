@@ -75,6 +75,7 @@ import {
   workflowResourceDraftInspections,
   workflowResourceDraftModules,
   workflowResourceDrafts,
+  projectItems,
   workflowResourceMembers,
   workflowResourceProcesses,
   workflowResources,
@@ -83,6 +84,8 @@ import {
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
 import { failUnless, lockGuardFailed } from "./packages/locks.ts";
+import { namedProjectsFor, requireProjectRoom } from "./project-access.ts";
+import { projectWithRoomForItemSql } from "./project-sql.ts";
 import {
   ceilingOf,
   memberEntry,
@@ -236,6 +239,20 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   for Apps.
 
 /**
+ * `nextGeneration` for every workflow `where` picks (a condition on
+ * `workflow_resources`): for a change that reaches many at once, such as
+ * whom a project they are shared with reaches (projects.ts).
+ */
+export const nextGenerationWhere = (
+  db: ReturnType<typeof drizzle>,
+  where: SQL | undefined
+) =>
+  db
+    .update(workflowResources)
+    .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
+    .where(where);
+
+/**
  * Moves workflow `id`'s policy generation on, for a batch that changes who
  * may start or follow it: a start admitted under the generation before is
  * refused (workflow-starts.ts).
@@ -244,11 +261,7 @@ export const nextGeneration = (
   db: ReturnType<typeof drizzle>,
   id: string,
   landed?: SQL
-) =>
-  db
-    .update(workflowResources)
-    .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
-    .where(and(eq(workflowResources.id, id), landed));
+) => nextGenerationWhere(db, and(eq(workflowResources.id, id), landed));
 
 /**
  * That the batch's previous statement changed a row, as SQL: for the
@@ -2893,17 +2906,32 @@ export const shareWorkflowResource = async (
     workflowShareSchema,
     input
   );
-  await requireSharable(env, member, {
-    owner: workflow.owner,
-    builds: role === "builder",
-    invalid: (issue) =>
-      workflowResourceErrors.create("workflow.resource_invalid", {
-        issues: [issue],
-      }),
-    ownerIssue: "id: The workflow's owner always has it.",
-    buildsIssue:
-      "role: Only the organization's admins and builders build workflows.",
-  });
+  await requireSharable(
+    env,
+    member,
+    {
+      owner: workflow.owner,
+      builds: role === "builder",
+      invalid: (issue) =>
+        workflowResourceErrors.create("workflow.resource_invalid", {
+          issues: [issue],
+        }),
+      ownerIssue: "id: The workflow's owner always has it.",
+      buildsIssue:
+        "role: Only the organization's admins and builders build workflows.",
+      item: { type: "workflow", id: workflow.id },
+    },
+    by
+  );
+  // A share with a project: the project, while it has room for it.
+  const toProject =
+    member.type === "project"
+      ? projectWithRoomForItemSql(
+          member.id,
+          { type: "workflow", id: workflow.id },
+          by.userId
+        )
+      : undefined;
   const addedAt = new Date();
   const db = drizzle(env.DB);
   const batch = auditedBatch(env, db, [
@@ -2912,8 +2940,12 @@ export const shareWorkflowResource = async (
       .values({
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a share racing a deletion writes nothing.
+        // A share with a project, also only while it is there, `by` builds
+        // it, and it has room for the workflow (or holds it already), read
+        // here: two shares racing for its last place can't both land.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
-          WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
+          WHERE id = ${workflow.id} AND deleted_at IS NULL
+            AND ${toProject === undefined ? sql`1` : sql`${toProject} IS NOT NULL`})`,
         memberType: member.type,
         memberId: member.id,
         role,
@@ -2950,6 +2982,10 @@ export const shareWorkflowResource = async (
     if (
       notNullFailed(error, "workflow_resource_members.workflow_resource_id")
     ) {
+      // The project's guard, if that was what held it back, says why.
+      if (toProject !== undefined) {
+        await requireProjectRoom(env, member.id, by.userId, toProject);
+      }
       throw unavailable();
     }
     throw error;
@@ -3087,9 +3123,20 @@ export const workflowMembers = async (
       asc(workflowResourceMembers.memberType),
       asc(workflowResourceMembers.memberId)
     );
+  // A project's name only for someone in it: it is its members' alone.
+  const projectNames = await namedProjectsFor(
+    env,
+    by,
+    rows
+      .filter(({ memberType }) => memberType === "project")
+      .map(({ memberId }) => memberId)
+  );
   return rows.map((row) => ({
     type: row.memberType,
     id: row.memberId,
+    ...(row.memberType === "project"
+      ? { projectName: projectNames.get(row.memberId) ?? null }
+      : {}),
     role: row.role,
     addedBy: row.addedBy,
     addedAt: row.addedAt.toISOString(),
@@ -3257,6 +3304,22 @@ const deletedOnce = async (
     db.delete(workflowResourceDraftInspections).where(
       sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+    ),
+    // Out of every project, filed or shared: a deleted workflow takes no
+    // project's room (projects.ts).
+    db.delete(projectItems).where(
+      and(
+        eq(projectItems.itemType, "workflow"),
+        sql`${projectItems.itemId} IN (SELECT id
+          FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+      )
+    ),
+    db.delete(workflowResourceMembers).where(
+      and(
+        eq(workflowResourceMembers.memberType, "project"),
+        sql`${workflowResourceMembers.workflowResourceId} IN (SELECT id
+          FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+      )
     ),
     // Its versions bind its stores no more (GRA-682): none of them runs
     // again, nothing running was left (`boundSql`), so an admin may delete

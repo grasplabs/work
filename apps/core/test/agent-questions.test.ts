@@ -153,7 +153,6 @@ describe(
         id,
         undefined,
         undefined,
-        undefined,
         "teams"
       );
       // Its model asks anyway, with the tool it wasn't offered.

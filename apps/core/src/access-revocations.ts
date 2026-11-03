@@ -22,10 +22,12 @@ import {
   accessRevocations,
   apps,
   appMembers,
+  projectMembers,
   teamMembers,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
+import { projectsOfSql } from "./project-sql.ts";
 
 // Telling an App's open screens that someone's access to it may have
 // dropped (spec 11.4). Our own writes that can take a role in an App away
@@ -571,20 +573,49 @@ export const retryAccessRevocations = async (env: Env): Promise<void> => {
   }
 };
 
-/** The Apps shared with team `teamId`. */
+/**
+ * The Apps shared with team `teamId`, or with a project the team is in:
+ * whoever leaves the team leaves those projects too.
+ */
 const appsSharedWith = async (env: Env, teamId: string): Promise<AppId[]> => {
   const rows = await drizzle(env.DB)
-    .select({ appId: appMembers.appId })
+    .selectDistinct({ appId: appMembers.appId })
     .from(appMembers)
     .where(
-      and(eq(appMembers.memberType, "team"), eq(appMembers.memberId, teamId))
+      or(
+        and(eq(appMembers.memberType, "team"), eq(appMembers.memberId, teamId)),
+        and(
+          eq(appMembers.memberType, "project"),
+          inArray(
+            appMembers.memberId,
+            drizzle(env.DB)
+              .select({ projectId: projectMembers.projectId })
+              .from(projectMembers)
+              .where(
+                and(
+                  eq(projectMembers.memberType, "team"),
+                  eq(projectMembers.memberId, teamId)
+                )
+              )
+          )
+        )
+      )
     );
   return rows.map(({ appId }) => appIdSchema.parse(appId));
 };
 
 /**
- * The Apps shared with any of `userIds`, as a person or through a team
- * they are in now. Leaving a team can take those away too, though none
+ * The Apps shared with project `projectId`: what everyone in it may lose
+ * when someone leaves it, or it is deleted (projects.ts).
+ */
+export const appsSharedWithProject = (projectId: string): SQL =>
+  sql`${apps.id} IN (SELECT ${appMembers.appId} FROM ${appMembers} WHERE ${appMembers.memberType} = 'project' AND ${appMembers.memberId} = ${projectId})`;
+
+/**
+ * The Apps shared with any of `userIds`, as a person, through a team they
+ * are in now, or through a project they are in now, as its owner, as a
+ * person or through a team (one they were in through the team they left is
+ * `appsSharedWith`'s). Leaving a team can take those away too, though none
  * is shared with that team: one that read a collection only that team
  * may read is refused to them from then on (app-provenance.ts).
  */
@@ -612,6 +643,15 @@ const appsSharedWithPeople = async (
               .select({ teamId: teamMembers.teamId })
               .from(teamMembers)
               .where(inList(teamMembers.userId, userIds))
+          )
+        ),
+        and(
+          eq(appMembers.memberType, "project"),
+          or(
+            ...userIds.map(
+              (userId) =>
+                sql`${appMembers.memberId} IN ${projectsOfSql(userId)}`
+            )
           )
         )
       )

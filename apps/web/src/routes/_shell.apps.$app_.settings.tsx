@@ -236,11 +236,15 @@ const AppSettings = ({
   const nameOf = (member: AppMember): string =>
     member.name ??
     (member.type === "person" ? personName(member.id) : member.id);
-  // Whom it may be made for: a person or team it is shared with.
+  // Whom it may be made for: a person or team it is shared with, never a
+  // project's row.
   const current = app.audience === null ? nobody : refValue(app.audience);
+  const audienceMembers = members.flatMap((member) =>
+    member.type === "project" ? [] : [{ ...member, type: member.type }]
+  );
   const audiences = [
     { value: nobody, label: t`Nobody in particular` },
-    ...members.map((member) => ({
+    ...audienceMembers.map((member) => ({
       value: refValue(member),
       label: nameOf(member),
     })),
@@ -338,7 +342,9 @@ const AppSettings = ({
               if (typeof value !== "string") {
                 return;
               }
-              const member = members.find((each) => refValue(each) === value);
+              const member = audienceMembers.find(
+                (each) => refValue(each) === value
+              );
               change({
                 audience:
                   member === undefined

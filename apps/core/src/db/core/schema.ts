@@ -877,8 +877,9 @@ export const accessRevocations = sqliteTable(
 
 /**
  * Whom each App is shared with (src/app-access.ts): a person
- * (`member_type` `person`, `member_id` their user ID) or a team, with their
- * role in it. Sharing again changes the role; unsharing deletes the row.
+ * (`member_type` `person`, `member_id` their user ID), a team, or everyone
+ * in a project (`project`, src/projects.ts), with their role in it.
+ * Sharing again changes the role; unsharing deletes the row.
  * Who did which is in the audit log. The App's owner has no row: they are
  * always one of its builders.
  */
@@ -888,7 +889,9 @@ export const appMembers = sqliteTable(
     appId: text("app_id")
       .notNull()
       .references(() => apps.id),
-    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberType: text("member_type", {
+      enum: ["person", "team", "project"],
+    }).notNull(),
     memberId: text("member_id").notNull(),
     role: text({ enum: ["user", "builder"] }).notNull(),
     addedBy: text("added_by").notNull(),
@@ -3837,9 +3840,10 @@ export const workflowResourceVersions = sqliteTable(
 
 /**
  * Whom each workflow is shared with (src/workflow-resources.ts): a person
- * (`member_type` `person`, `member_id` their user ID) or a team, in role
- * `user` or `builder`. Sharing again changes the role; unsharing deletes
- * the row; who did which is in the audit log. Its owner has no row.
+ * (`member_type` `person`, `member_id` their user ID), a team or everyone
+ * in a project (`project`, src/projects.ts), in role `user` or `builder`.
+ * Sharing again changes the role; unsharing deletes the row; who did
+ * which is in the audit log. Its owner has no row.
  */
 export const workflowResourceMembers = sqliteTable(
   "workflow_resource_members",
@@ -3847,7 +3851,9 @@ export const workflowResourceMembers = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
-    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberType: text("member_type", {
+      enum: ["person", "team", "project"],
+    }).notNull(),
     memberId: text("member_id").notNull(),
     role: text({ enum: ["user", "builder"] }).notNull(),
     addedBy: text("added_by").notNull(),
@@ -5433,4 +5439,75 @@ export const stephenSummaries = sqliteTable(
     settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.week, table.personId] })]
+);
+
+/**
+ * Projects (src/projects.ts): a grouping of Apps and workflows for a
+ * process, team or goal. Its owner, who made it, is always one of its
+ * builders; whoever else is in it has a row in `project_members`. Deleting
+ * one deletes its rows, never its Apps or workflows.
+ */
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** One of the icons `projectIcons` names (@grasp-os/shared/projects). */
+    icon: text().notNull(),
+    ownerId: text("owner_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  // Every access check reads the projects someone owns (`projectsOfSql`).
+  (table) => [index("projects_owner_idx").on(table.ownerId)]
+);
+
+/**
+ * Who is in each project besides its owner: a person (`member_type`
+ * `person`, `member_id` their user ID) or a team, as a `user`, who sees
+ * it, or a `builder`, who also changes it. Being in a project reaches only
+ * the Apps and workflows shared with it (`member_type` `project` in
+ * `app_members` and `workflow_resource_members`), never what is merely
+ * filed in it.
+ */
+export const projectMembers = sqliteTable(
+  "project_members",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["user", "builder"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.projectId, table.memberType, table.memberId],
+    }),
+    index("project_members_member_idx").on(table.memberType, table.memberId),
+  ]
+);
+
+/**
+ * What is filed in each project: an App (`item_type` `app`) or an
+ * independent workflow (`workflow`). Filing shares nothing: whom an item
+ * reaches is its own members' rows alone.
+ */
+export const projectItems = sqliteTable(
+  "project_items",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    itemType: text("item_type", { enum: ["app", "workflow"] }).notNull(),
+    itemId: text("item_id").notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.itemType, table.itemId] }),
+    index("project_items_item_idx").on(table.itemType, table.itemId),
+  ]
 );

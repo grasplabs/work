@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { notRemoved, organizationId } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
 import { members, teams, users } from "./db/core/schema.ts";
+import { buildsProjectsOf } from "./project-access.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 
@@ -34,7 +35,7 @@ export const workflowShareCandidates = async (
   requireNotStaff(by);
   await requireWorkflowRole(env, by, id, "builder");
   const db = drizzle(env.DB);
-  const [people, organizationTeams] = await Promise.all([
+  const [people, organizationTeams, builtProjects] = await Promise.all([
     db
       .select({ id: users.id, name: users.name })
       .from(members)
@@ -51,6 +52,8 @@ export const workflowShareCandidates = async (
       .from(teams)
       .where(eq(teams.organizationId, organizationId))
       .orderBy(asc(teams.name), asc(teams.id)),
+    // Only the projects they build: a project's name is its members'.
+    buildsProjectsOf(env, by),
   ]);
-  return { people, teams: organizationTeams };
+  return { people, teams: organizationTeams, projects: builtProjects };
 };

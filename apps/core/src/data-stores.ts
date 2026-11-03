@@ -55,7 +55,7 @@ import {
   rowsOf,
   stillMembers,
 } from "./sharing.ts";
-import type { MemberRef } from "./sharing.ts";
+import type { PersonOrTeam } from "./sharing.ts";
 import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type { ImportApply, ImportBatch, ReadResult } from "./store-host.ts";
@@ -632,13 +632,21 @@ const appBuilders = async (
     );
   return [
     ...owner,
-    ...rows.map((row): StoreManager => ({
-      type: row.memberType,
-      id: row.memberId,
-      role: "manage",
-      addedBy: row.addedBy,
-      addedAt: row.addedAt.toISOString(),
-    })),
+    // A project's builders aren't listed: a store's managers are people
+    // and teams (the query above picks no project row).
+    ...rows.flatMap((row): StoreManager[] =>
+      row.memberType === "project"
+        ? []
+        : [
+            {
+              type: row.memberType,
+              id: row.memberId,
+              role: "manage",
+              addedBy: row.addedBy,
+              addedAt: row.addedAt.toISOString(),
+            },
+          ]
+    ),
   ];
 };
 
@@ -782,7 +790,7 @@ export const shareStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   requireSharableStore(store);
-  const member: MemberRef = dataErrors.parse(
+  const member: PersonOrTeam = dataErrors.parse(
     "data.invalid",
     storeMemberSchema,
     input
@@ -830,7 +838,7 @@ export const unshareStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   requireSharableStore(store);
-  const member: MemberRef = dataErrors.parse(
+  const member: PersonOrTeam = dataErrors.parse(
     "data.invalid",
     storeMemberSchema,
     input

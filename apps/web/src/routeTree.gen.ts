@@ -36,6 +36,7 @@ import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.inte
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
+import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
@@ -203,6 +204,11 @@ const ShellKnowledgeCollectionRoute =
     path: '/knowledge/$collection',
     getParentRoute: () => ShellRoute,
   } as any)
+const ShellProjectsIndexRoute = ShellProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
@@ -406,6 +412,7 @@ export interface FileRoutesByFullPath {
   '/brain/': typeof ShellBrainIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/projects/': typeof ShellProjectsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/apps/$app/data': typeof ShellAppsAppDataRoute
@@ -462,6 +469,7 @@ export interface FileRoutesByTo {
   '/brain': typeof ShellBrainIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
+  '/projects': typeof ShellProjectsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/apps/$app/data': typeof ShellAppsAppDataRoute
@@ -522,6 +530,7 @@ export interface FileRoutesById {
   '/_shell/brain/': typeof ShellBrainIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/_shell/projects/': typeof ShellProjectsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/apps/$app_/data': typeof ShellAppsAppDataRoute
@@ -582,6 +591,7 @@ export interface FileRouteTypes {
     | '/brain/'
     | '/integrations/'
     | '/knowledge/'
+    | '/projects/'
     | '/settings/'
     | '/workflows/'
     | '/apps/$app/data'
@@ -638,6 +648,7 @@ export interface FileRouteTypes {
     | '/brain'
     | '/integrations'
     | '/knowledge'
+    | '/projects'
     | '/settings'
     | '/workflows'
     | '/apps/$app/data'
@@ -697,6 +708,7 @@ export interface FileRouteTypes {
     | '/_shell/brain/'
     | '/_shell/integrations/'
     | '/_shell/knowledge/'
+    | '/_shell/projects/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
     | '/_shell/apps/$app_/data'
@@ -914,6 +926,13 @@ declare module '@tanstack/react-router' {
       path: '/knowledge/$collection'
       fullPath: '/knowledge/$collection'
       preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/projects/': {
+      id: '/_shell/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ShellProjectsIndexRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/projects/$projectId': {
@@ -1210,6 +1229,7 @@ interface ShellRouteChildren {
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
+  ShellProjectsIndexRoute: typeof ShellProjectsIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellAppsAppDataRoute: typeof ShellAppsAppDataRoute
   ShellAppsAppDetailsRoute: typeof ShellAppsAppDetailsRoute
@@ -1237,6 +1257,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
+  ShellProjectsIndexRoute: ShellProjectsIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellAppsAppDataRoute: ShellAppsAppDataRoute,
   ShellAppsAppDetailsRoute: ShellAppsAppDetailsRoute,

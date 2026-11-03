@@ -43,11 +43,19 @@ import {
   apps,
   appMembers,
   members,
+  projects,
   teamMembers,
   teams,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import {
+  buildsProjectsOf,
+  namedProjectsFor,
+  peopleInProject,
+  requireProjectRoom,
+} from "./project-access.ts";
+import { projectWithRoomForItemSql } from "./project-sql.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -81,11 +89,13 @@ const rowOf = (app: App, member: AppMemberRef) =>
   );
 
 /**
- * The member rows `where` picks, each with the name of its person or
- * team, in the order they were shared or last changed.
+ * The member rows `where` picks, each with the name of its person, team
+ * or project, in the order they were shared or last changed. A project's
+ * name only for someone in it (`by`): to anyone else it stays unnamed.
  */
 const namedMembers = async (
   env: Env,
+  by: Identity,
   where: SQL | undefined
 ): Promise<AppMember[]> => {
   const rows = await drizzle(env.DB)
@@ -116,7 +126,11 @@ const namedMembers = async (
             eq(appMembers.memberType, "person"),
             activeMember(appMembers.memberId)
           ),
-          and(eq(appMembers.memberType, "team"), isNotNull(teams.id))
+          and(eq(appMembers.memberType, "team"), isNotNull(teams.id)),
+          and(
+            eq(appMembers.memberType, "project"),
+            sql`EXISTS (SELECT 1 FROM ${projects} WHERE ${projects.id} = ${appMembers.memberId})`
+          )
         )
       )
     )
@@ -125,7 +139,21 @@ const namedMembers = async (
       asc(appMembers.memberType),
       asc(appMembers.memberId)
     );
-  return rows.map(({ row, person, team }) => toMember(row, person ?? team));
+  const projectNames = await namedProjectsFor(
+    env,
+    by,
+    rows
+      .filter(({ row }) => row.memberType === "project")
+      .map(({ row }) => row.memberId)
+  );
+  return rows.map(({ row, person, team }) =>
+    toMember(
+      row,
+      row.memberType === "project"
+        ? (projectNames.get(row.memberId) ?? null)
+        : (person ?? team)
+    )
+  );
 };
 
 const invalid = (issue: string) =>
@@ -138,6 +166,7 @@ const sharingRules = (app: App, member: NewAppMember): SharingRules => ({
   invalid,
   ownerIssue: "id: They own the App, and always build it.",
   buildsIssue: "role: Only the organization's admins and builders build Apps.",
+  item: { type: "app", id: app.id },
 });
 
 /** The audit entry of a change by `by` to whom `app` is shared with. */
@@ -156,9 +185,27 @@ const appMemberEntry = (
 const peopleOf = (member: AppMemberRef): string[] | null =>
   member.type === "person" ? [member.id] : null;
 
+/** The people a row reaches now, by user ID: the person, or a team's or project's. */
+const peopleReachedBy = async (
+  env: Env,
+  member: AppMemberRef
+): Promise<string[]> => {
+  if (member.type === "person") {
+    return [member.id];
+  }
+  if (member.type === "project") {
+    return await peopleInProject(env, member.id);
+  }
+  const inTeam = await drizzle(env.DB)
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, member.id));
+  return inTeam.map(({ userId }) => userId);
+};
+
 /**
  * Whom sharing `app` with `member` reaches now, as far as provenance goes:
- * the person, or each of the team's people, with their teams. The App's
+ * the person, or each of the team's or project's people, with their teams. The App's
  * owner and admins aren't checked, nor anyone no longer in the
  * organization, who reaches nothing. A few queries, whatever the team's
  * size.
@@ -169,15 +216,7 @@ const checkedPeople = async (
   member: AppMemberRef
 ): Promise<Reader[]> => {
   const db = drizzle(env.DB);
-  const inTeam =
-    member.type === "person"
-      ? []
-      : await db
-          .select({ userId: teamMembers.userId })
-          .from(teamMembers)
-          .where(eq(teamMembers.teamId, member.id));
-  const people =
-    member.type === "person" ? [member.id] : inTeam.map(({ userId }) => userId);
+  const people = await peopleReachedBy(env, member);
   const others = people.filter((userId) => userId !== app.owner);
   if (others.length === 0) {
     return [];
@@ -276,7 +315,7 @@ export const listMembers = async (
   app: unknown
 ): Promise<AppMember[]> => {
   const { id } = await appFor(env, by, app, "user");
-  return await namedMembers(env, eq(appMembers.appId, id));
+  return await namedMembers(env, by, eq(appMembers.appId, id));
 };
 
 /**
@@ -293,7 +332,7 @@ export const shareCandidates = async (
 ): Promise<ShareCandidates> => {
   await editableApp(env, by, app);
   const db = drizzle(env.DB);
-  const [people, organizationTeams] = await Promise.all([
+  const [people, organizationTeams, builtProjects] = await Promise.all([
     db
       .select({ id: users.id, name: users.name })
       .from(members)
@@ -310,8 +349,9 @@ export const shareCandidates = async (
       .from(teams)
       .where(eq(teams.organizationId, organizationId))
       .orderBy(asc(teams.name), asc(teams.id)),
+    buildsProjectsOf(env, by),
   ]);
-  return { people, teams: organizationTeams };
+  return { people, teams: organizationTeams, projects: builtProjects };
 };
 
 /**
@@ -328,7 +368,7 @@ export const addMember = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newAppMemberSchema, input);
-  await requireSharable(env, member, sharingRules(found, member));
+  await requireSharable(env, member, sharingRules(found, member), by);
   await requireReadable(env, by, found, member);
   const db = drizzle(env.DB);
   const row: Row = {
@@ -355,7 +395,18 @@ export const addMember = async (
       addedAt: sql<Date>`${row.addedAt.getTime()}`.as("added_at"),
     })
     .from(apps)
-    .where(and(eq(apps.id, found.id), ne(apps.status, "archived")));
+    .where(
+      and(
+        eq(apps.id, found.id),
+        ne(apps.status, "archived"),
+        // A share with a project only while it is there, `by` builds it,
+        // and it has room for the App (or holds it already), read in this
+        // statement: two shares racing for its last place can't both land.
+        member.type === "project"
+          ? sql`${projectWithRoomForItemSql(member.id, { type: "app", id: found.id }, by.userId)} IS NOT NULL`
+          : undefined
+      )
+    );
   const results = await auditedBatch(env, db, [
     db
       .insert(appMembers)
@@ -380,8 +431,21 @@ export const addMember = async (
   // Archived before the batch ran: it wrote nothing (`ifNotArchived`).
   if (results[0].meta.changes === 0) {
     await editableApp(env, by, found.id);
+    // A project's guard that held it back says why.
+    if (member.type === "project") {
+      await requireProjectRoom(
+        env,
+        member.id,
+        by.userId,
+        projectWithRoomForItemSql(
+          member.id,
+          { type: "app", id: found.id },
+          by.userId
+        )
+      );
+    }
   }
-  const [added] = await namedMembers(env, rowOf(found, member));
+  const [added] = await namedMembers(env, by, rowOf(found, member));
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
     throw appErrors.create("app.conflict");
