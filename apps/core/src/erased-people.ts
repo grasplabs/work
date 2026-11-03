@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { erasedSubjects, personErasures } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 
 // Who was erased (GRA-903, person-erasure.ts), by the email that was
@@ -43,7 +44,14 @@ export const emailKeyVersion = 1;
 const emailKeyPurpose = `person-erasure.email.v${emailKeyVersion}`;
 
 /**
- * A keyed hash of `email`, lowercased, under the key of version
+ * An address as the erasure compares it: trimmed and lower case, so two
+ * spellings of one address are one.
+ */
+export const normalizedEmail = (email: string): string =>
+  email.trim().toLowerCase();
+
+/**
+ * A keyed hash of `email`, normalized (`normalizedEmail`), under the key of version
  * `emailKeyVersion`: what keeps an erased person out once their email is
  * gone, never the email itself.
  */
@@ -55,7 +63,7 @@ export const emailHashOf = async (
   const signed = await crypto.subtle.sign(
     "HMAC",
     key,
-    new TextEncoder().encode(email.trim().toLowerCase())
+    new TextEncoder().encode(normalizedEmail(email))
   );
   return toHex(new Uint8Array(signed));
 };
@@ -78,6 +86,43 @@ export const isErasedEmail = async (
     .from(personErasures)
     .where(erasedAddress(hash));
   return row !== undefined;
+};
+
+/**
+ * Which of `emails` were erased people's, and aren't released: by their
+ * keyed hashes, in one read however many, as normalized addresses
+ * (`normalizedEmail`), so every spelling of one is found by comparing
+ * normalized. An empty address is nobody's.
+ */
+export const erasedEmailsAmong = async (
+  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
+  emails: readonly string[]
+): Promise<Set<string>> => {
+  const hashes = new Map<string, string>();
+  for (const email of new Set(emails.map(normalizedEmail))) {
+    if (email !== "") {
+      // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+      hashes.set(await emailHashOf(env, email), email);
+    }
+  }
+  if (hashes.size === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ emailHash: personErasures.emailHash })
+    .from(personErasures)
+    .where(
+      and(
+        inList(personErasures.emailHash, [...hashes.keys()]),
+        eq(personErasures.emailKeyVersion, emailKeyVersion)
+      )
+    );
+  return new Set(
+    rows.flatMap(({ emailHash }) => {
+      const email = emailHash === null ? undefined : hashes.get(emailHash);
+      return email === undefined ? [] : [email];
+    })
+  );
 };
 
 /** The version of the key sign-in subjects are hashed with now. */

@@ -161,6 +161,11 @@ import {
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import {
+  erasedEmailsAmong,
+  isErasedEmail,
+  normalizedEmail,
+} from "../erased-people.ts";
+import {
   deliverMail,
   dropMailAbout,
   mailAbout,
@@ -4989,12 +4994,15 @@ export class Onboarding extends DurableObject<Env> {
    * so it answers `interview.link_invalid`, it is marked erased, so no
    * code is made for it again, and the device it opened on is forgotten.
    * Unlike a delete on their own request, no new interview can be saved
-   * under it. Their entry on the list stays, an admin's to remove; taken
-   * off the list, the mark goes with the link.
+   * under it. What they were asked about goes too (a referral naming them
+   * may have set it, `#referOne`): nobody asks them anything again. Their
+   * entry on the list stays, an admin's to remove; taken off the list, the
+   * mark goes with the link.
    */
   closeLinkOf(person: string, now: string = new Date().toISOString()): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
       // Mail still to go about them (a reminder, say) goes nowhere now.
       // Sent mail stays: the company's record, as the roster is.
       dropMailAbout(this.ctx.storage.sql, person);
@@ -6708,6 +6716,13 @@ export class Onboarding extends DurableObject<Env> {
       return;
     }
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    // Someone erased stays on the list, the company's entry (D5), but is
+    // never named again: found by the address that was theirs, as their
+    // erasure keeps it (erased-people.ts), until an admin releases it.
+    const erased = await erasedEmailsAmong(
+      this.env,
+      roster.people.map(({ email }) => email)
+    );
     const found = await referralOf(
       this.env,
       {
@@ -6716,7 +6731,10 @@ export class Onboarding extends DurableObject<Env> {
           .filter(({ team, id }) => team === person.team && id !== asked.id)
           .map(({ id, name, local }) => ({ id, name, local })),
         people: roster.people
-          .filter(({ id, away }) => id !== personId && !away)
+          .filter(
+            ({ id, away, email }) =>
+              id !== personId && !away && !erased.has(normalizedEmail(email))
+          )
           .map(({ id, name, title, team }) => ({
             id,
             name,
@@ -6731,6 +6749,22 @@ export class Onboarding extends DurableObject<Env> {
     );
     // What changed while it was read stands: read again.
     const said = await this.#mailContext();
+    // The person it names, erased while the model read (GRA-903): what it
+    // found is dropped. The last read before the save, which is
+    // synchronous from here on, so nothing of this object runs between
+    // the two; an erasure core records after it comes after the save, and
+    // its interview area takes what the save wrote (`eraseInterviewOf`).
+    const namedEmail =
+      found.who === null
+        ? undefined
+        : this.#roster()?.people.find(({ id }) => id === found.who)?.email;
+    if (
+      namedEmail !== undefined &&
+      (await isErasedEmail(this.env, namedEmail))
+    ) {
+      done();
+      return;
+    }
     const now = this.#roster();
     const { plan } = this.#row();
     if (now === null) {
@@ -6769,7 +6803,17 @@ export class Onboarding extends DurableObject<Env> {
       this.isOpen() &&
       takingPart(now, invite) &&
       !this.#linkFacts().sent.has(invite.id);
-    this.ctx.storage.transactionSync(() => {
+    const saved = this.ctx.storage.transactionSync(() => {
+      // Its maker erased while the model read: their erasure deleted the
+      // referral with their interview (`#erase`), so it saves nothing.
+      const [still] = this.#db
+        .select({ person: referrals.person })
+        .from(referrals)
+        .where(eq(referrals.person, personId))
+        .all();
+      if (still === undefined) {
+        return false;
+      }
       for (const work of change.works) {
         this.#db
           .update(works)
@@ -6799,8 +6843,9 @@ export class Onboarding extends DurableObject<Env> {
         this.#noted(invite.id, "onboarding.link.sent_referred", at, "grasp");
       }
       done();
+      return true;
     });
-    if (sending) {
+    if (saved && sending) {
       this.#deliverMailSoon();
     }
   }
@@ -7452,6 +7497,10 @@ export class Onboarding extends DurableObject<Env> {
       .run();
     this.#db.delete(approvals).where(eq(approvals.person, person)).run();
     this.#db.delete(readbacks).where(eq(readbacks.person, person)).run();
+    // A roster fix still to make from what they agreed to rests on it, and
+    // goes with it. A referral names nobody else: whom it names is worked
+    // out from the roster only as it is made (`#referOne`).
+    this.#db.delete(referrals).where(eq(referrals.person, person)).run();
     return said;
   }
 
