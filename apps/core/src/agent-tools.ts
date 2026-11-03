@@ -246,8 +246,8 @@ const fileOf = async (
   scope: AgentScope,
   app: string,
   path: string
-): Promise<string> => {
-  const { files } = await draftOf(scope, app);
+): Promise<{ content: string; revision: number }> => {
+  const { files, revision } = await draftOf(scope, app);
   const content = files[path];
   if (content === undefined) {
     const paths = Object.keys(files).toSorted();
@@ -255,7 +255,7 @@ const fileOf = async (
       `No file ${path} in the App's draft. Its files: ${paths.length === 0 ? "none yet" : paths.join(", ")}.`
     );
   }
-  return content;
+  return { content, revision };
 };
 
 /** How many times `part` occurs in `text`. */
@@ -378,7 +378,7 @@ const definitions = (known: Set<string>) => [
     },
     readInput,
     async (scope, { app, path }) => {
-      const content = await fileOf(scope, app, path);
+      const { content } = await fileOf(scope, app, path);
       known.add(fileKey(app, path));
       return { path, content };
     }
@@ -438,7 +438,7 @@ const definitions = (known: Set<string>) => [
           `Read ${path} with readFile before you edit it: you haven't read it in this chat.`
         );
       }
-      const content = await fileOf(scope, app, path);
+      const { content, revision } = await fileOf(scope, app, path);
       const found = occurrences(content, oldText);
       if (found !== 1) {
         throw new Error(
@@ -448,9 +448,15 @@ const definitions = (known: Set<string>) => [
         );
       }
       guard();
+      // Only over the revision just read: a discard or a restore since
+      // refuses the edit rather than writing the old file over it.
       return await exports
         .BuildApi({ props: scope })
-        .write(app, { [path]: content.replace(oldText, () => newText) });
+        .write(
+          app,
+          { [path]: content.replace(oldText, () => newText) },
+          { revision }
+        );
     }
   ),
   tool(

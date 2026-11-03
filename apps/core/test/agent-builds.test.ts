@@ -425,6 +425,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [draft, after] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(draft?.text)).toStrictEqual({
       base: 1,
+      revision: 1,
       changed: ["notes.md"],
       files: { "AGENTS.md": "# Ledger\n", "notes.md": "the agent's" },
     });
@@ -729,7 +730,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("writes and edits a draft's files with tools of their own, editing only a file it read, as its person's own build", async () => {
-    const { person, chat } = await setUp((app) => [
+    const { person, chat, existing } = await setUp((app) => [
       editing(app),
       toolStep("readFile", { app, path: "AGENTS.md" }),
       editing(app),
@@ -739,6 +740,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"] };
       };`),
       says("Done."),
+      // The next question's edit, which the person's discard overtakes.
+      toolStep("editFile", {
+        app,
+        path: "AGENTS.md",
+        oldText: "# Ledger desk",
+        newText: "# Ledger book",
+      }),
+      says("It moved."),
     ]);
 
     await chat.ask("Name the desk, and add its screen");
@@ -776,6 +785,41 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         },
         "ok",
       ]),
+    });
+
+    // The person discards the draft while an edit has read it and not
+    // yet written: the edit is refused, and the discard stands.
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    const { length: before } = await transcript(chat.stub, chatId);
+    await slowFilesDuring(chat.stub, async () => {
+      const reply = chat.ask("Call it the Ledger book");
+      await vi.waitFor(
+        async () => {
+          const now = await transcript(chat.stub, chatId);
+          expect(now.length).toBeGreaterThan(before + 1);
+          expect(now.at(-1)?.role).toBe("assistant");
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      await chat.stub.discardDraft(chatId, person.userId, existing, {
+        type: "person",
+        userId: person.userId,
+      });
+      await reply;
+    });
+    const results = await toolResults(chat.stub, chatId);
+    const overtaken = results.at(-1);
+    const { changes } = await chat.stub.draft(chatId, existing);
+    expect({
+      overtaken: [overtaken?.tool, overtaken?.isError],
+      conflict: overtaken?.text.includes(
+        appErrors.create("app.conflict").message
+      ),
+      draft: changes,
+    }).toStrictEqual({
+      overtaken: ["editFile", true],
+      conflict: true,
+      draft: {},
     });
   });
 
