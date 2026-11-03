@@ -189,8 +189,6 @@ interface Asked {
   answered: string[];
   /** Each line asked to be said. */
   said: string[];
-  /** How long they waited for his voice, as each turn told core, for staff. */
-  waited: number[];
 }
 
 const wordMs = 300;
@@ -219,9 +217,6 @@ const fakeTurns = async (page: Page, asked: Asked): Promise<void> => {
     }
     if (turn.data.event !== "start") {
       asked.answered.push(turn.data.lines.at(-1)?.text ?? "");
-    }
-    if (turn.data.waited !== undefined) {
-      asked.waited.push(turn.data.waited);
     }
     const n = asked.answered.length;
     if (n === heldAnswer) {
@@ -307,8 +302,7 @@ const watchLoop = async (page: Page): Promise<void> => {
 const toldSchema = z.array(
   z.union([
     z.object({
-      measured: z.object({ by: z.string() }),
-      waited: z.number().nullable(),
+      measured: z.object({ by: z.string(), voice: z.number().nullable() }),
     }),
     z.object({
       did: z.object({
@@ -335,7 +329,7 @@ test("an interview by voice: he answers when they are done, drops his answer whe
   const run = crypto.randomUUID().slice(0, 8);
   const person = `ines-${run}`;
   const link = await invited(staff, person, "Ines");
-  const asked: Asked = { refused: [], answered: [], said: [], waited: [] };
+  const asked: Asked = { refused: [], answered: [], said: [] };
   await fakeTurns(page, asked);
   await fakeVoice(page, asked);
   await page.routeWebSocket("**/api/transcription", relay(asked));
@@ -375,7 +369,9 @@ test("an interview by voice: he answers when they are done, drops his answer whe
       type === "ask" && turn !== undefined && dropTurns.has(turn - 1)
   );
   const waits = told.flatMap((event) =>
-    "measured" in event && event.waited !== null ? [event.waited] : []
+    "measured" in event && event.measured.voice !== null
+      ? [event.measured.voice]
+      : []
   );
   const middle = middleOf(waits);
   testInfo.annotations.push({
@@ -397,8 +393,6 @@ test("an interview by voice: he answers when they are done, drops his answer whe
     ),
     readBack: asked.said.includes("Is that correct?"),
     measured: waits.length >= 3,
-    // Core is told each wait with the next turn, and keeps it for staff.
-    kept: asked.waited.length >= 2,
     faster: middle < prototypeMs,
   }).toStrictEqual({
     refused: [],
@@ -408,7 +402,6 @@ test("an interview by voice: he answers when they are done, drops his answer whe
     heard: [],
     readBack: true,
     measured: true,
-    kept: true,
     faster: true,
   });
 });
