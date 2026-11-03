@@ -159,6 +159,22 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // email, in the identity area's batch.
   "core.app_visitor_codes": { erased: "identity" },
   "core.app_visitor_sessions": { erased: "identity" },
+  // An App's webhooks (app-webhooks.ts): the company's settings, naming
+  // the builder who added each and the admin who approved its URL, as
+  // other settings name who changed them.
+  "core.app_webhooks": {
+    company: "webhooks builders added, and the admins who approved them",
+  },
+  // A delivery of a form names who sent it, and carries what they sent
+  // until it settles: theirs go, waiting or not, with none queued after.
+  // Those of a publish or a version made current name nobody.
+  "core.app_webhook_deliveries": { erased: "apps" },
+  // Which forms were told, by a hash of who sent each with the rest
+  // (app-webhook-queue.ts), so none is told twice; forgotten once no
+  // repeat can come. Erasing one would tell a repeat again.
+  "core.app_form_submissions": {
+    kept: "which forms were told, as hashes, forgotten once no repeat can come",
+  },
   "core.business_stores": { company: "stores they created" },
   "core.business_store_members": { company: "who has a role in a store" },
   "core.workflow_resources": { company: "workflows they own" },
@@ -356,7 +372,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "dataStore.sdk_schema_activations": noPerson,
   "dataStore.sdk_schemas": noPerson,
   "dataStore.sdk_tables": noPerson,
-  "dataStore.sdk_change_outbox": { company: "writes of the App's records" },
+  // A form's values (app.form_sent) wait here only to reach the App's
+  // webhooks: cleared once handed over, and with their sender's erasure
+  // (`forgetPerson`), so what stays is the company's.
+  "dataStore.sdk_change_outbox": {
+    company: "writes of the App's records; a form's values go once handed over",
+  },
   "dataStore.sdk_file_events": { company: "the App's files they own" },
   "dataStore.sdk_file_writes": { company: "the App's files they own" },
   // The Brain and Knowledge (the Brain's personal purge erases a person's
@@ -464,6 +485,8 @@ export const reviewedPersonColumns: Readonly<
   "core.app_versions": ["author_id", "proposed_by"],
   "core.app_visitor_entries": ["added_by"],
   "core.app_visitor_grants": ["granted_by"],
+  "core.app_webhook_deliveries": ["person_id"],
+  "core.app_webhooks": ["approved_by", "created_by"],
   "core.app_workflow_bindings": ["bound_by", "removed_by"],
   "core.apps": ["owner_id", "removed_by", "status_changed_by"],
   "core.blueprints": ["marked_by"],

@@ -29,6 +29,7 @@ import {
   appMembers,
   appVersions,
   appResourceBindings,
+  appWebhookDeliveries,
   appWorkflowBindings,
   apps,
   permissions,
@@ -168,6 +169,16 @@ const endedWith = (
     db
       .delete(appIntegrations)
       .where(and(eq(appIntegrations.appId, appId), gone)),
+    // Nothing more of it leaves for its webhooks.
+    db
+      .delete(appWebhookDeliveries)
+      .where(
+        and(
+          eq(appWebhookDeliveries.appId, appId),
+          isNull(appWebhookDeliveries.deliveredAt),
+          gone
+        )
+      ),
   ] as const;
 };
 

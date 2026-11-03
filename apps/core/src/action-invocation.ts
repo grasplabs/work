@@ -2,6 +2,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   actionInvocationWallMs,
   actionMaxRunning,
@@ -25,6 +26,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { operationRoles } from "./app-access.ts";
 import { invokeAppAction, refusalOf } from "./app-functions.ts";
 import type { FunctionRequest } from "./app-functions.ts";
+import { formSubmissionOf, queueFormSent } from "./app-webhook-queue.ts";
+import type { FormSubmission } from "./app-webhook-queue.ts";
 import { actionInvocations } from "./db/core/schema.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -111,6 +114,15 @@ export interface InvocationOpen {
    * (app-functions.ts, `pinnedReference`). None for a portable host.
    */
   readonly pinnedVersion?: number;
+  /**
+   * A screen's form, sent as this action under its key: told to the App's
+   * webhooks once the run it starts succeeds, whoever reads it
+   * (app-webhook-queue.ts), named by the public action the run's own
+   * checked release resolved (`invokeAppAction`'s `path`), never by a
+   * lookup of its own. Only a start uses it; a join or an attach reads a
+   * run told already, or to be.
+   */
+  readonly form?: { readonly key: string };
 }
 
 /** What a reader is sent, one JSON line each. */
@@ -149,6 +161,19 @@ interface Started {
    * there was an inventory, which have no row.
    */
   readonly name?: string;
+  /**
+   * When its run started: the same for every reader of that run, its
+   * receipt and its tombstone, and new for a fresh run under the key once
+   * they are gone. Absent from records written before it was kept.
+   */
+  readonly startedAt?: number;
+  /**
+   * The form its run sent, succeeded and not yet told to the App's
+   * webhooks: kept with the receipt in one write, and told from here,
+   * again on every alarm until it is, so a run that succeeded is never
+   * left untold.
+   */
+  readonly untold?: FormSubmission;
 }
 
 /**
@@ -170,7 +195,15 @@ type Record =
       readonly settledAt: number;
       readonly result: OperationResult;
     })
-  | (Started & { readonly state: "expired" });
+  | (Started & {
+      readonly state: "expired";
+      /**
+       * When its tombstone ends and the key is free again: an alarm before
+       * it (a form's retry) leaves it. Absent from records written before
+       * it was kept, which go at their first alarm.
+       */
+      readonly expiresAt?: number;
+    });
 
 /** An invocation this object runs now, or ran since it last woke. */
 export interface Live {
@@ -188,7 +221,19 @@ export interface Live {
   changed: PromiseWithResolvers<null>;
 }
 
+/** The form a run sends, as its start said (`InvocationOpen.form`). */
+interface SentForm {
+  /** Which run sends it (`Live.runId`). */
+  readonly runId: string;
+  readonly app: AppId;
+  readonly call: FunctionRequest;
+  readonly key: string;
+}
+
 const recordKey = "invocation";
+
+/** How soon a form a run couldn't tell its App's webhooks is tried again. */
+const untoldRetryMs = 30_000;
 
 /** How long past its deadline a run may still be settling before the alarm looks. */
 const settleMarginMs = 60_000;
@@ -343,6 +388,8 @@ interface Outcome {
   readonly result: OperationResult;
   readonly reached: boolean;
   readonly effects: number;
+  /** The public action it ran, as its release resolved it. */
+  readonly path?: string;
 }
 
 /**
@@ -357,6 +404,8 @@ export const keepsReceipt = (outcome: Outcome): boolean =>
 
 export class ActionInvocation extends DurableObject<Env> {
   #live: Live | undefined;
+  /** The form the run under way sends, if it sends one. */
+  #form: SentForm | undefined;
   /** The record's changes, one after another (`#serially`). */
   #queue: Promise<null> = Promise.resolve(null);
 
@@ -429,6 +478,8 @@ export class ActionInvocation extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     await this.#serially(async () => {
+      // A form its run sent and couldn't tell yet, tried again first.
+      await this.#tellUntold();
       const record = this.#record();
       const now = Date.now();
       if (record === undefined) {
@@ -449,20 +500,34 @@ export class ActionInvocation extends DurableObject<Env> {
       }
       if (record.state === "settled") {
         if (now < record.settledAt + streamRetentionMs) {
-          await this.ctx.storage.setAlarm(record.settledAt + streamRetentionMs);
+          await this.#alarmAt(record.settledAt + streamRetentionMs);
           return;
         }
-        const { owner, inputHash, access, version, name } = record;
+        const { owner, inputHash, access, version, name, startedAt, untold } =
+          record;
         this.ctx.storage.kv.put<Record>(recordKey, {
           owner,
           inputHash,
           access,
           version,
           name,
+          startedAt,
+          ...(untold === undefined ? {} : { untold }),
           state: "expired",
+          expiresAt: now + streamTombstoneMs,
         });
-        await this.ctx.storage.setAlarm(now + streamTombstoneMs);
+        await this.#alarmAt(now + streamTombstoneMs);
         return;
+      }
+      // A tombstone is kept to its own end, whatever earlier alarm a form's
+      // retry set: only then is the key free to start the action again.
+      if (record.expiresAt !== undefined && now < record.expiresAt) {
+        await this.#alarmAt(record.expiresAt);
+        return;
+      }
+      if (record.untold !== undefined) {
+        // Tried on every alarm through its receipt and its tombstone.
+        log.error("app.webhook.form_untold", { name: record.name });
       }
       await this.ctx.storage.deleteAll();
       await this.#unlist(record.name);
@@ -639,6 +704,7 @@ export class ActionInvocation extends DurableObject<Env> {
       access: spec.access,
       version: spec.call.reference.resourceVersion,
       name: spec.name,
+      startedAt: Date.now(),
       state: "running",
       runId,
       deadline,
@@ -656,6 +722,10 @@ export class ActionInvocation extends DurableObject<Env> {
       changed: Promise.withResolvers(),
     };
     this.#live = live;
+    this.#form =
+      spec.form === undefined
+        ? undefined
+        : { runId, app: spec.app, call: spec.call, ...spec.form };
     await this.ctx.storage.setAlarm(deadline + settleMarginMs);
     const run = async (): Promise<void> => {
       let outcome: Outcome;
@@ -724,7 +794,61 @@ export class ActionInvocation extends DurableObject<Env> {
       await this.#unlist(record.name);
       return;
     }
-    await this.#settle(record, withReason(outcome.result, live.unfollowed));
+    const result = withReason(outcome.result, live.unfollowed);
+    // Its form, once it succeeded, whether or not anyone is listening:
+    // kept with its receipt, and told once per run, its start, which its
+    // receipt, a join and an attach all share.
+    const form = this.#form;
+    const untold =
+      result.ok &&
+      form?.runId === live.runId &&
+      outcome.path !== undefined &&
+      record.startedAt !== undefined
+        ? formSubmissionOf({
+            app: form.app,
+            userId: record.owner,
+            call: form.call,
+            key: form.key,
+            operation: outcome.path,
+            startedAt: record.startedAt,
+          })
+        : undefined;
+    await this.#settle(record, result, untold);
+  }
+
+  /**
+   * Tells the App's webhooks the form the record keeps untold, and keeps
+   * the record without it once told; one that couldn't be told stays, for
+   * the next alarm, which comes within `untoldRetryMs`.
+   */
+  async #tellUntold(): Promise<void> {
+    const record = this.#record();
+    if (record?.untold === undefined) {
+      return;
+    }
+    try {
+      await queueFormSent(this.env, record.untold);
+    } catch (error) {
+      log.warn("app.webhook.form_retry", {
+        name: record.name,
+        ...errorFields(error),
+      });
+      await this.#alarmAt(Date.now() + untoldRetryMs);
+      return;
+    }
+    const { untold: _told, ...rest } = record;
+    this.ctx.storage.kv.put<Record>(recordKey, rest);
+  }
+
+  /**
+   * Sets the alarm for `at`, or sooner while the record keeps a form
+   * untold: within `untoldRetryMs`, to tell it again.
+   */
+  async #alarmAt(at: number): Promise<void> {
+    const untold = this.#record()?.untold !== undefined;
+    await this.ctx.storage.setAlarm(
+      untold ? Math.min(at, Date.now() + untoldRetryMs) : at
+    );
   }
 
   /**
@@ -733,20 +857,25 @@ export class ActionInvocation extends DurableObject<Env> {
    */
   async #settle(
     record: Record & { readonly state: "running" },
-    result: OperationResult
+    result: OperationResult,
+    untold?: FormSubmission
   ): Promise<void> {
     const settledAt = Date.now();
-    const { owner, inputHash, access, version, name } = record;
+    const { owner, inputHash, access, version, name, startedAt } = record;
     this.ctx.storage.kv.put<Record>(recordKey, {
       owner,
       inputHash,
       access,
       version,
       name,
+      startedAt,
+      ...(untold === undefined ? {} : { untold }),
       state: "settled",
       settledAt,
       result,
     });
+    // Its form told before anyone hears it succeeded, if it can be now.
+    await this.#tellUntold();
     const live = this.#ownLive(record);
     if (live !== undefined) {
       clearTimeout(live.idle);
@@ -754,7 +883,7 @@ export class ActionInvocation extends DurableObject<Env> {
       live.result = result;
       wake(live);
     }
-    await this.ctx.storage.setAlarm(settledAt + streamRetentionMs);
+    await this.#alarmAt(settledAt + streamRetentionMs);
   }
 }
 

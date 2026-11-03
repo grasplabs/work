@@ -7,6 +7,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import { appFor, toApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -250,6 +251,19 @@ export const changeStatus = async (
           found.status === "published" ? storedEvent(event.id) : sql`0`
         )
       ),
+    // Its webhooks told it was published, with the change or not at all.
+    ...(to === "published"
+      ? queuedWebhookDeliveries(
+          db,
+          {
+            app: found.id,
+            event: "published",
+            dedupe: `published:${event.id}`,
+            version: "current",
+          },
+          storedEvent(event.id)
+        )
+      : []),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");

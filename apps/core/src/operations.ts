@@ -79,6 +79,7 @@ import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
+import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
@@ -454,6 +455,21 @@ export interface CallOptions {
    * again would act on what that effect changed.
    */
   readonly onEffect?: () => void;
+  /**
+   * For a mutation the caller named, an intent its commit carries with its
+   * writes, if any, made from when its receipt was made
+   * (`Claimed.startedAt`: the same for every attempt of one submission,
+   * new for a fresh one under the key): kept with the commit or not at
+   * all. Never for what it calls. `full` is carried when it fits what the
+   * mutation stages; `lean`, a small one, otherwise, so the mutation never
+   * fails on it.
+   */
+  readonly commitIntent?: (
+    startedAt: number
+  ) => Promise<
+    | { readonly full: SubmissionIntent; readonly lean: SubmissionIntent }
+    | undefined
+  >;
   /** A budget it shares with other calls (`sharedBudget`), not its own. */
   readonly budget?: SharedBudget;
 }
@@ -1264,6 +1280,26 @@ const verbOf = {
   replace: "update",
   delete: "delete",
 } as const;
+
+/**
+ * The intent of `carried` a commit takes: its full one, counted in what
+ * `staging` holds, or, past that, its lean one, which a commit's margin
+ * past what is staged always holds (a few hundred bytes of its 64 KiB).
+ */
+const carriedWithin = (
+  staging: Staging,
+  carried: { readonly full: SubmissionIntent; readonly lean: SubmissionIntent }
+): SubmissionIntent => {
+  try {
+    staging.reserve({ kind: carried.full.kind, data: carried.full.data });
+    return carried.full;
+  } catch (error) {
+    if (operationErrors.codeOf(error) !== "mutation.too_large") {
+      throw error;
+    }
+    return carried.lean;
+  }
+};
 
 /** A new staging of a mutation's writes, at `stagedAt`. */
 const stagingFor = (
@@ -2383,6 +2419,8 @@ interface Run {
   readonly cancelled?: AbortSignal;
   /** Told of each effect the call makes (`CallOptions.onEffect`). */
   readonly onEffect?: () => void;
+  /** What the named mutation's commit carries (`CallOptions.commitIntent`). */
+  readonly commitIntent?: CallOptions["commitIntent"];
   /** Where its progress goes: only for the streaming action the caller named. */
   readonly progress?: ProgressSink;
   /**
@@ -3191,6 +3229,9 @@ const runMutation = async (
   if (run.depth === 0) {
     await run.filesAdmitted?.();
   }
+  // What its commit carries for its caller, once, whatever reruns it takes.
+  const carried =
+    run.depth === 0 ? await run.commitIntent?.(claimed.startedAt) : undefined;
   for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
@@ -3363,7 +3404,10 @@ const runMutation = async (
             guards: [...reader.guards()],
             readSet: reader.readSet(),
             writes: staging.writes(),
-            intents,
+            intents:
+              carried === undefined
+                ? intents
+                : [...intents, carriedWithin(staging, carried)],
             result: value,
             ...(invocation.writer === undefined
               ? {}
@@ -3703,6 +3747,9 @@ export const callOperation = async (
         ...(options.onEffect === undefined
           ? {}
           : { onEffect: options.onEffect }),
+        ...(options.commitIntent === undefined
+          ? {}
+          : { commitIntent: options.commitIntent }),
         filesAdmitted,
       },
       operation,

@@ -74,6 +74,7 @@ export const familyNamespaces = [
   "version",
   "visitor",
   "waiting",
+  "webhook",
   "workflow",
 ] as const;
 

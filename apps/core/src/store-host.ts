@@ -536,6 +536,20 @@ const purgedTables = [
   "sdk_tables",
 ] as const;
 
+/**
+ * A form's intent without what the form sent (`app.form_sent`, core's
+ * app-webhook-queue.ts): its values are kept only to hand them to the
+ * App's webhooks, and may hold fields no record keeps.
+ */
+const formValuesCleared = sql`json_set(${outbox.intent}, '$.data.values', json('null'))`;
+
+/**
+ * An entry's intent once it is settled: a form's without its values, as
+ * nothing hands it over again; any other's as it was.
+ */
+const settledIntent = sql`CASE WHEN ${outbox.kind} = 'app.form_sent'
+  THEN ${formValuesCleared} ELSE ${outbox.intent} END`;
+
 /** How long one alarm goes on deleting cascade jobs' batches. */
 const cascadeBudgetMs = 5000;
 
@@ -2594,12 +2608,15 @@ export class StoreHost {
   }
 
   /**
-   * Forgets `personId`'s preferences in this store, as core asks once an
-   * admin erased them (GRA-903, core's person-erasure.ts): their row, its
-   * value and its last write's receipt. A store never set up holds none,
-   * and is set up by nothing here. Answers how many rows went (0 or 1).
+   * Forgets what this store keeps of `personId` alone, as core asks once
+   * an admin erased them (GRA-903, core's person-erasure.ts): their
+   * preferences (their row, its value and its last write's receipt), and
+   * the values of the forms they sent kept in the outbox for the App's
+   * webhooks, handed over or not (core queues none of theirs after). A
+   * store never set up holds none, and is set up by nothing here. Answers
+   * how many preference rows went (0 or 1).
    */
-  forgetPreferences(storeId: StoreId, personId: string): { forgotten: number } {
+  forgetPerson(storeId: StoreId, personId: string): { forgotten: number } {
     const id = storeIdSchema.parse(storeId);
     const person = dataErrors.parse("data.invalid", personIdOf, personId);
     if (this.ctx.id.name !== id) {
@@ -2621,6 +2638,16 @@ export class StoreHost {
         .where(eq(preferences.personId, person))
         .returning({ personId: preferences.personId })
         .all();
+      this.#db
+        .update(outbox)
+        .set({ intent: formValuesCleared })
+        .where(
+          and(
+            eq(outbox.kind, "app.form_sent"),
+            sql`json_extract(${outbox.intent}, '$.data.userId') = ${person}`
+          )
+        )
+        .run();
       return { forgotten: gone.length };
     });
   }
@@ -3065,7 +3092,7 @@ export class StoreHost {
             retainUntil: now + retentionMs,
           })
           .run();
-        return { held: { receiptId, fence: 1 } };
+        return { held: { receiptId, fence: 1 }, startedAt: now };
       }
       if (receipt.expiredAt !== null) {
         throw submissionErrors.create("submission.expired");
@@ -3074,7 +3101,10 @@ export class StoreHost {
         throw submissionErrors.create("submission.key_conflict");
       }
       if (receipt.outcome !== null) {
-        return { outcome: outcomeOf(receipt.outcome) };
+        return {
+          outcome: outcomeOf(receipt.outcome),
+          startedAt: receipt.createdAt,
+        };
       }
       const fence = receipt.fence + 1;
       this.#db
@@ -3086,7 +3116,7 @@ export class StoreHost {
         })
         .where(eq(receipts.receiptId, receiptId))
         .run();
-      return { held: { receiptId, fence } };
+      return { held: { receiptId, fence }, startedAt: receipt.createdAt };
     });
     await this.schedule();
     return claimed;
@@ -6269,7 +6299,7 @@ export class StoreHost {
     const settleUndeliverable = (code: string): void => {
       this.#db
         .update(outbox)
-        .set({ settledAt: clock(), undeliverable: code })
+        .set({ settledAt: clock(), intent: settledIntent, undeliverable: code })
         .where(
           and(
             eq(outbox.id, id),
@@ -6308,6 +6338,7 @@ export class StoreHost {
         .update(outbox)
         .set({
           settledAt: handedAt,
+          intent: settledIntent,
           undeliverable:
             result.settled === "delivered"
               ? null
@@ -6330,6 +6361,7 @@ export class StoreHost {
           ? {
               attempts: failed,
               settledAt: handedAt,
+              intent: settledIntent,
               undeliverable:
                 consumer === undefined
                   ? "outbox.no_consumer"

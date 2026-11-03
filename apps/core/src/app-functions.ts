@@ -34,6 +34,11 @@ import {
 import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import {
+  formHeardBy,
+  formIntents,
+  formSubmissionOf,
+} from "./app-webhook-queue.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -707,6 +712,13 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
+  /**
+   * Whether a keyed mutation's call is a screen's form, told to the App's
+   * webhooks: its commit carries it (`CallOptions.commitIntent`), so it is
+   * told once it committed, once per submission, and never unless it did.
+   * A query, an action or what the mutation calls is never told.
+   */
+  readonly tellsForm?: boolean;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -1020,6 +1032,7 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
+    tellsForm,
     sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
@@ -1116,6 +1129,10 @@ const callFunction = async (
     const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
+    // A screen's keyed mutation: its form, committed with its writes.
+    const submittedCall = call;
+    const submittedKey = call.idempotencyKey;
+    const submittedApp = appId;
     const result =
       call.window === undefined
         ? await callOperation(hosted, observed, reference, call.input, {
@@ -1124,6 +1141,28 @@ const callFunction = async (
               : { idempotencyKey: call.idempotencyKey }),
             ...(parentSession === undefined ? {} : { parentSession }),
             ...(cancelled === undefined ? {} : { cancelled }),
+            ...(tellsForm !== true ||
+            submittedCall.reference.kind !== "mutation" ||
+            submittedKey === undefined
+              ? {}
+              : {
+                  // Only for a form some webhook would hear: a receipt
+                  // whose outbox owes nothing keeps to its own time.
+                  // Its values left out when the commit wouldn't hold them.
+                  commitIntent: async (startedAt: number) =>
+                    (await formHeardBy(env, submittedApp, startedAt))
+                      ? formIntents(
+                          formSubmissionOf({
+                            app: submittedApp,
+                            userId: by.userId,
+                            call: submittedCall,
+                            key: submittedKey,
+                            operation: path,
+                            startedAt,
+                          })
+                        )
+                      : undefined,
+                }),
           })
         : await readWindow(
             {
@@ -1411,7 +1450,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<FunctionCallOptions, "pinnedVersion"> = {}
+  options: Pick<FunctionCallOptions, "pinnedVersion" | "tellsForm"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
@@ -1572,10 +1611,16 @@ export const invokeAppAction = async (
   readonly reached: boolean;
   /** How many effects it made, or may have made (`CallOptions.onEffect`). */
   readonly effects: number;
+  /**
+   * The public action it ran, as the checked release it ran resolved it:
+   * what a screen's form sent as it names (action-invocation.ts).
+   */
+  readonly path?: string;
 }> => {
   const requestId = crypto.randomUUID();
   let reached = false;
   let effects = 0;
+  let resolved: string | undefined;
   try {
     const found = await usableApp(env, by, app);
     if (found.currentVersion === null) {
@@ -1586,6 +1631,7 @@ export const invokeAppAction = async (
       release,
       await pinnedReference(env, release, call.reference, pinnedVersion)
     );
+    resolved = path;
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
@@ -1612,12 +1658,13 @@ export const invokeAppAction = async (
         },
       }
     );
-    return { result, reached, effects };
+    return { result, reached, effects, path };
   } catch (error) {
     return {
       result: { ok: false, error: refusalOf(error, requestId) },
       reached,
       effects,
+      ...(resolved === undefined ? {} : { path: resolved }),
     };
   }
 };
