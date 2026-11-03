@@ -4,14 +4,17 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { peopleIn } from "./people.ts";
+import { modelScripts } from "./model-scripts.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against the profile and says what to fix at its
 // task and JSON Pointer, only a revision that passes publishes, and of two
 // people saving the same revision, the second is told and keeps their text.
 // The page opens on its Flow, the revision that passed drawn, where a step
-// is changed too; the JSON is behind it, on Definition.
+// is changed too; the JSON is behind it, on Definition. A new workflow
+// opens on an empty Flow with Grasp's chat docked beside it, which asks
+// which business process it is for and draws it as its draft passes.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -66,11 +69,18 @@ const definition = (
     2
   );
 
-/** Creates workflow `name` from the Workflows page's New workflow. */
-const create = async (page: Page, name: string): Promise<void> => {
+/** A new workflow's name, as New workflow makes one. */
+const newName = /^new-workflow-[\da-f]{8}$/u;
+
+/**
+ * Creates a workflow from the Workflows page's New workflow, which opens
+ * it: its name, once its page shows it.
+ */
+const create = async (page: Page): Promise<string> => {
   await page.getByRole("button", { name: "New workflow" }).click();
-  await page.getByLabel("Name of a new workflow").fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
+  const title = page.getByRole("heading", { name: newName });
+  await expect(title).toBeVisible(pageRead);
+  return (await title.textContent()) ?? "";
 };
 
 /** Shows the definition's JSON on `page`, behind its Flow. */
@@ -91,9 +101,8 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   const { builder } = peopleIn("workflowEditor");
   const page = await pageOf(builder);
   const reads = await callGate(page, '["workflowResources","draft"]');
-  const name = `edited-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await create(page, name);
+  const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByText("Not published")).toBeVisible();
 
@@ -171,9 +180,8 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
 }) => {
   const { builder } = peopleIn("workflowEditor");
   const page = await pageOf(builder);
-  const name = `racing-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await create(page, name);
+  const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // The definition it starts from saves as it is.
   await definitionOf(page);
@@ -248,9 +256,8 @@ test("a builder sees every declared branch of the checked definition, and a test
 }) => {
   const { builder, admin } = peopleIn("workflowDiagram");
   const page = await pageOf(builder);
-  const name = `routed-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await create(page, name);
+  const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   await save(page, routing(name));
@@ -376,9 +383,8 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
 }) => {
   const { builder } = peopleIn("workflowDiagram");
   const page = await pageOf(builder);
-  const name = `stepped-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await create(page, name);
+  const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // It opens on its Flow; nothing passed yet, so nothing is drawn.
   await expect(page.getByRole("tab", { name: "Flow" })).toHaveAttribute(
@@ -471,9 +477,8 @@ test("a builder writes a module beside the definition, calls it through a local 
 }) => {
   const { builder } = peopleIn("workflowModules");
   const page = await pageOf(builder);
-  const name = `totalled-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await create(page, name);
+  const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   // Without its module, the binding names nothing the workflow has.
@@ -499,4 +504,70 @@ test("a builder writes a module beside the definition, calls it through a local 
   await expect(page.getByLabel("code/total.ts", { exact: true })).toHaveValue(
     totalModule
   );
+});
+
+test("a builder starts a new workflow on an empty Flow with Grasp's chat beside it, says which process it is for, and sees the Flow drawn as the chat's draft passes", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowDrawn");
+  const page = await pageOf(builder);
+  const [reply] = modelScripts.drawsWorkflow.replies;
+  await page.goto("/workflows");
+  const name = await create(page);
+  const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+
+  // It opens on its Flow, with nothing drawn yet, and Grasp's chat docked
+  // open beside it, asking first which business process it is for.
+  await expect(page.getByRole("tab", { name: "Flow" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await expect(
+    page.getByText(
+      "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
+    )
+  ).toBeVisible();
+  const chat = page.getByRole("region", { name: "Ask Grasp" });
+  await expect(
+    chat.getByText(
+      "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
+    )
+  ).toBeVisible();
+  const asks = chat.getByRole("region", { name: "Grasp asks" });
+  await expect(
+    asks.getByText("Which business process is this workflow for?")
+  ).toBeVisible();
+  await expect(asks.getByRole("radio")).toHaveCount(7);
+  await expect(
+    asks.getByRole("radio", { name: "Something else" })
+  ).toBeVisible();
+
+  // The chat's agent saves a first step that passes as it works, as
+  // `env.workflowBuild.edit` does: the stack's model is scripted and writes
+  // no code (its tools are core's tests), so the builder's own session
+  // saves it, before the answer the page then follows.
+  const { core, api } = apiOf(builder);
+  try {
+    await api.workflowResources.editDraft(workflow, {
+      expectedRevision: 0,
+      source: definition(name, "received"),
+      modules: {},
+    });
+
+    await asks.getByRole("radio", { name: "Purchase-to-Pay" }).click();
+    await asks.getByRole("button", { name: "Send" }).click();
+    await expect(chat.getByText(reply.text)).toBeVisible({ timeout: 30_000 });
+
+    // The Flow follows the draft as the chat changed it, and the workflow
+    // serves the process chosen.
+    const diagram = page.getByRole("region", { name: "Diagram", exact: true });
+    await expect(diagram.getByRole("listitem", { name: "finish" })).toBeVisible(
+      pageRead
+    );
+    await expect(page.getByText("Diagram of revision 1")).toBeVisible();
+    const resource = await api.workflowResources.get(workflow);
+    expect(resource.process).toBe("p2p");
+  } finally {
+    core[Symbol.dispose]();
+  }
 });

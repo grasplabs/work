@@ -38,6 +38,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { EllipsisIcon, WorkflowIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
+import { dockDrawerRoom, useDockMode } from "../chat/dock-mode.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import {
@@ -57,6 +58,7 @@ import { DeleteWorkflow } from "../workflows/delete-workflow.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
 import type { DiagramPart } from "../workflows/diagram-parts.ts";
+import { useDraftFromChat } from "../workflows/draw-in-chat.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
 import { ListedCount } from "../workflows/listed-count.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
@@ -64,6 +66,7 @@ import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { ShareWorkflow } from "../workflows/share-workflow.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
+import { definitionTitle } from "../workflows/step-body.ts";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
@@ -101,6 +104,9 @@ import {
 // workflow page (GRA-1402), the title stands alone with where it stands
 // at its right; what is set about it sits in its "…" menu, and what it is
 // (its version, its owner, its process) in one quiet line beside the tabs.
+// Its builders draw it with Grasp in its own chat, docked beside it
+// (`workflows/draw-in-chat.ts`): the Flow follows the draft as the chat
+// edits it.
 
 /**
  * One use whose writes a model's answers may steer (GRA-718), as its
@@ -376,18 +382,21 @@ const useStatus = (lifecycle: Loaded<WorkflowLifecycle>) => {
 };
 
 /**
- * Its name alone on its line, with where it stands, a run to start and
+ * Its title alone on its line, with where it stands, a run to start and
  * its settings at the line's end; and, for whoever may decide it, the
  * version waiting to go live.
  */
 const WorkflowHeader = ({
   resource,
+  title,
   status,
   onChange,
   askable,
   me,
 }: {
   resource: WorkflowResource;
+  /** What it is headed with: its definition's title, or its name. */
+  title: string;
   status: WorkflowLifecycle | undefined;
   onChange: (next: WorkflowLifecycle) => void;
   askable: Loaded<boolean>;
@@ -395,9 +404,7 @@ const WorkflowHeader = ({
 }) => (
   <div className="flex flex-col gap-3">
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <PageHeaderTitle className="min-w-0 grow">
-        {resource.name}
-      </PageHeaderTitle>
+      <PageHeaderTitle className="min-w-0 grow">{title}</PageHeaderTitle>
       <div className="flex flex-wrap items-center gap-2">
         {status === undefined ? null : (
           <WorkflowStatus
@@ -599,6 +606,22 @@ const DraftTabs = ({
   );
 };
 
+/**
+ * What a workflow named `name` is headed with: its definition's title, as
+ * its draft has it (or the latest that passed, while the draft's text
+ * isn't JSON); its name without one, as for whoever doesn't read its draft.
+ */
+const headingOf = (draft: WorkflowDraft | undefined, name: string): string => {
+  if (draft === undefined) {
+    return name;
+  }
+  return (
+    definitionTitle(draft.source) ??
+    definitionTitle(draft.checkpoint?.source) ??
+    name
+  );
+};
+
 /** The later of two ISO times, either of which may be missing. */
 const laterOf = (a: string | null, b: string | null): string | null => {
   if (a === null || (b !== null && b > a)) {
@@ -661,6 +684,8 @@ const WorkflowResourceView = ({
     setEdited(next);
     setSavedHere(next.editedAt);
   };
+  // As Grasp draws it in its chat, beside the page.
+  useDraftFromChat(resource.id, took);
   const { status, onChange } = useStatus(lifecycle);
   // Its parts gone (a new checkpoint drawn in none), Overview goes too:
   // the tab it was on shows where the page starts instead.
@@ -681,6 +706,7 @@ const WorkflowResourceView = ({
             onChange={onChange}
             resource={resource}
             status={status}
+            title={headingOf(latest, resource.name)}
           />
           <div className="flex flex-wrap items-end justify-between gap-x-4">
             <WorkflowTabs
@@ -863,6 +889,8 @@ const WorkflowResourcePage = () => {
   const { identity } = Route.useRouteContext();
   const { tab } = Route.useSearch();
   const { t } = useLingui();
+  // Its builders' chat as a drawer down the right takes its room from the page.
+  const drawer = useDockMode() === "drawer";
   const name = resource.state === "ready" ? resource.data.name : undefined;
   const crumbs = [
     { label: t`Workflows`, to: "/workflows" },
@@ -881,7 +909,13 @@ const WorkflowResourcePage = () => {
   return (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex min-h-full flex-col text-sm">
+      <div
+        className={
+          drawer && resource.data.role === "builder"
+            ? `flex min-h-full flex-col text-sm ${dockDrawerRoom}`
+            : "flex min-h-full flex-col text-sm"
+        }
+      >
         <WorkflowResourceView
           // Another workflow starts afresh; a new current version of this
           // one keeps what is typed in its editor.

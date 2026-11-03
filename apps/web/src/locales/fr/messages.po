@@ -4208,10 +4208,6 @@ msgstr "Impossible de faire de {chosen} le responsable de {named}"
 msgid "Counted over the workflows of the domains you can open; independent workflows aren't counted here."
 msgstr "Comptées sur les workflows des domaines que vous pouvez ouvrir ; les workflows indépendants ne sont pas comptés ici."
 
-#: src/workflows/independent-workflows.tsx
-msgid "Create"
-msgstr "Créer"
-
 #: src/routes/_shell.integrations.$integration.tsx
 msgctxt "permission group"
 msgid "Create and change"
@@ -6523,10 +6519,6 @@ msgstr "Il n’a aucune étape."
 msgid "It has recorded no step yet."
 msgstr "Aucune étape n’a encore été enregistrée."
 
-#: src/workflows/workflow-flow.tsx
-msgid "It is drawn once a revision passes the check: check and save it under Definition."
-msgstr "Il est dessiné dès qu’une révision passe la vérification : vérifiez-la et enregistrez-la sous Définition."
-
 #: src/brain/forget.tsx
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "C'est définitif et ne peut pas être récupéré. Le journal d'audit garde qu'il a été retiré et par qui, jamais ce que c'était."
@@ -7654,10 +7646,6 @@ msgstr "Indiquez ci-dessous un modèle que cet endpoint propose, choisissez-le, 
 msgid "Name in the app's code"
 msgstr "Nom dans le code de l’app"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Name of a new workflow"
-msgstr "Nom d'un nouveau workflow"
-
 #: src/engines/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Nom de la conservation, par exemple une référence de dossier"
@@ -8594,6 +8582,10 @@ msgstr "Rien ici ne correspond au filtre."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Rien ici pour l’instant."
+
+#: src/workflows/workflow-flow.tsx
+msgid "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
+msgstr "Rien n'est encore dessiné. Dites à Grasp dans le chat comment ce travail se déroule et ses étapes apparaîtront ici."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -10961,6 +10953,10 @@ msgstr "Enregistré."
 msgid "Saving…"
 msgstr "Enregistrement…"
 
+#: src/chat/chat-dock.tsx
+msgid "Say how this work runs"
+msgstr "Dites comment ce travail se déroule"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Say it didn't happen?"
@@ -12308,6 +12304,10 @@ msgstr "Les équipes de moins de cinq personnes indiquent seulement si leur resp
 msgctxt "dashboard widget: how far each team is with AI"
 msgid "Teams with AI"
 msgstr "Équipes avec l’IA"
+
+#: src/chat/chat-dock.tsx
+msgid "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
+msgstr "Dites-moi comment ce travail se déroule aujourd'hui, étape par étape : qui fait quoi, dans quelle app et à quelle fréquence. Je le dessine au fil de vos réponses."
 
 #: src/engines/resource-bindings.tsx
 msgid "Template"
@@ -14939,6 +14939,10 @@ msgstr "Si des personnes de Grasp peuvent se connecter pour aider sur cet espace
 msgid "Which AI tools do people use?"
 msgstr "Quels outils d’IA les gens utilisent-ils ?"
 
+#: src/workflows/draw-in-chat.ts
+msgid "Which business process is this workflow for?"
+msgstr "À quel processus métier ce workflow est-il destiné ?"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Quels domaines et quels agents ont des autorisations : {why}"
@@ -15137,6 +15141,10 @@ msgstr "Workflow"
 msgctxt "a table column"
 msgid "Workflow"
 msgstr "Workflow"
+
+#: src/workflows/draw-in-chat.ts
+msgid "Workflow {name} (ID {id}) is open beside this chat."
+msgstr "Le workflow {name} (ID {id}) est ouvert à côté de ce chat."
 
 #: src/activity/pending.tsx
 msgid "Workflow {workflow}"
