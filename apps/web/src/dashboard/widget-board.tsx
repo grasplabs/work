@@ -171,13 +171,13 @@ const StateMark = ({ state }: { state: WorkflowState }) => (
 const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
   const name = workflow.workflow;
-  const domain = workflow.appName;
+  const { appName } = workflow;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Link
-            aria-label={t`${name} in ${domain}`}
+            aria-label={t`${name} in ${appName}`}
             className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
             params={{ app: workflow.app, workflow: name }}
             to="/workflows/$app/$workflow"
@@ -191,7 +191,7 @@ const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
       <TooltipContent side="right" variant="quiet">
         <span className="flex flex-col text-left">
           <span className="text-foreground font-medium">{name}</span>
-          <span>{domain}</span>
+          <span>{appName}</span>
         </span>
       </TooltipContent>
     </Tooltip>
@@ -349,8 +349,8 @@ const Others = ({ count }: { count: number }) =>
   count === 0 ? null : (
     <p className="text-muted-foreground border-t pt-3 text-xs first:border-t-0 first:pt-0">
       <Plural
-        one="# more domain with no workflows to show"
-        other="# more domains with no workflows to show"
+        one="# more App with no workflows to show"
+        other="# more Apps with no workflows to show"
         value={count}
       />
     </p>
@@ -370,8 +370,8 @@ const EngineSections = ({ engines, others }: Engines) => {
           <h3 className="flex min-w-0 flex-col self-start">
             <Link
               className="truncate font-medium hover:underline"
-              params={{ engine: engine.app.id }}
-              to="/domains/$engine"
+              params={{ app: engine.app.id }}
+              to="/apps/$app"
             >
               {engine.app.name}
             </Link>
@@ -421,12 +421,12 @@ const EnginesWidget = ({
   rows: WorkflowSummary[];
 }) => {
   const { t } = useLingui();
-  const title = t`Domains`;
+  const title = t`Apps`;
   if (apps.length === 0) {
     return (
       <WidgetBlock title={title}>
         <NothingYet>
-          <Trans>No domains yet. Domains are made in chat.</Trans>
+          <Trans>No Apps yet. Apps are made in chat.</Trans>
         </NothingYet>
       </WidgetBlock>
     );
@@ -445,8 +445,8 @@ const EnginesWidget = ({
           >
             <Link
               className="min-w-0 flex-1 truncate hover:underline"
-              params={{ engine: engine.app.id }}
-              to="/domains/$engine"
+              params={{ app: engine.app.id }}
+              to="/apps/$app"
             >
               {engine.app.name}
             </Link>
@@ -493,7 +493,7 @@ const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
     context: "dashboard widget: how far each team is with AI",
   }),
   workflows: msg`Workflows`,
-  engines: msg`Domains`,
+  engines: msg`Apps`,
   runs: msg`Runs this week`,
   signals: msg`Could be better`,
   spend: msg({ message: "AI spend this month", context: "dashboard widget" }),

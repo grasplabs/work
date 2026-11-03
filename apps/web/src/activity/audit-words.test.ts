@@ -7,7 +7,7 @@ const said = (action: string): string | undefined =>
   actionWords(action)?.message;
 
 describe("an audit entry's words", () => {
-  it("say what a visitor did, never that a domain changed", () => {
+  it("say what a visitor did, never that an App changed", () => {
     const visitorActions = [
       "app.visitor_signed_in",
       "app.visitor_signed_out",
@@ -25,7 +25,7 @@ describe("an audit entry's words", () => {
         (action) => said(action) === said("app") || said(action) === undefined
       ),
     }).toStrictEqual({
-      signedIn: "Signed in to a domain as a visitor",
+      signedIn: "Signed in to an App as a visitor",
       allOwn: [],
     });
   });

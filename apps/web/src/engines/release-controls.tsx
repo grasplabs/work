@@ -18,7 +18,7 @@ import { useId, useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// What the organization's own admins do to a domain's sealed releases, on
+// What the organization's own admins do to an App's sealed releases, on
 // its Versions tab (`apps.versions.releases`, `revoke`, `placeHold`,
 // `releaseHold`, which core refuses anyone else, Grasp staff included):
 // revoke one, so it runs no more, calls already running included; or

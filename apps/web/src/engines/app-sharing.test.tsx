@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppMembers } from "./app-sharing.tsx";
 
-// Sharing a domain's App on its Members tab, against core's App members
+// Sharing an App's App on its Members tab, against core's App members
 // API as the page reaches it over RPC (the boundary from the web app),
 // faked: it keeps whom the App is shared with and in which role, answers
 // the tab's next read with it, and offers the organization's people and
@@ -195,7 +195,7 @@ const listed = (): string[] =>
     (cell) => cell.textContent?.trim() ?? ""
   );
 
-describe("Sharing a domain's App", () => {
+describe("Sharing an App's App", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

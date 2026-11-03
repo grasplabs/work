@@ -32,7 +32,7 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // packages proposed for an engine, which wait for someone given the
 // permission to approve them. The rest is settled on its own page, and is
 // listed under the pile with the way there, not counted on it: the current
-// apps of engines whose code nobody approved (read on the engine's page),
+// pages of Apps whose code nobody approved (read in the App's details),
 // workflows failed while acting for the person, with a way to ask the
 // agent to fix it, connections they can sign in to again, and what the
 // inbox settles (`in-inbox.tsx`), each a way to its item there.
@@ -80,7 +80,7 @@ const PartNotLoaded = ({ part }: { part: Loaded<unknown> }) =>
     </div>
   );
 
-/** An engine with apps to approve: its next step is the engine's page, where their code is approved. */
+/** An App with pages to approve: its next step is the App's details, where their code is approved. */
 const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
   const { t } = useLingui();
   const { app, name, screens } = waiting;
@@ -94,17 +94,17 @@ const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
         </span>
         <span className="truncate">
           <Plural
-            one={`${name} has # app whose code nobody approved`}
-            other={`${name} has # apps whose code nobody approved`}
+            one={`${name} has # page whose code nobody approved`}
+            other={`${name} has # pages whose code nobody approved`}
             value={count}
           />
         </span>
       </div>
       <Link
-        aria-label={t`Review the apps of ${name}`}
+        aria-label={t`Review the pages of ${name}`}
         className={buttonVariants({ size: "xs" })}
-        params={{ engine: app }}
-        to="/domains/$engine"
+        params={{ app }}
+        to="/apps/$app/details"
       >
         <Trans>Review</Trans>
       </Link>

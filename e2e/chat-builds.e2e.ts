@@ -109,7 +109,7 @@ test("the side panel shows an App being built, and a builder makes its version c
       /Added screens\/desk\.tsx/u
     );
     await expect(built).toContainText(
-      "Nothing runs yet: this would be the domain's first current version."
+      "Nothing runs yet: this would be the App's first current version."
     );
     // Who proposed it, and the proposer's own words, labelled as such.
     await expect(built).toContainText("Committed by a person.");

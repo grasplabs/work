@@ -8,8 +8,8 @@ import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// A domain's data (engines/app-data.tsx), for its builders and the admins:
-// core refuses anyone else, and the page says so as for a domain it can't
+// An App's data (engines/app-data.tsx), for its builders and the admins:
+// core refuses anyone else, and the page says so as for an App it can't
 // open.
 
 const AppDataPage = () => {
@@ -18,9 +18,9 @@ const AppDataPage = () => {
   if (page.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`Domain` }]}
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
         icon={LayoutGridIcon}
-        notFound={t`Domain not found`}
+        notFound={t`App not found`}
         page={page}
       />
     );
@@ -31,8 +31,8 @@ const AppDataPage = () => {
     <>
       <SiteHeader
         crumbs={[
-          { label: t`Domains`, to: "/domains" },
-          { label: app.name },
+          { label: t`Apps`, to: "/apps" },
+          { label: app.name, to: "/apps/$app", params: { app: app.id } },
           { label: t`Data` },
         ]}
       />
@@ -50,7 +50,7 @@ const AppDataPage = () => {
         <h1 className="text-2xl font-medium tracking-tight">
           <Trans>Data of {appName}</Trans>
         </h1>
-        {/* Opening another domain on this page starts afresh. */}
+        {/* Opening another App on this page starts afresh. */}
         <AppData
           app={app.id}
           key={`${app.id}/${tables.version}`}

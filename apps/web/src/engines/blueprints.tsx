@@ -119,8 +119,8 @@ export const StartFromBlueprint = ({
     if (created !== undefined) {
       setOpen(false);
       await navigate({
-        to: "/domains/$engine",
-        params: { engine: created.app.id },
+        to: "/apps/$app",
+        params: { app: created.app.id },
       });
     }
   };
@@ -151,7 +151,7 @@ export const StartFromBlueprint = ({
             </DialogTitle>
             <DialogDescription>
               <Trans>
-                The new app starts as a copy of it, with none of its data. Its
+                The new App starts as a copy of it, with none of its data. Its
                 access waits for an admin.
               </Trans>
             </DialogDescription>
@@ -164,7 +164,7 @@ export const StartFromBlueprint = ({
                 </EmptyTitle>
                 <EmptyDescription>
                   <Trans>
-                    Save an app as a blueprint from its domain, and it shows
+                    Save an App as a blueprint from its details, and it shows
                     here.
                   </Trans>
                 </EmptyDescription>
@@ -254,7 +254,7 @@ export const SaveAsBlueprint = ({
                 </Trans>
               ) : (
                 <Trans>
-                  New apps can start from version {version} of {name}, as a copy
+                  New Apps can start from version {version} of {name}, as a copy
                   with none of its data. {name} itself stays as it is.
                 </Trans>
               )}

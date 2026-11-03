@@ -156,7 +156,7 @@ const EarlierDecisions = ({
           <TableHeader>
             <TableRow>
               <TableHead variant="card">
-                <Trans>App</Trans>
+                <Trans>Page</Trans>
               </TableHead>
               <TableHead className="w-24" variant="card">
                 <Trans>Version</Trans>
@@ -237,18 +237,18 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
       {review.output === "ordinary" ? (
         <p className="text-muted-foreground max-w-prose">
           <Trans>
-            An admin said this domain&apos;s data may go to apps nobody
-            approved, so its apps run without approval, unless their approval
-            was taken back.
+            An admin said this App&apos;s data may go to pages nobody approved,
+            so its pages run without approval, unless their approval was taken
+            back.
           </Trans>
         </p>
       ) : (
         <p className="text-muted-foreground max-w-prose">
           <Trans>
-            An app is code that runs in people&apos;s browsers. It gets this
-            domain&apos;s data only once an admin has approved exactly that
-            code, and a change to the code needs a new approval. Read the code
-            first: approved code can still send what it gets somewhere else, so
+            A page is code that runs in people&apos;s browsers. It gets this
+            App&apos;s data only once an admin has approved exactly that code,
+            and a change to the code needs a new approval. Read the code first:
+            approved code can still send what it gets somewhere else, so
             approving says you trust it.
           </Trans>
         </p>
@@ -260,7 +260,7 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
               <TableHeader>
                 <TableRow>
                   <TableHead variant="card">
-                    <Trans>App</Trans>
+                    <Trans>Page</Trans>
                   </TableHead>
                   <TableHead className="w-48" variant="card">
                     <Trans>Status</Trans>
@@ -314,7 +314,7 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
             }}
             size="sm"
           >
-            <Trans>Approve the apps of version {version}</Trans>
+            <Trans>Approve the pages of version {version}</Trans>
           </Button>
         </div>
       ) : null}

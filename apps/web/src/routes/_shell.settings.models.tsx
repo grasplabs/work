@@ -85,7 +85,7 @@ const BindingSpend = ({
   if (bound.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        <Trans>No domain has a model bound to it.</Trans>
+        <Trans>No App has a model bound to it.</Trans>
       </p>
     );
   }
@@ -96,7 +96,7 @@ const BindingSpend = ({
         <TableHeader>
           <TableRow>
             <TableHead>
-              <Trans>Domain</Trans>
+              <Trans>App</Trans>
             </TableHead>
             <TableHead className="text-right">
               <Trans>This month</Trans>
@@ -110,8 +110,8 @@ const BindingSpend = ({
                 <span className="flex flex-col gap-0.5">
                   <Link
                     className="underline underline-offset-4"
-                    params={{ engine: binding.appId }}
-                    to="/domains/$engine"
+                    params={{ app: binding.appId }}
+                    to="/apps/$app/details"
                   >
                     {binding.appName}
                   </Link>
@@ -147,27 +147,25 @@ const BindingSpend = ({
       </Table>
       {more ? (
         <p className="text-muted-foreground text-sm">
-          <Trans>
-            The first {shown} by domain; more domains have models bound.
-          </Trans>
+          <Trans>The first {shown} by App; more Apps have models bound.</Trans>
         </p>
       ) : null}
     </div>
   );
 };
 
-/** What each domain's model spent: shown whether or not models are chosen. */
+/** What each App's model spent: shown whether or not models are chosen. */
 const EngineSpend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   return (
     <Section
       description={
         <Trans>
-          What each domain&apos;s actions spent through its model this month. A
+          What each App&apos;s actions spent through its model this month. A
           workflow&apos;s own AI steps don&apos;t count here.
         </Trans>
       }
-      title={t`Domain spend`}
+      title={t`App spend`}
     >
       <BindingSpend bindings={settings.bindings} />
     </Section>

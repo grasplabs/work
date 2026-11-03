@@ -42,7 +42,7 @@ export const decisionErrors = defineErrorFamily({
   "decision.cancelled":
     "You didn't confirm the answer, so nothing was recorded.",
   "decision.asking_paused":
-    "This app can't ask you to confirm an answer right now: another is open, you cancelled one moments ago, or you cancelled twice. Reload the app to answer again.",
+    "This page can't ask you to confirm an answer right now: another is open, you cancelled one moments ago, or you cancelled twice. Reload the page to answer again.",
 });
 
 /**

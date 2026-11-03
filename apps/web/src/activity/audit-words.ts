@@ -127,84 +127,84 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Read restricted sources, and is held to them`,
   },
   { action: "staff.session", text: msg`Grasp staff signed in` },
-  { action: "app.call", text: msg`Called another domain` },
-  { action: "app.called", text: msg`Was called by another domain` },
-  { action: "app.member.added", text: msg`Added a member to a domain` },
+  { action: "app.call", text: msg`Called another App` },
+  { action: "app.called", text: msg`Was called by another App` },
+  { action: "app.member.added", text: msg`Added a member to an App` },
   {
     action: "app.member.refused",
-    text: msg`Was refused adding a member to a domain`,
+    text: msg`Was refused adding a member to an App`,
   },
-  { action: "app.artifact.approved", text: msg`Approved an app's code` },
+  { action: "app.artifact.approved", text: msg`Approved a page's code` },
   {
     action: "app.artifact.revoked",
-    text: msg`Took back the approval of an app's code`,
+    text: msg`Took back the approval of a page's code`,
   },
   {
     action: "app.artifact.refused",
-    text: msg`An app nobody approved was refused the domain's data`,
+    text: msg`A page nobody approved was refused the App's data`,
   },
   {
     action: "app.output.classified",
-    text: msg`Changed whether a domain's data needs approved apps`,
+    text: msg`Changed whether an App's data needs approved pages`,
   },
-  { action: "app.webhook.added", text: msg`Added a webhook to a domain` },
+  { action: "app.webhook.added", text: msg`Added a webhook to an App` },
   {
     action: "app.webhook.approved",
-    text: msg`Let a domain's data go to a webhook`,
+    text: msg`Let an App's data go to a webhook`,
   },
   {
     action: "app.webhook.removed",
-    text: msg`Removed a webhook from a domain`,
+    text: msg`Removed a webhook from an App`,
   },
   {
     action: "app.webhook.undeliverable",
-    text: msg`Gave up sending a domain's event to a webhook`,
+    text: msg`Gave up sending an App's event to a webhook`,
   },
   {
     action: "webhook.call",
     // Recorded for refusals and failures too, as a channel call is.
-    text: msg`Sent a domain's event to a webhook`,
+    text: msg`Sent an App's event to a webhook`,
   },
-  // A published domain's visitors (core's src/app-visitors.ts), each
+  // A published App's visitors (core's src/app-visitors.ts), each
   // action by name: an `app.visitor_*` action has no dotted prefix of its
   // own, so it would otherwise read as `app`.
   {
     action: "app.visitor_listed",
-    text: msg`Let someone visit a domain`,
+    text: msg`Let someone visit an App`,
   },
   {
     action: "app.visitor_unlisted",
-    text: msg`Stopped someone visiting a domain`,
+    text: msg`Stopped someone visiting an App`,
   },
   {
     action: "app.visitor_code_sent",
-    text: msg`Was sent a code to visit a domain`,
+    text: msg`Was sent a code to visit an App`,
   },
   {
     action: "app.visitor_signed_in",
-    text: msg`Signed in to a domain as a visitor`,
+    text: msg`Signed in to an App as a visitor`,
   },
   {
     action: "app.visitor_signed_out",
-    text: msg`Signed out of a domain as a visitor`,
+    text: msg`Signed out of an App as a visitor`,
   },
   {
     action: "app.visitor_refused",
-    text: msg`Was refused as a domain's visitor`,
+    text: msg`Was refused as an App's visitor`,
   },
   {
     action: "app.visitor_granted",
-    text: msg`Let a domain's visitors use one of its functions`,
+    text: msg`Let an App's visitors use one of its functions`,
   },
   {
     action: "app.visitor_ungranted",
-    text: msg`Stopped a domain's visitors using one of its functions`,
+    text: msg`Stopped an App's visitors using one of its functions`,
   },
   {
     action: "app.visitor_called",
-    text: msg`Used a domain's function as a visitor`,
+    text: msg`Used an App's function as a visitor`,
   },
-  { action: "app", text: msg`Changed a domain` },
+  { action: "app", text: msg`Changed an App` },
   { action: "member.removed", text: msg`Removed a member` },
   {
     action: "member.erasure.requested",
@@ -291,7 +291,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "improvement.signals.read",
     text: msg`Read what could be improved`,
   },
-  { action: "statistics.read", text: msg`Read a domain's statistics` },
+  { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

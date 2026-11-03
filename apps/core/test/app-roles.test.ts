@@ -172,9 +172,8 @@ const asUser = {
 
 /** Whether `person` finds `app` among theirs. */
 const lists = async ({ api }: Person, app: string): Promise<boolean> => {
-  const [apps, screens, overview] = await Promise.all([
+  const [apps, overview] = await Promise.all([
     api.apps.list(),
-    api.apps.screens(),
     api.apps.overview(),
   ]);
   const listed = apps.some(({ id }) => id === app);
@@ -185,11 +184,9 @@ const lists = async ({ api }: Person, app: string): Promise<boolean> => {
   expect(contents).toStrictEqual(
     listed ? await api.apps.contents(app) : undefined
   );
-  // Its screens are listed exactly when it is: someone who can't open the
-  // App never learns its screens, nor that it exists, from them.
-  expect(
-    screens.filter((each) => each.app.id === app).map(({ screen }) => screen)
-  ).toStrictEqual(listed ? ["desk"] : []);
+  // Its pages (its screens) are listed exactly when it is: someone who
+  // can't open the App never learns its pages, nor that it exists.
+  expect(contents?.screens ?? []).toStrictEqual(listed ? ["desk"] : []);
   return listed;
 };
 
@@ -386,7 +383,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     );
   });
 
-  it("list the screens of several Apps newest App first, each by name with its App's name, status and process", async () => {
+  it("list each App once with its screens as its pages, however many screens it has", async () => {
     const owner = await personApi("builder");
     const names = {
       oldest: `Oldest ${unique()}`,
@@ -427,9 +424,9 @@ describe("App roles", { timeout: 60_000 }, () => {
     // Published, then archived.
     await release(owner, newest, files);
     await owner.api.apps.archive(newest);
-    // Listed by when each was made, the newest first, whatever order the
+    // Listed by when each was made, the oldest first, whatever order the
     // requests landed in. `empty`, the newest of all, has no current
-    // version, so no screens.
+    // version, so no pages.
     const start = Date.now() - 60_000;
     await env.DB.batch(
       [oldest, middle, newest, empty].map((id, index) =>
@@ -440,36 +437,48 @@ describe("App roles", { timeout: 60_000 }, () => {
       )
     );
 
-    const listed = await owner.api.apps.screens();
+    const listed = await owner.api.apps.overview();
     const ours = new Set<string>([oldest, middle, newest, empty]);
-    expect(listed.filter(({ app }) => ours.has(app.id))).toStrictEqual([
+    expect(
+      listed
+        .filter(({ app }) => ours.has(app.id))
+        .map(({ app, contents }) => ({
+          id: app.id,
+          name: app.name,
+          status: app.status,
+          process: app.process,
+          pages: contents.screens,
+        }))
+    ).toStrictEqual([
+      // One App with three screens: one entry, its screens its pages.
       {
-        app: {
-          id: newest,
-          name: names.newest,
-          status: "archived",
-          process: null,
-        },
-        screen: "desk",
+        id: oldest,
+        name: names.oldest,
+        status: "published",
+        process: null,
+        pages: ["alpha", "desk", "zeta"],
       },
       {
-        app: {
-          id: middle,
-          name: names.middle,
-          status: "draft",
-          process: "o2c",
-        },
-        screen: "desk",
+        id: middle,
+        name: names.middle,
+        status: "draft",
+        process: "o2c",
+        pages: ["desk"],
       },
-      ...["alpha", "desk", "zeta"].map((screen) => ({
-        app: {
-          id: oldest,
-          name: names.oldest,
-          status: "published",
-          process: null,
-        },
-        screen,
-      })),
+      {
+        id: newest,
+        name: names.newest,
+        status: "archived",
+        process: null,
+        pages: ["desk"],
+      },
+      {
+        id: empty,
+        name: names.empty,
+        status: "draft",
+        process: null,
+        pages: [],
+      },
     ]);
   });
 

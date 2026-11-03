@@ -58,7 +58,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
-// Asking for a permission for a domain's App outside chat, on its
+// Asking for a permission for an App's App outside chat, on its
 // Integrations tab (`permissions.request`), and the App's requests still
 // waiting for an admin. Core takes a request only from the App's builders,
 // never Grasp staff, and only for what the App may hold: a connection (by
@@ -198,7 +198,7 @@ const ToolChoice = ({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="pb-1 text-sm font-medium">
-        <Trans>What the app may do with it</Trans>
+        <Trans>What the App may do with it</Trans>
       </legend>
       <div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
         {choices.map((tool) => {
@@ -313,7 +313,7 @@ const AskDialog = ({
       <DialogContent closeLabel={t`Close`}>
         <DialogHeader>
           <DialogTitle>
-            <Trans>Ask for access for this domain</Trans>
+            <Trans>Ask for access for this App</Trans>
           </DialogTitle>
           <DialogDescription>
             <Trans>
@@ -388,7 +388,7 @@ const AskDialog = ({
         ) : null}
         <Field>
           <FieldLabel htmlFor={bindingId}>
-            <Trans>Name in the app&apos;s code</Trans>
+            <Trans>Name in the App&apos;s code</Trans>
           </FieldLabel>
           <Input
             id={bindingId}
@@ -468,7 +468,7 @@ const RequestsView = ({
       </div>
       {requested.length === 0 ? (
         <p className="text-muted-foreground">
-          <Trans>Nothing this domain asked for is waiting.</Trans>
+          <Trans>Nothing this App asked for is waiting.</Trans>
         </p>
       ) : (
         <div className="bg-card overflow-hidden rounded-xl border">
@@ -482,7 +482,7 @@ const RequestsView = ({
                   <Trans>To</Trans>
                 </TableHead>
                 <TableHead variant="card">
-                  <Trans>Name in the app&apos;s code</Trans>
+                  <Trans>Name in the App&apos;s code</Trans>
                 </TableHead>
                 <TableHead className="w-44" variant="card">
                   <Trans>Asked</Trans>
@@ -529,7 +529,7 @@ const RequestsView = ({
 };
 
 /**
- * A domain's requests for access, and asking for more, for its builders:
+ * An App's requests for access, and asking for more, for its builders:
  * read when the Integrations tab opens and again after each request.
  */
 export const AppAccessRequests = ({

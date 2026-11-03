@@ -28,7 +28,7 @@ import { ErrorText } from "../error-text.tsx";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// A domain's webhooks (core's app-webhooks.ts): https addresses its
+// An App's webhooks (core's app-webhooks.ts): https addresses its
 // builders give it, which Grasp sends its events to, signed with each
 // one's secret. The secret is shown once, as the webhook is added. Until an
 // admin approves an address, what goes there is IDs and the event only;
@@ -37,15 +37,15 @@ import { useCoreAction } from "../use-core-action.ts";
 const eventNames = {
   form_sent: msg({
     message: "A form is sent",
-    context: "a webhook event: someone sent a form of the domain's apps",
+    context: "a webhook event: someone sent a form on one of the App's pages",
   }),
   published: msg({
     message: "It is published",
-    context: "a webhook event: the domain was published",
+    context: "a webhook event: the App was published",
   }),
   changed: msg({
     message: "A new version goes live",
-    context: "a webhook event: a version of the domain was made current",
+    context: "a webhook event: a version of the App was made current",
   }),
 } as const satisfies Record<AppWebhookEvent, unknown>;
 
@@ -223,7 +223,7 @@ const WebhookRow = ({
   );
 };
 
-/** A domain's webhooks as core listed them: approved by an admin only. */
+/** An App's webhooks as core listed them: approved by an admin only. */
 export const WebhookList = ({
   identity,
   webhooks,
@@ -242,7 +242,7 @@ export const WebhookList = ({
 };
 
 /**
- * A domain's webhooks, for its builders and the workspace's admins: added
+ * An App's webhooks, for its builders and the workspace's admins: added
  * and removed by either. `children` is the list (`WebhookList`), read
  * apart: a new webhook's secret is kept here, above it, so a list read
  * again after the add, failing or not, never takes the secret with it.
@@ -259,7 +259,7 @@ export const AppWebhooks = ({
     <div className="flex flex-col gap-4">
       <p className="text-muted-foreground">
         <Trans>
-          Grasp sends this domain&apos;s events to each address, signed with its
+          Grasp sends this App&apos;s events to each address, signed with its
           secret. Until an admin approves an address, it gets IDs and the event
           only, never what someone sent in a form.
         </Trans>

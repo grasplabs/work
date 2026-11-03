@@ -199,7 +199,7 @@ const runsOf = async (builder: Person, id: string): Promise<number> => {
  * default 5 seconds.
  */
 const openDesk = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/domains/${app}/apps/desk/full`);
+  await page.goto(`/apps/${app}/full?screen=desk`);
   const screen = page.frameLocator('iframe[title="desk app"]');
   await expect(screen.getByRole("heading", { name: "Follow-ups" })).toBeVisible(
     { timeout: 20_000 }

@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { ExportDefinition } from "./app-definition.tsx";
 
-// Exporting a domain's definition from its page, against core's `apps` as
+// Exporting an App's definition from its page, against core's `apps` as
 // the page reaches it over RPC (the boundary from the web app), faked: it
 // hands over the package as it holds it, or refuses as core does. What the
 // person saves is read from the file the page made.
@@ -135,7 +135,7 @@ const press = async (name: string) => {
   await settled();
 };
 
-describe("Exporting a domain's definition", () => {
+describe("Exporting an App's definition", () => {
   beforeEach(() => {
     // A download is a link to the file, clicked: what it would save is read
     // from the file the page made, and its name from the link.
@@ -165,7 +165,7 @@ describe("Exporting a domain's definition", () => {
     downloaded = [];
   });
 
-  it("saves the package core built of its current release, named after the domain and version", async () => {
+  it("saves the package core built of its current release, named after the App and version", async () => {
     const { session, asked } = fakeApps();
     await shown(session, invoices);
 

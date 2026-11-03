@@ -8,7 +8,7 @@ import { Composer } from "../chat/composer.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 
 // Making a new app (grasplabs/prototype `components/apps/apps-home.tsx`):
-// Grasp's buddy and the question "What should the app show, and for whom?",
+// Grasp's buddy and the question "What should the App show, and for whom?",
 // centred, over the box to answer in. The answer starts an ordinary chat,
 // which opens at its own address; its agent builds the app there, in the
 // chat's studio. Below it, other ways to start (`children`), such as from
@@ -35,11 +35,11 @@ export const NewApp = ({
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
             <PageHeaderTitle id="new-app">
-              <Trans>What should the app show, and for whom?</Trans>
+              <Trans>What should the App show, and for whom?</Trans>
             </PageHeaderTitle>
           </div>
           <Composer
-            placeholder={t`Describe the app: what it shows, and for whom`}
+            placeholder={t`Describe the App: what it shows, and for whom`}
             running={false}
             {...composer}
           />

@@ -9,7 +9,7 @@ import { downloadText } from "../export/export-file.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
 
-// Exporting a domain's definition from its page: its App's current sealed
+// Exporting an App's definition from its page: its App's current sealed
 // release and the workflow versions it binds, as the portable package core
 // builds (`apps.definition`, definition-export.ts), saved as JSON for
 // another deployment or `vp run package:definition` to take. Core builds
@@ -26,7 +26,7 @@ const fileName = (name: string, version: number): string => {
     .toLowerCase()
     .replaceAll(nonSlug, "-")
     .replaceAll(slugEnds, "");
-  return `${slug === "" ? "domain" : slug}-v${version}.json`;
+  return `${slug === "" ? "App" : slug}-v${version}.json`;
 };
 
 /** Whether `identity` may export `app`'s definition. */
@@ -35,7 +35,7 @@ export const exportsDefinition = (
   identity: Pick<Identity, "staff">
 ): boolean => buildsApp(app, identity) && app.currentVersion !== null;
 
-/** Saves the domain's definition package, for its builders. */
+/** Saves the App's definition package, for its builders. */
 export const ExportDefinition = ({
   app,
   identity,

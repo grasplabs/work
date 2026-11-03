@@ -13,7 +13,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { openingState } from "../screens/screen-navigate.ts";
 
-// The Apps' sidebar surfaces (spec 34.1), under Domains in the shell's
+// The Apps' sidebar surfaces (spec 34.1), under Apps in the shell's
 // sidebar: each App that declares any, by name, its entries under it. An
 // entry opens its screen in the main pane by its route and surface, with
 // nothing as input, which opening checks with core as any screen; listing
@@ -47,7 +47,7 @@ const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
 const AppEntries = ({ app }: { app: SidebarApp }) => (
   <SidebarMenuSubItem>
     <SidebarMenuSubButton
-      render={<Link params={{ engine: app.app }} to="/domains/$engine" />}
+      render={<Link params={{ app: app.app }} to="/apps/$app" />}
     >
       <span className="truncate">{app.name}</span>
     </SidebarMenuSubButton>
@@ -57,14 +57,15 @@ const AppEntries = ({ app }: { app: SidebarApp }) => (
           <SidebarMenuSubButton
             render={
               <Link
-                params={{ engine: app.app, screen: entry.screen }}
+                params={{ app: app.app }}
+                search={{ screen: entry.screen }}
                 state={openingState(app.app, {
                   screen: entry.screen,
                   route: entry.route,
                   input: {},
                   surface: entry.name,
                 })}
-                to="/domains/$engine/apps/$screen"
+                to="/apps/$app"
               />
             }
             size="sm"
@@ -77,7 +78,7 @@ const AppEntries = ({ app }: { app: SidebarApp }) => (
   </SidebarMenuSubItem>
 );
 
-/** The Apps' sidebar entries, under Domains; nothing when there are none. */
+/** The Apps' sidebar entries, under Apps; nothing when there are none. */
 export const SurfaceNav = ({ core }: { core: CoreConnection }) => {
   const apps = useSidebarApps(core);
   const { t } = useLingui();
@@ -89,9 +90,9 @@ export const SurfaceNav = ({ core }: { core: CoreConnection }) => {
       {/* Said in so many words: below are the Apps' own entries, not
           Grasp's, whatever an App calls them. */}
       <p className="text-sidebar-foreground/70 px-2 pt-1 text-xs">
-        <Trans>From your domains</Trans>
+        <Trans>From your Apps</Trans>
       </p>
-      <SidebarMenuSub aria-label={t`Domain shortcuts`}>
+      <SidebarMenuSub aria-label={t`App shortcuts`}>
         {apps.map((app) => (
           <AppEntries app={app} key={app.app} />
         ))}

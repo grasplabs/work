@@ -72,8 +72,9 @@ export const Route = createFileRoute("/_shell/links/$app/$surface")({
     const target = resolved.data;
     // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
     throw redirect({
-      to: "/domains/$engine/apps/$screen",
-      params: { engine: params.app, screen: target.screen },
+      to: "/apps/$app",
+      params: { app: params.app },
+      search: { screen: target.screen },
       // What core resolved, in the entry's state: never the link's address.
       state: openingState(params.app, {
         screen: target.screen,

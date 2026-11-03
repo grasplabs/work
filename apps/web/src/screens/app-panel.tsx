@@ -60,8 +60,8 @@ const PanelScreen = ({
         </h2>
         <Link
           className="text-sm underline"
-          params={{ engine: opened.app }}
-          to="/domains/$engine"
+          params={{ app: opened.app }}
+          to="/apps/$app/details"
         >
           <Trans>Workflows and more</Trans>
         </Link>

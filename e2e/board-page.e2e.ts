@@ -39,7 +39,7 @@ const openScreen = async (
   screen: string,
   heading: string
 ): Promise<FrameLocator> => {
-  await page.goto(`/domains/${app}/apps/${screen}/full`);
+  await page.goto(`/apps/${app}/full?screen=${screen}`);
   const frame = page.frameLocator(`iframe[title="${screen} app"]`);
   // The first open builds the screen, which takes a while on a loaded machine.
   await expect(frame.getByRole("heading", { name: heading })).toBeVisible({
@@ -155,7 +155,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
     screen.getByRole("button", { name: "Take a snapshot" })
   ).toBeHidden();
   await expect(screen.getByLabel("Edit the narrative")).toBeHidden();
-  await expect(page.getByText("Domain app")).toBeHidden();
+  await expect(page.getByText("App page")).toBeHidden();
   const frame = page
     .frames()
     .find((each) => each.url().includes("/screen-frame"));

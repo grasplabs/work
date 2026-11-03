@@ -50,7 +50,7 @@ import {
 } from "./release-controls.tsx";
 import type { ReleaseAction } from "./release-controls.tsx";
 
-// A domain's versions on its page: every version of its App, newest first,
+// An App's versions on its page: every version of its App, newest first,
 // which one runs and which is up for review, and, for its builders, making
 // one current: the one up for review, or an earlier one to roll back to
 // (`apps.versions.setCurrent`, over the version current as shown, so a
@@ -96,14 +96,14 @@ const MoveDialog = ({
           </AlertDialogTitle>
           <AlertDialogDescription>
             <Trans>
-              Its apps and workflows run on it from now on. Grasp checks and
+              Its pages and workflows run on it from now on. Grasp checks and
               builds it first, and refuses if the version that runs changed
               since you looked.
             </Trans>{" "}
             {admin ? null : (
               <Trans>
                 Its permissions on connections, to start workflows and to call
-                other domains wait for an admin to grant them again.
+                other Apps wait for an admin to grant them again.
               </Trans>
             )}
           </AlertDialogDescription>
@@ -392,7 +392,7 @@ const releasesOf = async (
   );
 };
 
-/** The domain's versions, read when its tab opens, a page at a time. */
+/** The App's versions, read when its tab opens, a page at a time. */
 export const AppVersions = ({
   app,
   identity,

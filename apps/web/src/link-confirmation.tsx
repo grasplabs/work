@@ -108,8 +108,8 @@ export const LinkConfirmDialog = ({
           <AlertDialogTitle>{t`Open a link outside Grasp?`}</AlertDialogTitle>
           <AlertDialogDescription>
             <Trans>
-              This app wants to open a page on another site in a new tab. Open
-              it only if you expected to go there.
+              This page wants to open another site in a new tab. Open it only if
+              you expected to go there.
             </Trans>
           </AlertDialogDescription>
         </AlertDialogHeader>

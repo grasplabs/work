@@ -26,7 +26,6 @@ export const parityRoutes: readonly ParityRoute[] = [
   { name: "inbox", prototype: "/inbox", grasp: "/inbox" },
   { name: "apps", prototype: "/apps", grasp: "/apps" },
   { name: "workflows", prototype: "/workflows", grasp: "/workflows" },
-  { name: "domains", prototype: "/domains", grasp: "/domains" },
   { name: "brain", prototype: "/brain", grasp: "/brain" },
   { name: "integrations", prototype: "/integrations", grasp: "/integrations" },
   { name: "settings", prototype: "/settings", grasp: "/settings" },

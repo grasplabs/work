@@ -477,7 +477,7 @@ const requireApps = async (
   const missing = [...named].filter(([, appId]) => !existing.has(appId));
   if (missing.length > 0) {
     throw permissionErrors.create("permission.invalid", {
-      issues: missing.map(([path]) => `${path}: There's no such domain.`),
+      issues: missing.map(([path]) => `${path}: There's no such App.`),
     });
   }
 };

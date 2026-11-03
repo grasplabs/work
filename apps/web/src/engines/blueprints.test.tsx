@@ -84,7 +84,7 @@ const fakeBlueprints = (listed: Blueprint[]) => {
 
 let root: Root | undefined;
 
-/** `page` at /start, against `blueprints`; a domain's page says which it is. */
+/** `page` at /start, against `blueprints`; an App's page says which it is. */
 const opened = async (
   blueprints: ReturnType<typeof fakeBlueprints>["blueprints"],
   page: (listed: Blueprint[]) => ReactElement
@@ -103,13 +103,13 @@ const opened = async (
     loader: async () => await blueprints.list(),
     component: () => page(start.useLoaderData()),
   });
-  const domain = createRoute({
+  const appPage = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/domains/$engine",
-    component: () => <h1>A domain</h1>,
+    path: "/apps/$app",
+    component: () => <h1>An App</h1>,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([start, domain]),
+    routeTree: rootRoute.addChildren([start, appPage]),
     history: createMemoryHistory({ initialEntries: ["/start"] }),
     context: { core },
   });
@@ -200,8 +200,8 @@ describe("blueprints", () => {
       calls: [
         "create blueprint-invoices Invoices: Open invoices and who chases them",
       ],
-      at: "/domains/app-new",
-      heading: "A domain",
+      at: "/apps/app-new",
+      heading: "An App",
     });
   });
 

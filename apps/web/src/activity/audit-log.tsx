@@ -315,7 +315,7 @@ export const actorOf = (
     const engine = appName(directory, actor.appId);
     const { workflowId } = actor;
     return {
-      label: i18n._(msg`${ph({ domain: engine })}: run of ${workflowId}`),
+      label: i18n._(msg`${ph({ app: engine })}: run of ${workflowId}`),
       id: actor.runId,
     };
   }
@@ -324,7 +324,7 @@ export const actorOf = (
     const person = personName(directory, actor.invitedBy);
     return {
       label: i18n._(
-        msg`Guest of ${ph({ domain: engine })}, invited for ${person}`
+        msg`Guest of ${ph({ app: engine })}, invited for ${person}`
       ),
       id: actor.chatId,
     };
@@ -332,7 +332,7 @@ export const actorOf = (
   if (actor.type === "visitor") {
     const engine = appName(directory, actor.appId);
     return {
-      label: i18n._(msg`Visitor of ${ph({ domain: engine })}`),
+      label: i18n._(msg`Visitor of ${ph({ app: engine })}`),
       id: actor.sessionId ?? actor.appId,
     };
   }

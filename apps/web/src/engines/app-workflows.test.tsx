@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppWorkflows } from "./app-workflows.tsx";
 
-// The workflows a domain's App starts, on its Resources tab, against
+// The workflows an App's App starts, on its Resources tab, against
 // core's `workflowResources` as the page reaches it over RPC (the boundary
 // from the web app), faked: it keeps the App's active bindings, replaces
 // an alias's binding when it is bound again, and forgets one unbound.
@@ -237,7 +237,7 @@ const listed = (): string[][] =>
       .map((cell) => cell.textContent?.trim() ?? "")
   );
 
-describe("The workflows a domain's app starts, for its builders", () => {
+describe("The workflows an App starts, for its builders", () => {
   afterEach(() => {
     unmount();
   });
@@ -248,7 +248,7 @@ describe("The workflows a domain's app starts, for its builders", () => {
     expect(listed()).toStrictEqual([["summary", "Summarise the week", "1"]]);
 
     await press(button("Bind a workflow"));
-    await type("Name in the app's code", "invoice");
+    await type("Name in the App's code", "invoice");
     await choose("Workflow", "Send an invoice");
     await choose("Version", "Version 3");
     await press(button("Bind"));
@@ -291,12 +291,12 @@ describe("The workflows a domain's app starts, for its builders", () => {
     });
   });
 
-  it("refuses a name the app's code couldn't use", async () => {
+  it("refuses a name the App's code couldn't use", async () => {
     const { session } = fakeWorkflows();
     await shown(session);
 
     await press(button("Bind a workflow"));
-    await type("Name in the app's code", "2nd-flow");
+    await type("Name in the App's code", "2nd-flow");
     await choose("Workflow", "Send an invoice");
     await choose("Version", "Version 1");
 
@@ -306,7 +306,7 @@ describe("The workflows a domain's app starts, for its builders", () => {
     }).toStrictEqual({ told: true, bindable: true });
   });
 
-  it("shows an archived domain's bindings without changing them, and none to who doesn't build it", async () => {
+  it("shows an archived App's bindings without changing them, and none to who doesn't build it", async () => {
     const archived = fakeWorkflows();
     await shown(archived.session, { app: { ...ledger, status: "archived" } });
     const kept = {

@@ -285,7 +285,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // granted this connection, so it's refused, and the write still waits.
   await waiting.getByRole("button", { name: `Confirm ${described}` }).click();
   await expect(waiting.getByRole("alert")).toHaveText(
-    "This domain or agent has no permission to do that."
+    "This App or agent has no permission to do that."
   );
   await expect(waiting).toContainText("cleo@acme.test");
   // Rejecting each drops it.
@@ -701,7 +701,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const question = `From the dock ${tag}?`;
 
   // Asked from another page, it opens around the box and streams there.
-  await page.goto("/domains");
+  await page.goto("/apps");
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
   // The box takes a question once the dock has read the models core
   // offers, as its Send shows: Enter before then sends nothing.
@@ -720,7 +720,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
     { timeout: 30_000 }
   );
   // The page stayed where it was.
-  expect(new URL(page.url()).pathname).toBe("/domains");
+  expect(new URL(page.url()).pathname).toBe("/apps");
 
   // Folded away, it is the bar again, and a click into the box opens it
   // again on the same chat, the cursor in the box all along, and what was

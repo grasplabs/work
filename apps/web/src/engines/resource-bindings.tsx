@@ -81,7 +81,7 @@ const kindLabels: Readonly<
   store: msg`Store`,
   statistics: msg`Statistics`,
   guests: msg`Guests`,
-  app: msg`Another domain`,
+  app: msg`Another App`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -96,11 +96,11 @@ const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
 /** Why a binding no longer serves its resource, by its state. */
 const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
   {
-    unbound: msg`The domain's actions can't use it until an admin binds it.`,
+    unbound: msg`The App's actions can't use it until an admin binds it.`,
     declaration_changed: msg`The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now.`,
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
-    unchecked: msg`The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
+    unchecked: msg`The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
   };
 
 /** One term of a definition list and what it says. */
@@ -164,17 +164,17 @@ const BoundTo = ({
     return <Trans>Permission {permission}</Trans>;
   }
   if (target.kind === "app") {
-    const { appId: domain } = target;
-    return <Trans>Domain {domain}</Trans>;
+    const { appId: app } = target;
+    return <Trans>App {app}</Trans>;
   }
   if (target.kind === "statistics") {
     const { permissionId: permission } = target;
     return permission === undefined ? (
-      <Trans>The domain&apos;s own statistics</Trans>
+      <Trans>The App&apos;s own statistics</Trans>
     ) : (
       <Trans>
-        The domain&apos;s own statistics, and the platform&apos;s under
-        permission {permission}
+        The App&apos;s own statistics, and the platform&apos;s under permission{" "}
+        {permission}
       </Trans>
     );
   }
@@ -262,13 +262,13 @@ const NothingToChoose = ({
     model: <Trans>This deployment allows no model.</Trans>,
     connector: (
       <Trans>
-        None of the domain&apos;s integration permissions serves {contract} with
+        None of the App&apos;s integration permissions serves {contract} with
         every action it declares. Grant one first.
       </Trans>
     ),
     knowledge: (
       <Trans>
-        The domain has no permission to read a collection. Grant one first.
+        The App has no permission to read a collection. Grant one first.
       </Trans>
     ),
     template: (
@@ -276,24 +276,24 @@ const NothingToChoose = ({
     ),
     store: (
       <Trans>
-        None of the domain&apos;s store permissions serves every operation it
+        None of the App&apos;s store permissions serves every operation it
         declares, exactly as declared. Grant one first.
       </Trans>
     ),
     statistics: (
       <Trans>
-        The domain has no permission to read the platform&apos;s statistics.
-        Grant one first.
+        The App has no permission to read the platform&apos;s statistics. Grant
+        one first.
       </Trans>
     ),
     guests: (
       <Trans>
-        The domain has no permission to invite guests. Grant one first.
+        The App has no permission to invite guests. Grant one first.
       </Trans>
     ),
     app: (
       <Trans>
-        No other domain serves every function it declares, public and exactly as
+        No other App serves every function it declares, public and exactly as
         declared.
       </Trans>
     ),
@@ -425,7 +425,7 @@ const BindForm = ({
         </Choice>
       ) : null}
       {choices.kind === "app" ? (
-        <Choice label={t`Domain`} onChange={setPicked} value={picked}>
+        <Choice label={t`App`} onChange={setPicked} value={picked}>
           {choices.apps.map(({ appId, name }) => (
             <NativeSelectOption key={appId} value={appId}>
               {/* Names needn't be unique: the ID tells two apart. */}
@@ -600,7 +600,7 @@ const Revoke = ({
           </DialogTitle>
           <DialogDescription>
             <Trans>
-              The domain&apos;s next request through it is refused, and actions
+              The App&apos;s next request through it is refused, and actions
               waiting on it are dropped. Bind it again to use it again.
             </Trans>
           </DialogDescription>
@@ -849,15 +849,15 @@ export const ResourceBindings = ({
       <p className="text-muted-foreground max-w-prose">
         {decides ? (
           <Trans>
-            The domain&apos;s actions reach a model, an integration, knowledge
-            or a template only through a binding an admin approves here.
-            Declaring one grants nothing, and revoking a binding stops the next
-            request through it.
+            The App&apos;s actions reach a model, an integration, knowledge or a
+            template only through a binding an admin approves here. Declaring
+            one grants nothing, and revoking a binding stops the next request
+            through it.
           </Trans>
         ) : (
           <Trans>
-            The domain&apos;s actions reach a model, an integration, knowledge
-            or a template only through a binding an admin of your organization
+            The App&apos;s actions reach a model, an integration, knowledge or a
+            template only through a binding an admin of your organization
             approves.
           </Trans>
         )}
@@ -865,8 +865,7 @@ export const ResourceBindings = ({
       {version === null || resources.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>
-            The domain&apos;s current version declares no resource for its
-            actions.
+            The App&apos;s current version declares no resource for its actions.
           </Trans>
         </p>
       ) : (

@@ -11,7 +11,7 @@ import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// A new app, from New app in a domain's Apps tab: the question to start
+// A new App, from New App on the Apps page: the question to start
 // the chat that makes it, and, for someone who builds, the blueprints to
 // start from instead.
 
@@ -33,7 +33,7 @@ const NewAppRoute = () => {
   const { page, blueprints } = Route.useLoaderData();
   const crumbs = [
     { label: t`Apps`, to: "/apps" as const },
-    { label: t`New app` },
+    { label: t`New App` },
   ];
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={crumbs} page={page} />;

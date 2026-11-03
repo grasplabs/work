@@ -94,7 +94,7 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   // The App's name heads the page once: the screen's frame, open now,
   // names it a level below.
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
-  const screens = page.getByRole("navigation", { name: "Screens" });
+  const screens = page.getByRole("navigation", { name: "Pages" });
   await expect(screens.getByRole("link", { name: "board" })).toHaveAttribute(
     "aria-current",
     "page"
@@ -177,7 +177,7 @@ test("a builder renames an App and says what it is for in its settings, archives
   const other = await pageOf(user);
   await other.goto(`/apps/${app}/settings`);
   await expect(
-    other.getByRole("heading", { name: "Domain not found" })
+    other.getByRole("heading", { name: "App not found" })
   ).toBeVisible();
 });
 
@@ -260,7 +260,7 @@ test("an archived App says so under its bar, opens no screen, and its builder re
 
   await expect(
     page.getByText(
-      "This app is archived. It is kept as it was, and nobody works on it."
+      "This App is archived. It is kept as it was, and nobody works on it."
     )
   ).toBeVisible();
   await expect(page.locator("iframe")).toHaveCount(0);
@@ -268,7 +268,7 @@ test("an archived App says so under its bar, opens no screen, and its builder re
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
 
   await page.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByText("This app is archived.")).toHaveCount(0);
+  await expect(page.getByText("This App is archived.")).toHaveCount(0);
   await screenShowing(page, "board", "The board");
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();
 });

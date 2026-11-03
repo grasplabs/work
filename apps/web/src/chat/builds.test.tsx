@@ -19,15 +19,15 @@ import type { ChatBuildsRead } from "./builds.tsx";
 
 // Releasing a version beside the chat, against core's `apps` as the page
 // reaches it over RPC (the boundary from the web app), faked: a new
-// domain is a draft, which its users can't open until it is published, so
+// App is a draft, which its users can't open until it is published, so
 // its release offers to publish it with the version, and says why; a
-// published domain's release only makes the version current.
+// published App's release only makes the version current.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const appId = appIdSchema.parse(crypto.randomUUID());
 
-/** A domain with version 2 up for review, at `status`. */
+/** An App with version 2 up for review, at `status`. */
 const appAt = (status: AppStatus): App & { pendingVersion: number } => ({
   id: appId,
   name: "Invoices",
@@ -213,7 +213,7 @@ describe("releasing a version beside the chat", () => {
     expect(calls).toStrictEqual([`setCurrent ${appId} 2`]);
   });
 
-  it("only makes a published domain's version current", async () => {
+  it("only makes a published App's version current", async () => {
     const { calls, apps } = fakeApps();
     await opened(appAt("published"), apps);
     const offered = { buttons: buttons(), saysDraft: saysDraft() };

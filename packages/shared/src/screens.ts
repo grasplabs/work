@@ -581,35 +581,35 @@ export interface ScreensApi {
 
 /** Why a call to an App's screens was refused. */
 export const screenErrors = defineErrorFamily({
-  "screen.not_found": "The domain has no such app.",
-  "screen.build_failed": "The domain's apps don't build.",
+  "screen.not_found": "The App has no such page.",
+  "screen.build_failed": "The App's pages don't build.",
   "screen.build_slow":
-    "The app's screens are still building. Try again in a moment.",
+    "The App's pages are still building. Try again in a moment.",
   "screen.not_sealed":
-    "This version's screens aren't sealed with its release, so they can't open.",
-  "screen.invalid": "That isn't a valid request for a screen.",
-  "screen.input_invalid": "That isn't valid input for the screen.",
+    "This version's pages aren't sealed with its release, so they can't open.",
+  "screen.invalid": "That isn't a valid request for a page.",
+  "screen.input_invalid": "That isn't valid input for the page.",
   "screen.navigation_cancelled":
-    "The person chose to stay on this screen, which has unsaved changes.",
+    "The person chose to stay on this page, which has unsaved changes.",
   "screen.too_many_subscriptions":
-    "This page follows at most 20 workflows' runs at once. Close a screen, then try again.",
+    "This page follows at most 20 workflows' runs at once. Close a page, then try again.",
   "screen.too_many_queries":
-    "This page follows too many live queries at once. Close a screen, then try again.",
+    "This page follows too many live queries at once. Close a page, then try again.",
   "screen.rate_limited":
-    "This screen asks for too much at once. Try again in a moment.",
+    "This page asks for too much at once. Try again in a moment.",
   "screen.input_too_large":
-    "That is more data than a screen may send in one call.",
+    "That is more data than a page may send in one call.",
   "screen.answer_too_large":
-    "The domain answered with more data than an app takes in one call.",
+    "The App answered with more data than a page takes in one call.",
   "screen.unreviewed":
-    "Nobody has approved this app's code for the engine's data yet.",
-  "screen.revoked": "The approval of this app's code was taken back.",
+    "Nobody has approved this page's code for the App's data yet.",
+  "screen.revoked": "The approval of this page's code was taken back.",
   "screen.review_outdated":
-    "The app or its approvals changed since they were reviewed. Review them again.",
-  "screen.not_approved": "That build of the app isn't approved.",
+    "The page or its approvals changed since they were reviewed. Review them again.",
+  "screen.not_approved": "That build of the page isn't approved.",
   "screen.reload_required": "This page is out of date. Reload it to go on.",
   "screen.access_changed":
-    "Your access to this app changed. What it shows is being read again.",
+    "Your access to this App changed. What it shows is being read again.",
 });
 
 /**

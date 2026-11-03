@@ -60,7 +60,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
-// The workflows a domain's App starts, on the domain's Resources tab, for
+// The workflows an App's App starts, on the App's Resources tab, for
 // its builders (`workflowResources.appBindings`, which core lets them read
 // and nobody else, never Grasp staff): each alias the App's code starts a
 // workflow by, and the exact version it binds. Its builders bind an alias
@@ -179,8 +179,8 @@ const BindDialog = ({
           </DialogTitle>
           <DialogDescription>
             <Trans>
-              The app starts this exact version by its name, until a builder
-              binds another. Starting it still takes the app&apos;s own
+              The App starts this exact version by its name, until a builder
+              binds another. Starting it still takes the App&apos;s own
               permission on the workflow, which an admin grants.
             </Trans>
           </DialogDescription>
@@ -188,7 +188,7 @@ const BindDialog = ({
         {naming ? (
           <Field>
             <FieldLabel htmlFor={aliasId}>
-              <Trans>Name in the app&apos;s code</Trans>
+              <Trans>Name in the App&apos;s code</Trans>
             </FieldLabel>
             <Input
               id={aliasId}
@@ -325,7 +325,7 @@ const Unbind = ({
             </AlertDialogTitle>
             <AlertDialogDescription>
               <Trans>
-                The app can no longer start a workflow by this name, until a
+                The App can no longer start a workflow by this name, until a
                 builder binds it again. Runs already started go on.
               </Trans>
             </AlertDialogDescription>
@@ -371,7 +371,7 @@ const BindingsView = ({
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">
-          <Trans>Workflows the app starts</Trans>
+          <Trans>Workflows the App starts</Trans>
         </h2>
         {changes ? (
           <Button
@@ -387,7 +387,7 @@ const BindingsView = ({
       </div>
       {bindings.length === 0 ? (
         <p className="text-muted-foreground">
-          <Trans>The app starts no workflow of its own.</Trans>
+          <Trans>The App starts no workflow of its own.</Trans>
         </p>
       ) : (
         <div className="bg-card overflow-hidden rounded-xl border">
@@ -395,7 +395,7 @@ const BindingsView = ({
             <TableHeader>
               <TableRow>
                 <TableHead variant="card">
-                  <Trans>Name in the app&apos;s code</Trans>
+                  <Trans>Name in the App&apos;s code</Trans>
                 </TableHead>
                 <TableHead variant="card">
                   <Trans>Workflow</Trans>
@@ -482,7 +482,7 @@ interface Read {
 }
 
 /**
- * The workflows a domain's App binds, for its builders, read when the
+ * The workflows an App's App binds, for its builders, read when the
  * Resources tab opens and again after each change.
  */
 export const AppWorkflows = ({

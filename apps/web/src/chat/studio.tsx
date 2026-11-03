@@ -113,11 +113,11 @@ const StudioBar = ({
     </div>
     <Link
       className={buttonVariants({ variant: "outline" })}
-      params={{ engine: draft.app }}
-      to="/domains/$engine"
+      params={{ app: draft.app }}
+      to="/apps/$app"
     >
       <EyeIcon data-icon="inline-start" />
-      <Trans>View app</Trans>
+      <Trans>View App</Trans>
     </Link>
   </div>
 );
@@ -135,7 +135,7 @@ const DraftPicker = ({
   const { t } = useLingui();
   return (
     <fieldset className="flex flex-none flex-wrap gap-1 border-b px-3 py-2">
-      <legend className="sr-only">{t`Domains being built in this chat`}</legend>
+      <legend className="sr-only">{t`Apps being built in this chat`}</legend>
       {drafts.map(({ draft, name }) => (
         <Button
           aria-pressed={draft.app === shown}
@@ -186,7 +186,7 @@ const ViewToggle = ({
       size="sm"
       variant={view === "app" ? "secondary" : "ghost"}
     >
-      <Trans context="the domain being built, beside its chat">Domain</Trans>
+      <Trans context="the App being built, beside its chat">App</Trans>
     </Button>
   </div>
 );

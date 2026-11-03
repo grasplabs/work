@@ -42,11 +42,11 @@ type Entry = OfferedCatalog["entries"][number];
 const whyNames = {
   permission: msg({
     message: "Its code uses it",
-    context: "why an integration is one of a domain's",
+    context: "why an integration is one of an App's",
   }),
   added: msg({
     message: "Added by hand",
-    context: "why an integration is one of a domain's",
+    context: "why an integration is one of an App's",
   }),
 } as const;
 
@@ -188,7 +188,7 @@ export const AppIntegrations = ({
           />
         ) : undefined
       }
-      description={t`Where the domain’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
+      description={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
       title={t`Integrations`}
     >
       <SettingsBody>

@@ -20,7 +20,6 @@ import type {
   AppFiles,
   AppRole,
   AppVersion,
-  ListedScreen,
   ViewedApp,
   CommittedVersion,
   FileDiff,
@@ -792,36 +791,6 @@ export const listAppOverviews = async (
       workflows: (workflows ?? []).toSorted(),
     },
   }));
-};
-
-/**
- * Every screen of the current version of each App `by` has a role in
- * (`appsFoundBy`, as `listApps`), newest App first, its screens by name:
- * one query, the names its version's row keeps (`app_versions.screens`),
- * so no files are read. An App with no current version has none.
- */
-export const listScreens = async (
-  env: Env,
-  by: Member
-): Promise<ListedScreen[]> => {
-  const rows = await drizzle(env.DB)
-    .select({ app: apps, screens: appVersions.screens })
-    .from(apps)
-    .innerJoin(
-      appVersions,
-      and(
-        eq(appVersions.appId, apps.id),
-        eq(appVersions.version, apps.currentVersion)
-      )
-    )
-    .where(appsFoundBy(env, by))
-    .orderBy(desc(apps.createdAt), asc(apps.id));
-  return rows.flatMap(({ app, screens }) => {
-    const { id, name, status, process } = toApp(app);
-    return screens
-      .toSorted()
-      .map((screen) => ({ app: { id, name, status, process }, screen }));
-  });
 };
 
 /** An App's files at `version`, or at its latest version without one. */

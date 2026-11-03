@@ -4,20 +4,14 @@ import { msg } from "@lingui/core/macro";
 // Stephen's tour of the platform, as the prototype's script has it
 // (grasplabs/prototype `lib/tour-script.ts`): his lines, the pages he
 // takes in the sidebar's order, and the place he can always be asked last.
-// Text only: his voice waits on the voice work. The prototype's Apps stop
-// is left out, as Apps are Domains here (routes/_shell.apps.index.tsx), and
-// so is its one-workflow stop, which the prototype has switched off.
+// Text only: his voice waits on the voice work. The prototype's
+// one-workflow stop is left out, as the prototype has switched it off.
 
 /** The stops there are. */
-export type TourStop =
-  | "brain"
-  | "domains"
-  | "workflows"
-  | "integrations"
-  | "chat";
+export type TourStop = "brain" | "apps" | "workflows" | "integrations" | "chat";
 
 /** The pages a stop goes to, by the sidebar. */
-export type TourPage = "/brain" | "/domains" | "/workflows" | "/integrations";
+export type TourPage = "/brain" | "/apps" | "/workflows" | "/integrations";
 
 /** What the tour knows of the person: what their role lets them see. */
 export interface TourViewer {
@@ -69,10 +63,10 @@ const script: readonly ScriptStop[] = [
     shownTo: seesSections,
   },
   {
-    id: "domains",
-    page: "/domains",
-    points: "/domains",
-    say: msg`These are your domains. Each one is a part of your business, with its workflows, apps and integrations together.`,
+    id: "apps",
+    page: "/apps",
+    points: "/apps",
+    say: msg`These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows.`,
     shownTo: seesSections,
   },
   {

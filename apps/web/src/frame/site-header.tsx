@@ -14,7 +14,6 @@ export type Crumb =
         | "/"
         | "/brain"
         | "/knowledge"
-        | "/domains"
         | "/apps"
         | "/workflows"
         | "/integrations";
@@ -30,7 +29,7 @@ export type Crumb =
       to: "/brain/sections/$sectionId";
       params: { sectionId: string };
     }
-  | { label: string; to: "/domains/$engine"; params: { engine: string } }
+  | { label: string; to: "/apps/$app"; params: { app: string } }
   | {
       label: string;
       to: "/projects/$projectId";
@@ -68,8 +67,8 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   if (crumb.to === "/projects/$projectId") {
     return <Link params={crumb.params} to="/projects/$projectId" />;
   }
-  return crumb.to === "/domains/$engine" ? (
-    <Link params={crumb.params} to="/domains/$engine" />
+  return crumb.to === "/apps/$app" ? (
+    <Link params={crumb.params} to="/apps/$app" />
   ) : (
     <Link params={crumb.params} search={{}} to="/knowledge/$collection" />
   );

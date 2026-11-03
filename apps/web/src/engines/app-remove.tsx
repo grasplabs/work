@@ -20,11 +20,11 @@ import { TrashIcon } from "lucide-react";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Deleting an archived domain (`apps.remove`), on its bar: for its owner or
+// Deleting an archived App (`apps.remove`), on its bar: for its owner or
 // an admin of the organization, never Grasp staff, and only once it is
 // archived, as core checks. Its stores and their records stay, and so do
 // the workflows it doesn't own; its grants, members and bindings end, and
-// it is gone from then on, so it asks first and then leaves for Domains.
+// it is gone from then on, so it asks first and then leaves for Apps.
 
 /** Whether `identity` may delete `app`: archived, and theirs or an admin's. */
 export const removesApp = (
@@ -54,7 +54,7 @@ export const RemoveApp = ({
       return true;
     });
     if (done === true) {
-      await navigate({ to: "/domains", replace: true });
+      await navigate({ to: "/apps", replace: true });
     }
   };
   return (
@@ -74,8 +74,8 @@ export const RemoveApp = ({
             </AlertDialogTitle>
             <AlertDialogDescription>
               <Trans>
-                It is gone for good: its apps, versions and members, and what it
-                was allowed. Its stores and their records stay, and so do the
+                It is gone for good: its pages, versions and members, and what
+                it was allowed. Its stores and their records stay, and so do the
                 workflows it doesn’t own.
               </Trans>
             </AlertDialogDescription>

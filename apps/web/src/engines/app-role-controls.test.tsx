@@ -23,7 +23,7 @@ import { AppStatusControls } from "./app-status.tsx";
 // Who an App's pages offer its changes to (app-role.ts, `buildsApp`): its
 // builders, by their role in that App, never by their role in the
 // organization. An organization's builder who only uses this App gets no
-// controls on its page or the domain's, nor does Grasp staff, whom core
+// controls on its page or the App's, nor does Grasp staff, whom core
 // counts a builder of every App. Core refuses them all the same; this is
 // what the page offers.
 
@@ -68,7 +68,7 @@ const buttonsOf = async (page: ReactNode): Promise<string[]> => {
   });
   const settings = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/domains/$engine",
+    path: "/apps/$app",
     component: () => null,
   });
   const router = createRouter({
@@ -122,7 +122,7 @@ const appPageFor = async ({
   return names.some((name) => name === "Publish" || name === "Published");
 };
 
-/** The domain page's status controls, as `viewer` sees them. */
+/** The App page's status controls, as `viewer` sees them. */
 const statusFor = async ({
   role,
   staff: isStaff,
@@ -148,7 +148,7 @@ describe("an App's changes, offered on its pages", () => {
     }).toStrictEqual({ builder: true, user: false, staff: false });
   });
 
-  it("shows the domain's status controls to its builders alone, never to a user of it or to staff", async () => {
+  it("shows the App's status controls to its builders alone, never to a user of it or to staff", async () => {
     expect({
       builder: await statusFor(builder),
       user: await statusFor(user),

@@ -18,9 +18,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { StatusActions, StatusBadge } from "./app-status.tsx";
 
-// A domain's status controls against core's `apps` as the page reaches it
+// An App's status controls against core's `apps` as the page reaches it
 // over RPC (the boundary from the web app), faked: each control moves the
-// domain only along what core allows from where it is, the page reads it
+// App only along what core allows from where it is, the page reads it
 // again afterwards, archiving asks first, and what core refuses is said.
 // Publish and Restore stand on the bar; Unpublish and Archive are under
 // its "…" menu.
@@ -37,7 +37,7 @@ const moves: Record<Transition, { from: AppStatus[]; to: AppStatus }> = {
   restore: { from: ["archived"], to: "draft" },
 };
 
-/** Core's `apps` for one domain, refusing `refusing` with core's reason. */
+/** Core's `apps` for one App, refusing `refusing` with core's reason. */
 const fakeApps = (
   status: AppStatus,
   {
@@ -65,10 +65,10 @@ const fakeApps = (
     calls.push(transition);
     await Promise.resolve();
     if (transition === refusing) {
-      throw new Error("Only the domain's builders can do that.");
+      throw new Error("Only the App's builders can do that.");
     }
     if (!moves[transition].from.includes(app.status)) {
-      throw new Error("The domain moved on meanwhile.");
+      throw new Error("The App moved on meanwhile.");
     }
     app = { ...app, status: moves[transition].to };
     return app;
@@ -87,11 +87,11 @@ const fakeApps = (
 
 let root: Root | undefined;
 
-/** Whether the loader's data is the domain, as `fakeApps` answers it. */
+/** Whether the loader's data is the App, as `fakeApps` answers it. */
 const isApp = (data: unknown): data is App =>
   typeof data === "object" && data !== null && "status" in data;
 
-/** The domain's status and its controls, as its page reads them from `apps`. */
+/** The App's status and its controls, as its page reads them from `apps`. */
 const opened = async (
   apps: ReturnType<typeof fakeApps>["apps"]
 ): Promise<void> => {
@@ -103,8 +103,8 @@ const opened = async (
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),
   });
-  // The bar as a page has it: the domain as its loader read it last.
-  const DomainBar = () => {
+  // The bar as a page has it: the App as its loader read it last.
+  const AppBar = () => {
     // This test's own router, never the app's registered route tree.
     const loaded: unknown = useRouterState<AnyRouter>({
       select: ({ matches }) => matches.at(0)?.loaderData,
@@ -119,7 +119,7 @@ const opened = async (
       </div>
     );
   };
-  rootRoute.update({ component: DomainBar });
+  rootRoute.update({ component: AppBar });
   const router = createRouter({
     routeTree: rootRoute,
     history: createMemoryHistory(),
@@ -150,7 +150,7 @@ const settled = async (): Promise<void> => {
 };
 
 /** The "…" menu's button, by its label. */
-const more = "More for this domain";
+const more = "More for this App";
 
 /** What a button or menu item is called: its text, or its label without one. */
 const nameOf = (element: HTMLElement): string => {
@@ -214,7 +214,7 @@ const shown = () => ({
   refused: document.querySelector('[role="alert"]')?.textContent ?? null,
 });
 
-describe("a domain's status controls", () => {
+describe("an App's status controls", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -291,7 +291,7 @@ describe("a domain's status controls", () => {
     });
   });
 
-  it("says why core refused, leaving the domain as it was", async () => {
+  it("says why core refused, leaving the App as it was", async () => {
     const { apps } = fakeApps("draft", { refusing: "publish" });
     await opened(apps);
 
@@ -300,11 +300,11 @@ describe("a domain's status controls", () => {
     expect(shown()).toStrictEqual({
       status: "Draft",
       buttons: ["Publish", more],
-      refused: "Only the domain's builders can do that.",
+      refused: "Only the App's builders can do that.",
     });
   });
 
-  it("doesn't offer to publish a domain with no version to run", async () => {
+  it("doesn't offer to publish an App with no version to run", async () => {
     const { apps } = fakeApps("draft", { currentVersion: null });
     await opened(apps);
 

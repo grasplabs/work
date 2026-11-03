@@ -274,7 +274,7 @@ const MemberActions = ({
  */
 const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
   {
-    label: msg`Use the chat, Knowledge and the apps shared with them`,
+    label: msg`Use the chat, Knowledge and the Apps shared with them`,
     roles: ["admin", "builder", "user"],
   },
   {
@@ -282,11 +282,11 @@ const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
     roles: ["admin", "builder", "user"],
   },
   {
-    label: msg`Build domains, their apps and workflows, and ask for the permissions they need`,
+    label: msg`Build Apps and workflows, and ask for the permissions they need`,
     roles: ["admin", "builder"],
   },
   {
-    label: msg`Connect shared accounts and decide what domains may do`,
+    label: msg`Connect shared accounts and decide what Apps may do`,
     roles: ["admin"],
   },
   {

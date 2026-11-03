@@ -702,7 +702,7 @@ const PackagesItem = ({
       acts={[
         {
           label: t`Approve`,
-          name: t`Approve the packages for ${ph({ domain: engine })}`,
+          name: t`Approve the packages for ${ph({ app: engine })}`,
           disabled: review === undefined,
           describedBy: review === undefined ? hintId : undefined,
           onPress: async () => {
@@ -711,7 +711,7 @@ const PackagesItem = ({
         },
         {
           label: t`Reject`,
-          name: t`Reject the packages for ${ph({ domain: engine })}`,
+          name: t`Reject the packages for ${ph({ app: engine })}`,
           onPress: async () => {
             await decide(false, t`Rejected: ${who}.`);
           },

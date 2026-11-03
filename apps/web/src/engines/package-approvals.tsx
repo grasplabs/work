@@ -148,8 +148,8 @@ const EndDialog = ({
         <header className="flex flex-col gap-1 pr-8">
           <DialogTitle>
             {ending === "retire"
-              ? t`Retire the packages for ${ph({ domain: engine })}?`
-              : t`Revoke the packages for ${ph({ domain: engine })}?`}
+              ? t`Retire the packages for ${ph({ app: engine })}?`
+              : t`Revoke the packages for ${ph({ app: engine })}?`}
           </DialogTitle>
           <DialogDescription>
             <PackagesOf request={request} />
@@ -292,7 +292,7 @@ const ApprovalRow = ({
             <div className="flex gap-2">
               {request.status === "approved" ? (
                 <Button
-                  aria-label={t`Retire the packages for ${ph({ domain: engine })}`}
+                  aria-label={t`Retire the packages for ${ph({ app: engine })}`}
                   disabled={busy}
                   onClick={() => {
                     void ask("retire");
@@ -304,7 +304,7 @@ const ApprovalRow = ({
                 </Button>
               ) : null}
               <Button
-                aria-label={t`Revoke the packages for ${ph({ domain: engine })}`}
+                aria-label={t`Revoke the packages for ${ph({ app: engine })}`}
                 disabled={busy}
                 onClick={() => {
                   void ask("revoke");
@@ -439,7 +439,7 @@ export const PackageApprovals = ({
           {listed.subject.type === "workflow" ? (
             <Trans>No packages are approved for this workflow.</Trans>
           ) : (
-            <Trans>No packages are approved for this domain.</Trans>
+            <Trans>No packages are approved for this App.</Trans>
           )}
         </p>
       ) : (

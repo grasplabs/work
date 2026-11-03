@@ -219,7 +219,7 @@ const RunFilters = ({
 }: {
   options: FilterOptions;
   /**
-   * Whether `options` are the chosen domain's: while another domain's
+   * Whether `options` are the chosen App's: while another App's
    * workflows are on their way, the Workflow filter offers none.
    */
   settled: boolean;
@@ -232,23 +232,23 @@ const RunFilters = ({
   const { t } = useLingui();
   const listed = settled ? (options.workflows ?? []) : [];
   const chosen = search.workflow;
-  // A workflow the address filters by that the domain's current version
+  // A workflow the address filters by that the App's current version
   // doesn't list (renamed or removed since): core still filters its kept
   // runs by that name, so it stays, offered under the name it has, said
-  // to be no longer the domain's once the domain's workflows are known.
+  // to be no longer the App's once the App's workflows are known.
   const kept =
     chosen === undefined || listed.includes(chosen)
       ? []
       : [
           {
             value: chosen,
-            label: settled ? t`${chosen} (no longer in this domain)` : chosen,
+            label: settled ? t`${chosen} (no longer in this App)` : chosen,
           },
         ];
   return (
     <div className="flex flex-wrap gap-2">
       <Filter
-        label={t`Domain`}
+        label={t`App`}
         onChange={(app) => {
           // A workflow of another App finds nothing in this one.
           filterBy({ app, workflow: undefined });
@@ -283,7 +283,7 @@ const RunFilters = ({
       />
       {settled && options.workflows === null ? (
         <p className="text-destructive self-center text-sm">
-          <Trans>Couldn&apos;t load this domain&apos;s workflows.</Trans>
+          <Trans>Couldn&apos;t load this App&apos;s workflows.</Trans>
         </p>
       ) : null}
     </div>
@@ -305,7 +305,7 @@ const offeredOf = (
   );
 
 /**
- * The workflows serving `process`, the domains' and the independent ones
+ * The workflows serving `process`, the Apps' and the independent ones
  * together, at work and on the way.
  */
 const ListedWorkflows = ({
@@ -561,7 +561,7 @@ const domainsUnchecked = (
   process !== undefined && read.state !== "ready";
 
 /**
- * Every workflow the lists show under `process`: the domains' and the
+ * Every workflow the lists show under `process`: the Apps' and the
  * independent ones, listed together.
  */
 const countAll = (
@@ -577,7 +577,7 @@ const countAll = (
     : undefined;
 
 /**
- * What needs a person under `process`: the domains' workflows that do,
+ * What needs a person under `process`: the Apps' workflows that do,
  * and the go-lives waiting.
  */
 const countNeeds = (
@@ -588,7 +588,7 @@ const countNeeds = (
     return undefined;
   }
   // Under a process, which go-live serves it is read off the independent
-  // workflows, and which domain workflow serves it off the domains:
+  // workflows, and which App workflow serves it off the Apps:
   // without either it can't be told, so no count rather than one that
   // leaves some out.
   if (
@@ -664,10 +664,10 @@ const filterOf = ({
 
 /**
  * What of the address's run filters isn't on offer once the filters'
- * options are read, to drop, or null: a domain the Domain filter doesn't
+ * options are read, to drop, or null: an App the App filter doesn't
  * offer (one the reader can't open, or that is gone), with its workflow,
- * as it would filter the log by a domain the filter can't show. A
- * workflow the domain's current version doesn't list stays: core still
+ * as it would filter the log by an App the filter can't show. A
+ * workflow the App's current version doesn't list stays: core still
  * filters kept runs by that name, and the Workflow filter shows it.
  */
 const strayOf = (
@@ -707,7 +707,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   const navigate = useNavigate({ from: "/workflows/" });
   const [read, setRead] = useState<{
     key: string;
-    /** The domain whose workflows its filter options are. */
+    /** The App whose workflows its filter options are. */
     app: string | undefined;
     data: RunsRead;
   }>();
@@ -883,8 +883,8 @@ const Workflows = () => {
 };
 
 /**
- * The processes Today's lanes serve, from what the lists read: a domain
- * workflow its domain's, an independent one its own.
+ * The processes Today's lanes serve, from what the lists read: an App
+ * workflow its App's, an independent one its own.
  */
 const laneProcessesOf = (lists: Lists): LaneProcesses => ({
   apps: lists.processes,
@@ -916,13 +916,13 @@ const processesOf = (
 
 /**
  * What the lists show, read on every tab, as the tabs count them: the
- * domains' workflows, the independent ones, the processes the domains
+ * Apps' workflows, the independent ones, the processes the Apps
  * serve, and the go-lives waiting for the reader.
  */
 interface Lists {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
-  /** The domains, read for the processes they serve (`processes`). */
+  /** The Apps, read for the processes they serve (`processes`). */
   apps: Loaded<App[]>;
   processes: AppProcesses;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
@@ -935,7 +935,7 @@ const readLists = async (core: CoreConnection): Promise<Lists> => {
       core,
       async (session) => await session.workflowResources.list()
     ),
-    // For the processes the domains serve: read like the rest, so a list
+    // For the processes the Apps serve: read like the rest, so a list
     // filtered by a process can tell when it couldn't check them.
     loadFromCore(core, async (session) => await session.apps.list()),
     loadFromCore(

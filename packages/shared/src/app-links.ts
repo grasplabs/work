@@ -13,13 +13,13 @@ import { defineErrorFamily } from "./errors.ts";
 export const linkErrors = defineErrorFamily({
   "link.invalid": "That isn't a link that can be opened.",
   "link.not_allowed":
-    "This app may open links only to the sites its version declares, and never to a private network.",
+    "This page may open links only to the sites its version declares, and never to a private network.",
   "link.declined": "The link wasn't opened.",
   "link.asking_paused":
     "Another link is waiting for an answer, or one was just turned down. Try again in a moment.",
   "link.unavailable": "Links can't be opened here.",
   "link.confirmation_required":
-    "This app read restricted data, so each link it opens needs your confirmation.",
+    "This page read restricted data, so each link it opens needs your confirmation.",
 });
 
 /** An alias of a links resource, as an App declares it. */

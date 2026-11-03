@@ -211,10 +211,10 @@ const Lead = ({
       <TooltipTrigger
         render={
           <Link
-            aria-label={t`Open the domain ${name}`}
+            aria-label={t`Open the App ${name}`}
             className="focus-visible:ring-ring/50 relative z-10 flex-none rounded-lg outline-none focus-visible:ring-3"
-            params={{ engine: workflow.app }}
-            to="/domains/$engine"
+            params={{ app: workflow.app }}
+            to="/apps/$app/details"
           />
         }
       >
@@ -278,8 +278,8 @@ const Place = ({ workflow }: { workflow: WorkflowSummary }) =>
   workflow.type === "app" ? (
     <Link
       className="relative z-10 truncate underline-offset-4 hover:underline"
-      params={{ engine: workflow.app }}
-      to="/domains/$engine"
+      params={{ app: workflow.app }}
+      to="/apps/$app/details"
     >
       {workflow.appName}
     </Link>
@@ -409,7 +409,7 @@ export const WorkflowsTable = ({
             <EmptyDescription>
               <Trans>
                 Workflows are made in chat: describe what should run on its own,
-                and Grasp builds it into a domain.
+                and Grasp builds it into an App.
               </Trans>
             </EmptyDescription>
           </EmptyHeader>
@@ -436,7 +436,7 @@ export const WorkflowsTable = ({
             </TableHead>
             {withEngine ? (
               <TableHead className="hidden w-56 @lg:table-cell" variant="card">
-                <Trans>Domain</Trans>
+                <Trans>App</Trans>
               </TableHead>
             ) : null}
             <TableHead className="hidden w-32 @xl:table-cell" variant="card">

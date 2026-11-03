@@ -638,10 +638,7 @@ const WorkflowView = ({
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
                 render={
-                  <Link
-                    params={{ engine: summary.app }}
-                    to="/domains/$engine"
-                  />
+                  <Link params={{ app: summary.app }} to="/apps/$app/details" />
                 }
                 variant="outline"
               >
@@ -660,7 +657,7 @@ const WorkflowView = ({
             </div>
             {summary.scheduleStopped ? (
               <p className="text-status-attention">
-                {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current.`}
+                {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the App is made current.`}
               </p>
             ) : null}
           </div>

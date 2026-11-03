@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { RemoveApp } from "./app-remove.tsx";
 import { AppVersions } from "./app-versions.tsx";
 
-// A domain's versions and deleting an archived domain, against core's Apps
+// An App's versions and deleting an archived App, against core's Apps
 // API as the page reaches it over RPC (the boundary from the web app),
 // faked: it keeps which version is current and whether the App is still
 // there, and answers the page's next read with that.
@@ -134,7 +134,7 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The domain's page, its versions and its Delete, for `viewer`. */
+/** The App's page, its versions and its Delete, for `viewer`. */
 const shown = async (
   session: ReturnType<typeof fakeApps>["session"],
   viewer: Identity
@@ -159,13 +159,13 @@ const shown = async (
       );
     },
   });
-  const domains = createRoute({
+  const apps = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/domains",
-    component: () => <p>Domains</p>,
+    path: "/apps",
+    component: () => <p>Apps</p>,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([page, domains]),
+    routeTree: rootRoute.addChildren([page, apps]),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -216,7 +216,7 @@ const listed = (): string[] =>
     (cell) => cell.textContent?.trim() ?? ""
   );
 
-describe("A domain's versions", () => {
+describe("An App's versions", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -315,7 +315,7 @@ describe("A domain's versions", () => {
   });
 });
 
-describe("Deleting an archived domain", () => {
+describe("Deleting an archived App", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -324,7 +324,7 @@ describe("Deleting an archived domain", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets its owner delete it once archived, after asking, and leaves for Domains", async () => {
+  it("lets its owner delete it once archived, after asking, and leaves for Apps", async () => {
     const { session, asked } = fakeApps({
       role: "builder",
       status: "archived",
@@ -336,7 +336,7 @@ describe("Deleting an archived domain", () => {
 
     expect({ asked, at: router.state.location.pathname }).toStrictEqual({
       asked: [["remove", appId]],
-      at: "/domains",
+      at: "/apps",
     });
   });
 

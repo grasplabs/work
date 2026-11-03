@@ -90,8 +90,8 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     pageRead
   );
   await expect(workflows.getByRole("link")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "Domains" })).toContainText(
-    "No domains yet.",
+  await expect(page.getByRole("region", { name: "Apps" })).toContainText(
+    "No Apps yet.",
     pageRead
   );
   await expect(
@@ -108,7 +108,7 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("a builder sees their workflows and domain on the board, and opens them in full", async ({
+test("a builder sees their workflows and App on the board, and opens them in full", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("dashboardBoard");
@@ -154,14 +154,14 @@ test("a builder sees their workflows and domain on the board, and opens them in 
   ).toBeVisible();
 
   // The engine, with how many of its workflows ran.
-  const engines = page.getByRole("region", { name: "Domains" });
+  const engines = page.getByRole("region", { name: "Apps" });
   await expect(
     engines.getByRole("listitem").filter({ hasText: name })
   ).toContainText("1 of 2 workflows ran");
 
   // In full, each engine with its workflows.
   await engines.getByRole("button", { name: "Open in full" }).click();
-  let dialog = page.getByRole("dialog", { name: "Domains" });
+  let dialog = page.getByRole("dialog", { name: "Apps" });
   await expect(
     dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
   ).toBeVisible();
@@ -206,7 +206,7 @@ test("a builder sees their workflows and domain on the board, and opens them in 
 const boardTitles = (page: Page) =>
   page.getByRole("heading", {
     level: 2,
-    name: /^(?:Return a month|Board goals|Teams with AI|Workflows|Domains|Runs this week|Could be better)$/u,
+    name: /^(?:Return a month|Board goals|Teams with AI|Workflows|Apps|Runs this week|Could be better)$/u,
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
@@ -229,7 +229,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     "Board goals",
     "Teams with AI",
     "Workflows",
-    "Domains",
+    "Apps",
     "Runs this week",
     "Could be better",
   ];
@@ -248,10 +248,10 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
 
   // Taken off, it stays off.
   await page
-    .getByRole("region", { name: "Domains" })
+    .getByRole("region", { name: "Apps" })
     .getByRole("button", { name: "Take off the dashboard" })
     .click();
-  const without = begun.filter((title) => title !== "Domains");
+  const without = begun.filter((title) => title !== "Apps");
   await expect(titles).toHaveText(without);
   await expect
     .poll(saved)
@@ -270,9 +270,9 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await add.click();
   await page
     .getByRole("dialog", { name: "Add a widget" })
-    .getByRole("button", { name: "Domains" })
+    .getByRole("button", { name: "Apps" })
     .click();
-  await expect(titles).toHaveText([...without, "Domains"]);
+  await expect(titles).toHaveText([...without, "Apps"]);
   await expect
     .poll(saved)
     .toStrictEqual([
@@ -287,7 +287,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
 
   // Moved a place back with the keys on its grip, which keeps them.
   const grip = page.getByRole("button", {
-    name: "Move Domains: drag it, or use the arrow keys",
+    name: "Move Apps: drag it, or use the arrow keys",
     exact: true,
   });
   // Once the card has closed and given the focus back to what opened it,
@@ -304,7 +304,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     "Teams with AI",
     "Workflows",
     "Runs this week",
-    "Domains",
+    "Apps",
     "Could be better",
   ];
   await expect(titles).toHaveText(moved);

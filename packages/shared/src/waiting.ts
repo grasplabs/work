@@ -105,14 +105,14 @@ export interface PackagesItem extends ItemBase {
   policyGeneration: number;
 }
 
-/** An engine whose current apps run code nobody approved: approved on the engine's page. */
+/** An App whose current pages run code nobody approved: approved in the App's details. */
 export interface AppApprovalItem extends ItemBase {
   kind: "appApproval";
   verdicts: never[];
   waiting: ScreensWaiting;
 }
 
-/** A version of an App up for review, for the person who answers for the App: made current on its page. */
+/** A version of an App up for review, for the person who answers for the App: made current under Versions in the App's details. */
 export interface GoLiveItem extends ItemBase {
   kind: "goLive";
   verdicts: never[];

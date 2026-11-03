@@ -8,8 +8,8 @@ import type { ScreenNavigate } from "./screen-frame.tsx";
 
 // Where a screen's navigation takes the page (spec 10.7.7, 34.1): an App's
 // screen, in the same layout the navigating screen runs in; or, for a
-// surface, where the host places it: the shell's panel, or the App's
-// settings tab.
+// surface, where the host places it: the shell's panel, or the Settings
+// tab of the App's details.
 //
 // The route, input and surface core resolved go in the history entry's
 // state, never in the address: anyone can write an address, and a link
@@ -83,19 +83,14 @@ export const openingState = (
 });
 
 /**
- * The layouts a screen runs in: in Grasp's frame, on its App's own page
- * (the screen in the address's search), or full page.
+ * The layouts a screen runs in: in Grasp's frame, on its App's own page,
+ * or full page; the screen in the address's search either way.
  */
-type ScreenLayout =
-  | "/apps/$app"
-  | "/domains/$engine/apps/$screen"
-  | "/domains/$engine/apps/$screen/full";
+type ScreenLayout = "/apps/$app" | "/apps/$app/full";
 
 /** Where `screen` of `app` opens in `layout`. */
 const layoutLocation = (layout: ScreenLayout, app: string, screen: string) =>
-  layout === "/apps/$app"
-    ? { to: layout, params: { app }, search: { screen } }
-    : { to: layout, params: { engine: app, screen } };
+  ({ to: layout, params: { app }, search: { screen } }) as const;
 
 /**
  * How a screen of `app` running in `layout` navigates the page: to the
@@ -142,8 +137,8 @@ export const useScreenNavigate = (
     });
     const { href } = settings
       ? router.buildLocation({
-          to: "/domains/$engine",
-          params: { engine: app },
+          to: "/apps/$app/details",
+          params: { app },
           search: { tab: "settings" },
         })
       : router.buildLocation(layoutLocation(layout, app, target.screen));
@@ -174,7 +169,7 @@ export const useScreenNavigate = (
  * the page it leaves is never replaced.
  */
 export const usePushNavigate = (app: string): ScreenNavigate => {
-  const navigate = useScreenNavigate(app, "/domains/$engine/apps/$screen");
+  const navigate = useScreenNavigate(app, "/apps/$app");
   return async (target) => {
     await navigate(target, false);
   };

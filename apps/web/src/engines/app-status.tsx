@@ -36,35 +36,35 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
 
-// Where a domain (core's App) is in its life, and its builders moving it,
+// Where an App (core's App) is in its life, and its builders moving it,
 // as in the prototype (`components/apps/app-settings.tsx`,
 // `publish-dialog.tsx`): its status as a badge, Publish on its bar, and
-// Archive or Restore to put it away or take it back. A new domain is a
+// Archive or Restore to put it away or take it back. A new App is a
 // draft: only its builders open it, and its triggers don't fire, until it
 // is published. Core decides who may move it (app-status.ts); a refusal
 // shows under the buttons.
 
 const statusNames = {
-  draft: msg({ message: "Draft", context: "a domain still being made" }),
+  draft: msg({ message: "Draft", context: "an App still being made" }),
   published: msg({
     message: "Published",
-    context: "a domain open to the people it is shared with",
+    context: "an App open to the people it is shared with",
   }),
-  archived: msg({ message: "Archived", context: "a domain put away" }),
+  archived: msg({ message: "Archived", context: "an App put away" }),
 } as const satisfies Record<AppStatus, unknown>;
 
-/** A domain's status, as people read it. */
+/** An App's status, as people read it. */
 export const statusLabel = (status: AppStatus): string =>
   i18n._(statusNames[status]);
 
-/** A domain's status as a badge: filled once published, as in the prototype. */
+/** An App's status as a badge: filled once published, as in the prototype. */
 export const StatusBadge = ({ status }: { status: AppStatus }) => (
   <Badge variant={status === "published" ? "default" : "outline"}>
     {statusLabel(status)}
   </Badge>
 );
 
-/** What a builder can move a domain along, as core's `apps` names it. */
+/** What a builder can move an App along, as core's `apps` names it. */
 export type Transition = "publish" | "unpublish" | "archive" | "restore";
 
 const moveOf = async (
@@ -74,7 +74,7 @@ const moveOf = async (
 ): Promise<App> => await session.apps[transition](app);
 
 /**
- * Asks before archiving: it takes the domain offline and stops its runs,
+ * Asks before archiving: it takes the App offline and stops its runs,
  * which a restore doesn't start again.
  */
 export const ArchiveDialog = ({
@@ -96,8 +96,8 @@ export const ArchiveDialog = ({
         </AlertDialogTitle>
         <AlertDialogDescription>
           <Trans>
-            An archived domain is kept as it is and goes offline: nobody opens
-            its apps, its triggers stop and its unfinished runs are cancelled. A
+            An archived App is kept as it is and goes offline: nobody opens its
+            pages, its triggers stop and its unfinished runs are cancelled. A
             builder can restore it later, as a draft.
           </Trans>
         </AlertDialogDescription>
@@ -115,7 +115,7 @@ export const ArchiveDialog = ({
 );
 
 /**
- * Moves the domain `app` along (`transition`), then reads the page again,
+ * Moves the App `app` along (`transition`), then reads the page again,
  * whatever core answered, so the controls act on the status shown: `busy`
  * meanwhile, and `failure` saying why core refused.
  */
@@ -136,8 +136,8 @@ export const useStatusMove = (app: string) => {
 };
 
 /**
- * A builder's controls for the domain's status, as the prototype's bar
- * (`routes/domains/$engineId.tsx`): Publish on the bar while it is a
+ * A builder's controls for the App's status, as the prototype's bar
+ * (`routes/engines/$engineId.tsx`): Publish on the bar while it is a
  * draft, and the rest under one "…" menu, Unpublish and Archive; Restore
  * on the bar once archived, the one thing left to do with it.
  */
@@ -179,7 +179,7 @@ export const StatusActions = ({ app }: { app: App }) => {
               disabled={busy}
               render={
                 <Button
-                  aria-label={t`More for this domain`}
+                  aria-label={t`More for this App`}
                   size="icon-sm"
                   variant="ghost"
                 />
@@ -224,7 +224,7 @@ export const StatusActions = ({ app }: { app: App }) => {
   );
 };
 
-/** What the page says under the name of a domain that isn't published. */
+/** What the page says under the name of an App that isn't published. */
 export const StatusNote = ({ status }: { status: AppStatus }) => {
   const { t } = useLingui();
   if (status === "draft") {
@@ -237,7 +237,7 @@ export const StatusNote = ({ status }: { status: AppStatus }) => {
   if (status === "archived") {
     return (
       <p className="text-muted-foreground">
-        {t`Archived: nobody opens its apps and nothing runs, until a builder restores it.`}
+        {t`Archived: nobody opens its pages and nothing runs, until a builder restores it.`}
       </p>
     );
   }
@@ -245,7 +245,7 @@ export const StatusNote = ({ status }: { status: AppStatus }) => {
 };
 
 /**
- * The domain's status controls for `identity`: only for one who builds it
+ * The App's status controls for `identity`: only for one who builds it
  * (`buildsApp`), by their role in this App; nothing for anyone else.
  */
 export const AppStatusControls = ({

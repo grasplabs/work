@@ -252,7 +252,7 @@ const workflowsSection = (
     const engine = plainText(workflow.appName);
     return item(
       i18n._(
-        msg`${name} in ${ph({ domain: engine })}: ${started} started, ${completed} completed, ${failed} failed`
+        msg`${name} in ${ph({ app: engine })}: ${started} started, ${completed} completed, ${failed} failed`
       )
     );
   });

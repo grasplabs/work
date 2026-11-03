@@ -69,7 +69,12 @@ export type InboxKind =
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
-  | { kind: "engine"; engine: string }
+  /**
+   * An App: its own page, or its details (`details`), or the Versions tab
+   * there (`versions`), where what the item is about is decided. Details
+   * also show the packages alone to an approver with no role in the App.
+   */
+  | { kind: "engine"; engine: string; place?: "details" | "versions" }
   | { kind: "app"; app: string; screen?: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -315,7 +320,7 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.appId }
+          ? { kind: "engine", engine: request.subject.appId, place: "details" }
           : undefined,
       date: request.requestedAt,
       urgent: false,
@@ -331,7 +336,7 @@ const packageItems = (
   requests.map((request) => {
     // An App or a workflow, in one queue: only an App has a page to go to.
     const engine = request.subject.name;
-    const kind = request.subject.type === "workflow" ? t`Workflow` : t`Domain`;
+    const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
     const targets = formatList(
       request.targets.map((target) => i18n._(targetNames[target]))
     );
@@ -339,8 +344,8 @@ const packageItems = (
     return {
       id: `packages:${request.id}`,
       kind: "packages",
-      title: t`Approve the packages for ${ph({ domain: engine })}?`,
-      context: t`Packages for ${ph({ domain: engine })}`,
+      title: t`Approve the packages for ${ph({ app: engine })}?`,
+      context: t`Packages for ${ph({ app: engine })}`,
       body: [request.purpose],
       facts: [
         { label: kind, value: engine },
@@ -356,7 +361,7 @@ const packageItems = (
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.id }
+          ? { kind: "engine", engine: request.subject.id, place: "details" }
           : undefined,
       forWhom: { role: t`package approvers` },
       date: request.requestedAt,
@@ -365,7 +370,7 @@ const packageItems = (
     };
   });
 
-/** An engine whose current apps run code nobody approved: approved on the engine's page. */
+/** An App whose current pages run code nobody approved: approved in its details. */
 const screenItems = (
   engines: readonly ScreensWaiting[],
   readAt: string
@@ -377,18 +382,18 @@ const screenItems = (
       id: `screens:${waiting.app}`,
       kind: "appApproval",
       title: plural(count, {
-        one: `${name} has # app whose code nobody approved`,
-        other: `${name} has # apps whose code nobody approved`,
+        one: `${name} has # page whose code nobody approved`,
+        other: `${name} has # pages whose code nobody approved`,
       }),
       context: name,
       body: [
-        t`An app runs only once an admin approved its code. That happens on the domain's page.`,
+        t`A page runs only once an admin approved its code. That happens in the App's details.`,
       ],
       facts: [
         { label: t`Version`, value: String(version) },
-        { label: t`Apps`, value: formatList(screens) },
+        { label: t`Pages`, value: formatList(screens) },
       ],
-      about: { kind: "engine", engine: waiting.app },
+      about: { kind: "engine", engine: waiting.app, place: "details" },
       // Core says what waits now, not since when: as of the read.
       date: readAt,
       urgent: false,
@@ -396,7 +401,7 @@ const screenItems = (
     };
   });
 
-/** A version of an App the person answers for, up for review: made current on the App's page. */
+/** A version of an App the person answers for, up for review: made current under Versions in its details. */
 const versionItems = (
   versions: readonly GoLiveItem[],
   me: string,
@@ -411,10 +416,10 @@ const versionItems = (
       title: t`Make version ${version} of ${name} live?`,
       context: name,
       body: [
-        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, on the domain's page.`,
+        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's details.`,
       ],
       facts: [{ label: t`Version`, value: String(version) }],
-      about: { kind: "engine", engine: app.id },
+      about: { kind: "engine", engine: app.id, place: "versions" },
       forWhom: { person: me },
       // Core says what waits now, not since when: as of the read.
       date: readAt,
@@ -518,7 +523,7 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         t`It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached.`,
       ],
       facts: [
-        { label: t`Domain`, value: appName },
+        { label: t`App`, value: appName },
         {
           label: t`Failed`,
           value: plural(failures, { one: "Once", other: "# times" }),
@@ -573,7 +578,7 @@ const revokedSubject = (
   subject.type === "app"
     ? {
         name: subject.appName,
-        about: { kind: "engine", engine: subject.app },
+        about: { kind: "engine", engine: subject.app, place: "details" },
       }
     : {
         name: subject.workflowName,

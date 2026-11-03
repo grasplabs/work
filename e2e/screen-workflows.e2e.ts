@@ -51,7 +51,7 @@ const releaseApp = async (
  * default 5 seconds.
  */
 const openIntake = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/domains/${app}/apps/intake/full`);
+  await page.goto(`/apps/${app}/full?screen=intake`);
   const screen = page.frameLocator('iframe[title="intake app"]');
   await expect(screen.getByRole("heading", { name: "Invoices" })).toBeVisible({
     timeout: 20_000,

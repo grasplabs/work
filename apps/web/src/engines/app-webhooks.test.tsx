@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppWebhooks, WebhookList } from "./app-webhooks.tsx";
 
-// A domain's Webhooks tab (app-webhooks.tsx), against core's
+// An App's Webhooks tab (app-webhooks.tsx), against core's
 // `apps.webhooks` as the page reaches it: Approve only for the
 // workspace's admins, a new webhook's secret shown once, as core answers
 // it, and the deliveries a webhook missed. Core decides all of it again
