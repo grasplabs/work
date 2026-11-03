@@ -1,5 +1,14 @@
-import { bindingOf } from "@grasp-os/sdk/form-binding";
 import type {
+  ArgsOf,
+  FilesReference,
+  OperationReference,
+  ReturnOf,
+} from "@grasp-os/sdk";
+import { bindingOf } from "@grasp-os/sdk/form-binding";
+import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
+import { useQuery, useUpload } from "@grasp-os/sdk/react";
+import type {
+  Declaring,
   FieldChange,
   FormStatus,
   GraspForm,
@@ -12,21 +21,53 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
+import { ButtonGroup } from "@grasp-os/ui/components/button-group";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@grasp-os/ui/components/combobox";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
+  FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { Progress } from "@grasp-os/ui/components/progress";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Switch } from "@grasp-os/ui/components/switch";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { useSettled } from "@grasp-os/ui/hooks/use-settled";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { useId, useState, useSyncExternalStore } from "react";
+import type { DeepKeys, DeepValue } from "@tanstack/react-form";
+import {
+  BoldIcon,
+  ItalicIcon,
+  LinkIcon,
+  ListIcon,
+  ListOrderedIcon,
+  PaperclipIcon,
+} from "lucide-react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 
 // The fields and parts of a form the SDK's `useForm` made (spec 10.2.2):
-// one semantic form, text fields with their label, description and error,
+// one semantic form, a field for every kind of value (text, a choice or
+// several, a number, a day or a moment, a yes or no, a record, a file,
+// formatted text) with its label, description and error,
 // the form's own error, and the submit button. They own what every form
 // would otherwise write again: error IDs and `aria-invalid`, showing an
 // error only once a field was left or a submit tried, the lock while a
@@ -94,7 +135,7 @@ const Form = ({
   />
 );
 
-/** What a text field shows of its error: the field's own check, or the server's. */
+/** What a field shows of its error: the field's own check, or the server's. */
 const errorOf = (
   meta: { readonly errors: readonly unknown[]; readonly isBlurred: boolean },
   status: FormStatus,
@@ -111,24 +152,57 @@ const errorOf = (
     : undefined;
 };
 
-/** What a text field's control gets from the field around it. */
+/**
+ * The names of a form's fields whose value is `Value`: what each field
+ * helper binds, so a field of another type is a type error in the screen.
+ */
+type FieldNameOf<Values, Value> = {
+  [Name in DeepKeys<Values>]: DeepValue<Values, Name> extends Value
+    ? Name
+    : never;
+}[DeepKeys<Values>];
+
+/** A field that holds one choice: an enum's value, or a record's ID. */
+type ChoiceFieldName<Values> = FieldNameOf<Values, string | null | undefined>;
+/** A field that holds several choices: an array of an enum's values. */
+type ChoicesFieldName<Values> = FieldNameOf<
+  Values,
+  readonly string[] | undefined
+>;
+/** A field that holds a number, a moment (`v.timestamp()`) among them. */
+type NumberFieldName<Values> = FieldNameOf<Values, number | null | undefined>;
+/** A field that holds a yes or no. */
+type BooleanFieldName<Values> = FieldNameOf<Values, boolean | undefined>;
+/** A field that holds a file's reference (`v.file()`). */
+type FileFieldName<Values> = FieldNameOf<
+  Values,
+  { readonly id: string } | null | undefined
+>;
+
+/** What a field's control gets from the field around it. */
 interface Control {
   id: string;
   name: string;
-  value: string;
+  value: unknown;
   disabled: boolean;
   invalid: boolean;
+  /** Whether the schema needs a value the person must give. */
+  required: boolean;
   describedBy: string | undefined;
-  handleChange: (value: string) => void;
+  /** What the schema declares of the field, if it declares it. */
+  descriptor: ValueDescriptor | undefined;
+  /** The field's value once the person cleared it: null when the schema allows it. */
+  empty: null | undefined;
+  handleChange: (value: unknown) => void;
   handleBlur: () => void;
 }
 
-/** What every text field takes. */
-interface TextFieldProps<Values> {
+/** What every field takes. */
+interface FieldProps<Values, Name> {
   /** The form the field belongs to, passed so its name is typed. */
   form: GraspForm<Values, unknown>;
-  /** The field: one of the form's text values. */
-  name: TextFieldName<Values>;
+  /** The field: one of the form's values, of the type this field edits. */
+  name: Name;
   label: React.ReactNode;
   description?: React.ReactNode;
 }
@@ -141,55 +215,120 @@ const describedByOf = (
   return ids.length === 0 ? undefined : ids.join(" ");
 };
 
-/** A text field's label, description and error around its control. */
-const TextFieldShell = <Values,>({
+/**
+ * Whether `descriptor` needs a value the person must give: not one left
+ * out, filled in by a default or null, nor text that may be empty.
+ */
+const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
+  if (
+    descriptor === undefined ||
+    descriptor.presence !== "required" ||
+    descriptor.nullable
+  ) {
+    return false;
+  }
+  if (descriptor.kind === "string") {
+    return (descriptor.min ?? 0) > 0;
+  }
+  if (descriptor.kind === "array") {
+    return (descriptor.min ?? 0) > 0;
+  }
+  return descriptor.kind !== "boolean";
+};
+
+/**
+ * How a field sits around its control: its label above it (`stacked`),
+ * beside a checkbox or switch (`inline`), or as the legend of a group of
+ * controls (`group`).
+ */
+type Layout = "stacked" | "inline" | "group";
+
+/** A field's label, description and error around its control. */
+const FieldShell = <Values,>({
   form,
   name,
   label,
   description,
+  layout = "stacked",
   render,
-}: TextFieldProps<Values> & {
-  render: (props: Control) => React.JSX.Element;
+}: FieldProps<Values, string> & {
+  layout?: Layout;
+  render: (control: Control) => React.ReactNode;
 }): React.JSX.Element => {
   const status = useFormStatus(form);
   const id = useId();
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
+  const descriptor = bindingOf(form).fieldDescriptor(name);
   const { locked } = status;
   return (
-    // SAFETY: a text field's name is one of the form's keys (TextFieldName).
+    // SAFETY: a field's name is one of the form's keys (FieldNameOf).
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     <form.Field name={name as never}>
       {(field) => {
         const error = errorOf(field.state.meta, status, name);
-        const describedBy = describedByOf({
-          [descriptionId]: description !== undefined,
-          [errorId]: error !== undefined,
-        });
-        const { value } = field.state;
+        const invalid = error !== undefined;
+        const control: Control = {
+          id,
+          name,
+          value: field.state.value,
+          disabled: locked,
+          invalid,
+          required: isRequired(descriptor),
+          describedBy: describedByOf({
+            [descriptionId]: description !== undefined,
+            [errorId]: invalid,
+          }),
+          descriptor,
+          empty: descriptor?.nullable === true ? null : undefined,
+          handleChange: (next) => {
+            // SAFETY: each field hands on a value of the type its name
+            // admits (FieldNameOf), or one the validator then refuses.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            field.handleChange(next as never);
+          },
+          handleBlur: field.handleBlur,
+        };
+        const shownDescription =
+          description === undefined ? null : (
+            <FieldDescription id={descriptionId}>
+              {description}
+            </FieldDescription>
+          );
+        const shownError = <FieldError id={errorId}>{error}</FieldError>;
+        if (layout === "group") {
+          return (
+            <FieldSet
+              aria-describedby={control.describedBy}
+              aria-invalid={invalid}
+              data-invalid={invalid}
+              disabled={locked}
+            >
+              <FieldLegend variant="label">{label}</FieldLegend>
+              {shownDescription}
+              {render(control)}
+              {shownError}
+            </FieldSet>
+          );
+        }
+        if (layout === "inline") {
+          return (
+            <Field data-invalid={invalid} orientation="horizontal">
+              {render(control)}
+              <FieldContent>
+                <FieldLabel htmlFor={id}>{label}</FieldLabel>
+                {shownDescription}
+                {shownError}
+              </FieldContent>
+            </Field>
+          );
+        }
         return (
-          <Field data-invalid={error !== undefined}>
+          <Field data-invalid={invalid}>
             <FieldLabel htmlFor={id}>{label}</FieldLabel>
-            {render({
-              id,
-              name,
-              value: typeof value === "string" ? value : "",
-              disabled: locked,
-              invalid: error !== undefined,
-              describedBy,
-              handleChange: (next) => {
-                // SAFETY: a text field's value is text (TextFieldName).
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-                field.handleChange(next as never);
-              },
-              handleBlur: field.handleBlur,
-            })}
-            {description === undefined ? null : (
-              <FieldDescription id={descriptionId}>
-                {description}
-              </FieldDescription>
-            )}
-            <FieldError id={errorId}>{error}</FieldError>
+            {render(control)}
+            {shownDescription}
+            {shownError}
           </Field>
         );
       }}
@@ -197,11 +336,22 @@ const TextFieldShell = <Values,>({
   );
 };
 
-/** What a text field passes to its control, of the props it was given. */
+/** What a field passes to its control, of the props it was given. */
 type ControlProps<Element extends "input" | "textarea"> = Omit<
   React.ComponentProps<Element>,
-  "form" | "name" | "value" | "defaultValue" | "onChange" | "onBlur" | "id"
+  | "form"
+  | "name"
+  | "value"
+  | "defaultValue"
+  | "onChange"
+  | "onBlur"
+  | "id"
+  | "type"
 >;
+
+/** A control's text: text as it is, anything else as nothing. */
+const textOf = (value: unknown): string =>
+  typeof value === "string" ? value : "";
 
 /** A one-line text field of `form`, with its label, description and error. */
 const TextField = <Values,>({
@@ -209,14 +359,23 @@ const TextField = <Values,>({
   name,
   label,
   description,
+  type,
   ...props
-}: TextFieldProps<Values> & ControlProps<"input">): React.JSX.Element => (
-  <TextFieldShell
+}: FieldProps<Values, TextFieldName<Values>> &
+  ControlProps<"input"> & {
+    type?: "text" | "email" | "url" | "tel" | "search" | "password";
+  }): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
     render={(control) => (
       <Input
         {...props}
         aria-describedby={control.describedBy}
         aria-invalid={control.invalid}
+        aria-required={control.required}
         disabled={control.disabled || props.disabled}
         id={control.id}
         name={control.name}
@@ -224,13 +383,10 @@ const TextField = <Values,>({
         onChange={(event) => {
           control.handleChange(event.target.value);
         }}
-        value={control.value}
+        type={type}
+        value={textOf(control.value)}
       />
     )}
-    description={description}
-    form={form}
-    label={label}
-    name={name}
   />
 );
 
@@ -241,13 +397,19 @@ const TextareaField = <Values,>({
   label,
   description,
   ...props
-}: TextFieldProps<Values> & ControlProps<"textarea">): React.JSX.Element => (
-  <TextFieldShell
+}: FieldProps<Values, TextFieldName<Values>> &
+  ControlProps<"textarea">): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
     render={(control) => (
       <Textarea
         {...props}
         aria-describedby={control.describedBy}
         aria-invalid={control.invalid}
+        aria-required={control.required}
         disabled={control.disabled || props.disabled}
         id={control.id}
         name={control.name}
@@ -255,15 +417,871 @@ const TextareaField = <Values,>({
         onChange={(event) => {
           control.handleChange(event.target.value);
         }}
-        value={control.value}
+        value={textOf(control.value)}
       />
     )}
+  />
+);
+
+/** The values an enum, or an array of one, declares, in its order. */
+const enumValuesOf = (
+  descriptor: ValueDescriptor | undefined
+): readonly string[] => {
+  if (descriptor?.kind === "enum") {
+    return descriptor.values;
+  }
+  if (descriptor?.kind === "array" && descriptor.item.kind === "enum") {
+    return descriptor.item.values;
+  }
+  return [];
+};
+
+/**
+ * The choices a field offers: the schema's enum values, each named by
+ * `options` where it names it; or `options` alone, for a field whose
+ * schema is text.
+ */
+const choicesOf = (
+  descriptor: ValueDescriptor | undefined,
+  options: Readonly<Record<string, string>> | undefined
+): readonly { readonly value: string; readonly label: string }[] => {
+  const declared = enumValuesOf(descriptor);
+  const values = declared.length > 0 ? declared : Object.keys(options ?? {});
+  return values.map((value) => ({
+    value,
+    label:
+      options !== undefined && Object.hasOwn(options, value)
+        ? (options[value] ?? value)
+        : value,
+  }));
+};
+
+/**
+ * A field of `form` that holds one of a fixed set of values: an enum's
+ * (`v.enum([...])`), each shown by its label in `options`, or itself.
+ * Choosing nothing clears it (null where the schema allows it).
+ */
+const SelectField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  options,
+  placeholder = "Choose…",
+}: FieldProps<Values, ChoiceFieldName<Values>> & {
+  /** Each value's label, by value; or the values, for a text field. */
+  options?: Readonly<Record<string, string>>;
+  /** What the select shows while nothing is chosen. */
+  placeholder?: string;
+}): React.JSX.Element => (
+  <FieldShell
     description={description}
     form={form}
     label={label}
     name={name}
+    render={(control) => (
+      <NativeSelect
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        aria-required={control.required}
+        className="w-full"
+        disabled={control.disabled}
+        id={control.id}
+        name={control.name}
+        onBlur={control.handleBlur}
+        onChange={(event) => {
+          const { value } = event.target;
+          control.handleChange(value === "" ? control.empty : value);
+        }}
+        value={textOf(control.value)}
+      >
+        <NativeSelectOption value="">{placeholder}</NativeSelectOption>
+        {choicesOf(control.descriptor, options).map((choice) => (
+          <NativeSelectOption key={choice.value} value={choice.value}>
+            {choice.label}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    )}
   />
 );
+
+/** A field's values, as a list of text. */
+const listOf = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+
+/**
+ * A field of `form` that holds several of a fixed set of values: an array
+ * of an enum (`v.array(v.enum([...]))`), a checkbox each, in the enum's
+ * order.
+ */
+const MultiSelectField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  options,
+}: FieldProps<Values, ChoicesFieldName<Values>> & {
+  /** Each value's label, by value; or the values, for an array of text. */
+  options?: Readonly<Record<string, string>>;
+}): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    layout="group"
+    name={name}
+    render={(control) => {
+      const chosen = listOf(control.value);
+      const choices = choicesOf(control.descriptor, options);
+      return (
+        <FieldGroup data-slot="checkbox-group">
+          {choices.map((choice) => {
+            const id = `${control.id}-${choice.value}`;
+            return (
+              <Field key={choice.value} orientation="horizontal">
+                <Checkbox
+                  aria-invalid={control.invalid}
+                  checked={chosen.includes(choice.value)}
+                  disabled={control.disabled}
+                  id={id}
+                  name={control.name}
+                  onCheckedChange={(checked) => {
+                    // Kept in the schema's order, whatever order they were picked in.
+                    const next = new Set(chosen);
+                    if (checked) {
+                      next.add(choice.value);
+                    } else {
+                      next.delete(choice.value);
+                    }
+                    control.handleChange(
+                      choices
+                        .map(({ value }) => value)
+                        .filter((value) => next.has(value))
+                    );
+                    control.handleBlur();
+                  }}
+                  value={choice.value}
+                />
+                <FieldLabel htmlFor={id}>{choice.label}</FieldLabel>
+              </Field>
+            );
+          })}
+        </FieldGroup>
+      );
+    }}
+  />
+);
+
+/** A number's text as an input shows it. */
+const numberText = (value: unknown): string => {
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return typeof value === "string" ? value : "";
+};
+
+/**
+ * What the person typed, as a number field holds it: a number, the
+ * cleared value, or the text itself, which the validator refuses as the
+ * wrong type rather than it being lost.
+ */
+const parsedNumber = (text: string, empty: null | undefined): unknown => {
+  if (text.trim() === "") {
+    return empty;
+  }
+  const number = Number(text);
+  return Number.isFinite(number) ? number : text;
+};
+
+/** A number input that keeps what the person types ("1.") while it is a number already. */
+const NumberInput = ({
+  control,
+  ...props
+}: ControlProps<"input"> & { control: Control }): React.JSX.Element => {
+  const [typed, setTyped] = useState(() => numberText(control.value));
+  // The field's value changed elsewhere (a reset, a record arrived): shown as it is.
+  const shown =
+    Object.is(parsedNumber(typed, control.empty), control.value) ||
+    (typed.trim() === "" &&
+      (control.value === null || control.value === undefined))
+      ? typed
+      : numberText(control.value);
+  const { descriptor } = control;
+  const integer = descriptor?.kind === "number" && descriptor.integer;
+  return (
+    <Input
+      inputMode={integer ? "numeric" : "decimal"}
+      max={descriptor?.kind === "number" ? descriptor.max : undefined}
+      min={descriptor?.kind === "number" ? descriptor.min : undefined}
+      step={integer ? 1 : "any"}
+      {...props}
+      aria-describedby={control.describedBy}
+      aria-invalid={control.invalid}
+      aria-required={control.required}
+      disabled={control.disabled || props.disabled}
+      id={control.id}
+      name={control.name}
+      onBlur={control.handleBlur}
+      onChange={(event) => {
+        setTyped(event.target.value);
+        control.handleChange(parsedNumber(event.target.value, control.empty));
+      }}
+      type="number"
+      value={shown}
+    />
+  );
+};
+
+/** A field of `form` that holds a number, bounded and whole as the schema says. */
+const NumberField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  ...props
+}: FieldProps<Values, NumberFieldName<Values>> &
+  ControlProps<"input">): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
+    render={(control) => <NumberInput {...props} control={control} />}
+  />
+);
+
+/** Pads a part of a date to two digits. */
+const twoDigits = (part: number): string => String(part).padStart(2, "0");
+
+/** A moment's calendar day in UTC, as a date input shows it: `2026-11-03`. */
+const dayText = (value: unknown): string =>
+  typeof value === "number" && Number.isFinite(value)
+    ? new Date(value).toISOString().slice(0, "yyyy-mm-dd".length)
+    : "";
+
+/** A moment in the person's own time zone, as a date-and-time input shows it. */
+const localText = (value: unknown): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "";
+  }
+  const date = new Date(value);
+  return `${date.getFullYear()}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())}T${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+};
+
+/**
+ * A field of `form` that holds a day (`v.timestamp()`): the moment that
+ * day starts in UTC, so it is the same day wherever it is read.
+ */
+const DateField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  ...props
+}: FieldProps<Values, NumberFieldName<Values>> &
+  ControlProps<"input">): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
+    render={(control) => (
+      <Input
+        {...props}
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        aria-required={control.required}
+        disabled={control.disabled || props.disabled}
+        id={control.id}
+        name={control.name}
+        onBlur={control.handleBlur}
+        onChange={(event) => {
+          const { value } = event.target;
+          control.handleChange(
+            value === "" ? control.empty : Date.parse(`${value}T00:00:00Z`)
+          );
+        }}
+        type="date"
+        value={dayText(control.value)}
+      />
+    )}
+  />
+);
+
+/**
+ * A field of `form` that holds a moment (`v.timestamp()`), entered in the
+ * person's own time zone, to the minute.
+ */
+const DateTimeField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  ...props
+}: FieldProps<Values, NumberFieldName<Values>> &
+  ControlProps<"input">): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
+    render={(control) => (
+      <Input
+        {...props}
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        aria-required={control.required}
+        disabled={control.disabled || props.disabled}
+        id={control.id}
+        name={control.name}
+        onBlur={control.handleBlur}
+        onChange={(event) => {
+          const { value } = event.target;
+          // Read in the person's time zone: no `Z`.
+          control.handleChange(
+            value === "" ? control.empty : new Date(value).getTime()
+          );
+        }}
+        type="datetime-local"
+        value={localText(control.value)}
+      />
+    )}
+  />
+);
+
+/** A field of `form` that holds a yes or no (`v.boolean()`), as a checkbox. */
+const CheckboxField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+}: FieldProps<Values, BooleanFieldName<Values>>): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    layout="inline"
+    name={name}
+    render={(control) => (
+      <Checkbox
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        checked={control.value === true}
+        disabled={control.disabled}
+        id={control.id}
+        name={control.name}
+        onCheckedChange={(checked) => {
+          control.handleChange(checked);
+          control.handleBlur();
+        }}
+      />
+    )}
+  />
+);
+
+/** A field of `form` that holds a yes or no (`v.boolean()`), as a switch. */
+const SwitchField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+}: FieldProps<Values, BooleanFieldName<Values>>): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    layout="inline"
+    name={name}
+    render={(control) => (
+      <Switch
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        checked={control.value === true}
+        disabled={control.disabled}
+        id={control.id}
+        name={control.name}
+        onCheckedChange={(checked) => {
+          control.handleChange(checked);
+          control.handleBlur();
+        }}
+      />
+    )}
+  />
+);
+
+/** A query, as a relation field reads its records with. */
+type AnyQuery = OperationReference<unknown, unknown, "query">;
+
+/** The records `Reference` answers: a list of them, or a page of them. */
+type RecordOf<Reference> =
+  ReturnOf<Reference> extends readonly (infer Item)[]
+    ? Item
+    : ReturnOf<Reference> extends { readonly items: readonly (infer Item)[] }
+      ? Item
+      : never;
+
+/** The records a query answered: its list, or its page's. */
+const recordsOf = (answer: unknown): readonly unknown[] => {
+  if (Array.isArray(answer)) {
+    return answer;
+  }
+  if (
+    typeof answer === "object" &&
+    answer !== null &&
+    "items" in answer &&
+    Array.isArray(answer.items)
+  ) {
+    return answer.items;
+  }
+  return [];
+};
+
+/** A record's `_id`, if it has one. */
+const idOf = (record: unknown): string | undefined =>
+  typeof record === "object" &&
+  record !== null &&
+  "_id" in record &&
+  typeof record._id === "string"
+    ? record._id
+    : undefined;
+
+/**
+ * Marks the record a relation field stands in for the one its value names
+ * while the query doesn't list it (a value it started with): named by its
+ * ID until the person picks another.
+ */
+const standIn = Symbol("standIn");
+
+/** How long typing settles before a search is read: one query, not one per key. */
+const searchSettleMs = 250;
+
+/** What a relation field's picker takes. */
+interface RelationProps<Reference extends AnyQuery> {
+  /** The query that answers the records to choose from: a list, or a page. */
+  query: Reference;
+  /** The query's arguments for what the person typed (empty at first). */
+  args: (search: string) => ArgsOf<Reference>;
+  /** How a record is named in the list and once chosen. */
+  optionLabel: (record: RecordOf<Reference>) => string;
+  /** What the input shows while nothing is typed. */
+  placeholder?: string;
+  /** What the list says when the query answers no records. */
+  emptyText?: string;
+  /** What the list says while the query loads. */
+  loadingText?: string;
+}
+
+/** The searchable list a relation field picks a record from. */
+const RelationPicker = <Reference extends AnyQuery>({
+  control,
+  query,
+  args,
+  optionLabel,
+  placeholder,
+  emptyText = "No matches.",
+  loadingText = "Loading…",
+}: RelationProps<Reference> & { control: Control }): React.JSX.Element => {
+  const [search, setSearch] = useState("");
+  const settled = useSettled(search, searchSettleMs);
+  const answer = useQuery(query, args(settled));
+  // The record chosen here, kept while a later search no longer lists it.
+  const [picked, setPicked] = useState<unknown>(null);
+  const records = recordsOf(answer);
+  const chosenId = typeof control.value === "string" ? control.value : null;
+  let chosen: unknown = null;
+  if (chosenId !== null) {
+    chosen =
+      records.find((record) => idOf(record) === chosenId) ??
+      (idOf(picked) === chosenId ? picked : { _id: chosenId, [standIn]: true });
+  }
+  const labelOf = (record: unknown): string => {
+    if (typeof record === "object" && record !== null && standIn in record) {
+      return idOf(record) ?? "";
+    }
+    // SAFETY: every other record here came from the query's answer.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return optionLabel(record as RecordOf<Reference>);
+  };
+  return (
+    <Combobox
+      disabled={control.disabled}
+      filter={null}
+      isItemEqualToValue={(item: unknown, value: unknown) =>
+        idOf(item) === idOf(value)
+      }
+      itemToStringLabel={labelOf}
+      items={records}
+      onInputValueChange={(text) => {
+        setSearch(text);
+      }}
+      onValueChange={(record: unknown) => {
+        setPicked(record);
+        control.handleChange(idOf(record) ?? control.empty);
+        control.handleBlur();
+      }}
+      value={chosen}
+    >
+      <ComboboxInput
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid}
+        aria-required={control.required}
+        disabled={control.disabled}
+        id={control.id}
+        placeholder={placeholder}
+        showClear={!control.required}
+      />
+      <ComboboxContent>
+        <ComboboxEmpty>
+          {answer === undefined ? loadingText : emptyText}
+        </ComboboxEmpty>
+        <ComboboxList>
+          {(record: unknown) => (
+            <ComboboxItem key={idOf(record)} value={record}>
+              {labelOf(record)}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  );
+};
+
+/**
+ * A field of `form` that holds a record's ID (`v.id("table")`): a
+ * searchable list of the records `query` answers for what the person
+ * types, each named by `optionLabel`.
+ */
+const RelationField = <Values, Reference extends AnyQuery>({
+  form,
+  name,
+  label,
+  description,
+  ...picker
+}: FieldProps<Values, ChoiceFieldName<Values>> &
+  RelationProps<Reference>): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
+    render={(control) => <RelationPicker {...picker} control={control} />}
+  />
+);
+
+/** A file picked and uploaded here: what the field shows of it. */
+interface UploadedFile {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** What a file field says, in English unless the screen says otherwise. */
+interface FileFieldText {
+  /** The button that takes the file off the field (not deleting it). */
+  readonly remove: string;
+  /** A file the field held before this screen opened. */
+  readonly attached: string;
+  readonly uploading: string;
+}
+
+const fileFieldText: FileFieldText = {
+  remove: "Remove",
+  attached: "Attached file",
+  uploading: "Uploading…",
+};
+
+/** The upload control of a file field, through `resource`. */
+const FileUpload = <Reference extends FilesReference>({
+  control,
+  resource,
+  accept,
+  text,
+}: {
+  control: Control;
+  resource: Declaring<Reference, "upload">;
+  accept: string | undefined;
+  text: FileFieldText;
+}): React.JSX.Element => {
+  const upload = useUpload(resource);
+  const [uploaded, setUploaded] = useState<UploadedFile>();
+  const [failure, setFailure] = useState<string>();
+  const held =
+    typeof control.value === "object" &&
+    control.value !== null &&
+    "id" in control.value &&
+    typeof control.value.id === "string"
+      ? control.value.id
+      : undefined;
+  const busy = upload.status === "uploading" || upload.status === "verifying";
+  if (held !== undefined) {
+    return (
+      <div className="flex items-center gap-2">
+        <PaperclipIcon aria-hidden />
+        <span className="truncate text-sm">
+          {uploaded?.id === held ? uploaded.name : text.attached}
+        </span>
+        <Button
+          disabled={control.disabled}
+          onClick={() => {
+            control.handleChange(control.empty);
+            control.handleBlur();
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {text.remove}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <Input
+        accept={accept}
+        aria-busy={busy}
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid || failure !== undefined}
+        aria-required={control.required}
+        disabled={control.disabled || busy}
+        id={control.id}
+        name={control.name}
+        onChange={(event) => {
+          const [file] = event.target.files ?? [];
+          if (file === undefined) {
+            return;
+          }
+          setFailure(undefined);
+          const send = async (): Promise<void> => {
+            try {
+              const ref = await upload.upload(file);
+              setUploaded({ id: ref.id, name: file.name });
+              control.handleChange(ref);
+            } catch (error) {
+              setFailure(
+                error instanceof Error ? error.message : String(error)
+              );
+            }
+            control.handleBlur();
+          };
+          void send();
+        }}
+        type="file"
+      />
+      {busy ? (
+        <Progress
+          aria-label={text.uploading}
+          value={
+            upload.bytesTotal === 0
+              ? null
+              : (upload.bytesUploaded / upload.bytesTotal) * 100
+          }
+        />
+      ) : null}
+      {failure === undefined ? null : (
+        <p className="text-destructive text-sm" role="alert">
+          {failure}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A field of `form` that holds a file's reference (`v.file()`): the file
+ * the person picks is uploaded through `resource`, a files resource the
+ * App declares with `upload`, and the field holds its reference.
+ * Removing it only takes it off the field.
+ */
+const FileField = <Values, Reference extends FilesReference>({
+  form,
+  name,
+  label,
+  description,
+  resource,
+  accept,
+  text,
+}: FieldProps<Values, FileFieldName<Values>> & {
+  resource: Declaring<Reference, "upload">;
+  /** The kinds of file the picker offers, as an input's `accept`. */
+  accept?: string;
+  text?: Partial<FileFieldText>;
+}): React.JSX.Element => (
+  <FieldShell
+    description={description}
+    form={form}
+    label={label}
+    name={name}
+    render={(control) => (
+      <FileUpload
+        accept={accept}
+        control={control}
+        resource={resource}
+        text={{ ...fileFieldText, ...text }}
+      />
+    )}
+  />
+);
+
+/** A Markdown mark the rich text toolbar puts around, or before, what is selected. */
+type Mark = "bold" | "italic" | "bullets" | "numbers" | "link";
+
+/** What the rich text toolbar's buttons are called, in English unless the screen says otherwise. */
+type MarkLabels = Readonly<Record<Mark, string>>;
+
+const markLabels: MarkLabels = {
+  bold: "Bold",
+  italic: "Italic",
+  bullets: "Bulleted list",
+  numbers: "Numbered list",
+  link: "Link",
+};
+
+const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
+  bold: BoldIcon,
+  italic: ItalicIcon,
+  bullets: ListIcon,
+  numbers: ListOrderedIcon,
+  link: LinkIcon,
+};
+
+const marks: readonly Mark[] = ["bold", "italic", "bullets", "numbers", "link"];
+
+/** A link's address before the person types one: selected, to type over. */
+const linkPlaceholder = "https://";
+
+/**
+ * `text` with `mark` applied to its selection from `start` to `end`, and
+ * what to select after: the text marked, or a link's address to type.
+ */
+export const applyMark = (
+  text: string,
+  start: number,
+  end: number,
+  mark: Mark
+): { text: string; start: number; end: number } => {
+  const before = text.slice(0, start);
+  const selected = text.slice(start, end);
+  const after = text.slice(end);
+  if (mark === "bold" || mark === "italic") {
+    const wrap = mark === "bold" ? "**" : "_";
+    return {
+      text: `${before}${wrap}${selected}${wrap}${after}`,
+      start: start + wrap.length,
+      end: end + wrap.length,
+    };
+  }
+  if (mark === "link") {
+    const label = `[${selected}](`;
+    return {
+      text: `${before}${label}${linkPlaceholder})${after}`,
+      start: start + label.length,
+      end: start + label.length + linkPlaceholder.length,
+    };
+  }
+  // A list: each selected line, or the line the cursor is on, as an item.
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const lines = text.slice(lineStart, end).split("\n");
+  const listed = lines
+    .map((line, index) =>
+      mark === "bullets" ? `- ${line}` : `${index + 1}. ${line}`
+    )
+    .join("\n");
+  return {
+    text: `${text.slice(0, lineStart)}${listed}${after}`,
+    start: lineStart,
+    end: lineStart + listed.length,
+  };
+};
+
+/**
+ * A field of `form` that holds formatted text, as Markdown: bold, italic,
+ * lists and links, which its toolbar puts around what is selected. It
+ * holds text alone, never HTML, so nothing it stores can run: whatever
+ * shows it renders the Markdown, without raw HTML.
+ */
+const RichTextField = <Values,>({
+  form,
+  name,
+  label,
+  description,
+  labels,
+  ...props
+}: FieldProps<Values, TextFieldName<Values>> &
+  ControlProps<"textarea"> & {
+    /** What the toolbar's buttons are called. */
+    labels?: Partial<MarkLabels>;
+  }): React.JSX.Element => {
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const named = { ...markLabels, ...labels };
+  return (
+    <FieldShell
+      description={description}
+      form={form}
+      label={label}
+      name={name}
+      render={(control) => (
+        <div className="flex flex-col gap-2">
+          <ButtonGroup
+            aria-label={typeof label === "string" ? label : undefined}
+          >
+            {marks.map((mark) => {
+              const Icon = markIcons[mark];
+              return (
+                <Button
+                  aria-controls={control.id}
+                  aria-label={named[mark]}
+                  disabled={control.disabled}
+                  key={mark}
+                  onClick={() => {
+                    const element = editor.current;
+                    if (element === null) {
+                      return;
+                    }
+                    const marked = applyMark(
+                      element.value,
+                      element.selectionStart,
+                      element.selectionEnd,
+                      mark
+                    );
+                    control.handleChange(marked.text);
+                    requestAnimationFrame(() => {
+                      element.focus();
+                      element.setSelectionRange(marked.start, marked.end);
+                    });
+                  }}
+                  size="icon-sm"
+                  title={named[mark]}
+                  type="button"
+                  variant="outline"
+                >
+                  <Icon />
+                </Button>
+              );
+            })}
+          </ButtonGroup>
+          <Textarea
+            {...props}
+            aria-describedby={control.describedBy}
+            aria-invalid={control.invalid}
+            aria-required={control.required}
+            disabled={control.disabled || props.disabled}
+            id={control.id}
+            name={control.name}
+            onBlur={control.handleBlur}
+            onChange={(event) => {
+              control.handleChange(event.target.value);
+            }}
+            ref={editor}
+            value={textOf(control.value)}
+          />
+        </div>
+      )}
+    />
+  );
+};
 
 /**
  * A submission whose outcome is unknown: what is known of it, and a way to
@@ -630,4 +1648,21 @@ const SubmitButton = ({
   );
 };
 
-export { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField };
+export {
+  CheckboxField,
+  DateField,
+  DateTimeField,
+  FileField,
+  Form,
+  FormChanges,
+  FormError,
+  MultiSelectField,
+  NumberField,
+  RelationField,
+  RichTextField,
+  SelectField,
+  SubmitButton,
+  SwitchField,
+  TextareaField,
+  TextField,
+};

@@ -30,6 +30,7 @@ import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject, unsafeKeys, valueLimits } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
+import { descriptorOf } from "./value-schema.ts";
 
 // Forms (spec 10.2.1–10.3): one `useForm`, three ways in.
 //
@@ -687,6 +688,17 @@ type Checked =
  * What a form holds beside TanStack's state: its status, the record's
  * baseline and the submission in flight. One per mounted form.
  */
+/** A native schema's descriptor (a `v` schema), or undefined for another vendor's. */
+const nativeDescriptorOf = (
+  schema: StandardSchemaV1
+): ValueDescriptor | undefined => {
+  try {
+    return descriptorOf(schema);
+  } catch {
+    return undefined;
+  }
+};
+
 /** Whether two drafts hold the same edits, whenever each was written. */
 const sameDraft = (one: FormDraft, other: FormDraft): boolean => {
   try {
@@ -781,6 +793,28 @@ export class FormBinding {
   /** Connects the binding to its TanStack form, once. */
   attach(form: FormApiOf<Record<string, unknown>>): void {
     this.#form ??= form;
+  }
+
+  /**
+   * What the form's validator declares of its top-level field `name`: the
+   * operation's argument, or a native schema's field (a `v.object`). The
+   * field helpers read it for what a control offers (an enum's values, a
+   * number's bounds, whether it may be left empty); the validator still
+   * checks every value. Undefined for a field it doesn't declare, or a
+   * local form whose schema isn't Grasp's own.
+   */
+  fieldDescriptor(name: string): ValueDescriptor | undefined {
+    const target = this.#target;
+    let fields: Readonly<Record<string, ValueDescriptor>> | undefined;
+    if (target.kind === "schema") {
+      const declared = nativeDescriptorOf(target.schema);
+      fields = declared?.kind === "object" ? declared.fields : undefined;
+    } else if (target.args.kind === "object") {
+      ({ fields } = target.args);
+    }
+    return fields !== undefined && Object.hasOwn(fields, name)
+      ? fields[name]
+      : undefined;
   }
 
   /** The form's status now: what `subscribe` tells of. */

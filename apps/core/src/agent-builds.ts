@@ -1262,6 +1262,29 @@ const buildDeclaration = `/**
  * Screens are \`screens/<name>.tsx\` on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
+ * Don't wire tables and forms by hand:
+ * - A list of records is a \`DataGrid\` (\`@grasp-os/ui/components/data-grid\`)
+ *   over a query that takes \`pagination\` and answers pages: it reads them
+ *   page by page and hands the query what the person searched, sorted and
+ *   filtered, so the query does it over every record. Columns are field
+ *   names or \`{ field, label?, sortable?, filter?: { value: label },
+ *   cell?, edit?: (row, value) => mutation }\`; \`bulkActions\` make rows
+ *   selectable, \`rowActions\` give each row a menu. It shows its own
+ *   empty, loading and failed states.
+ *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, "due"]} search="Search tasks" rowActions={[{ label: "Open", onSelect: (task) => navigate(screens.task, { id: task._id }) }]} />\`
+ * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
+ *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
+ *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
+ *   bounds and whether it is required come from the schema: \`TextField\`,
+ *   \`TextareaField\` (text), \`SelectField\` (\`v.enum\`; \`options\` labels
+ *   each value), \`MultiSelectField\` (\`v.array(v.enum(...))\`),
+ *   \`NumberField\`, \`DateField\` (a day, \`v.timestamp()\`), \`DateTimeField\`
+ *   (a moment), \`CheckboxField\` and \`SwitchField\` (\`v.boolean()\`),
+ *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`
+ *   and \`optionLabel\`), \`FileField\` (\`v.file()\`: \`resource\`, a files
+ *   resource declaring \`upload\`) and \`RichTextField\` (bold, italic, lists
+ *   and links, kept as Markdown in a \`v.string()\`). Wrap them in \`Form\`,
+ *   with \`FormError\` and \`SubmitButton\`.
  * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
  * its public functions (\`query\`, \`mutation\`, \`action\`) in
  * operations files, \`operations/<group>.ts\`. An App holds no workflows,

@@ -853,6 +853,133 @@ export default function Notes() {
     ).resolves.toStrictEqual([expect.stringContaining('"owner"')]);
   });
 
+  it("builds a screen of a data grid and a field for every kind of value, typed by what each binds", async () => {
+    const tasks = {
+      "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export const taskFields = {
+  title: v.string().trim().min(1).max(200),
+  status: v.enum(["open", "done"]),
+  labels: v.array(v.enum(["red", "green"])),
+  estimate: v.number().integer().min(1),
+  due: v.timestamp(),
+  urgent: v.boolean(),
+  owner: v.id("people").optional(),
+  notes: v.string().max(10_000),
+  brief: v.file().optional(),
+};
+
+export default defineSchema({
+  tasks: defineTable(taskFields),
+  people: defineTable({ name: v.string() }),
+});
+`,
+      "operations/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+import { doc, mutation, query } from "#grasp/server";
+import { taskFields } from "../schema.ts";
+
+export const list = query({
+  args: { pagination: paginationOptionsValidator, search: v.string(), status: v.enum(["open", "done"]).optional() },
+  returns: paginationResultValidator(doc("tasks")),
+  handler: async (ctx, args) => await ctx.db.query("tasks").paginate(args.pagination),
+});
+
+export const people = query({
+  args: { search: v.string() },
+  returns: v.array(doc("people")),
+  handler: async (ctx) => await ctx.db.query("people").take(20),
+});
+
+export const create = mutation({
+  args: taskFields,
+  returns: v.id("tasks"),
+  handler: async (ctx, args) => await ctx.db.insert("tasks", args),
+});
+
+export const rename = mutation({
+  args: { id: v.id("tasks"), title: taskFields.title },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch("tasks", args.id, { title: args.title });
+    return null;
+  },
+});
+`,
+      "app.ts": `import { app, resource } from "@grasp-os/sdk";
+import { create, list, people, rename } from "./operations/tasks.ts";
+import schema from "./schema.ts";
+
+export const briefs = resource.files("briefs", { operations: ["upload", "read"] });
+
+export default app({
+  name: "Tasks",
+  schema,
+  access: { tables: { tasks: { read: "appMembers", write: "appMembers" }, people: { read: "appMembers", write: "appBuilders" } } },
+  operations: { tasks: { list, people, create, rename } },
+  internalOperations: {},
+  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
+  uses: [briefs],
+});
+`,
+    };
+    const tasksScreen = `import { useForm, useMutation } from "@grasp-os/sdk/react";
+import { DataGrid } from "@grasp-os/ui/components/data-grid";
+import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
+import { api, resources } from "#grasp";
+
+export default function Tasks() {
+  const rename = useMutation(api.tasks.rename);
+  const form = useForm(api.tasks.create, {
+    defaultValues: { title: "", status: "open", labels: [], estimate: 1, due: Date.now(), urgent: false, notes: "" },
+    resetOnSuccess: true,
+  });
+  return (
+    <main className="flex flex-col gap-6 p-6">
+      <DataGrid
+        label="Tasks"
+        query={api.tasks.list}
+        args={({ search, filters }) => ({ search, status: filters.status })}
+        columns={[
+          { field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) },
+          { field: "status", filter: { open: "Open", done: "Done" } },
+          "due",
+        ]}
+        search="Search tasks"
+        bulkActions={[{ label: "Archive", onSelect: (rows) => rows.length }]}
+        rowActions={[{ label: "Open", onSelect: (task) => task._id }]}
+      />
+      <Form form={form}>
+        <TextField form={form} label="Title" name="title" />
+        <SelectField form={form} label="Status" name="status" options={{ open: "Open", done: "Done" }} />
+        <MultiSelectField form={form} label="Labels" name="labels" />
+        <NumberField form={form} label="Estimate" name="estimate" />
+        <DateField form={form} label="Due" name="due" />
+        <CheckboxField form={form} label="Urgent" name="urgent" />
+        <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} optionLabel={(person) => person.name} />
+        <RichTextField form={form} label="Notes" name="notes" />
+        <FileField form={form} label="Brief" name="brief" resource={resources.briefs} />
+        <FormError form={form} />
+        <SubmitButton form={form}>Add task</SubmitButton>
+      </Form>
+    </main>
+  );
+}
+`;
+    await expect(
+      diagnosticsOf({ ...tasks, "screens/tasks.tsx": tasksScreen })
+    ).resolves.toStrictEqual([]);
+    // A field bound to a value of another kind is the screen's type error.
+    await expect(
+      diagnosticsOf({
+        ...tasks,
+        "screens/tasks.tsx": tasksScreen.replace(
+          '<NumberField form={form} label="Estimate" name="estimate" />',
+          '<NumberField form={form} label="Estimate" name="title" />'
+        ),
+      })
+    ).resolves.toStrictEqual([expect.stringContaining('"title"')]);
+  });
+
   it("gives screens only the native values of the SDK's root", async () => {
     await expect(
       diagnosticsOf({

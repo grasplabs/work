@@ -129,6 +129,7 @@ export type {
   SurfaceNavigateOptions,
 } from "./client-navigation.ts";
 export type {
+  Declaring,
   DeleteOptions,
   DownloadOptions,
   FileRef,
@@ -292,6 +293,18 @@ export const usePaginatedQuery = <Reference extends QueryReference>(
   // return, whose records `PageItemOf` names.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return snapshot.view as PaginatedQueryView<PageItemOf<Reference>>;
+};
+
+/**
+ * Reads again every query of the screen that failed and is still read: for
+ * a part of a screen that shows its own failure with a way to try again,
+ * as `DataGrid` does. The screen's error boundary does the same.
+ */
+export const useRetryFailed = (): (() => void) => {
+  const internals = clientInternals(useClient());
+  return () => {
+    internals.retryFailed();
+  };
 };
 
 /**
