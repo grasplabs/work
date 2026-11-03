@@ -138,6 +138,21 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company: "what a run recalled, as runs are (D3)",
   },
   "core.guest_chats": { company: "guest chats they opened for an App" },
+  // An App's visitor list (app-visitors.ts): the company's, as its builders
+  // keep it, with the builder who listed each entry (`added_by`). An entry
+  // may be a member's own address; it stays, the list's to change, never
+  // the erasure's (a decision for Nick: see the PR).
+  "core.app_visitor_entries": {
+    company: "an App's visitor list, and the builder who listed each",
+  },
+  // A visitor's codes and sessions name them only by address, mostly an
+  // outside visitor's, and are short-lived: a code works 10 minutes and
+  // its row goes an hour after, a session lasts 8 hours at most, and the
+  // sweep deletes both. A member's own address may be listed (or their
+  // domain), so the rows under the address that was theirs go with their
+  // email, in the identity area's batch.
+  "core.app_visitor_codes": { erased: "identity" },
+  "core.app_visitor_sessions": { erased: "identity" },
   "core.business_stores": { company: "stores they created" },
   "core.business_store_members": { company: "who has a role in a store" },
   "core.workflow_resources": { company: "workflows they own" },

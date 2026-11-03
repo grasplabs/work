@@ -500,6 +500,52 @@ const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
 };
 
 describe("erasing a person", () => {
+  it("takes out the codes and sessions they had as an App's visitor under the address that was theirs, and leaves everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const app = crypto.randomUUID();
+    const now = Date.now();
+    // An App whose builders listed their address, as visitors' are kept:
+    // lower case.
+    const theirs = String(person.person.email).toLowerCase();
+    const other = `visitor-${crypto.randomUUID().slice(0, 8)}@partner.test`;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Portal', '', ?, ?)"
+      ).bind(app, admin.userId, now),
+      ...[theirs, other].flatMap((address) => [
+        env.DB.prepare(
+          "INSERT INTO app_visitor_codes (id, app_id, address, code_hash, tries, used_at, sent_at, expires_at) VALUES (?, ?, ?, 'h', 0, NULL, ?, ?)"
+        ).bind(crypto.randomUUID(), app, address, now, now + 600_000),
+        env.DB.prepare(
+          "INSERT INTO app_visitor_sessions (id, app_id, address, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          address,
+          crypto.randomUUID(),
+          now,
+          now + 3_600_000
+        ),
+      ]),
+    ]);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const left = async (table: string, address: string) =>
+      await rowsOf(table, "address", address);
+    expect({
+      theirCodes: await left("app_visitor_codes", theirs),
+      theirSessions: await left("app_visitor_sessions", theirs),
+      otherCodes: await left("app_visitor_codes", other),
+      otherSessions: await left("app_visitor_sessions", other),
+    }).toStrictEqual({
+      theirCodes: 0,
+      theirSessions: 0,
+      otherCodes: 1,
+      otherSessions: 1,
+    });
+  });
+
   it("erases their email and every sign-in, keeping only their name and ID", async () => {
     const { admin, person } = await removedPerson();
     const name = String(person.person.name);
