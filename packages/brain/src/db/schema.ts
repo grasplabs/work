@@ -452,8 +452,15 @@ export const brainExports = sqliteTable(
     claim: text(),
     claimedAt: timestamp("claimed_at"),
     /**
+     * When it stopped running, complete or failed: no run writes for it
+     * after, and no upload of one runs past `exportUploadWindowMs` from
+     * then (../exports.ts).
+     */
+    endedAt: timestamp("ended_at"),
+    /**
      * When its files were found gone from the bucket, after it expired or
-     * failed: it leaves the sweep that deletes them (../exports.ts).
+     * failed and no upload could still land: it leaves the sweep that
+     * deletes them (../exports.ts).
      */
     filesRemovedAt: timestamp("files_removed_at"),
   },

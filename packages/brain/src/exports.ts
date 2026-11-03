@@ -100,6 +100,15 @@ export const exportLifetimeMs = 24 * 60 * 60 * 1000;
 /** How long a run holds an export before another may take it over. */
 export const exportLeaseMs = 10 * 60 * 1000;
 
+/**
+ * How long after an export stopped running an upload of a run that lost
+ * it may still land: twice the 15 minutes an invocation of the host's
+ * clock may run, and each run claims the export, and uploads, within its
+ * invocation, before it stopped (`ended_at`). Until then its files are
+ * deleted, but not taken as gone (`expireExports`).
+ */
+export const exportUploadWindowMs = 30 * 60 * 1000;
+
 /** Documents begun in one file of the export, at most. */
 export const documentsPerFile = 25;
 
@@ -491,6 +500,18 @@ const deleteObjects = async <C>(
 };
 
 /**
+ * Deletes `object`, as far as it can: one left behind is deleted with its
+ * export's prefix by its sweep (`expireExports`).
+ */
+const dropObject = async <C>(brain: Brain<C>, object: string) => {
+  try {
+    await brain.ports.blobs.delete(object);
+  } catch {
+    // Its export's sweep deletes it.
+  }
+};
+
+/**
  * Removes `files` of `run`'s export, records and objects: an upload cut
  * short, or the host's files of a run that stopped among them.
  */
@@ -566,6 +587,9 @@ const writeFile = async <C>(
     )
     .returning({ name: brainExportFiles.name });
   if (stored.length === 0) {
+    // Taken over meanwhile: what it uploaded is no file of the export's,
+    // and its sweep may have found the bucket empty already.
+    await dropObject(brain, object);
     throw new ClaimLostError();
   }
 };
@@ -1231,6 +1255,7 @@ const writeNext = async <C>(
         claim: null,
         claimedAt: null,
         updatedAt: now,
+        endedAt: now,
       })
       .where(
         and(
@@ -1252,6 +1277,8 @@ const writeNext = async <C>(
     }),
   ]);
   if (completed === undefined || completed.length === 0) {
+    // Taken over meanwhile: its manifest is no export's.
+    await dropObject(brain, manifestObject);
     throw new ClaimLostError();
   }
   return { more: false, reads: 0 };
@@ -1375,6 +1402,7 @@ export const advanceExport = async <C>(
         claim: null,
         claimedAt: null,
         updatedAt: brain.ports.clock(),
+        endedAt: brain.ports.clock(),
       })
       .where(and(eq(brainExports.id, exportId), eq(brainExports.claim, claim)))
       .returning({ id: brainExports.id });
@@ -1406,6 +1434,8 @@ const failPurged = async <C>(
       state: "failed",
       reason: "knowledge.export_purged",
       updatedAt: brain.ports.clock(),
+      // As it stopped running first: a complete one's, as it completed.
+      endedAt: sql`coalesce(${brainExports.endedAt}, ${brain.ports.clock().getTime()})`,
     })
     .where(eq(brainExports.id, exportId));
   await deleteFiles(brain, exportId);
@@ -1421,9 +1451,10 @@ export const exportSweepLimit = 10;
 
 /**
  * Deletes the files of every complete export past its download window,
- * and of every failed one, noting the complete ones expired; each once,
- * as an export whose files are found gone leaves the sweep
- * (`files_removed_at`), and one whose delete left some is swept again.
+ * and of every failed one, noting the complete ones expired; each until
+ * its files are found gone once no upload can still land
+ * (`exportUploadWindowMs`), when it leaves the sweep (`files_removed_at`);
+ * one whose delete left some is swept again.
  * `exportSweepLimit` exports a sweep, oldest first.
  */
 export const expireExports = async <C>(
@@ -1443,7 +1474,11 @@ export const expireExports = async <C>(
     }
   }
   const due = await brain.db
-    .select({ id: brainExports.id, state: brainExports.state })
+    .select({
+      id: brainExports.id,
+      state: brainExports.state,
+      endedAt: brainExports.endedAt,
+    })
     .from(brainExports)
     .where(
       or(
@@ -1459,13 +1494,17 @@ export const expireExports = async <C>(
     )
     .orderBy(asc(brainExports.updatedAt), asc(brainExports.id))
     .limit(exportSweepLimit);
-  for (const { id, state } of due) {
+  for (const { id, state, endedAt } of due) {
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
     await deleteFiles(brain, id);
-    // Gone only if the bucket says so: a delete that left some is swept
-    // again.
+    // Gone only if the bucket says so, and once no upload of a run that
+    // lost it can land after (`exportUploadWindowMs`): until then it is
+    // swept again.
+    const settled =
+      endedAt !== null &&
+      endedAt.getTime() + exportUploadWindowMs <= now.getTime();
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
-    const gone = await filesGone(brain, id);
+    const gone = settled && (await filesGone(brain, id));
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
     await brain.db
       .update(brainExports)

@@ -27,6 +27,7 @@ CREATE TABLE `brain_exports` (
 	`purge_mark` integer NOT NULL,
 	`claim` text,
 	`claimed_at` integer,
+	`ended_at` integer,
 	`files_removed_at` integer
 );
 --> statement-breakpoint

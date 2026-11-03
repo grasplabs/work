@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -20,6 +20,7 @@ import {
   exportLeaseMs,
   exportStatus,
   exportSweepLimit,
+  exportUploadWindowMs,
   expireExports,
   manifestName,
   prepareExport,
@@ -769,13 +770,15 @@ describe("exporting the company's Brain", () => {
     const exportId = await begun(brain, onExport);
     const blocked = await blockedPurge(brain, plan.id);
     const ended = await ranToEnd(brain, exportId, onExport);
-    // Every minute, as core's clock sweeps: however many failed before it.
+    // Every minute, as core's clock sweeps, once no upload can still land:
+    // however many failed before it.
     const { counting, listed } = listingCounted(brain);
+    const settled = new Date(Date.now() + exportUploadWindowMs + 60_000);
     const perSweep: number[] = [];
     for (let sweep = 0; sweep < 12; sweep += 1) {
       const before = listed.get(exportId) ?? 0;
       // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      await expireExports(counting, new Date());
+      await expireExports(counting, settled);
       perSweep.push((listed.get(exportId) ?? 0) - before);
     }
     // Finished, as its host's copies come back in reach: exports may run.
@@ -811,6 +814,7 @@ describe("exporting the company's Brain", () => {
       reason: "knowledge.export_purged",
       createdAt: new Date(at),
       updatedAt: new Date(at),
+      endedAt: new Date(at),
       collectionIds: "[]",
       purgeMark: 0,
     }));
@@ -825,6 +829,115 @@ describe("exporting the company's Brain", () => {
     expect(swept).toStrictEqual(
       failed.slice(0, exportSweepLimit).map(({ id }) => id)
     );
+  });
+
+  it("leaves no file in the bucket that a run which lost its export uploads after the sweep found it empty", async () => {
+    const { brain } = testHost();
+    const plans = await newCollection(brain, "Plans");
+    const plan = await writeVersion(brain, admin, {
+      collection: plans,
+      path: "plan.md",
+      text: "# Plan\nThe route.",
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const onExport = hostWith();
+    const exportId = await begun(brain, onExport);
+    // The first run's first upload waits, as one slow to reach the bucket.
+    const { promise: held, resolve: release } =
+      Promise.withResolvers<boolean>();
+    let waiting = false;
+    const stalled = withPorts(brain, {
+      blobs: {
+        delete: env.BLOBS.delete.bind(env.BLOBS),
+        get: env.BLOBS.get.bind(env.BLOBS),
+        head: env.BLOBS.head.bind(env.BLOBS),
+        list: env.BLOBS.list.bind(env.BLOBS),
+        put: async (key, value, options) => {
+          waiting = true;
+          await held;
+          return await env.BLOBS.put(key, value, options);
+        },
+      },
+    });
+    const first = outcome(
+      advanceExport(stalled, exportId, onExport, new Date(Date.now() + 60_000))
+    );
+    await expect.poll(() => waiting).toBe(true);
+    // Past its lease another run takes it over, and fails, as a purge
+    // begins; the sweep then deletes its files, once no upload can land.
+    const later = withPorts(brain, {
+      clock: () => new Date(Date.now() + exportLeaseMs + 60_000),
+    });
+    const blocked = await blockedPurge(brain, plan.id);
+    const second = await ranToEnd(later, exportId, onExport);
+    await expireExports(
+      brain,
+      new Date(Date.now() + exportLeaseMs + exportUploadWindowMs + 120_000)
+    );
+    const emptied = await objectsOf(exportId);
+    // Then the first run's upload lands.
+    release(true);
+    const firstEnded = await first;
+    const input = {
+      type: "content",
+      documentIds: [plan.id],
+      terms: ["route"],
+      reason: "erasure_request",
+    };
+    const again = await preparePurge(brain, admin, input, noCopies);
+    await purge(brain, admin, input, again.token, noCopies);
+
+    expect({
+      blocked,
+      second,
+      emptied,
+      firstEnded,
+      left: await objectsOf(exportId),
+    }).toStrictEqual({
+      blocked: "Error: The host's copies are out of reach",
+      second: "knowledge.export_purged",
+      emptied: [],
+      firstEnded: "ok",
+      left: [],
+    });
+  });
+
+  it("takes a failed export's files as gone only once no upload of a run that lost it can land", async () => {
+    const { brain } = testHost();
+    const ended = new Date();
+    const exportId = crypto.randomUUID();
+    await brain.db.insert(brainExports).values({
+      id: exportId,
+      by: "admin",
+      state: "failed",
+      reason: "knowledge.export_purged",
+      createdAt: ended,
+      updatedAt: ended,
+      endedAt: ended,
+      collectionIds: "[]",
+      purgeMark: 0,
+    });
+    const removedAt = async () => {
+      const [row] = await brain.db
+        .select({ at: brainExports.filesRemovedAt })
+        .from(brainExports)
+        .where(eq(brainExports.id, exportId));
+      return row?.at ?? null;
+    };
+    await expireExports(brain, new Date(ended.getTime() + 60_000));
+    const within = await removedAt();
+    await expireExports(
+      brain,
+      new Date(ended.getTime() + exportUploadWindowMs + 60_000)
+    );
+    const after = await removedAt();
+
+    expect({ within, after: after !== null }).toStrictEqual({
+      within: null,
+      after: true,
+    });
   });
 
   // Runs last: what it writes is large, and goes once it has run.
