@@ -1,7 +1,7 @@
 /** Reading imported releases from the admin's database. */
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { releases } from "../db/schema.ts";
@@ -75,6 +75,21 @@ export const listReleases = async (
     older: rows[RELEASE_LIST_LIMIT] ?? null,
   };
 };
+
+/**
+ * Every release whose bundle is kept, newest first: all a channel may be
+ * set to, however many newer releases the list shows instead
+ * (`RELEASE_LIST_LIMIT`). Retention never deletes the bundle of a
+ * channel's release (src/releases/retention.ts), so each channel's is here.
+ */
+export const listDeployableReleases = async (
+  db: AdminDatabase
+): Promise<{ id: string; notes: string }[]> =>
+  await db
+    .select({ id: summaryColumns.id, notes: summaryColumns.notes })
+    .from(releases)
+    .where(isNull(releases.bundleDeletedAt))
+    .orderBy(desc(releases.builtAt), desc(releases.id));
 
 /** Release `id` with its manifest, or null when it isn't imported. */
 const getStoredRelease = async (

@@ -211,11 +211,7 @@ const PlatformPage = () => {
       <PlatformNav />
       <div className="@container flex flex-col gap-6 text-sm">
         <ReadinessPanel readiness={readiness} />
-        <Channels
-          channels={platform.channels}
-          history={platform.history}
-          id={channelsId}
-        />
+        <Channels channels={platform.channels} id={channelsId} />
         <PromotionHistory history={platform.history} />
         <SharedSecrets />
         <EveryCompany live={live} rows={rows} />

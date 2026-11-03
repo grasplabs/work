@@ -71,14 +71,22 @@ const eventDetailSchema = promotionDetailSchema.extend({
 });
 
 /**
- * Every change of a channel's release, newest first, as the audit log
- * recorded it; only those naming `releaseIds` when given.
+ * Whether an event names one of `releaseIds`, as SQL: the ids bound as one
+ * JSON parameter, so any number of them fit D1's 100 parameters.
+ */
+const targetIn = (releaseIds: readonly string[]): SQL =>
+  sql`${auditEvents.target} IN (SELECT value FROM json_each(${JSON.stringify(releaseIds)}))`;
+
+/**
+ * The changes of a channel's release, newest first, as the audit log
+ * recorded it: only those naming `releaseIds` when given, and at most
+ * `limit` when given.
  */
 export const promotionHistory = async (
   db: AdminDatabase,
-  releaseIds?: readonly string[]
+  { releaseIds, limit }: { releaseIds?: readonly string[]; limit?: number } = {}
 ): Promise<PromotionEvent[]> => {
-  const rows = await db
+  const query = db
     .select({
       target: auditEvents.target,
       detail: auditEvents.detail,
@@ -89,18 +97,41 @@ export const promotionHistory = async (
     .where(
       and(
         eq(auditEvents.action, promoteAction),
-        releaseIds === undefined
-          ? undefined
-          : inArray(auditEvents.target, [...releaseIds])
+        releaseIds === undefined ? undefined : targetIn(releaseIds)
       )
     )
     // Changes in one millisecond in the order they were written.
     .orderBy(desc(auditEvents.at), desc(sql`rowid`));
+  const rows = await (limit === undefined ? query : query.limit(limit));
   return rows.flatMap(({ target, detail, actor, at }) => {
     const parsed = eventDetailSchema.safeParse(JSON.parse(detail ?? "null"));
     return target === null || !parsed.success
       ? []
       : [{ releaseId: target, ...parsed.data, actor, at }];
+  });
+};
+
+/**
+ * Each channel each of `releaseIds` has been on, once per pair: what its
+ * badges and the promotion choices need (`promotionRefusal`), without
+ * reading every change ever recorded.
+ */
+export const channelsOfReleases = async (
+  db: AdminDatabase,
+  releaseIds: readonly string[]
+): Promise<Promotion[]> => {
+  const rows = await db
+    .selectDistinct({
+      releaseId: auditEvents.target,
+      channel: sql<unknown>`json_extract(${auditEvents.detail}, '$.channel')`,
+    })
+    .from(auditEvents)
+    .where(and(eq(auditEvents.action, promoteAction), targetIn(releaseIds)));
+  return rows.flatMap(({ releaseId, channel }) => {
+    const parsed = promotionDetailSchema.shape.channel.safeParse(channel);
+    return releaseId === null || !parsed.success
+      ? []
+      : [{ releaseId, channel: parsed.data }];
   });
 };
 
@@ -216,7 +247,7 @@ export const promoteRelease = async (
   await assertDeployable(db, releaseId);
   const pointing = await channelReleases(db);
   const current = pointing[channel];
-  const history = await promotionHistory(db, [releaseId]);
+  const history = await promotionHistory(db, { releaseIds: [releaseId] });
   const refusal = promotionRefusal(channel, releaseId, current, history);
   if (refusal !== null) {
     throw new RolloutError(

@@ -87,7 +87,7 @@ export const staffEvents = async (db: AdminDatabase): Promise<StaffEvent[]> => {
 export interface PlatformData {
   /** Edge, Beta, Stable. */
   channels: ChannelProgress[];
-  /** Every change of a channel's release, newest first. */
+  /** The latest changes of a channel's release, newest first (`historyShown`). */
   history: PromotionEvent[];
   /** What staff did, the latest first (`staffEvents`). */
   events: StaffEvent[];

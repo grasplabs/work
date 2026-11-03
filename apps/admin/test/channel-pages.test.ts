@@ -9,6 +9,7 @@ import {
   clients,
 } from "../src/db/schema.ts";
 import type { Channel } from "../src/db/schema.ts";
+import { RELEASE_LIST_LIMIT } from "../src/releases/queries.ts";
 import { promoteRelease } from "../src/rollout/channels.ts";
 import { promoteReleaseFn, retryChannelFn } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
@@ -63,6 +64,20 @@ const live = async (channel: Channel, releaseId: string): Promise<string> => {
     channel,
   });
   return clientId;
+};
+
+/**
+ * A full release list's worth of releases newer than any placed one, on no
+ * channel and their bundles gone: the releases the list shows instead of
+ * the older ones.
+ */
+const crowdTheList = async (): Promise<void> => {
+  const at = Date.now() + 60_000;
+  await env.DB.prepare(
+    "INSERT INTO releases (id, commit_sha, manifest, manifest_sha256, built_at, imported_at, bundle_deleted_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?2) SELECT 'dev-crowd-' || i, 'crowd', '{}', 'crowd', ?1 + i, ?1 + i, ?1 FROM n"
+  )
+    .bind(at, RELEASE_LIST_LIMIT)
+    .run();
 };
 
 /** Takes `releaseId` to Stable as staff would: Edge, then Beta, then Stable. */
@@ -132,6 +147,8 @@ describe("the release channels on the Platform page", () => {
     const newest = await placedRelease("feat(core): only on edge");
     await toStable(release);
     await releaseToEdge(env, [newest]);
+    // Every choice stays offered once newer releases fill the list.
+    await crowdTheList();
 
     const { html } = await page("/platform");
     const edge = offered(html, "edge") ?? [];

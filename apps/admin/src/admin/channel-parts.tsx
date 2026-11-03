@@ -2,7 +2,7 @@
  * The release channels on Platform, derived live (src/rollout/progress.ts):
  * each channel's release, how many of its companies run it, each company's
  * state, Retry once a deploy failed, and Promote with only the moves the
- * channel may make. Then every change of a channel's release, from the
+ * channel may make. Then the latest changes of a channel's release, from the
  * audit log.
  */
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -15,6 +15,7 @@ import {
 import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { releaseTitle } from "../releases/version.ts";
@@ -64,24 +65,13 @@ const ClientLine = ({ client }: { client: ClientProgress }) => (
 );
 
 /** Moves `channel` to a release it may take: promoted from the channel before, or back. */
-const Promote = ({
-  channel,
-  history,
-}: {
-  channel: ChannelProgress;
-  history: readonly PromotionEvent[];
-}) => {
+const Promote = ({ channel }: { channel: ChannelProgress }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
   const id = `promote-${channel.channel}`;
   if (channel.promotable.length === 0) {
     return null;
   }
-  const back = (releaseId: string) =>
-    history.some(
-      (event) =>
-        event.channel === channel.channel && event.releaseId === releaseId
-    );
   return (
     <form
       className="flex flex-wrap items-end gap-2"
@@ -110,9 +100,9 @@ const Promote = ({
           {`Release for ${channelWords[channel.channel]}`}
         </FieldLabel>
         <NativeSelect id={id} name="releaseId">
-          {channel.promotable.map((releaseId) => (
+          {channel.promotable.map(({ releaseId, back }) => (
             <NativeSelectOption key={releaseId} value={releaseId}>
-              {back(releaseId) ? `${releaseId} (back)` : releaseId}
+              {back ? `${releaseId} (back)` : releaseId}
             </NativeSelectOption>
           ))}
         </NativeSelect>
@@ -162,20 +152,14 @@ const Retry = ({ channel }: { channel: ChannelProgress["channel"] }) => {
 };
 
 /** One channel: its release, its progress, its companies and what can be done. */
-const ChannelPanel = ({
-  channel,
-  history,
-}: {
-  channel: ChannelProgress;
-  history: readonly PromotionEvent[];
-}) => {
+const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
   const title = releaseTitle(channel.notes);
   return (
     <Section
       action={
         <div className="flex flex-col items-end gap-2">
           {channel.failed ? <Retry channel={channel.channel} /> : null}
-          <Promote channel={channel} history={history} />
+          <Promote channel={channel} />
         </div>
       }
       description={
@@ -229,41 +213,69 @@ const ChannelPanel = ({
   );
 };
 
+/** How often the Platform page is read again while a deploy moves on. */
+const followMs = 5000;
+
+/**
+ * Reads the Platform page again every few seconds while a company of a
+ * channel is deploying or waiting to, so its state, Retry and the counts
+ * follow the reconciler. A failed channel starts nothing until Retry, so
+ * its waiting companies don't count.
+ */
+const useFollowDeploys = (channels: readonly ChannelProgress[]) => {
+  const router = useRouter();
+  const moving = channels.some(({ failed, clients }) =>
+    clients.some(
+      ({ state }) => state === "deploying" || (state === "waiting" && !failed)
+    )
+  );
+  useEffect(() => {
+    const timer = moving
+      ? setInterval(() => {
+          void router.invalidate({
+            filter: (match) => match.routeId === "/platform/",
+          });
+        }, followMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [moving, router]);
+};
+
 /** Edge, Beta and Stable, side by side where there's room. */
 export const Channels = ({
   id,
   channels,
-  history,
 }: {
   id: string;
   channels: readonly ChannelProgress[];
-  history: readonly PromotionEvent[];
-}) => (
-  <div className="grid gap-6 @4xl:grid-cols-3" id={id}>
-    {channels.map((channel) => (
-      <ChannelPanel channel={channel} history={history} key={channel.channel} />
-    ))}
-  </div>
-);
+}) => {
+  useFollowDeploys(channels);
+  return (
+    <div className="grid gap-6 @4xl:grid-cols-3" id={id}>
+      {channels.map((channel) => (
+        <ChannelPanel channel={channel} key={channel.channel} />
+      ))}
+    </div>
+  );
+};
 
-/** How many changes the history lists: the latest. */
-const historyShown = 20;
-
-/** Every change of a channel's release, the newest first, as the audit log keeps it. */
+/** The latest changes of a channel's release, the newest first, as the audit log keeps it. */
 export const PromotionHistory = ({
   history,
 }: {
   history: readonly PromotionEvent[];
 }) => (
   <Section
-    description="Every change of a channel's release, the newest first. Edge's come by themselves as releases are imported."
+    description="The latest changes of a channel's release, the newest first. Edge's come by themselves as releases are imported."
     title="Promotions"
   >
     {history.length === 0 ? (
       <Quiet>No release has gone to a channel yet.</Quiet>
     ) : (
       <ul className="flex flex-col">
-        {history.slice(0, historyShown).map((event) => (
+        {history.map((event) => (
           <li
             className="flex items-baseline justify-between gap-4 border-t px-5 py-2"
             key={`${event.at.getTime()}-${event.channel}-${event.releaseId}`}

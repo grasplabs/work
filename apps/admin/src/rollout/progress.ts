@@ -10,11 +10,11 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { channelIds, clients } from "../db/schema.ts";
 import type { Channel } from "../db/schema.ts";
-import { listReleases } from "../releases/queries.ts";
-import { promotionHistory } from "./channels.ts";
+import { listDeployableReleases } from "../releases/queries.ts";
+import { channelsOfReleases, promotionHistory } from "./channels.ts";
 import type { PromotionEvent } from "./channels.ts";
 import { failsChannel, promotableReleases, stateOf } from "./desired.ts";
-import type { ClientState, SharedByWorker } from "./desired.ts";
+import type { ClientState, Promotion, SharedByWorker } from "./desired.ts";
 import { eachPage } from "./reconciler.ts";
 import { desiredShared } from "./shared-secrets.ts";
 import { channelReleases } from "./targets.ts";
@@ -49,8 +49,8 @@ export interface ChannelProgress {
   /** Whether a deploy of its release failed: nothing new starts until Retry. */
   failed: boolean;
   clients: ClientProgress[];
-  /** The releases it may be set to, newest first. */
-  promotable: string[];
+  /** The releases it may be set to, newest first; `back` for one it had before. */
+  promotable: { releaseId: string; back: boolean }[];
 }
 
 /** One channel's progress, its clients read a page at a time. */
@@ -68,7 +68,7 @@ const progressOf = async (
     releases: Awaited<ReturnType<typeof channelReleases>>;
     desired: SharedByWorker | null;
     names: ReadonlyMap<string, string>;
-    history: readonly PromotionEvent[];
+    history: readonly Promotion[];
     imported: readonly string[];
     notes: ReadonlyMap<string, string>;
   }
@@ -110,19 +110,29 @@ const progressOf = async (
       releases[channel],
       history,
       imported
-    ),
+    ).map((releaseId) => ({
+      releaseId,
+      back: history.some(
+        (promotion) =>
+          promotion.channel === channel && promotion.releaseId === releaseId
+      ),
+    })),
   };
 };
 
-/** Every channel's progress, Edge first, and its promotion history. */
+/** How many changes of a channel's release the Platform page lists: the latest. */
+export const historyShown = 20;
+
+/** Every channel's progress, Edge first, and the latest changes of a channel's release. */
 export const channelsProgress = async (
   env: Env
 ): Promise<{ channels: ChannelProgress[]; history: PromotionEvent[] }> => {
   const db = adminDatabase(env.DB);
   const releases = await channelReleases(db);
   const desired = await desiredShared(env);
-  const history = await promotionHistory(db);
-  const { releases: listed } = await listReleases(db);
+  // A release whose bundle is gone can't be deployed, so isn't offered.
+  const deployable = await listDeployableReleases(db);
+  const imported = deployable.map(({ id }) => id);
   const named = await db
     .select({ id: clients.id, name: clients.name })
     .from(clients)
@@ -131,15 +141,15 @@ export const channelsProgress = async (
     releases,
     desired,
     names: new Map(named.map(({ id, name }) => [id, name])),
-    history,
-    notes: new Map(listed.map(({ id, notes }) => [id, notes])),
-    // A release whose bundle is gone can't be deployed, so isn't offered.
-    imported: listed
-      .filter(({ bundleDeletedAt }) => bundleDeletedAt === null)
-      .map(({ id }) => id),
+    history: await channelsOfReleases(db, imported),
+    notes: new Map(deployable.map(({ id, notes }) => [id, notes])),
+    imported,
   };
   const channels = await Promise.all(
     channelIds.map(async (channel) => await progressOf(db, channel, context))
   );
-  return { channels, history };
+  return {
+    channels,
+    history: await promotionHistory(db, { limit: historyShown }),
+  };
 };

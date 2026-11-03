@@ -12,21 +12,23 @@ import { z } from "zod";
 import { adminDatabase } from "../db/act.ts";
 import { clients, clientWorkers } from "../db/schema.ts";
 import type { Channel } from "../db/schema.ts";
-import { promotionHistory } from "../rollout/channels.ts";
+import { channelsOfReleases, promotionHistory } from "../rollout/channels.ts";
 import { getRelease, listReleases } from "./queries.ts";
 
 export const fetchReleases = createServerFn({ method: "GET" }).handler(
   async () => {
     const db = adminDatabase(env.DB);
     const listed = await listReleases(db);
-    // Every promotion, unfiltered: D1 binds at most 100 parameters.
-    const history = await promotionHistory(db);
+    const pairs = await channelsOfReleases(
+      db,
+      listed.releases.map(({ id }) => id)
+    );
+    // One pair per release and channel, so none repeats.
     const channelsOn: Record<string, Channel[]> = {};
-    for (const { releaseId, channel } of history) {
+    for (const { releaseId, channel } of pairs) {
       const on = channelsOn[releaseId] ?? [];
-      if (!on.includes(channel)) {
-        channelsOn[releaseId] = [...on, channel];
-      }
+      on.push(channel);
+      channelsOn[releaseId] = on;
     }
     return { ...listed, channelsOn };
   }
@@ -54,7 +56,7 @@ export const fetchRelease = createServerFn({ method: "GET" })
       );
     return {
       ...release,
-      history: await promotionHistory(db, [data.id]),
+      history: await promotionHistory(db, { releaseIds: [data.id] }),
       running: running.toSorted((a, b) => a.name.localeCompare(b.name)),
     };
   });
