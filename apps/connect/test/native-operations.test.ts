@@ -1,3 +1,4 @@
+import { httpActionSchemas } from "@grasp-os/shared/http-connections";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -134,5 +135,26 @@ describe("a native operation's schemas", () => {
       notJson: "connect.contract_not_found",
       invalid: "connect.invalid",
     });
+  });
+
+  it("confirm an HTTP connection's actions, which core's release contracts install without asking", async () => {
+    // Core installs `grasp/http` and `grasp/http-read` from these very
+    // schemas as it boots, without asking connect (workflow-catalog.ts):
+    // this is what holds them to a native action's.
+    const confirmed = await Promise.all(
+      (["get", "send"] as const).map(async (action) => {
+        const { readOnly } = await confirm(
+          action,
+          httpActionSchemas[action].input,
+          httpActionSchemas[action].output
+        );
+        return { action, readOnly };
+      })
+    );
+
+    expect(confirmed).toStrictEqual([
+      { action: "get", readOnly: true },
+      { action: "send", readOnly: false },
+    ]);
   });
 });
