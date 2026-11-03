@@ -6,13 +6,16 @@ import type {
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { PencilIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { DoorBadge, DoorSheet, DoorsMenu } from "./diagram-doors.tsx";
 import { doorsOf, partsOf } from "./diagram-parts.ts";
@@ -28,7 +31,10 @@ import type { Box, Drawn } from "./flow-lines.ts";
 // Showing it runs nothing. A workflow drawn in named parts shows each as
 // a frame, stacked or side by side as the reader chooses, joined by the
 // line of the work (flow-lines.ts); its doors to other workflows are
-// listed beside the drawing's controls (diagram-doors.tsx).
+// listed beside the drawing's controls (diagram-doors.tsx). On the Flow
+// canvas (`workflow-flow.tsx`) the same drawing reads left to right or top
+// to bottom, its own tasks cards joined by dotted lines, and a builder
+// opens one of them to change it (`onStep`).
 
 /** Where a task or case goes once done, in words; nothing for "next". */
 const NextText = ({ next }: { next: DiagramNext | null }) => {
@@ -96,24 +102,87 @@ interface Marks {
   attempts: ReadonlyMap<string, number>;
   /** The tasks to show, by pointer: those that lead through a door gone to. */
   shown: ReadonlySet<string>;
+  /** Drawn on the canvas: cards that lift off its dotted ground. */
+  canvas: boolean;
+  /** Opens a task to change it, where its builder may. */
+  onStep: ((task: DiagramTask) => void) | undefined;
 }
 
+/** How the drawing reads: one under the other, or side by side. */
+export type Layout = "stacked" | "side";
+
+/** The dotted line between two cards on the canvas, as the drawing reads. */
+export const Wire = ({ layout }: { layout: Layout }) => (
+  <span
+    aria-hidden="true"
+    className={cn(
+      "border-muted-foreground/50 flex-none border-dotted",
+      layout === "side" ? "w-10 border-t-2" : "h-8 border-l-2"
+    )}
+  />
+);
+
+/**
+ * Tasks in order, one under the other; or, for the workflow's own tasks on
+ * the canvas (`row`), cards joined by dotted lines the way it reads.
+ */
 const TaskList = ({
   tasks,
   marks,
+  row,
 }: {
   tasks: readonly DiagramTask[];
   marks: Marks;
+  /** How the canvas reads its own tasks; none for tasks in a task. */
+  row?: Layout;
 }) => (
-  <ol className="flex flex-col gap-2">
+  <ol
+    className={cn(
+      "flex",
+      row === undefined && "flex-col gap-2",
+      row === "side" && "flex-row items-center",
+      row === "stacked" && "flex-col items-center"
+    )}
+  >
     {tasks.map((task) => (
       // eslint-disable-next-line no-use-before-define -- tasks nest in tasks
-      <TaskItem key={task.pointer} marks={marks} task={task} />
+      <TaskItem key={task.pointer} marks={marks} row={row} task={task} />
     ))}
   </ol>
 );
 
-const TaskItem = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
+/** Its ID; a button that opens it to change it, where it may be changed. */
+const TaskId = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
+  const { t } = useLingui();
+  const { onStep } = marks;
+  const { id } = task;
+  if (onStep === undefined) {
+    return <code className="font-medium">{id}</code>;
+  }
+  return (
+    <Button
+      aria-label={t`Change step ${id}`}
+      onClick={() => {
+        onStep(task);
+      }}
+      size="xs"
+      variant="ghost"
+    >
+      <code>{id}</code>
+      <PencilIcon aria-hidden="true" data-icon="inline-end" />
+    </Button>
+  );
+};
+
+const TaskItem = ({
+  task,
+  marks,
+  row,
+}: {
+  task: DiagramTask;
+  marks: Marks;
+  row: Layout | undefined;
+}) => {
   const { t } = useLingui();
   const state = marks.states.get(task.id);
   const attempts = marks.attempts.get(task.id) ?? 0;
@@ -121,51 +190,61 @@ const TaskItem = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
     <li
       aria-label={task.id}
       className={cn(
-        "bg-card flex flex-col gap-2 rounded-lg border p-3 transition-shadow",
-        marks.shown.has(task.pointer) && "ring-ring/50 ring-3"
+        row === "side" && "flex flex-none items-center",
+        row === "stacked" && "flex flex-none flex-col items-center"
       )}
       data-pointer={task.pointer}
       data-state={state ?? "none"}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="font-medium">{task.id}</code>
-        <Badge variant="outline">{task.kind}</Badge>
-        {task.label === null ? null : <span>{task.label}</span>}
-        {task.detail === null ? null : (
-          <span className="text-muted-foreground">{task.detail}</span>
+      {row === undefined ? null : <Wire layout={row} />}
+      <div
+        className={cn(
+          "bg-card flex flex-col gap-2 p-3 transition-shadow",
+          marks.canvas ? "node-sheet rounded-xl" : "rounded-lg border",
+          row !== undefined && "w-80",
+          marks.shown.has(task.pointer) && "ring-ring/50 ring-3"
         )}
-        {task.guarded ? (
-          <Badge variant="outline">{t`Only if its condition holds`}</Badge>
-        ) : null}
-        <NextText next={task.next} />
-        <StateBadge state={state} />
-        {attempts > 1 ? (
-          <Badge variant="outline">
-            <Plural one="# attempt" other="# attempts" value={attempts} />
-          </Badge>
-        ) : null}
-        {(task.doors ?? []).map((door) => (
-          <DoorBadge
-            door={door}
-            key={`${door.workflowId ?? ""} ${door.flow}`}
-          />
-        ))}
-      </div>
-      {task.scopes.length === 0 ? null : (
-        <div className="flex flex-col gap-3 border-l pl-3">
-          {task.scopes.map((scope) => (
-            <div
-              className="flex flex-col gap-2"
-              key={`${scope.kind} ${scope.name ?? ""}`}
-            >
-              <ScopeHeading scope={scope} />
-              {scope.tasks.length === 0 ? null : (
-                <TaskList marks={marks} tasks={scope.tasks} />
-              )}
-            </div>
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <TaskId marks={marks} task={task} />
+          <Badge variant="outline">{task.kind}</Badge>
+          {task.label === null ? null : <span>{task.label}</span>}
+          {task.detail === null ? null : (
+            <span className="text-muted-foreground">{task.detail}</span>
+          )}
+          {task.guarded ? (
+            <Badge variant="outline">{t`Only if its condition holds`}</Badge>
+          ) : null}
+          <NextText next={task.next} />
+          <StateBadge state={state} />
+          {attempts > 1 ? (
+            <Badge variant="outline">
+              <Plural one="# attempt" other="# attempts" value={attempts} />
+            </Badge>
+          ) : null}
+          {(task.doors ?? []).map((door) => (
+            <DoorBadge
+              door={door}
+              key={`${door.workflowId ?? ""} ${door.flow}`}
+            />
           ))}
         </div>
-      )}
+        {task.scopes.length === 0 ? null : (
+          <div className="flex flex-col gap-3 border-l pl-3">
+            {task.scopes.map((scope) => (
+              <div
+                className="flex flex-col gap-2"
+                key={`${scope.kind} ${scope.name ?? ""}`}
+              >
+                <ScopeHeading scope={scope} />
+                {scope.tasks.length === 0 ? null : (
+                  <TaskList marks={marks} tasks={scope.tasks} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </li>
   );
 };
@@ -173,9 +252,6 @@ const TaskItem = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
 /** No run shown: no task marked. */
 const noStates: ReadonlyMap<string, TraceState> = new Map();
 const noAttempts: ReadonlyMap<string, number> = new Map();
-
-/** How the parts stand: one under the other, or side by side. */
-type Layout = "stacked" | "side";
 
 /** Where each part's frame stands in the drawing, measured, for its lines. */
 const useFrameLines = () => {
@@ -192,14 +268,18 @@ const useFrameLines = () => {
         return;
       }
       const origin = element.getBoundingClientRect();
+      // The canvas may show the drawing zoomed: the lines are drawn in
+      // its own, unzoomed, measure.
+      const zoom =
+        element.offsetWidth === 0 ? 1 : origin.width / element.offsetWidth;
       const boxes = [...element.querySelectorAll("[data-part]")].map(
         (frame, index) => {
           const rect = frame.getBoundingClientRect();
           const box: Box = {
-            left: rect.left - origin.left + element.scrollLeft,
-            top: rect.top - origin.top,
-            right: rect.right - origin.left + element.scrollLeft,
-            bottom: rect.bottom - origin.top,
+            left: (rect.left - origin.left) / zoom + element.scrollLeft,
+            top: (rect.top - origin.top) / zoom,
+            right: (rect.right - origin.left) / zoom + element.scrollLeft,
+            bottom: (rect.bottom - origin.top) / zoom,
           };
           return {
             id: String(index),
@@ -262,7 +342,7 @@ const PartsFrames = ({
       >
         {wires.map((wire) => (
           <path
-            className="stroke-border"
+            className={marks.canvas ? "wire-base" : "stroke-border"}
             d={wire.d}
             fill="none"
             key={wire.key}
@@ -277,7 +357,8 @@ const PartsFrames = ({
           <section
             aria-label={t`Part ${n}: ${name}`}
             className={cn(
-              "bg-muted/40 relative flex flex-col gap-3 rounded-xl border p-3",
+              "relative flex flex-col gap-3 rounded-xl p-3",
+              marks.canvas ? "bg-card/60 node-sheet" : "bg-muted/40 border",
               layout === "side" ? "w-96 flex-none" : "w-full"
             )}
             data-part={n}
@@ -318,24 +399,78 @@ const showDoor = (drawing: HTMLElement | null, door: DoorPlace): void => {
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
+/** What the canvas sets of the drawing: how it reads, and what it adds. */
+export interface CanvasOptions {
+  layout: Layout;
+  /** Before the workflow's first task: where it starts. */
+  start: ReactNode;
+  /** After its last: where it ends. */
+  end: ReactNode;
+  /** Opens a task to change it; none where it may not be changed. */
+  onStep: ((task: DiagramTask) => void) | undefined;
+}
+
+/**
+ * The drawing on the canvas: where it starts, its tasks (or its parts) as
+ * cards that read as `layout` says, and where it ends, joined by dotted
+ * lines.
+ */
+const CanvasDrawing = ({
+  diagram,
+  parts,
+  marks,
+  canvas,
+}: {
+  diagram: WorkflowDiagram;
+  parts: readonly DiagramPart[];
+  marks: Marks;
+  canvas: CanvasOptions;
+}) => {
+  const { layout } = canvas;
+  return (
+    <div
+      className={cn(
+        "flex w-max",
+        layout === "side" ? "flex-row items-center" : "flex-col items-center"
+      )}
+    >
+      {canvas.start}
+      {parts.length > 0 ? (
+        <>
+          <Wire layout={layout} />
+          <PartsFrames layout={layout} marks={marks} parts={parts} />
+        </>
+      ) : (
+        <TaskList marks={marks} row={layout} tasks={diagram.tasks} />
+      )}
+      <Wire layout={layout} />
+      {canvas.end}
+    </div>
+  );
+};
+
 /**
  * `diagram`, with the tasks a run reached marked as `states` says, and
  * the attempts each made: none when no run is shown. In named parts, as
- * frames; with its doors beside its controls.
+ * frames; with its doors beside its controls. On the canvas (`canvas`),
+ * as the canvas lays it out, its parts as it says they stand.
  */
 export const WorkflowDiagramView = ({
   diagram,
   states = noStates,
   attempts = noAttempts,
   label,
+  canvas,
 }: {
   diagram: WorkflowDiagram;
   states?: ReadonlyMap<string, TraceState>;
   attempts?: ReadonlyMap<string, number>;
   label: string;
+  canvas?: CanvasOptions;
 }) => {
   const { t } = useLingui();
-  const [layout, setLayout] = useState<Layout>("stacked");
+  const [picked, setPicked] = useState<Layout>("stacked");
+  const layout = canvas?.layout ?? picked;
   const [door, setDoor] = useState<DoorPlace | null>(null);
   const drawing = useRef<HTMLElement>(null);
   const parts = partsOf(diagram);
@@ -344,18 +479,22 @@ export const WorkflowDiagramView = ({
     states,
     attempts,
     shown: new Set(door?.tasks),
+    canvas: canvas !== undefined,
+    onStep: canvas?.onStep,
   };
+  // On the canvas, how the parts stand is the canvas's own control.
+  const layoutPicker = parts.length > 0 && canvas === undefined;
   return (
     <section aria-label={label} className="flex flex-col gap-2" ref={drawing}>
-      {parts.length > 0 || doors.length > 0 ? (
+      {layoutPicker || doors.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
-          {parts.length > 0 ? (
+          {layoutPicker ? (
             <ToggleGroup
               aria-label={t`How the parts stand`}
               onValueChange={(value: unknown[]) => {
                 const [next] = value;
                 if (next === "stacked" || next === "side") {
-                  setLayout(next);
+                  setPicked(next);
                 }
               }}
               size="sm"
@@ -375,9 +514,9 @@ export const WorkflowDiagramView = ({
           ) : null}
           <DoorsMenu
             doors={doors}
-            onGo={(chosen) => {
-              setDoor(chosen);
-              showDoor(drawing.current, chosen);
+            onGo={(next) => {
+              setDoor(next);
+              showDoor(drawing.current, next);
             }}
           />
         </div>
@@ -387,10 +526,20 @@ export const WorkflowDiagramView = ({
           <Trans>It declares no tasks.</Trans>
         </p>
       ) : null}
-      {diagram.tasks.length > 0 && parts.length === 0 ? (
+      {diagram.tasks.length > 0 && canvas !== undefined ? (
+        <CanvasDrawing
+          canvas={canvas}
+          diagram={diagram}
+          marks={marks}
+          parts={parts}
+        />
+      ) : null}
+      {diagram.tasks.length > 0 &&
+      canvas === undefined &&
+      parts.length === 0 ? (
         <TaskList marks={marks} tasks={diagram.tasks} />
       ) : null}
-      {parts.length > 0 ? (
+      {canvas === undefined && parts.length > 0 ? (
         <PartsFrames layout={layout} marks={marks} parts={parts} />
       ) : null}
       <DoorSheet

@@ -2,6 +2,7 @@ import knowledgeMigrations from "@grasp-os/brain/migrations/journal" with { type
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resources";
 import { DurableObject } from "cloudflare:workers";
 
 import type { BuiltinBlueprint } from "#blueprints";
@@ -12,11 +13,14 @@ import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type
 import { inJurisdiction } from "./durable-objects.ts";
 import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
 import type { GraspSkill } from "./knowledge/grasp-skills.ts";
+import { releaseContracts } from "./release-contracts.ts";
+import { ensureReleaseContract } from "./workflow-catalog.ts";
 
 // What ships with the release, installed once per release on the first
 // request: the built-in blueprints
 // (apps/core/blueprints/, embedded by build-blueprints.ts, each installed
-// as a blueprint like any other, app-blueprints.ts), and the Grasp skills
+// as a blueprint like any other, app-blueprints.ts), the general catalog
+// contracts (release-contracts.ts), and the Grasp skills
 // (knowledge/grasp-skills.ts). Workers have no deploy hook, so the first
 // request core serves after the router's check starts the install, in the
 // background (`installBuiltinsOnce`), once per isolate.
@@ -50,10 +54,11 @@ import type { GraspSkill } from "./knowledge/grasp-skills.ts";
 
 /**
  * What a release's fingerprint is made of: its blueprints by their digest
- * (src/builtin-digest.ts), and its skills.
+ * (src/builtin-digest.ts), its general catalog contracts, and its skills.
  */
 export interface ReleaseFingerprint {
   blueprintsDigest: string;
+  contracts: readonly CatalogContractDefinition[];
   skills: readonly GraspSkill[];
 }
 
@@ -68,6 +73,7 @@ export interface Release extends ReleaseFingerprint {
  */
 export const thisRelease: ReleaseFingerprint = {
   blueprintsDigest,
+  contracts: releaseContracts,
   skills: graspSkills,
 };
 
@@ -110,6 +116,31 @@ const installBlueprints = async (
 };
 
 /**
+ * Publishes each of the release's general catalog contracts whose key
+ * isn't taken yet, one at a time. One that fails is logged, and the
+ * others are still published. Resolves whether all of them are.
+ */
+const installContracts = async (
+  env: Env,
+  contracts: readonly CatalogContractDefinition[]
+): Promise<boolean> => {
+  let complete = true;
+  for (const contract of contracts) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await ensureReleaseContract(env, contract, { builtin: "release" });
+    } catch (error) {
+      complete = false;
+      log.error("builtins.contract_failed", {
+        contract: contract.key,
+        ...errorFields(error),
+      });
+    }
+  }
+  return complete;
+};
+
+/**
  * The core and Knowledge databases' latest migrations: part of the
  * fingerprint, so a release that changes either schema installs again, as
  * what the install writes may have moved or been cleared, such as the
@@ -126,6 +157,7 @@ export const fingerprintOf = async (of: ReleaseFingerprint): Promise<string> =>
       schema: coreSchema,
       knowledgeSchema,
       blueprints: of.blueprintsDigest,
+      contracts: of.contracts,
       skills: of.skills.map(({ path, text }) => ({ path, text })),
     })
   );
@@ -145,8 +177,9 @@ export const installBuiltins = async (
     return true;
   }
   const blueprints = await installBlueprints(env, of.blueprints);
+  const contracts = await installContracts(env, of.contracts);
   const skills = await syncGraspSkills(env, of.skills);
-  const complete = blueprints && skills;
+  const complete = blueprints && contracts && skills;
   if (complete) {
     await storage.put(installedKey, fingerprint);
   }

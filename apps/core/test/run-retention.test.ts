@@ -4,7 +4,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   answerDecision,
@@ -27,6 +27,7 @@ import {
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
+  endLiveResourceRuns,
   greetingTasks,
   jsonWorkflowAppsOf,
   objectSchema,
@@ -275,6 +276,8 @@ const unsweptOf = async (ids: readonly string[]): Promise<string[]> => {
 };
 
 describe("JSON run retention", { timeout: 60_000 }, () => {
+  afterEach(endLiveResourceRuns);
+
   it("removes what an ended run read and returned once its retention is over, not a day before, says so when read, and keeps the run", async () => {
     const builder = await signedIn("builder");
     const by = builder;

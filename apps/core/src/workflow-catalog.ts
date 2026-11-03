@@ -415,3 +415,83 @@ export const resolveCatalogKeys = async (
   }
   return found;
 };
+
+/** A descriptor's JSON text, read back as JSON for whoever binds it. */
+const descriptorOf = (text: string | undefined): unknown =>
+  text === undefined ? undefined : JSON.parse(text);
+
+/**
+ * A catalog contract as someone writing a definition binds it: its key,
+ * kind, and what a call passes and gets back, each descriptor as JSON.
+ */
+export interface CatalogContractTerms {
+  key: string;
+  kind: CatalogBindingKind;
+  input?: unknown;
+  output?: unknown;
+  response?: unknown;
+  operations?: Record<
+    string,
+    { input: unknown; output: unknown; readOnly: boolean }
+  >;
+  events?: Record<string, { data: unknown }>;
+}
+
+const termsOf = ({
+  key,
+  kind,
+  contract,
+}: ResolvedCatalogContract): CatalogContractTerms => {
+  const { input, output, response, operations, events } = contract;
+  const terms: CatalogContractTerms = { key, kind };
+  if (input !== undefined) {
+    terms.input = descriptorOf(input);
+  }
+  if (output !== undefined) {
+    terms.output = descriptorOf(output);
+  }
+  if (response !== undefined) {
+    terms.response = descriptorOf(response);
+  }
+  if (operations !== undefined) {
+    terms.operations = Object.fromEntries(
+      Object.entries(operations).map(([name, operation]) => [
+        name,
+        {
+          input: descriptorOf(operation.input),
+          output: descriptorOf(operation.output),
+          readOnly: operation.readOnly ?? false,
+        },
+      ])
+    );
+  }
+  if (events !== undefined) {
+    terms.events = Object.fromEntries(
+      Object.entries(events).map(([type, event]) => [
+        type,
+        { data: descriptorOf(event.data) },
+      ])
+    );
+  }
+  return terms;
+};
+
+/**
+ * The catalog's contracts with their terms, for builders: what a
+ * definition can bind besides its own code and other workflows. Only
+ * those intact, as validation resolves them (`resolveCatalogKeys`).
+ */
+export const catalogContractTerms = async (
+  env: Env,
+  by: Pick<Identity, "role">
+): Promise<CatalogContractTerms[]> => {
+  const listed = await catalogContracts(env, by);
+  const resolved = await resolveCatalogKeys(
+    env,
+    listed.map(({ key }) => key)
+  );
+  return listed.flatMap(({ key }) => {
+    const contract = resolved.get(key);
+    return contract === undefined ? [] : [termsOf(contract)];
+  });
+};

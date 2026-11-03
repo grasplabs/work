@@ -11,25 +11,17 @@ import { mailConnection } from "./mail-connection.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, runInstance } from "./runs.ts";
 import { openRpc, outcome, signedInWithRole } from "./sign-in.ts";
-import {
-  appWith,
-  invoiceMail,
-  mailer,
-  runEvents,
-  workflowFiles,
-} from "./workflow-apps.ts";
+import { appWith, invoiceMail, workflowFiles } from "./workflow-apps.ts";
 
 // The wakes a held side effect's decision owes the step waiting on it
-// (src/workflows/wakes.ts), from their threat model: a crash between
-// connect deciding and core's record of the wake loses it; a lost answer
-// from connect loses it; a stale wake ends another step's wait; a wake a
-// crash left is sent forever; a confirmation connect refuses, asked again
-// and again, wakes the run each time and spends its steps. Each checks
-// what the engine says ended the step's wait: a wake (`wait_completed`),
-// or its timed check (`wait_timed_out`). Its checks come further apart
-// each time, from 250 ms in tests: the fifth waits nearly four seconds,
-// which only a wake ends early. (Apart from held-runs.test.ts: one file
-// holds only so many runs' worth of workers.)
+// (src/workflows/wakes.ts): a wake a crash left between connect deciding
+// and core's record of it is sent again by the repair, wakes only its own
+// step, and is given up after a day. It checks what the engine says ended
+// the step's wait: a wake (`wait_completed`), or its timed check
+// (`wait_timed_out`). Kept as an App run until a JSON run's held call
+// shows the same: a wake sent again waking no later step, and none sent
+// after a day. The rest of the held wakes are covered on JSON runs
+// (workflow-calls.test.ts).
 
 const idp = mockIdp();
 
@@ -58,14 +50,13 @@ const twoMails = workflowFiles(
 );
 
 /**
- * A restricted App with `mailer` and `two`, allowed to send mail on a
+ * A restricted App with `two`, allowed to send mail on a
  * connection of its own, so every mail waits for its person: the App,
  * its connection and the permission's ID.
  */
 const heldApp = async (admin: Api) => {
   const mail = await mailConnection();
   const app = await appWith(admin, {
-    ...mailer(`retries: { limit: 0 }`),
     ...twoMails,
   });
   const permission = await requestGranted(idp, admin, {
@@ -232,93 +223,6 @@ const owed = async (run: string): Promise<number> => {
 
 describe("a held side effect's decision", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
-
-  it("wakes the waiting step when the person declines it", async () => {
-    const admin = await personApi("admin");
-    const { app } = await heldApp(admin);
-    const run = await admin.api.workflows.start(app, "mailer");
-    using waits = await waitsOf(run.id);
-    await waits.started("send", 5);
-    const held = await heldOne(admin);
-    await admin.api.pendingActions.decline(held.id);
-    const ended = await waits.nextEnd("send");
-    await finished(run.id);
-    const { status, failure } = await admin.api.workflows.status(run.id);
-
-    expect({ ended, status, code: failure?.error.code }).toStrictEqual({
-      ended: "wait_completed",
-      status: "failed",
-      code: "connect.declined",
-    });
-  });
-
-  it("wakes the waiting step when connect decided, though its answer was lost", async () => {
-    const admin = await personApi("admin");
-    const { app, mail } = await heldApp(admin);
-    const run = await admin.api.workflows.start(app, "mailer");
-    using waits = await waitsOf(run.id);
-    await waits.started("send", 5);
-    const held = await heldOne(admin);
-    const confirmed = await aroundConnect(
-      "confirmAction",
-      (real) =>
-        async (...args: unknown[]): Promise<never> => {
-          await real(...args);
-          throw new Error("Connect's answer was lost");
-        },
-      async () =>
-        await outcome(admin.api.pendingActions.confirm(held.id, held.inputHash))
-    );
-    const ended = await waits.nextEnd("send");
-    await finished(run.id);
-
-    expect({
-      confirmed,
-      ended,
-      run: await admin.api.workflows.status(run.id),
-      server: await mail.did(),
-    }).toMatchObject({
-      confirmed: "internal.unexpected",
-      ended: "wait_completed",
-      run: { status: "completed", output: { messageId: "message-1" } },
-      server: { calls: 1, sent: [invoiceMail] },
-    });
-  });
-
-  it("wakes nothing on a confirmation connect refuses, however often it is asked, so the run keeps its steps", async () => {
-    const admin = await personApi("admin");
-    const { app, permission } = await heldApp(admin);
-    const run = await admin.api.workflows.start(app, "mailer");
-    await runEvents(run.id, "workflow.run.waiting");
-    const held = await heldOne(admin);
-    await admin.api.permissions.revoke(permission);
-    // More confirmations than the run has steps (60 in tests), each
-    // refused: none of them is a decision, so none wakes the step.
-    const refused = [];
-    for (let tries = 0; tries < 40; tries += 1) {
-      refused.push(
-        // oxlint-disable-next-line no-await-in-loop -- one at a time
-        await outcome(admin.api.pendingActions.confirm(held.id, held.inputHash))
-      );
-    }
-    const waiting = await admin.api.workflows.status(run.id);
-    await admin.api.pendingActions.decline(held.id);
-    await finished(run.id);
-    const { status, failure } = await admin.api.workflows.status(run.id);
-
-    expect({
-      refused: new Set(refused),
-      waiting: waiting.status,
-      status,
-      code: failure?.error.code,
-    }).toStrictEqual({
-      refused: new Set(["permission.denied"]),
-      waiting: "waiting",
-      status: "failed",
-      // The step runs again once declined, and its call is refused.
-      code: "permission.denied",
-    });
-  });
 
   it("is sent again by the repair after a crash, waking only its own step, until a day has passed", async () => {
     const admin = await personApi("admin");
