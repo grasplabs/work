@@ -29,7 +29,8 @@ let made = 0;
 const run = (
   version: string | undefined,
   values: readonly number[],
-  changes: Partial<Result> = {}
+  changes: Partial<Result> = {},
+  talks = `talks-${version ?? "old"}`
 ): Result => {
   made += 1;
   const bench = changes.bench ?? "whole";
@@ -44,7 +45,7 @@ const run = (
       interviewer: "stephen",
       own: "own",
       lead: "lead",
-      talks: `talks-${version ?? "old"}`,
+      talks,
       draws: "draws",
       ...(version === undefined ? {} : { version }),
       commit: "abc1234",
@@ -134,30 +135,62 @@ describe("the number the Lab leads with", () => {
 
     expect(lab.headline).toMatchObject({
       label: "Heard",
-      version: "v2",
-      before: { version: "v1", value: 0.6 },
+      version: "talks-v2",
+      before: { version: "talks-v1", value: 0.6 },
       verdict: "better",
     });
     expect(
       lab.versions.map(({ version, name }) => [version, name])
     ).toStrictEqual([
-      ["v1", "Stephen 1"],
-      ["v2", "Stephen 2"],
+      ["talks-v1", "Stephen 1"],
+      ["talks-v2", "Stephen 2"],
     ]);
   });
 
-  it("calls nothing better or worse when chance wasn't measured, or the change is within it", () => {
+  it("calls nothing better or worse when chance wasn't measured, or the change is within what the earlier Stephen moves by", () => {
     expect(labOf([run("v1", [0.6]), run("v2", [0.8])]).headline?.verdict).toBe(
       "noise not measured"
     );
+    // The earlier Stephen moves 20 points between two runs: ten points up is within that.
     expect(
       labOf([
         run("v1", [0.6]),
-        run("v2", [0.62]),
-        run("v2", [0.5]),
-        run("v2", [0.74]),
+        run("v1", [0.8]),
+        run("v2", [0.8]),
+        run("v2", [0.8]),
       ]).headline?.verdict
     ).toBe("no difference");
+  });
+
+  it("compares two Stephens only over the cases both were measured on", () => {
+    // The newer one was also run on an easy case the older one never saw: on the shared case nothing changed.
+    const lab = labOf([
+      run("v1", [0.5]),
+      run("v1", [0.5]),
+      run("v2", [0.5, 1]),
+      run("v2", [0.5, 1]),
+    ]);
+
+    expect(lab.headline?.verdict).toBe("no difference");
+  });
+
+  it("tells a change to the code that makes him talk apart from his texts, and joins real interviews to the newest", () => {
+    const lab = labOf(
+      [run("v1", [0.6], {}, "talks-a"), run("v1", [0.7], {}, "talks-b")],
+      [organization("Bakkerij", held("v1", 3, 3))]
+    );
+
+    expect(
+      lab.versions.map(({ version, release, name, real }) => [
+        version,
+        release,
+        name,
+        real?.started ?? null,
+      ])
+    ).toStrictEqual([
+      ["talks-a", "v1", "Stephen 1", null],
+      ["talks-b", "v1", "Stephen 2", 3],
+    ]);
   });
 
   it("never sets a version beside one measured with other models", () => {

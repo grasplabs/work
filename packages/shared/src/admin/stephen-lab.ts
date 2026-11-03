@@ -3,17 +3,22 @@
  * and after. The lab measures a Stephen on practice companies whose truth
  * is known (scripts/lab/); a change to him ships as a release, and the
  * companies on it hold their interviews with it; their numbers, never their
- * words (GRA-329), say how he does with real people. Both are told apart by
- * the same name, `stephenVersion` (core's onboarding/lab-marks.ts), so a
- * version is one row: what the lab measured of it, and what real people
- * did with it.
+ * words (GRA-329), say how he does with real people.
+ *
+ * A row is one Stephen as the lab tells them apart: by the mark of his
+ * texts and of the code that makes him talk (`talks`, scripts/lab/
+ * results.ts), so a change to that code alone is a Stephen of its own. Real
+ * interviews say only the release name of his texts (`stephenVersion` in
+ * core's onboarding/lab-marks.ts), which a run records too: they join the
+ * newest row with that name. Interviews of a release the lab never measured
+ * are a row of their own.
  *
  * Pure: the page (apps/admin/src/admin/lab.tsx) only says what this works
  * out. A difference in the lab counts only when it is larger than what the
  * same Stephen moves by chance (`@grasp-os/shared/lab-compare`).
  */
-import { meansOf, noiseOf, verdictOf } from "../lab-compare.ts";
-import type { Verdict } from "../lab-compare.ts";
+import { compare, meansOf, noiseOf } from "../lab-compare.ts";
+import type { CaseScore, Verdict } from "../lab-compare.ts";
 import type { Bench, Result, Scores } from "../lab-runs.ts";
 import type { Interviewer } from "../onboarding.ts";
 import { stephenOf } from "./onboarding-admin-record.ts";
@@ -37,9 +42,9 @@ export type LabNumber = (typeof LAB_NUMBERS)[number];
 /** Interviews from a Grasp that didn't say which Stephen held them. */
 export const UNRECORDED = "unrecorded";
 
-/** Which Stephen a run measured: its release's name, or its mark for a run kept before releases were named. */
+/** Which Stephen a run measured, as the lab tells them apart: his texts and the code that makes him talk. */
 const versionOfRun = (run: Pick<Result, "stephen">): string =>
-  run.stephen.version ?? `mark ${run.stephen.talks}`;
+  run.stephen.talks;
 
 /** Two runs measured the same thing the same way: the same bench, interviewer, models and people. */
 const alikeKey = (run: Result | Scores): string =>
@@ -76,7 +81,10 @@ export interface RealStanding {
 
 /** One version of Stephen: its name, and how it did in the lab and with real people. */
 export interface LabVersion {
+  /** The lab's mark of him (`talks`); for a release the lab never measured, its release name; `UNRECORDED` for interviews that don't say. */
   version: string;
+  /** The release name of his texts, which real interviews carry; none where unknown. */
+  release: string | null;
   /** "Stephen 3" in the order the lab first measured them; versions the lab never measured are "Not measured". */
   name: string;
   firstRun: string | null;
@@ -215,6 +223,33 @@ const LEAST_DROP = 0.15;
 /** After how many days without a lab run that is worth saying. */
 const QUIET_DAYS = 14;
 
+/** Each case's number over some runs: its mean where several runs held it, as the lab compares them. */
+const casesOver = (
+  runs: readonly Result[],
+  metric: string
+): { cases: CaseScore[] } => {
+  const found = new Map<string, number[]>();
+  for (const run of runs) {
+    for (const each of run.cases) {
+      const value = each.scores[metric];
+      if (value !== undefined) {
+        found.set(each.id, [...(found.get(each.id) ?? []), value]);
+      }
+    }
+  }
+  return {
+    cases: [...found].map(([id, values]) => ({
+      id,
+      scores: { [metric]: mean(values) },
+    })),
+  };
+};
+
+/**
+ * The newest Stephen against the one before, as the lab compares two runs
+ * (`compare`, scripts/lab/round.ts): over the cases both were measured on,
+ * with what the earlier one moves by chance as the bar.
+ */
 const headlineOf = (
   open: readonly Result[],
   hidden: readonly Scores[],
@@ -250,28 +285,27 @@ const headlineOf = (
             alikeKey(run) === key
         )
       );
+    const alike = open.filter((run) => alikeKey(run) === key);
     const was =
       previous === undefined
         ? null
-        : standingOf(
-            open.filter((run) => alikeKey(run) === key),
-            hidden,
-            previous,
-            number
-          );
-    const noise = noiseOf(now);
+        : standingOf(alike, hidden, previous, number);
+    const before =
+      previous === undefined ? [] : newestAlike(alike, previous, number.bench);
+    const compared = compare(
+      casesOver(before, number.metric),
+      casesOver(now, number.metric),
+      noiseOf(before)
+    ).find((each) => each.metric === number.metric);
     return {
       label: number.label,
       version,
       value: standing.value,
       before:
-        previous === undefined || was === null
+        previous === undefined || was === null || compared === undefined
           ? null
           : { version: previous, value: was.value },
-      verdict:
-        was === null
-          ? null
-          : verdictOf(number.metric, standing.value - was.value, noise),
+      verdict: was === null ? null : (compared?.verdict ?? null),
       hiddenChange:
         was === null || standing.hidden === null || was.hidden === null
           ? null
@@ -292,6 +326,18 @@ const firstRunsOf = (
     }
   }
   return first;
+};
+
+/** The release name of a row: what its lab Stephen ran as, or the release itself for one the lab never measured. */
+const releaseNameOf = (
+  version: string,
+  measured: readonly string[],
+  releaseOf: ReadonlyMap<string, string>
+): string | null => {
+  if (measured.includes(version)) {
+    return releaseOf.get(version) ?? null;
+  }
+  return version === UNRECORDED ? null : version;
 };
 
 /** What a version is called: by the order the lab measured it, or that it never was. */
@@ -432,27 +478,54 @@ export const stephenLabOf = ({
   );
   const firstRun = firstRunsOf([...open, ...hidden]);
   const measured = [...firstRun.keys()];
-  const ordered = [
-    ...measured,
-    ...[...realVersions].filter((version) => !firstRun.has(version)),
-  ];
-  const versions: LabVersion[] = ordered.map((version) => ({
-    version,
-    name: nameFor(version, measured, interviewer),
-    firstRun: firstRun.get(version) ?? null,
-    lab: Object.fromEntries(
-      LAB_NUMBERS.flatMap((number) => {
-        const standing = standingOf(open, hidden, version, number);
-        return standing === null ? [] : [[number.metric, standing]];
-      })
-    ),
-    real: realVersions.has(version)
-      ? realOf(
-          theirs,
-          (interview) => (interview.stephen ?? UNRECORDED) === version
-        )
-      : null,
-  }));
+  // The release name each lab Stephen was run as, from his newest run that says it.
+  const releaseOf = new Map<string, string>();
+  for (const run of [...open, ...hidden].toSorted((a, b) =>
+    a.at.localeCompare(b.at)
+  )) {
+    if (run.stephen.version !== undefined) {
+      releaseOf.set(versionOfRun(run), run.stephen.version);
+    }
+  }
+  // Real interviews of a release join the newest lab Stephen of that name; the rest are rows of their own.
+  const rowOfRelease = new Map<string, string>();
+  for (const mark of measured) {
+    const release = releaseOf.get(mark);
+    if (release !== undefined) {
+      rowOfRelease.set(release, mark);
+    }
+  }
+  const unmeasured = [...realVersions].filter(
+    (release) => !rowOfRelease.has(release)
+  );
+  const realFor = (row: string): RealStanding | null => {
+    const releases = [
+      ...[...rowOfRelease].flatMap(([release, mark]) =>
+        mark === row && realVersions.has(release) ? [release] : []
+      ),
+      ...(unmeasured.includes(row) ? [row] : []),
+    ];
+    return releases.length === 0
+      ? null
+      : realOf(theirs, (interview) =>
+          releases.includes(interview.stephen ?? UNRECORDED)
+        );
+  };
+  const versions: LabVersion[] = [...measured, ...unmeasured].map(
+    (version) => ({
+      version,
+      release: releaseNameOf(version, measured, releaseOf),
+      name: nameFor(version, measured, interviewer),
+      firstRun: firstRun.get(version) ?? null,
+      lab: Object.fromEntries(
+        LAB_NUMBERS.flatMap((number) => {
+          const standing = standingOf(open, hidden, version, number);
+          return standing === null ? [] : [[number.metric, standing]];
+        })
+      ),
+      real: realFor(version),
+    })
+  );
   const headline = headlineOf(open, hidden, measured);
   const everyRun = [...open, ...hidden].toSorted((a, b) =>
     b.at.localeCompare(a.at)

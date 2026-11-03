@@ -161,7 +161,15 @@ const verdictWords: Record<Verdict, string> = {
 
 /** The version's name, its release name a hover away. */
 const VersionName = ({ version }: { version: LabVersion }) => (
-  <span title={`Release name ${version.version}`}>{version.name}</span>
+  <span
+    title={
+      version.release === null
+        ? `Mark ${version.version}`
+        : `Release name ${version.release}, mark ${version.version}`
+    }
+  >
+    {version.name}
+  </span>
 );
 
 const changeWords = (lab: Lab, headline: LabHeadline): string => {
@@ -336,7 +344,7 @@ const Runs = ({ lab }: { lab: Lab }) => {
     return null;
   }
   const nameOf = (run: Result | Scores): string => {
-    const version = run.stephen.version ?? `mark ${run.stephen.talks}`;
+    const version = run.stephen.talks;
     return (
       lab.versions.find((each) => each.version === version)?.name ?? version
     );
