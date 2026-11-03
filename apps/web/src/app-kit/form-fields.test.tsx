@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { v } from "@grasp-os/sdk";
-import type { FilesReference, InferInput } from "@grasp-os/sdk";
+import type { FilesReference, Id, InferInput } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
 import {
   CheckboxField,
@@ -61,7 +61,7 @@ type Task = InferInput<typeof task>;
 const searchPeople = reference(
   "query",
   "people.search",
-  v.object({ search: v.string() }),
+  v.object({ search: v.string(), id: v.id("people").optional() }),
   v.array(v.object({ _id: v.id("people"), name: v.string() }))
 );
 
@@ -118,6 +118,7 @@ const TaskForm = ({ saved }: { saved: unknown[] }) => {
       <SwitchField form={form} label="Notify the team" name="notify" />
       <RelationField
         args={(search) => ({ search })}
+        lookup={(id) => ({ search: "", id })}
         form={form}
         label="Owner"
         name="owner"
@@ -161,12 +162,59 @@ const control = (label: string): HTMLElement => {
   return found;
 };
 
-const hostOf = () =>
-  testHost((sent) => ({
-    value: directory.filter(({ name }) =>
-      name.toLowerCase().includes(String(sent.input.search).toLowerCase())
-    ),
-  }));
+/** A host whose people search answers the directory, by name or by ID. */
+const hostOf = (options?: { readonly holdUploads?: boolean }) =>
+  testHost(
+    ({ input }) => ({
+      value: directory.filter(({ _id, name }) =>
+        input.id === undefined
+          ? name.toLowerCase().includes(String(input.search).toLowerCase())
+          : _id === input.id
+      ),
+    }),
+    options
+  );
+
+/** A review: an enum, a moment that may be cleared, and a person it starts with. */
+const review = v.object({
+  rank: v.enum(["urgent", "high", "low"]),
+  reviewed: v.timestamp().nullable(),
+  reviewer: v.id("people"),
+});
+
+/** When the review was done: a day, as a date field keeps it. */
+const reviewedOn = Date.UTC(2026, 10, 3);
+
+const ReviewForm = ({ saved }: { saved: unknown[] }) => {
+  const form = useForm(review, {
+    defaultValues: {
+      rank: "high",
+      reviewed: reviewedOn,
+      // SAFETY: the form of the store's IDs: Grace's.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      reviewer: grace as Id<"people">,
+    },
+    onSubmit: (values) => {
+      saved.push(values);
+    },
+  });
+  return (
+    <Form form={form}>
+      <SelectField form={form} label="Rank" name="rank" />
+      <DateField form={form} label="Reviewed" name="reviewed" />
+      <RelationField
+        args={(search) => ({ search })}
+        form={form}
+        label="Reviewer"
+        lookup={(id) => ({ search: "", id })}
+        name="reviewer"
+        optionLabel={(person) => person.name}
+        query={searchPeople}
+      />
+      <SubmitButton form={form}>Save review</SubmitButton>
+    </Form>
+  );
+};
 
 describe("the form fields", () => {
   it("say what the schema refuses once the person tries to submit, and not before", async () => {
@@ -309,5 +357,53 @@ describe("the form fields", () => {
     await typeInto(status, "");
     await click(find("button", "Save task"));
     expect(errorOf("Status")).toBe("A value is required.");
+  });
+
+  it("offer the schema's own choices, in its order, and clear a nullable value to null", async () => {
+    const saved: unknown[] = [];
+    const { client } = hostOf();
+    await rendered(client, <ReviewForm saved={saved} />);
+    const choices = [
+      ...valueOf(control("Rank")).querySelectorAll("option"),
+    ].map((option) => option.textContent);
+    await typeInto(control("Reviewed"), "");
+    await click(find("button", "Save review"));
+    expect(choices).toStrictEqual(["Choose…", "urgent", "high", "low"]);
+    expect(saved).toStrictEqual([
+      { rank: "high", reviewed: null, reviewer: grace },
+    ]);
+  });
+
+  it("name the record a relation starts with, read by its ID", async () => {
+    const { client, reads } = hostOf();
+    await rendered(client, <ReviewForm saved={[]} />);
+    await settle(300);
+    expect(valueOf(control("Reviewer")).value).toBe("Grace");
+    expect(reads.some(({ input }) => input.id === grace)).toBeTruthy();
+  });
+
+  it("don't submit while a file uploads", async () => {
+    const saved: unknown[] = [];
+    const { client, uploads } = hostOf({ holdUploads: true });
+    await rendered(client, <TaskForm saved={saved} />);
+    const brief = control("Brief");
+    await act(async () => {
+      Object.defineProperty(brief, "files", {
+        configurable: true,
+        value: [new File(["# Brief"], "brief.md", { type: "text/markdown" })],
+      });
+      brief.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    const save = find("button", "Save task");
+    await click(save);
+    expect({
+      uploads: uploads.length,
+      disabled: save.hasAttribute("disabled"),
+      saved,
+      // Not even checked: no submit was tried.
+      title: errorOf("Title"),
+    }).toStrictEqual({ uploads: 1, disabled: true, saved: [], title: "" });
   });
 });

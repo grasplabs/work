@@ -1266,12 +1266,15 @@ const buildDeclaration = `/**
  * - A list of records is a \`DataGrid\` (\`@grasp-os/ui/components/data-grid\`)
  *   over a query that takes \`pagination\` and answers pages: it reads them
  *   page by page and hands the query what the person searched, sorted and
- *   filtered, so the query does it over every record. Columns are field
- *   names or \`{ field, label?, sortable?, filter?: { value: label },
- *   cell?, edit?: (row, value) => mutation }\`; \`bulkActions\` make rows
- *   selectable, \`rowActions\` give each row a menu. It shows its own
- *   empty, loading and failed states.
- *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, "due"]} search="Search tasks" rowActions={[{ label: "Open", onSelect: (task) => navigate(screens.task, { id: task._id }) }]} />\`
+ *   filtered, so the query does it over every record. Each cell shows and
+ *   edits its field as the query's \`returns\` declares it (a moment as a
+ *   date, money in its currency, a yes or no). Columns are field names or
+ *   \`{ field, label?, sortable?, filter?: { value: label }, richText?,
+ *   cell?, edit?: async (row, value) => mutation }\`; \`bulkActions\` (rows
+ *   with an \`_id\`) make rows selectable, \`rowActions\` give each row a
+ *   menu, and a failed action or edit is shown. It shows its own empty,
+ *   loading and failed states.
+ *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, "due", { field: "notes", richText: true }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate(screens.task, { id: task._id }) }]} />\`
  * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
  *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
@@ -1280,11 +1283,17 @@ const buildDeclaration = `/**
  *   each value), \`MultiSelectField\` (\`v.array(v.enum(...))\`),
  *   \`NumberField\`, \`DateField\` (a day, \`v.timestamp()\`), \`DateTimeField\`
  *   (a moment), \`CheckboxField\` and \`SwitchField\` (\`v.boolean()\`),
- *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`
- *   and \`optionLabel\`), \`FileField\` (\`v.file()\`: \`resource\`, a files
- *   resource declaring \`upload\`) and \`RichTextField\` (bold, italic, lists
- *   and links, kept as Markdown in a \`v.string()\`). Wrap them in \`Form\`,
- *   with \`FormError\` and \`SubmitButton\`.
+ *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`,
+ *   \`lookup={(id) => ({ search: "", id })}\`, which reads the chosen record
+ *   by its ID, and \`optionLabel\`), \`FileField\` (\`v.file()\`: \`resource\`,
+ *   a files resource declaring \`upload\`; the form waits for it) and
+ *   \`RichTextField\` (bold, italic, lists and links, kept as Markdown in a
+ *   \`v.string()\`; show it with \`RichText\` from
+ *   \`@grasp-os/ui/components/rich-text\`, which drops any HTML). Wrap them
+ *   in \`Form\`, with \`FormError\` and \`SubmitButton\`.
+ * - The grid's and the fields' own words follow the page's language
+ *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
+ *   otherwise.
  * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
  * its public functions (\`query\`, \`mutation\`, \`action\`) in
  * operations files, \`operations/<group>.ts\`. An App holds no workflows,

@@ -8,6 +8,7 @@ import type { Id } from "@grasp-os/sdk";
 import { useMutation } from "@grasp-os/sdk/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import type { DataGridState } from "@grasp-os/ui/components/data-grid";
+import { act } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -27,10 +28,11 @@ import type { Answer, Sent } from "./test-host.tsx";
 
 // The data grid an App screen shows its records in, against a real session
 // client: what it asks the App's query for (the page size, then more on
-// Load more; the search, sort and filters the person chose), what it
-// does with the rows (an edit saved through the App's mutation, a bulk
-// action on the rows selected, a row's own action), and what it shows
-// when there is nothing, while it loads, and when the query fails.
+// Load more; the search, sort and filters the person chose), how it shows
+// and edits each field as the query declares it, what it does with the
+// rows (an edit saved through the App's mutation, a bulk action on the
+// rows selected, a row's own action, each failure shown), and what it
+// shows when there is nothing, while it loads, and when the query fails.
 
 const person = v.object({
   _id: v.id("people"),
@@ -38,6 +40,8 @@ const person = v.object({
   name: v.string(),
   team: v.enum(["sales", "support"]),
   active: v.boolean(),
+  joined: v.timestamp(),
+  score: v.number().nullable(),
 });
 
 const listPeople = reference(
@@ -59,10 +63,20 @@ const renamePerson = reference(
   v.null()
 );
 
+const scorePerson = reference(
+  "mutation",
+  "people.score",
+  v.object({ id: v.id("people"), score: v.number().nullable() }),
+  v.null()
+);
+
 const idOf = (index: number): Id<"people"> =>
   // SAFETY: the form of the store's IDs; the grid reads it as a key.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   `01890000-0000-7000-8000-00000000000${index}` as Id<"people">;
+
+/** When the first person joined: a moment, not the start of a day. */
+const joined = Date.UTC(2026, 2, 14, 15, 30);
 
 const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
   (name, index) => ({
@@ -71,6 +85,8 @@ const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
     name,
     team: index % 2 === 0 ? ("sales" as const) : ("support" as const),
     active: index !== 2,
+    joined,
+    score: index === 0 ? 7 : null,
   })
 );
 
@@ -86,33 +102,40 @@ const argsOf = ({ search, sort, filters }: DataGridState<Person>) => {
   return { search, sort: order, team: filters.team };
 };
 
-/** A host whose query answers `people` a window at a time, and whose rename does as `renamed` says. */
+/** A host whose query answers `people` a window at a time, and whose mutations do as `saved` says. */
 const hostOf = (
-  renamed: (sent: Sent) => Answer = () => ({ value: null }),
+  saved: (sent: Sent) => Answer = () => ({ value: null }),
   records: readonly unknown[] = people
 ) =>
   testHost((sent) =>
     sent.contractId === "people.list"
       ? pageOf(records, sent.extent)
-      : renamed(sent)
+      : saved(sent)
   );
+
+/** An archive that does nothing, and succeeds. */
+const archived = (): null => null;
 
 const PeopleGrid = ({
   selected,
   opened,
+  archive = archived,
 }: {
   selected: string[][];
   opened: string[];
+  archive?: () => unknown;
 }) => {
   const rename = useMutation(renamePerson);
+  const score = useMutation(scorePerson);
   return (
     <DataGrid
       args={argsOf}
       bulkActions={[
         {
           label: "Archive",
-          onSelect: (rows) => {
+          onSelect: async (rows) => {
             selected.push(rows.map((row) => row.name));
+            await archive();
           },
         },
       ]}
@@ -124,6 +147,12 @@ const PeopleGrid = ({
         },
         { field: "team", filter: { sales: "Sales", support: "Support" } },
         "active",
+        "joined",
+        {
+          field: "score",
+          edit: async (row, value) =>
+            await score({ id: row._id, score: value }),
+        },
       ]}
       label="People"
       pageSize={2}
@@ -152,6 +181,15 @@ const names = (): string[] =>
 
 /** What the last read asked the query for. */
 const lastInput = (reads: readonly Sent[]) => reads.at(-1)?.input;
+
+/** Presses `key` in `element`, as a person's keyboard does. */
+const press = async (element: HTMLElement, key: string): Promise<void> => {
+  await act(async () => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+    await Promise.resolve();
+  });
+  await settle();
+};
 
 describe("a data grid", () => {
   it("reads its first page, and more on Load more", async () => {
@@ -204,6 +242,24 @@ describe("a data grid", () => {
     expect(reads.at(-1)?.extent).toBe(2);
   });
 
+  it("shows each field as the query declares it", async () => {
+    const { client } = hostOf();
+    await rendered(client, grid);
+    const cells = [...(document.querySelector("tbody tr")?.children ?? [])]
+      .map((cell) => cell.textContent?.trim())
+      .slice(1, -1);
+    expect(cells).toStrictEqual([
+      "Ada",
+      "sales",
+      "Yes",
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(joined),
+      "7",
+    ]);
+  });
+
   it("saves a cell edited in place through the App's mutation, and says why a save failed", async () => {
     let refuse = true;
     const { client, calls } = hostOf(() =>
@@ -212,17 +268,17 @@ describe("a data grid", () => {
         : { value: null }
     );
     await rendered(client, grid);
-    await click(named("Edit Name: Ada"));
-    await typeInto(named("Edit Name"), "Ada Lovelace");
-    await leave(named("Edit Name"));
+    await click(named("Edit Name for Ada"));
+    await typeInto(named("Edit Name for Ada"), "Ada Lovelace");
+    await leave(named("Edit Name for Ada"));
     const refused = {
       calls: [...calls],
       alert: find('[role="alert"]').textContent,
       // Kept as typed, to save again.
-      kept: valueOf(named("Edit Name")).value,
+      kept: valueOf(named("Edit Name for Ada")).value,
     };
     refuse = false;
-    await leave(named("Edit Name"));
+    await leave(named("Edit Name for Ada"));
     expect(refused).toStrictEqual({
       calls: [
         {
@@ -237,8 +293,57 @@ describe("a data grid", () => {
     expect(calls).toHaveLength(2);
     // Saved: the editor closes, and nothing is wrong.
     expect(
-      document.querySelector('[role="alert"], [aria-label="Edit Name"]')
+      document.querySelector(
+        '[role="alert"], input[aria-label="Edit Name for Ada"]'
+      )
     ).toBeNull();
+  });
+
+  it("saves on Enter and drops the edit on Escape, back on the cell either way", async () => {
+    const { client, calls } = hostOf();
+    await rendered(client, grid);
+    await click(named("Edit Name for Grace"));
+    await typeInto(named("Edit Name for Grace"), "Grace Hopper");
+    await press(named("Edit Name for Grace"), "Escape");
+    const escaped = {
+      calls: calls.length,
+      focused: document.activeElement?.getAttribute("aria-label"),
+      tag: document.activeElement?.tagName,
+    };
+    await click(named("Edit Name for Grace"));
+    await typeInto(named("Edit Name for Grace"), "Grace Hopper");
+    await press(named("Edit Name for Grace"), "Enter");
+    expect({ escaped, calls }).toStrictEqual({
+      escaped: { calls: 0, focused: "Edit Name for Grace", tag: "BUTTON" },
+      calls: [
+        {
+          contractId: "people.rename",
+          input: { id: idOf(1), name: "Grace Hopper" },
+          extent: undefined,
+        },
+      ],
+    });
+    expect(document.activeElement?.tagName).toBe("BUTTON");
+  });
+
+  it("edits a nullable number as a number, and clears it to null", async () => {
+    const { client, calls } = hostOf();
+    await rendered(client, grid);
+    await click(named("Edit Score for Ada"));
+    const editor = valueOf(named("Edit Score for Ada"));
+    const type = editor.getAttribute("type");
+    await typeInto(editor, "9");
+    await press(named("Edit Score for Ada"), "Enter");
+    await click(named("Edit Score for Ada"));
+    await typeInto(named("Edit Score for Ada"), "");
+    await press(named("Edit Score for Ada"), "Enter");
+    expect({ type, sent: calls.map(({ input }) => input) }).toStrictEqual({
+      type: "number",
+      sent: [
+        { id: idOf(0), score: 9 },
+        { id: idOf(0), score: null },
+      ],
+    });
   });
 
   it("acts on the rows selected, and on one row from its menu", async () => {
@@ -246,22 +351,15 @@ describe("a data grid", () => {
     const opened: string[] = [];
     const { client } = hostOf();
     await rendered(client, <PeopleGrid opened={opened} selected={selected} />);
-    const [, second] = document.querySelectorAll('[aria-label="Select row"]');
-    if (second === undefined) {
-      throw new Error("No second row to select.");
-    }
-    await click(second);
-    const count = find('[role="toolbar"] span').textContent;
+    await click(named("Select Grace"));
+    const count = find('[aria-label="Selected rows"] span').textContent;
     await click(find("button", "Archive"));
     // Done: nothing selected any more.
-    const cleared = !document.body.textContent?.includes("selected");
+    const cleared =
+      document.querySelector('[aria-label="Selected rows"]') === null;
     await click(named("Select all rows"));
     await click(find("button", "Archive"));
-    const [menu] = document.querySelectorAll('[aria-label="Row actions"]');
-    if (menu === undefined) {
-      throw new Error("No row menu.");
-    }
-    await click(menu);
+    await click(named("Actions for Ada"));
     await click(find('[role="menuitem"]', "Open"));
     expect({ count, cleared, selected, opened }).toStrictEqual({
       count: "1 selected",
@@ -271,6 +369,26 @@ describe("a data grid", () => {
     });
   });
 
+  it("shows a bulk action's failure, and keeps the selection to try again", async () => {
+    const { client } = hostOf();
+    await rendered(
+      client,
+      <PeopleGrid
+        archive={() => {
+          throw new Error("Archiving is paused.");
+        }}
+        opened={[]}
+        selected={[]}
+      />
+    );
+    await click(named("Select Ada"));
+    await click(find("button", "Archive"));
+    expect(find('[role="alert"]').textContent).toBe("Archiving is paused.");
+    expect(find('[aria-label="Selected rows"] span').textContent).toBe(
+      "1 selected"
+    );
+  });
+
   it("hides the columns the person hides", async () => {
     const { client } = hostOf();
     await rendered(client, grid);
@@ -278,7 +396,7 @@ describe("a data grid", () => {
     await click(find("button", "Columns"));
     await click(find('[role="menuitemcheckbox"]', "Active"));
     expect(before).toContain("Active");
-    expect(find("thead").textContent).toBe("NameTeamRow actions");
+    expect(find("thead").textContent).toBe("NameTeamJoinedScoreActions");
   });
 
   it("says when there is nothing, and when nothing matches", async () => {

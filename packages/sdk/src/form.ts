@@ -688,6 +688,11 @@ type Checked =
  * What a form holds beside TanStack's state: its status, the record's
  * baseline and the submission in flight. One per mounted form.
  */
+/** What separates the steps of a field's path: `a.b`, `a[0]`. */
+const fieldPathBreak = /[.[\]]/u;
+/** A step of a path into an array. */
+const arrayIndex = /^\d+$/u;
+
 /** A native schema's descriptor (a `v` schema), or undefined for another vendor's. */
 const nativeDescriptorOf = (
   schema: StandardSchemaV1
@@ -796,7 +801,8 @@ export class FormBinding {
   }
 
   /**
-   * What the form's validator declares of its top-level field `name`: the
+   * What the form's validator declares of its field `name`, a path as
+   * TanStack names fields (`address.city`, `lines[0].amount`): the
    * operation's argument, or a native schema's field (a `v.object`). The
    * field helpers read it for what a control offers (an enum's values, a
    * number's bounds, whether it may be left empty); the validator still
@@ -805,16 +811,25 @@ export class FormBinding {
    */
   fieldDescriptor(name: string): ValueDescriptor | undefined {
     const target = this.#target;
-    let fields: Readonly<Record<string, ValueDescriptor>> | undefined;
-    if (target.kind === "schema") {
-      const declared = nativeDescriptorOf(target.schema);
-      fields = declared?.kind === "object" ? declared.fields : undefined;
-    } else if (target.args.kind === "object") {
-      ({ fields } = target.args);
+    let descriptor =
+      target.kind === "schema"
+        ? nativeDescriptorOf(target.schema)
+        : target.args;
+    for (const step of name.split(fieldPathBreak)) {
+      if (step === "" || descriptor === undefined) {
+        continue;
+      }
+      if (descriptor.kind === "object") {
+        descriptor = Object.hasOwn(descriptor.fields, step)
+          ? descriptor.fields[step]
+          : undefined;
+      } else if (descriptor.kind === "array" && arrayIndex.test(step)) {
+        descriptor = descriptor.item;
+      } else {
+        descriptor = undefined;
+      }
     }
-    return fields !== undefined && Object.hasOwn(fields, name)
-      ? fields[name]
-      : undefined;
+    return descriptor;
   }
 
   /** The form's status now: what `subscribe` tells of. */

@@ -6,7 +6,7 @@ import type {
 } from "@grasp-os/sdk";
 import { bindingOf } from "@grasp-os/sdk/form-binding";
 import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
-import { useQuery, useUpload } from "@grasp-os/sdk/react";
+import { useQuery, useRetryFailed, useUpload } from "@grasp-os/sdk/react";
 import type {
   Declaring,
   FieldChange,
@@ -64,6 +64,19 @@ import {
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 
+import { changesTexts, shownValue } from "./internal/form-changes-text.ts";
+import type { ChangesText } from "./internal/form-changes-text.ts";
+import {
+  isUploading,
+  subscribeUploads,
+  uploadStarted,
+} from "./internal/form-uploads.ts";
+import { pageText } from "./internal/language.ts";
+import type { Texts } from "./internal/language.ts";
+import { QueryBoundary } from "./internal/query-boundary.tsx";
+import { applyMark, marks } from "./internal/rich-text-marks.ts";
+import type { Mark } from "./internal/rich-text-marks.ts";
+
 // The fields and parts of a form the SDK's `useForm` made (spec 10.2.2):
 // one semantic form, a field for every kind of value (text, a choice or
 // several, a number, a day or a moment, a yes or no, a record, a file,
@@ -108,6 +121,10 @@ const submitFrom = async (
   form: AnyForm,
   element: HTMLFormElement | null
 ): Promise<void> => {
+  // Not while a file field uploads: it would save without the file.
+  if (isUploading(form)) {
+    return;
+  }
   try {
     await form.submit();
   } catch {
@@ -178,6 +195,126 @@ type FileFieldName<Values> = FieldNameOf<
   Values,
   { readonly id: string } | null | undefined
 >;
+
+/** What the fields say themselves, in the page's language unless the screen says otherwise. */
+interface FieldText {
+  /** A select's choice of nothing. */
+  readonly choose: string;
+  /** A relation's list while its query loads, or its value while it is read. */
+  readonly loading: string;
+  /** A relation's list when the search answered nothing. */
+  readonly noMatches: string;
+  readonly showOptions: string;
+  readonly clear: string;
+  /** A relation's query, or a file's upload, that failed without saying why. */
+  readonly failed: string;
+  readonly tryAgain: string;
+  /** Takes a file off its field (never deletes it). */
+  readonly remove: string;
+  /** A file the field held before the screen opened. */
+  readonly attached: string;
+  readonly uploading: string;
+  /** The rich text toolbar, and its buttons. */
+  readonly formatting: string;
+  readonly bold: string;
+  readonly italic: string;
+  readonly bullets: string;
+  readonly numbers: string;
+  readonly link: string;
+}
+
+const fieldTexts: Texts<FieldText> = {
+  en: {
+    choose: "Choose…",
+    loading: "Loading…",
+    noMatches: "No matches.",
+    showOptions: "Show options",
+    clear: "Clear",
+    failed: "This couldn't load.",
+    tryAgain: "Try again",
+    remove: "Remove",
+    attached: "Attached file",
+    uploading: "Uploading…",
+    formatting: "Formatting",
+    bold: "Bold",
+    italic: "Italic",
+    bullets: "Bulleted list",
+    numbers: "Numbered list",
+    link: "Link",
+  },
+  de: {
+    choose: "Auswählen…",
+    loading: "Wird geladen…",
+    noMatches: "Keine Treffer.",
+    showOptions: "Optionen anzeigen",
+    clear: "Leeren",
+    failed: "Das konnte nicht geladen werden.",
+    tryAgain: "Erneut versuchen",
+    remove: "Entfernen",
+    attached: "Angehängte Datei",
+    uploading: "Wird hochgeladen…",
+    formatting: "Formatierung",
+    bold: "Fett",
+    italic: "Kursiv",
+    bullets: "Aufzählung",
+    numbers: "Nummerierte Liste",
+    link: "Link",
+  },
+  nl: {
+    choose: "Kiezen…",
+    loading: "Laden…",
+    noMatches: "Geen resultaten.",
+    showOptions: "Opties tonen",
+    clear: "Wissen",
+    failed: "Dit kon niet worden geladen.",
+    tryAgain: "Opnieuw proberen",
+    remove: "Verwijderen",
+    attached: "Bijgevoegd bestand",
+    uploading: "Uploaden…",
+    formatting: "Opmaak",
+    bold: "Vet",
+    italic: "Cursief",
+    bullets: "Opsomming",
+    numbers: "Genummerde lijst",
+    link: "Link",
+  },
+  es: {
+    choose: "Elegir…",
+    loading: "Cargando…",
+    noMatches: "Sin resultados.",
+    showOptions: "Mostrar opciones",
+    clear: "Borrar",
+    failed: "No se ha podido cargar.",
+    tryAgain: "Reintentar",
+    remove: "Quitar",
+    attached: "Archivo adjunto",
+    uploading: "Subiendo…",
+    formatting: "Formato",
+    bold: "Negrita",
+    italic: "Cursiva",
+    bullets: "Lista con viñetas",
+    numbers: "Lista numerada",
+    link: "Enlace",
+  },
+  fr: {
+    choose: "Choisir…",
+    loading: "Chargement…",
+    noMatches: "Aucun résultat.",
+    showOptions: "Afficher les options",
+    clear: "Effacer",
+    failed: "Impossible de charger ceci.",
+    tryAgain: "Réessayer",
+    remove: "Retirer",
+    attached: "Fichier joint",
+    uploading: "Envoi en cours…",
+    formatting: "Mise en forme",
+    bold: "Gras",
+    italic: "Italique",
+    bullets: "Liste à puces",
+    numbers: "Liste numérotée",
+    link: "Lien",
+  },
+};
 
 /** What a field's control gets from the field around it. */
 interface Control {
@@ -300,7 +437,6 @@ const FieldShell = <Values,>({
           return (
             <FieldSet
               aria-describedby={control.describedBy}
-              aria-invalid={invalid}
               data-invalid={invalid}
               disabled={locked}
             >
@@ -467,7 +603,7 @@ const SelectField = <Values,>({
   label,
   description,
   options,
-  placeholder = "Choose…",
+  placeholder,
 }: FieldProps<Values, ChoiceFieldName<Values>> & {
   /** Each value's label, by value; or the values, for a text field. */
   options?: Readonly<Record<string, string>>;
@@ -495,7 +631,9 @@ const SelectField = <Values,>({
         }}
         value={textOf(control.value)}
       >
-        <NativeSelectOption value="">{placeholder}</NativeSelectOption>
+        <NativeSelectOption value="">
+          {placeholder ?? pageText(fieldTexts).choose}
+        </NativeSelectOption>
         {choicesOf(control.descriptor, options).map((choice) => (
           <NativeSelectOption key={choice.value} value={choice.value}>
             {choice.label}
@@ -823,6 +961,10 @@ type RecordOf<Reference> =
       ? Item
       : never;
 
+/** The ID of a record `Reference` answers. */
+type IdOf<Reference> =
+  RecordOf<Reference> extends { readonly _id: infer Id } ? Id : string;
+
 /** The records a query answered: its list, or its page's. */
 const recordsOf = (answer: unknown): readonly unknown[] => {
   if (Array.isArray(answer)) {
@@ -850,8 +992,7 @@ const idOf = (record: unknown): string | undefined =>
 
 /**
  * Marks the record a relation field stands in for the one its value names
- * while the query doesn't list it (a value it started with): named by its
- * ID until the person picks another.
+ * while no query has answered it yet: named by its ID until one does.
  */
 const standIn = Symbol("standIn");
 
@@ -864,14 +1005,18 @@ interface RelationProps<Reference extends AnyQuery> {
   query: Reference;
   /** The query's arguments for what the person typed (empty at first). */
   args: (search: string) => ArgsOf<Reference>;
+  /**
+   * The query's arguments that answer the record the field holds, by its
+   * ID: how the field names a value it started with, which a search
+   * needn't list.
+   */
+  lookup: (id: IdOf<Reference>) => ArgsOf<Reference>;
   /** How a record is named in the list and once chosen. */
   optionLabel: (record: RecordOf<Reference>) => string;
   /** What the input shows while nothing is typed. */
   placeholder?: string;
-  /** What the list says when the query answers no records. */
-  emptyText?: string;
-  /** What the list says while the query loads. */
-  loadingText?: string;
+  /** What it says, in the screen's language. */
+  text?: Partial<FieldText>;
 }
 
 /** The searchable list a relation field picks a record from. */
@@ -879,11 +1024,14 @@ const RelationPicker = <Reference extends AnyQuery>({
   control,
   query,
   args,
+  lookup,
   optionLabel,
   placeholder,
-  emptyText = "No matches.",
-  loadingText = "Loading…",
-}: RelationProps<Reference> & { control: Control }): React.JSX.Element => {
+  text,
+}: RelationProps<Reference> & {
+  control: Control;
+  text: FieldText;
+}): React.JSX.Element => {
   const [search, setSearch] = useState("");
   const settled = useSettled(search, searchSettleMs);
   const answer = useQuery(query, args(settled));
@@ -891,15 +1039,31 @@ const RelationPicker = <Reference extends AnyQuery>({
   const [picked, setPicked] = useState<unknown>(null);
   const records = recordsOf(answer);
   const chosenId = typeof control.value === "string" ? control.value : null;
+  const listed =
+    chosenId === null
+      ? undefined
+      : (records.find((record) => idOf(record) === chosenId) ??
+        (idOf(picked) === chosenId ? picked : undefined));
+  // A value the field started with, which neither the search nor the
+  // person's pick holds: read by its ID, to name it.
+  let unlisted: IdOf<Reference> | null = null;
+  if (listed === undefined && chosenId !== null) {
+    // SAFETY: the field holds the ID of a record the query answers.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    unlisted = chosenId as IdOf<Reference>;
+  }
+  const looked = useQuery(query, unlisted === null ? "skip" : lookup(unlisted));
   let chosen: unknown = null;
   if (chosenId !== null) {
-    chosen =
-      records.find((record) => idOf(record) === chosenId) ??
-      (idOf(picked) === chosenId ? picked : { _id: chosenId, [standIn]: true });
+    chosen = listed ??
+      recordsOf(looked).find((record) => idOf(record) === chosenId) ?? {
+        _id: chosenId,
+        [standIn]: true,
+      };
   }
   const labelOf = (record: unknown): string => {
     if (typeof record === "object" && record !== null && standIn in record) {
-      return idOf(record) ?? "";
+      return looked === undefined ? text.loading : (idOf(record) ?? "");
     }
     // SAFETY: every other record here came from the query's answer.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -914,8 +1078,8 @@ const RelationPicker = <Reference extends AnyQuery>({
       }
       itemToStringLabel={labelOf}
       items={records}
-      onInputValueChange={(text) => {
-        setSearch(text);
+      onInputValueChange={(typed) => {
+        setSearch(typed);
       }}
       onValueChange={(record: unknown) => {
         setPicked(record);
@@ -928,14 +1092,16 @@ const RelationPicker = <Reference extends AnyQuery>({
         aria-describedby={control.describedBy}
         aria-invalid={control.invalid}
         aria-required={control.required}
+        clearLabel={text.clear}
         disabled={control.disabled}
         id={control.id}
         placeholder={placeholder}
         showClear={!control.required}
+        triggerLabel={text.showOptions}
       />
       <ComboboxContent>
         <ComboboxEmpty>
-          {answer === undefined ? loadingText : emptyText}
+          {answer === undefined ? text.loading : text.noMatches}
         </ComboboxEmpty>
         <ComboboxList>
           {(record: unknown) => (
@@ -949,27 +1115,81 @@ const RelationPicker = <Reference extends AnyQuery>({
   );
 };
 
+/** A relation's query that failed, in the picker's place, and a way to read it again. */
+const RelationFailure = ({
+  id,
+  error,
+  again,
+  text,
+}: {
+  id: string;
+  error: unknown;
+  again: () => void;
+  text: FieldText;
+}): React.JSX.Element => {
+  const retryFailed = useRetryFailed();
+  return (
+    <Alert id={id} live="assertive" variant="destructive">
+      <AlertDescription>
+        <p>{error instanceof Error ? error.message : text.failed}</p>
+        <p>
+          <Button
+            onClick={() => {
+              retryFailed();
+              again();
+            }}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {text.tryAgain}
+          </Button>
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+};
+
 /**
  * A field of `form` that holds a record's ID (`v.id("table")`): a
  * searchable list of the records `query` answers for what the person
- * types, each named by `optionLabel`.
+ * types (`args`), each named by `optionLabel`, and the record the field
+ * holds read by its ID (`lookup`). A failed query shows in its place.
  */
 const RelationField = <Values, Reference extends AnyQuery>({
   form,
   name,
   label,
   description,
+  text,
   ...picker
 }: FieldProps<Values, ChoiceFieldName<Values>> &
-  RelationProps<Reference>): React.JSX.Element => (
-  <FieldShell
-    description={description}
-    form={form}
-    label={label}
-    name={name}
-    render={(control) => <RelationPicker {...picker} control={control} />}
-  />
-);
+  RelationProps<Reference>): React.JSX.Element => {
+  const said = { ...pageText(fieldTexts), ...text };
+  return (
+    <FieldShell
+      description={description}
+      form={form}
+      label={label}
+      name={name}
+      render={(control) => (
+        <QueryBoundary
+          renderFailure={(error, again) => (
+            <RelationFailure
+              again={again}
+              error={error}
+              id={control.id}
+              text={said}
+            />
+          )}
+          reading={control.name}
+        >
+          <RelationPicker {...picker} control={control} text={said} />
+        </QueryBoundary>
+      )}
+    />
+  );
+};
 
 /** A file picked and uploaded here: what the field shows of it. */
 interface UploadedFile {
@@ -977,32 +1197,19 @@ interface UploadedFile {
   readonly name: string;
 }
 
-/** What a file field says, in English unless the screen says otherwise. */
-interface FileFieldText {
-  /** The button that takes the file off the field (not deleting it). */
-  readonly remove: string;
-  /** A file the field held before this screen opened. */
-  readonly attached: string;
-  readonly uploading: string;
-}
-
-const fileFieldText: FileFieldText = {
-  remove: "Remove",
-  attached: "Attached file",
-  uploading: "Uploading…",
-};
-
-/** The upload control of a file field, through `resource`. */
+/** The upload control of a file field of `form`, through `resource`. */
 const FileUpload = <Reference extends FilesReference>({
+  form,
   control,
   resource,
   accept,
   text,
 }: {
+  form: object;
   control: Control;
   resource: Declaring<Reference, "upload">;
   accept: string | undefined;
-  text: FileFieldText;
+  text: FieldText;
 }): React.JSX.Element => {
   const upload = useUpload(resource);
   const [uploaded, setUploaded] = useState<UploadedFile>();
@@ -1049,21 +1256,24 @@ const FileUpload = <Reference extends FilesReference>({
         id={control.id}
         name={control.name}
         onChange={(event) => {
-          const [file] = event.target.files ?? [];
+          const [file] = event.currentTarget.files ?? [];
+          // Picking the same file again, after a failure, is a change too.
+          event.currentTarget.value = "";
           if (file === undefined) {
             return;
           }
           setFailure(undefined);
+          // The form doesn't submit until the upload ends.
+          const ended = uploadStarted(form);
           const send = async (): Promise<void> => {
             try {
               const ref = await upload.upload(file);
               setUploaded({ id: ref.id, name: file.name });
               control.handleChange(ref);
             } catch (error) {
-              setFailure(
-                error instanceof Error ? error.message : String(error)
-              );
+              setFailure(error instanceof Error ? error.message : text.failed);
             }
+            ended();
             control.handleBlur();
           };
           void send();
@@ -1092,8 +1302,8 @@ const FileUpload = <Reference extends FilesReference>({
 /**
  * A field of `form` that holds a file's reference (`v.file()`): the file
  * the person picks is uploaded through `resource`, a files resource the
- * App declares with `upload`, and the field holds its reference.
- * Removing it only takes it off the field.
+ * App declares with `upload`, and the field holds its reference. The form
+ * doesn't submit while it uploads. Removing it only takes it off the field.
  */
 const FileField = <Values, Reference extends FilesReference>({
   form,
@@ -1107,7 +1317,8 @@ const FileField = <Values, Reference extends FilesReference>({
   resource: Declaring<Reference, "upload">;
   /** The kinds of file the picker offers, as an input's `accept`. */
   accept?: string;
-  text?: Partial<FileFieldText>;
+  /** What it says, in the screen's language. */
+  text?: Partial<FieldText>;
 }): React.JSX.Element => (
   <FieldShell
     description={description}
@@ -1118,26 +1329,13 @@ const FileField = <Values, Reference extends FilesReference>({
       <FileUpload
         accept={accept}
         control={control}
+        form={form}
         resource={resource}
-        text={{ ...fileFieldText, ...text }}
+        text={{ ...pageText(fieldTexts), ...text }}
       />
     )}
   />
 );
-
-/** A Markdown mark the rich text toolbar puts around, or before, what is selected. */
-type Mark = "bold" | "italic" | "bullets" | "numbers" | "link";
-
-/** What the rich text toolbar's buttons are called, in English unless the screen says otherwise. */
-type MarkLabels = Readonly<Record<Mark, string>>;
-
-const markLabels: MarkLabels = {
-  bold: "Bold",
-  italic: "Italic",
-  bullets: "Bulleted list",
-  numbers: "Numbered list",
-  link: "Link",
-};
 
 const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
   bold: BoldIcon,
@@ -1147,75 +1345,27 @@ const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
   link: LinkIcon,
 };
 
-const marks: readonly Mark[] = ["bold", "italic", "bullets", "numbers", "link"];
-
-/** A link's address before the person types one: selected, to type over. */
-const linkPlaceholder = "https://";
-
-/**
- * `text` with `mark` applied to its selection from `start` to `end`, and
- * what to select after: the text marked, or a link's address to type.
- */
-export const applyMark = (
-  text: string,
-  start: number,
-  end: number,
-  mark: Mark
-): { text: string; start: number; end: number } => {
-  const before = text.slice(0, start);
-  const selected = text.slice(start, end);
-  const after = text.slice(end);
-  if (mark === "bold" || mark === "italic") {
-    const wrap = mark === "bold" ? "**" : "_";
-    return {
-      text: `${before}${wrap}${selected}${wrap}${after}`,
-      start: start + wrap.length,
-      end: end + wrap.length,
-    };
-  }
-  if (mark === "link") {
-    const label = `[${selected}](`;
-    return {
-      text: `${before}${label}${linkPlaceholder})${after}`,
-      start: start + label.length,
-      end: start + label.length + linkPlaceholder.length,
-    };
-  }
-  // A list: each selected line, or the line the cursor is on, as an item.
-  const lineStart = before.lastIndexOf("\n") + 1;
-  const lines = text.slice(lineStart, end).split("\n");
-  const listed = lines
-    .map((line, index) =>
-      mark === "bullets" ? `- ${line}` : `${index + 1}. ${line}`
-    )
-    .join("\n");
-  return {
-    text: `${text.slice(0, lineStart)}${listed}${after}`,
-    start: lineStart,
-    end: lineStart + listed.length,
-  };
-};
-
 /**
  * A field of `form` that holds formatted text, as Markdown: bold, italic,
  * lists and links, which its toolbar puts around what is selected. It
- * holds text alone, never HTML, so nothing it stores can run: whatever
- * shows it renders the Markdown, without raw HTML.
+ * holds text alone, never HTML: show it with `RichText`
+ * (`@grasp-os/ui/components/rich-text`), which renders the Markdown and
+ * drops any HTML in it.
  */
 const RichTextField = <Values,>({
   form,
   name,
   label,
   description,
-  labels,
+  text,
   ...props
 }: FieldProps<Values, TextFieldName<Values>> &
   ControlProps<"textarea"> & {
-    /** What the toolbar's buttons are called. */
-    labels?: Partial<MarkLabels>;
+    /** What it says, in the screen's language. */
+    text?: Partial<FieldText>;
   }): React.JSX.Element => {
   const editor = useRef<HTMLTextAreaElement>(null);
-  const named = { ...markLabels, ...labels };
+  const said = { ...pageText(fieldTexts), ...text };
   return (
     <FieldShell
       description={description}
@@ -1224,15 +1374,13 @@ const RichTextField = <Values,>({
       name={name}
       render={(control) => (
         <div className="flex flex-col gap-2">
-          <ButtonGroup
-            aria-label={typeof label === "string" ? label : undefined}
-          >
+          <ButtonGroup aria-label={said.formatting}>
             {marks.map((mark) => {
               const Icon = markIcons[mark];
               return (
                 <Button
                   aria-controls={control.id}
-                  aria-label={named[mark]}
+                  aria-label={said[mark]}
                   disabled={control.disabled}
                   key={mark}
                   onClick={() => {
@@ -1253,7 +1401,7 @@ const RichTextField = <Values,>({
                     });
                   }}
                   size="icon-sm"
-                  title={named[mark]}
+                  title={said[mark]}
                   type="button"
                   variant="outline"
                 >
@@ -1416,94 +1564,6 @@ const FormError = ({
   return null;
 };
 
-/** What `FormChanges` says, in each language the frontend speaks. */
-interface ChangesText {
-  readonly title: string;
-  readonly waiting: string;
-  readonly latest: string;
-  readonly yours: string;
-  readonly reapply: string;
-  /** A text field left empty. */
-  readonly empty: string;
-  /** A field with no value at all (`null`, or left out). */
-  readonly none: string;
-}
-
-const englishChanges: ChangesText = {
-  title: "This changed since you started editing",
-  waiting: "Loading the latest version…",
-  latest: "Latest version",
-  yours: "Yours",
-  reapply: "Re-apply my changes to the latest version",
-  empty: "(empty)",
-  none: "(no value)",
-};
-
-const changesTexts: Readonly<Record<string, ChangesText>> = {
-  en: englishChanges,
-  de: {
-    title: "Das hat sich geändert, seit Sie mit der Bearbeitung begonnen haben",
-    waiting: "Die neueste Version wird geladen…",
-    latest: "Neueste Version",
-    yours: "Ihre",
-    reapply: "Meine Änderungen auf die neueste Version anwenden",
-    empty: "(leer)",
-    none: "(kein Wert)",
-  },
-  nl: {
-    title: "Dit is veranderd sinds je begon met bewerken",
-    waiting: "De nieuwste versie wordt geladen…",
-    latest: "Nieuwste versie",
-    yours: "Die van jou",
-    reapply: "Mijn wijzigingen opnieuw toepassen op de nieuwste versie",
-    empty: "(leeg)",
-    none: "(geen waarde)",
-  },
-  es: {
-    title: "Esto ha cambiado desde que empezaste a editar",
-    waiting: "Cargando la versión más reciente…",
-    latest: "Versión más reciente",
-    yours: "La tuya",
-    reapply: "Volver a aplicar mis cambios a la versión más reciente",
-    empty: "(vacío)",
-    none: "(sin valor)",
-  },
-  fr: {
-    title: "Ceci a changé depuis que vous avez commencé à modifier",
-    waiting: "Chargement de la dernière version…",
-    latest: "Dernière version",
-    yours: "La vôtre",
-    reapply: "Réappliquer mes modifications à la dernière version",
-    empty: "(vide)",
-    none: "(aucune valeur)",
-  },
-};
-
-/**
- * What `FormChanges` says in `language` (a document's `lang`, such as
- * the frame's, which the page sets to its own), English for any other.
- */
-export const changesTextFor = (language: string): ChangesText =>
-  changesTexts[language.toLowerCase().split("-")[0] ?? ""] ?? englishChanges;
-
-/** The language of the document a screen runs in, if any. */
-const documentLanguage = (): string =>
-  typeof document === "undefined" ? "en" : document.documentElement.lang;
-
-/**
- * A field's value as text to read: text as it is, an empty text and no
- * value each said apart, anything else as JSON.
- */
-export const shownValue = (value: unknown, text: ChangesText): string => {
-  if (typeof value === "string") {
-    return value === "" ? text.empty : value;
-  }
-  if (value === null || value === undefined) {
-    return text.none;
-  }
-  return JSON.stringify(value) ?? text.none;
-};
-
 /** One field that changed, as the latest record and the draft have it. */
 const ChangedField = ({
   change,
@@ -1564,7 +1624,7 @@ const FormChanges = <Values,>({
   }
   const locked = status.phase !== "idle";
   // In the page's language unless the App says otherwise.
-  const text = changesTextFor(documentLanguage());
+  const text = pageText(changesTexts);
   return (
     <form.Subscribe selector={(state) => state.values}>
       {() => {
@@ -1630,7 +1690,11 @@ const SubmitButton = ({
   form: AnyForm;
 }): React.JSX.Element => {
   const status = useFormStatus(form);
-  const busy = status.phase === "submitting";
+  const uploading = useSyncExternalStore(
+    (onChange) => subscribeUploads(form, onChange),
+    () => isUploading(form)
+  );
+  const busy = status.phase === "submitting" || uploading;
   return (
     <Button
       {...props}

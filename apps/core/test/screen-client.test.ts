@@ -885,7 +885,7 @@ export const list = query({
 });
 
 export const people = query({
-  args: { search: v.string() },
+  args: { search: v.string(), id: v.id("people").optional() },
   returns: v.array(doc("people")),
   handler: async (ctx) => await ctx.db.query("people").take(20),
 });
@@ -943,6 +943,7 @@ export default function Tasks() {
           { field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) },
           { field: "status", filter: { open: "Open", done: "Done" } },
           "due",
+          { field: "notes", richText: true },
         ]}
         search="Search tasks"
         bulkActions={[{ label: "Archive", onSelect: (rows) => rows.length }]}
@@ -955,7 +956,7 @@ export default function Tasks() {
         <NumberField form={form} label="Estimate" name="estimate" />
         <DateField form={form} label="Due" name="due" />
         <CheckboxField form={form} label="Urgent" name="urgent" />
-        <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} optionLabel={(person) => person.name} />
+        <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} lookup={(id) => ({ search: "", id })} optionLabel={(person) => person.name} />
         <RichTextField form={form} label="Notes" name="notes" />
         <FileField form={form} label="Brief" name="brief" resource={resources.briefs} />
         <FormError form={form} />

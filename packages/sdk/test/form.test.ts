@@ -831,3 +831,28 @@ describe("a decision form", () => {
     });
   });
 });
+
+describe("what a form declares of its fields", () => {
+  it("reads a field's schema by its path, into objects and arrays", () => {
+    const { client } = host(() => ({ value: null }));
+    const binding = bindForm(
+      client,
+      v.object({
+        address: v.object({ country: v.enum(["nl", "de"]) }),
+        lines: v.array(v.object({ amount: v.number().min(1) })),
+      }),
+      { defaultValues: {} }
+    );
+    expect({
+      country: binding.fieldDescriptor("address.country")?.kind,
+      amount: binding.fieldDescriptor("lines[0].amount")?.kind,
+      missing: binding.fieldDescriptor("address.city"),
+      intoText: binding.fieldDescriptor("address.country.code"),
+    }).toStrictEqual({
+      country: "enum",
+      amount: "number",
+      missing: undefined,
+      intoText: undefined,
+    });
+  });
+});

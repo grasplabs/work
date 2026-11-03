@@ -1080,6 +1080,9 @@ importers:
       react-is:
         specifier: 'catalog:'
         version: 19.3.0
+      react-markdown:
+        specifier: 'catalog:'
+        version: 10.1.0(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2)
       react-resizable-panels:
         specifier: 'catalog:'
         version: 4.14.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

@@ -1,4 +1,5 @@
 import type { OperationReference } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
 import { usePaginatedQuery, useRetryFailed } from "@grasp-os/sdk/react";
 import type { PageItemOf, PaginatedArgsOf } from "@grasp-os/sdk/react";
 import {
@@ -33,6 +34,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
+import { RichText } from "@grasp-os/ui/components/rich-text";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -54,8 +56,23 @@ import {
   MoreHorizontalIcon,
   SearchIcon,
 } from "lucide-react";
-import { Component, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
+
+import {
+  draftOf,
+  editorKindOf,
+  parsedDraft,
+  recordFieldsOf,
+  shownCell,
+} from "../internal/data-grid-cells.ts";
+import type { EditorKind } from "../internal/data-grid-cells.ts";
+import { dataGridTexts } from "../internal/data-grid-text.ts";
+import type { DataGridText } from "../internal/data-grid-text.ts";
+import { documentLanguage, pageText } from "../internal/language.ts";
+import { QueryBoundary } from "../internal/query-boundary.tsx";
+
+export type { DataGridText } from "../internal/data-grid-text.ts";
 
 // A table of an App's records, read page by page from one of its queries
 // (`usePaginatedQuery`): what a screen would otherwise wire by hand around
@@ -63,15 +80,19 @@ import type { ReactNode } from "react";
 // filters, which columns show, which rows are selected) and hands the
 // first three to the query through `args`, so the App's query does the
 // searching, sorting and filtering on the server, over every record, not
-// just those loaded. It shows the records the query answered, more on
-// Load more, and its own empty, loading and failed states.
+// just those loaded. Each cell shows and edits its field as the query
+// declares it (its `returns`): a moment as a date, money in its currency,
+// a nullable number edited as a number.
 //
 // What could go wrong, and how it is closed:
 // - A search per keystroke: the search settles before it reaches `args`.
-// - A bulk action on rows no longer shown: the selection is what the
-//   person sees, the rows loaded now; a row gone from the list drops out.
+// - A bulk action on rows no longer shown, or on the wrong ones: rows are
+//   selected by their `_id` (a grid with bulk actions needs one), and the
+//   selection is of the rows loaded now; a row gone from the list drops out.
 // - An inline edit saved twice, or lost: one save at a time per cell; a
 //   failure keeps the editor open with what was typed, and says why.
+// - An action failing unseen: a row's or bulk action's failure is shown
+//   above the table, as an edit's is in its cell.
 // - A failed query blanking the screen: the grid shows the failure in its
 //   place, with Try again, and the search and filters stay usable.
 
@@ -113,14 +134,20 @@ interface GridState {
   readonly filters: Readonly<Record<string, string>>;
 }
 
-/** What an inline edit of a value of type `Value` saves: its text, number or yes or no. */
+/**
+ * What an inline edit of a value of type `Value` saves: text (an enum's
+ * value among them), a number (a moment's too), a yes or no, or null for a
+ * field that allows it, cleared.
+ */
 type EditValue<Value> = Value extends string
-  ? string
+  ? Value
   : Value extends number
     ? number
     : Value extends boolean
       ? boolean
-      : never;
+      : Value extends null
+        ? null
+        : never;
 
 /** One column, showing one field of the record. */
 interface ColumnOf<Row, Name extends FieldOf<Row>> {
@@ -133,12 +160,18 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
   readonly filter?: Readonly<Partial<Record<FilterValue<Row[Name]>, string>>>;
   /** Whether it starts hidden; the person can show it. */
   readonly hidden?: boolean;
-  /** How a cell shows the record; its value as text otherwise. */
+  /**
+   * Whether the field is formatted text, as a rich text field keeps it
+   * (Markdown): shown formatted, with `RichText`.
+   */
+  readonly richText?: boolean;
+  /** How a cell shows the record; as the query declares the field otherwise. */
   readonly cell?: (row: Row) => ReactNode;
   /**
-   * Saves a new value the person typed in the cell, with a mutation of the
-   * App's: the cell becomes editable. Text and numbers are typed, a yes or
-   * no is a switch. Its rejection is shown in the cell.
+   * Saves a new value the person gave in the cell, with a mutation of the
+   * App's: the cell becomes editable, as the query declares the field
+   * (text, an enum's values, a number, a moment, a yes or no). Its
+   * rejection is shown in the cell.
    */
   readonly edit?: (row: Row, value: EditValue<Row[Name]>) => Promise<unknown>;
 }
@@ -151,6 +184,7 @@ export type DataGridColumn<Row> =
 /** Something the person can do to one row, from its menu. */
 export interface DataGridRowAction<Row> {
   readonly label: string;
+  /** Its rejection is shown above the table. */
   readonly onSelect: (row: Row) => unknown;
   readonly destructive?: boolean;
 }
@@ -158,71 +192,35 @@ export interface DataGridRowAction<Row> {
 /** Something the person can do to the selected rows at once. */
 export interface DataGridBulkAction<Row> {
   readonly label: string;
-  /** Called with the selected rows; the selection clears once it resolves. */
+  /**
+   * Called with the selected rows; the selection clears once it resolves,
+   * and stays, its rejection shown above the table, if it fails.
+   */
   readonly onSelect: (rows: readonly Row[]) => unknown;
   readonly destructive?: boolean;
 }
 
-/** What the grid says, in English unless the screen says otherwise. */
-export interface DataGridText {
-  readonly search: string;
-  readonly columns: string;
-  readonly loadMore: string;
-  readonly empty: string;
-  /** When a search or filter answered nothing. */
-  readonly noMatches: string;
-  readonly failed: string;
-  readonly tryAgain: string;
-  readonly all: string;
-  readonly selectAll: string;
-  readonly selectRow: string;
-  readonly selected: (count: number) => string;
-  readonly shown: (count: number) => string;
-  readonly rowActions: string;
-  readonly edit: (label: string) => string;
-  readonly yes: string;
-  readonly no: string;
-  /** An inline edit of a number that isn't one. */
-  readonly notANumber: string;
-}
-
-const englishText: DataGridText = {
-  search: "Search",
-  columns: "Columns",
-  loadMore: "Load more",
-  empty: "Nothing here yet.",
-  noMatches: "Nothing matches.",
-  failed: "This list couldn't load",
-  tryAgain: "Try again",
-  all: "All",
-  selectAll: "Select all rows",
-  selectRow: "Select row",
-  selected: (count) => `${count} selected`,
-  shown: (count) => `${count} shown`,
-  rowActions: "Row actions",
-  edit: (label) => `Edit ${label}`,
-  yes: "Yes",
-  no: "No",
-  notANumber: "Enter a number.",
-};
-
-/** What every column of a grid is, read from its spec. */
+/** What every column of a grid is, read from its spec and the query. */
 interface ReadColumn<Row> {
   readonly field: FieldOf<Row>;
   readonly label: string;
   readonly sortable: boolean;
   readonly filter: Readonly<Partial<Record<string, string>>> | undefined;
   readonly hidden: boolean;
+  readonly richText: boolean;
   readonly cell: ((row: Row) => ReactNode) | undefined;
   readonly edit: ((row: Row, value: unknown) => Promise<unknown>) | undefined;
+  /** What the query declares of the field. */
+  readonly descriptor: ValueDescriptor | undefined;
 }
 
 const camelBreak = /(?<=[a-z0-9])(?=[A-Z])/gu;
+const leadingUnderscores = /^_+/u;
 
 /** A field's name in words: `_createdAt` as "Created at". */
-export const labelOfField = (field: string): string => {
+const labelOfField = (field: string): string => {
   const words = field
-    .replace(/^_+/u, "")
+    .replace(leadingUnderscores, "")
     .split(camelBreak)
     .join(" ")
     .replaceAll("_", " ")
@@ -230,67 +228,55 @@ export const labelOfField = (field: string): string => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
-const readColumn = <Row,>(spec: DataGridColumn<Row>): ReadColumn<Row> => {
+const readColumn = <Row,>(
+  spec: DataGridColumn<Row>,
+  fields: Readonly<Record<string, ValueDescriptor>>
+): ReadColumn<Row> => {
+  const field = typeof spec === "string" ? spec : spec.field;
+  const descriptor = Object.hasOwn(fields, field) ? fields[field] : undefined;
   if (typeof spec === "string") {
     return {
-      field: spec,
-      label: labelOfField(spec),
+      field,
+      label: labelOfField(field),
       sortable: false,
       filter: undefined,
       hidden: false,
+      richText: false,
       cell: undefined,
       edit: undefined,
+      descriptor,
     };
   }
   return {
-    field: spec.field,
-    label: spec.label ?? labelOfField(spec.field),
+    field,
+    label: spec.label ?? labelOfField(field),
     sortable: spec.sortable === true,
     filter: spec.filter,
     hidden: spec.hidden === true,
+    richText: spec.richText === true,
     cell: spec.cell,
-    // SAFETY: an editor hands `edit` a value of the type the field holds
-    // (`EditValue`): text for text, a number for a number, a boolean for
-    // a boolean (`editorKindOf`).
+    // SAFETY: an editor hands `edit` a value of the type the query
+    // declares the field holds (`parsedDraft`), as `EditValue` types it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     edit: spec.edit as ReadColumn<Row>["edit"],
+    descriptor,
   };
 };
 
-/** A record's key among the rows: its `_id`, or where it is. */
-const keyOf = (row: unknown, index: number): string =>
+/** A record's `_id`, if it has one. */
+const idOf = (row: unknown): string | undefined =>
   typeof row === "object" &&
   row !== null &&
   "_id" in row &&
   typeof row._id === "string"
     ? row._id
-    : `#${index}`;
+    : undefined;
 
 /** `row`'s value of `field`. */
 const valueOf = (row: unknown, field: string): unknown =>
   typeof row === "object" && row !== null && Object.hasOwn(row, field)
     ? Reflect.get(row, field)
     : undefined;
-
-/** A value as a cell shows it when its column says nothing else. */
-const shownValue = (value: unknown, text: DataGridText): string => {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (typeof value === "boolean") {
-    return value ? text.yes : text.no;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => shownValue(item, text)).join(", ");
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number" || typeof value === "bigint") {
-    return value.toString();
-  }
-  return typeof value === "object" ? JSON.stringify(value) : "";
-};
 
 /** The next sort when the person picks a column's heading: up, down, then none. */
 const nextSort = (
@@ -303,22 +289,14 @@ const nextSort = (
   return sort.direction === "asc" ? { field, direction: "desc" } : undefined;
 };
 
-/** How a cell's value is edited: as text, a number, or a yes or no. */
-type EditorKind = "text" | "number" | "boolean";
+/** Why something failed, as a person reads it: its own message, if it has one. */
+const messageOf = (error: unknown, text: DataGridText): string =>
+  error instanceof Error && error.message !== ""
+    ? error.message
+    : text.actionFailed;
 
-const editorKindOf = (value: unknown): EditorKind => {
-  if (typeof value === "number") {
-    return "number";
-  }
-  return typeof value === "boolean" ? "boolean" : "text";
-};
-
-/** Why a save failed, as a person reads it. */
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
-/** A cell the person can edit in place, saving through its column's `edit`. */
-const EditableCell = <Row,>({
+/** A cell as the query declares its field: formatted, or rich text. */
+const CellValue = <Row,>({
   row,
   column,
   text,
@@ -326,15 +304,51 @@ const EditableCell = <Row,>({
   row: Row;
   column: ReadColumn<Row>;
   text: DataGridText;
+}): ReactNode => {
+  if (column.cell !== undefined) {
+    return column.cell(row);
+  }
+  const value = valueOf(row, column.field);
+  if (column.richText && typeof value === "string") {
+    return <RichText value={value} />;
+  }
+  return shownCell(value, column.descriptor, text, documentLanguage());
+};
+
+/** The input an editor types into, by what it edits. */
+const inputTypes: Readonly<Record<EditorKind, string>> = {
+  text: "text",
+  choice: "text",
+  number: "number",
+  boolean: "checkbox",
+  moment: "datetime-local",
+};
+
+/** A cell the person can edit in place, saving through its column's `edit`. */
+const EditableCell = <Row,>({
+  row,
+  rowLabel,
+  column,
+  kind,
+  text,
+}: {
+  row: Row;
+  rowLabel: string;
+  column: ReadColumn<Row>;
+  kind: EditorKind;
+  text: DataGridText;
 }): React.JSX.Element => {
   const value = valueOf(row, column.field);
-  const kind = editorKindOf(value);
+  const { descriptor } = column;
   const [draft, setDraft] = useState<string>();
   const [saving, setSaving] = useState(false);
   // One save at a time: Enter and the blur that follows it are one edit.
   const pending = useRef(false);
+  // Back to the cell once an edit the person ended there (Enter, Escape) closes.
+  const refocus = useRef(false);
   const [failure, setFailure] = useState<string>();
   const failureId = useId();
+  const name = text.edit(column.label, rowLabel);
   const save = async (next: unknown): Promise<void> => {
     if (pending.current || column.edit === undefined) {
       return;
@@ -346,7 +360,7 @@ const EditableCell = <Row,>({
     try {
       await column.edit(row, next);
     } catch (error) {
-      failed = messageOf(error);
+      failed = messageOf(error, text);
     }
     pending.current = false;
     setSaving(false);
@@ -355,6 +369,7 @@ const EditableCell = <Row,>({
       setDraft(undefined);
     }
   };
+  const describedBy = failure === undefined ? undefined : failureId;
   const failureShown =
     failure === undefined ? null : (
       <p className="text-destructive text-xs" id={failureId} role="alert">
@@ -365,8 +380,8 @@ const EditableCell = <Row,>({
     return (
       <div className="flex flex-col gap-1">
         <Switch
-          aria-describedby={failure === undefined ? undefined : failureId}
-          aria-label={text.edit(column.label)}
+          aria-describedby={describedBy}
+          aria-label={name}
           checked={value === true}
           disabled={saving}
           onCheckedChange={(checked) => {
@@ -380,65 +395,132 @@ const EditableCell = <Row,>({
   if (draft === undefined) {
     return (
       <Button
-        aria-label={`${text.edit(column.label)}: ${shownValue(value, text)}`}
+        aria-label={name}
         onClick={() => {
-          setDraft(shownValue(value, text));
+          setDraft(draftOf(value, kind));
           setFailure(undefined);
+        }}
+        ref={(button: HTMLButtonElement | null) => {
+          if (button !== null && refocus.current) {
+            refocus.current = false;
+            button.focus();
+          }
         }}
         size="sm"
         type="button"
         variant="ghost"
       >
-        {column.cell === undefined ? shownValue(value, text) : column.cell(row)}
+        <CellValue column={column} row={row} text={text} />
       </Button>
     );
   }
-  const commit = (): void => {
-    if (draft === shownValue(value, text)) {
+  const commit = (typed: string): void => {
+    if (typed === draftOf(value, kind)) {
       setDraft(undefined);
       return;
     }
-    if (kind === "number") {
-      const number = Number(draft);
-      if (draft.trim() === "" || !Number.isFinite(number)) {
-        setFailure(text.notANumber);
-        return;
-      }
-      void save(number);
+    const parsed = parsedDraft(typed, kind, descriptor, text);
+    if ("problem" in parsed) {
+      setFailure(parsed.problem);
       return;
     }
-    void save(draft);
+    void save(parsed.value);
   };
+  const keys = (event: React.KeyboardEvent): void => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      refocus.current = true;
+      commit(draft);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      refocus.current = true;
+      setDraft(undefined);
+      setFailure(undefined);
+    }
+  };
+  const choices = descriptor?.kind === "enum" ? descriptor.values : [];
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <Input
-          aria-describedby={failure === undefined ? undefined : failureId}
-          aria-invalid={failure !== undefined}
-          aria-label={text.edit(column.label)}
-          autoFocus
-          disabled={saving}
-          onBlur={commit}
-          onChange={(event) => {
-            setDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commit();
-            }
-            if (event.key === "Escape") {
+        {kind === "choice" ? (
+          <NativeSelect
+            aria-describedby={describedBy}
+            aria-invalid={failure !== undefined}
+            aria-label={name}
+            autoFocus
+            disabled={saving}
+            onBlur={() => {
               setDraft(undefined);
-              setFailure(undefined);
-            }
-          }}
-          type={kind === "number" ? "number" : "text"}
-          value={draft}
-        />
+            }}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              commit(event.target.value);
+            }}
+            onKeyDown={keys}
+            value={draft}
+          >
+            {descriptor?.nullable === true ? (
+              <NativeSelectOption value="" />
+            ) : null}
+            {choices.map((choice) => (
+              <NativeSelectOption key={choice} value={choice}>
+                {choice}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        ) : (
+          <Input
+            aria-describedby={describedBy}
+            aria-invalid={failure !== undefined}
+            aria-label={name}
+            autoFocus
+            disabled={saving}
+            onBlur={() => {
+              commit(draft);
+            }}
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+            onKeyDown={keys}
+            type={inputTypes[kind]}
+            value={draft}
+          />
+        )}
         {saving ? <Spinner aria-hidden /> : null}
       </div>
       {failureShown}
     </div>
+  );
+};
+
+/** A cell of a row: editable where its column saves and its field can be edited. */
+const RowCell = <Row,>({
+  row,
+  rowLabel,
+  column,
+  text,
+}: {
+  row: Row;
+  rowLabel: string;
+  column: ReadColumn<Row>;
+  text: DataGridText;
+}): React.JSX.Element => {
+  const kind = editorKindOf(column.descriptor);
+  return (
+    <TableCell>
+      {column.edit === undefined || kind === undefined ? (
+        <CellValue column={column} row={row} text={text} />
+      ) : (
+        <EditableCell
+          column={column}
+          kind={kind}
+          row={row}
+          rowLabel={rowLabel}
+          text={text}
+        />
+      )}
+    </TableCell>
   );
 };
 
@@ -489,6 +571,28 @@ const SortIcon = ({
 /** How many placeholder rows show while the first records load. */
 const loadingRows = 3;
 
+/**
+ * What names a row in its controls' names (`Select Ada`): its first
+ * column as a cell shows it, or where it is.
+ */
+const rowLabelOf = <Row,>(
+  row: Row,
+  index: number,
+  first: ReadColumn<Row> | undefined,
+  text: DataGridText
+): string => {
+  const shown =
+    first === undefined
+      ? ""
+      : shownCell(
+          valueOf(row, first.field),
+          first.descriptor,
+          text,
+          documentLanguage()
+        );
+  return shown === "" ? `#${index + 1}` : shown;
+};
+
 /** The grid's rows: read from the query, with the selection and Load more. */
 const GridRows = <Reference extends AnyQuery>({
   label,
@@ -505,19 +609,43 @@ const GridRows = <Reference extends AnyQuery>({
   text,
 }: RowsProps<Reference>): React.JSX.Element => {
   const list = usePaginatedQuery(query, args, { initialPageSize: pageSize });
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [acting, setActing] = useState(false);
+  // Why the last row or bulk action failed, until another runs.
+  const [failure, setFailure] = useState<string>();
+  const [first] = columns;
   const rows = list.items.map((row, index) => ({
-    key: keyOf(row, index),
+    id: idOf(row),
+    key: idOf(row) ?? `#${index}`,
+    label: rowLabelOf(row, index, first, text),
     row,
   }));
-  // The selection is of the rows shown now: one gone from the list drops out.
-  const chosen = rows.filter(({ key }) => selected.has(key));
+  // The selection is of the rows shown now, by ID: one gone drops out.
+  const selectableRows = rows.filter(({ id }) => id !== undefined);
+  const chosen = selectableRows.filter(
+    ({ id }) => id !== undefined && selected.has(id)
+  );
   const selectable = bulkActions.length > 0;
-  const allChosen = rows.length > 0 && chosen.length === rows.length;
+  const allChosen =
+    selectableRows.length > 0 && chosen.length === selectableRows.length;
   const width =
     columns.length + (selectable ? 1 : 0) + (rowActions.length > 0 ? 1 : 0);
   const loadingFirst = list.isLoading && rows.length === 0;
+  const run = async (act: () => unknown): Promise<boolean> => {
+    setActing(true);
+    setFailure(undefined);
+    let failed: string | undefined;
+    try {
+      await act();
+    } catch (error) {
+      failed = messageOf(error, text);
+    }
+    setActing(false);
+    setFailure(failed);
+    return failed === undefined;
+  };
   let body: ReactNode;
   if (loadingFirst) {
     body = Array.from({ length: loadingRows }, (_, index) => (
@@ -544,37 +672,40 @@ const GridRows = <Reference extends AnyQuery>({
       </TableRow>
     );
   } else {
-    body = rows.map(({ key, row }) => (
+    body = rows.map(({ id, key, label: rowLabel, row }) => (
       <TableRow
-        data-state={selected.has(key) ? "selected" : undefined}
+        data-state={
+          id !== undefined && selected.has(id) ? "selected" : undefined
+        }
         key={key}
       >
         {selectable ? (
           <TableCell>
-            <Checkbox
-              aria-label={text.selectRow}
-              checked={selected.has(key)}
-              onCheckedChange={(checked) => {
-                const next = new Set(selected);
-                if (checked) {
-                  next.add(key);
-                } else {
-                  next.delete(key);
-                }
-                setSelected(next);
-              }}
-            />
+            {id === undefined ? null : (
+              <Checkbox
+                aria-label={text.selectRow(rowLabel)}
+                checked={selected.has(id)}
+                onCheckedChange={(checked) => {
+                  const next = new Set(selected);
+                  if (checked) {
+                    next.add(id);
+                  } else {
+                    next.delete(id);
+                  }
+                  setSelected(next);
+                }}
+              />
+            )}
           </TableCell>
         ) : null}
         {columns.map((column) => (
-          <TableCell key={column.field}>
-            {column.edit === undefined ? (
-              (column.cell?.(row) ??
-              shownValue(valueOf(row, column.field), text))
-            ) : (
-              <EditableCell column={column} row={row} text={text} />
-            )}
-          </TableCell>
+          <RowCell
+            column={column}
+            key={column.field}
+            row={row}
+            rowLabel={rowLabel}
+            text={text}
+          />
         ))}
         {rowActions.length > 0 ? (
           <TableCell variant="end">
@@ -582,7 +713,7 @@ const GridRows = <Reference extends AnyQuery>({
               <DropdownMenuTrigger
                 render={
                   <Button
-                    aria-label={text.rowActions}
+                    aria-label={text.rowActions(rowLabel)}
                     size="icon-sm"
                     variant="ghost"
                   />
@@ -595,7 +726,7 @@ const GridRows = <Reference extends AnyQuery>({
                   <DropdownMenuItem
                     key={action.label}
                     onClick={() => {
-                      void action.onSelect(row);
+                      void run(() => action.onSelect(row));
                     }}
                     variant={
                       action.destructive === true ? "destructive" : "default"
@@ -613,8 +744,17 @@ const GridRows = <Reference extends AnyQuery>({
   }
   return (
     <div className="flex flex-col gap-3">
+      {failure === undefined ? null : (
+        <Alert live="assertive" variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
       {selectable && chosen.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2" role="toolbar">
+        <div
+          aria-label={text.bulkActions}
+          className="flex flex-wrap items-center gap-2"
+          role="group"
+        >
           <span className="text-sm">{text.selected(chosen.length)}</span>
           {bulkActions.map((action) => (
             <Button
@@ -622,16 +762,9 @@ const GridRows = <Reference extends AnyQuery>({
               key={action.label}
               onClick={() => {
                 const act = async (): Promise<void> => {
-                  setActing(true);
-                  let done = false;
-                  try {
-                    await action.onSelect(chosen.map(({ row }) => row));
-                    done = true;
-                  } catch {
-                    // The action says why it failed itself; the selection
-                    // stays, to try again.
-                  }
-                  setActing(false);
+                  const done = await run(() =>
+                    action.onSelect(chosen.map(({ row }) => row))
+                  );
                   if (done) {
                     setSelected(new Set());
                   }
@@ -656,11 +789,17 @@ const GridRows = <Reference extends AnyQuery>({
                 <Checkbox
                   aria-label={text.selectAll}
                   checked={allChosen}
-                  disabled={rows.length === 0}
+                  disabled={selectableRows.length === 0}
                   indeterminate={chosen.length > 0 && !allChosen}
                   onCheckedChange={(checked) => {
                     setSelected(
-                      new Set(checked ? rows.map(({ key }) => key) : [])
+                      new Set(
+                        checked
+                          ? selectableRows.flatMap(({ id }) =>
+                              id === undefined ? [] : [id]
+                            )
+                          : []
+                      )
                     );
                   }}
                 />
@@ -692,7 +831,7 @@ const GridRows = <Reference extends AnyQuery>({
             ))}
             {rowActions.length > 0 ? (
               <TableHead>
-                <span className="sr-only">{text.rowActions}</span>
+                <span className="sr-only">{text.actions}</span>
               </TableHead>
             ) : null}
           </TableRow>
@@ -733,11 +872,11 @@ const GridRows = <Reference extends AnyQuery>({
 /** The grid's failure, in place of its rows, and a way to read it again. */
 const GridFailure = ({
   error,
-  onRetry,
+  again,
   text,
 }: {
   error: unknown;
-  onRetry: () => void;
+  again: () => void;
   text: DataGridText;
 }): React.JSX.Element => {
   const retryFailed = useRetryFailed();
@@ -745,12 +884,12 @@ const GridFailure = ({
     <Alert live="assertive" variant="destructive">
       <AlertTitle>{text.failed}</AlertTitle>
       <AlertDescription>
-        <p>{messageOf(error)}</p>
+        <p>{messageOf(error, text)}</p>
         <p>
           <Button
             onClick={() => {
               retryFailed();
-              onRetry();
+              again();
             }}
             size="sm"
             type="button"
@@ -764,64 +903,13 @@ const GridFailure = ({
   );
 };
 
-interface BoundaryProps {
-  readonly children: ReactNode;
-  readonly text: DataGridText;
-  /** What the rows are read for: another search or filter reads them afresh. */
-  readonly reading: string;
-}
-
-interface BoundaryState {
-  readonly failure: { readonly error: unknown } | null;
-  readonly reading: string;
-}
-
-/**
- * Catches the grid's query failing, which `usePaginatedQuery` throws while
- * rendering, so it shows in the grid's place rather than the screen's.
- * React offers no hook for this; the React Compiler leaves classes as
- * they are.
- */
-class GridBoundary extends Component<BoundaryProps, BoundaryState> {
-  constructor(props: BoundaryProps) {
-    super(props);
-    this.state = { failure: null, reading: props.reading };
-  }
-
-  static getDerivedStateFromError(error: unknown): Partial<BoundaryState> {
-    return { failure: { error } };
-  }
-
-  static getDerivedStateFromProps(
-    props: BoundaryProps,
-    state: BoundaryState
-  ): Partial<BoundaryState> | null {
-    return props.reading === state.reading
-      ? null
-      : { failure: null, reading: props.reading };
-  }
-
-  override render(): ReactNode {
-    const { failure } = this.state;
-    if (failure === null) {
-      return this.props.children;
-    }
-    return (
-      <GridFailure
-        error={failure.error}
-        onRetry={() => {
-          // A class's own state: the one way out of a caught failure.
-          // oxlint-disable-next-line react/no-set-state -- see above
-          this.setState({ failure: null });
-        }}
-        text={this.props.text}
-      />
-    );
-  }
-}
-
 /** How long typing settles before a search reaches the query. */
 const searchSettleMs = 300;
+
+/** The bulk actions a grid of `Row` takes: only of rows it can select by `_id`. */
+type BulkActionsOf<Row> = [Row] extends [{ readonly _id: string }]
+  ? readonly DataGridBulkAction<Row>[]
+  : never;
 
 /** What a data grid takes. */
 export interface DataGridProps<Reference extends AnyQuery> {
@@ -847,11 +935,14 @@ export interface DataGridProps<Reference extends AnyQuery> {
   readonly initialSort?: DataGridState<PageItemOf<Reference>>["sort"];
   /** What a row's menu offers. */
   readonly rowActions?: readonly DataGridRowAction<PageItemOf<Reference>>[];
-  /** What the selected rows can have done to them: rows become selectable. */
-  readonly bulkActions?: readonly DataGridBulkAction<PageItemOf<Reference>>[];
+  /**
+   * What the selected rows can have done to them: rows become selectable,
+   * by their `_id`, which the records must have.
+   */
+  readonly bulkActions?: BulkActionsOf<PageItemOf<Reference>>;
   /** What it says, besides its title, when there are no records. */
   readonly empty?: ReactNode;
-  /** What it says, in the screen's language. */
+  /** What it says, in the screen's language (the page's otherwise). */
   readonly text?: Partial<DataGridText>;
 }
 
@@ -861,7 +952,8 @@ const noActions: readonly never[] = [];
  * A table of the records `query` answers, read page by page: search,
  * sorting and filters handed to the query, columns the person can hide,
  * rows they can select for bulk actions, a menu of actions per row, and
- * cells edited in place through a mutation.
+ * cells edited in place through a mutation. Each cell shows and edits its
+ * field as the query declares it.
  *
  * ```tsx
  * <DataGrid
@@ -873,13 +965,14 @@ const noActions: readonly never[] = [];
  *     status: filters.status,
  *   })}
  *   columns={[
- *     { field: "name", sortable: true, edit: (row, name) => rename({ id: row._id, name }) },
+ *     { field: "name", sortable: true, edit: async (row, name) => await rename({ id: row._id, name }) },
  *     { field: "status", filter: { active: "Active", archived: "Archived" } },
- *     "email",
+ *     { field: "notes", richText: true },
+ *     "_createdAt",
  *   ]}
  *   search="Search customers"
- *   bulkActions={[{ label: "Archive", onSelect: (rows) => archive({ ids: rows.map((row) => row._id) }) }]}
- *   rowActions={[{ label: "Open", onSelect: (row) => navigate(screens.customer, { id: row._id }) }]}
+ *   bulkActions={[{ label: "Archive", onSelect: async (rows) => await archive({ ids: rows.map((row) => row._id) }) }]}
+ *   rowActions={[{ label: "Open", onSelect: async (row) => await navigate(screens.customer, { id: row._id }) }]}
  * />
  * ```
  */
@@ -892,12 +985,19 @@ export const DataGrid = <Reference extends AnyQuery>({
   search: searchPlaceholder,
   initialSort,
   rowActions = noActions,
-  bulkActions = noActions,
+  bulkActions,
   empty,
   text: ownText,
 }: DataGridProps<Reference>): React.JSX.Element => {
-  const text: DataGridText = { ...englishText, ...ownText };
-  const columns = specs.map((spec) => readColumn(spec));
+  // SAFETY: `BulkActionsOf` admits bulk actions only of rows with an `_id`,
+  // which are the rows these are.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const bulk = (bulkActions ?? noActions) as readonly DataGridBulkAction<
+    PageItemOf<Reference>
+  >[];
+  const text: DataGridText = { ...pageText(dataGridTexts), ...ownText };
+  const fields = recordFieldsOf(query.returns);
+  const columns = specs.map((spec) => readColumn(spec, fields));
   const [typed, setTyped] = useState("");
   const search = useSettled(typed, searchSettleMs);
   const [sort, setSort] = useState<GridState["sort"]>(initialSort);
@@ -918,7 +1018,7 @@ export const DataGrid = <Reference extends AnyQuery>({
   const listArgs = args(state as DataGridState<PageItemOf<Reference>>);
   return (
     <div className="flex flex-col gap-3" data-slot="data-grid">
-      <div className="flex flex-wrap items-center gap-2" role="toolbar">
+      <div className="flex flex-wrap items-center gap-2">
         {searchPlaceholder === undefined ? null : (
           <InputGroup className="max-w-sm">
             <InputGroupAddon>
@@ -993,10 +1093,15 @@ export const DataGrid = <Reference extends AnyQuery>({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <GridBoundary reading={JSON.stringify(listArgs)} text={text}>
+      <QueryBoundary
+        renderFailure={(error, again) => (
+          <GridFailure again={again} error={error} text={text} />
+        )}
+        reading={JSON.stringify(listArgs)}
+      >
         <GridRows
           args={listArgs}
-          bulkActions={bulkActions}
+          bulkActions={bulk}
           columns={shown}
           empty={empty}
           label={label}
@@ -1010,7 +1115,7 @@ export const DataGrid = <Reference extends AnyQuery>({
           state={state}
           text={text}
         />
-      </GridBoundary>
+      </QueryBoundary>
     </div>
   );
 };

@@ -75,7 +75,10 @@ export const uploadedFileId = "01890000-0000-7000-8000-0000000000f1";
  * A session client whose host answers each read and call with `answer`,
  * and every read and call it was sent, in order.
  */
-export const testHost = (answer: (sent: Sent) => Answer) => {
+export const testHost = (
+  answer: (sent: Sent) => Answer,
+  { holdUploads = false }: { readonly holdUploads?: boolean } = {}
+) => {
   const reads: Sent[] = [];
   const calls: Sent[] = [];
   /** Each file uploaded: through which resource, and its name. */
@@ -112,6 +115,10 @@ export const testHost = (answer: (sent: Sent) => Answer) => {
       upload: async (resource, _file, name) => {
         uploads.push({ resource, name });
         await Promise.resolve();
+        if (holdUploads) {
+          // Never ends: the upload is still under way.
+          await Promise.withResolvers<never>().promise;
+        }
         return uploadedFileId;
       },
       read: async () => {

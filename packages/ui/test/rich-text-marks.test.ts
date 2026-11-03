@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { applyMark } from "../src/form.tsx";
+import { applyMark } from "../src/internal/rich-text-marks.ts";
 
 // What the rich text field's toolbar makes of the text: Markdown around
 // the selection, and what it selects after, so the person types on.
@@ -13,10 +13,15 @@ describe("a rich text mark", () => {
       end: 9,
     });
     expect(applyMark("Ship it now", 5, 7, "italic")).toStrictEqual({
-      text: "Ship _it_ now",
+      text: "Ship *it* now",
       start: 6,
       end: 8,
     });
+  });
+
+  it("leaves the spaces at the selection's edges outside the mark", () => {
+    // A double-click takes the space after a word; `**it **` isn't bold.
+    expect(applyMark("Ship it now", 5, 8, "bold").text).toBe("Ship **it** now");
   });
 
   it("makes each selected line an item, or the line the cursor is on", () => {
