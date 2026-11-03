@@ -50,7 +50,6 @@ import {
 } from "../db/schema.ts";
 import { toEdge } from "../rollout/channels.ts";
 import { recordBlobs } from "./blobs.ts";
-import { startsMajor } from "./version.ts";
 
 /**
  * The releases bucket, as the import uses it: reading only, so the import
@@ -263,7 +262,6 @@ const importRelease = async (
         manifestSha256,
         builtAt: new Date(manifest.createdAt),
         importedAt: new Date(),
-        feature: startsMajor(manifest.notes),
       })
       .onConflictDoNothing(),
     {

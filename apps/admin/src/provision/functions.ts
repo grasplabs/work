@@ -29,17 +29,14 @@ export type ChangeResult =
   | { clientId: string; refused: null }
   | { clientId: null; refused: ProvisionErrorCode };
 
-/** The imported releases, newest first: what a client's provisioning picks from. */
-export const fetchNewClientOptions = createServerFn({ method: "GET" }).handler(
+/** The imported releases whose bundles are kept, newest first: what a client can be pinned to. */
+export const fetchPinChoices = createServerFn({ method: "GET" }).handler(
   async () => {
     const { releases } = await listReleases(adminDatabase(env.DB));
     return {
-      releases: releases.map(({ id, notes, versionMajor, versionMinor }) => ({
-        id,
-        notes,
-        versionMajor,
-        versionMinor,
-      })),
+      releases: releases
+        .filter(({ bundleDeletedAt }) => bundleDeletedAt === null)
+        .map(({ id, notes }) => ({ id, notes })),
     };
   }
 );
