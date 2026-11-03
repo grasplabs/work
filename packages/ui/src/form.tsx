@@ -1297,7 +1297,16 @@ const FileUpload = <Reference extends FilesReference>({
               setUploaded({ id: ref.id, name: file.name });
               control.handleChange(ref);
             } catch (error) {
-              setFailure(error instanceof Error ? error.message : text.failed);
+              // Cancelled by the person: nothing went wrong to say.
+              const cancelled =
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "file.cancelled";
+              if (!cancelled) {
+                setFailure(
+                  error instanceof Error ? error.message : text.failed
+                );
+              }
             }
             ended();
             control.handleBlur();

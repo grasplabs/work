@@ -31,6 +31,8 @@ export interface DataGridText {
   readonly file: string;
   /** An inline edit of a number that isn't one. */
   readonly notANumber: string;
+  /** An inline edit of a day or a moment that isn't one. */
+  readonly notADate: string;
   /** An inline edit left empty where a value is needed. */
   readonly required: string;
   /** An action that failed without saying why. */
@@ -59,6 +61,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     no: "No",
     file: "File",
     notANumber: "Enter a number.",
+    notADate: "Enter a date.",
     required: "Enter a value.",
     actionFailed: "That didn't work.",
   },
@@ -83,6 +86,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     no: "Nein",
     file: "Datei",
     notANumber: "Geben Sie eine Zahl ein.",
+    notADate: "Geben Sie ein Datum ein.",
     required: "Geben Sie einen Wert ein.",
     actionFailed: "Das hat nicht geklappt.",
   },
@@ -107,6 +111,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     no: "Nee",
     file: "Bestand",
     notANumber: "Vul een getal in.",
+    notADate: "Vul een datum in.",
     required: "Vul een waarde in.",
     actionFailed: "Dat is niet gelukt.",
   },
@@ -132,6 +137,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     no: "No",
     file: "Archivo",
     notANumber: "Introduce un número.",
+    notADate: "Introduce una fecha.",
     required: "Introduce un valor.",
     actionFailed: "No ha funcionado.",
   },
@@ -157,6 +163,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     no: "Non",
     file: "Fichier",
     notANumber: "Saisissez un nombre.",
+    notADate: "Saisissez une date.",
     required: "Saisissez une valeur.",
     actionFailed: "Cela n’a pas fonctionné.",
   },

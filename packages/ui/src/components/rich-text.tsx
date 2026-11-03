@@ -1,3 +1,5 @@
+import type { LinksReference } from "@grasp-os/sdk";
+import { useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createContext, use } from "react";
@@ -13,13 +15,46 @@ import type { Components } from "react-markdown";
 // text inside a screen never outranks the screen's own headings.
 //
 // An App's screen runs in a frame that opens nothing itself: it opens a
-// URL through one of the App's links resources (`client.links.open`). So a
-// link is a button that hands its address to `onOpenLink`, which the
-// screen wires to its links resource; without it, the link's words show
-// with their address beside them, to read.
+// URL through one of the App's links resources (`client.links.open`). So
+// given the resource (`links`), a link is a button that opens its address
+// through it; without one, the link's words show with their address
+// beside them, to read.
 
-/** How a link's address is opened, if the screen opens links. */
-const OpenLink = createContext<((url: string) => void) | undefined>(undefined);
+/** The links resource a link's address opens through, if the screen gave one. */
+const Links = createContext<LinksReference | undefined>(undefined);
+
+/** A link that opens its address through the screen's links resource. */
+const OpeningLink = ({
+  links,
+  href,
+  children,
+}: {
+  links: LinksReference;
+  href: string;
+  children?: ReactNode;
+}): ReactNode => {
+  const client = useClient();
+  return (
+    <Button
+      onClick={() => {
+        const open = async (): Promise<void> => {
+          try {
+            await client.links.open(links, { url: href });
+          } catch {
+            // The host says why it didn't open (an address the resource
+            // doesn't allow, the person declining) in its own UI.
+          }
+        };
+        void open();
+      }}
+      size="inline"
+      type="button"
+      variant="link"
+    >
+      {children}
+    </Button>
+  );
+};
 
 const RichLink = ({
   href,
@@ -28,31 +63,24 @@ const RichLink = ({
   href?: string;
   children?: ReactNode;
 }): ReactNode => {
-  const open = use(OpenLink);
+  const links = use(Links);
   // An address the transform dropped (`javascript:`): its words alone.
   if (href === undefined || href === "") {
     return <span>{children}</span>;
   }
-  if (open === undefined) {
-    return children === href ? (
-      <span>{href}</span>
-    ) : (
-      <span>
-        {children} ({href})
-      </span>
+  if (links !== undefined) {
+    return (
+      <OpeningLink href={href} links={links}>
+        {children}
+      </OpeningLink>
     );
   }
-  return (
-    <Button
-      onClick={() => {
-        open(href);
-      }}
-      size="inline"
-      type="button"
-      variant="link"
-    >
-      {children}
-    </Button>
+  return children === href ? (
+    <span>{href}</span>
+  ) : (
+    <span>
+      {children} ({href})
+    </span>
   );
 };
 
@@ -71,8 +99,11 @@ const components: Components = {
   ul: ({ children }) => (
     <ul className="flex list-disc flex-col gap-1 pl-5">{children}</ul>
   ),
-  ol: ({ children }) => (
-    <ol className="flex list-decimal flex-col gap-1 pl-5">{children}</ol>
+  // A list that starts elsewhere (`3. …`) keeps its numbering.
+  ol: ({ children, start }) => (
+    <ol className="flex list-decimal flex-col gap-1 pl-5" start={start}>
+      {children}
+    </ol>
   ),
   a: ({ href, children }) => <RichLink href={href}>{children}</RichLink>,
   img: ({ alt }) => <span>{alt}</span>,
@@ -80,17 +111,17 @@ const components: Components = {
 
 function RichText({
   value,
-  onOpenLink,
+  links,
   className,
 }: {
   /** The Markdown, as a rich text field saved it. */
   value: string;
   /**
-   * Opens a link's address: the screen's links resource
-   * (`(url) => void client.links.open(resources.site, url)`). Without it,
+   * The App's links resource its links open through (`resources.site`):
+   * a link is then a button that opens its address there. Without it,
    * links show their address as text.
    */
-  onOpenLink?: (url: string) => void;
+  links?: LinksReference;
   className?: string;
 }) {
   return (
@@ -98,11 +129,11 @@ function RichText({
       className={cn("flex flex-col gap-2 text-sm", className)}
       data-slot="rich-text"
     >
-      <OpenLink value={onOpenLink}>
+      <Links value={links}>
         <Markdown components={components} skipHtml>
           {value}
         </Markdown>
-      </OpenLink>
+      </Links>
     </div>
   );
 }

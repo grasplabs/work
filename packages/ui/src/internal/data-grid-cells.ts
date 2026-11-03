@@ -219,5 +219,8 @@ export const parsedDraft = (
     // Read in the person's own time zone: no `Z`.
     value = new Date(draft).getTime();
   }
-  return Number.isFinite(value) ? { value } : { problem: text.notANumber };
+  if (Number.isFinite(value)) {
+    return { value };
+  }
+  return { problem: kind === "number" ? text.notANumber : text.notADate };
 };

@@ -83,6 +83,8 @@ export const testHost = (
   const calls: Sent[] = [];
   /** Each file uploaded: through which resource, and its name. */
   const uploads: { resource: string; name: string }[] = [];
+  /** Each link opened: through which resource, and its address. */
+  const links: { resource: string; url: string }[] = [];
   const transport: Transport = {
     call: async (body) => {
       const sent = sentOf(body);
@@ -110,6 +112,12 @@ export const testHost = (
           // Nothing to let go of: the host pushes once.
         },
       };
+    },
+    links: {
+      open: async (resource, url) => {
+        links.push({ resource, url });
+        await Promise.resolve();
+      },
     },
     files: {
       upload: async (resource, _file, name, { cancel }) => {
@@ -141,7 +149,7 @@ export const testHost = (
       },
     },
   };
-  return { client: new GraspClient(transport), reads, calls, uploads };
+  return { client: new GraspClient(transport), reads, calls, uploads, links };
 };
 
 /** A page of `records` for a list's window of `extent`. */

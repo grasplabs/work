@@ -436,5 +436,8 @@ describe("the form fields", () => {
     // A stalled upload can be cancelled: the form submits again.
     await click(find("button", "Cancel upload"));
     expect(save.hasAttribute("disabled")).toBeFalsy();
+    // Cancelled by the person: no failure to show for it.
+    // (The field's own "required" stays: it holds no file.)
+    expect(document.querySelector('p[role="alert"]')).toBeNull();
   });
 });

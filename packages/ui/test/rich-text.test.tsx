@@ -8,8 +8,8 @@ import { RichText } from "../src/components/rich-text.tsx";
 // or leaves the screen: no script, no handler, no unsafe address, no
 // image fetched from elsewhere.
 
-const shown = (value: string, onOpenLink?: (url: string) => void): string =>
-  renderToStaticMarkup(<RichText onOpenLink={onOpenLink} value={value} />);
+const shown = (value: string): string =>
+  renderToStaticMarkup(<RichText value={value} />);
 
 const attacks = [
   "<script>alert(1)</script>",
@@ -47,15 +47,15 @@ describe("rich text", () => {
     );
   });
 
-  it("shows a link's address as text, unless the screen opens links", () => {
-    const value = "See [the plan](https://example.com/plan).";
-    expect(shown(value)).toContain("the plan (https://example.com/plan)");
-    const opening = shown(value, () => {
-      // Opens nothing: only how it renders is read.
-    });
-    expect({
-      button: opening.includes("<button"),
-      address: opening.includes("https://example.com/plan"),
-    }).toStrictEqual({ button: true, address: false });
+  it("shows a link's address as text when the screen gives no links resource", () => {
+    expect(shown("See [the plan](https://example.com/plan).")).toContain(
+      "the plan (https://example.com/plan)"
+    );
+  });
+
+  it("keeps where a numbered list starts", () => {
+    expect(shown("3. Ship\n4. Tell")).toContain(
+      '<ol class="flex list-decimal flex-col gap-1 pl-5" start="3">'
+    );
   });
 });

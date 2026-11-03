@@ -180,7 +180,9 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
    * (text, an enum's values, a number, a moment or a day, a yes or no).
    * Its rejection is shown in the cell. Other fields stay read-only, their
    * `edit` never called: a record's ID (typed `never`), a file, money, a
-   * duration, a list or an object.
+   * duration, a list or an object. Don't combine it with a `cell` that
+   * renders something interactive (a link, a button): the cell is the
+   * edit button, and can't hold another.
    */
   readonly edit?: (row: Row, value: EditValue<Row[Name]>) => Promise<unknown>;
 }

@@ -917,6 +917,8 @@ import schema from "./schema.ts";
 
 export const briefs = resource.files("briefs", { operations: ["upload", "read"] });
 
+export const site = resource.links("site", { origins: ["https://example.com"] });
+
 export default app({
   name: "Tasks",
   schema,
@@ -924,7 +926,7 @@ export default app({
   operations: { tasks: { list, people, person, create, rename } },
   internalOperations: {},
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-  uses: [briefs],
+  uses: [briefs, site],
 });
 `,
     };
@@ -969,6 +971,7 @@ export default function Tasks() {
         <FormError form={form} />
         <SubmitButton form={form}>Add task</SubmitButton>
       </Form>
+      <RichText links={resources.site} value="See [the plan](https://example.com/plan)." />
     </main>
   );
 }

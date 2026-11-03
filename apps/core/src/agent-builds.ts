@@ -1293,9 +1293,9 @@ const buildDeclaration = `/**
  *   resource declaring \`upload\`; the form doesn't submit while it
  *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
  *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
- *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; its links
- *   open through \`onOpenLink={(url) => void client.links.open(resources.site, url)}\`
- *   and otherwise show their address. Wrap the fields in \`Form\`, with
+ *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; given
+ *   \`links={resources.site}\` (a links resource the App declares), its
+ *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
  *   \`FormError\` and \`SubmitButton\`.
  * - The grid's and the fields' own words follow the page's language
  *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
