@@ -165,6 +165,8 @@ export interface AppDataImportPreview {
 
 /** What to import: the CSV's text, and each column's field (null: left out). */
 export const appDataImportSchema = z.strictObject({
+  /** The version whose tables the person mapped the columns to (`tables`). */
+  version: z.int().min(1),
   csv: z.string().max(appDataImportLimits.maxBytes),
   mapping: z
     .record(z.string().max(256), z.string().max(64).nullable())
@@ -193,7 +195,7 @@ export const appDataErrors = defineErrorFamily({
   "app_data.invalid": "That isn't a valid request for this App's data.",
   "app_data.export_too_large": `A table exports at most ${appDataExportMaxRecords} records.`,
   "app_data.version_changed":
-    "The App changed while this ran. Try again on its current version.",
+    "This App changed. Reload to see its current version.",
 });
 
 /** An App's data, through `apps.data`: for its builders and the admins. */
@@ -202,17 +204,22 @@ export interface AppDataApi {
   tables: (app: string) => Promise<AppDataTables>;
   /**
    * A page of `table`'s records, newest first, as the person may read
-   * them (the table's read access): from `cursor`, the last page's.
+   * them (the table's read access): from `cursor`, the last page's. Like
+   * `record`, `history` and `import`, it names the version whose tables
+   * the page read (`tables`): refused (`app_data.version_changed`) once
+   * another is current, never read under the other's tables.
    */
   records: (
     app: string,
     table: string,
+    version: number,
     cursor: string | null
   ) => Promise<AppDataPage>;
   /** One record, as `records` would show it; null when there is none. */
   record: (
     app: string,
     table: string,
+    version: number,
     id: string
   ) => Promise<AppDataRecord | null>;
   /**
@@ -222,6 +229,7 @@ export interface AppDataApi {
   history: (
     app: string,
     table: string,
+    version: number,
     id: string,
     before: number | null
   ) => Promise<RecordChangePage>;

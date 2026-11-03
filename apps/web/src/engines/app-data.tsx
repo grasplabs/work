@@ -1,3 +1,4 @@
+import { appDataErrors } from "@grasp-os/shared/app-data";
 import type {
   AppDataImportPreview,
   AppDataImportResult,
@@ -49,6 +50,7 @@ import {
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useRouter } from "@tanstack/react-router";
 import { DownloadIcon, SearchIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -62,6 +64,26 @@ import { useCoreAction } from "../use-core-action.ts";
 // its change history, export a table as CSV and import CSV rows into one.
 // Reading only, but for an import, which core checks row by row and lands
 // whole or not at all.
+
+/**
+ * `call`'s answer, or undefined once core says the domain's version moved
+ * on from the one the page read (`app_data.version_changed`), which
+ * `onStale` hears: the page offers a reload rather than an error.
+ */
+const unlessStale = async <T,>(
+  call: () => Promise<T>,
+  onStale: () => void
+): Promise<T | undefined> => {
+  try {
+    return await call();
+  } catch (error) {
+    if (appDataErrors.codeOf(error) === "app_data.version_changed") {
+      onStale();
+      return undefined;
+    }
+    throw error;
+  }
+};
 
 /** Most fields a row of the records table shows; a record shows them all. */
 const shownFields = 6;
@@ -175,12 +197,18 @@ const ChangeItem = ({ change }: { change: RecordChange }) => {
 const RecordSheet = ({
   app,
   table,
+  version,
   record,
+  stale,
+  onStale,
   onClose,
 }: {
   app: string;
   table: string;
+  version: number;
   record: AppDataRecord;
+  stale: boolean;
+  onStale: () => void;
   onClose: () => void;
 }) => {
   const { t } = useLingui();
@@ -190,7 +218,17 @@ const RecordSheet = ({
   const load = async (before: number | null) => {
     const page = await run(
       async (session) =>
-        await session.apps.data.history(app, table, record.id, before)
+        await unlessStale(
+          async () =>
+            await session.apps.data.history(
+              app,
+              table,
+              version,
+              record.id,
+              before
+            ),
+          onStale
+        )
     );
     if (page !== undefined) {
       setChanges([
@@ -200,7 +238,7 @@ const RecordSheet = ({
       setNext(page.next);
     }
   };
-  if (changes === undefined && !busy && failure === undefined) {
+  if (changes === undefined && !busy && failure === undefined && !stale) {
     void load(null);
   }
   const { id } = record;
@@ -271,11 +309,15 @@ const leaveOut = "-";
 const ImportDialog = ({
   app,
   table,
+  version,
+  onStale,
   onDone,
   onClose,
 }: {
   app: string;
   table: AppDataTable;
+  version: number;
+  onStale: () => void;
   onDone: () => void;
   onClose: () => void;
 }) => {
@@ -307,7 +349,15 @@ const ImportDialog = ({
     }
     const done = await run(
       async (session) =>
-        await session.apps.data.import(app, table.name, { csv, mapping })
+        await unlessStale(
+          async () =>
+            await session.apps.data.import(app, table.name, {
+              version,
+              csv,
+              mapping,
+            }),
+          onStale
+        )
     );
     setResult(done);
     if (done?.ok === true) {
@@ -455,9 +505,23 @@ const ImportDialog = ({
 };
 
 /** One table's records, a page at a time, with export, import and find. */
-const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
+const TableData = ({
+  app,
+  table,
+  version,
+}: {
+  app: string;
+  table: AppDataTable;
+  version: number;
+}) => {
   const { t } = useLingui();
+  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
+  // Core has another version current than the one this page read.
+  const [stale, setStale] = useState(false);
+  const onStale = () => {
+    setStale(true);
+  };
   const [records, setRecords] = useState<AppDataRecord[]>();
   const [cursor, setCursor] = useState<string | null>(null);
   const [open, setOpen] = useState<AppDataRecord>();
@@ -467,14 +531,19 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
   const columns = table.fields.slice(0, shownFields).map(({ name }) => name);
   const load = async (from: string | null) => {
     const page = await run(
-      async (session) => await session.apps.data.records(app, table.name, from)
+      async (session) =>
+        await unlessStale(
+          async () =>
+            await session.apps.data.records(app, table.name, version, from),
+          onStale
+        )
     );
     if (page !== undefined) {
       setRecords([...(from === null ? [] : (records ?? [])), ...page.records]);
       setCursor(page.cursor);
     }
   };
-  if (records === undefined && !busy && failure === undefined) {
+  if (records === undefined && !busy && failure === undefined && !stale) {
     void load(null);
   }
   const exportTable = async () => {
@@ -492,7 +561,16 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
     setMissing(false);
     const found = await run(
       async (session) =>
-        await session.apps.data.record(app, table.name, wanted.trim())
+        await unlessStale(
+          async () =>
+            await session.apps.data.record(
+              app,
+              table.name,
+              version,
+              wanted.trim()
+            ),
+          onStale
+        )
     );
     if (found === null) {
       setMissing(true);
@@ -501,6 +579,24 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
     }
   };
   const canImport = table.write !== "none";
+  if (stale) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ErrorText>
+          {t`This domain changed. Reload to see its current version.`}
+        </ErrorText>
+        <Button
+          onClick={() => {
+            void router.invalidate();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Reload</Trans>
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -633,8 +729,11 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
           onClose={() => {
             setOpen(undefined);
           }}
+          onStale={onStale}
           record={open}
+          stale={stale}
           table={table.name}
+          version={version}
         />
       )}
       {importing ? (
@@ -646,7 +745,9 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
           onDone={() => {
             void load(null);
           }}
+          onStale={onStale}
           table={table}
+          version={version}
         />
       ) : null}
     </div>
@@ -656,9 +757,12 @@ const TableData = ({ app, table }: { app: string; table: AppDataTable }) => {
 /** A domain's tables, one picked at a time. */
 export const AppData = ({
   app,
+  version,
   tables,
 }: {
   app: string;
+  /** The version whose tables these are: every read and import names it. */
+  version: number | null;
   tables: AppDataTable[];
 }) => {
   const { t } = useLingui();
@@ -667,7 +771,7 @@ export const AppData = ({
   const [picked, setPicked] = useState({ app, table: tables[0]?.name });
   const wanted = picked.app === app ? picked.table : tables[0]?.name;
   const table = tables.find(({ name }) => name === wanted) ?? tables.at(0);
-  if (table === undefined) {
+  if (table === undefined || version === null) {
     return (
       <Empty>
         <EmptyHeader>
@@ -714,7 +818,12 @@ export const AppData = ({
       ) : null}
       {/* Its own state for each domain and table: nothing read of one
           is shown, or kept, for another. */}
-      <TableData app={app} key={`${app}/${table.name}`} table={table} />
+      <TableData
+        app={app}
+        key={`${app}/${version}/${table.name}`}
+        table={table}
+        version={version}
+      />
     </div>
   );
 };

@@ -148,6 +148,25 @@ const openedStore = async (
   return store;
 };
 
+/**
+ * `openedStore`, if version `version` (what the person's page read,
+ * `tables`) is still the App's current one: otherwise
+ * `app_data.version_changed`, never a read or write under another
+ * version's tables than the page shows.
+ */
+const versionedStore = async (
+  env: Env,
+  by: Identity,
+  input: unknown,
+  version: unknown
+): Promise<Opened> => {
+  const open = await openedStore(env, by, input);
+  if (open.version !== version) {
+    throw appDataErrors.create("app_data.version_changed");
+  }
+  return open;
+};
+
 /** Table `name` of the current version, or `app_data.no_table`. */
 const tableOf = (open: Opened, name: unknown): ManifestTable => {
   const table =
@@ -614,12 +633,12 @@ const importRows = async (
   table: string,
   request: unknown
 ): Promise<AppDataImportResult> => {
-  const { csv, mapping } = appDataErrors.parse(
+  const { version, csv, mapping } = appDataErrors.parse(
     "app_data.invalid",
     appDataImportSchema,
     request
   );
-  const open = await openedStore(env, by, input);
+  const open = await versionedStore(env, by, input, version);
   requireNotArchived(open.app);
   const declared = tableOf(open, table);
   const read = readCsv(csv);
@@ -794,10 +813,11 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
   async records(
     app: string,
     table: string,
+    version: number,
     cursor: string | null
   ): Promise<AppDataPage> {
     return await withPerson(this.#check, async (by) => {
-      const open = await openedStore(this.#env, by, app);
+      const open = await versionedStore(this.#env, by, app, version);
       tableOf(open, table);
       if (cursor !== null && typeof cursor !== "string") {
         throw appDataErrors.create("app_data.invalid");
@@ -809,10 +829,11 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
   async record(
     app: string,
     table: string,
+    version: number,
     id: string
   ): Promise<AppDataRecord | null> {
     return await withPerson(this.#check, async (by) => {
-      const open = await openedStore(this.#env, by, app);
+      const open = await versionedStore(this.#env, by, app, version);
       tableOf(open, table);
       const { value } = await open.store.read(open.scope, {
         kind: "get",
@@ -827,11 +848,12 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
   async history(
     app: string,
     table: string,
+    version: number,
     id: string,
     before: number | null
   ): Promise<RecordChangePage> {
     return await withPerson(this.#check, async (by) => {
-      const open = await openedStore(this.#env, by, app);
+      const open = await versionedStore(this.#env, by, app, version);
       tableOf(open, table);
       return await open.store.history(open.scope, table, id, before);
     });
@@ -871,7 +893,7 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
       const { csv: text } = appDataErrors.parse(
         "app_data.invalid",
         appDataImportSchema,
-        { csv, mapping: {} }
+        { version: 1, csv, mapping: {} }
       );
       const open = await openedStore(this.#env, by, app);
       const declared = tableOf(open, table);

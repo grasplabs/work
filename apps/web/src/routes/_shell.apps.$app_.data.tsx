@@ -51,7 +51,12 @@ const AppDataPage = () => {
           <Trans>Data of {appName}</Trans>
         </h1>
         {/* Opening another domain on this page starts afresh. */}
-        <AppData app={app.id} key={app.id} tables={tables.tables} />
+        <AppData
+          app={app.id}
+          key={`${app.id}/${tables.version}`}
+          tables={tables.tables}
+          version={tables.version}
+        />
       </div>
     </>
   );

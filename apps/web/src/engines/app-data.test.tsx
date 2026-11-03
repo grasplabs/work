@@ -93,7 +93,7 @@ const shown = async () => {
         >
           Open second
         </button>
-        <AppData app={app} tables={tables[app] ?? []} />
+        <AppData app={app} tables={tables[app] ?? []} version={1} />
       </>
     );
   };

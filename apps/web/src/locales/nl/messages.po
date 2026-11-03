@@ -10413,6 +10413,10 @@ msgstr "Afgewezen: {who}."
 msgid "Release address…"
 msgstr "Adres vrijgeven…"
 
+#: src/engines/app-data.tsx
+msgid "Reload"
+msgstr "Opnieuw laden"
+
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
 msgstr "Onthouden"
@@ -13650,6 +13654,10 @@ msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} sta
 #: src/knowledge/markdown.tsx
 msgid "This document is empty."
 msgstr "Dit document is leeg."
+
+#: src/engines/app-data.tsx
+msgid "This domain changed. Reload to see its current version."
+msgstr "Dit domein is gewijzigd. Laad opnieuw om de huidige versie te zien."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "This domain doesn't use an integration yet."

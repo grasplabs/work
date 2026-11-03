@@ -10413,6 +10413,10 @@ msgstr "Rejected: {who}."
 msgid "Release address…"
 msgstr "Release address…"
 
+#: src/engines/app-data.tsx
+msgid "Reload"
+msgstr "Reload"
+
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
 msgstr "Remember it"
@@ -13650,6 +13654,10 @@ msgstr "This document changed since you opened it. Version {newerVersion} is bel
 #: src/knowledge/markdown.tsx
 msgid "This document is empty."
 msgstr "This document is empty."
+
+#: src/engines/app-data.tsx
+msgid "This domain changed. Reload to see its current version."
+msgstr "This domain changed. Reload to see its current version."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "This domain doesn't use an integration yet."

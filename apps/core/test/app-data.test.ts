@@ -201,7 +201,7 @@ const call = async (
 
 /** The whole history of `table`'s record `id`, newest first. */
 const historyOf = async (
-  { builder, app }: Notes,
+  { builder, app, version }: Notes,
   table: string,
   id: string
 ): Promise<RecordChange[]> => {
@@ -209,7 +209,13 @@ const historyOf = async (
   let before: number | null = null;
   do {
     // oxlint-disable-next-line no-await-in-loop -- a page after the other
-    const page = await builder.api.apps.data.history(app, table, id, before);
+    const page = await builder.api.apps.data.history(
+      app,
+      table,
+      version,
+      id,
+      before
+    );
     changes.push(...page.changes);
     before = page.next;
   } while (before !== null);
@@ -217,12 +223,17 @@ const historyOf = async (
 };
 
 /** Every record of `table`, as the data browser pages through it. */
-const everyRecord = async ({ builder, app }: Notes, table: string) => {
+const everyRecord = async ({ builder, app, version }: Notes, table: string) => {
   const records = [];
   let cursor: string | null = null;
   do {
     // oxlint-disable-next-line no-await-in-loop -- a page after the other
-    const page = await builder.api.apps.data.records(app, table, cursor);
+    const page = await builder.api.apps.data.records(
+      app,
+      table,
+      version,
+      cursor
+    );
     records.push(...page.records);
     ({ cursor } = page);
   } while (cursor !== null);
@@ -313,7 +324,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     });
     // Gone from the table, its history still there for the App's builders.
     await expect(
-      builder.api.apps.data.record(notes.app, "notes", id)
+      builder.api.apps.data.record(notes.app, "notes", notes.version, id)
     ).resolves.toBeNull();
   });
 
@@ -340,7 +351,12 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     });
     // The record itself reads as it is, to whoever may read the table.
     await expect(
-      notes.builder.api.apps.data.record(notes.app, "salaries", id)
+      notes.builder.api.apps.data.record(
+        notes.app,
+        "salaries",
+        notes.version,
+        id
+      )
     ).resolves.toMatchObject({ fields: { person: "Ada", amount: 5000 } });
   });
 
@@ -366,18 +382,27 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one outsider at a time
       const refusals = await Promise.all([
         outcome(data.tables(app)),
-        outcome(data.records(app, "notes", null)),
+        outcome(data.records(app, "notes", notes.version, null)),
         outcome(data.export(app, "notes")),
         outcome(data.previewImport(app, "notes", csv)),
         outcome(
-          data.import(app, "notes", { csv, mapping: { title: "title" } })
+          data.import(app, "notes", {
+            version: notes.version,
+            csv,
+            mapping: { title: "title" },
+          })
         ),
       ]);
       expect(new Set(refusals)).toStrictEqual(
         new Set([outsider === user ? "role.forbidden" : "app.not_found"])
       );
     }
-    const records = await admin.api.apps.data.records(app, "notes", null);
+    const records = await admin.api.apps.data.records(
+      app,
+      "notes",
+      notes.version,
+      null
+    );
     expect(records.records.map(({ fields }) => fields.title)).toStrictEqual([
       "Plan",
     ]);
@@ -398,6 +423,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
       mapping: { Title: "title", Status: "status", done: "done" },
     });
     const result = await builder.api.apps.data.import(app, "notes", {
+      version: notes.version,
       csv,
       mapping: preview.mapping,
     });
@@ -419,6 +445,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     const notes = await notesApp();
     const { app, builder } = notes;
     const fixed = await builder.api.apps.data.import(app, "notes", {
+      version: notes.version,
       csv: badCsv
         .replace(",open,true", "Second,open,true")
         .replace("maybe", "false"),
@@ -485,6 +512,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     });
     await expect(
       other.builder.api.apps.data.import(other.app, "notes", {
+        version: other.version,
         csv,
         mapping: preview.mapping,
       })
@@ -520,7 +548,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     expect(csv).toContain("Builder's pin");
     expect(csv).not.toContain("Member's pin");
     await expect(
-      builder.api.apps.data.history(app, "pins", theirs, null)
+      builder.api.apps.data.history(app, "pins", notes.version, theirs, null)
     ).resolves.toStrictEqual({ changes: [], next: null });
   });
 
@@ -740,7 +768,11 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
       csv
     );
     await expect(
-      other.builder.api.apps.data.import(other.app, "labels", { csv, mapping })
+      other.builder.api.apps.data.import(other.app, "labels", {
+        version: other.version,
+        csv,
+        mapping,
+      })
     ).resolves.toStrictEqual({ ok: true, inserted: labels.length });
     expect(byName(await everyRecord(other, "labels"))).toStrictEqual(
       byName(labels.map((fields) => ({ fields })))
@@ -769,6 +801,42 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
       ...files,
       "screens/notes.tsx": `${files["screens/notes.tsx"] ?? ""}\n// v2\n`,
     });
-    await expect(reader.read()).rejects.toThrow(/changed while this ran/u);
+    await expect(reader.read()).rejects.toThrow(/This App changed/u);
+  });
+
+  it("refuses the page's reads and imports once another version is current, never under other tables", async () => {
+    const notes = await notesApp();
+    const { app, builder } = notes;
+    const id = await call(notes, builder, "notes.create", { title: "Plan" });
+    if (typeof id !== "string") {
+      throw new TypeError("Expected the note's ID");
+    }
+    const { version } = await builder.api.apps.data.tables(app);
+    expect(version).toBe(notes.version);
+    await release(builder, app, {
+      ...files,
+      "screens/notes.tsx": `${files["screens/notes.tsx"] ?? ""}\n// v2\n`,
+    });
+    const { data } = builder.api.apps;
+    const refusals = await Promise.all([
+      outcome(data.records(app, "notes", notes.version, null)),
+      outcome(data.record(app, "notes", notes.version, id)),
+      outcome(data.history(app, "notes", notes.version, id, null)),
+      outcome(
+        data.import(app, "notes", {
+          version: notes.version,
+          csv: "title\nLate\n",
+          mapping: { title: "title" },
+        })
+      ),
+    ]);
+    expect(new Set(refusals)).toStrictEqual(
+      new Set(["app_data.version_changed"])
+    );
+    // The version it reads now serves them.
+    const now = await data.tables(app);
+    await expect(
+      data.record(app, "notes", now.version ?? 0, id)
+    ).resolves.toMatchObject({ id });
   });
 });
