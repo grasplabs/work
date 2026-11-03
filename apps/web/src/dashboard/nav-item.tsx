@@ -30,6 +30,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
         "stoppedSchedule",
         "revokedPackage",
         "stoppedEvents",
+        "appMessage",
       ]);
       return (
         items.filter(({ kind }) => !notified.has(kind)).length +

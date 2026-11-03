@@ -25,6 +25,7 @@ const settledInInbox = new Set<InboxSource["type"]>([
   "asked",
   "stopped",
   "stoppedEvents",
+  "appMessage",
   "bindings",
   "revoked",
 ]);

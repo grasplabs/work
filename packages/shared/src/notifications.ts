@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { defineErrorFamily } from "./errors.ts";
 
 /** Why a call on notifications was refused. */
@@ -10,8 +12,10 @@ export const notificationErrors = defineErrorFamily({
 // an admin asked them one of the brain's open questions, that a
 // schedule trigger of theirs stopped, that connect stopped hearing a
 // mailbox or drive their triggers listen to, or that packages of an App
-// or workflow they build or approved were revoked as malware. Only they
-// see their own; nobody else is told.
+// or workflow they build or approved were revoked as malware, or what an
+// App's server code told them (`ctx.notifyPeople`, core's
+// app-notifications.ts).
+// Only they see their own; nobody else is told.
 
 /**
  * A workflow of an App failed while acting for the person: one per App
@@ -114,7 +118,27 @@ export interface PackageRevokedNotification {
   read: boolean;
 }
 
+/**
+ * What an App's server code told the person (`ctx.notifyPeople`, core's
+ * app-notifications.ts): its title, body and the screen it opens on.
+ * Listed while they can still open the App, by its name now.
+ */
+export interface AppMessageNotification {
+  id: string;
+  type: "app_message";
+  app: string;
+  appName: string;
+  title: string;
+  body: string | null;
+  /** The App's screen it opens on; null for the App's first. */
+  screen: string | null;
+  /** When it was sent (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
 export type Notification =
+  | AppMessageNotification
   | RunFailedNotification
   | GapAskedNotification
   | TriggerStoppedNotification
@@ -159,3 +183,61 @@ export interface NotificationsApi {
    */
   markRead: (ids: string[], upTo: string) => Promise<void>;
 }
+
+// What App code may send (`ctx.notifyPeople`): bounded, so one send can't fill
+// someone's notifications or the database, and rate-limited per App.
+
+/** The longest title an App's notification has, in characters. */
+export const appNotificationTitleMax = 120;
+
+/** The longest body an App's notification has, in characters. */
+export const appNotificationBodyMax = 1000;
+
+/**
+ * The most people one send reaches: a team larger than this is told up to
+ * here, and the rest skipped.
+ */
+export const appNotificationMaxRecipients = 50;
+
+/**
+ * The most notifications (one per person told) an App sends in an hour,
+ * all its people's calls together: a send that would go past it is
+ * refused whole (`resource.limit_reached`, `{ limit: "hour" }`).
+ */
+export const appNotificationsPerHour = 200;
+
+/** A screen's name, as the App's page opens it (`?screen=`). */
+const screenSchema = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_./-]{0,127}$/u);
+
+/**
+ * What App code sends: a title, a body if it has one, and the App's screen
+ * to open on (`link`), the App's first when it names none or one the App
+ * doesn't have. Never a URL: a notification opens the App, nothing else.
+ */
+export const appNotificationMessageSchema = z.strictObject({
+  title: z.string().trim().min(1).max(appNotificationTitleMax),
+  body: z.string().trim().max(appNotificationBodyMax).optional(),
+  link: screenSchema.optional(),
+});
+
+export type AppNotificationMessage = z.infer<
+  typeof appNotificationMessageSchema
+>;
+
+/** Whom App code tells: a person's ID or a team's. */
+export const appNotificationRecipientSchema = z.string().min(1).max(128);
+
+/**
+ * What a send did: how many people it told. Never who, nor how many it
+ * skipped, which would tell App code a team's size.
+ */
+export interface AppNotificationReceipt {
+  delivered: number;
+}
+
+/**
+ * The resource alias App code's channel names to tell people
+ * (`channel.resource(peopleAlias, "notify", [to, notification])`): no
+ * alias an App declares is one, as each starts with a letter.
+ */
+export const peopleAlias = "~people";

@@ -1,3 +1,4 @@
+import { peopleAlias } from "@grasp-os/shared/notifications";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
@@ -49,7 +50,7 @@ export interface OperationChannel {
   /**
    * One call of a resource the function uses: an action's only, but a
    * mutation's staged start (`start`) or notification (`notify`) of one
-   * of the App's workflows.
+   * of the App's workflows, and either's send to people (`peopleAlias`).
    */
   readonly resource: (
     alias: string,
@@ -217,6 +218,16 @@ const startOf =
     );
 
 /**
+ * A send to people (`ctx.notifyPeople` of an action, `ctx.afterCommit.notifyPeople` of
+ * a mutation), over `channel`: the host tells them apart by the function
+ * it runs, as it does starts.
+ */
+const notifyPeopleOf =
+  (channel: OperationChannel) =>
+  async (to: unknown, notification: unknown): Promise<unknown> =>
+    await channel.resource(peopleAlias, "notify", [to, notification]);
+
+/**
  * The one method of each kind of resource's client but knowledge's,
  * statistics' and guests', whose methods are the operations they declare.
  */
@@ -328,6 +339,12 @@ export const runFunction = async (
         start: async (workflow: unknown, input: unknown): Promise<void> => {
           await startOf(fn, channel)(workflow, input);
         },
+        notifyPeople: async (
+          to: unknown,
+          notification: unknown
+        ): Promise<void> => {
+          await notifyPeopleOf(channel)(to, notification);
+        },
       }),
       notify: notifications.notify,
     };
@@ -348,6 +365,7 @@ export const runFunction = async (
             },
           }),
       startWorkflow: startOf(fn, channel),
+      notifyPeople: notifyPeopleOf(channel),
     };
   }
   // SAFETY: the context is the one of the function's kind, and the

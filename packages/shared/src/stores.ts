@@ -294,7 +294,8 @@ export type Claimed =
 
 /**
  * The most intents one commit may stage for its outbox: workflow
- * notifications and starts, each handed over after the commit.
+ * notifications and starts, and sends to people, each handed over after
+ * the commit.
  */
 export const commitMaxIntents = 16;
 
@@ -305,6 +306,7 @@ export const commitMaxIntents = 16;
  */
 export const storeIntentKinds = [
   "app.form_sent",
+  "app.notify",
   "workflow.notify",
   "workflow.start",
 ] as const;

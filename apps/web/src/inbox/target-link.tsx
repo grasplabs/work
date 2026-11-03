@@ -4,8 +4,9 @@ import type { ComponentProps } from "react";
 import type { Target } from "./items.ts";
 
 // A link to what an inbox item is about, as the prototype's
-// (`components/target-link.tsx`): here a workflow, an engine, an
-// integration's account, a chat, the brain, or a decision's own page.
+// (`components/target-link.tsx`): here a workflow, an engine, an App's
+// page (on one of its screens), an integration's account, a chat, the
+// brain, or a decision's own page.
 
 export const TargetLink = ({
   destination,
@@ -35,6 +36,18 @@ export const TargetLink = ({
       <Link
         params={{ engine: destination.engine }}
         to="/domains/$engine"
+        {...props}
+      />
+    );
+  }
+  if (destination.kind === "app") {
+    return (
+      <Link
+        params={{ app: destination.app }}
+        search={
+          destination.screen === undefined ? {} : { screen: destination.screen }
+        }
+        to="/apps/$app"
         {...props}
       />
     );

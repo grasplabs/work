@@ -52,12 +52,14 @@ import type {
 //   only thing it starts is a workflow it lists, after it commits
 //   (`ctx.afterCommit.start`), as part of that commit, and the only event
 //   it sends is one it lists, to a run of the App's own, likewise
-//   (`ctx.notify`, spec 10.7.4);
+//   (`ctx.notify`, spec 10.7.4); it tells people only once it commits,
+//   likewise (`ctx.afterCommit.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   and reaches outside capabilities only through `ctx.resources`, for
-//   the resources its `uses` lists, and starts only the workflows it
-//   lists (`ctx.startWorkflow`).
+//   the resources its `uses` lists, starts only the workflows it lists
+//   (`ctx.startWorkflow`), and tells people through the platform's
+//   notifications (`ctx.notifyPeople`).
 // The host enforces each of these again at run time, whatever App code
 // sends it; the types here make the mistakes fail to compile first.
 //
@@ -186,6 +188,47 @@ type StartWorkflow<Uses extends readonly Use[]> = <
 ) => Promise<RunHandle>;
 
 /**
+ * What App code tells people (`ctx.notifyPeople`,
+ * `ctx.afterCommit.notifyPeople`): a
+ * notification in their Grasp inbox that opens the App.
+ */
+export interface PeopleNotification {
+  /** At most 120 characters. */
+  readonly title: string;
+  /** At most 1000 characters. */
+  readonly body?: string;
+  /**
+   * The App's screen it opens on, by name (`"orders"`); the App's first
+   * when it names none, or one the App doesn't have. Never a URL.
+   */
+  readonly link?: string;
+}
+
+/**
+ * What a send did: how many people it told. Never who, nor how many it
+ * skipped.
+ */
+export interface NotifyReceipt {
+  readonly delivered: number;
+}
+
+/**
+ * Tells `to` (a person's ID or a team's: each of its members) about
+ * something in the App, in their Grasp notifications. Only people in the
+ * organization who can open the App are told; anyone else is skipped,
+ * never refused. Bounded: a title and body within their limits,
+ * at most 50 people a send, and an App sends at most 200 notifications an
+ * hour, all its calls together (`resource.limit_reached` past it, the
+ * whole send refused). Each send is audited, with how many it told and
+ * skipped, never what it said. A call a visitor makes, or one from a
+ * workflow's run, tells nobody (`resource.unavailable`).
+ */
+type NotifyPeople<Told> = (
+  to: string,
+  notification: PeopleNotification
+) => Promise<Told>;
+
+/**
  * `ctx.afterCommit`: what a mutation hands on once it commits, as part of
  * its commit, so nothing is handed on for a mutation that doesn't.
  */
@@ -199,6 +242,17 @@ export interface AfterCommit<Uses extends readonly Use[]> {
   readonly start: <Workflow extends UsedWorkflow<Uses>>(
     ...args: StartArgs<Workflow>
   ) => Promise<void>;
+  /**
+   * Tells people about what the mutation did, once it has committed
+   * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
+   * for a title or body past its limit), staged with its writes and sent
+   * from the store's outbox exactly once. Whom it reaches, and the App's
+   * hourly limit, are decided as it is sent: one past the limit then is
+   * dropped, and audited. A mutation that fails, is rolled back or is
+   * superseded tells nobody. Not `ctx.notify`, which sends a workflow's
+   * run an event.
+   */
+  readonly notifyPeople: NotifyPeople<void>;
 }
 
 /** The references of kind `Kind` among `Uses`. */
@@ -333,6 +387,15 @@ export interface ActionCtx<
    * (`Promise.race`), can swap places on the second call.
    */
   readonly startWorkflow: StartWorkflow<Uses>;
+  /**
+   * Tells people now (`NotifyPeople`), resolving once they are told: how
+   * many were. Called again under the same idempotency key, it tells
+   * nobody twice, matched by its place among the action's sends. Keep that
+   * order a function of the input, and await sends one at a time: sends
+   * made at once, in whichever order they happen to land, can swap places
+   * on the second call and tell people twice.
+   */
+  readonly notifyPeople: NotifyPeople<NotifyReceipt>;
 }
 
 /**

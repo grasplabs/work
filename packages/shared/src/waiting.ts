@@ -16,6 +16,7 @@ import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
+  AppMessageNotification,
   EventsStoppedNotification,
   GapAskedNotification,
   RunFailedNotification,
@@ -182,6 +183,13 @@ export interface StoppedEventsItem extends ItemBase {
   } | null;
 }
 
+/** What an App the person can open told them: opened on the App's page. */
+export interface AppMessageItem extends ItemBase {
+  kind: "appMessage";
+  verdicts: never[];
+  notification: AppMessageNotification;
+}
+
 /**
  * A workflow version, live or asked to go live, whose bindings no admin
  * approved, so its starts are refused: for the organization's own admins,
@@ -222,6 +230,7 @@ export type WaitingItem =
   | StoppedScheduleItem
   | RevokedPackageItem
   | StoppedEventsItem
+  | AppMessageItem
   | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
