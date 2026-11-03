@@ -4,10 +4,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   afterTurn,
   approved,
+  awayAfterMs,
+  begun,
   freshProgress,
   markedPieces,
+  minutesAt,
   openingEvent,
   reopened,
+  ticked,
   withFactToggled,
   withLine,
 } from "./progress.ts";
@@ -157,5 +161,61 @@ describe("what someone said, in pieces", () => {
       { at: 11, text: "in Exact", tag: "system" },
       { at: 19, text: ", then send it.", tag: null },
     ]);
+  });
+});
+
+describe("the interview's clock", () => {
+  const minute = 60_000;
+  const start = 1_000_000;
+  /** Turns a minute apart from the start, as a conversation goes. */
+  const turns = (count: number) => {
+    let progress = begun(freshProgress, start, "type");
+    for (let step = 1; step <= count; step += 1) {
+      progress = ticked(progress, start + step * minute);
+    }
+    return progress;
+  };
+
+  it("counts the minutes from the start while they are there", () => {
+    expect(minutesAt(turns(9), start + 9 * minute)).toBeCloseTo(9, 5);
+  });
+
+  it("leaves a day away out: back the next day is where they left off", () => {
+    const back = start + 9 * minute + 20 * 60 * minute;
+    const after = ticked(turns(9), back);
+    // The break counts its first five minutes, as a long pause would.
+    expect(minutesAt(after, back)).toBeCloseTo(9 + awayAfterMs / minute, 5);
+    // And it goes on from there, not from the end of the clock.
+    const next = ticked(after, back + minute);
+    expect(minutesAt(next, back + minute)).toBeCloseTo(15, 5);
+  });
+
+  it("counts a pause to think in full, up to five minutes", () => {
+    const begin = begun(freshProgress, start, "talk");
+    expect(
+      minutesAt(ticked(begin, start + 4 * minute), start + 4 * minute)
+    ).toBeCloseTo(4, 5);
+    expect(
+      minutesAt(ticked(begin, start + 8 * minute), start + 8 * minute)
+    ).toBeCloseTo(5, 5);
+  });
+
+  it("counts an interview kept before this clock from the start, as before", () => {
+    const old = {
+      ...freshProgress,
+      person: "progress" as const,
+      startedAt: start,
+    };
+    expect(minutesAt(old, start + 30 * minute)).toBeCloseTo(30, 5);
+    // Its first turn on this clock starts counting gaps from there.
+    expect(ticked(old, start + 30 * minute).awayMs).toBe(0);
+  });
+
+  it("stands still before they start, and never says more than core takes", () => {
+    expect(minutesAt(freshProgress, start)).toBe(0);
+    expect(ticked(freshProgress, start)).toBe(freshProgress);
+    expect(
+      minutesAt(begun(freshProgress, start, "type"), start + 600 * minute)
+    ).toBe(240);
   });
 });

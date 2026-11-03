@@ -32,9 +32,11 @@ import {
   afterTurn,
   approved,
   isReading,
+  minutesAt,
   openingEvent,
   partConfirmed,
   steered,
+  ticked,
   withFactText,
   withLine,
 } from "./progress.ts";
@@ -553,6 +555,7 @@ const requestOf = (
   told: LoopWords,
   event: InterviewEvent,
   lines: InterviewLine[],
+  at: number,
   reading?: string[]
 ): InterviewTurnRequest | null => {
   const link = linkNow();
@@ -575,10 +578,7 @@ const requestOf = (
       .filter(({ out }) => out !== true)
       .map(({ id, tag, text }) => ({ id, tag, text })),
     phase: now.phase,
-    minutes:
-      now.startedAt === null
-        ? 0
-        : Math.min(240, Math.max(0, (Date.now() - now.startedAt) / 60_000)),
+    minutes: minutesAt(now, at),
     ...(reading === undefined ? {} : { reading }),
     adding: now.adding,
   };
@@ -1089,6 +1089,10 @@ const ask = async (
   if (words === null) {
     return;
   }
+  // The clock moves on to this turn first: the minutes he is told leave
+  // out what was time away since their last one.
+  const at = Date.now();
+  update((progress) => ticked(progress, at));
   const now = progressNow();
   const inRead = event === "readback";
   const reading = inRead ? readingIds(now.facts, now.confirmed) : undefined;
@@ -1096,6 +1100,7 @@ const ask = async (
     words,
     event,
     said === undefined ? now.lines : [...now.lines, said],
+    at,
     reading
   );
   if (request === null) {
