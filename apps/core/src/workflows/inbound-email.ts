@@ -1,3 +1,4 @@
+import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
 import {
@@ -6,25 +7,36 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
+import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import {
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InboundEmail } from "@grasp-os/shared/workflows";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Address, Email } from "postal-mime";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
-import { apps, workflowTriggers } from "../db/core/schema.ts";
+import {
+  apps,
+  triggerResources,
+  triggerResourceVersions,
+  workflowTriggers,
+} from "../db/core/schema.ts";
+import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
+import type { Outcome, Taker } from "./connector-triggers.ts";
 import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
 import {
   learnMailDomain,
   lineageRefusals,
   mailRecipient,
   runsOwnMail,
+  stampedMessageRun,
 } from "./mail-stamps.ts";
+import type { MailStamp, StampedRun } from "./mail-stamps.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
@@ -103,6 +115,52 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // the envelope recipient Email Routing sets, which no sender chooses: a
 // run's mail to it is what core stamps, from the first message on, so a
 // fresh deployment's first hop is a root.
+//
+// Independent workflows' email triggers (trigger-resources.ts) receive
+// mail the same way, each at an address of its own (`trigger-<token>`,
+// 128 random bits, never its ID): the same
+// ingress, size limit, parser, loop refusal and input (`InboundEmail`,
+// mapped into the run's input as a connector trigger maps its event). An
+// address is looked up among live, enabled email triggers first, exactly
+// as stored, and only then among Apps' addresses: a trigger's token is
+// random, so it is no App's.
+// Each message then takes the steps a connector event does
+// (connector-triggers.ts, `startOnce`): its start, its refusals and its
+// drops once each, by the message. Threat model, and how each is closed:
+//
+// - Forged delivery: mail reaches here only from Email Routing or the
+//   router-signed raw-mail ingress (mail-ingress.ts), as App mail does.
+// - Mail to a trigger that is disabled, deleted or doesn't exist bounces,
+//   as mail nobody receives does, before it is read. Its ID names no
+//   address: knowing it mails nothing. Nothing on this path logs its
+//   address or its ID.
+// - Mail loops: mail sent automatically or from the deployment's own
+//   domain is dropped, audited, as above. A run's own mail joins its
+//   lineage: an independent run's by the stamp its message carries
+//   (`stampHeader`, `stampedMessageRun`), one level deeper (`causeOf`),
+//   until the lineage's limits refuse it; an App run's (its token, or its
+//   stamp) can't join an independent lineage and is refused, audited with
+//   the run, never started as a new root. A recorded stamp counts for at
+//   most a few messages at the address (`maxClaimsPerSource`). Besides, a
+//   trigger starts and refuses at most `triggeredRunsPerHour` messages an
+//   hour, loop drops included, so mail can't write the audit log without
+//   end; past that the delivery fails for now, for its sender to try again
+//   later, and one held back a day is dropped, audited once.
+// - An oversized or malicious attachment: the message bounces past
+//   `maxMessageBytes`, attachments are only listed, and none is kept:
+//   an independent run has no way to read one (`stored: null`).
+// - A sender writing an internal address: From is untrusted data for the
+//   run, as above; only the envelope sender, which SPF vouches for, makes
+//   mail a run's own, with a stamp core recorded.
+// - A trigger acting on authority it lost: each message is a start as any
+//   trigger's (workflow-starts.ts), acting for its creator, read again as
+//   it is admitted: the trigger live and enabled, its creator still with
+//   a role, its own `start` grant active. A refusal for good is audited
+//   (`workflow.email.refused`) and the message dropped, never bounced. A
+//   trigger moved to another version as the message arrived fails it for
+//   now, to be started at the new version.
+// - The same message delivered twice: its start is keyed by the trigger
+//   and the message (its Message-ID, or bytes), so it is one run.
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -392,6 +450,164 @@ export type InboundMessage = Pick<
   "from" | "to" | "raw" | "setReject"
 >;
 
+/** A message read and parsed, once someone receives it. */
+interface ReadMessage {
+  raw: Uint8Array;
+  parsed: Email;
+  /** The SHA-256 of its bytes. */
+  id: string;
+  domain: string | undefined;
+}
+
+/**
+ * `message` read and parsed, its domain learned (mail-stamps.ts); none,
+ * rejected, when too large or unreadable.
+ */
+const readMessage = async (
+  message: InboundMessage,
+  env: Env
+): Promise<ReadMessage | undefined> => {
+  const domain = domainOf(message.to);
+  if (domain !== undefined) {
+    await learnMailDomain(env, domain);
+  }
+  const raw = await readAtMost(message.raw, maxMessageBytes);
+  if (raw === undefined) {
+    message.setReject("The message is too large.");
+    return undefined;
+  }
+  const parsed = await parsedOf(raw);
+  if (parsed === undefined) {
+    message.setReject("The message can't be read.");
+    return undefined;
+  }
+  const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
+  return { raw, parsed, id, domain };
+};
+
+/**
+ * What makes `parsed` (of bytes hashing to `id`) one message: the SHA-256
+ * of its Message-ID, or `id` when it has none that names one message:
+ * `<>` or `x` would make every message that carries it the same one.
+ */
+const messageKeyOf = async (parsed: Email, id: string): Promise<string> => {
+  const { messageId } = parsed;
+  return messageId !== undefined && messageId.includes("@")
+    ? await sha256Hex(messageId)
+    : id;
+};
+
+/** The stamp `parsed` carries (`stampHeader`), if it carries one. */
+const stampOf = (parsed: Email): string | undefined => {
+  const name = stampHeader.toLowerCase();
+  return parsed.headers
+    .filter(({ key }) => key.toLowerCase() === name)
+    .map(({ value }) => value.trim())
+    .find((value) => stampPattern.test(value));
+};
+
+/** The live, enabled email trigger at `address`, if there is one. */
+const emailTakerAt = async (
+  env: Env,
+  address: string
+): Promise<Taker | undefined> =>
+  await drizzle(env.DB)
+    .select({
+      id: triggerResources.id,
+      version: triggerResources.currentVersion,
+      workflowId: triggerResourceVersions.workflowResourceId,
+      workflowVersion: triggerResourceVersions.workflowResourceVersion,
+      inputMapping: triggerResourceVersions.inputMapping,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        eq(triggerResources.emailAddress, address),
+        eq(triggerResources.kind, "email"),
+        eq(triggerResources.enabled, true),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+
+/**
+ * Takes a message to `taker`, the email trigger at `address` (its token
+ * `recorded`, if any, gone): starts its run, the message mapped into its
+ * input, acting for its creator; bounces it, drops it (audited), or fails
+ * it for now, as the threat model above says. Logs the message's hash
+ * alone: never the address or the trigger.
+ */
+const receiveForTrigger = async (
+  message: InboundMessage,
+  env: Env,
+  address: string,
+  taker: Taker,
+  recorded: MailStamp | undefined
+): Promise<void> => {
+  const read = await readMessage(message, env);
+  if (read === undefined) {
+    return;
+  }
+  const { parsed, id, domain } = read;
+  const messageKey = await messageKeyOf(parsed, id);
+  // Mail that may loop is refused for good, as a start refused is.
+  const loop = loopOf(message.to, message.from, parsed);
+  // A run's own mail: an App run's token, or a run's stamp, each only to
+  // this address from one of the run's senders.
+  const to = `${address}@${domain ?? ""}`;
+  const token = runsOwnMail(recorded, to, message.from);
+  let stamped: StampedRun | undefined =
+    token === undefined ? undefined : { kind: "app", runId: token.run };
+  if (stamped === undefined && loop === undefined) {
+    // Mail refused as a loop claims no place of a stamp.
+    stamped = await stampedMessageRun(
+      env,
+      stampOf(parsed),
+      to,
+      message.from,
+      messageKey
+    );
+  }
+  const same =
+    stamped === undefined
+      ? messageKey
+      : await sha256Hex(`stamp:${stamped.runId}:${messageKey}`);
+  const mapping = inputMappingSchema.parse(
+    JSON.parse(taker.inputMapping ?? "{}")
+  );
+  const outcome: Outcome = await startOnce(env, taker, {
+    same,
+    key: `${coreStartKeyPrefix}email:${taker.id}:${same}`,
+    admission: `email:${same}:${taker.id}`,
+    input: mappedInput(mapping, inputOf(id, null, message.from, parsed)),
+    stamped,
+    noted: { message: id },
+    audited: {
+      refused: "workflow.email.refused",
+      dropped: "workflow.email.dropped",
+      detail: { message: id },
+    },
+    logged: { type: "email", message: id },
+    ...(loop === undefined ? {} : { refusedAs: loop }),
+  });
+  if (outcome === "unavailable") {
+    // Disabled or deleted as it arrived: no such address. (Moved to
+    // another version, it is tried again, at that version: `retry`.)
+    message.setReject("No such address.");
+    return;
+  }
+  if (outcome === "retry") {
+    throw new Error(`Message ${id} didn't start its trigger's run yet`);
+  }
+};
+
 /**
  * Takes a message Email Routing delivers: starts a run of each workflow
  * that receives mail at its recipient's address, with the message as
@@ -411,26 +627,21 @@ export const receiveEmail = async (
     local === ""
       ? { local: "", stamp: undefined }
       : await mailRecipient(env, local);
+  const taker = address === "" ? undefined : await emailTakerAt(env, address);
+  if (taker !== undefined) {
+    await receiveForTrigger(message, env, address, taker, recorded);
+    return;
+  }
   const receivers = address === "" ? [] : await receiversAt(env, address);
   if (receivers.length === 0) {
     message.setReject("No such address.");
     return;
   }
-  const domain = domainOf(message.to);
-  if (domain !== undefined) {
-    await learnMailDomain(env, domain);
-  }
-  const raw = await readAtMost(message.raw, maxMessageBytes);
-  if (raw === undefined) {
-    message.setReject("The message is too large.");
+  const read = await readMessage(message, env);
+  if (read === undefined) {
     return;
   }
-  const parsed = await parsedOf(raw);
-  if (parsed === undefined) {
-    message.setReject("The message can't be read.");
-    return;
-  }
-  const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
+  const { raw, parsed, id, domain } = read;
   // The run's own mail only to the address it mailed, from its sender.
   const stamp = runsOwnMail(
     recorded,
@@ -455,14 +666,9 @@ export const receiveEmail = async (
     );
     return;
   }
-  // Only a Message-ID with an `@` names one message: `<>` or `x` would
-  // make every message that carries it the same one. A run's own mail is
-  // keyed by its token too, so it is never taken for mail to another.
-  const { messageId } = parsed;
-  const messageKey =
-    messageId !== undefined && messageId.includes("@")
-      ? await sha256Hex(messageId)
-      : id;
+  // A run's own mail is keyed by its token too, so it is never taken for
+  // mail to another.
+  const messageKey = await messageKeyOf(parsed, id);
   const same =
     stamp === undefined
       ? messageKey

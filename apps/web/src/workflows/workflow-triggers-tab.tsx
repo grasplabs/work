@@ -29,7 +29,7 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { CalendarClockIcon, PlugIcon, ZapIcon } from "lucide-react";
+import { CalendarClockIcon, MailIcon, PlugIcon, ZapIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -42,8 +42,10 @@ import { useCore } from "../use-core.ts";
 // every one to its builders and the organization's admins, a person's own
 // to anyone else. Its builders add a schedule (a cron expression in a time
 // zone, with the input each run starts with) or a connection's event (an
-// account's new mail or file, with how the event becomes the run's input),
-// for an exact published version. A trigger acts for whoever made it:
+// account's new mail or file, with how the event becomes the run's input)
+// or an email to an address of its own (with how the message becomes the
+// run's input, shown by the part of its address before the @, as an App's
+// email trigger is), for an exact published version. A trigger acts for whoever made it:
 // they alone turn it on again or move it to another version; its builders
 // and admins turn it off and delete it (deleting asks first). A schedule
 // whose starts kept failing stopped, and says so, with Turn on again for
@@ -118,6 +120,10 @@ const TriggerWhat = ({
       </Trans>
     );
   }
+  if (trigger.kind === "email") {
+    const localPart = trigger.address ?? "";
+    return t`When an email arrives for ${localPart}`;
+  }
   if (trigger.kind === "system") {
     const type = textAt(config, "event", "type") ?? "";
     return <Trans>When the event {type} is sent</Trans>;
@@ -129,6 +135,9 @@ const TriggerWhat = ({
 const KindIcon = ({ kind }: { kind: WorkflowTrigger["kind"] }) => {
   if (kind === "schedule") {
     return <CalendarClockIcon aria-hidden="true" className="mt-0.5 size-4" />;
+  }
+  if (kind === "email") {
+    return <MailIcon aria-hidden="true" className="mt-0.5 size-4" />;
   }
   return kind === "connector" ? (
     <PlugIcon aria-hidden="true" className="mt-0.5 size-4" />
@@ -342,7 +351,12 @@ const jsonOf = (text: string): { ok: true; value: unknown } | { ok: false } => {
 const ownTimeZone = (): string =>
   Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-/** A new trigger, for a builder: a schedule or a connection's event, for one version. */
+/** The kinds of trigger a builder adds here. */
+const addedKinds = ["schedule", "connector", "email"] as const;
+
+type AddedKind = (typeof addedKinds)[number];
+
+/** A new trigger, for a builder: a schedule, a connection's event or an email, for one version. */
 const AddTrigger = ({
   workflow,
   versions,
@@ -358,7 +372,7 @@ const AddTrigger = ({
   const ids = useId();
   const { busy, failure, run } = useCoreAction();
   const [problem, setProblem] = useState<string>();
-  const [kind, setKind] = useState<"schedule" | "connector">("schedule");
+  const [kind, setKind] = useState<AddedKind>("schedule");
   const [chosen, setChosen] = useState(versions.at(-1) ?? 1);
   const [cron, setCron] = useState("");
   const [timeZone, setTimeZone] = useState(ownTimeZone);
@@ -391,6 +405,9 @@ const AddTrigger = ({
     if (!fields.ok) {
       setProblem(t`The input fields aren't JSON.`);
       return undefined;
+    }
+    if (kind === "email") {
+      return { input: { fields: fields.value, defaults: {} } };
     }
     if (connection === "") {
       setProblem(t`Choose a connection.`);
@@ -452,7 +469,8 @@ const AddTrigger = ({
             id={`${ids}-kind`}
             onChange={(changed) => {
               setKind(
-                changed.target.value === "connector" ? "connector" : "schedule"
+                addedKinds.find((each) => each === changed.target.value) ??
+                  "schedule"
               );
             }}
             value={kind}
@@ -460,6 +478,9 @@ const AddTrigger = ({
             <NativeSelectOption value="schedule">{t`A schedule`}</NativeSelectOption>
             <NativeSelectOption value="connector">
               {t`An event at a connection`}
+            </NativeSelectOption>
+            <NativeSelectOption value="email">
+              {t`An email to its own address`}
             </NativeSelectOption>
           </NativeSelect>
         </div>
@@ -528,7 +549,28 @@ const AddTrigger = ({
             />
           </div>
         </div>
-      ) : (
+      ) : null}
+      {kind === "email" ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`${ids}-mapping`}>
+            <Trans>
+              The run&apos;s input fields, each from the message as a JSON
+              Pointer, as JSON
+            </Trans>
+          </Label>
+          <Textarea
+            id={`${ids}-mapping`}
+            onChange={(changed) => {
+              setMapping(changed.target.value);
+            }}
+            placeholder='{ "subject": "/subject", "from": "/from/address" }'
+            spellCheck={false}
+            value={mapping}
+            variant="code"
+          />
+        </div>
+      ) : null}
+      {kind === "connector" ? (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-4">
             <div className="flex flex-col gap-2">
@@ -605,7 +647,7 @@ const AddTrigger = ({
             />
           </div>
         </div>
-      )}
+      ) : null}
       <ErrorText>{problem ?? failure}</ErrorText>
       <div>
         <Button disabled={busy} size="sm" type="submit">
