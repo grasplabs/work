@@ -38,6 +38,7 @@ import {
 } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
+import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 
 import { clientAddress } from "./client-address.ts";
 import { routeCache } from "./route-cache.ts";
@@ -157,11 +158,26 @@ const authBasePath = "/api/auth";
 
 /**
  * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT`,
- * `INTERVIEW_RATE_LIMIT`, `CHANNELS_RATE_LIMIT` and `VISITOR_RATE_LIMIT`
- * all have it in
+ * `INTERVIEW_RATE_LIMIT`, `CHANNELS_RATE_LIMIT`, `VISITOR_RATE_LIMIT` and
+ * `WEBHOOK_RATE_LIMIT` all have it in
  * wrangler.jsonc.
  */
 const limitPeriodS = 60;
+
+/** Whether `key` is within `limiter`'s limit; through when the limiter fails. */
+const withinLimitOf = async (
+  limiter: RateLimit,
+  key: string,
+  host: string
+): Promise<boolean> => {
+  try {
+    const { success } = await limiter.limit({ key });
+    return success;
+  } catch (error) {
+    log.error("router.rate_limit_failed", { host, ...errorFields(error) });
+    return true;
+  }
+};
 
 /**
  * Whether a request is within `limiter`'s limit for its hostname and
@@ -182,14 +198,19 @@ const withinLimit = async (
   const ip = clientAddress(
     request.headers.get("cf-connecting-ip") ?? "unknown"
   );
-  try {
-    const { success } = await limiter.limit({ key: `${host}|${ip}` });
-    return success;
-  } catch (error) {
-    log.error("router.rate_limit_failed", { host, ...errorFields(error) });
-    return true;
-  }
+  return await withinLimitOf(limiter, `${host}|${ip}`, host);
 };
+
+/**
+ * The budget a request counts against besides its client address's, if
+ * any: a webhook trigger's own (its URL's token), so a URL someone learned
+ * can't be flooded from many addresses either, each delivery costing core
+ * a body read and a signature check before it is refused unsigned.
+ */
+const ownBudgetOf = (pathname: string): string | undefined =>
+  pathname.startsWith(`${workflowWebhookPath}/`)
+    ? `webhook:${pathname.slice(workflowWebhookPath.length + 1)}`
+    : undefined;
 
 /** Core's sign-out route, which the limit leaves alone. */
 const signOutPath = `${authBasePath}/sign-out`;
@@ -240,7 +261,8 @@ type LimitBinding =
   | "GUEST_RATE_LIMIT"
   | "VISITOR_RATE_LIMIT"
   | "CHANNELS_RATE_LIMIT"
-  | "INTERVIEW_RATE_LIMIT";
+  | "INTERVIEW_RATE_LIMIT"
+  | "WEBHOOK_RATE_LIMIT";
 
 /**
  * The limit a request to `pathname` counts against, if any: the public
@@ -273,6 +295,13 @@ const limitFor = (pathname: string): LimitBinding | undefined => {
   // one budget; core counts per link too.
   if (interviewLinkPaths.has(pathname)) {
     return "INTERVIEW_RATE_LIMIT";
+  }
+  // A workflow's webhook trigger (core's workflows/webhook-triggers.ts),
+  // which anyone can post to; core checks each delivery is signed with its
+  // secret. Counted per client address and per URL (`ownBudgetOf`), before
+  // core looks the URL up or reads a byte of the body.
+  if (pathname.startsWith(`${workflowWebhookPath}/`)) {
+    return "WEBHOOK_RATE_LIMIT";
   }
   return undefined;
 };
@@ -469,7 +498,12 @@ export default {
         log.error("router.rate_limit_unbound", { host, limit });
         return new Response("Service unavailable", { status: 503 });
       }
-      if (!(await withinLimit(limiter, request, host))) {
+      const own = ownBudgetOf(pathname);
+      if (
+        !(await withinLimit(limiter, request, host)) ||
+        (own !== undefined &&
+          !(await withinLimitOf(limiter, `${host}|${own}`, host)))
+      ) {
         return rateLimited(url, host);
       }
     }

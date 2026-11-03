@@ -805,7 +805,7 @@ describe("a trigger starting a workflow", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { inputMapping: { who: "body.who" } },
+      config: {},
     });
     await granted(
       bob,
