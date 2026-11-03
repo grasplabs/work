@@ -89,6 +89,7 @@ import {
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import {
@@ -4069,8 +4070,10 @@ const waiting = async (runId: string): Promise<void> => {
 
 describe("runs started by a restricted App, waiting on a held call", () => {
   beforeAll(chooseModel);
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
+    // A test that times out leaves its run waiting on its held call.
+    await endLiveResourceRuns();
   });
 
   it("go on as soon as their person decides it, long before the next timed check: confirmed, it is sent once; declined, the run ends", async () => {
