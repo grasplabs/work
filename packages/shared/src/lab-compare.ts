@@ -1,11 +1,20 @@
 /**
- * How two runs compare. A difference counts only when it is larger than
- * what two runs of the same Stephen on the same cases differ by: that is
- * the noise, and it is measured, never assumed. Pure. Ported from the
- * prototype (grasplabs/prototype, packages/grasp: meansOf, noiseOf and
- * compare in src/lib/lab.ts).
+ * How two runs of the Stephen Lab compare. A difference counts only when it
+ * is larger than what two runs of the same Stephen on the same cases differ
+ * by: that is the noise, and it is measured, never assumed. Pure, and
+ * shared: the lab (scripts/lab/) and the admin's Stephen Lab judge a
+ * change by the same rules. Ported from the prototype
+ * (grasplabs/prototype, packages/grasp: meansOf, noiseOf and compare in
+ * src/lib/lab.ts).
  */
-import type { CaseScore } from "./results.ts";
+import { z } from "zod";
+
+/** One case of a run: an interview, a conversation, a moment or a drawing, and its numbers. */
+export const caseScoreSchema = z.object({
+  id: z.string(),
+  scores: z.record(z.string(), z.number()),
+});
+export type CaseScore = z.output<typeof caseScoreSchema>;
 
 /** Numbers where less is better; the rest are better when higher. */
 export const lessIsBetter: ReadonlySet<string> = new Set([
@@ -33,7 +42,7 @@ export const counts: ReadonlySet<string> = new Set([
 ]);
 
 /** The smallest change that counts even when two runs of the same Stephen were the same. */
-const least = 0.02;
+export const least = 0.02;
 
 const mean = (values: readonly number[]): number =>
   values.length === 0
@@ -122,7 +131,7 @@ export interface Compared {
   verdict: Verdict;
 }
 
-const verdictOf = (
+export const verdictOf = (
   metric: string,
   change: number,
   noise: Record<string, number> | null
