@@ -90,7 +90,7 @@ const setUp = async (
   await requestGranted(idp, admin, {
     subject: chat.agent,
     object: { type: "collection", collectionId: "apps" },
-    actions: ["read", "write"],
+    actions: ["read"],
     binding: "APP_LIBRARY",
   });
   return { person, chat, ledgerBlueprint };

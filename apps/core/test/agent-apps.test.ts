@@ -1,6 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
@@ -13,9 +12,9 @@ import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // `env.apps` in a chat's code: the chat's agent looking into its person's
-// Apps. These tests start from the ways it can fail: the agent reads an
-// App without a permission of its own, or past what its person may see
-// (the code of an App they don't build); and a call leaves no trace.
+// Apps, as them, with no permission of its own. These tests start from the
+// ways it can fail: the agent reads past what its person may see (the code
+// of an App they don't build); and a call leaves no trace.
 // Already covered: the agent following an independent workflow's runs
 // only once it may read it, never what a run returned
 // (agent-workflow-build.test.ts, "lists and follows a workflow's runs only
@@ -28,7 +27,8 @@ const idp = mockIdp();
 
 /**
  * A builder's App, current, and a chat of `person`'s (the builder, unless
- * another is given) answered by the replies `script` makes for its App.
+ * another is given) answered by the replies `script` makes for its App,
+ * and `grant`: every permission the agent could hold on it.
  */
 const setUp = async (
   script: (app: string) => ProviderReply[],
@@ -99,17 +99,12 @@ const everyCall = (app: string) =>
     versions: `(await env.apps.versions(${JSON.stringify(app)})).map(({ version }) => version)`,
   });
 
-const denied = permissionErrors.create("permission.denied", {
-  action: "read",
-}).message;
-
 describe("a chat's Apps", () => {
-  it("show the agent its person's App, and record every call", async () => {
-    const { app, chat, grant } = await setUp((made) => [
+  it("show the agent its person's App, with no permission of its own, and record every call", async () => {
+    const { app, chat } = await setUp((made) => [
       codeStep(everyCall(made)),
       says("Here it is."),
     ]);
-    await grant();
 
     await chat.ask("What does the notes App do?");
 
@@ -121,43 +116,6 @@ describe("a chat's Apps", () => {
     expect(
       calls.map(({ detail }) => String(detail.method)).toSorted()
     ).toStrictEqual(["apps.files", "apps.list", "apps.versions"]);
-  });
-
-  it("read nothing without a permission of the agent's own", async () => {
-    const { chat } = await setUp((made) => [
-      codeStep(everyCall(made)),
-      says("Nothing."),
-    ]);
-
-    await chat.ask("What's there?");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(result?.text).toBe(
-      `Returned:\n${JSON.stringify({
-        apps: denied,
-        files: denied,
-        versions: denied,
-      })}`
-    );
-    // Every call recorded once: the refused ones with why.
-    const calls = await callsOf(chat.agent.agentId, 3);
-    expect(
-      calls
-        .map(({ detail }) => ({
-          method: String(detail.method),
-          outcome: detail.outcome,
-          reason: detail.reason,
-        }))
-        .toSorted((one, other) => one.method.localeCompare(other.method))
-    ).toStrictEqual([
-      { method: "apps.files", outcome: "refused", reason: "permission.denied" },
-      { method: "apps.list", outcome: "refused", reason: "permission.denied" },
-      {
-        method: "apps.versions",
-        outcome: "refused",
-        reason: "permission.denied",
-      },
-    ]);
   });
 
   it("read no further than the person may, with every permission granted", async () => {

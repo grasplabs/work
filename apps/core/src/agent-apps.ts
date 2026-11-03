@@ -20,26 +20,17 @@ import { cancelRequest, requestText } from "./app-requests.ts";
 import { appFor, findApp, listApps, listVersions, readFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { appRead } from "./history-access.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
 import { inTurn, runSessionOf } from "./run-sessions.ts";
 
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
-// sees of Apps themselves (agent-person.ts), once the agent may read the
-// Apps collection, where agents find the Apps that already exist before
-// anyone builds another (knowledge/apps-collection.ts): the Apps the
-// person has a role in, and the files and versions of those they build.
-// Every call is audited as the chat's agent acting for them.
-
-/** Whether the agent may read the Apps collection, and so look into Apps. */
-const readsApps = (permissions: Permission[]): boolean =>
-  permissions.some(
-    ({ object, actions }) =>
-      object.type === "collection" &&
-      object.collectionId === appsCollectionId &&
-      actions.includes("read")
-  );
+// sees of Apps themselves (agent-person.ts): the Apps the person has a
+// role in, and the files and versions of those they build. These are the
+// person's own, read as them, as `env.build` changes them (agent-builds.ts),
+// so they need no permission of the agent's own; calling an App's
+// functions, which reaches its data, does (`call`). Every call is audited
+// as the chat's agent acting for them.
 
 /**
  * How long a chat's code waits for one of an App's functions: as long as a
@@ -72,7 +63,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The Apps the person has a role in, oldest first. */
   async list(): Promise<App[]> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: readsApps,
       method: "apps.list",
       read: async (person) => await listApps(this.env, person),
       detail: (listed) => ({ apps: listed.length }),
@@ -82,7 +72,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** An App's files at `version`, or at its latest: for its builders. */
   async files(app: unknown, version?: unknown): Promise<AppFiles> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: readsApps,
       method: "apps.files",
       read: async (person) => {
         const files = await readFiles(this.env, person, app, version);
@@ -280,7 +269,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** An App's versions, newest first: for its builders. */
   async versions(app: unknown, before?: unknown): Promise<AppVersion[]> {
     return await asPerson(this.env, this.ctx.props, {
-      allowed: readsApps,
       method: "apps.versions",
       read: async (person) => {
         const listed = await listVersions(this.env, person, app, before);

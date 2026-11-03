@@ -11,7 +11,7 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { buildingAs, buildsApps, maxCreatesPerTurn } from "./agent-builds.ts";
+import { buildingAs, maxCreatesPerTurn } from "./agent-builds.ts";
 import { asPerson } from "./agent-person.ts";
 import { admitEffect } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -45,12 +45,12 @@ import {
 //
 // Threat model (failure modes and attacks first), and how each is closed:
 //
-// - The agent building without being let to. Every call needs the agent's
-//   own permission to build (`write` on the Apps collection, as
-//   `env.build`: building Apps and the workflows they bind is one
-//   capability), read again on each call, and is refused once the code
-//   run that made it ended or one of the agent's permissions was revoked
-//   since it opened (`asPerson`, `admitEffect` right before each write).
+// - The agent building after its run is over. Every call is refused once
+//   the code run that made it ended or one of the agent's permissions was
+//   revoked since it opened (`asPerson`, `admitEffect` right before each
+//   write). Building needs no permission of the agent's own, as
+//   `env.build` needs none: it is the person's own act, bounded by their
+//   role below, and grants nothing.
 // - The agent doing more than its person may. Each call is the person's
 //   own function, with the person's role read now: only a builder creates
 //   a workflow; only the workflow's builders read or edit its draft, test
@@ -162,8 +162,8 @@ const named = (value: unknown): string | null =>
 export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * Runs one call as the chat's person, with the agent as the audit log's
-   * actor for what it changes: once the agent may build, and only from a
-   * chat that hasn't read restricted data.
+   * actor for what it changes: only from a chat that hasn't read
+   * restricted data.
    */
   async #build<T>(
     method: string,
@@ -173,8 +173,6 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
     const { env } = this;
     const scope = this.ctx.props;
     return await asPerson(env, scope, {
-      allowed: buildsApps,
-      action: "write",
       method: `workflowBuild.${method}`,
       read: async (person) => await run(await buildingAs(env, scope, person)),
       ...(detail === undefined ? {} : { detail }),

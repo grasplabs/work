@@ -32,9 +32,9 @@ import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.
-// These tests start from the ways it can fail: the agent builds without a
-// permission of its own, or past what its person may do (an App they
-// don't build, or any App for someone who doesn't build); a chat that read
+// These tests start from the ways it can fail: the agent builds past what
+// its person may do (an App they don't build, or any App for someone who
+// doesn't build), or not at all for someone who does; a chat that read
 // restricted data writes it into code others read; the agent writes a
 // workflow into an App, whose calls no admin approves binding by binding;
 // the agent's draft and a builder's commits overwrite each other; a draft
@@ -142,25 +142,26 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
 /**
  * A chat of `role`'s person (a builder unless another is given) answered
  * by `replies`, with an App a builder released so the Apps collection is
- * there, and `grant`: the agent's permission on it, to read and, with
- * `write`, to build.
+ * there, and `grant`: a permission of the agent's own on it, which
+ * building doesn't need but whose revocation ends what the agent does.
  */
 const setUp = async (
   replies: ProviderReply[],
-  role: "builder" | "user" = "builder"
+  role: "admin" | "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
   await published(existing);
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
-  const person = role === "builder" ? builder : await signedInApi(idp, role);
+  const others = { admin, builder };
+  const person = role === "user" ? await signedInApi(idp, role) : others[role];
   const chat = await chatOf(person.userId, ...replies);
-  const grant = async (actions: ("read" | "write")[] = ["read", "write"]) => {
+  const grant = async () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
-      actions,
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
   };
@@ -637,35 +638,42 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ).resolves.toStrictEqual([]);
   });
 
-  it("refuses to build without the agent's own permission, or for someone who doesn't build", async () => {
+  it("builds for whoever builds, as them, with no permission of its own, and never past what they may do", async () => {
     const calls = tryEach({
-      create: `(await env.build.create({ name: "Refused" })).name`,
+      create: `(await env.build.create({ name: ${JSON.stringify(appName)} })).name`,
       call: `await env.build.call("app_refused", "count")`,
     });
-    const resultOf = async (
-      role: "builder" | "user",
-      actions: ("read" | "write")[]
-    ) => {
-      const { chat, grant } = await setUp([codeStep(calls), says("No.")], role);
-      await grant(actions);
+    const resultOf = async (role: "admin" | "user", granted: boolean) => {
+      const { chat, grant, person } = await setUp(
+        [codeStep(calls), says("Done.")],
+        role
+      );
+      if (granted) {
+        await grant();
+      }
       await chat.ask("Build something");
       const [result] = await codeResults(chat.stub, chat.chat.id);
-      return returned(result?.text);
+      return { result: returned(result?.text), person };
     };
-    const denied = permissionErrors.create("permission.denied", {
-      action: "write",
-    }).message;
-    const forbidden = roleErrors.create("role.forbidden").message;
+    const notFound = appErrors.create("app.not_found").message;
 
-    // Reading the Apps collection is not building.
-    await expect(resultOf("builder", ["read"])).resolves.toStrictEqual({
-      create: denied,
-      call: denied,
-    });
-    // The agent's permission reaches no further than its person.
-    await expect(resultOf("user", ["read", "write"])).resolves.toStrictEqual({
-      create: forbidden,
-      call: appErrors.create("app.not_found").message,
+    // An admin in a new deployment, whose agent was granted nothing: the
+    // App is made, theirs.
+    const { result: made, person: admin } = await resultOf("admin", false);
+    expect(made).toStrictEqual({ create: appName, call: notFound });
+    const listed = await admin.api.apps.list();
+    expect(
+      listed
+        .filter(({ owner }) => owner === admin.userId)
+        .map(({ name, role }) => ({ name, role }))
+    ).toStrictEqual([{ name: appName, role: "builder" }]);
+    // Every permission the agent could hold reaches no further than its
+    // person.
+    await expect(resultOf("user", true)).resolves.toMatchObject({
+      result: {
+        create: roleErrors.create("role.forbidden").message,
+        call: notFound,
+      },
     });
   });
 
@@ -705,12 +713,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes no App code from a restricted chat", async () => {
+  it("writes no App code from a restricted chat, though building needs no grant", async () => {
     const calls = tryEach({
       create: `(await env.build.create({ name: "Refused" })).name`,
     });
-    const { chat, grant } = await setUp([codeStep(calls), says("No.")]);
-    await grant();
+    const { chat } = await setUp([codeStep(calls), says("No.")]);
     await runInDurableObject(chat.stub, (instance) =>
       instance.restrictChat(chatIdSchema.parse(chat.chat.id))
     );
@@ -722,15 +729,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lands no draft write whose run ran out of time while it was under way", async () => {
-    const { chat, existing, grant } = await setUp([]);
+  it("lands no draft write whose run ran out of time while it was under way, with no grant to revoke", async () => {
+    const { chat, existing } = await setUp([]);
     await fakeProvider(
       codeStep(`export default async (self, env) => {
           await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
         };`),
       says("It ran out of time.")
     );
-    await grant();
 
     // The write is let in at once, then waits on the App's files past its
     // run's end: refused as it commits.

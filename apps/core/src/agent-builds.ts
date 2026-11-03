@@ -40,7 +40,6 @@ import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
@@ -112,10 +111,12 @@ import type { Draft } from "./workspace.ts";
 //
 // The person's rights bound every call, read again each time: creating an
 // App needs a role that builds (and, from a marked blueprint, a role in
-// its App), and changing one a builder's role in it.
-// The agent needs a permission of its own too: `write` on the Apps
-// collection, the company's catalog of Apps, which no one writes as
-// Knowledge (it is read only), so granting it means only this. A chat
+// its App), and changing one a builder's role in it. The agent needs no
+// permission of its own for it: building is its person's own act, done
+// for them, and grants nothing (what the App asks for waits for an admin,
+// and a version goes live only when a builder makes it current). Asking
+// for one instead stopped every admin and builder from making an App in a
+// new deployment, where nothing can grant one. A chat
 // that read restricted data writes no App code: what it read would reach
 // everyone who builds the App. Every call is audited as `agent.call`, and
 // what changes an App (`app.created`, `app.committed`,
@@ -289,15 +290,6 @@ const functionCall = (text: string): DraftCall => {
     note: callNote,
   };
 };
-
-/** Whether the agent may build Apps: `write` on the Apps collection. */
-export const buildsApps = (permissions: Permission[]): boolean =>
-  permissions.some(
-    ({ object, actions }) =>
-      object.type === "collection" &&
-      object.collectionId === appsCollectionId &&
-      actions.includes("write")
-  );
 
 /** A chat's draft of an App, as the agent reads it. */
 export interface DraftFiles {
@@ -632,8 +624,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Runs one build call as the chat's person, with the agent as the audit
-   * log's actor for what it changes: once the agent may build Apps, and
-   * only from a chat that hasn't read restricted data.
+   * log's actor for what it changes: only from a chat that hasn't read
+   * restricted data.
    */
   async #build<T>(
     method: string,
@@ -643,8 +635,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     const { env } = this;
     const scope = this.ctx.props;
     return await asPerson(env, scope, {
-      allowed: buildsApps,
-      action: "write",
       method,
       read: async (person: Member) =>
         await run(await buildingAs(env, scope, person)),

@@ -316,7 +316,7 @@ const setUp = async (replies: ProviderReply[], agentBuilds = true) => {
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "collection", collectionId: "apps" },
-      actions: ["read", "write"],
+      actions: ["read"],
       binding: "APP_LIBRARY",
     });
   }

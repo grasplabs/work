@@ -10,15 +10,20 @@ import { forSandbox } from "./bindings.ts";
 import { grantedPermissions } from "./permissions.ts";
 
 // Calls of a chat's code that go through the functions of the person's own
-// session (reading Apps and workflows, building Apps): as the chat's
-// person, read now, so the agent sees and does no more than they could,
-// and only once the agent holds a permission for it, as for everything an
-// agent reaches.
+// session (reading Apps and workflows, building Apps and workflows): as the
+// chat's person, read now, so the agent sees and does no more than they
+// could. A call that reaches a resource (an App's functions, a workflow's
+// runs) also needs a permission the agent holds for it (`allowed`).
+// Building, and reading the person's own Apps, need none: they are the
+// person's own acts, under their name, bounded by their role.
 
 /** One read of the chat's code, as `asPerson` runs it. */
 export interface PersonRead<T> {
-  /** Whether the agent's permissions, read now, allow it. */
-  allowed: (permissions: Permission[]) => boolean;
+  /**
+   * Whether the agent's permissions, read now, allow it. Without it the
+   * call needs none, and `read` is handed none.
+   */
+  allowed?: (permissions: Permission[]) => boolean;
   /** What the permission it lacks would allow: `read` unless it writes. */
   action?: "read" | "write";
   /** The API and method, for the audit log. */
@@ -37,9 +42,10 @@ export const readDenied = (action: "read" | "write" = "read") =>
   permissionErrors.create("permission.denied", { action });
 
 /**
- * Runs one read as the chat's person, once the run's check passed and the
- * agent holds a permission for it, and audits it as `agent.call` however
- * it ends: a refusal too, with why. Errors as the sandbox sees them.
+ * Runs one read as the chat's person, once the run's check passed and,
+ * for a call that names one (`allowed`), the agent holds a permission for
+ * it, and audits it as `agent.call` however it ends: a refusal too, with
+ * why. Errors as the sandbox sees them.
  */
 export const asPerson = async <T>(
   env: Env,
@@ -57,8 +63,11 @@ export const asPerson = async <T>(
         ...(ended === undefined ? {} : { endedOf: ended }),
       },
       async () => {
-        const permissions = await grantedPermissions(env, chatAuthority(scope));
-        if (!allowed(permissions)) {
+        const permissions =
+          allowed === undefined
+            ? []
+            : await grantedPermissions(env, chatAuthority(scope));
+        if (allowed !== undefined && !allowed(permissions)) {
           throw readDenied(action);
         }
         const person = await memberOf(env.DB, scope.personId);
