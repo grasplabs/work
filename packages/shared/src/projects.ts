@@ -36,12 +36,6 @@ export const projectNameMaxLength = 80;
 /** Longest description a project has, in characters. */
 export const projectDescriptionMaxLength = 500;
 
-/** Most items one project holds, filed or shared with it. */
-export const projectItemsMax = 200;
-
-/** Most people and teams in one project besides its owner. */
-export const projectMembersMax = 100;
-
 /** A role in a project: `user` sees it; `builder` also changes it. */
 export const projectRoleSchema = z.enum(["user", "builder"]);
 export type ProjectRole = z.infer<typeof projectRoleSchema>;
@@ -210,7 +204,4 @@ export const projectErrors = defineErrorFamily({
   "project.not_found": "There's no such project.",
   "project.member_invalid": "They can't be added to the project like that.",
   "project.item_not_found": "There's no such App or workflow you can open.",
-  "project.conflict":
-    "The project's sharing changed while it was being deleted. Try again.",
-  "project.full": `A project holds at most ${projectItemsMax} apps and workflows, and ${projectMembersMax} people and teams besides its owner. Take one out to add another.`,
 });

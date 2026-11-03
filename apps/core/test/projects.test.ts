@@ -1,10 +1,8 @@
-import { projectItemsMax, projectMembersMax } from "@grasp-os/shared/projects";
 import type { ProjectItemRef } from "@grasp-os/shared/projects";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { addMember } from "../src/app-members.ts";
 import {
   addProjectMember,
   fileItem,
@@ -12,10 +10,7 @@ import {
   removeProjectMember,
   unfileItem,
 } from "../src/projects.ts";
-import {
-  deleteWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { deleteWorkflowResource } from "../src/workflow-resources.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -543,7 +538,7 @@ describe("projects", { timeout: 120_000 }, () => {
     });
   });
 
-  it("holds at most its limits of items and people, however they are added", async () => {
+  it("takes items and people past what a project once held at most, however they are added", async () => {
     const owner = await personApi("builder");
     const ada = await personApi("user");
     const project = await projectOf(owner);
@@ -551,29 +546,19 @@ describe("projects", { timeout: 120_000 }, () => {
       workflowOf(owner),
       workflowOf(owner),
     ]);
-    // Seeded to the limits: items filed elsewhere, people of the
-    // organization in it.
+    // Seeded past the old limits of 200 items and 100 people.
     const now = Date.now();
-    const people = Array.from({ length: projectMembersMax }, () =>
-      crypto.randomUUID()
-    );
     await env.DB.batch([
-      ...Array.from({ length: projectItemsMax }, () =>
+      ...Array.from({ length: 200 }, () =>
         env.DB.prepare(
           "INSERT INTO project_items (project_id, item_type, item_id, added_by, added_at) VALUES (?, 'workflow', ?, ?, ?)"
         ).bind(project, crypto.randomUUID(), owner.userId, now)
       ),
-      ...people.flatMap((person) => [
-        env.DB.prepare(
-          "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Person', ?, 1, ?, ?)"
-        ).bind(person, `${person}@acme.test`, now, now),
-        env.DB.prepare(
-          "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
-        ).bind(crypto.randomUUID(), person, now),
+      ...Array.from({ length: 100 }, () =>
         env.DB.prepare(
           "INSERT INTO project_members (project_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-        ).bind(project, person, owner.userId, now),
-      ]),
+        ).bind(project, crypto.randomUUID(), owner.userId, now)
+      ),
     ]);
 
     expect({
@@ -598,24 +583,11 @@ describe("projects", { timeout: 120_000 }, () => {
       ),
       shared: await seesWorkflow(ada, sharedOne),
     }).toStrictEqual({
-      files: "project.full",
-      sharesFromItsDialog: "project.full",
-      adds: "project.full",
-      shared: "workflow.resource_unavailable",
+      files: "ok",
+      sharesFromItsDialog: "ok",
+      adds: "ok",
+      shared: "ok",
     });
-    // Someone in it leaves the organization: their row reaches nobody,
-    // as the project's page shows, and holds no place.
-    const [gone] = people;
-    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
-      .bind(gone)
-      .run();
-    await expect(
-      owner.api.projects.addMember(project, {
-        type: "person",
-        id: ada.userId,
-        role: "user",
-      })
-    ).resolves.toBeUndefined();
   });
 
   it("answers that the project is gone when it is deleted while someone is added or something filed", async () => {
@@ -655,74 +627,6 @@ describe("projects", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       adding: "project.not_found",
       filing: "project.not_found",
-    });
-  });
-
-  it("lets two shares racing for a project's last place not both land", async () => {
-    const owner = await personApi("builder");
-    const by = await owner.api.whoami();
-    const project = await projectOf(owner);
-    const [first, second] = await Promise.all([
-      workflowOf(owner),
-      workflowOf(owner),
-    ]);
-    const [firstApp, secondApp] = await Promise.all([
-      owner.api.apps.create({ name: `Desk ${unique()}` }),
-      owner.api.apps.create({ name: `Desk ${unique()}` }),
-    ]);
-    // One place left, twice over: once for the workflows, once for the
-    // Apps.
-    const seeded = (count: number) =>
-      Array.from({ length: count }, () =>
-        env.DB.prepare(
-          "INSERT INTO project_items (project_id, item_type, item_id, added_by, added_at) VALUES (?, 'workflow', ?, ?, ?)"
-        ).bind(project, crypto.randomUUID(), owner.userId, Date.now())
-      );
-    await env.DB.batch(seeded(projectItemsMax - 1));
-    const toProject = { type: "project", id: project, role: "user" } as const;
-    // The other share lands right before this one's write runs.
-    const workflows = await outcome(
-      shareWorkflowResource(
-        {
-          ...env,
-          DB: racingDb(async () => {
-            await shareWorkflowResource(env, by, second, toProject);
-          }, /insert into "workflow_resource_members"/u),
-        },
-        by,
-        first,
-        toProject
-      )
-    );
-    await owner.api.workflowResources.unshare(second, {
-      type: "project",
-      id: project,
-    });
-    const apps = await outcome(
-      addMember(
-        {
-          ...env,
-          DB: racingDb(async () => {
-            await addMember(env, by, secondApp.id, toProject);
-          }, /insert into "app_members"/u),
-        },
-        by,
-        firstApp.id,
-        toProject
-      )
-    );
-    const page = await owner.api.projects.get(project);
-
-    expect({
-      workflows,
-      apps,
-      held: page.items.length === projectItemsMax,
-      won: page.items.some(({ id }) => id === secondApp.id),
-    }).toStrictEqual({
-      workflows: "project.full",
-      apps: "project.full",
-      held: false,
-      won: true,
     });
   });
 
@@ -843,76 +747,61 @@ describe("projects", { timeout: 120_000 }, () => {
     });
   });
 
-  it("records on each App and workflow the end of its share when the project is deleted, a share added meanwhile included", async () => {
+  it("records a project's deletion once, by whom, with how many items and people it held", async () => {
     const owner = await personApi("builder");
-    const by = await owner.api.whoami();
+    const [ada, ben] = await Promise.all([
+      personApi("user"),
+      personApi("user"),
+    ]);
     const project = await projectOf(owner);
-    const [workflow, lateWorkflow, app] = await Promise.all([
+    for (const person of [ada, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await owner.api.projects.addMember(project, {
+        type: "person",
+        id: person.userId,
+        role: "user",
+      });
+    }
+    const [shared, filed, app] = await Promise.all([
       workflowOf(owner),
       workflowOf(owner),
       owner.api.apps.create({ name: `Desk ${unique()}` }),
     ]);
     await owner.api.projects.file(project, {
-      item: { type: "workflow", id: workflow },
+      item: { type: "workflow", id: shared },
       share: true,
+    });
+    await owner.api.projects.file(project, {
+      item: { type: "workflow", id: filed },
     });
     await owner.api.projects.file(project, {
       item: { type: "app", id: app.id },
       share: true,
     });
-    const toProject = { type: "project", id: project, role: "user" } as const;
 
     const events = await auditedDuring(async () => {
-      // Another share lands after the deletion read the project's shares,
-      // before its batch runs: it reads them again.
-      await removeProject(
-        {
-          ...env,
-          DB: racingDb(async () => {
-            await shareWorkflowResource(env, by, lateWorkflow, toProject);
-          }, /update "projects" set "icon"/u),
-        },
-        by,
-        project
-      );
+      await owner.api.projects.remove(project);
     });
-    const ended = events
-      .filter(({ action }) => action.endsWith(".member.removed"))
-      .map(({ action, target, detail }) => ({
-        action,
-        target: target?.id,
-        member: detail.member,
-        memberType: detail.memberType,
-      }))
-      .toSorted((one, other) =>
-        `${one.action}${one.target}`.localeCompare(
-          `${other.action}${other.target}`
-        )
-      );
-    const lateShares = await owner.api.workflowResources.members(lateWorkflow);
+    const sharesLeft = await owner.api.workflowResources.members(shared);
 
     expect({
-      ended,
-      deleted: events.filter(({ action }) => action === "project.deleted")
-        .length,
-      lateShares: lateShares.length,
+      recorded: events.map(({ action, actor, target, detail }) => ({
+        action,
+        actor,
+        target,
+        detail,
+      })),
+      sharesLeft: sharesLeft.length,
     }).toStrictEqual({
-      ended: [
+      recorded: [
         {
-          action: "app.member.removed",
-          target: app.id,
-          member: project,
-          memberType: "project",
+          action: "project.deleted",
+          actor: { type: "person", userId: owner.userId },
+          target: { type: "project", id: project },
+          detail: { items: 3, members: 2 },
         },
-        ...[workflow, lateWorkflow].toSorted().map((id) => ({
-          action: "workflow.member.removed",
-          target: id,
-          member: project,
-          memberType: "project",
-        })),
       ],
-      deleted: 1,
-      lateShares: 0,
+      sharesLeft: 0,
     });
   });
 });

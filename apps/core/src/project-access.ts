@@ -152,46 +152,25 @@ export const requireProjectRole = async (
 };
 
 /**
- * Why a write guarded by project `id`'s room (project-sql.ts) wrote
- * nothing, read now: `project.not_found` once it is gone,
- * `role.forbidden` once `by` no longer builds it, and `project.full`
- * otherwise.
+ * Refuses unless project `id` is there and `by` builds it now:
+ * `project.not_found` once it is gone, `role.forbidden` once they no
+ * longer build it. Says why a write under `projectStillBuiltSql`
+ * (project-sql.ts) wrote nothing.
  */
-export const projectRefusal = async (
+export const requireStillBuilt = async (
   env: Pick<Env, "DB">,
   id: string,
   by: string
-): Promise<Error> => {
+): Promise<void> => {
   const row = await drizzle(env.DB).get<{ there: number; builds: number }>(
     sql`SELECT EXISTS (SELECT 1 FROM ${projects} WHERE ${projects.id} = ${id}) AS there,
       ${projectBuiltBySql(id, by)} AS builds`
   );
   if (row.there === 0) {
-    return projectErrors.create("project.not_found");
+    throw projectErrors.create("project.not_found");
   }
   if (row.builds === 0) {
-    return roleErrors.create("role.forbidden");
-  }
-  return projectErrors.create("project.full");
-};
-
-/**
- * Refuses, as `projectRefusal` says, unless `guard` (a project's ID
- * while `by` builds it and it has room, project-sql.ts) reads a project
- * now: for a write elsewhere, such as an item's own Share dialog, before
- * it writes under the same guard.
- */
-export const requireProjectRoom = async (
-  env: Pick<Env, "DB">,
-  id: string,
-  by: string,
-  guard: SQL
-): Promise<void> => {
-  const row = await drizzle(env.DB).get<{ id: string | null } | undefined>(
-    sql`SELECT ${guard} AS id`
-  );
-  if (row?.id === null || row?.id === undefined) {
-    throw await projectRefusal(env, id, by);
+    throw roleErrors.create("role.forbidden");
   }
 };
 

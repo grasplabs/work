@@ -84,8 +84,8 @@ import {
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
 import { failUnless, lockGuardFailed } from "./packages/locks.ts";
-import { namedProjectsFor, requireProjectRoom } from "./project-access.ts";
-import { projectWithRoomForItemSql } from "./project-sql.ts";
+import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
+import { projectStillBuiltSql } from "./project-sql.ts";
 import {
   ceilingOf,
   memberEntry,
@@ -2926,18 +2926,13 @@ export const shareWorkflowResource = async (
       ownerIssue: "id: The workflow's owner always has it.",
       buildsIssue:
         "role: Only the organization's admins and builders build workflows.",
-      item: { type: "workflow", id: workflow.id },
     },
     by
   );
-  // A share with a project: the project, while it has room for it.
+  // A share with a project: the project, while `by` still builds it.
   const toProject =
     member.type === "project"
-      ? projectWithRoomForItemSql(
-          member.id,
-          { type: "workflow", id: workflow.id },
-          by.userId
-        )
+      ? projectStillBuiltSql(member.id, by.userId)
       : undefined;
   const addedAt = new Date();
   const db = drizzle(env.DB);
@@ -2947,9 +2942,9 @@ export const shareWorkflowResource = async (
       .values({
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a share racing a deletion writes nothing.
-        // A share with a project, also only while it is there, `by` builds
-        // it, and it has room for the workflow (or holds it already), read
-        // here: two shares racing for its last place can't both land.
+        // A share with a project, also only while it is there and `by`
+        // builds it, read here: a builder taken out meanwhile shares
+        // nothing.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
           WHERE id = ${workflow.id} AND deleted_at IS NULL
             AND ${toProject === undefined ? sql`1` : sql`${toProject} IS NOT NULL`})`,
@@ -2991,7 +2986,7 @@ export const shareWorkflowResource = async (
     ) {
       // The project's guard, if that was what held it back, says why.
       if (toProject !== undefined) {
-        await requireProjectRoom(env, member.id, by.userId, toProject);
+        await requireStillBuilt(env, member.id, by.userId);
       }
       throw unavailable();
     }

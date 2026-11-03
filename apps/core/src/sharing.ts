@@ -1,6 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
-import type { ProjectItemRef } from "@grasp-os/shared/projects";
 import { canBuild, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, or, sql } from "drizzle-orm";
@@ -12,9 +11,9 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import { projects, teams } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { requireProjectRole, requireProjectRoom } from "./project-access.ts";
+import { requireProjectRole } from "./project-access.ts";
 import type { Person } from "./project-access.ts";
-import { projectWithRoomForItemSql, viaProjectSql } from "./project-sql.ts";
+import { viaProjectSql } from "./project-sql.ts";
 
 // Sharing a resource with people and teams of the organization, the same
 // for every kind that is shared (Apps, app-members.ts; business stores,
@@ -123,11 +122,6 @@ export interface SharingRules {
   ownerIssue: string;
   /** The issue for sharing with someone whose role doesn't build. */
   buildsIssue: string;
-  /**
-   * The App or workflow shared, for a share with a project: it must have
-   * room for it (`projectItemsMax`) unless it holds it already.
-   */
-  item?: ProjectItemRef;
 }
 
 /**
@@ -152,16 +146,8 @@ export const requireSharable = async (
     if (by === undefined) {
       throw rules.invalid("type: It can't be shared with a project.");
     }
+    // Checked again in the share's own write (`projectStillBuiltSql`).
     await requireProjectRole(env, by, member.id, "builder");
-    if (rules.item !== undefined) {
-      // Checked again in the share's own write, as the same guard.
-      await requireProjectRoom(
-        env,
-        member.id,
-        by.userId,
-        projectWithRoomForItemSql(member.id, rules.item, by.userId)
-      );
-    }
     return;
   }
   if (member.type === "team") {

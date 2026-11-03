@@ -53,9 +53,9 @@ import {
   buildsProjectsOf,
   namedProjectsFor,
   peopleInProject,
-  requireProjectRoom,
+  requireStillBuilt,
 } from "./project-access.ts";
-import { projectWithRoomForItemSql } from "./project-sql.ts";
+import { projectStillBuiltSql } from "./project-sql.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -166,7 +166,6 @@ const sharingRules = (app: App, member: NewAppMember): SharingRules => ({
   invalid,
   ownerIssue: "id: They own the App, and always build it.",
   buildsIssue: "role: Only the organization's admins and builders build Apps.",
-  item: { type: "app", id: app.id },
 });
 
 /** The audit entry of a change by `by` to whom `app` is shared with. */
@@ -399,11 +398,11 @@ export const addMember = async (
       and(
         eq(apps.id, found.id),
         ne(apps.status, "archived"),
-        // A share with a project only while it is there, `by` builds it,
-        // and it has room for the App (or holds it already), read in this
-        // statement: two shares racing for its last place can't both land.
+        // A share with a project only while it is there and `by` builds
+        // it, read in this statement: a builder taken out meanwhile shares
+        // nothing.
         member.type === "project"
-          ? sql`${projectWithRoomForItemSql(member.id, { type: "app", id: found.id }, by.userId)} IS NOT NULL`
+          ? sql`${projectStillBuiltSql(member.id, by.userId)} IS NOT NULL`
           : undefined
       )
     );
@@ -433,16 +432,7 @@ export const addMember = async (
     await editableApp(env, by, found.id);
     // A project's guard that held it back says why.
     if (member.type === "project") {
-      await requireProjectRoom(
-        env,
-        member.id,
-        by.userId,
-        projectWithRoomForItemSql(
-          member.id,
-          { type: "app", id: found.id },
-          by.userId
-        )
-      );
+      await requireStillBuilt(env, member.id, by.userId);
     }
   }
   const [added] = await namedMembers(env, by, rowOf(found, member));
