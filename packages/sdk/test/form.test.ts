@@ -831,3 +831,91 @@ describe("a decision form", () => {
     });
   });
 });
+
+describe("what a form declares of its fields", () => {
+  it("reads a field's schema by its path, into objects and arrays", () => {
+    const { client } = host(() => ({ value: null }));
+    const binding = bindForm(
+      client,
+      v.object({
+        address: v.object({ country: v.enum(["nl", "de"]) }),
+        lines: v.array(v.object({ amount: v.number().min(1) })),
+      }),
+      { defaultValues: {} }
+    );
+    expect({
+      country: binding.fieldDescriptor("address.country")?.kind,
+      amount: binding.fieldDescriptor("lines[0].amount")?.kind,
+      missing: binding.fieldDescriptor("address.city"),
+      intoText: binding.fieldDescriptor("address.country.code"),
+    }).toStrictEqual({
+      country: "enum",
+      amount: "number",
+      missing: undefined,
+      intoText: undefined,
+    });
+  });
+});
+
+/** An upload's cancel that has nothing to cancel. */
+const cancelNothing = (): void => {
+  // Nothing runs here: only the form's hold is tested.
+};
+
+describe("a form with a file uploading", () => {
+  it("refuses to submit until every upload ended, and sends nothing", async () => {
+    const { client, sent } = host(() => ({ value: 1 }));
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    const first = binding.startUpload(cancelNothing).end;
+    const second = binding.startUpload(cancelNothing).end;
+    const whileUploading = await settle(binding.submit());
+    const refusal =
+      typeof whileUploading === "object" &&
+      whileUploading !== null &&
+      "rejected" in whileUploading &&
+      whileUploading.rejected instanceof GraspError
+        ? whileUploading.rejected.code
+        : undefined;
+    first();
+    // Ending it twice ends it once: the other still holds the form.
+    first();
+    const whileOneUploads = binding.status().uploading;
+    second();
+    expect({
+      refusal,
+      whileOneUploads,
+      after: await settle(binding.submit()),
+      sent: sent.length,
+    }).toStrictEqual({
+      refusal: "form.uploading",
+      whileOneUploads: true,
+      after: { resolved: 1 },
+      sent: 1,
+    });
+  });
+});
+
+describe("a form whose draft is discarded while a file uploads", () => {
+  it("cancels the upload, and says its file belongs to no draft any more", async () => {
+    const { client } = host(() => ({ value: 1 }));
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    let cancelled = 0;
+    const upload = binding.startUpload(() => {
+      cancelled += 1;
+    });
+    binding.reset();
+    // The upload's own end, which comes after: nothing more to undo.
+    upload.end();
+    expect({
+      cancelled,
+      current: upload.current(),
+      uploading: binding.status().uploading,
+      submitted: await settle(binding.submit()),
+    }).toStrictEqual({
+      cancelled: 1,
+      current: false,
+      uploading: false,
+      submitted: { resolved: 1 },
+    });
+  });
+});

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { changesTextFor, shownValue } from "../src/form.tsx";
+import {
+  changesTextFor,
+  shownValue,
+} from "../src/internal/form-changes-text.ts";
 
 // How the changes list of a record form (FormChanges) says a field's
 // value, and in which language: the frame's document says the page's.

@@ -30,6 +30,7 @@ import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject, unsafeKeys, valueLimits } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
+import { descriptorOf } from "./value-schema.ts";
 
 // Forms (spec 10.2.1–10.3): one `useForm`, three ways in.
 //
@@ -169,6 +170,11 @@ export interface FormStatus {
   readonly newer: boolean;
   /** The save committed, but `onSuccess` failed: what it said. */
   readonly applicationError: string | undefined;
+  /**
+   * Whether a field's upload is under way: the form doesn't submit until
+   * it ends (`form.uploading`), or it would save without the file.
+   */
+  readonly uploading: boolean;
 }
 
 const initialStatus: FormStatus = Object.freeze({
@@ -180,6 +186,7 @@ const initialStatus: FormStatus = Object.freeze({
   conflict: false,
   newer: false,
   applicationError: undefined,
+  uploading: false,
 });
 
 /** A Grasp form: TanStack's typed fields and state, and its submission. */
@@ -687,6 +694,30 @@ type Checked =
  * What a form holds beside TanStack's state: its status, the record's
  * baseline and the submission in flight. One per mounted form.
  */
+/** What separates the steps of a field's path: `a.b`, `a[0]`. */
+const fieldPathBreak = /[.[\]]/u;
+/** A step of a path into an array. */
+const arrayIndex = /^\d+$/u;
+
+/** A native schema's descriptor (a `v` schema), or undefined for another vendor's. */
+const nativeDescriptorOf = (
+  schema: StandardSchemaV1
+): ValueDescriptor | undefined => {
+  try {
+    return descriptorOf(schema);
+  } catch {
+    return undefined;
+  }
+};
+
+/** A field's upload, as the form holds it while it runs. */
+export interface UploadHold {
+  /** Whether the draft it was started for is still the form's. */
+  readonly current: () => boolean;
+  /** It ended: the form may submit once every one has. */
+  readonly end: () => void;
+}
+
 /** Whether two drafts hold the same edits, whenever each was written. */
 const sameDraft = (one: FormDraft, other: FormDraft): boolean => {
   try {
@@ -781,6 +812,38 @@ export class FormBinding {
   /** Connects the binding to its TanStack form, once. */
   attach(form: FormApiOf<Record<string, unknown>>): void {
     this.#form ??= form;
+  }
+
+  /**
+   * What the form's validator declares of its field `name`, a path as
+   * TanStack names fields (`address.city`, `lines[0].amount`): the
+   * operation's argument, or a native schema's field (a `v.object`). The
+   * field helpers read it for what a control offers (an enum's values, a
+   * number's bounds, whether it may be left empty); the validator still
+   * checks every value. Undefined for a field it doesn't declare, or a
+   * local form whose schema isn't Grasp's own.
+   */
+  fieldDescriptor(name: string): ValueDescriptor | undefined {
+    const target = this.#target;
+    let descriptor =
+      target.kind === "schema"
+        ? nativeDescriptorOf(target.schema)
+        : target.args;
+    for (const step of name.split(fieldPathBreak)) {
+      if (step === "" || descriptor === undefined) {
+        continue;
+      }
+      if (descriptor.kind === "object") {
+        descriptor = Object.hasOwn(descriptor.fields, step)
+          ? descriptor.fields[step]
+          : undefined;
+      } else if (descriptor.kind === "array" && arrayIndex.test(step)) {
+        descriptor = descriptor.item;
+      } else {
+        descriptor = undefined;
+      }
+    }
+    return descriptor;
   }
 
   /** The form's status now: what `subscribe` tells of. */
@@ -1151,6 +1214,7 @@ export class FormBinding {
         ? pick(this.#baseline, target.fields)
         : this.initialValues;
     this.#savedValues = undefined;
+    this.#cancelUploads();
     this.#formOf().reset(values, { keepDefaultValues: true });
     this.#set({
       attempted: false,
@@ -1179,6 +1243,7 @@ export class FormBinding {
     }
     // Discarded: no draft of the record is kept, here or in the page.
     this.#draft?.store.discardFor(this.#draft.key, this.#owner);
+    this.#cancelUploads();
     this.#adopt(this.#latest);
   }
 
@@ -1253,8 +1318,47 @@ export class FormBinding {
     });
   }
 
+  /** The uploads under way, each by how to cancel it. */
+  readonly #uploads = new Map<object, () => void>();
+
+  /**
+   * A field's upload started, `cancel` stopping it: the form refuses to
+   * submit until every one ended. Discarding the draft (`reset`,
+   * `reload`) cancels them: an upload that still finishes belongs to a
+   * draft that is gone, and `current` says so, so its file isn't written
+   * into the one that replaced it.
+   */
+  startUpload(cancel: () => void): UploadHold {
+    const hold = {};
+    this.#uploads.set(hold, cancel);
+    this.#set({ uploading: true });
+    return {
+      current: () => this.#uploads.has(hold),
+      end: () => {
+        if (this.#uploads.delete(hold)) {
+          this.#set({ uploading: this.#uploads.size > 0 });
+        }
+      },
+    };
+  }
+
+  /** Cancels every upload under way: what they upload goes with the draft. */
+  #cancelUploads(): void {
+    const cancels = [...this.#uploads.values()];
+    this.#uploads.clear();
+    for (const cancel of cancels) {
+      cancel();
+    }
+    if (this.#status.uploading) {
+      this.#set({ uploading: false });
+    }
+  }
+
   /** See `GraspForm.submit`. */
   async submit(): Promise<unknown> {
+    if (this.#uploads.size > 0) {
+      throw clientError("form.uploading");
+    }
     this.#pending ??= this.#run();
     return await this.#pending;
   }

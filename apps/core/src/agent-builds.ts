@@ -1277,6 +1277,44 @@ const buildDeclaration = `/**
  * Screens are \`screens/<name>.tsx\` on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
+ * Don't wire tables and forms by hand:
+ * - A list of records is a \`DataGrid\` (\`@grasp-os/ui/components/data-grid\`)
+ *   over a query that takes \`pagination\` and answers pages: it reads them
+ *   page by page and hands the query what the person searched, sorted and
+ *   filtered, so the query does it over every record. Each cell shows and
+ *   edits its field as the query's \`returns\` declares it (a moment as a
+ *   date and time, money in its currency, a yes or no); \`day: true\` on a
+ *   \`v.timestamp()\` column that holds days (as a \`DateField\` saves them).
+ *   Columns are field names or \`{ field, label?, sortable?, filter?:
+ *   { value: label }, day?, cell?, edit?: async (row, value) => mutation }\`.
+ *   Text, enums, numbers, moments, days and booleans are editable in place;
+ *   IDs (typed \`never\`), files, money, durations, lists and objects are
+ *   read-only. \`bulkActions\` (rows with an \`_id\`) make rows selectable,
+ *   \`rowActions\` give each row a menu, and a failed action or edit is
+ *   shown. It shows its own empty, loading and failed states.
+ *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate(screens.task, { id: task._id }) }]} />\`
+ * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
+ *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
+ *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
+ *   bounds and whether it is required come from the schema: \`TextField\`,
+ *   \`TextareaField\` (text), \`SelectField\` (\`v.enum\`; \`options\` labels
+ *   each value), \`MultiSelectField\` (\`v.array(v.enum(...))\`),
+ *   \`NumberField\`, \`DateField\` (a day, \`v.timestamp()\`), \`DateTimeField\`
+ *   (a moment), \`CheckboxField\` and \`SwitchField\` (\`v.boolean()\`),
+ *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`,
+ *   \`optionLabel\`, and optionally \`lookup={{ query: api.people.get, args: (id) => ({ id }) }}\`,
+ *   a query of one record that names the value it starts with, shown as
+ *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, a files
+ *   resource declaring \`upload\`; the form doesn't submit while it
+ *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
+ *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
+ *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; given
+ *   \`links={resources.site}\` (a links resource the App declares), its
+ *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
+ *   \`FormError\` and \`SubmitButton\`.
+ * - The grid's and the fields' own words follow the page's language
+ *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
+ *   otherwise.
  * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
  * its public functions (\`query\`, \`mutation\`, \`action\`) in
  * operations files, \`operations/<group>.ts\`. An App holds no workflows,

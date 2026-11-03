@@ -288,6 +288,41 @@ export default m;`;
 });
 
 /**
+ * Packages whose `browser` build touches the DOM as it loads, by the build
+ * without it. A kit module must load without a document: wherever it is
+ * evaluated before a page exists (a check in a worker, a screen's module
+ * graph before its frame renders), a module that reads `document` at load
+ * fails, and every screen that imports it with it. Markdown's decoder
+ * (`decode-named-character-reference`, under react-markdown's micromark)
+ * makes an element at load to decode entities with `innerHTML`; its own
+ * build decodes them from a table instead.
+ */
+const loadsWithoutDom: Readonly<Record<string, string>> = {
+  "decode-named-character-reference": "index.js",
+};
+
+/** Resolves each of `loadsWithoutDom` to its build that needs no DOM. */
+const withoutDomAtLoad: Plugin = {
+  name: "kit-without-dom-at-load",
+  enforce: "pre",
+  async resolveId(source, importer, options) {
+    const file = Object.hasOwn(loadsWithoutDom, source)
+      ? loadsWithoutDom[source]
+      : undefined;
+    if (file === undefined) {
+      return null;
+    }
+    const resolved = await this.resolve(source, importer, {
+      ...options,
+      skipSelf: true,
+    });
+    return resolved === null
+      ? null
+      : { ...resolved, id: path.join(path.dirname(resolved.id), file) };
+  },
+};
+
+/**
  * Compiles the kit's own sources with Babel and the React Compiler, the same
  * way as App files. They are the only TypeScript in the build.
  */
@@ -418,6 +453,7 @@ const buildKitModules = async (
     plugins: [
       reactEntries(preview ? "development" : "production"),
       reactCompiler,
+      withoutDomAtLoad,
     ],
     build: {
       write: false,
