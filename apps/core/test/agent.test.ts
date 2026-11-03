@@ -697,9 +697,10 @@ describe("chat agent sandbox", () => {
       "import { env as imported, exports } from 'cloudflare:workers'; export default async (self, env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
     );
 
+    // No `env.brain`: its agent doesn't hold the brain permission.
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "workflowBuild", "memory", "brain", "dashboard"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "workflowBuild", "memory", "dashboard"], imported: [], exports: [] })}`,
     });
   });
 
@@ -710,7 +711,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.memory, env.brain, env.dashboard."
+      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.memory, env.dashboard."
     );
   });
 

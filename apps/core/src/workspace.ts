@@ -112,6 +112,7 @@ import {
   workspaceAgentIdSchema,
 } from "./agent-scope.ts";
 import type {
+  AgentApi,
   AgentScope,
   CodeRunAdmission,
   CodeRunCall,
@@ -448,6 +449,23 @@ const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
  */
 const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);
 const sharedApis = agentApis.filter(({ name }) => sharedApiNames.has(name));
+
+/** A person's own chat's APIs, its agent without the brain permission. */
+const withoutBrain = agentApis.filter(({ name }) => name !== "brain");
+
+/**
+ * The APIs a chat's turn gets: a shared chat's (`sharedApis`), or all of
+ * the agent's, but `env.brain` (and its `searchBrain` tool, agent-tools.ts)
+ * only while its agent holds the brain permission, read before the turn:
+ * the Brain refuses every read without it (knowledge/recall-grants.ts), so
+ * the model is never offered a tool that would be refused.
+ */
+const apisFor = (shared: boolean, readsBrain: boolean): readonly AgentApi[] => {
+  if (shared) {
+    return sharedApis;
+  }
+  return readsBrain ? agentApis : withoutBrain;
+};
 
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
@@ -2007,7 +2025,7 @@ export class Workspace extends DurableObject<Env> {
         question: parsed.data.text,
         files,
         model,
-        apis: shared ? sharedApis : agentApis,
+        apis: apisFor(shared, readsBrain),
         context,
         scope,
         whyStop: async () =>

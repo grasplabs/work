@@ -10,8 +10,9 @@ import type { Reader } from "./access.ts";
 
 /**
  * Whether `authority` holds an active `brain` grant, read now: what an
- * App, run or agent needs to recall. A chat asks it before recalling for
- * a question (agent.ts), and recall asks it again as it reads.
+ * App, run or agent needs to recall. A chat asks it before its turn, to
+ * offer the brain at all and recall for the question (workspace.ts,
+ * agent.ts), and recall asks it again as it reads.
  */
 export const hasBrainGrant = async (
   env: Env,

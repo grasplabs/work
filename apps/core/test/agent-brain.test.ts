@@ -1,13 +1,21 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  model,
+  personalChatsOf,
+  says,
+  toolResults,
+  toolStep,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi, signedInWithRole } from "./sign-in.ts";
+import { readCollection } from "./knowledge.ts";
+import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's
 // person, only once the agent holds the brain permission (a platform
@@ -47,7 +55,7 @@ const gapCalls = async (
   );
 
 describe("a chat's brain", setUpTime, () => {
-  it("reads its open questions only once the agent holds the brain permission, and records every read", async () => {
+  it("has its open questions only once the agent holds the brain permission, and records every read", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const { stub, agent, newChat } = await personalChatsOf(
@@ -68,7 +76,7 @@ describe("a chat's brain", setUpTime, () => {
     const after = await newChat();
     await after.ask("What's still unknown?");
 
-    const calls = await gapCalls(agent.agentId, 2);
+    const calls = await gapCalls(agent.agentId, 1);
     const beforeSteps = await codeResults(stub, before.chat.id);
     // Once granted, the turn recalls for the question before the model's
     // first request (agent.ts): its own code step, then the model's.
@@ -83,20 +91,12 @@ describe("a chat's brain", setUpTime, () => {
         reason: detail.reason,
       })),
     }).toStrictEqual({
-      // Without the permission, no recall step: only the model's.
-      before: [
-        `Returned:\n${permissionErrors.create("permission.denied", { action: "read" }).message}`,
-      ],
+      // Without the permission, no recall step and no `env.brain` at
+      // all: nothing is called, so nothing is refused.
+      before: [expect.stringContaining("This chat has no API named env.brain")],
       recalled: true,
       after: "Returned:\n[]",
-      calls: [
-        {
-          onBehalfOf: person.userId,
-          outcome: "refused",
-          reason: "permission.denied",
-        },
-        { onBehalfOf: person.userId, outcome: "ok", reason: null },
-      ],
+      calls: [{ onBehalfOf: person.userId, outcome: "ok", reason: null }],
     });
   });
 
@@ -159,5 +159,69 @@ describe("a chat's brain", setUpTime, () => {
         about: [],
       },
     ]);
+  });
+
+  it("is offered only once the agent holds the brain permission: without it no call is refused, and building goes on", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `The depot opens at ${unique()}`;
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.api.knowledge.saveDocument({
+      collectionId,
+      path: "depot.md",
+      text: `# Depot ${word}\n\n${fact}.`,
+      ifVersion: 0,
+    });
+    const app = await builder.api.apps.create({ name: `Depot ${unique()}` });
+    const { stub, agent, provider, newChat } = await personalChatsOf(
+      builder.userId,
+      toolStep("writeFile", { app: app.id, files: { "notes.md": "Depot" } }),
+      says("Written."),
+      toolStep("searchBrain", { query: word }),
+      says("It opens then.")
+    );
+    const forApp = await builder.api.chats.forApp(app.id);
+    await stub.ask(forApp.id, { text: "Note the depot.", model });
+    const withoutGrant = provider.requests.length;
+    await requestGranted(idp, admin, readCollection(agent, collectionId));
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const { chat, ask } = await newChat();
+    await ask("When does the depot open?");
+
+    const offered = (from: number, to?: number) =>
+      provider.requests.slice(from, to).map(({ body }) => {
+        const sent = JSON.stringify(body);
+        return {
+          tool: sent.includes('"name":"searchBrain"'),
+          api: sent.includes("env.brain:"),
+        };
+      });
+    const built = await toolResults(stub, forApp.id);
+    const searched = await toolResults(stub, chat.id);
+    expect({
+      without: offered(0, withoutGrant),
+      built: built.map(({ tool, isError }) => [tool, isError]),
+      with: offered(withoutGrant).at(0),
+      searched: searched
+        .filter(({ tool }) => tool === "searchBrain")
+        .map(({ isError, text }) => [isError, text.includes(fact)]),
+    }).toStrictEqual({
+      without: Array.from({ length: withoutGrant }, () => ({
+        tool: false,
+        api: false,
+      })),
+      built: [["writeFile", false]],
+      with: { tool: true, api: true },
+      searched: [[false, true]],
+    });
   });
 });
