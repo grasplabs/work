@@ -36,7 +36,6 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { queuedJob } from "./build-admission.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
@@ -50,7 +49,7 @@ import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
-import { buildOnSave } from "./save-builds.ts";
+import { buildOnSave, draftServerBuild } from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
 import { workflowTestFailures } from "./workflows/code.ts";
@@ -76,9 +75,11 @@ import type { Draft } from "./workspace.ts";
 // in the draft as it is: the agent may delete it, never change it.
 //
 // It checks a draft as a save does (screens and
-// workflows: type errors, @shadcn/lint and build errors; its server code
-// is sealed by the preview, which reports what fails)
-// and runs its workflows' tests. A check also reads
+// workflows: type errors, @shadcn/lint and build errors), and its server
+// code as its seal type-checks it, against the references the seal
+// generates, only its registration run (`draftServerBuild`),
+// and runs its workflows' tests; what fails only once it runs, the preview
+// reports as it seals it. A check also reads
 // what the preview of the draft in the person's side panel ran into so far
 // (preview-reports.ts): runtime errors fail it as build errors do, so the
 // repair loop fixes them within the same limits. The agent can also call
@@ -316,6 +317,13 @@ export interface DraftCheck {
    */
   passed: boolean;
   screens: SavedBuild;
+  /**
+   * Its server code of spec 8's layout, type-checked with every gate its
+   * seal holds it to, against the references its seal generates, only
+   * its registration run (`draftServerBuild`): what fails only once it
+   * runs, its preview reports.
+   */
+  server: SavedBuild;
   workflows: SavedBuild;
   tests: {
     /** `not_run` while the workflows don't build. */
@@ -465,29 +473,30 @@ export const checkFiles = async (
   signal?: AbortSignal
 ): Promise<Omit<DraftCheck, "failedInARow" | "maxFailedChecks">> => {
   signal?.throwIfAborted();
-  const saved = await buildOnSave(
-    env,
-    // Typed by the App's permissions now, as a version committed from it
-    // would be.
-    {
-      app,
-      version: base ?? 0,
-      files,
-      bindings: await appBindingKinds(env, app),
-    },
-    { profile: "preview", signal }
-  );
+  const version = base ?? 0;
+  // Its server code checked beside the save's builds, all at once.
+  const [saved, server] = await Promise.all([
+    buildOnSave(
+      env,
+      // Typed by the App's permissions now, as a version committed from it
+      // would be.
+      { app, version, files, bindings: await appBindingKinds(env, app) },
+      { profile: "preview", signal }
+    ),
+    draftServerBuild(env, { app, version, files }, signal),
+  ]);
   signal?.throwIfAborted();
   const tests = await testsOf(env, app, base, files, saved.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [saved.screens, saved.workflows].every(buildPassed) &&
+    [saved.screens, server, saved.workflows].every(buildPassed) &&
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
     screens: reported(saved.screens),
+    server: reported(server),
     workflows: reported(saved.workflows),
     tests,
     preview,
@@ -893,7 +902,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Checks the chat's draft of `app`: builds its screens and workflows,
-   * and runs its workflows' tests. Refused once
+   * type-checks its server code, and runs its workflows' tests. Refused once
    * {@link maxFailedChecks} checks of it failed in a row this turn, those
    * still running counted.
    */
@@ -1160,8 +1169,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         await failDeadJobs(this.env, workspaceId, chatId);
         await reconcileReceipt(this.env, workspaceId, chatId, found.id);
         const now = await chats.buildJob(chatId, found.id);
-        // Its own place in the queue for a share of builds, if it holds one.
-        return jobView(now ?? found, await queuedJob(this.env, found.id));
+        return jobView(now ?? found);
       },
       (view) => ({ job: view.id, status: view.status })
     );
@@ -1303,7 +1311,9 @@ build: {
   discard(app: string): Promise<void>;
   /**
    * Builds the draft's screens and workflows (type errors, lint and build
-   * errors) and runs its workflows' tests, and reads what its
+   * errors), type-checks its server code (app.ts, schema.ts, values.ts,
+   * operations/, migrations/) as its seal does, without running its operations, and runs
+   * its workflows' tests, and reads what its
    * screens ran into so far in the person's preview (runtime errors). Fix what fails
    * and check again; after ${maxFailedChecks} checks in a row that didn't pass, checking
    * refuses: stop and tell the person what still fails.
@@ -1311,6 +1321,7 @@ build: {
   check(app: string): Promise<{
     passed: boolean;
     screens: Build;
+    server: Build;
     workflows: Build;
     tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
     /**
@@ -1371,7 +1382,7 @@ build: {
    */
   propose(app: string, message: string): Promise<{
     version: number | null;
-    check: { passed: boolean; screens: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
+    check: { passed: boolean; screens: Build; server: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
     /** What the version changes, as its reviewer reads it; null when not proposed. */
     review: {
       current: number | null;
@@ -1420,18 +1431,15 @@ build: {
    * A build job this chat submitted: how it stands and, once completed,
    * what it came to: for a check, what \`check\` returns; for a proposal,
    * what \`propose\` returns. \`version\` is the version it proposed, if it
-   * did. A cancelled or revoked job does nothing more. \`queued\` while it
-   * waits for its turn to build (the organization's builds, each person's
-   * and each App's take turns): it isn't failed, and builds once a turn comes free.
+   * did. A cancelled or revoked job does nothing more. A running job may
+   * wait a while for a free build slot: it isn't failed.
    */
   job(id: string): Promise<{
     id: string;
     kind: "check" | "propose";
     app: string;
     revision: number;
-    status: "running" | "queued" | "completed" | "failed" | "cancelled" | "revoked";
-    /** While queued: whose builds are full (the organization's, the person's, or this App's), and when it asks again. */
-    queued: { waitingFor: "client" | "person" | "key"; retryAt: string } | null;
+    status: "running" | "completed" | "failed" | "cancelled" | "revoked";
     result: unknown;
     version: number | null;
     error: { code: string; message: string } | null;

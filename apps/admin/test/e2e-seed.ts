@@ -1,9 +1,9 @@
 /**
  * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
  * as the admin's tests make it: its database migrated, its Secrets Store
- * filled with every secret it binds, and a client in ring 0, placed in a
- * dedicated destination of its own on the fake Cloudflare API, provisioned
- * on a release, with a newer release imported to roll out.
+ * filled with every secret it binds, and a client on Stable, placed in the
+ * stage's destination on the fake Cloudflare API, provisioned on Stable's
+ * release, with a newer release on Edge to promote.
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
@@ -11,8 +11,11 @@ import { eq, ne } from "drizzle-orm";
 
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import { promoteRelease } from "../src/rollout/channels.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
+import { releaseToEdge } from "./edge.ts";
+import { onChannel, staff } from "./hosting.ts";
 import { namespaceRelease } from "./namespace-release.ts";
 import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
@@ -20,11 +23,18 @@ import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 /** What a seed made, for the journeys to find on the admin's pages. */
 export interface Seeded {
   clientId: string;
-  /** The newest release, which it doesn't run yet. */
+  /** The newest release, on Edge only. */
   releaseId: string;
-  /** The release it runs. */
+  /** The release it runs: Stable's, after Edge and Beta. */
   previousReleaseId: string;
 }
+
+/** Takes `releaseId` through Edge and Beta to Stable, as staff promote it. */
+const toStable = async (releaseId: string): Promise<void> => {
+  await releaseToEdge(env, [releaseId]);
+  await promoteRelease(env, staff, { channel: "beta", releaseId });
+  await promoteRelease(env, staff, { channel: "stable", releaseId });
+};
 
 /** The admin's migrations, as drizzle-kit writes them (src/db/migrations). */
 const migrations = import.meta.glob<string>("../src/db/migrations/*.sql", {
@@ -83,9 +93,9 @@ const fillStore = async (tokens: { deployer: string }): Promise<void> => {
 };
 
 /**
- * Seeds the admin: a new client in ring 0, placed in a dedicated
- * destination of its own on the fake's new account and provisioned on a
- * release, and a newer release. Every client an earlier seed made is
+ * Seeds the admin: a new client on Stable, placed in the stage's
+ * destination on the fake and provisioned on Stable's release, and a
+ * newer release on Edge. Every client an earlier seed made is
  * offboarded, so a journey tried again reaches only its own.
  */
 export const seed = async (
@@ -102,28 +112,29 @@ export const seed = async (
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
   });
-  const { clientId } = await placedClientRecord(cloudflare, 0);
+  await toStable(previous);
+  const { clientId } = await placedClientRecord(cloudflare);
   await deployPlaced(clientId, previous);
-  const next = await placedRelease("feat(core): roll out", {
+  const next = await placedRelease("feat(core): promote", {
     core: "export default { core: 2 };",
     connect: "export default { connect: 2 };",
   });
+  await releaseToEdge(env, [next]);
   return { clientId, releaseId: next, previousReleaseId: previous };
 };
 
 /** What a placed seed made, for the placed-client journey to find on the admin's pages. */
 export interface SeededPlaced {
-  /** A client live on the first release, in a dedicated destination of its own. */
+  /** A client live on Stable's release, in the stage's destination. */
   clientId: string;
-  /** Two releases a placed client runs, oldest first. */
+  /** Stable's release, then a newer one on Edge to pin it to. */
   releaseIds: [string, string];
 }
 
 /**
- * Seeds the admin for the placed-client journey: a client placed in a
- * dedicated destination on the fake's new account, as the admin can
- * still place one though its pages offer only Grasp Cloud and
- * on-premises, live on a first release, and a second to release it to.
+ * Seeds the admin for the placed-client journey: a client placed in the
+ * stage's destination on the fake, live on Stable's release, and a newer
+ * release on Edge.
  */
 export const seedPlaced = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -135,26 +146,28 @@ export const seedPlaced = async (
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
   });
-  const { clientId } = await placedClientRecord(cloudflare, 1);
+  await toStable(first);
+  const { clientId } = await placedClientRecord(cloudflare);
   await deployPlaced(clientId, first);
-  const second = await placedRelease("feat(core): what it's released to", {
+  const second = await placedRelease("feat(core): what it's pinned to", {
     core: "export default { core: 2 };",
     connect: "export default { connect: 2 };",
   });
+  await releaseToEdge(env, [second]);
   return { clientId, releaseIds: [first, second] };
 };
 
 /** What the organizations seed made: a client whose core answers, and one not set up yet. */
 export interface SeededOrganizations {
   /** Live, its core answering the admin's snapshot. */
-  answered: { clientId: string; account: AccountState };
+  answered: { clientId: string; core: CoreState };
   /** Added, never provisioned: it has no core to answer. */
   unset: { clientId: string };
 }
 
 /**
  * Seeds the admin for the organization sections' journey: every client an
- * earlier seed made offboarded, then one client live on a release and one
+ * earlier seed made offboarded, and its account in the fake gone, then one client live on a release and one
  * only added, as staff leave an organization before its Setup runs.
  */
 export const seedOrganizations = async (
@@ -167,17 +180,20 @@ export const seedOrganizations = async (
     .update(clients)
     .set({ status: "offboarded" })
     .where(ne(clients.status, "offboarded"));
+  // Each of these journeys seeds anew: the accounts earlier ones made, all
+  // offboarded now, go, so the fake's few databases are free again.
+  cloudflare.reset();
   const release = await placedRelease("feat(core): the sections", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
   });
-  const answered = await placedClientRecord(cloudflare, 0, {
+  const answered = await placedClientRecord(cloudflare, {
     name: "Answering Acme",
   });
   await deployPlaced(answered.clientId, release);
-  const unset = await placedClientRecord(cloudflare, 0, { name: "Unset Acme" });
+  const unset = await placedClientRecord(cloudflare, { name: "Unset Acme" });
   return {
-    answered: { clientId: answered.clientId, account: answered.account },
+    answered: { clientId: answered.clientId, core: answered.core },
     unset: { clientId: unset.clientId },
   };
 };
@@ -194,7 +210,11 @@ export const seedCreate = async (
   await migrate(env.DB);
   await fillStore(tokens);
   const account = cloudflare.addAccount("Grasp", undefined, platformAccountId);
-  account.namespaces.set(clientsNamespace("production"), new Map());
+  if (!account.namespaces.has(clientsNamespace("production"))) {
+    account.namespaces.set(clientsNamespace("production"), new Map());
+  }
   const manifest = await namespaceRelease();
+  // On Stable, which a new organization follows: what it's provisioned on.
+  await onChannel(manifest.releaseId);
   return { releaseId: manifest.releaseId };
 };

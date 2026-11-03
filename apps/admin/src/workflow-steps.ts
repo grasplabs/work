@@ -1,6 +1,6 @@
 /**
  * How the admin's runs on Workerflow (src/workflow-runs.ts: provisioning,
- * applies, rollouts and rollbacks) run their steps: their retry configs,
+ * applies and deploys) run their steps: their retry configs,
  * and how a step fails. A failure a retry can fix is retried; any other
  * stops the run at once (`NonRetryableError`, carrying its code). Either
  * way nothing a step returns or throws carries a token or a response body:
@@ -35,7 +35,6 @@ export const deployStepConfig = {
 /** Deploy failures a retry can fix: a new version still starting, a name race, a flaky query. */
 const retryableDeployCodes: ReadonlySet<DeployErrorCode> = new Set([
   "smoke_check_failed",
-  "subdomain_unavailable",
   "d1_migration_failed",
 ]);
 

@@ -1,3 +1,4 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { KickoffReading } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { stephenTermMaxLength } from "@grasp-os/shared/onboarding-staff";
@@ -6,15 +7,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
+import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // What only Grasp's staff set in the onboarding (GRA-320): how Stephen is
 // set up for this deployment, which every interview turn's context holds
@@ -24,7 +20,8 @@ import {
 //
 // - Stephen asking about what staff told him to leave alone, because the
 //   kickoff's older word on it is still in his context.
-// - Anyone but staff reading or changing his setup or the agreements.
+// - Anyone but Grasp's admin changing the agreements or his setup: both
+//   are commands from the admin alone (admin-command.test.ts).
 // - A setup that isn't one: no language, one he doesn't speak, a line
 //   past its length.
 // - The words staff gave him in the audit log, which the company reads.
@@ -32,12 +29,6 @@ import {
 //   agreements are in.
 
 const idp = mockIdp();
-
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
 
 /** What the kickoff brought: what to leave alone, the languages, a team. */
 const reading: KickoffReading = {
@@ -77,8 +68,7 @@ const staffs: StephenSetup = {
 describe("how Stephen is set up", () => {
   it("is what the kickoff suggests until staff set it, and every turn's context holds it with what the kickoff brought", async () => {
     await kickoffIn();
-    const staff = await asStaff();
-    const suggested = await staff.onboardingStaff.stephen();
+    const suggested = await onboardingStore(env).stephen();
     const before = await onboardingStore(env).interviewBrief();
     expect({
       setup: suggested.setup,
@@ -112,10 +102,12 @@ describe("how Stephen is set up", () => {
 
   it("holds staff's setup from the next turn on, in place of the kickoff's word on languages and what to leave alone, and goes back to it", async () => {
     await kickoffIn();
-    const staff = await asStaff();
-    const saved = await staff.onboardingStaff.saveStephen(staffs);
-    const brief = await onboardingStore(env).interviewBrief();
-    const reset = await staff.onboardingStaff.saveStephen(null);
+    const store = onboardingStore(env);
+    await adminCommands().saveStephen(staffs);
+    const saved = await store.stephen();
+    const brief = await store.interviewBrief();
+    await adminCommands().saveStephen(null);
+    const reset = await store.stephen();
     const after = await onboardingStore(env).interviewBrief();
     expect({
       setup: saved.setup,
@@ -146,14 +138,12 @@ describe("how Stephen is set up", () => {
 
   it("keeps a long limit from the sponsor whole when staff change only a language", async () => {
     await kickoffIn();
-    const staff = await asStaff();
+    const store = onboardingStore(env);
     const long = `Niets over de reorganisatie van de afdeling ${"Financiën, ".repeat(150)}einde.`;
-    await staff.onboardingStaff.answerKickoff("limits", long);
-    const { setup } = await staff.onboardingStaff.stephen();
-    const saved = await staff.onboardingStaff.saveStephen({
-      ...setup,
-      languages: ["nl"],
-    });
+    await adminKickoff().answerKickoff("limits", long);
+    const { setup } = await store.stephen();
+    await adminCommands().saveStephen({ ...setup, languages: ["nl"] });
+    const saved = await store.stephen();
     const brief = await onboardingStore(env).interviewBrief();
     expect({
       long: long.length > 1000,
@@ -163,25 +153,26 @@ describe("how Stephen is set up", () => {
   });
 
   it("holds before any kickoff is in", async () => {
-    const staff = await asStaff();
-    await staff.onboardingStaff.saveStephen(staffs);
+    await adminCommands().saveStephen(staffs);
     const brief = await onboardingStore(env).interviewBrief();
     expect(brief).toContain("Zebulon CRM");
   });
 
   it("is on record as staff's, without the words they gave him", async () => {
-    const staff = await asStaff();
     const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.saveStephen(staffs);
-      await staff.onboardingStaff.saveStephen(null);
+      await adminCommands().saveStephen(staffs);
+      await adminCommands().saveStephen(null);
     });
     expect({
       actions: events.map(({ action, actor }) => [action, actor.type]),
-      detail: events[0]?.detail,
+      detail: events.find(({ action }) => action === "onboarding.stephen.set")
+        ?.detail,
       words: JSON.stringify(events).includes("Zebulon"),
     }).toStrictEqual({
       actions: [
+        ["admin.command", "staff"],
         ["onboarding.stephen.set", "staff"],
+        ["admin.command", "staff"],
         ["onboarding.stephen.reset", "staff"],
       ],
       detail: { languages: "nl", limits: 1, terms: 2 },
@@ -190,7 +181,6 @@ describe("how Stephen is set up", () => {
   });
 
   it("refuses what isn't a setup", async () => {
-    const staff = await asStaff();
     const tries: unknown[] = [
       { ...staffs, languages: [] },
       { ...staffs, languages: ["pt"] },
@@ -205,11 +195,12 @@ describe("how Stephen is set up", () => {
           await outcome(
             // SAFETY: what a client could send, whatever its types say.
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            staff.onboardingStaff.saveStephen(setup as StephenSetup)
+            adminCommands().saveStephen(setup as StephenSetup)
           )
       )
     );
-    expect(new Set(refused)).toStrictEqual(new Set(["onboarding.invalid"]));
+    // A command the admin couldn't have made is refused whole.
+    expect(new Set(refused)).toStrictEqual(new Set(["request.forbidden"]));
   });
 });
 
@@ -236,25 +227,45 @@ const agreed = {
   councilOn: "2026-10-03",
 };
 
-describe("the agreements, as staff put them in place", () => {
+/** Whose links are out, as the admin reads them. */
+const linksOut = (snapshot: AdminSnapshot): string[] =>
+  snapshot.links
+    .filter(({ sentAt }) => sentAt !== null)
+    .map(({ person }) => person)
+    .toSorted();
+
+describe("the agreements, as staff put them in place from the admin", () => {
   it("keep each one's day, and once the last is in the links that wait go out at once; the team is told then", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
+    const commands = adminCommands();
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan({
       start: new Date().toISOString().slice(0, 10),
     });
-    await staff.onboardingStaff.setAgreements({
+    await commands.setAgreements({
       processing: true,
       processingOn: "2026-10-01",
       assessment: true,
       assessmentOn: "2026-10-02",
       council: "waiting",
     });
-    const waiting = await staff.onboardingStaff.agreements();
-    const view = await staff.onboardingStaff.setAgreements(agreed);
-    const out = await staff.onboardingStaff.agreements();
-    expect({ waiting, agreed: view.agreed, out }).toStrictEqual({
+    const waiting = await adminSnapshot();
+    await commands.setAgreements(agreed);
+    const out = await adminSnapshot();
+    expect({
+      waiting: {
+        agreements: waiting.agreements,
+        agreed: waiting.agreed,
+        told: waiting.told,
+        out: linksOut(waiting),
+      },
+      out: {
+        agreements: out.agreements,
+        agreed: out.agreed,
+        told: out.told,
+        out: linksOut(out),
+      },
+    }).toStrictEqual({
       waiting: {
         agreements: {
           processing: true,
@@ -265,42 +276,45 @@ describe("the agreements, as staff put them in place", () => {
         },
         agreed: false,
         told: false,
-        out: 0,
-        waiting: 3,
+        out: [],
       },
-      agreed: true,
       out: {
         agreements: agreed,
         agreed: true,
         told: true,
         // The lead's and Ona's; Sam's waits for Lea.
-        out: 2,
-        waiting: 1,
+        out: ["lea", "ona"],
       },
     });
   });
 
   it("stay as they were once the team is told, even when everyone with a link leaves the roster, though saving them again unchanged still applies", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
+    const commands = adminCommands();
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan({
       start: new Date().toISOString().slice(0, 10),
     });
-    await staff.onboardingStaff.setAgreements(agreed);
+    await commands.setAgreements(agreed);
     await api.onboarding.saveRoster({
       teams: [{ id: "new", name: "New", lead: null }],
       people: [{ id: "neo", name: "Neo", team: "new" }],
     });
-    const { told, out } = await staff.onboardingStaff.agreements();
+    const left = await adminSnapshot();
     const changed = await outcome(
-      staff.onboardingStaff.setAgreements({ ...agreed, council: "waiting" })
+      commands.setAgreements({ ...agreed, council: "waiting" })
     );
-    const again = await outcome(staff.onboardingStaff.setAgreements(agreed));
-    const { agreements } = await staff.onboardingStaff.agreements();
-    expect({ told, out, changed, again, agreements }).toStrictEqual({
+    const again = await outcome(commands.setAgreements(agreed));
+    const { agreements } = await adminSnapshot();
+    expect({
+      told: left.told,
+      out: linksOut(left),
+      changed,
+      again,
+      agreements,
+    }).toStrictEqual({
       told: true,
-      out: 0,
+      out: [],
       changed: "onboarding.agreements_kept",
       again: "ok",
       agreements: agreed,
@@ -308,36 +322,15 @@ describe("the agreements, as staff put them in place", () => {
   });
 
   it("refuse a day that isn't one", async () => {
-    const staff = await asStaff();
     await expect(
       outcome(
-        staff.onboardingStaff.setAgreements({
+        adminCommands().setAgreements({
           processing: true,
           processingOn: "1 October",
           assessment: false,
           council: "waiting",
         })
       )
-    ).resolves.toBe("onboarding.invalid");
-  });
-});
-
-describe("what only staff set", () => {
-  it("is staff's alone: a member and the company's admin get nothing from it", async () => {
-    const { api: admin } = await signedInApi(idp, "admin");
-    const { api: user } = await signedInApi(idp, "user");
-    const refused = await Promise.all(
-      [admin, user].flatMap((api) => [
-        outcome(api.onboardingStaff.stephen()),
-        outcome(api.onboardingStaff.saveStephen(staffs)),
-        outcome(api.onboardingStaff.saveStephen(null)),
-        outcome(api.onboardingStaff.agreements()),
-      ])
-    );
-    const kept = await onboardingStore(env).stephen();
-    expect({ refused: new Set(refused), changed: kept.changed }).toStrictEqual({
-      refused: new Set(["onboarding.staff_only"]),
-      changed: false,
-    });
+    ).resolves.toBe("request.forbidden");
   });
 });

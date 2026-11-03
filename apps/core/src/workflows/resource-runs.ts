@@ -61,7 +61,6 @@ import {
 import { requireNotStaff } from "../sharing.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
-import { runDequeued } from "./admission.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
@@ -81,7 +80,7 @@ import {
   unadmitted,
 } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { admitAttempt } from "./quotas.ts";
+import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
@@ -98,7 +97,6 @@ import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
-import { wakingOnSettle } from "./share-wakes.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -155,7 +153,11 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   restart or a replay counts on, never afresh. A run its own start
 //   admitted is its lineage's root; a child its `run` task starts
 //   (run-children.ts) joins that lineage, one level deeper, admitted
-//   against its levels and descendant runs, and counts on its root. A workflow's own
+//   against its levels and descendant runs, and counts on its root. A run
+//   a trigger starts in another run's lineage (an event or a stamped
+//   message of that run) takes its place there the same way, but counts
+//   on its workflow's account in it (quotas.ts, `triggeredAccountClaimed`),
+//   as do its children. A workflow's own
 //   `limits` lower those: `maxSteps` the step limit and `maxModelCalls`
 //   the model requests a lineage may make (the lower of each and the
 //   host's, `loadedRun`, one request per call). A `maxActiveMs` isn't
@@ -179,25 +181,10 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
 
 /**
  * Whose runs a run's isolate is among, for the sandbox's share; and whose
- * App share of the client's attempts running at once its attempts take
+ * App slots of the attempts running at once its attempts take
  * (admission.ts): the workflow's own, as an App's runs take their App's.
  */
 const ownerOf = (workflow: string): string => `workflow-resource:${workflow}`;
-
-/**
- * Whose person share of the attempts running at once a run's attempts
- * take (admission.ts), from its receipt, never its input: the person it
- * acts for, whose App runs take the same share; for a trigger's start, the
- * trigger's own (`trigger:<id>`), as an App's triggers take theirs, so
- * the events that fire it never take its principal's.
- */
-const admissionSubjectOf = (
-  row: Pick<RunRow, "principalId">,
-  receipt: { invokerType: string; invokerId: string }
-): string =>
-  receipt.invokerType === "trigger"
-    ? `trigger:${receipt.invokerId}`
-    : row.principalId;
 
 /** What a start's run is admitted as: its pins, from the authorization. */
 export interface RunAdmission {
@@ -218,6 +205,23 @@ export interface RunAdmission {
    */
   lineage?: { parentRunId: string | null; rootRunId: string; depth: number };
 }
+
+/**
+ * The account a start's run is charged to, as SQL (quotas.ts): for a run
+ * a trigger started in another run's lineage, its workflow's account
+ * there, which its start claimed just before (`triggeredAccountClaimed`);
+ * for a child, its parent's; none for a root, nor a child charged to its
+ * root.
+ */
+const accountOfAdmitted = (run: RunAdmission): SQL => {
+  const { lineage } = run;
+  if (lineage === undefined) {
+    return sql`NULL`;
+  }
+  return lineage.parentRunId === null
+    ? triggeredAccountOf(lineage.rootRunId, run.workflowId)
+    : sql`(SELECT parent_run.account_run_id FROM ${workflowResourceRuns} AS parent_run WHERE parent_run.id = ${lineage.parentRunId})`;
+};
 
 /**
  * The statement that admits a start's run, for the receipt's own batch:
@@ -253,9 +257,13 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         ),
         depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
         stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
+        stopTakenAt: sql<null>`NULL`.as("stop_taken"),
         controlGeneration: sql<number>`0`.as("control_generation"),
         summaryRevision: sql<number>`0`.as("summary_revision"),
         compensation: sql<null>`NULL`.as("compensation"),
+        accountRunId: sql<string | null>`${accountOfAdmitted(run)}`.as(
+          "account"
+        ),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -792,7 +800,7 @@ const loadedRun = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
-): Promise<{ run: HostedResourceRun; output: string; subject: string }> => {
+): Promise<{ run: HostedResourceRun; output: string }> => {
   const row = await runOf(env, runId);
   if (
     row === undefined ||
@@ -878,7 +886,6 @@ const loadedRun = async (
       ),
     },
     output: JSON.stringify(contract.output),
-    subject: admissionSubjectOf(row, receipt),
   };
 };
 
@@ -950,16 +957,17 @@ export interface HostedActivation {
   readonly run: HostedResourceRun;
   /** Its version's output schema's descriptor (`acceptedOutput`). */
   readonly output: string;
-  /** Whose share of the sandbox its isolate takes, and of the client's attempts. */
+  /** Whose share of the sandbox its isolate takes, and of the attempts running at once. */
   readonly owner: string;
   /**
    * Its lineage, which admits each attempt against the quotas and the
-   * client's shares (quotas.ts); or, for a run an App's test started, the
-   * test's own admission, which counts nothing of the organization's
-   * (fixture-runs.ts), with the host's fixture checks (`fixture`).
+   * slots of the attempts running at once (quotas.ts); or, for a run an
+   * App's test started, the test's own admission, which counts nothing of
+   * the organization's (fixture-runs.ts), with the host's fixture checks
+   * (`fixture`).
    */
   readonly admission:
-    | { readonly run: string; readonly root: string; readonly subject: string }
+    | { readonly run: string; readonly root: string }
     | "fixture";
 }
 
@@ -988,11 +996,6 @@ export const runActivation = async (
   let tampered: StepError | undefined;
   // The run's own sandbox session on-prem, its actions' parent.
   let sessionId: string | undefined;
-  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
-  // the run's code is done, never before a step's outcome; none started
-  // after that, by a settle that came too late.
-  const wakes: Promise<void>[] = [];
-  const waking = { open: true };
   const host = new ResourceRunHost(env, step, run, {
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
@@ -1013,19 +1016,7 @@ export const runActivation = async (
         }
       : {
           admitAttempt: async (attempt) =>
-            wakingOnSettle(
-              env,
-              await admitAttempt(
-                env,
-                { ...admission, resource: owner },
-                attempt
-              ),
-              (wake) => {
-                if (waking.open) {
-                  wakes.push(wake());
-                }
-              }
-            ),
+            await admitAttempt(env, { ...admission, resource: owner }, attempt),
         }),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(
@@ -1060,8 +1051,6 @@ export const runActivation = async (
       host.isolateDone();
     }
   });
-  waking.open = false;
-  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     throw new Error(`Run ${runId} is no longer this activation's`);
   }
@@ -1101,13 +1090,15 @@ export const runResourceWorkflow = async (
   engineStep: RunStep,
   memory: ResourceRunMemory
 ): Promise<unknown> => {
-  const { run, output, subject } = await loadedRun(env, pin, runId);
+  const { run, output } = await loadedRun(env, pin, runId);
   return await runActivation(env, engineStep, memory, {
     run,
     output,
     owner: ownerOf(pin.workflow),
-    // Counted on its lineage's root: its own, or its parent's for a child.
-    admission: { run: runId, root: run.rootRunId ?? runId, subject },
+    // Counted on its account: its lineage's root (its own, or its
+    // parent's for a child), or its workflow's account in the lineage a
+    // trigger started it in (quotas.ts, `triggeredAccountClaimed`).
+    admission: { run: runId, root: run.calling.accountRunId },
   });
 };
 
@@ -1445,18 +1436,6 @@ export const projectResourceRun = async (
             withFailure(runEntry(row, action), status, failure)
           ),
         ]),
-    // Ended or paused, it waits in the admission queue for nothing more:
-    // its places go now, rather than keep others waiting until they lapse.
-    // After the audit entry, which reads what the row's update changed.
-    ...(ended || status === "paused"
-      ? [
-          runDequeued(
-            db,
-            id,
-            sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${id} AND ${workflowResourceRuns.status} = ${status})`
-          ),
-        ]
-      : []),
   ]);
   // A screen's controls of it, settled by how it ended.
   const now = ended ? await runOf(env, id) : undefined;
@@ -1869,6 +1848,76 @@ export const stopRunsStartedBy = async (
       failed[at] === true ? [run.id] : []
     ),
   };
+};
+
+/**
+ * Stops the unfinished runs of independent workflows that ran for
+ * `personId` (their principal), as an admin erased them (core's
+ * person-erasure.ts): each as a builder's stop is, audited under `actor`,
+ * claimed first so no pass asks it twice. A stop that fails is logged and
+ * left to the next pass. Answers how many it asked to stop, and how many
+ * unfinished runs of theirs no stop was taken for yet (`stopTakenAt`):
+ * never asked, or claimed by a pass that may have died before sending it,
+ * which a pass asks again once the claim is old (`stopDue`).
+ */
+export const stopRunsFor = async (
+  env: Env,
+  actor: AuditActor,
+  personId: string
+): Promise<{ asked: number; unasked: number }> => {
+  const db = drizzle(env.DB);
+  const ofTheirs = and(
+    eq(workflowResourceRuns.principalId, personId),
+    inArray(workflowResourceRuns.status, unended)
+  );
+  const rows = await db
+    .select()
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, stopDue()))
+    .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id));
+  let asked = 0;
+  for (const run of rows) {
+    const claimedAt = new Date();
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    const [claimed] = await db
+      .update(workflowResourceRuns)
+      .set({ stopRequestedAt: claimedAt })
+      .where(and(eq(workflowResourceRuns.id, run.id), stopDue()))
+      .returning({ id: workflowResourceRuns.id });
+    if (claimed === undefined) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await stopResourceRun(env, actor, run);
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopTakenAt: new Date() })
+        .where(eq(workflowResourceRuns.id, run.id));
+      asked += 1;
+    } catch (error) {
+      log.error("workflow.erasure_stop_failed", {
+        runId: run.id,
+        ...errorFields(error),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopRequestedAt: null })
+        .where(
+          and(
+            eq(workflowResourceRuns.id, run.id),
+            eq(workflowResourceRuns.stopRequestedAt, claimedAt)
+          )
+        );
+    }
+  }
+  const [left] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, isNull(workflowResourceRuns.stopTakenAt)));
+  return { asked, unasked: left?.count ?? 0 };
 };
 
 /**

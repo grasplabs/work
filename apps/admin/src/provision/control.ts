@@ -1,10 +1,8 @@
 /**
  * Adding a client (spec 40.1): staff record it, with no account of its
  * own, then place it in a hosting destination and provision it there
- * from its Setup (src/hosting/placement.ts). Destination allocation is
- * automatic; a dedicated destination is an explicit choice staff make
- * there. No account is adopted or created for a client: a destination
- * holds the account, shared or dedicated.
+ * from its Setup (src/hosting/placement.ts), in its stage's one shared
+ * destination. No account is adopted or created for a client.
  */
 import { newClientIdSchema } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
@@ -24,8 +22,6 @@ import { ProvisionError } from "./errors.ts";
 export const provisionInputSchema = z.object({
   clientId: newClientIdSchema,
   name: z.string().trim().min(1).max(100),
-  /** The rollout ring it's in: Production's unless staff move it on Setup. */
-  ring: z.int().nonnegative().default(1),
   /** How its people sign in: every deploy makes core's `SIGN_IN` from it. */
   signIn: clientSignInSchema,
   /**
@@ -104,7 +100,6 @@ export const createClient = async (
       .values({
         id: clientId,
         name: parsed.name,
-        ring: parsed.ring,
         signIn: JSON.stringify(parsed.signIn),
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
@@ -118,7 +113,6 @@ export const createClient = async (
       action: "client.create",
       clientId,
       detail: {
-        ring: parsed.ring,
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
         ...(parsed.attioCompanyId === undefined

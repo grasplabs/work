@@ -18,9 +18,9 @@ import {
   answeringProvider,
   connectModels,
   keyChanger,
-  streamText,
 } from "./model-provider.ts";
 import { plan } from "./platform-providers.ts";
+import { streamText } from "./provider-streams.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
 // The organization's AI, for the admin: which providers it connected and

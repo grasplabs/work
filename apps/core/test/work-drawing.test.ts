@@ -23,6 +23,7 @@ import {
   quick,
 } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Each piece of work drawn from what its people agreed to
@@ -487,14 +488,15 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       [ticketsReply(ids)],
       async () => await store.drawNext()
     );
-    const { entries } = await store.staffLog({ what: "work" });
+    const logged = await onboardingLog("work", store);
+    const entries = logged.toReversed();
     expect({
       result,
       calls: requests.length,
       dueAfter,
       again,
       log: entries
-        .filter(({ person }) => person?.id === ids.max)
+        .filter(({ about }) => about === ids.max)
         .map(({ what }) => what),
     }).toStrictEqual({
       result: [

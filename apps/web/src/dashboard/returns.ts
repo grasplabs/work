@@ -1,5 +1,8 @@
 import type { Goal } from "@grasp-os/shared/brain";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary as WorkflowSummary,
+  RunActivity,
+} from "@grasp-os/shared/workflows";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
@@ -237,7 +240,11 @@ export const teamProgressOf = (
   activity: RunActivity
 ): TeamsRead => {
   const ran = new Map(
-    activity.workflows.map((each) => [`${each.app}/${each.workflow}`, each])
+    activity.workflows.flatMap((each) =>
+      each.type === "app"
+        ? [[`${each.app}/${each.workflow}`, each] as const]
+        : []
+    )
   );
   const rows: WorkflowReturn[] = [];
   const teams = new Map<string, TeamProgress>();

@@ -6,11 +6,10 @@
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 
-import { placeAndProvisionFn } from "../src/hosting/functions.ts";
 import { stageDestinationId } from "../src/hosting/placement.ts";
 import { startClient } from "../src/provision/functions.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { staff } from "./hosting.ts";
+import { onChannel, staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
 import { placedRelease } from "./placed.ts";
 
@@ -26,12 +25,23 @@ const documented = new Set([
   "assets",
 ]);
 
-/** A release a client in a Workers for Platforms namespace runs: documented bindings, no cron triggers. */
-export const sharedRelease = async (): Promise<string> =>
-  await placedRelease("feat(core): the first", { crons: [] }, (core) => ({
-    ...core,
-    bindings: core.bindings.filter(({ type }) => documented.has(type)),
-  }));
+/**
+ * A release a client in a Workers for Platforms namespace runs (documented
+ * bindings, no cron triggers), on Stable: what a new client is
+ * provisioned on.
+ */
+export const sharedRelease = async (): Promise<string> => {
+  const releaseId = await placedRelease(
+    "feat(core): the first",
+    { crons: [] },
+    (core) => ({
+      ...core,
+      bindings: core.bindings.filter(({ type }) => documented.has(type)),
+    })
+  );
+  await onChannel(releaseId);
+  return releaseId;
+};
 
 /** A client staff add, as the new-organization form does. */
 export const added = async (): Promise<string> => {
@@ -41,7 +51,6 @@ export const added = async (): Promise<string> => {
     {
       clientId,
       name: "Acme",
-      ring: 1,
       signIn: {
         domains: ["acme.test"],
         admins: ["ada@acme.test"],
@@ -55,13 +64,6 @@ export const added = async (): Promise<string> => {
   }
   return clientId;
 };
-
-export const place = async (clientId: string, releaseId: string) =>
-  await callServerFn(
-    placeAndProvisionFn,
-    { clientId, releaseId, destinationId: null },
-    { email: staff.email }
-  );
 
 /** Grasp's own account on the fake API, with the stage's clients' namespace in it. */
 export const graspAccount = (

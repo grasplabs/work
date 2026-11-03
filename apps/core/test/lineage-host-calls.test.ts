@@ -1,76 +1,30 @@
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { admitAttempt } from "../src/workflows/quotas.ts";
-import { runActor, startRun } from "../src/workflows/runs.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { jsonWorkflowAppsOf, liveLineage } from "./json-workflow-apps.ts";
 import { withQuotas } from "./quota-limits.ts";
-import { finished, woken } from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
+import { outcome } from "./sign-in.ts";
 
 // A run lineage's host calls: every call its steps' attempts make through
-// their hosts, counted durably on the lineage, held to the
-// quota limits (`TEST_QUOTA_LIMITS`, which a test lowers to reach them),
-// so no retry, restart, child or attempt that dies mid-step starts the
-// count afresh, and calls racing each other never pass it. Runs, the
-// engine, the dispatcher and core's database are real.
+// their hosts, counted durably on the lineage of an independent JSON
+// workflow's run, held to the quota limits (`TEST_QUOTA_LIMITS`, which a
+// test lowers to reach them), so calls racing each other never pass it
+// and a settled attempt makes none. The admissions are asked for here as
+// a run's activations ask for them (quotas.ts `admitAttempt`); the run,
+// the engine and core's database are real.
+//
+// That a run's lineage counts its host calls across a CPU kill and the
+// retry under the same key, failing the run past them, is
+// workflow-resource-runs' "fails a run whose expressions would take its
+// lineage past its host calls…"; that a call past them is refused unsent,
+// workflow-calls' "refuses a call once its run's lineage has made all the
+// host calls it may…". Calls made from code between an App workflow's
+// steps went with App workflows.
 
 const idp = mockIdp();
-
-/** Starts a run of `workflow` under `parent`, as core starts a child run. */
-const startChild = async (
-  app: string,
-  workflow: string,
-  parent: string,
-  startedBy: string
-): Promise<string> => {
-  const parentRun = runIdSchema.parse(parent);
-  const run = await startRun(env, {
-    app: appIdSchema.parse(app),
-    workflow: workflowIdSchema.parse(workflow),
-    input: null,
-    startedBy,
-    actor: runActor({ id: parentRun, appId: app, workflowId: workflow }),
-    parent: parentRun,
-  });
-  return run.id;
-};
-
-/** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
-const failedWith = async (run: string): Promise<unknown> => {
-  const events = await allEvents();
-  return events.find(
-    ({ action, target }) =>
-      action === "workflow.run.failed" && target?.id === run
-  )?.detail.error;
-};
-
-/** The calls of `run` refused past its lineage's host calls, as audited. */
-const refusedCalls = async (run: string): Promise<unknown[]> => {
-  const events = await allEvents();
-  return events
-    .filter(
-      ({ action, target, detail }) =>
-        action === "workflow.call.refused" &&
-        target?.id === run &&
-        detail.errorCode === "workflow.lineage_limit"
-    )
-    .map(({ detail }) => detail.step);
-};
-
-/** A step `name` that calls the App's `hit` of its name `calls` times. */
-const calling = (name: string, calls: number) =>
-  `  await step.do("${name}", { description: "Call" }, async () => {
-${Array.from({ length: calls }, () => `    await ${hitCall(`"${name}"`)};`).join("\n")}
-    return 1;
-  });`;
+const { signedIn } = jsonWorkflowAppsOf(idp);
 
 /**
  * A first attempt at the step `key`, holding `ms` from now: a minute
@@ -156,20 +110,6 @@ const lineageHostCalls = async (root: string): Promise<unknown> => {
   return row?.calls;
 };
 
-/** A run of an App's no-op workflow, finished: the root of a lineage. */
-const lineageOf = async () => {
-  const builder = await signedInApi(idp, "builder");
-  const app = await appWith(builder, workflowFiles("noop", "  return 1;"));
-  const root = await builder.api.workflows.start(app, "noop");
-  await finished(root.id);
-  return {
-    run: root.id,
-    root: root.id,
-    subject: builder.userId,
-    resource: app,
-  };
-};
-
 /** How a call refused past the lineage's host calls is coded. */
 const refusalOf = async (
   call: Promise<void>
@@ -188,80 +128,10 @@ const refusalOf = async (
 };
 
 describe("run lineage host calls", { timeout: 90_000 }, () => {
-  it("count every host call of a lineage across retries of attempts that died mid-step, a restart and a child, and refuse the first past the limit", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Six calls in all: three attempts of `flaky` call once each and die
-    // as they time out, never settling; `more` calls twice and `last`
-    // once, after the run is loaded anew from a day's wait. `last` tries
-    // twice more, catching each refusal, audited once. `over` and the
-    // child, on its root's count, aren't admitted at all.
-    const app = await appWith(builder, {
-      ...workflowFiles(
-        "calls",
-        `  try {
-    await step.do("flaky", { description: "Flaky", timeout: "1 second", retries: { limit: 2, delay: 1, backoff: "constant" } }, async () => {
-      await ${hitCall(`"flaky"`)};
-      await new Promise(() => {});
-    });
-  } catch {}
-  await step.sleep("pause", { description: "Wait", duration: "1 day" });
-${calling("more", 2)}
-  await step.do("last", { description: "Call" }, async () => {
-    for (const _ of [1, 2, 3]) {
-      try {
-        await ${hitCall(`"last"`)};
-      } catch {}
-    }
-    return 1;
-  });
-${calling("over", 1)}
-  return 1;`,
-        { flaky: null, more: 1, last: 1, over: 1 }
-      ),
-      ...workflowFiles("child", `${calling("child", 1)}\n  return 1;`, {
-        child: 1,
-      }),
-    });
-
-    const result = await withQuotas({ lineageHostCalls: 6 }, async () => {
-      const root = await builder.api.workflows.start(app, "calls");
-      await woken(root.id, "pause");
-      await finished(root.id);
-      const child = await startChild(app, "child", root.id, builder.userId);
-      await finished(child);
-      return {
-        root: await failedWith(root.id),
-        child: await failedWith(child),
-        refused: await refusedCalls(root.id),
-      };
-    });
-    const hits = Object.fromEntries(
-      await Promise.all(
-        ["flaky", "more", "last", "over", "child"].map(
-          async (name) => [name, await hitsOf(builder, app, name)] as const
-        )
-      )
-    );
-
-    expect({ ...result, hits }).toStrictEqual({
-      root: "workflow.lineage_limit",
-      child: "workflow.lineage_limit",
-      refused: ["last"],
-      hits: { flaky: 3, more: 2, last: 1, over: 0, child: 0 },
-    });
-  });
-
   it("admit host calls racing within and across attempts no further than the lineage has, naming the limit, and give back what a settled attempt reserved and didn't make", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, workflowFiles("noop", "  return 1;"));
-    const root = await builder.api.workflows.start(app, "noop");
-    await finished(root.id);
-    const lineage = {
-      run: root.id,
-      root: root.id,
-      subject: builder.userId,
-      resource: app,
-    };
+    const { owner: lineage, end } = await liveLineage(
+      await signedIn("builder")
+    );
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
       // Three calls one after another: blocks of one, one and two, one of
@@ -297,6 +167,7 @@ ${calling("over", 1)}
       const refusal = await refusalOf(third.hostCall());
       return { few, racing, rest, afterSettle, refusal };
     });
+    await end();
     const calls = [...result.few, ...result.racing, ...result.rest];
     const allowed = calls.filter((call) => call === "ok");
     const refused = calls.filter((call) => call !== "ok");
@@ -321,7 +192,9 @@ ${calling("over", 1)}
   });
 
   it("refuse an attempt's calls past the limit without asking the database again, and admit no new attempt of the lineage", async () => {
-    const lineage = await lineageOf();
+    const { owner: lineage, end } = await liveLineage(
+      await signedIn("builder")
+    );
     const result = await withQuotas({ lineageHostCalls: 2 }, async () => {
       // Its environment as the limits are now.
       const { counted, env: counting } = countingDb();
@@ -345,6 +218,8 @@ ${calling("over", 1)}
       return { allowed, first, again: [...new Set(again)], asked, next };
     });
 
+    await end();
+
     expect(result).toStrictEqual({
       allowed: ["ok", "ok"],
       first: "workflow.lineage_limit",
@@ -361,7 +236,9 @@ ${calling("over", 1)}
   });
 
   it("reserve nothing more for an attempt settled as having used up its time, though its code still calls", async () => {
-    const lineage = await lineageOf();
+    const { owner: lineage, end } = await liveLineage(
+      await signedIn("builder")
+    );
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
       // Its deadline passes, and the next admission settles it as used up.
@@ -376,6 +253,8 @@ ${calling("over", 1)}
       return { before, after };
     });
 
+    await end();
+
     expect(result).toStrictEqual({
       before: "ok",
       after: "execution.stale_attempt",
@@ -383,7 +262,9 @@ ${calling("over", 1)}
   });
 
   it("give back a block a call was still reserving as its attempt settled, the attempt's function having returned without waiting for the call", async () => {
-    const lineage = await lineageOf();
+    const { owner: lineage, end } = await liveLineage(
+      await signedIn("builder")
+    );
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
       const { control, env: reordering } = reorderingDb();
@@ -404,6 +285,8 @@ ${calling("over", 1)}
         calls: await lineageHostCalls(lineage.root),
       };
     });
+
+    await end();
 
     expect(result).toStrictEqual({
       unawaited: "execution.stale_attempt",

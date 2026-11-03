@@ -1,4 +1,8 @@
 import type {
+  AppVisitorEntry,
+  AppVisitorGrants,
+} from "@grasp-os/shared/app-visitors";
+import type {
   App,
   AppAnswerer,
   AppChanges,
@@ -10,16 +14,24 @@ import type {
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
+import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
+import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { removeApp } from "./app-removal.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
+import {
+  appVisitorGrantsOf,
+  setAppVisitorGrants,
+} from "./app-visitor-calls.ts";
+import { appVisitors, setAppVisitors } from "./app-visitors.ts";
+import { AppWebhooksRpc } from "./app-webhooks.ts";
 import {
   appContents,
   createApp,
@@ -35,7 +47,7 @@ import type { SessionCheck } from "./session-check.ts";
 
 /**
  * A signed-in person's `apps`, with `apps.files`, `apps.versions`,
- * `apps.members`, `apps.blueprints` and `apps.integrations`, in SessionRpc's form. The App
+ * `apps.members`, `apps.blueprints`, `apps.integrations` and `apps.webhooks`, in SessionRpc's form. The App
  * functions check the person's role in the App and validate what the
  * client sent.
  */
@@ -47,6 +59,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #members: AppMembersRpc;
   readonly #blueprints: AppBlueprintsRpc;
   readonly #integrations: AppIntegrationsRpc;
+  readonly #webhooks: AppWebhooksRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -57,6 +70,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     this.#members = new AppMembersRpc(env, check);
     this.#blueprints = new AppBlueprintsRpc(env, check);
     this.#integrations = new AppIntegrationsRpc(env, check);
+    this.#webhooks = new AppWebhooksRpc(env, check);
   }
 
   get files(): AppFilesRpc {
@@ -77,6 +91,10 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   get integrations(): AppIntegrationsRpc {
     return this.#integrations;
+  }
+
+  get webhooks(): AppWebhooksRpc {
+    return this.#webhooks;
   }
 
   async create(app: NewApp): Promise<App> {
@@ -135,6 +153,54 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   async restore(app: string): Promise<App> {
     return await this.#changeStatus(app, "restore");
+  }
+
+  async setLink(app: string, link: string | null): Promise<App> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setAppLink(this.#env, by, app, link)
+    );
+  }
+
+  async visitors(app: string): Promise<AppVisitorEntry[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appVisitors(this.#env, by, app)
+    );
+  }
+
+  async setVisitors(
+    app: string,
+    list: AppVisitorEntry[]
+  ): Promise<AppVisitorEntry[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setAppVisitors(this.#env, by, app, list)
+    );
+  }
+
+  async visitorGrants(app: string): Promise<AppVisitorGrants> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appVisitorGrantsOf(this.#env, by, app)
+    );
+  }
+
+  async setVisitorGrants(
+    app: string,
+    functions: string[]
+  ): Promise<AppVisitorGrants> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setAppVisitorGrants(this.#env, by, app, functions)
+    );
+  }
+
+  async openLink(link: string): Promise<{ app: AppId }> {
+    return await withPerson(
+      this.#check,
+      async (by) => await openAppLink(this.#env, by, link)
+    );
   }
 
   async #changeStatus(app: string, transition: AppTransition): Promise<App> {

@@ -90,8 +90,8 @@ import { summaryOf } from "./summary.ts";
 // everyone's own link, to send themselves as well (the threat model's L3:
 // a link opens on the first device only, whoever holds it). At the end it
 // settles the steps people told two ways and nobody could explain, never
-// told who said which. What only Grasp's staff do is in staff-rpc.ts. The
-// admin also shares documents,
+// told who said which. What only Grasp's staff do is a command from
+// Grasp's admin (admin-command.ts). The admin also shares documents,
 // each read at once (documents.ts). Everything that comes in is checked
 // against the shared schemas before the store sees it. Its programme
 // (when it began, and where it stands) is for everyone signed in, for the

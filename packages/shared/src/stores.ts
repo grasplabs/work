@@ -283,9 +283,13 @@ export interface Held {
 
 /**
  * What a claim answers: the attempt now holds the receipt, or its
- * mutation committed already, and this was its outcome.
+ * mutation committed already, and this was its outcome. `startedAt` is
+ * when the receipt was made: the same for every attempt of one
+ * submission, and new for a fresh one under the key once it is gone.
  */
-export type Claimed = { held: Held } | { outcome: Committed };
+export type Claimed =
+  | { held: Held; startedAt: number }
+  | { outcome: Committed; startedAt: number };
 
 /**
  * The most intents one commit may stage for its outbox: workflow
@@ -294,10 +298,15 @@ export type Claimed = { held: Held } | { outcome: Committed };
 export const commitMaxIntents = 16;
 
 /**
- * A workflow notification or start a commit stages: its content is
- * defined where it is delivered.
+ * A workflow notification or start a commit stages, or the form a screen
+ * sent as the mutation, for its App's webhooks: its content is defined
+ * where it is delivered.
  */
-export const storeIntentKinds = ["workflow.notify", "workflow.start"] as const;
+export const storeIntentKinds = [
+  "app.form_sent",
+  "workflow.notify",
+  "workflow.start",
+] as const;
 
 export const storeIntentSchema = z.strictObject({
   kind: z.enum(storeIntentKinds),
@@ -362,7 +371,11 @@ export const commitSchema = z
     guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
     readSet: readSetSchema.default({}),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
-    intents: z.array(storeIntentSchema).max(commitMaxIntents).default([]),
+    // What App code stages, and the one form a screen's call adds.
+    intents: z
+      .array(storeIntentSchema)
+      .max(commitMaxIntents + 1)
+      .default([]),
     result: fieldValueSchema.default(null),
     /**
      * The consumer whose call of a store's public operation this commit

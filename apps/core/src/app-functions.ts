@@ -34,6 +34,11 @@ import {
 import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import {
+  formHeardBy,
+  formIntents,
+  formSubmissionOf,
+} from "./app-webhook-queue.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -707,6 +712,13 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
+  /**
+   * Whether a keyed mutation's call is a screen's form, told to the App's
+   * webhooks: its commit carries it (`CallOptions.commitIntent`), so it is
+   * told once it committed, once per submission, and never unless it did.
+   * A query, an action or what the mutation calls is never told.
+   */
+  readonly tellsForm?: boolean;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -1020,6 +1032,7 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
+    tellsForm,
     sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
@@ -1116,6 +1129,10 @@ const callFunction = async (
     const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
+    // A screen's keyed mutation: its form, committed with its writes.
+    const submittedCall = call;
+    const submittedKey = call.idempotencyKey;
+    const submittedApp = appId;
     const result =
       call.window === undefined
         ? await callOperation(hosted, observed, reference, call.input, {
@@ -1124,6 +1141,28 @@ const callFunction = async (
               : { idempotencyKey: call.idempotencyKey }),
             ...(parentSession === undefined ? {} : { parentSession }),
             ...(cancelled === undefined ? {} : { cancelled }),
+            ...(tellsForm !== true ||
+            submittedCall.reference.kind !== "mutation" ||
+            submittedKey === undefined
+              ? {}
+              : {
+                  // Only for a form some webhook would hear: a receipt
+                  // whose outbox owes nothing keeps to its own time.
+                  // Its values left out when the commit wouldn't hold them.
+                  commitIntent: async (startedAt: number) =>
+                    (await formHeardBy(env, submittedApp, startedAt))
+                      ? formIntents(
+                          formSubmissionOf({
+                            app: submittedApp,
+                            userId: by.userId,
+                            call: submittedCall,
+                            key: submittedKey,
+                            operation: path,
+                            startedAt,
+                          })
+                        )
+                      : undefined,
+                }),
           })
         : await readWindow(
             {
@@ -1146,6 +1185,136 @@ const callFunction = async (
     return {
       result,
       provenance: sources.snapshot(),
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
+/**
+ * Who a visitor's call runs for (app-visitor-calls.ts): never a person.
+ * The App's version is the one it was granted on.
+ */
+export interface VisitorCaller {
+  readonly app: AppId;
+  readonly version: number;
+  /**
+   * `visitor:<session>`, a name no member's ID has: it owns what the call
+   * inserts, and keys its receipts, so no two visitors share either.
+   */
+  readonly principal: string;
+  /**
+   * Throws unless the visitor may still call `path`: their session live,
+   * the App published at this version, their address listed, and `path`
+   * still granted. Read before the call and before each commit.
+   */
+  readonly stillAllowed: (path: string) => Promise<void>;
+  /**
+   * Refuses the call of `path` as not granted, recorded: for what no grant
+   * can open (an action, core's own queries) as for what isn't granted.
+   */
+  readonly notGranted: (path: string) => Promise<never>;
+  /** Told the function the call runs, once it is admitted. */
+  readonly admitted: (path: string) => Promise<void>;
+}
+
+/**
+ * The invocation of `release`'s function `path` for a visitor: the App's
+ * store, as no member (no `appMembers` or `appBuilders` table opens to it,
+ * and an `owner` table shows only the visitor's own rows), with nothing
+ * else bound. No resource (no connection, Knowledge, model, store, other
+ * App or template), no workflow started, no notification staged: a
+ * function that asks for any of them is refused (`resource.unavailable`),
+ * whatever the App holds for its members.
+ */
+export const visitorInvocation = async (
+  env: Env,
+  release: Release,
+  caller: VisitorCaller,
+  path: string,
+  requestId: string,
+  deadline: number
+): Promise<Invocation> => {
+  const store =
+    release.store === null
+      ? noStore()
+      : await openStore(env, release.store.storeId);
+  return {
+    principal: caller.principal,
+    consumer: {
+      resourceId: caller.app,
+      resourceVersion: release.manifest.resourceVersion,
+    },
+    store,
+    requestId,
+    deadline,
+    runId: null,
+    authorize: async () => {
+      await requireNotRevoked(env, caller.app, caller.version);
+      await caller.stillAllowed(path);
+      return { appMember: false, appBuilder: false };
+    },
+  };
+};
+
+/**
+ * Calls a function of a published App for a visitor (app-visitor-calls.ts),
+ * as the App itself: only a public query or mutation of the version the
+ * visitor's grant is on, never an action (which reaches resources) and
+ * never core's own workflow or preference queries, which are a member's.
+ * `request` is the call as the screen client wrote it, as text.
+ */
+export const callVisitorFunction = async (
+  env: Env,
+  caller: VisitorCaller,
+  request: unknown,
+  deadline: number
+): Promise<FunctionAnswer> => {
+  const requestId = crypto.randomUUID();
+  const refused = (error: unknown): FunctionAnswer => ({
+    result: { ok: false, error: refusalOf(error, requestId) },
+    provenance: null,
+    fingerprint: null,
+    manifestHash: null,
+  });
+  try {
+    const call = callAllowed(request, { kind: undefined, windowed: false });
+    const { contractId } = call.reference;
+    // Never granted, whatever the grants say: refused, and recorded, before
+    // anything of the release is read.
+    if (
+      call.reference.kind === "action" ||
+      isWorkflowQueryPath(contractId) ||
+      isPreferencePath(contractId)
+    ) {
+      return refused(await caller.notGranted(contractId));
+    }
+    const release = await loadRelease(env, caller.app, caller.version);
+    const { path } = await referenceIn(release, call.reference);
+    await caller.stillAllowed(path);
+    await caller.admitted(path);
+    const invocation = await visitorInvocation(
+      env,
+      release,
+      caller,
+      path,
+      requestId,
+      deadline
+    );
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      call.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: call.idempotencyKey }
+    );
+    return {
+      result,
+      provenance: null,
       fingerprint: call.reference.fingerprint,
       manifestHash: release.manifestHash,
     };
@@ -1281,7 +1450,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<FunctionCallOptions, "pinnedVersion"> = {}
+  options: Pick<FunctionCallOptions, "pinnedVersion" | "tellsForm"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
@@ -1442,10 +1611,16 @@ export const invokeAppAction = async (
   readonly reached: boolean;
   /** How many effects it made, or may have made (`CallOptions.onEffect`). */
   readonly effects: number;
+  /**
+   * The public action it ran, as the checked release it ran resolved it:
+   * what a screen's form sent as it names (action-invocation.ts).
+   */
+  readonly path?: string;
 }> => {
   const requestId = crypto.randomUUID();
   let reached = false;
   let effects = 0;
+  let resolved: string | undefined;
   try {
     const found = await usableApp(env, by, app);
     if (found.currentVersion === null) {
@@ -1456,6 +1631,7 @@ export const invokeAppAction = async (
       release,
       await pinnedReference(env, release, call.reference, pinnedVersion)
     );
+    resolved = path;
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
@@ -1482,12 +1658,13 @@ export const invokeAppAction = async (
         },
       }
     );
-    return { result, reached, effects };
+    return { result, reached, effects, path };
   } catch (error) {
     return {
       result: { ok: false, error: refusalOf(error, requestId) },
       reached,
       effects,
+      ...(resolved === undefined ? {} : { path: resolved }),
     };
   }
 };

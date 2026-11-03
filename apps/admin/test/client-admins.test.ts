@@ -2,17 +2,16 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import {
-  adminReader,
-  clientAdmins,
-  defaultAdminReadOptions,
-} from "../src/clients/admin.ts";
+import { clientAdmins, defaultAdminReadOptions } from "../src/clients/admin.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
-import { fetchClientAdmins } from "../src/clients/functions.ts";
+import {
+  fetchClientAdmin,
+  fetchClientAdmins,
+} from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
+import type { CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
@@ -32,16 +31,16 @@ const importedRelease = async (notes: string): Promise<string> =>
   await placedRelease(notes);
 
 /**
- * A client recorded as provisioning leaves it, on a new account in the
+ * A client recorded as provisioning leaves it, its core on the
  * fake. Clients are read in the order of their ids, so `order` places it
  * among the test's others.
  */
 const recordClient = async (
   status: "provisioning",
   order = ""
-): Promise<{ clientId: string; account: AccountState }> => {
+): Promise<{ clientId: string; core: CoreState }> => {
   const clientId = `client-${order}${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
+  const core = cloudflare.coreOf(clientId);
   const now = new Date();
   await act(
     db,
@@ -57,17 +56,17 @@ const recordClient = async (
     ],
     { action: "client.create", clientId }
   );
-  return { clientId, account };
+  return { clientId, core };
 };
 
 /** A live placed client running `releaseId`, as its operation made it. */
 const liveClient = async (releaseId: string, order = "") => {
   const clientId = `client-${order}${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, releaseId, {
+  const { core } = await livePlacedClient(cloudflare, releaseId, {
     id: clientId,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 /** Client `clientId`'s entry in `read`. */
@@ -103,17 +102,17 @@ describe("every client's admin snapshot", () => {
     const release = await importedRelease("feat(core): the admin's read");
     const acme = await liveClient(release);
     const down = await liveClient(release);
-    acme.account.admin = {
+    acme.core.admin = {
       ...emptyAdminSnapshot("Acme"),
       told: true,
       mapped: ["Sales"],
     };
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
 
     const first = await clientAdmins(env, staff);
-    down.account.unhealthy = 0;
+    down.core.unhealthy = 0;
     const second = await clientAdmins(env, staff);
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
     const third = await clientAdmins(env, staff);
     const answeredAt = entryOf(second, down.clientId);
 
@@ -157,7 +156,7 @@ describe("every client's admin snapshot", () => {
     const quick = await liveClient(release);
     const slow = await liveClient(release);
     const held = Promise.withResolvers<boolean>();
-    slow.account.adminHeld = async () => {
+    slow.core.adminHeld = async () => {
       await held.promise;
     };
 
@@ -187,13 +186,13 @@ describe("every client's admin snapshot", () => {
       await liveClient(release, "0"),
       await liveClient(release, "1"),
     ];
-    for (const { account } of slow) {
-      account.adminHeld = hang;
+    for (const { core } of slow) {
+      core.adminHeld = hang;
     }
     // Read once a turn frees, it answers a little after: in time only if
     // its time starts when its read does.
     const late = await liveClient(release, "z");
-    late.account.adminHeld = async () => {
+    late.core.adminHeld = async () => {
       await scheduler.wait(50);
     };
 
@@ -220,12 +219,12 @@ describe("every client's admin snapshot", () => {
   it("tells a core that refuses the read, as one does once its company ended Grasp's staff access, from one whose answer isn't a snapshot, and never follows one that redirects", async () => {
     const release = await importedRelease("feat(core): refusing cores");
     const ended = await liveClient(release);
-    ended.account.admin = "ended";
+    ended.core.admin = "ended";
     const garbled = await liveClient(release);
-    garbled.account.admin = "garbled";
+    garbled.core.admin = "garbled";
     const moved = await liveClient(release);
-    moved.account.admin = emptyAdminSnapshot("Moved");
-    moved.account.redirectsTo = "https://elsewhere.example";
+    moved.core.admin = emptyAdminSnapshot("Moved");
+    moved.core.redirectsTo = "https://elsewhere.example";
 
     const read = await clientAdmins(env, staff);
 
@@ -246,7 +245,7 @@ describe("every client's admin snapshot", () => {
   it("marks a client not deployed yet, and one whose core is from before the snapshot, without leaving either out", async () => {
     const release = await importedRelease("feat(core): older cores");
     const older = await liveClient(release);
-    older.account.admin = "absent";
+    older.core.admin = "absent";
     const waiting = await recordClient("provisioning");
 
     const read = await clientAdmins(env, staff);
@@ -276,22 +275,42 @@ describe("every client's admin snapshot", () => {
     expect({
       // The fake core answers only a request signed as core checks it.
       state: entryOf(read, acme.clientId)?.state,
-      readers: acme.account.adminReaders,
+      readers: acme.core.adminReaders,
     }).toStrictEqual({ state: "answered", readers: ["ada@grasp.test"] });
   });
 
-  it("asks each core once for everything one request reads", async () => {
-    const release = await importedRelease("feat(core): read once");
+  it("reads one client alone for its page, and every other client without it", async () => {
+    const release = await importedRelease("feat(core): one page");
     const acme = await liveClient(release);
-    const read = adminReader(env, staff);
+    const globex = await liveClient(release);
 
-    const [sections, chat] = await Promise.all([read(), read()]);
-    const again = await read();
+    const one = await callServerFn(fetchClientAdmin, {
+      clientId: acme.clientId,
+    });
+    const rest = await callServerFn(fetchClientAdmins, {
+      except: [acme.clientId],
+    });
+    const unknown = await callServerFn(fetchClientAdmin, {
+      clientId: "no-such-client",
+    });
 
     expect({
-      same: sections === chat && chat === again,
-      asked: acme.account.adminReaders.length,
-    }).toStrictEqual({ same: true, asked: 1 });
+      one: one === null ? null : [one.client.id, one.state],
+      rest: {
+        acme: entryOf(rest, acme.clientId)?.state,
+        globex: entryOf(rest, globex.clientId)?.state,
+      },
+      unknown,
+      asked: {
+        acme: acme.core.adminReaders.length,
+        globex: globex.core.adminReaders.length,
+      },
+    }).toStrictEqual({
+      one: [acme.clientId, "answered"],
+      rest: { acme: undefined, globex: "answered" },
+      unknown: null,
+      asked: { acme: 1, globex: 1 },
+    });
   });
 
   it("refuses the read for anyone Access doesn't vouch for, or sent from another site's page, asking no core and keeping nothing", async () => {
@@ -307,7 +326,7 @@ describe("every client's admin snapshot", () => {
       })
     ).rejects.toThrow("The server function answered 403");
     expect({
-      readers: acme.account.adminReaders,
+      readers: acme.core.adminReaders,
       kept: await storedReads([acme.clientId]),
     }).toStrictEqual({ readers: [], kept: [] });
   });
@@ -340,7 +359,7 @@ describe("every client's admin snapshot", () => {
     const acme = await liveClient(release);
     const arrived = Promise.withResolvers<boolean>();
     const dropped = Promise.withResolvers<boolean>();
-    acme.account.adminHeld = async () => {
+    acme.core.adminHeld = async () => {
       arrived.resolve(true);
       await dropped.promise;
       throw new Error("The connection dropped");
@@ -350,7 +369,7 @@ describe("every client's admin snapshot", () => {
     // its failure lands after the second's answer.
     const first = clientAdmins(env, staff);
     await arrived.promise;
-    acme.account.adminHeld = undefined;
+    acme.core.adminHeld = undefined;
     await scheduler.wait(10);
     const second = await clientAdmins(env, staff);
     dropped.resolve(true);
@@ -375,7 +394,7 @@ describe("every client's admin snapshot", () => {
     const release = await importedRelease("feat(core): nothing kept");
     const acme = await liveClient(release);
     const down = await liveClient(release);
-    acme.account.admin = {
+    acme.core.admin = {
       ...emptyAdminSnapshot("Acme Secret Name"),
       company: {
         name: "Acme Secret Name",
@@ -385,7 +404,7 @@ describe("every client's admin snapshot", () => {
         admins: ["ada@acme.test"],
       },
     };
-    down.account.unhealthy = 1000;
+    down.core.unhealthy = 1000;
 
     const read = await clientAdmins(env, staff);
     const answered = entryOf(read, acme.clientId);

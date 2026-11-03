@@ -115,7 +115,10 @@ export interface TraceStep {
    */
   item: string | null;
   state: TraceState;
-  /** How many attempts it made, as far as the journal tells. */
+  /**
+   * How many attempts it made, as far as the journal tells: a try's
+   * retries of it included, each an attempt more of the same step.
+   */
   attempts: number;
   /** When the journal first recorded it. */
   startedAt: string;
@@ -142,8 +145,11 @@ export interface WorkflowRunTrace {
   tasks: { task: string; state: TraceState; attempts: number }[];
   /** Each of its tasks' steps, in the order the run reached them. */
   steps: TraceStep[];
-  /** False when the journal held more than one read takes. */
-  complete: boolean;
+  /**
+   * True when its journal holds more than one trace reads: what it shows
+   * is the first part of the run.
+   */
+  truncated: boolean;
   /**
    * The run's retention is over, or its
    * details were swept: nothing of what it reached is shown.
@@ -167,6 +173,6 @@ export interface WorkflowCandidateTrace {
   draftRevision: number;
   status: WorkflowRunStatus;
   steps: TraceStep[];
-  /** False when the journal held more than one read takes. */
-  complete: boolean;
+  /** True when its journal holds more than one trace reads. */
+  truncated: boolean;
 }

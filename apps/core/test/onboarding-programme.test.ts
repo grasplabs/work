@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
 
@@ -138,9 +139,9 @@ describe("the programme", () => {
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(session);
     const staff = core.authenticate();
-    await staff.onboardingGate.close();
+    await adminCommands().close();
     const closed = await staff.onboarding.programme();
-    await staff.onboardingGate.open();
+    await adminCommands().open();
     expect(closed?.stage).toBe("interviews");
   });
 });

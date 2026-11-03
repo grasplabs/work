@@ -142,8 +142,8 @@ export interface StampingRun {
   /**
    * Whose run it is: an App's (the default), or an independent
    * workflow's, whose mail carries a stamp only (`resource_run_mail_calls`):
-   * no email trigger starts an independent workflow, so its recipients
-   * carry no token.
+   * its recipients carry no token, as its mail to an email trigger is known
+   * by its stamp (`stampedMessageRun`).
    */
   kind?: "app" | "resource";
 }
@@ -650,6 +650,133 @@ const mailboxAddressesOf = async (
 };
 
 /**
+ * The mail call core recorded stamp `stamp` for: an App run's
+ * (`run_mail_calls`) or an independent workflow run's
+ * (`resource_run_mail_calls`), with every recipient it named and its
+ * senders; none for a stamp core didn't record.
+ */
+const stampedCallOf = async (
+  env: Pick<Env, "DB">,
+  stamp: string
+): Promise<
+  (StampedRun & { recipients: string[]; senders: string[] }) | undefined
+> => {
+  const db = drizzle(env.DB);
+  const appCall = await db
+    .select({
+      runId: runMailCalls.runId,
+      recipients: runMailCalls.recipients,
+      senders: runMailCalls.senders,
+    })
+    .from(runMailCalls)
+    .where(eq(runMailCalls.stamp, stamp))
+    .get();
+  const call =
+    appCall ??
+    (await db
+      .select({
+        runId: resourceRunMailCalls.runId,
+        recipients: resourceRunMailCalls.recipients,
+        senders: resourceRunMailCalls.senders,
+      })
+      .from(resourceRunMailCalls)
+      .where(eq(resourceRunMailCalls.stamp, stamp))
+      .get());
+  const recipients = call?.recipients ?? null;
+  const senders = call?.senders ?? null;
+  if (call === undefined || recipients === null || senders === null) {
+    return undefined;
+  }
+  return {
+    kind: appCall === undefined ? "resource" : "app",
+    runId: call.runId,
+    recipients,
+    senders,
+  };
+};
+
+/**
+ * Whether message `eventKey` claims `stamp` at `source`: one of the first
+ * {@link maxClaimsPerSource} messages there to name it
+ * (`run_mail_stamp_claims`), the same message again included. Only while
+ * the stamp's call is still recorded (one its run's retention removed
+ * meanwhile leaves no claim behind that nothing would remove), and only
+ * while the source has room: in the one statement, so of messages
+ * delivered at once no more than the bound claim.
+ */
+const claimsStamp = async (
+  env: Pick<Env, "DB">,
+  { kind, stamp }: { kind: StampedRun["kind"]; stamp: string },
+  source: string,
+  eventKey: string
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const claimed = and(
+    eq(runMailStampClaims.stamp, stamp),
+    eq(runMailStampClaims.source, source)
+  );
+  const recorded =
+    kind === "app"
+      ? sql`EXISTS (SELECT 1 FROM ${runMailCalls} WHERE ${runMailCalls.stamp} = ${stamp})`
+      : sql`EXISTS (SELECT 1 FROM ${resourceRunMailCalls} WHERE ${resourceRunMailCalls.stamp} = ${stamp})`;
+  await db
+    .insert(runMailStampClaims)
+    .select(
+      sql`SELECT ${stamp}, ${source}, ${eventKey}, ${Date.now()}
+        WHERE ${recorded}
+          AND (SELECT count(*) FROM ${runMailStampClaims} WHERE ${claimed}) < ${maxClaimsPerSource}`
+    )
+    .onConflictDoNothing();
+  const claim = await db
+    .select({ eventKey: runMailStampClaims.eventKey })
+    .from(runMailStampClaims)
+    .where(and(claimed, eq(runMailStampClaims.eventKey, eventKey)))
+    .get();
+  return claim !== undefined;
+};
+
+/**
+ * The run whose own mail message `messageKey` to `address` is, by the
+ * stamp it carries (`stamp`, its `stampHeader`), from the envelope sender
+ * `from`: only when core recorded the stamp for a call that named
+ * `address` among its recipients and `from` among its senders (which SPF
+ * vouches for, unlike its From), and it is one of the first
+ * {@link maxClaimsPerSource} messages at the address to name the stamp,
+ * as at a watched mailbox (`stampedEventRun`). None otherwise: mail like
+ * any other. So an independent workflow's mail to an email trigger's
+ * address is a run of its own; a forged copy of a recorded stamp, from
+ * one of its senders, charges that run's lineage, never escapes it, and
+ * only so many do.
+ */
+export const stampedMessageRun = async (
+  env: Pick<Env, "DB">,
+  stamp: string | undefined,
+  address: string,
+  from: string,
+  messageKey: string
+): Promise<StampedRun | undefined> => {
+  const call =
+    stamp === undefined ? undefined : await stampedCallOf(env, stamp);
+  if (
+    stamp === undefined ||
+    call === undefined ||
+    !call.recipients.includes(address.toLowerCase()) ||
+    !call.senders.includes(from.toLowerCase())
+  ) {
+    return undefined;
+  }
+  const source = JSON.stringify(["email", address.toLowerCase()]);
+  return (await claimsStamp(
+    env,
+    { kind: call.kind, stamp },
+    source,
+    messageKey
+  ))
+    ? { kind: call.kind, runId: call.runId }
+    : undefined;
+};
+
+/**
  * The run whose own mail a connector event is, if it is: a message that
  * reached a watched mailbox carrying the stamp core recorded for the run's
  * call (`stamp`, read from its header by connect), only when
@@ -671,33 +798,11 @@ export const stampedEventRun = async (
   if (event.stamp === undefined) {
     return undefined;
   }
-  const db = drizzle(env.DB);
-  const appCall = await db
-    .select({
-      runId: runMailCalls.runId,
-      recipients: runMailCalls.recipients,
-      senders: runMailCalls.senders,
-    })
-    .from(runMailCalls)
-    .where(eq(runMailCalls.stamp, event.stamp))
-    .get();
-  const call =
-    appCall ??
-    (await db
-      .select({
-        runId: resourceRunMailCalls.runId,
-        recipients: resourceRunMailCalls.recipients,
-        senders: resourceRunMailCalls.senders,
-      })
-      .from(resourceRunMailCalls)
-      .where(eq(resourceRunMailCalls.stamp, event.stamp))
-      .get());
-  const kind = appCall === undefined ? "resource" : "app";
-  const recipients = call?.recipients ?? null;
-  const senders = call?.senders ?? null;
-  if (call === undefined || recipients === null || senders === null) {
+  const call = await stampedCallOf(env, event.stamp);
+  if (call === undefined) {
     return undefined;
   }
+  const { kind, recipients, senders } = call;
   const from = mailEventFrom
     .safeParse(event.payload)
     .data?.from?.address.trim()
@@ -716,32 +821,14 @@ export const stampedEventRun = async (
   const eventKey = await sha256Hex(
     JSON.stringify([event.connection, event.id])
   );
-  // Only while the call is still recorded (one its run's retention
-  // removed meanwhile leaves no claim behind that nothing would remove),
-  // and only while the source has room: in the one statement, so of
-  // messages delivered at once no more than the bound claim.
-  const claimed = and(
-    eq(runMailStampClaims.stamp, event.stamp),
-    eq(runMailStampClaims.source, source)
-  );
-  const recorded =
-    kind === "app"
-      ? sql`EXISTS (SELECT 1 FROM ${runMailCalls} WHERE ${runMailCalls.stamp} = ${event.stamp})`
-      : sql`EXISTS (SELECT 1 FROM ${resourceRunMailCalls} WHERE ${resourceRunMailCalls.stamp} = ${event.stamp})`;
-  await db
-    .insert(runMailStampClaims)
-    .select(
-      sql`SELECT ${event.stamp}, ${source}, ${eventKey}, ${Date.now()}
-        WHERE ${recorded}
-          AND (SELECT count(*) FROM ${runMailStampClaims} WHERE ${claimed}) < ${maxClaimsPerSource}`
-    )
-    .onConflictDoNothing();
-  const claim = await db
-    .select({ eventKey: runMailStampClaims.eventKey })
-    .from(runMailStampClaims)
-    .where(and(claimed, eq(runMailStampClaims.eventKey, eventKey)))
-    .get();
-  return claim === undefined ? undefined : { kind, runId: call.runId };
+  return (await claimsStamp(
+    env,
+    { kind, stamp: event.stamp },
+    source,
+    eventKey
+  ))
+    ? { kind, runId: call.runId }
+    : undefined;
 };
 
 /** Records that Email Routing delivered mail for `domain`. */

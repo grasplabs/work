@@ -45,6 +45,8 @@ import type {
   PurgeInput,
   PurgePlan,
   PurgeResult,
+  PurgeStatus,
+  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -497,7 +499,40 @@ export interface KnowledgeApi {
    * `knowledge.purge_expired`. The audit log records who purged what and
    * why, never what was removed.
    */
-  purge: (input: PurgeInput, token: string) => Promise<PurgeResult>;
+  purge: (
+    input: PurgeInput,
+    token: string,
+    /**
+     * `fresh`: begins it anew; an unfinished purge of the same input is
+     * kept as it stood, superseded. Resumed otherwise, every step run again.
+     */
+    options?: { fresh?: boolean }
+  ) => Promise<PurgeResult>;
+  /**
+   * Where purge `purgeId` stands (GRA-1122): each projection it reaches,
+   * queued, running, complete or blocked (with an error code), and what
+   * each changed. A blocked one goes on when the purge is run again with
+   * the same input. Admins only, as purging is.
+   */
+  purgeStatus: (purgeId: string) => Promise<PurgeStatus>;
+  /**
+   * What an export of the company's Brain would hold, with a token to
+   * confirm it with (GRA-1192): admins only, never staff. Audited.
+   */
+  prepareBrainExport: () => Promise<{
+    collections: number;
+    documents: number;
+    token: string;
+    expiresAt: string;
+  }>;
+  /**
+   * Begins the export `prepareBrainExport` returned `token` for: its files
+   * are written by core's clock, and downloaded by this admin for a day
+   * (`/api/brain/export?id=…&file=…`).
+   */
+  startBrainExport: (token: string) => Promise<{ exportId: string }>;
+  /** Where export `exportId` stands, and its files once complete. */
+  brainExportStatus: (exportId: string) => Promise<ExportStatus>;
 }
 
 /**
@@ -600,6 +635,8 @@ export type {
   PurgePlan,
   PurgeReason,
   PurgeResult,
+  PurgeStatus,
+  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,

@@ -1267,6 +1267,130 @@ describe("grasp.model calls of JSON workflows", () => {
     }
   });
 
+  it("shows a call waiting for its AI provider in its run's trace as its task's step waiting, then each run again an attempt more: reached, or failed", async () => {
+    const admin = await person("admin");
+    const signedIn = await signedInApi(idp, "builder");
+    const ada = identityOf(signedIn.userId, "builder");
+    const before = env.WORKFLOW_OFF_WAIT_MS;
+    env.WORKFLOW_OFF_WAIT_MS = "59000";
+    try {
+      const provider: { answers: "refused" | "greets" | "off-schema" } = {
+        answers: "refused",
+      };
+      const fake = await answeringProvider(
+        () => {
+          if (provider.answers === "greets") {
+            return answer('{"line":"Hello Ada"}');
+          }
+          return provider.answers === "off-schema"
+            ? answer("Hello, Ada!")
+            : { status: 401, errorType: "authentication_error" };
+        },
+        { models: [allowedModel] }
+      );
+      /** The greeting's steps in the run's trace, as the builder reads it. */
+      const greetOf = async (id: string, runId: string) => {
+        const { steps } = await signedIn.api.workflowResources.runTrace(
+          id,
+          runId,
+          { doors: false }
+        );
+        return steps
+          .filter(({ task }) => task === "greet")
+          .map(
+            ({ state, attempts, endedAt }) =>
+              `${state} ${attempts} ${endedAt === null ? "open" : "ended"}`
+          );
+      };
+      /** A run of a greeting that waits for its provider, then goes on once `answers`. */
+      const waitedThen = async (answers: "greets" | "off-schema") => {
+        const { workflow } = await greetingWorkflow(ada, admin);
+        provider.answers = "refused";
+        const runId = await started(ada, workflow.id);
+        await providerWaitOf(ada, workflow.id, runId);
+        const waiting = await greetOf(workflow.id, runId);
+        provider.answers = answers;
+        // The admin replaces the key (the provider's fake knows it by its
+        // value, so it stays the same).
+        const { api } = await signedInApi(idp, "admin");
+        await api.aiProviders.add({ provider: "mistral", key: fake.key });
+        const run = await ended(ada, workflow.id, runId);
+        return {
+          status: run.status,
+          waiting,
+          after: await greetOf(workflow.id, runId),
+        };
+      };
+
+      expect({
+        greets: await waitedThen("greets"),
+        offSchema: await waitedThen("off-schema"),
+      }).toStrictEqual({
+        greets: {
+          status: "completed",
+          // One step: its first attempt refused, then waiting.
+          waiting: ["waiting 1 open"],
+          // Run again once the key works: an attempt more.
+          after: ["reached 2 ended"],
+        },
+        offSchema: {
+          status: "failed",
+          waiting: ["waiting 1 open"],
+          after: ["failed 2 ended"],
+        },
+      });
+    } finally {
+      env.WORKFLOW_OFF_WAIT_MS = before;
+    }
+  });
+
+  it("shows a call whose AI provider never came back, once its wait ran out, in its run's trace as its task's step failed with the provider's code", async () => {
+    const admin = await person("admin");
+    const signedIn = await signedInApi(idp, "builder");
+    const ada = identityOf(signedIn.userId, "builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    await answeringProvider(
+      () => ({ status: 401, errorType: "authentication_error" }),
+      { models: [allowedModel] }
+    );
+    const keyHold = env.WORKFLOW_AI_KEY_HOLD_MS;
+    env.WORKFLOW_AI_KEY_HOLD_MS = "1500";
+    let run: WorkflowResourceRun;
+    let runId: string;
+    try {
+      runId = await started(ada, workflow.id);
+      run = await ended(ada, workflow.id, runId);
+    } finally {
+      env.WORKFLOW_AI_KEY_HOLD_MS = keyHold;
+    }
+    const { steps, tasks } = await signedIn.api.workflowResources.runTrace(
+      workflow.id,
+      runId,
+      { doors: false }
+    );
+    const greet = steps.filter(({ task }) => task === "greet");
+
+    expect({
+      end: endOf(run),
+      steps: greet.map(({ state, errorCode, endedAt }) => ({
+        state,
+        errorCode,
+        ended: endedAt !== null,
+      })),
+      task: tasks.find(({ task }) => task === "greet")?.state,
+    }).toStrictEqual({
+      end: { status: "failed", code: "model.provider_key_failed" },
+      steps: [
+        {
+          state: "failed",
+          errorCode: "model.provider_key_failed",
+          ended: true,
+        },
+      ],
+      task: "failed",
+    });
+  });
+
   it("waits while the provider fails its call with a 5xx and no answer, and goes on by itself once calls work again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -2429,6 +2553,7 @@ const hostOf = async (
       calling: {
         runId,
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -2575,6 +2700,7 @@ const activationOf = async (
       calling: {
         runId,
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -4068,6 +4194,69 @@ describe("runs started by a restricted App, waiting on a held call", () => {
         stillWaiting: "waiting",
         end: { status: "completed", output: { status: "message-1" } },
         sent: 1,
+      });
+    });
+  });
+
+  it("shows a held call in its run's trace as its task's step waiting for its person, then reached once confirmed or failed once declined", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const confirmed = await mailingWorkflow(ada, admin);
+      const declined = await mailingWorkflow(ada, admin);
+      const confirmedStarter = await startingApp(
+        ada,
+        admin,
+        confirmed.workflow.id,
+        { restricted: true }
+      );
+      const confirmedRun = await confirmedStarter.start(confirmed.serving);
+      const declinedStarter = await startingApp(
+        ada,
+        admin,
+        declined.workflow.id,
+        { restricted: true }
+      );
+      const declinedRun = await declinedStarter.start(declined.serving);
+      const toConfirm = await heldFor(ada, confirmedRun);
+      const toDecline = await heldFor(ada, declinedRun);
+      await waiting(confirmedRun);
+      await waiting(declinedRun);
+      /** The send's steps in the run's trace, as the builder reads it. */
+      const sendOf = async (id: string, runId: string) => {
+        const { steps } = await signedIn.api.workflowResources.runTrace(
+          id,
+          runId,
+          { doors: false }
+        );
+        return steps
+          .filter(({ task }) => task === "send")
+          .map(
+            ({ state, attempts, endedAt, errorCode }) =>
+              `${state} ${attempts} ${endedAt === null ? "open" : "ended"} ${errorCode ?? "-"}`
+          );
+      };
+      const whileHeld = await sendOf(confirmed.workflow.id, confirmedRun);
+
+      await signedIn.api.pendingActions.confirm(
+        toConfirm.id,
+        toConfirm.inputHash
+      );
+      await signedIn.api.pendingActions.decline(toDecline.id);
+      await ended(ada, confirmed.workflow.id, confirmedRun);
+      await ended(ada, declined.workflow.id, declinedRun);
+
+      expect({
+        whileHeld,
+        confirmed: await sendOf(confirmed.workflow.id, confirmedRun),
+        declined: await sendOf(declined.workflow.id, declinedRun),
+      }).toStrictEqual({
+        // One step: its first attempt held, then waiting for its person.
+        whileHeld: ["waiting 1 open -"],
+        // Run again once they decided: an attempt more.
+        confirmed: ["reached 2 ended -"],
+        declined: ["failed 2 ended connect.declined"],
       });
     });
   });

@@ -280,7 +280,7 @@ const changedBeforeAdmission = (meanwhile: () => Promise<void>): Env => {
 
 /**
  * `env` in which one clock run's try fails in the workflow's own terms
- * (its queue full, as at its run limit), and `meanwhile` runs just before
+ * (no slot free, as at its run limit), and `meanwhile` runs just before
  * that failure is recorded: another clock run's try of the same
  * occurrence, admitted in between.
  */
@@ -307,7 +307,7 @@ const failingWhileAnotherStarts = (meanwhile: () => Promise<void>): Env => {
         return async (statements: D1PreparedStatement[]): Promise<unknown> => {
           if (admitting && !refused) {
             refused = true;
-            throw workflowErrors.create("workflow.queue_full");
+            throw workflowErrors.create("workflow.queued");
           }
           if (recording && !ran) {
             ran = true;
@@ -343,7 +343,7 @@ const runLimitFull = (): Env => {
         return async (statements: D1PreparedStatement[]): Promise<unknown> => {
           if (admitting) {
             admitting = false;
-            throw workflowErrors.create("workflow.queue_full");
+            throw workflowErrors.create("workflow.queued");
           }
           const answer: unknown = await target.batch(statements);
           return answer;

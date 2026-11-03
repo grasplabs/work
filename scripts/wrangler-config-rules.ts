@@ -10,6 +10,8 @@
  * - is wrangler.jsonc, never TOML;
  * - declares its routes under `routes` alone, never wrangler's singular
  *   `route`, which the admin's deploy wouldn't read;
+ * - binds, in every env, each rate limit the top level binds, with the
+ *   same limit: an env inherits none, so one left out is no limit there;
  * - for a platform Worker (the admin, the router, the connect gateway), names every Cloudflare
  *   resource, and declares the routes it answers on, as the shared names
  *   module (@grasp-os/shared/names) does, at the top level for production
@@ -63,6 +65,39 @@ const routeErrors = (where: string, config: unknown): string[] =>
     ? []
     : [`${where}: declare routes under "routes", not "route".`];
 
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** `config`'s rate limits: each binding's name, with its limit as words. */
+const rateLimitsOf = (config: unknown): Map<string, string> =>
+  new Map(
+    list(field(config, "ratelimits")).map((limit) => {
+      const simple = field(limit, "simple");
+      return [
+        String(field(limit, "name")),
+        `${String(field(simple, "limit"))} a ${String(field(simple, "period"))} s`,
+      ];
+    })
+  );
+
+/**
+ * Each of the top level's rate limits (`top`) that `env` doesn't bind
+ * with the same limit. Wrangler gives an env none of the top level's, so
+ * one missing there leaves its endpoints unlimited in that stage.
+ */
+const rateLimitErrors = (
+  where: string,
+  top: Map<string, string>,
+  env: unknown
+): string[] => {
+  const own = rateLimitsOf(env);
+  return [...top]
+    .filter(([name, limit]) => own.get(name) !== limit)
+    .map(
+      ([name, limit]) =>
+        `${where}: bind rate limit ${name} as the top level does (${limit}), with its own namespace_id.`
+    );
+};
+
 /** What `file`'s config, whose text is `text`, breaks of the rules above. */
 export const wranglerConfigErrors = (file: string, text: string): string[] => {
   if (file.endsWith(".toml")) {
@@ -88,7 +123,10 @@ export const wranglerConfigErrors = (file: string, text: string): string[] => {
     if (previewUrls !== undefined) {
       errors.push(...previewUrlErrors(where, previewUrls));
     }
-    errors.push(...routeErrors(where, env));
+    errors.push(
+      ...routeErrors(where, env),
+      ...rateLimitErrors(where, rateLimitsOf(config), env)
+    );
   }
   return errors;
 };
@@ -99,8 +137,6 @@ const platformConfigs: Readonly<Record<string, PlatformWorker>> = {
   "apps/router/wrangler.jsonc": "router",
   "apps/gateway/wrangler.jsonc": "connect-gateway",
 };
-
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
  * Every route `config` declares under `routes` (wrangler's singular

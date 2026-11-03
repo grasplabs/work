@@ -9,7 +9,6 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
  * its core works.
  */
 import {
-  isCoreOrigin,
   routerHostKey,
   routerHostSchema,
   routerSecretHeader,
@@ -17,8 +16,7 @@ import {
 import type { RouterHost } from "@grasp-os/shared/router";
 import { z } from "zod";
 
-import { CloudflareApiError, isNotFound } from "../cloudflare/api.ts";
-import type { CloudflareApi } from "../cloudflare/api.ts";
+import type { CoreAddress } from "../clients/core-address.ts";
 import { DeployError } from "./errors.ts";
 
 /** The router's hostname map, as the admin uses it (the router's `HOSTS`, a KV namespace). */
@@ -28,100 +26,19 @@ export interface RouterHosts {
   delete: (key: string) => Promise<void>;
 }
 
-const subdomainSchema = z.object({ subdomain: z.string() });
-
-/** Tries at a free workers.dev subdomain: `grasp-<clientId>`, then with a suffix. */
-const subdomainTries = 3;
-
 /**
- * Cloudflare's error code for a workers.dev subdomain another account
- * has, as Wrangler reads it when it registers one (10032 means free).
+ * How long the smoke check waits between tries, and for each. Core itself
+ * is reached only as its `CoreAddress` says: through the dispatch
+ * namespace (src/clients/core-address.ts).
  */
-const subdomainUnavailableCode = 10_031;
-
-/** Whether Cloudflare refused a subdomain as another account's. */
-const isTaken = (error: unknown): boolean =>
-  error instanceof CloudflareApiError &&
-  error.codes.includes(subdomainUnavailableCode);
-
-const randomSuffix = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(3)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-
-/**
- * The account's workers.dev subdomain: the one it has, or else
- * `grasp-<clientId>`, set now. A subdomain is unique across Cloudflare,
- * so one another account has (error 10031) is tried again with a short
- * random suffix (`subdomain_unavailable` after a few tries).
- */
-export const workersSubdomain = async (
-  api: CloudflareApi,
-  accountId: string,
-  clientId: string
-): Promise<string> => {
-  const path = `/accounts/${accountId}/workers/subdomain`;
-  try {
-    const { subdomain } = await api.call(
-      { method: "GET", path },
-      subdomainSchema
-    );
-    return subdomain;
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
-  }
-  for (let attempt = 0; attempt < subdomainTries; attempt += 1) {
-    const wanted =
-      attempt === 0
-        ? `grasp-${clientId}`
-        : `grasp-${clientId}-${randomSuffix()}`;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one name at a time
-      const { subdomain } = await api.call(
-        { method: "PUT", path, json: { subdomain: wanted } },
-        subdomainSchema
-      );
-      return subdomain;
-    } catch (error) {
-      if (!isTaken(error)) {
-        throw error;
-      }
-    }
-  }
-  throw new DeployError(
-    "subdomain_unavailable",
-    `No free workers.dev subdomain for ${clientId}`
-  );
-};
-
-/**
- * A client's core on its account's workers.dev subdomain, checked to be
- * an `https://*.workers.dev` origin before anything is sent to it.
- */
-export const coreOrigin = (coreScript: string, subdomain: string): string => {
-  const origin = `https://${coreScript}.${subdomain}.workers.dev`;
-  if (!isCoreOrigin(origin)) {
-    throw new DeployError(
-      "invalid_core_origin",
-      `${origin} isn't a workers.dev origin`
-    );
-  }
-  return origin;
-};
-
-/** How the smoke check reaches core, and how long it waits between tries. */
 export interface SmokeOptions {
-  /** `fetch` by default. */
-  fetch?: typeof fetch;
   /** The first retry's wait, doubling after; tests pass 0. */
   retryDelayMs?: number;
   /** How long one try may take, its body included; tests pass less. */
   attemptTimeoutMs?: number;
 }
 
-/** Tries of the smoke check: a new workers.dev hostname can take a moment. */
+/** Tries of the smoke check: a new upload can take a moment to answer. */
 const smokeAttempts = 5;
 const defaultSmokeDelayMs = 2000;
 /**
@@ -169,7 +86,7 @@ export const answeringVersion = async (
 };
 
 /**
- * Tries core's health check at `origin` until it answers a version
+ * Tries core's health check at `core` until it answers a version
  * `accepts` takes, to a request carrying the client's router secret as
  * the router sends it: a few tries, each with its own deadline, waiting
  * longer between them (a new hostname, or the old version still
@@ -177,11 +94,10 @@ export const answeringVersion = async (
  * or undefined after the last try.
  */
 const smokeTries = async (
-  origin: string,
+  core: CoreAddress,
   routerSecret: string,
   accepts: (version: string) => boolean,
   {
-    fetch: fetchCore = fetch,
     retryDelayMs = defaultSmokeDelayMs,
     attemptTimeoutMs = defaultAttemptTimeoutMs,
   }: SmokeOptions
@@ -189,8 +105,8 @@ const smokeTries = async (
   for (let attempt = 1; attempt <= smokeAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- tries in turn
     const answering = await answeringVersion(
-      fetchCore,
-      origin,
+      core.fetch,
+      core.origin,
       routerSecret,
       attemptTimeoutMs
     );
@@ -206,35 +122,7 @@ const smokeTries = async (
 };
 
 /**
- * Checks that core at `origin` answers its health check as version
- * `versionId`, to a request carrying the client's router secret as the
- * router sends it: so the version this deploy made live is the one
- * answering, and it has the secret the router will derive. Returns how
- * many tries it took (`smokeTries`).
- */
-export const smokeCheck = async (
-  origin: string,
-  routerSecret: string,
-  versionId: string,
-  options: SmokeOptions = {}
-): Promise<number> => {
-  const answered = await smokeTries(
-    origin,
-    routerSecret,
-    (version) => version === versionId,
-    options
-  );
-  if (answered === undefined) {
-    throw new DeployError(
-      "smoke_check_failed",
-      `Core at ${origin} didn't answer as version ${versionId}`
-    );
-  }
-  return answered.attempts;
-};
-
-/**
- * Checks that core at `origin` answers its health check at all, to a
+ * Checks that `core` answers its health check at all, to a
  * request carrying the client's router secret: for a core whose live
  * version the admin can't read beforehand (a user Worker in a dispatch
  * namespace, whose upload is live at once and whose versions the
@@ -244,12 +132,12 @@ export const smokeCheck = async (
  * tries it took.
  */
 export const smokeAnswering = async (
-  origin: string,
+  core: CoreAddress,
   routerSecret: string,
   { refuses, ...options }: SmokeOptions & { refuses?: string } = {}
 ): Promise<{ version: string; attempts: number }> => {
   const answered = await smokeTries(
-    origin,
+    core,
     routerSecret,
     (version) => version !== refuses,
     options
@@ -257,7 +145,7 @@ export const smokeAnswering = async (
   if (answered === undefined) {
     throw new DeployError(
       "smoke_check_failed",
-      `Core at ${origin} didn't answer its health check`
+      `Core at ${core.origin} didn't answer its health check`
     );
   }
   return answered;

@@ -14,6 +14,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine, sweepSpokenLines } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -24,6 +25,7 @@ import {
   participate,
 } from "./interview-link.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import {
   agree,
   fact,
@@ -38,15 +40,7 @@ import {
   ticketsReply,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import {
-  auditedDuring,
-  openRpc,
-  routed,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 
 // Deleting an interview (GRA-368, the store's `#forget` and `purgeBrain`):
 // from its link, by Grasp's staff on request, with a new start, or by
@@ -238,6 +232,21 @@ const ofInterviews = [
   "brain_sent",
 ];
 
+/**
+ * The text `person`'s interview was held with, kept as the release before
+ * kept it: nothing writes it now, but what it wrote stays until the table
+ * is dropped, and goes with the interview.
+ */
+const textKeptBefore = async (person: string): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (_instance, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'text-mark', ?)",
+      person,
+      new Date().toISOString()
+    );
+  });
+};
+
 /** Where `words`, and who said them, are left, apart from the roster and its links. */
 const leftOf = async (person: string, words: string) => {
   const tables = await storeTables();
@@ -278,12 +287,6 @@ const brainOf = async (ids: Ids) => {
   };
 };
 
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
-
 /** Deletes Max's interview from his link, on the device it is on. */
 const deleteOnLink = async (person: string): Promise<number> => {
   const { secret, key } = await openLink(person);
@@ -308,20 +311,13 @@ const ways: {
     audited: ["brain.records.purged"],
   },
   {
-    way: "by Grasp's staff, on their request",
-    remove: async (ids) => {
-      const staff = await asStaff();
-      await staff.onboardingStaff.deleteInterview(ids.max);
-    },
-    audited: ["brain.records.purged", "onboarding.interview.deleted"],
-  },
-  {
-    way: "with a new start",
-    remove: async (ids) => {
-      const staff = await asStaff();
-      await staff.onboardingStaff.newStart(ids.max);
-    },
-    audited: ["brain.records.purged", "onboarding.interview.restarted"],
+    way: "with a new start Grasp's staff give from the admin",
+    remove: async (ids) => await adminCommands().newStart(ids.max),
+    audited: [
+      "admin.command",
+      "brain.records.purged",
+      "onboarding.interview.restarted",
+    ],
   },
   {
     way: "by taking them off the staff list (L7)",
@@ -332,17 +328,6 @@ const ways: {
       );
     },
     audited: ["brain.records.purged", "onboarding.roster.saved"],
-  },
-  {
-    way: "by Grasp's staff taking them off the list (L7)",
-    remove: async (ids) => {
-      const staff = await asStaff();
-      await staff.onboardingStaff.changeOrganization({
-        kind: "removePerson",
-        person: ids.max,
-      });
-    },
-    audited: ["brain.records.purged", "onboarding.person.removed"],
   },
 ];
 
@@ -384,6 +369,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       const ids = await team();
       const said = sentinels();
       await inTheBrain(ids, said);
+      await textKeptBefore(ids.max);
       const before = await brainOf(ids);
       const events = await auditedDuring(async () => {
         await remove(ids);
@@ -446,15 +432,6 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       audited: [],
       by: "person",
     },
-    {
-      way: "by Grasp's staff is in the audit log as theirs, and in staff's own log",
-      remove: async (ids: Ids) => {
-        const staff = await asStaff();
-        await staff.onboardingStaff.deleteInterview(ids.max);
-      },
-      audited: ["onboarding.interview.deleted"],
-      by: "staff",
-    },
   ])("$way (W7)", async ({ remove, audited, by }) => {
     const ids = await team();
     await inTheBrain(ids, sentinels());
@@ -464,16 +441,14 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     // The team given to the brain again, so none of it waits for the next test.
     await drawAll(ids);
     await intakeAlike();
-    const { entries } = await onboardingStore(env).staffLog({
-      what: "interview.deleted",
-    });
+    const entries = await onboardingLog("interview.deleted");
     expect({
       audited: events
         .map(({ action }) => action)
         .filter((action) => action.startsWith("onboarding.")),
       logged: entries
-        .filter(({ person }) => person?.id === ids.max)
-        .map(({ actor }) => actor),
+        .filter(({ about }) => about === ids.max)
+        .map(({ by: who }) => (who === "interviewee" ? "person" : who)),
     }).toStrictEqual({
       audited,
       logged: [by],
@@ -485,8 +460,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const ids = await team();
     const said = sentinels();
     await inTheBrain(ids, said);
-    const staff = await asStaff();
-    await staff.onboardingStaff.deleteInterview(ids.lea);
+    // From her own link, as only the person deletes their interview.
+    await deleteOnLink(ids.lea);
     const redrawn = await drawAll(ids);
     await intakeAlike();
     const works = await store.teamWorks(ids.team);

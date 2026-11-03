@@ -1,7 +1,7 @@
 /**
  * What Grasp's own AI features cost on its keys, read only: on an
  * organization's AI use, its own this month and last, by feature and by
- * model; on Platform → AI, every active organization's summed, with those
+ * model; on Platform, every active organization's summed, with those
  * that cost the most (src/admin/platform-spend-sums.ts). The model
  * ledger's charges at list prices, in US dollars, read from each core
  * now. Nothing caps these features: this is where staff watch them.

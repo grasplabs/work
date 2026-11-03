@@ -1,4 +1,5 @@
-import { eq, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, lte, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Brain } from "./brain.ts";
@@ -100,6 +101,36 @@ export const rebuildOwed = (
 };
 
 /**
+ * Owes rebuild `id` again, its writes not done, for an attempt of a purge
+ * as it takes it: only while `holds` (purge-ledger.ts `attemptHolds`). A
+ * rebuild another purge ran meanwhile may have cleared the attempt
+ * before's, and this attempt writes again.
+ */
+export const rebuildOwedWhile = (
+  db: DrizzleD1Database,
+  id: string,
+  holds: SQL
+) => {
+  const now = Date.now();
+  return db
+    .insert(searchRebuilds)
+    .select(
+      db
+        .select({
+          id: sql<string>`${id}`.as("id"),
+          owedAt: sql<number>`${now}`.as("owed_at"),
+          writesDoneAt: sql<number | null>`NULL`.as("writes_done_at"),
+        })
+        .from(sql`(SELECT 1)`)
+        .where(holds)
+    )
+    .onConflictDoUpdate({
+      target: searchRebuilds.id,
+      set: { owedAt: now, writesDoneAt: null },
+    });
+};
+
+/**
  * Marks owed rebuild `id`'s purge's writes done: a rebuild from now on
  * covers them, and clears it.
  */
@@ -112,6 +143,21 @@ export const owedWritesDone = async (
     .set({ writesDoneAt: Date.now() })
     .where(eq(searchRebuilds.id, id));
 };
+
+/**
+ * Marks owed rebuild `id`'s purge's writes done as `owedWritesDone`, only
+ * while `holds` (purge-ledger.ts `attemptHolds`): an attempt that lost its
+ * purge never marks the writes of the one that took it over done.
+ */
+export const owedWritesDoneWhile = (
+  db: DrizzleD1Database,
+  id: string,
+  holds: SQL
+) =>
+  db
+    .update(searchRebuilds)
+    .set({ writesDoneAt: Date.now() })
+    .where(and(eq(searchRebuilds.id, id), holds));
 
 /**
  * Whether a purge recorded a rebuild that hasn't run since, other than

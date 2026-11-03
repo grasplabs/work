@@ -44,6 +44,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Kept access at the provider for an account connected again`,
   },
   {
+    action: "connection.revocations.viewed",
+    text: msg`Looked at the access to remove by hand`,
+  },
+  {
     action: "connection.revoke_abandoned",
     text: msg`Gave up revoking a disconnected account's access at its provider`,
   },
@@ -142,6 +146,63 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   {
     action: "app.output.classified",
     text: msg`Changed whether a domain's data needs approved apps`,
+  },
+  { action: "app.webhook.added", text: msg`Added a webhook to a domain` },
+  {
+    action: "app.webhook.approved",
+    text: msg`Let a domain's data go to a webhook`,
+  },
+  {
+    action: "app.webhook.removed",
+    text: msg`Removed a webhook from a domain`,
+  },
+  {
+    action: "app.webhook.undeliverable",
+    text: msg`Gave up sending a domain's event to a webhook`,
+  },
+  {
+    action: "webhook.call",
+    // Recorded for refusals and failures too, as a channel call is.
+    text: msg`Sent a domain's event to a webhook`,
+  },
+  // A published domain's visitors (core's src/app-visitors.ts), each
+  // action by name: an `app.visitor_*` action has no dotted prefix of its
+  // own, so it would otherwise read as `app`.
+  {
+    action: "app.visitor_listed",
+    text: msg`Let someone visit a domain`,
+  },
+  {
+    action: "app.visitor_unlisted",
+    text: msg`Stopped someone visiting a domain`,
+  },
+  {
+    action: "app.visitor_code_sent",
+    text: msg`Was sent a code to visit a domain`,
+  },
+  {
+    action: "app.visitor_signed_in",
+    text: msg`Signed in to a domain as a visitor`,
+  },
+  {
+    action: "app.visitor_signed_out",
+    text: msg`Signed out of a domain as a visitor`,
+  },
+  {
+    action: "app.visitor_refused",
+    text: msg`Was refused as a domain's visitor`,
+  },
+  {
+    action: "app.visitor_granted",
+    text: msg`Let a domain's visitors use one of its functions`,
+  },
+  {
+    action: "app.visitor_ungranted",
+    text: msg`Stopped a domain's visitors using one of its functions`,
+  },
+  {
+    action: "app.visitor_called",
+    text: msg`Used a domain's function as a visitor`,
   },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },

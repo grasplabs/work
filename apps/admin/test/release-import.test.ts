@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
+  channels,
   releaseImportFailures,
   releases,
 } from "../src/db/schema.ts";
@@ -24,6 +25,7 @@ import {
   MAX_READS_PER_RUN,
 } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
+import { channelReleases } from "../src/rollout/targets.ts";
 import worker from "../src/server.ts";
 import {
   buildRelease,
@@ -399,6 +401,8 @@ CREATE TABLE t (id TEXT);`,
     const first = await runImport();
 
     expect(first.imported).toStrictEqual(newest.toReversed());
+    // One left unread: retention waits for it (src/releases/retention.ts).
+    expect(first.caughtUp).toBeFalsy();
     await expect(releaseRow(oldest ?? "")).resolves.toBeUndefined();
 
     const second = await runImport();
@@ -640,6 +644,65 @@ CREATE TABLE t (id TEXT);`,
 
     expect(pages.length).toBeGreaterThan(1);
     expect(result.imported).toContain(release.id);
+  });
+
+  it("takes a release to Edge as it saves it, even when the run dies right after", async () => {
+    const release = await publishRelease({ notes: "feat(core): then dies" });
+    await db.delete(channels);
+    // The bucket as far as this run sees it: only this release.
+    const store: ReleaseStore = {
+      list: async (options) => {
+        const page = await env.RELEASES.list(options);
+        return {
+          ...page,
+          delimitedPrefixes: page.delimitedPrefixes.filter(
+            (prefix) => prefix === `releases/${release.id}/`
+          ),
+        };
+      },
+      get: async (key: string) => await env.RELEASES.get(key),
+    };
+    // The run dies once the batch that saves the release has landed:
+    // nothing after it runs.
+    let dead = false;
+    const dying = new Proxy(env.DB, {
+      get: (target, property) => {
+        if (dead) {
+          throw new Error("The run died");
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            const results = await target.batch(statements);
+            dead = (await releaseRow(release.id)) !== undefined;
+            return results;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const died = await importReleases(store, adminDatabase(dying)).then(
+      () => false,
+      () => true
+    );
+
+    const { edge } = await channelReleases(db);
+    const promoted = await eventsFor("channel.promote", release.id);
+
+    expect({
+      died,
+      saved: (await releaseRow(release.id)) !== undefined,
+      edge,
+      promoted: promoted.length,
+    }).toStrictEqual({
+      died: true,
+      saved: true,
+      edge: release.id,
+      promoted: 1,
+    });
   });
 
   it("runs on the admin's cron", async () => {

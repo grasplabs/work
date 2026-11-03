@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { AiProviderConnectApi } from "./ai-providers.ts";
+import type { WebhookOutcome, WebhookPost } from "./app-webhooks.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
@@ -319,6 +320,62 @@ export const erasePersonalSchema = z.strictObject({
 });
 export type ErasePersonal = z.input<typeof erasePersonalSchema>;
 
+/** Asks for the revokes to make by hand (`ConnectionsApi.revocationsByHand`). */
+export const revocationsByHandSchema = z.strictObject({
+  person: connectionPersonSchema,
+});
+export type RevocationsByHand = z.input<typeof revocationsByHandSchema>;
+
+/**
+ * A revoke at a provider connect couldn't make, for the company's admins
+ * to make by hand (GRA-1197): one still retried but stuck (`stuck`), or
+ * one connect gave up on (`given_up`), whose grant may be live at the
+ * provider. Never a token, an address or what the connection read: the
+ * connection by its ID, a shared one by its account's name, a personal
+ * one by its owner.
+ */
+export interface RevocationByHand {
+  id: string;
+  connectionId: string;
+  provider: string;
+  scope: ConnectionScope;
+  state: "stuck" | "given_up";
+  /** Why it was owed: a disconnect, or the connection asked to connect again. */
+  owedFor: "disconnected" | "needs_reauth";
+  /** When it was owed (ISO 8601). */
+  since: string;
+  attempts: number;
+  /** When connect gave up (ISO 8601), and why; null while it still tries. */
+  givenUpAt: string | null;
+  reason: "expired" | "unreadable" | null;
+  /** A shared connection's account, as the provider named it. */
+  accountName: string | null;
+  /** A personal connection's owner, by ID (core adds their name). */
+  ownerUserId: string | null;
+}
+
+/** As people see it: a personal connection's owner by name too. */
+export interface RevocationToDo extends RevocationByHand {
+  ownerName: string | null;
+  /**
+   * Whether a personal connection's owner is a member now: one removed
+   * keeps their name, but is no longer here to remove the access.
+   */
+  ownerIsMember: boolean;
+}
+
+/**
+ * Where an account's owner removes Grasp's access by hand at a provider
+ * whose grants Grasp revokes, where the provider has one place for it;
+ * undefined where it is in the app's own settings.
+ */
+export const revokeByHandAt = (provider: string): string | undefined =>
+  provider === "google" ||
+  provider === "google-directory" ||
+  provider === "google-documents"
+    ? "https://myaccount.google.com/connections"
+    : undefined;
+
 /** One connection, as people see it: never its tokens. */
 export interface ConnectionSummary {
   id: string;
@@ -505,6 +562,9 @@ export interface AppRequest {
 /** Most app requests listed at once: the latest. */
 export const appRequestsListed = 200;
 
+/** Most revokes to make by hand listed at once: the oldest first. */
+export const revocationsListed = 200;
+
 /**
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
@@ -586,6 +646,12 @@ export interface ConnectionsApi extends StephenReachApi {
   requestApp: (request: AppRequestInput) => Promise<AppRequest>;
   /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
   appRequests: () => Promise<AppRequest[]>;
+  /**
+   * The revokes at a provider connect couldn't make (stuck, or given up),
+   * for the company's admins to make by hand. Admins, and Grasp staff
+   * read-only, each staff read on record. At most {@link revocationsListed}.
+   */
+  revocationsByHand: () => Promise<RevocationToDo[]>;
   /** Every class the company turns on or off, and for whom. Admins only. */
   toolClasses: () => Promise<ToolClassSetting[]>;
   /**
@@ -1686,13 +1752,23 @@ export interface ChannelApi {
   ) => Promise<Response>;
 }
 
+/** Sending an App's events to a company's webhooks (connect's webhooks.ts). */
+export interface WebhookApi {
+  /**
+   * POSTs one delivery core signed (`WebhookPost`) to its URL, checked
+   * again (`webhookTargetOf`), following no redirect, within
+   * `appWebhookLimits.timeoutMs`; audited, by its origin and status only.
+   */
+  webhookPost: (post: WebhookPost) => Promise<WebhookOutcome>;
+}
+
 /**
  * What core reaches in connect, over the `CONNECT` service binding: the
- * npm registry among the rest (`PackageRegistryApi`), and the chat
- * platforms (`ChannelApi`).
+ * npm registry among the rest (`PackageRegistryApi`), the chat platforms
+ * (`ChannelApi`) and company webhooks (`WebhookApi`).
  */
 export interface ConnectApi
-  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi {
+  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi, WebhookApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;

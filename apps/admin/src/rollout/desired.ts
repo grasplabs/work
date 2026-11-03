@@ -105,7 +105,7 @@ export interface ClientFacts {
   pinnedReleaseId: string | null;
   /** The release every one of its Workers runs; null when they don't run one. */
   running: string | null;
-  /** Whether it runs shared secrets other than the ones staff rolled out. */
+  /** Whether it was given shared secrets other than Secrets Store's now. */
   secretsBehind: boolean;
   deploy: LastDeploy | null;
 }
@@ -121,7 +121,7 @@ export type ClientState =
 /**
  * Where `client` stands: deploying while a deploy is out; failed when its
  * last deploy of its target failed (until staff retry); up to date when it
- * runs its target with the shared secrets rolled out; otherwise waiting
+ * runs its target with Secrets Store's shared secrets; otherwise waiting
  * for the reconciler. With no target yet, `no_release`.
  */
 export const stateOf = (
@@ -192,23 +192,32 @@ export const failsChannel = (
 ): boolean =>
   client.pinnedReleaseId === null && stateOf(client, releases) === "failed";
 
+/** Shared-secret fingerprints, by Worker, then name. */
+export type SharedByWorker = Readonly<
+  Record<string, Readonly<Record<string, string>>>
+>;
+
 /**
- * Whether shared secrets as last delivered (`delivered`, by Worker then
- * name, each a keyed fingerprint) differ from the ones staff rolled out
- * (`rolledOut`, by name): any secret a Worker holds whose fingerprint
- * isn't the rolled-out one. Nothing rolled out yet: never behind.
+ * Whether a client's shared secrets are behind Secrets Store's: what its
+ * operation last delivered (`delivered`) differs from what a deploy would
+ * deliver now (`desired`, the store's fingerprints, read live) on any
+ * Worker: another fingerprint, a name it lacks, or one the store no
+ * longer has. A deploy delivers the store's values as they are, so one
+ * that succeeds settles the client. Nothing is behind while the store
+ * can't be read (`desired` null): no deploy could run then either.
  */
 export const isSecretsBehind = (
-  delivered: Readonly<Record<string, Readonly<Record<string, string>>>>,
-  rolledOut: Readonly<Record<string, string>> | null
+  delivered: SharedByWorker,
+  desired: SharedByWorker | null
 ): boolean => {
-  if (rolledOut === null) {
+  if (desired === null) {
     return false;
   }
-  return Object.values(delivered).some((prints) =>
-    Object.entries(prints).some(
-      ([name, print]) =>
-        Object.hasOwn(rolledOut, name) && rolledOut[name] !== print
-    )
-  );
+  const workers = new Set([...Object.keys(desired), ...Object.keys(delivered)]);
+  return [...workers].some((worker) => {
+    const want = desired[worker] ?? {};
+    const got = delivered[worker] ?? {};
+    const names = new Set([...Object.keys(want), ...Object.keys(got)]);
+    return [...names].some((name) => want[name] !== got[name]);
+  });
 };

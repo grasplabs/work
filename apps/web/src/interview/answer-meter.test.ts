@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { answerMeter, atShare, waitedOf } from "./answer-meter.ts";
+import { answerMeter, atShare } from "./answer-meter.ts";
 import type { Measured } from "./answer-meter.ts";
 
 // The prototype's `turnMeter` (`lib/interview-telemetry.ts`), as an
@@ -39,18 +39,14 @@ describe("an answer of his", () => {
     ]);
   });
 
-  it("counts as far as it went without a sound, and isn't sent to core", () => {
+  it("counts as far as it went without a sound", () => {
     const { answers, meter } = metered();
     meter.sent(1000);
     meter.line(1800);
     meter.stop();
-    expect({
-      answers,
-      waited: answers.map((answer) => waitedOf(answer)),
-    }).toStrictEqual({
-      answers: [{ by: "type", words: null, line: 800, voice: null, again: 0 }],
-      waited: [undefined],
-    });
+    expect(answers).toStrictEqual([
+      { by: "type", words: null, line: 800, voice: null, again: 0 },
+    ]);
   });
 
   it("is measured once, by the first sound only", () => {
@@ -59,12 +55,6 @@ describe("an answer of his", () => {
     meter.voice(2000);
     meter.voice(2600);
     expect(answers.map(({ voice }) => voice)).toStrictEqual([2000]);
-  });
-
-  it("is sent to core as the longest wait core takes at most", () => {
-    expect(
-      waitedOf({ by: "talk", words: null, line: 1, voice: 90_000, again: 0 })
-    ).toBe(60_000);
   });
 });
 

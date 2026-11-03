@@ -21,6 +21,7 @@ import {
   quick,
 } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { onboardingLog } from "./onboarding-log.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team's map (src/onboarding/team-map.ts and the store's drawing): once
@@ -325,8 +326,8 @@ describe("a team's map", { timeout: 60_000 }, () => {
     const dueAfter = dueBefore.includes(ids.lea);
     const again = await store.drawAgain(ids.team, staff);
     const dueNow = await store.drawsDue();
-    const { entries } = await store.staffLog({ what: "map" });
-    const log = entries.filter(({ person }) => person?.id === ids.lea);
+    const entries = await onboardingLog("map", store);
+    const log = entries.filter(({ about }) => about === ids.lea).toReversed();
     expect({
       result,
       calls: requests.length,

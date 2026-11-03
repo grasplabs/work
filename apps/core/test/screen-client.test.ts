@@ -503,7 +503,18 @@ describe("the session client", { timeout: 120_000 }, () => {
       { state: "expired" },
       rows,
     ]);
-    // Once the tombstone goes, the object holds nothing and isn't listed.
+    // Once the tombstone goes, the object holds nothing and isn't listed:
+    // its time over too.
+    await runInDurableObject(stub, (_instance, state) => {
+      const record = z
+        .object({ expiresAt: z.number() })
+        .loose()
+        .parse(state.storage.kv.get("invocation"));
+      state.storage.kv.put("invocation", {
+        ...record,
+        expiresAt: Date.now() - 60_000,
+      });
+    });
     await runDurableObjectAlarm(stub);
     await expect(Promise.all([held(), listed()])).resolves.toStrictEqual([
       undefined,

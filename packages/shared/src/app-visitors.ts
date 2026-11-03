@@ -1,0 +1,190 @@
+import { z } from "zod";
+
+import { appLinkSchema } from "./apps.ts";
+import { defineErrorFamily } from "./errors.ts";
+import { functionRequestMaxBytes } from "./operation-limits.ts";
+
+// Visitors (core's app-visitors.ts): someone who isn't a member opens a
+// published App at its own link (`appLinkSchema`), once they sign in with
+// a code core mails them. Only an address the App's builders listed, or
+// one at a domain they listed, can ask for a code. A visitor's session
+// opens that one App's screens and nothing else. Its screens call only the
+// functions the App's builders granted visitors, for the version they
+// granted them on, and those run as the App itself, never as a member
+// (core's app-visitor-calls.ts).
+// How each part can be attacked, and what stops it, is in core's
+// app-visitors.ts.
+
+/** Where a visitor's page talks to core: one POST per action. */
+export const appVisitorApiPath = "/api/app-visitor";
+
+/** Where a visitor opens an App: the page, then the App's link. */
+export const appVisitorPagePath = "/visit";
+
+/** Most addresses and domains one App lists. */
+export const appVisitorsMax = 50;
+
+/** How many digits a code has. */
+export const appVisitorCodeDigits = 8;
+
+/** How long a code works, in minutes. */
+export const appVisitorCodeMinutes = 10;
+
+/** Most tries one code takes; the last wrong one ends it. */
+export const appVisitorCodeTriesMax = 5;
+
+/** Most codes one address is sent for one App in an hour. */
+export const appVisitorCodesPerAddressPerHour = 5;
+
+/** Most codes one App sends in an hour, to anyone. */
+export const appVisitorCodesPerAppPerHour = 100;
+
+/** How long a visitor's session works, in hours. */
+export const appVisitorSessionHours = 8;
+
+/**
+ * A domain as builders list it and as an address ends: ASCII only, lower
+ * case, at least two labels, none starting or ending with `-`. A name in
+ * another script is listed by its `xn--` form, so a look-alike written
+ * with other letters is another domain, never this one.
+ */
+export const appVisitorDomainSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
+    "a domain, such as example.com"
+  );
+
+/**
+ * An address, compared as written but for case: no `+tag` is stripped and
+ * no dot ignored, so `a+b@example.com` is another address than
+ * `a@example.com`. ASCII only: its domain is `appVisitorDomainSchema`'s,
+ * and its local part plain letters, digits and `.!#$%&'*+/=?^_`{|}~-`,
+ * never quoted, so nothing in it reads as a second `@`.
+ */
+export const appVisitorAddressSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .refine((value) => {
+    const at = value.lastIndexOf("@");
+    if (at <= 0 || value.indexOf("@") !== at) {
+      return false;
+    }
+    const local = value.slice(0, at);
+    return (
+      local.length <= 64 &&
+      /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u.test(
+        local
+      ) &&
+      appVisitorDomainSchema.safeParse(value.slice(at + 1)).success
+    );
+  }, "an email address");
+
+/** The domain of an address `appVisitorAddressSchema` took. */
+export const appVisitorDomainOf = (address: string): string =>
+  address.slice(address.lastIndexOf("@") + 1);
+
+/** One entry of an App's list: an address, or every address at a domain. */
+export const appVisitorEntrySchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("address"),
+    value: appVisitorAddressSchema,
+  }),
+  z.strictObject({ kind: z.literal("domain"), value: appVisitorDomainSchema }),
+]);
+export type AppVisitorEntry = z.output<typeof appVisitorEntrySchema>;
+
+/** An App's whole list, as its builders set it. */
+export const appVisitorListSchema = z
+  .array(appVisitorEntrySchema)
+  .max(appVisitorsMax);
+
+/** A code as a visitor types it: its digits, spaces allowed between. */
+export const appVisitorCodeSchema = z
+  .string()
+  .transform((value) => value.replaceAll(/\s/gu, ""))
+  .pipe(z.string().regex(new RegExp(`^\\d{${appVisitorCodeDigits}}$`, "u")));
+
+/** Most functions one App's version grants visitors. */
+export const appVisitorGrantsMax = 50;
+
+/**
+ * The functions of an App's version that visitors may call, by path
+ * (`notes.titles`): its public queries and mutations only.
+ */
+export const appVisitorGrantsSchema = z
+  .array(z.string().min(1).max(256))
+  .max(appVisitorGrantsMax);
+
+/** What an App grants visitors: its current version's functions. */
+export interface AppVisitorGrants {
+  /** The version they are granted on; null while none is current. */
+  version: number | null;
+  functions: string[];
+}
+
+/** A visitor's session: 32 random bytes, base64url. */
+export const appVisitorTokenSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{43}$/u, "A visitor's session");
+
+/** What a visitor's page sends. */
+export const appVisitorRequestSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("ask"),
+    link: appLinkSchema,
+    address: z.string().max(320),
+  }),
+  z.strictObject({
+    action: z.literal("sign_in"),
+    link: appLinkSchema,
+    address: z.string().max(320),
+    code: z.string().max(32),
+  }),
+  z.strictObject({ action: z.literal("open"), token: appVisitorTokenSchema }),
+  z.strictObject({
+    action: z.literal("sign_out"),
+    token: appVisitorTokenSchema,
+  }),
+  /**
+   * A call of one of the App's functions from its screen, as the screen
+   * client writes it (`request`, JSON text), with the lease its frame was
+   * opened with.
+   */
+  z.strictObject({
+    action: z.literal("call"),
+    token: appVisitorTokenSchema,
+    lease: z.string().max(256),
+    // As many characters as a call's bytes; the call itself counts its
+    // bytes (`functionRequestMaxBytes`) before it parses them.
+    request: z.string().max(functionRequestMaxBytes),
+  }),
+]);
+export type AppVisitorRequest = z.input<typeof appVisitorRequestSchema>;
+
+/** A signed-in visitor's session, as their page keeps it. */
+export interface AppVisitorSession {
+  token: string;
+  /** ISO 8601. */
+  expiresAt: string;
+}
+
+export const appVisitorErrors = defineErrorFamily({
+  "visitor.invalid": "That isn't something this page takes.",
+  "visitor.code_invalid":
+    "That code doesn't work. Check it, or ask for a new one.",
+  "visitor.signed_out": "You're signed out of this App. Sign in again.",
+  "visitor.too_many":
+    "Too many codes were asked for. Wait a while, then ask again.",
+  "visitor.unavailable": "No code could be sent now. Try again later.",
+  "visitor.list_changed":
+    "Someone else changed who may visit this App while you were editing it. Reload the list and try again.",
+  "visitor.not_granted": "This App doesn't let visitors do that.",
+  "visitor.grants_changed":
+    "Someone else changed what visitors may do in this App while you were editing it. Reload and try again.",
+});

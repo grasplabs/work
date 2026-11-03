@@ -1,16 +1,15 @@
 /**
- * A client's settings, as staff change them on its page: its ring, its
+ * A client's settings, as staff change them on its page: its
  * sign-in (its record's `signIn`, which every deploy makes core's
  * `SIGN_IN` from), its Teams bot (src/clients/teams-bot.ts) and its sealed
  * secrets, such as its Teams bot's (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
  * as the change, and only when it changes something.
  *
- * None of it reaches the client's account at once. The ring decides which
- * rollouts reach it; sign-in is set on core, the bot on connect and core,
+ * None of it reaches the client's account at once. Sign-in is set on core, the bot on connect and core,
  * and a sealed secret on connect, by its next deploy. Each also marks the
  * client
- * (`configChangedAt`), so the next rollout deploys it even when it's on
- * the release already (src/rollout/targets.ts).
+ * (`configChangedAt`), so its Setup says a change waits until staff
+ * apply it, or a deploy of its next release carries it.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
@@ -19,7 +18,7 @@ import { z } from "zod";
 import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientRuns, clients, clientSealedSecrets } from "../db/schema.ts";
+import { clients, clientSealedSecrets } from "../db/schema.ts";
 import {
   MissingStoreSecretError,
   signInApps,
@@ -33,7 +32,6 @@ import {
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
-import { currentRun, hasEnded } from "../runners.ts";
 import { teamsBotSchema } from "./teams-bot.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */
@@ -50,7 +48,7 @@ export const settingsErrorCodes = [
   "not_active",
   /** The client's Workers don't run one release the admin made live. */
   "nothing_deployed",
-  /** Another runner (provisioning, a rollout, a rollback) has the client. */
+  /** Another runner (provisioning, a deploy) has the client. */
   "client_busy",
   /** Secrets Store has no `CLIENT_KEY` to fingerprint a sign-in's admins, or seal a secret, with. */
   "store_secret_missing",
@@ -73,11 +71,6 @@ export class SettingsError extends Error {
 
 const clientIdSchema = z.string().min(1);
 
-export const ringInputSchema = z.object({
-  clientId: clientIdSchema,
-  ring: z.int().nonnegative(),
-});
-
 /**
  * A sign-in as the page sends it, checked here rather than by the server
  * function's validator, so a refusal comes back as its code.
@@ -99,30 +92,6 @@ const assertClient = async (
   if (client === undefined) {
     throw new SettingsError("unknown_client", `No client ${clientId}`);
   }
-};
-
-/**
- * Moves client `clientId` to ring `ring`, as `staff`, audited
- * (`client.ring`) when it changes: rollouts started from then on reach it
- * with that ring. Returns whether it changed.
- */
-export const setRing = async (
-  env: Env,
-  staff: Staff,
-  input: z.input<typeof ringInputSchema>
-): Promise<boolean> => {
-  const db = adminDatabase(env.DB);
-  const { clientId, ring } = ringInputSchema.parse(input);
-  await assertClient(db, clientId);
-  return await actIfChanged(
-    db,
-    staff,
-    db
-      .update(clients)
-      .set({ ring, updatedAt: new Date() })
-      .where(and(eq(clients.id, clientId), ne(clients.ring, ring))),
-    { action: "client.ring", clientId, detail: { ring } }
-  );
 };
 
 /** What the key admins fingerprints are made with is derived for. */
@@ -293,14 +262,7 @@ const sealAttempts = 3;
  * `setSealedSecret`, with its event, in one batch, only while what it
  * read still holds: false when another set of the same secret got there
  * in between, so the event's `replaced` would be wrong and it's read
- * again. Refused (`client_busy`) while a rollback holds the client.
- *
- * A rollback checks, once it holds the client, that the versions it puts
- * back carry the sealed secrets the admin holds (src/rollout/rollback.ts),
- * then puts them back: one replaced in between would come back with them.
- * So none is set while a rollback holds the client, in the same batch as
- * the set, as a rollback that claims the client after it reads the new
- * one.
+ * again.
  */
 const writeSealed = async (
   env: Env,
@@ -316,25 +278,10 @@ const writeSealed = async (
     eq(clientSealedSecrets.clientId, clientId),
     eq(clientSealedSecrets.name, name)
   );
-  const [[had], run] = await Promise.all([
-    db
-      .select({ sealed: clientSealedSecrets.sealed })
-      .from(clientSealedSecrets)
-      .where(ofThis),
-    currentRun(env, clientId),
-  ]);
-  const rollback = run?.kind === "rollback" ? run : null;
-  if (rollback !== null && !hasEnded(rollback.status)) {
-    throw new SettingsError(
-      "client_busy",
-      `${clientId} is being rolled back: set its ${name} once that's done`
-    );
-  }
-  const noRollback = sql`NOT EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${clientId} AND ${clientRuns.kind} = ${"rollback"}${
-    rollback === null
-      ? sql``
-      : sql` AND ${clientRuns.runId} <> ${rollback.runId}`
-  })`;
+  const [had] = await db
+    .select({ sealed: clientSealedSecrets.sealed })
+    .from(clientSealedSecrets)
+    .where(ofThis);
   // Each seal has a fresh nonce, so what was read is told apart from any
   // other set's.
   const unchanged =
@@ -348,7 +295,7 @@ const writeSealed = async (
     db
       .update(clients)
       .set({ configChangedAt: now, updatedAt: now })
-      .where(and(eq(clients.id, clientId), noRollback, unchanged)),
+      .where(and(eq(clients.id, clientId), unchanged)),
     {
       action: "client.sealed_secret",
       clientId,

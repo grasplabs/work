@@ -9,8 +9,7 @@
  * Beside each organization, as the prototype has it, how many things need
  * Grasp there, as the admin's model works it out of what its core answered
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
- * need a look and a rollout waiting for approval, as the admin recorded
- * them (`platformCounts`), and under it its releases and rollouts.
+ * need a look, as the admin recorded them (`platformCounts`), and under it its releases.
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
  */
@@ -50,12 +49,15 @@ import {
   UnplugIcon,
   WrenchIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
+import type { GridRow } from "../clients/grid.ts";
 import { askedApps } from "./integrations-asked.ts";
 import type { PlatformCounts } from "./platform.ts";
+import { useSettled } from "./settled.tsx";
+import type { Deferred } from "./settled.tsx";
 import { organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 
@@ -70,7 +72,7 @@ interface Place {
 
 /** A page under one of the admin's places, nested beneath its entry. */
 interface SubPlace {
-  to: "/platform/releases" | "/platform/rollouts";
+  to: "/platform/releases";
   label: string;
 }
 
@@ -85,10 +87,7 @@ const places: readonly Place[] = [
     to: "/platform",
     label: "Platform",
     icon: ServerIcon,
-    under: [
-      { to: "/platform/releases", label: "Releases" },
-      { to: "/platform/rollouts", label: "Rollouts" },
-    ],
+    under: [{ to: "/platform/releases", label: "Releases" }],
   },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
@@ -132,24 +131,14 @@ interface PlaceBadge {
   words: string;
 }
 
-/** Platform's badge: companies that need a look, and a rollout that waits, as one count. */
-const platformBadge = ({
-  needLook,
-  waiting,
-}: PlatformCounts): PlaceBadge | null => {
-  const count = needLook + (waiting ? 1 : 0);
-  if (count === 0) {
-    return null;
-  }
-  const look =
-    needLook === 0
-      ? []
-      : [
-          `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
-        ];
-  const waits = waiting ? ["a rollout waits for approval"] : [];
-  return { count, words: [...look, ...waits].join("; ") };
-};
+/** Platform's badge: how many companies need a look. */
+const platformBadge = ({ needLook }: PlatformCounts): PlaceBadge | null =>
+  needLook === 0
+    ? null
+    : {
+        count: needLook,
+        words: `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
+      };
 
 /** Apps asked for's badge: how many apps the companies asked for. */
 const integrationsBadge = (asked: number): PlaceBadge | null =>
@@ -221,14 +210,21 @@ const PlaceItem = ({
 
 /**
  * An organization: its name, and how many things need Grasp there, or when
- * its core isn't read now, why.
+ * its core isn't read now, why; only its name until its core's answer
+ * is in.
  */
-const OrganizationItem = ({ organization }: { organization: Organization }) => {
+const OrganizationItem = ({
+  client,
+  organization,
+}: {
+  client: GridRow;
+  /** Null while its core's answer isn't in. */
+  organization: Organization | null;
+}) => {
   const matchRoute = useMatchRoute();
-  const { admin, view } = organization;
-  const { id, name } = admin.client;
-  const unread = unreadOf(admin);
-  const needs = view?.needs.length ?? 0;
+  const { id, name } = client;
+  const unread = organization === null ? null : unreadOf(organization.admin);
+  const needs = organization?.view?.needs.length ?? 0;
   const active =
     matchRoute({
       to: "/organizations/$clientId",
@@ -274,16 +270,86 @@ const OrganizationItem = ({ organization }: { organization: Organization }) => {
   );
 };
 
-const AdminSidebar = ({
+/**
+ * The sidebar's places and organizations: every organization the admin
+ * knows by name, and once their cores' answers are in (`admins`, null
+ * until then, or when they couldn't be read), what needs Grasp in each.
+ */
+const SidebarLists = ({
+  clients,
   admins,
   platform,
 }: {
-  admins: readonly ClientAdmin[];
+  clients: readonly GridRow[];
+  admins: readonly ClientAdmin[] | null;
+  platform: PlatformCounts;
+}) => {
+  const organizations = new Map(
+    organizationsOf(admins ?? []).map((organization) => [
+      organization.admin.client.id,
+      organization,
+    ])
+  );
+  const asked = askedApps(admins ?? []).length;
+  return (
+    <>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <nav aria-label="Admin">
+            <SidebarMenu>
+              {places.map((place) => (
+                <PlaceItem
+                  badge={badgeOf(place.to, platform, asked)}
+                  key={place.to}
+                  place={place}
+                />
+              ))}
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      <SidebarGroup>
+        <SidebarGroupLabel>Organizations</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <nav aria-label="Organizations">
+            <SidebarMenu>
+              {clients
+                .filter(({ status }) => status !== "offboarded")
+                .map((client) => (
+                  <OrganizationItem
+                    client={client}
+                    key={client.id}
+                    organization={organizations.get(client.id) ?? null}
+                  />
+                ))}
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </>
+  );
+};
+
+/** The sidebar's lists once the cores' answers are in. */
+const SettledLists = ({
+  admins,
+  ...lists
+}: {
+  clients: readonly GridRow[];
+  admins: Deferred<ClientAdmin[] | null>;
+  platform: PlatformCounts;
+}) => <SidebarLists {...lists} admins={useSettled(admins)} />;
+
+const AdminSidebar = ({
+  clients,
+  admins,
+  platform,
+}: {
+  clients: readonly GridRow[];
+  admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
 }) => {
   const router = useRouter();
-  const organizations = organizationsOf(admins);
-  const asked = askedApps(admins).length;
   const { setOpenMobile } = useSidebar();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
@@ -305,36 +371,14 @@ const AdminSidebar = ({
         />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <nav aria-label="Admin">
-              <SidebarMenu>
-                {places.map((place) => (
-                  <PlaceItem
-                    badge={badgeOf(place.to, platform, asked)}
-                    key={place.to}
-                    place={place}
-                  />
-                ))}
-              </SidebarMenu>
-            </nav>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Organizations</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <nav aria-label="Organizations">
-              <SidebarMenu>
-                {organizations.map((organization) => (
-                  <OrganizationItem
-                    key={organization.admin.client.id}
-                    organization={organization}
-                  />
-                ))}
-              </SidebarMenu>
-            </nav>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
+        <Suspense
+          fallback={
+            <SidebarLists admins={null} clients={clients} platform={platform} />
+          }
+        >
+          <SettledLists admins={admins} clients={clients} platform={platform} />
+        </Suspense>
       </SidebarContent>
     </Sidebar>
   );
@@ -345,15 +389,17 @@ const AdminSidebar = ({
  * scrolls inside it so its bar stays in view, as the platform's frame does.
  */
 export const AdminFrame = ({
+  clients,
   admins,
   platform,
 }: {
-  admins: readonly ClientAdmin[];
+  clients: readonly GridRow[];
+  admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
 }) => (
   <TooltipProvider>
     <SidebarProvider className="h-svh">
-      <AdminSidebar admins={admins} platform={platform} />
+      <AdminSidebar admins={admins} clients={clients} platform={platform} />
       <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
         <Outlet />
       </SidebarInset>

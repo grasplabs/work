@@ -457,6 +457,7 @@ const WorkflowResourceView = ({
   activity,
   names,
   admin,
+  opens,
 }: {
   resource: WorkflowResource;
   draft: Loaded<WorkflowDraft> | undefined;
@@ -469,6 +470,11 @@ const WorkflowResourceView = ({
   names: Names;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
+  /**
+   * The tab it opens on, if a link asked for one (a run count's: `runs`;
+   * an inbox item's: `triggers`).
+   */
+  opens: WorkflowSearch["tab"];
 }) => {
   const router = useRouter();
   const { currentVersion } = resource;
@@ -481,7 +487,10 @@ const WorkflowResourceView = ({
     savedHere
   );
   const start: WorkflowTab = draft === undefined ? "versions" : "definition";
-  const [tab, setTab] = useState<WorkflowTab>(Route.useSearch().tab ?? start);
+  // A builder reads runs on Traces (its runs part), so a link asking for
+  // runs opens there.
+  const opened = opens === "runs" && builder ? "traces" : opens;
+  const [tab, setTab] = useState<WorkflowTab>(opened ?? start);
   const [part, setPart] = useState<TracesPart>("runs");
   // The draft as its editor last saved or read it, beside the page's read:
   // whichever is at the later revision is the draft the page goes by.
@@ -699,6 +708,7 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
+  const { tab } = Route.useSearch();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
   const crumbs = [
@@ -731,6 +741,7 @@ const WorkflowResourcePage = () => {
           names={{ people, me: identity.userId }}
           params={params}
           resource={resource.data}
+          opens={tab}
           runs={runs}
           versions={versions}
         />
@@ -739,10 +750,17 @@ const WorkflowResourcePage = () => {
   );
 };
 
+/** What a link to a workflow's page may ask of it: the tab it opens on. */
+interface WorkflowSearch {
+  tab?: "runs" | "triggers";
+}
+
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
+  validateSearch: (search: Record<string, unknown>): WorkflowSearch =>
+    search.tab === "runs" || search.tab === "triggers"
+      ? { tab: search.tab }
+      : {},
   pendingComponent: PageLoading,
-  validateSearch: (search: Record<string, unknown>): { tab?: "triggers" } =>
-    search.tab === "triggers" ? { tab: "triggers" } : {},
   loader: async ({ context: { core }, params: { workflow } }) => {
     // Names only, and not waited for: IDs stand in until they come.
     const people = loadFromCore(core, readPeople);

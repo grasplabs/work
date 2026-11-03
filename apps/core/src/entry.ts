@@ -2,6 +2,7 @@ import { adminCommandPath } from "@grasp-os/shared/admin-command";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
+import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -21,7 +22,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
-import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPath,
   provisionProbePath,
@@ -41,6 +41,7 @@ import {
 } from "./app-function-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
+import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -55,6 +56,10 @@ import {
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
+import {
+  brainExportPath,
+  brainExportResponse,
+} from "./knowledge/brain-export.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
@@ -69,7 +74,6 @@ import {
   packageArtifactResponse,
   withoutArtifactToken,
 } from "./packages/serve.ts";
-import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
   connectVersionResponse,
@@ -82,6 +86,10 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
+import {
+  runFileResponse,
+  runFileRouteOf,
+} from "./workflows/run-file-downloads.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -204,6 +212,9 @@ const linkResponse = async (
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
   }
+  if (pathname === appVisitorApiPath) {
+    return await appVisitorResponse(request, env, requestId, ctx);
+  }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
   }
@@ -320,6 +331,11 @@ const appCallResponse = async (
   if (linkRoute !== undefined) {
     return await appLinkResponse(request, env, linkRoute, requestId);
   }
+  // A run's finished file, downloaded from its run sheet.
+  const runFile = runFileRouteOf(pathname);
+  if (runFile !== undefined) {
+    return await runFileResponse(request, env, runFile, requestId);
+  }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {
     return errorResponse(
@@ -339,13 +355,13 @@ const pathHandlers: ReadonlyMap<
   (request: Request, env: Env, requestId: string) => Promise<Response>
 > = new Map([
   [auditExportPath, auditExportResponse],
+  [brainExportPath, brainExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
   [adminCommandPath, adminCommandResponse],
-  [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);
 

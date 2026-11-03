@@ -276,8 +276,9 @@ const maxTargetConfigs = 4;
 
 /**
  * Most compilers whose pins a lock keeps: the two that pinned last, so two
- * releases running side by side (a rollout, ring by ring) each keep their
- * own pins instead of erasing the other's.
+ * releases running side by side (clients on the Edge, Beta and Stable
+ * channels while a release moves through them) each keep their own pins
+ * instead of erasing the other's.
  */
 const maxCompilers = 2;
 

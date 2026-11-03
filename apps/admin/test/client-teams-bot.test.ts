@@ -25,6 +25,7 @@ import { targetClient } from "../src/rollout/targets.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { clientScripts } from "./grasp-account.ts";
 import { callServerFn, page } from "./pages.ts";
 import {
   deployPlaced,
@@ -59,7 +60,7 @@ const inDays = (days: number): string =>
 const liveClient = async (name: string) => {
   const release = await placedRelease("feat(connect): its bot");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { account } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name,
     signIn: null,
@@ -79,7 +80,7 @@ const redeploy = async (clientId: string, releaseId: string) => {
 
 /** The version all of `script`'s traffic goes to in `account`. */
 const liveVersionOf = (account: AccountState, script: string) => {
-  const state = account.scripts.get(script);
+  const state = clientScripts(account).get(script);
   const [only] = state?.deployments[0]?.versions ?? [];
   return state?.versions.find(({ id }) => id === only?.version_id);
 };
@@ -192,7 +193,7 @@ describe("a client's Teams bot", () => {
       name: "TEAMS_BOT_SECRET",
       value: `Bq8~${crypto.randomUUID().replaceAll("-", "")}`,
     });
-    // A rollout deploys it next, even on the release it runs.
+    // Its next deploy carries it, even on the release it runs.
     const pending = await targetClient(db, acme.clientId);
     await redeploy(acme.clientId, acme.releaseId);
     await redeploy(other.clientId, other.releaseId);

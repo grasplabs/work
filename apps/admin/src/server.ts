@@ -10,15 +10,18 @@
  * are served from the root.
  *
  * The cron imports newly published releases (src/releases/import.ts),
- * then resumes provisioning that isn't getting anywhere
- * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
- * fares at every client every hour (src/clients/watch.ts).
+ * each taken to Edge as it's saved (src/rollout/channels.ts), deletes the
+ * bundles of releases never promoted past Edge after 14 days
+ * (src/releases/retention.ts), deploys each client
+ * whose Workers run something other than its target
+ * (src/rollout/reconciler.ts), then resumes provisioning that isn't
+ * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads
+ * how Stephen fares at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
- * hosting destination (src/hosting/workflow.ts), rollouts and the runs
- * that deploy their fleet clients (src/rollout/workflow.ts,
- * src/rollout/fleet-client.ts), and rollbacks (src/rollout/rollback.ts).
+ * hosting destination (src/hosting/workflow.ts), and clients' deploys
+ * (src/rollout/deploy.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
@@ -36,6 +39,8 @@ import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
+import { deleteExpiredBundles } from "./releases/retention.ts";
+import { reconcile } from "./rollout/reconciler.ts";
 
 export { AdminRuns } from "./run-object.ts";
 
@@ -63,10 +68,34 @@ export default {
     }
     // An import that fails never keeps stuck provisioning from resuming:
     // logged by its code, and reconciling runs all the same.
+    let caughtUp = false;
     try {
-      await importReleases(env.RELEASES, adminDatabase(env.DB));
+      ({ caughtUp } = await importReleases(
+        env.RELEASES,
+        adminDatabase(env.DB)
+      ));
     } catch (error) {
       log.error("releases.import_failed", { error: errorCode(error) });
+    }
+    // Bundles of releases never promoted past Edge go after 14 days: only
+    // once the import read every release published, so each one's blobs
+    // are on record and kept.
+    try {
+      if (caughtUp) {
+        await deleteExpiredBundles(
+          adminDatabase(env.DB),
+          env.RELEASES,
+          new Date(controller.scheduledTime)
+        );
+      }
+    } catch (error) {
+      log.error("releases.retention_failed", { error: errorCode(error) });
+    }
+    // Each client to its target: Edge's new release among them.
+    try {
+      await reconcile(env);
+    } catch (error) {
+      log.error("reconcile.failed", { error: errorCode(error) });
     }
     // After the import: a client waiting for a newer release takes it.
     await reconcileProvisioning(env, new Date(controller.scheduledTime));

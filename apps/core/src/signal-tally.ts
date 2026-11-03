@@ -64,6 +64,9 @@ export const askerOf = (actor: AuditActor): string => {
     case "guest": {
       return `guest:${actor.chatId}`;
     }
+    case "visitor": {
+      return `visitor:${actor.sessionId ?? actor.appId}`;
+    }
     case "system": {
       return "system";
     }

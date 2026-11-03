@@ -1,27 +1,44 @@
+import { preparePurge, purge } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Erasure, ErasurePreview } from "@grasp-os/shared/members";
+import type {
+  Erasure,
+  ErasureArea,
+  ErasurePreview,
+  RemovedPeoplePage,
+} from "@grasp-os/shared/members";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { activeMember, isRemoved, notRemoved } from "./auth/auth.ts";
+import {
+  activeMember,
+  isRemoved,
+  notRemoved,
+  organizationId,
+} from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
+  appVisitorCodes,
+  appVisitorSessions,
+  appWebhookDeliveries,
   erasedSubjects,
   channelAccounts,
   channelConversations,
   channelLinks,
   chatWorkflowOffers,
   invitations,
+  memberRemovals,
   notifications,
   chatAudiences,
   businessStores,
@@ -35,7 +52,9 @@ import {
   stephenSummaryReaders,
   teamMembers,
   users,
+  workflowDecisionConfirmations,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
@@ -46,6 +65,11 @@ import {
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
+import { brainOf } from "./knowledge/ports.ts";
+import { coreErasure } from "./knowledge/rpc.ts";
+import { onboardingStore } from "./onboarding/store.ts";
+import { cancelRunsStartedBy } from "./workflows/controls.ts";
+import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
 //
@@ -92,18 +116,19 @@ interface ErasureStep {
 }
 
 /**
- * Marks area `area` of `userId`'s erasure complete, if `done` holds as the
- * batch reaches it.
+ * Marks area `area` of `userId`'s erasure `state`, done one way or
+ * another, if `done` holds as the batch reaches it.
  */
-const completed = (
+const marked = (
   db: ReturnType<typeof drizzle>,
   userId: string,
   area: string,
+  state: "complete" | "skipped",
   done: SQL = sql`1`
 ) =>
   db
     .update(personErasureAreas)
-    .set({ state: "complete", updatedAt: new Date() })
+    .set({ state, updatedAt: new Date() })
     .where(
       and(
         eq(personErasureAreas.userId, userId),
@@ -112,6 +137,17 @@ const completed = (
       )
     );
 
+/**
+ * Marks area `area` of `userId`'s erasure complete, if `done` holds as the
+ * batch reaches it.
+ */
+const completed = (
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  area: string,
+  done: SQL = sql`1`
+) => marked(db, userId, area, "complete", done);
+
 /** Where an erased person's email was: an address nothing can deliver to. */
 const erasedEmail = (userId: string): string =>
   `erased-${userId}@erased.invalid`;
@@ -119,7 +155,10 @@ const erasedEmail = (userId: string): string =>
 /**
  * Their identity: their email (the address `users` keeps becomes one that
  * reaches nobody, and names nobody), whether it was verified, their
- * picture, every sign-in account and every session. Their name and ID stay.
+ * picture, every sign-in account and every session, and the codes and
+ * sessions an App's visitor had under the address that was theirs (an App
+ * may list a member's address, or their domain, app-visitors.ts). Their
+ * name and ID stay.
  * What each account named them by stays as a keyed hash, written in the
  * batch that deletes the accounts, so there is never a moment when neither
  * keeps them out. Only the accounts whose subjects were hashed go: one
@@ -145,7 +184,16 @@ const identity: ErasureStep = {
     const hashes = await Promise.all(
       [...subjects].map(async (subject) => await subjectHashOf(env, subject))
     );
+    // Their address as `users` has it still: the visitor rows go before it
+    // does, in the same batch, so a retry after it finds none left.
+    const theirAddress = sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`;
     await db.batch([
+      db
+        .delete(appVisitorCodes)
+        .where(eq(appVisitorCodes.address, theirAddress)),
+      db
+        .delete(appVisitorSessions)
+        .where(eq(appVisitorSessions.address, theirAddress)),
       db
         .update(users)
         .set({
@@ -180,6 +228,142 @@ const identity: ErasureStep = {
         )`
       ),
     ]);
+  },
+};
+
+/**
+ * What the Brain and Knowledge hold of them (GRA-1185), through the
+ * Brain's own personal purge, the one way it erases a person (purge.ts),
+ * as an admin's purge on the Knowledge page runs it, for the admin who
+ * asked: their memories, their outcomes with the Brain's tombstone that
+ * keeps them from coming back, their Personal collection with every
+ * version, section, transcript and payload, core's copies of what they
+ * gave (`coreErasure`), and the search index. It is one batch, safe to run
+ * again, so a failure leaves the area pending and the clock runs it again.
+ * Derived projections are GRA-309's, which the purge reaches as it grows.
+ */
+const brain: ErasureStep = {
+  area: "brain",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const by = {
+      actor: { type: "person" as const, userId: erasure.requestedBy },
+      userId: erasure.requestedBy,
+    };
+    const input = {
+      type: "personal" as const,
+      userId,
+      reason: "erasure_request" as const,
+    };
+    const onErase = coreErasure(env);
+    const plan = await preparePurge(brainOf(env), by, input, onErase);
+    await purge(brainOf(env), by, input, plan.token, onErase);
+    await completed(db, userId, "brain");
+  },
+};
+
+/**
+ * What still acts for them, and what of their decisions is
+ * theirs alone (GRA-1186). The runs they started are the company's
+ * records (Nick's D3): kept, naming them by their ID and name, their
+ * details removed only as run retention removes any run's. But nothing
+ * goes on running for someone erased: every unfinished run of theirs, of
+ * an App's workflow or an independent one, is cancelled or stopped as a
+ * builder's is, audited, for the admin who asked. The area is complete
+ * once each one's cancel or stop was taken, never on a stop claimed by a
+ * pass that died before sending it; the engine ends it. A run that starts for
+ * them after (a trigger of an App they own, a schedule of theirs) does
+ * nothing: every step of every run checks first that the person it acts
+ * for is still a member (`requireActivePerson`, the hosts'
+ * `#requirePerson`), so it fails at its first step. Moving ownership of
+ * what they owned is an admin's. Then the one-use
+ * confirmations they were given to answer decisions go. The decisions
+ * they answered keep who did, as company history.
+ */
+const runs: ErasureStep = {
+  area: "runs",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const by = { userId: erasure.requestedBy, staff: false };
+    const cancelled = await cancelRunsStartedBy(env, by, userId);
+    const stopped = await stopRunsFor(env, actorOf(by), userId);
+    if (cancelled.unasked > 0 || stopped.unasked > 0) {
+      throw new Error("Runs of theirs are still to be asked to end");
+    }
+    await db.batch([
+      db
+        .delete(workflowDecisionConfirmations)
+        .where(eq(workflowDecisionConfirmations.userId, userId)),
+      completed(db, userId, "runs"),
+    ]);
+  },
+};
+
+/**
+ * Their interview (GRA-1187), deleted as the onboarding deletes one on
+ * its person's own request (`deleteOnRequest`): what they said and agreed
+ * to, every drawing it was in, the Brain's records resting on it, and
+ * Stephen's lines kept from it. Found on the list by the address that was
+ * theirs, through its keyed hash, so whichever area ran first; once an
+ * admin released the address, or under an older key, it is found no more.
+ * Their entry on the list is the company's (Nick's D5): it stays, removed
+ * only by an admin.
+ */
+const interview: ErasureStep = {
+  area: "interview",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({
+        emailHash: personErasures.emailHash,
+        keyVersion: personErasures.emailKeyVersion,
+        requestedAt: personErasures.requestedAt,
+      })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    // Their address released, or hashed under an older key: they can't be
+    // found on the list by it, and whatever interview they have is left.
+    // Recorded as skipped, never as done.
+    if (erasure.emailHash === null || erasure.keyVersion !== emailKeyVersion) {
+      await marked(db, userId, "interview", "skipped");
+      return;
+    }
+    const store = onboardingStore(env);
+    let found = 0;
+    for (const { id, email } of await store.rosterEmails()) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      if ((await emailHashOf(env, email)) === erasure.emailHash) {
+        // Only an interview from a link sent before the erasure was asked
+        // for: the address may have been released, and a link sent to
+        // the entry since, as this ran (`eraseInterviewOf`).
+        // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+        await store.eraseInterviewOf(id, erasure.requestedAt.toISOString());
+        found += 1;
+      }
+    }
+    if (found === 0) {
+      // Not on the list by the address they signed in with: an interview
+      // under another address is left. IDs only.
+      log.warn("member.erasure_interview_unmatched", { userId });
+    }
+    await completed(db, userId, "interview");
   },
 };
 
@@ -329,11 +513,17 @@ const workspaceArea: ErasureStep = {
 /**
  * What they left in the company's Apps that is theirs alone (GRA-1184):
  * their preferences in every App's store (`sdk_preferences`, a host-owned
- * table no App code reaches), and the usage signals computed for them as
+ * table no App code reaches), what the forms they sent held in each
+ * store's outbox for its webhooks, and the usage signals computed for them as
  * the owner of
  * Knowledge collections (what others asked there, counted, and what they
  * haven't read or reviewed), which the daily computation no longer makes
- * for anyone erased (knowledge/signals.ts). The Apps' records they own are
+ * for anyone erased (knowledge/signals.ts), and the deliveries of the
+ * forms they sent to the Apps' webhooks (app-webhooks.ts): one still
+ * waiting carries what they sent out of the company, so it goes unsent,
+ * and one settled names them by ID only, so it goes too. None is queued
+ * for them after this (`queueFormSent`). What the forms wrote is the
+ * App's, in its store. The Apps' records they own are
  * the company's (`_ownerId` names them), and stay. Every store is asked,
  * whether or not they were a member of its App now: a store's row is never
  * deleted (a deleted store keeps it, `deleted_at` set), so every store
@@ -352,10 +542,13 @@ const apps: ErasureStep = {
       // oxlint-disable-next-line no-await-in-loop -- one store at a time
       await inJurisdiction(env, env.DATA_STORES)
         .getByName(storeId)
-        .forgetPreferences(storeId, userId);
+        .forgetPerson(storeId, userId);
     }
     await db.batch([
       db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
+      db
+        .delete(appWebhookDeliveries)
+        .where(eq(appWebhookDeliveries.personId, userId)),
       completed(db, userId, "apps"),
     ]);
   },
@@ -371,6 +564,9 @@ const steps: readonly ErasureStep[] = [
   connect,
   workspaceArea,
   apps,
+  interview,
+  runs,
+  brain,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */
@@ -393,6 +589,16 @@ const targetOf = (by: Identity, userId: unknown): string => {
   return parsed.data;
 };
 
+/** `areas` in the order the erasure runs them; any it doesn't know last. */
+const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
+  const order = new Map(steps.map(({ area }, index) => [area, index]));
+  return areas.toSorted(
+    (one, other) =>
+      (order.get(one.area) ?? steps.length) -
+      (order.get(other.area) ?? steps.length)
+  );
+};
+
 /** Where `userId`'s erasure stands, or null if none was asked for. */
 const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
   const db = drizzle(env.DB);
@@ -410,16 +616,35 @@ const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
     .select({ area: personErasureAreas.area, state: personErasureAreas.state })
     .from(personErasureAreas)
     .where(eq(personErasureAreas.userId, userId));
-  const order = new Map(steps.map(({ area }, index) => [area, index]));
   return {
     requestedAt: erasure.requestedAt.toISOString(),
     completedAt: erasure.completedAt?.toISOString() ?? null,
-    areas: areas.toSorted(
-      (one, other) =>
-        (order.get(one.area) ?? steps.length) -
-        (order.get(other.area) ?? steps.length)
-    ),
+    areas: inStepOrder(areas),
   };
+};
+
+/** The areas of the erasures of `userIds`, by the person erased. */
+const areasByPerson = async (
+  env: Env,
+  userIds: readonly string[]
+): Promise<Map<string, ErasureArea[]>> => {
+  if (userIds.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: personErasureAreas.userId,
+      area: personErasureAreas.area,
+      state: personErasureAreas.state,
+    })
+    .from(personErasureAreas)
+    // One bound value however many: D1 binds at most 100.
+    .where(inList(personErasureAreas.userId, userIds));
+  const byPerson = new Map<string, ErasureArea[]>();
+  for (const { userId, area, state } of rows) {
+    byPerson.set(userId, [...(byPerson.get(userId) ?? []), { area, state }]);
+  }
+  return byPerson;
 };
 
 /**
@@ -535,6 +760,7 @@ export const erasurePreview = async (
     email: erasure === null ? person.email : null,
     removed: await isRemoved(env, target),
     erasure,
+    areas: steps.map(({ area }) => area),
     addressKeptOut: await addressKeptOut(env, target),
   };
 };
@@ -659,6 +885,90 @@ export const releaseAddress = async (
     throw roleErrors.create("role.forbidden");
   }
   return { released: true };
+};
+
+/** The most people a page of `removedPeople` holds. */
+export const erasurePageSize = 100;
+
+const cursorSchema = z
+  .object({ at: z.iso.datetime(), userId: identifierSchema })
+  .optional();
+
+/**
+ * The page before `before` (by `at`, then the person's ID, both newest
+ * first), as SQL on `at` and `userId`: none for the latest page. A cursor
+ * that isn't one is `member.invalid`.
+ */
+const pageBefore = (
+  before: unknown,
+  at: SQLiteColumn,
+  userId: SQLiteColumn
+): SQL | undefined => {
+  const cursor = cursorSchema.safeParse(before);
+  if (!cursor.success) {
+    throw memberErrors.create("member.invalid");
+  }
+  return cursor.data === undefined
+    ? undefined
+    : sql`(${at}, ${userId}) < (${new Date(cursor.data.at).getTime()}, ${cursor.data.userId})`;
+};
+
+/**
+ * The people admins removed, most recently first, with where each one's
+ * erasure stands, for one of the client's admins: whom they may erase. The
+ * latest page, or the page before `before`.
+ */
+export const removedPeople = async (
+  env: Env,
+  by: Identity,
+  before?: unknown
+): Promise<RemovedPeoplePage> => {
+  requireMemberAdmin(by);
+  const after = pageBefore(
+    before,
+    memberRemovals.removedAt,
+    memberRemovals.userId
+  );
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: memberRemovals.userId,
+      name: users.name,
+      email: users.email,
+      removedAt: memberRemovals.removedAt,
+      requestedAt: personErasures.requestedAt,
+      completedAt: personErasures.completedAt,
+      emailHash: personErasures.emailHash,
+    })
+    .from(memberRemovals)
+    .innerJoin(users, eq(users.id, memberRemovals.userId))
+    .leftJoin(personErasures, eq(personErasures.userId, memberRemovals.userId))
+    .where(and(eq(memberRemovals.organizationId, organizationId), after))
+    .orderBy(desc(memberRemovals.removedAt), desc(memberRemovals.userId))
+    // One past the page: whether more follow.
+    .limit(erasurePageSize + 1);
+  const page = rows.slice(0, erasurePageSize);
+  const areas = await areasByPerson(
+    env,
+    page.flatMap((row) => (row.requestedAt === null ? [] : [row.userId]))
+  );
+  return {
+    people: page.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      email: row.requestedAt === null ? row.email : null,
+      removedAt: row.removedAt.toISOString(),
+      erasure:
+        row.requestedAt === null
+          ? null
+          : {
+              requestedAt: row.requestedAt.toISOString(),
+              completedAt: row.completedAt?.toISOString() ?? null,
+              areas: inStepOrder(areas.get(row.userId) ?? []),
+            },
+      addressKeptOut: row.emailHash !== null,
+    })),
+    more: rows.length > erasurePageSize,
+  };
 };
 
 /**

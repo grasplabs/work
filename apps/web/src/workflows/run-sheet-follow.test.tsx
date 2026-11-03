@@ -52,7 +52,7 @@ const traceOf = (waiting: boolean): WorkflowRunTrace => ({
   diagram: { tasks: [] },
   tasks: [],
   steps: [],
-  complete: true,
+  truncated: false,
   detailsRemoved: false,
   ...(waiting ? { aiProvider: wait } : {}),
 });

@@ -12,6 +12,8 @@ import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { reapAbandonedApps } from "./app-removal.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
+import { sweepAppVisitors } from "./app-visitors.ts";
+import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
@@ -26,6 +28,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
+import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
@@ -87,6 +90,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Exports of the company's Brain being written, and those past their
+  // window (src/knowledge/brain-export.ts).
+  { name: "brain.exports", period: "minute", run: advanceExports },
   // Shared documents' readings their writer never checked against the
   // purges since (src/onboarding/documents.ts `checkReading`).
   {
@@ -184,6 +190,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await drainEmittedEvents(env);
     },
   },
+  // Apps' events sent to company webhooks, through connect
+  // (src/app-webhooks.ts).
+  {
+    name: "apps.webhooks",
+    period: "minute",
+    run: async (env) => {
+      await drainWebhookDeliveries(env);
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",
@@ -225,6 +240,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).
   {

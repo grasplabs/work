@@ -40,6 +40,7 @@ import {
   holdsKeptMs,
   maxHeldMs,
   sweepConnectorTriggerHolds,
+  sweptPerStatement,
 } from "../src/workflows/connector-triggers.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import {
@@ -316,23 +317,16 @@ const runsOf = async (trigger: string) => {
   return rows.results;
 };
 
-/** Fills the hour of the trigger whose receipt `receipt` is: copies of it, each under a key of its own. */
-const fillHour = async (receipt: string): Promise<void> => {
-  const columns = await env.DB.prepare(
-    "SELECT name FROM pragma_table_info('workflow_start_receipts')"
-  ).all<{ name: string }>();
-  const names = columns.results.map(({ name }) => name);
-  const copied = names.map((name) => {
-    if (name === "id") {
-      return "?1";
-    }
-    return name === "idempotency_key" ? "?2" : name;
-  });
+/**
+ * Fills trigger `id`'s hourly room, but for `left` places: places taken by
+ * events of their own this hour (trigger_hour_slots).
+ */
+const fillHour = async (id: string, left = 0): Promise<void> => {
   await env.DB.batch(
-    Array.from({ length: triggeredRunsPerHour }, () =>
+    Array.from({ length: triggeredRunsPerHour - left }, () =>
       env.DB.prepare(
-        `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
-      ).bind(crypto.randomUUID(), `filler-${unique()}`, receipt)
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(id, `filler-${unique()}`, Date.now())
     )
   );
 };
@@ -649,8 +643,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     const shared = await connection();
     const trigger = await connectorTrigger(admin, workflow.id, shared);
     await deliverConnectorEvent(env, mailEvent(shared));
-    const [started] = await runsOf(trigger.id);
-    await fillHour(started?.id ?? "");
+    await fillHour(trigger.id);
     const logged = vi.spyOn(console, "warn").mockReturnValue();
 
     const over = await outcome(deliverConnectorEvent(env, mailEvent(shared)));
@@ -805,8 +798,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     const shared = await connection();
     const trigger = await connectorTrigger(admin, workflow.id, shared);
     await deliverConnectorEvent(env, mailEvent(shared));
-    const [started] = await runsOf(trigger.id);
-    await fillHour(started?.id ?? "");
+    await fillHour(trigger.id);
     const held = mailEvent(shared);
     const logged = vi.spyOn(console, "warn").mockReturnValue();
 
@@ -891,9 +883,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       await deliverConnectorEvent(env, mailEvent(shared));
       for (const name of atLimit) {
         // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
-        const [first] = await runsOf(triggers[name].id);
-        // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
-        await fillHour(first?.id ?? "");
+        await fillHour(triggers[name].id);
       }
       const warned = vi.spyOn(console, "warn").mockReturnValue();
       const event = mailEvent(shared);
@@ -1028,5 +1018,43 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       after: true,
       unusable: false,
     });
+  });
+
+  it("sweep a backlog of places past their hour larger than one statement deletes, in one clock run", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const trigger = await connectorTrigger(
+      admin,
+      workflow.id,
+      await connection()
+    );
+    const backlog = 2 * sweptPerStatement + 7;
+    const past = Date.now() - 2 * 60 * 60 * 1000;
+    const inserts = Array.from({ length: backlog }, () =>
+      env.DB.prepare(
+        "INSERT INTO trigger_hour_slots (trigger_id, event_key, taken_at) VALUES (?, ?, ?)"
+      ).bind(trigger.id, `old-${unique()}`, past)
+    );
+    // In batches D1 takes.
+    for (let at = 0; at < inserts.length; at += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch after another
+      await env.DB.batch(inserts.slice(at, at + 100));
+    }
+    await fillHour(trigger.id, triggeredRunsPerHour - 1);
+    const left = async (when: "past" | "current") => {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM trigger_hour_slots WHERE trigger_id = ? AND taken_at ${when === "past" ? "<=" : ">"} ?`
+      )
+        .bind(trigger.id, Date.now() - 60 * 60 * 1000)
+        .first<{ n: number }>();
+      return row?.n;
+    };
+
+    await sweepConnectorTriggerHolds(env, new Date());
+
+    expect({
+      past: await left("past"),
+      current: await left("current"),
+    }).toStrictEqual({ past: 0, current: 1 });
   });
 });

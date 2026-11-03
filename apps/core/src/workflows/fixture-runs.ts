@@ -58,7 +58,7 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 //   test's own fixture store, never a real model or store
 //   (fixture-calls.ts).
 // - It takes the organization's quotas or shares: nothing of it is
-//   admitted against a lineage or the client's queue (`unadmitted`); its
+//   admitted against a lineage or the slots (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
 //   (`testRunOwnerOf`); its steps are bounded by the step limit and its
 //   time by its test, which removes it.
@@ -329,6 +329,7 @@ export const runFixtureWorkflow = async (
         runId,
         // Its own lineage's root: a test's run starts no children.
         rootRunId: runId,
+        accountRunId: runId,
         workflowId: pin.workflow,
         version: pin.version,
         principal: row.principal,

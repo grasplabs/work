@@ -7,9 +7,8 @@ import { identifierSchema } from "./ids.ts";
  * it deploys: who made the change, what it was (a release, a setting),
  * the release the version runs and when it was made. Core records it in
  * the deployment's audit log as `platform.updated`, once per version
- * (core's src/platform-updates.ts). A rollback, which makes no version,
- * the admin sends in a notice instead (`platformUpdatePath`).
- * Identifiers only, as every audit detail is.
+ * (core's src/platform-updates.ts). Identifiers only, as every audit
+ * detail is.
  */
 export const platformChangeSchema = z.object({
   /** The staff member, or the rollout, that made the change. */
@@ -18,7 +17,7 @@ export const platformChangeSchema = z.object({
    * What changed, e.g. `release`, `secrets` (new secrets on the same
    * release: shared ones, or the deployment's own after a rotation),
    * `settings` (its sign-in, on the same release),
-   * `settings_and_secrets` (both in one version) or `rollback`.
+   * or `settings_and_secrets` (both in one version).
    */
   what: identifierSchema,
   /** The release the version runs, e.g. `26.01.123`. */
@@ -29,40 +28,9 @@ export const platformChangeSchema = z.object({
 export type PlatformChange = z.infer<typeof platformChangeSchema>;
 
 /**
- * Where the admin tells core of a platform update that made no new
- * version, a rollback to one core has run before, which the clock would
- * never record again: core records it as `platform.updated` (core's
- * src/platform-updates.ts). Behind the router-secret check like every
- * route, and signed (`platformUpdateSignatureHeader`).
- */
-export const platformUpdatePath = "/platform/updates";
-
-/**
- * The header carrying the notice's signature: lowercase hex HMAC-SHA256
- * of the request body, with the key `hkdfHmacKey` derives from core's
- * auth secret for `platformUpdatePurpose`.
+ * The header carrying the signature of what the admin sends core:
+ * lowercase hex HMAC-SHA256 of the request body, with a key `hkdfHmacKey`
+ * derives from core's auth secret for each request's own purpose (core's
+ * src/console-signed.ts).
  */
 export const platformUpdateSignatureHeader = "x-grasp-console-signature";
-
-/** The purpose a notice's signing key is derived for (`hkdfHmacKey`). */
-export const platformUpdatePurpose = "grasp-os platform update key";
-
-/** The most bytes a notice's body may have: far above what one takes. */
-export const platformUpdateMaxBytes = 4096;
-
-/**
- * How long after it was sent core takes a notice, and how far ahead of
- * core's clock it may be: a notice caught on its way can't be sent again
- * later.
- */
-export const platformUpdateMaxSkewMs = 5 * 60 * 1000;
-
-/** What the admin tells core: the version now running, and the change. */
-export const platformUpdateNoticeSchema = z.object({
-  /** The version of core all traffic goes to now. */
-  versionId: identifierSchema,
-  change: platformChangeSchema,
-  /** When the admin sent it. */
-  sentAt: z.iso.datetime(),
-});
-export type PlatformUpdateNotice = z.infer<typeof platformUpdateNoticeSchema>;

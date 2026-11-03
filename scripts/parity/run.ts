@@ -39,7 +39,6 @@ import { chromium } from "@playwright/test";
 import type { Browser } from "@playwright/test";
 import { z } from "zod";
 
-import { localStaff } from "../../apps/core/test/sign-in-config.ts";
 import { people } from "../seed/company.ts";
 import {
   cookieHeader,
@@ -54,12 +53,7 @@ import {
   parityWidths,
   prototypeCommit,
 } from "./routes.ts";
-import type {
-  ParityRoute,
-  ParitySession,
-  ParityTheme,
-  ParityWidth,
-} from "./routes.ts";
+import type { ParityRoute, ParityTheme, ParityWidth } from "./routes.ts";
 
 const root = path.join(import.meta.dirname, "../..");
 
@@ -208,17 +202,12 @@ const startPrototype = async (): Promise<void> => {
 const signInTimeoutMs = 30_000;
 
 /**
- * A session cookie in Grasp OS for `as`: the seed's admin, who sees every
- * page a company's people do, or the stack's Grasp staff member, through
- * Grasp's own tenant, for the pages only staff reach.
+ * A session cookie in Grasp OS for the seed's admin, who sees every page a
+ * company's people do.
  */
 const graspSession = async (
-  as: ParitySession,
   signal = AbortSignal.timeout(signInTimeoutMs)
 ): Promise<string> => {
-  if (as === "staff") {
-    return await signInAs(localStaff, { providerId: "grasp-staff", signal });
-  }
   const [admin] = people;
   if (admin === undefined) {
     throw new Error("The seed has no people.");
@@ -234,7 +223,6 @@ const waitForSignIn = async (): Promise<void> => {
     try {
       // oxlint-disable-next-line no-await-in-loop -- tried one at a time
       await graspSession(
-        "admin",
         AbortSignal.timeout(Math.max(1, Math.min(left, signInTimeoutMs)))
       );
       return;
@@ -401,11 +389,10 @@ const shotOf = async (
 const takeAll = async (
   browser: Browser,
   out: string,
-  cookies: Readonly<Record<ParitySession, string>>
+  cookie: string
 ): Promise<ReportPage[]> => {
   const pages: ReportPage[] = [];
   for (const route of routesAsked()) {
-    const cookie = cookies[route.session ?? "admin"];
     const pairs: ShotPair[] = [];
     for (const width of parityWidths) {
       for (const theme of parityThemes) {
@@ -510,13 +497,10 @@ const main = async (): Promise<void> => {
   try {
     await startPrototype();
     await startGrasp();
-    const cookies = {
-      admin: await graspSession("admin"),
-      staff: await graspSession("staff"),
-    };
+    const cookie = await graspSession();
     const browser = await chromium.launch();
     try {
-      const pages = await takeAll(browser, out, cookies);
+      const pages = await takeAll(browser, out, cookie);
       writeFileSync(
         path.join(out, reportMarker),
         `${JSON.stringify(ownedFiles(pages), null, 2)}\n`

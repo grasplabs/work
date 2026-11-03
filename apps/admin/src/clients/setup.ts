@@ -2,21 +2,20 @@
  * A client's own Grasp as the admin runs it, read for the admin's Setup
  * section (src/admin/setup.tsx): its provisioning, its account and what
  * the admin last made live there, every deploy, the releases it can
- * get and the rollout that last reached it, how its people sign in, its
+ * get and its last deploy, how its people sign in, its
  * secrets, and what staff did to it by hand. All of it is what the
  * admin itself recorded in D1, read with the client pages' own queries
  * where they have one; nothing here asks its account or its core.
  */
-import { desc, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
+  clientDeploys,
   clients,
   clientSealedSecrets,
   clientWorkers,
-  rollouts,
-  rolloutTargets,
 } from "../db/schema.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -24,6 +23,7 @@ import { bucketNames, databaseNames } from "../deploy/resources.ts";
 import { getProvisioning } from "../provision/queries.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
+import { targetReleaseOf } from "../rollout/targets.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
 import { daysUntil } from "./teams-bot.ts";
@@ -104,30 +104,25 @@ export interface ClientSetup {
     id: string;
     notes: string;
     builtAt: Date;
-    versionMajor: number | null;
-    versionMinor: number | null;
   }[];
   /** The newest release of all, whether or not it is listed. */
   newestReleaseId: string | null;
   /** Whether the admin has older releases than those. */
   moreReleases: boolean;
-  /** How many releases came after the one its core runs; null when that can't be told. */
-  behind: number | null;
-  /** The latest rollout the client was in, and how far it got with it. */
-  rollout: {
-    id: string;
-    kind: (typeof rollouts.kind.enumValues)[number];
-    releaseId: string | null;
-    status: (typeof rollouts.status.enumValues)[number];
-    ring: number;
-    target: (typeof rolloutTargets.status.enumValues)[number];
+  /** The release it should run (src/rollout/desired.ts); null while its channel has none. */
+  target: string | null;
+  /** Its last deploy by the reconciler (src/rollout/reconciler.ts); null before any. */
+  deploy: {
+    releaseId: string;
+    status: (typeof clientDeploys.status.enumValues)[number];
     error: string | null;
+    startedAt: Date;
   } | null;
   /** What staff did to it by hand, the newest first. */
   done: SetupEvent[];
   /**
    * Everything the audit log keeps of it, the newest first: staff's
-   * changes and its provisioning, deploys and rollouts, the latest
+   * changes and its provisioning and deploys, the latest
    * `historyLimit` (src/clients/queries.ts).
    */
   history: HistoryEntry[];
@@ -138,7 +133,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.create",
   "client.place",
   "client.provision_placed",
-  "client.ring",
+  "client.channel",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
@@ -198,46 +193,21 @@ const resourcesOf = async (
   };
 };
 
-/** The latest rollout client `clientId` was in, and its part in it. */
-const rolloutOf = async (
+/** Client `clientId`'s last deploy by the reconciler. */
+const deployOf = async (
   db: AdminDatabase,
   clientId: string
-): Promise<ClientSetup["rollout"]> => {
-  const [latest] = await db
+): Promise<ClientSetup["deploy"]> =>
+  (await db
     .select({
-      id: rollouts.id,
-      kind: rollouts.kind,
-      releaseId: rollouts.releaseId,
-      status: rollouts.status,
-      ring: rollouts.ring,
-      target: rolloutTargets.status,
-      error: rolloutTargets.error,
+      releaseId: clientDeploys.releaseId,
+      status: clientDeploys.status,
+      error: clientDeploys.error,
+      startedAt: clientDeploys.startedAt,
     })
-    .from(rolloutTargets)
-    .innerJoin(rollouts, eq(rollouts.id, rolloutTargets.rolloutId))
-    .where(eq(rolloutTargets.clientId, clientId))
-    .orderBy(desc(rollouts.createdAt))
-    .limit(1);
-  return latest ?? null;
-};
-
-/**
- * How many releases came after `runs`, the one a client runs, in the
- * order the release list has them (`listReleases`): null when it runs none, or one the admin doesn't have.
- */
-const behindOf = async (
-  db: AdminDatabase,
-  runs: string | null
-): Promise<number | null> => {
-  if (runs === null) {
-    return null;
-  }
-  const [row] = await db.all<{ behind: number | null }>(sql`
-    SELECT (SELECT count(*) FROM releases newer WHERE newer.built_at > own.built_at
-      OR (newer.built_at = own.built_at AND newer.id > own.id)) AS behind
-    FROM releases own WHERE own.id = ${runs}`);
-  return row?.behind ?? null;
-};
+    .from(clientDeploys)
+    .where(eq(clientDeploys.clientId, clientId))
+    .get()) ?? null;
 
 /** Client `clientId`'s own Grasp, or null when the admin has neither its record nor a run. */
 export const getClientSetup = async (
@@ -258,16 +228,17 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [settings, sealedSecrets, workers, listed, rollout, history, watched] =
+  const [settings, sealedSecrets, workers, listed, deploy, history, watched] =
     await Promise.all([
       clientSettings(db, clientId),
       sealedSecretsOf(db, clientId),
       workersOf(db, clientId),
       listReleases(db),
-      rolloutOf(db, clientId),
+      deployOf(db, clientId),
       clientHistory(db, clientId),
       lastWatched(env, clientId),
     ]);
+  const target = await targetReleaseOf(db, clientId);
   // Core's release is the one its people meet.
   const runs =
     workers.find(({ worker }) => worker === "core")?.releaseId ?? null;
@@ -287,18 +258,12 @@ export const getClientSetup = async (
     resources: await resourcesOf(db, runs),
     releases: listed.releases
       .slice(0, setupReleaseLimit)
-      .map(({ id, notes, builtAt, versionMajor, versionMinor }) => ({
-        id,
-        notes,
-        builtAt,
-        versionMajor,
-        versionMinor,
-      })),
+      .map(({ id, notes, builtAt }) => ({ id, notes, builtAt })),
     newestReleaseId: listed.releases[0]?.id ?? null,
     moreReleases:
       listed.releases.length > setupReleaseLimit || listed.older !== null,
-    behind: await behindOf(db, runs),
-    rollout,
+    target: target?.releaseId ?? null,
+    deploy,
     done: history.filter(
       ({ actor, action }) => actor !== "system" && byHand.has(action)
     ),

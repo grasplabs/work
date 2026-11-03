@@ -10,7 +10,7 @@ import { jsonOf, rewrittenStored, storedTexts } from "./interview-erasure.ts";
 import { onboardingStore } from "./store.ts";
 
 // Grasp's staff's own text in the onboarding as a Knowledge purge reaches
-// it (GRA-1126): their notes, and how Stephen is set up. A purge is the
+// it (GRA-1126): how Stephen is set up. A purge is the
 // admin's hard delete, and staff may have typed what it takes out (a
 // name, an address). Only a purge of terms reaches it (`rewrite`): every
 // string in it is rewritten where it holds one. A purge naming a document
@@ -76,15 +76,10 @@ const setupTexts = (stored: string): string[] => {
 };
 
 /** Every text a purge looks in of `said` (the store's `staffTextsSaid`). */
-const textsOf = (said: {
-  notes: readonly { text: string }[];
-  setup: string | null;
-}): string[] => [
-  ...said.notes.map(({ text }) => text),
-  ...(said.setup === null ? [] : setupTexts(said.setup)),
-];
+const textsOf = (said: { setup: string | null }): string[] =>
+  said.setup === null ? [] : setupTexts(said.setup);
 
-/** Staff's notes and Stephen's setup, as a purge of terms reaches them. */
+/** Stephen's setup, as a purge of terms reaches it. */
 export const staffTextErasure = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
 ): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => {
@@ -92,10 +87,7 @@ export const staffTextErasure = (
   return {
     count: async (holds) => {
       const said = await store.staffTextsSaid();
-      return (
-        said.notes.filter(({ text }) => holds(text)).length +
-        (said.setup !== null && setupTexts(said.setup).some(holds) ? 1 : 0)
-      );
+      return said.setup !== null && setupTexts(said.setup).some(holds) ? 1 : 0;
     },
     rewrite: async (by, rewrite) => {
       const actor = auditActorSchema.parse(by.actor);
@@ -109,10 +101,6 @@ export const staffTextErasure = (
         const landed = await store.rewriteStaffTexts(
           said,
           {
-            notes: said.notes.map(({ id, text }) => ({
-              id,
-              text: rewrite(text),
-            })),
             setup:
               said.setup === null ? null : rewrittenSetup(said.setup, rewrite),
           },

@@ -1,3 +1,5 @@
+import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
+import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
@@ -265,7 +267,7 @@ export const personErasureAreas = sqliteTable(
       .notNull()
       .references(() => personErasures.userId),
     area: text().notNull(),
-    state: text({ enum: ["pending", "complete"] }).notNull(),
+    state: text({ enum: ["pending", "complete", "skipped"] }).notNull(),
     attempts: integer().notNull().default(0),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -660,61 +662,71 @@ export const permissions = sqliteTable(
  * `pending_version` one put up for review. Both only ever name a version
  * the App has.
  */
-export const apps = sqliteTable("apps", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text().notNull(),
-  /** The user who created it, whom its triggered runs act for. */
-  ownerId: text("owner_id").notNull(),
-  /**
-   * Who answers for it (apps.ts `updateApp`), when a builder named someone
-   * other than its owner; null for its owner. Grants nothing.
-   */
-  responsibleId: text("responsible_id"),
-  /**
-   * Whom it is made for, a person or a team, when a builder said; both
-   * null otherwise. Grants nothing.
-   */
-  audienceType: text("audience_type", { enum: ["person", "team"] }),
-  audienceId: text("audience_id"),
-  /**
-   * The business process it serves (@grasp-os/shared/business-processes),
-   * when a builder said; null otherwise. Grants nothing.
-   */
-  process: text(),
-  blueprint: text(),
-  currentVersion: integer("current_version"),
-  pendingVersion: integer("pending_version"),
-  /**
-   * Where it is in its life (app-status.ts): a new App is a draft, open to
-   * its builders alone, until one publishes it.
-   */
-  status: text({ enum: ["draft", "published", "archived"] })
-    .notNull()
-    .default("draft"),
-  /** When its status last changed, and who changed it; null until then. */
-  statusChangedAt: timestamp("status_changed_at"),
-  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
-    userId: string;
-    staff: boolean;
-  }>(),
-  createdAt: timestamp("created_at").notNull(),
-  /**
-   * When it was removed (app-removal.ts), and by whom: a removed App is a
-   * tombstone, kept so what names it stays history, and answers nothing.
-   * Null while it is an App.
-   */
-  removedAt: timestamp("removed_at"),
-  removedBy: text("removed_by"),
-  /**
-   * Where a chat's agent created it (agent-builds.ts), while nobody has
-   * accepted it yet: provisional until its first version is made current
-   * (`makeCurrent`), and reaped once abandoned (app-removal.ts). Both null
-   * for an App a person created, and once accepted.
-   */
-  provisionalWorkspaceId: text("provisional_workspace_id"),
-  provisionalChatId: text("provisional_chat_id"),
-});
+export const apps = sqliteTable(
+  "apps",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** The user who created it, whom its triggered runs act for. */
+    ownerId: text("owner_id").notNull(),
+    /**
+     * Who answers for it (apps.ts `updateApp`), when a builder named someone
+     * other than its owner; null for its owner. Grants nothing.
+     */
+    responsibleId: text("responsible_id"),
+    /**
+     * Whom it is made for, a person or a team, when a builder said; both
+     * null otherwise. Grants nothing.
+     */
+    audienceType: text("audience_type", { enum: ["person", "team"] }),
+    audienceId: text("audience_id"),
+    /**
+     * The business process it serves (@grasp-os/shared/business-processes),
+     * when a builder said; null otherwise. Grants nothing.
+     */
+    process: text(),
+    blueprint: text(),
+    currentVersion: integer("current_version"),
+    pendingVersion: integer("pending_version"),
+    /**
+     * Where it is in its life (app-status.ts): a new App is a draft, open to
+     * its builders alone, until one publishes it.
+     */
+    status: text({ enum: ["draft", "published", "archived"] })
+      .notNull()
+      .default("draft"),
+    /** When its status last changed, and who changed it; null until then. */
+    statusChangedAt: timestamp("status_changed_at"),
+    statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * The last part of its own address under the workspace's (app-own-links.ts),
+     * one App's at most; null while its builders gave it none. It opens the
+     * App only while it is published.
+     */
+    link: text(),
+    /**
+     * When it was removed (app-removal.ts), and by whom: a removed App is a
+     * tombstone, kept so what names it stays history, and answers nothing.
+     * Null while it is an App.
+     */
+    removedAt: timestamp("removed_at"),
+    removedBy: text("removed_by"),
+    /**
+     * Where a chat's agent created it (agent-builds.ts), while nobody has
+     * accepted it yet: provisional until its first version is made current
+     * (`makeCurrent`), and reaped once abandoned (app-removal.ts). Both null
+     * for an App a person created, and once accepted.
+     */
+    provisionalWorkspaceId: text("provisional_workspace_id"),
+    provisionalChatId: text("provisional_chat_id"),
+  },
+  (table) => [uniqueIndex("apps_link").on(table.link)]
+);
 
 /**
  * The integrations a builder added to an App by hand (app-integrations.ts):
@@ -736,6 +748,103 @@ export const appIntegrations = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.appId, table.source, table.connectorId] }),
   ]
+);
+
+/**
+ * A company's webhooks for an App (src/app-webhooks.ts): the https URL
+ * Grasp POSTs the App's `events` to. Its secret is derived from its ID,
+ * never kept. `approved_by` and `approved_at` say which admin let the
+ * App's data go to the URL, and when; null until one did. A URL never
+ * changes, so an approval is always of the URL it was given for.
+ * `dropped` counts the deliveries it missed because too many were
+ * waiting.
+ */
+export const appWebhooks = sqliteTable(
+  "app_webhooks",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    url: text().notNull(),
+    events: text({ mode: "json" }).notNull().$type<AppWebhookEvent[]>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
+    dropped: integer().notNull().default(0),
+  },
+  (table) => [index("app_webhooks_app").on(table.appId)]
+);
+
+/**
+ * The deliveries waiting for, or made to, a webhook (src/app-webhooks.ts):
+ * core's outbox, drained every minute through connect. Each is one event,
+ * once per webhook (`dedupe`); its ID is its idempotency key. `values`
+ * holds what a form sent only when the webhook was approved as it was
+ * sent, and is cleared once the delivery settles. `delivery_at` is when
+ * it is next due, or the lease of the drain sending it. `person_id` is
+ * who sent a `form_sent`'s form (null for any other event), so erasing
+ * them takes their forms' deliveries out (person-erasure.ts).
+ */
+export const appWebhookDeliveries = sqliteTable(
+  "app_webhook_deliveries",
+  {
+    id: text().primaryKey(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => appWebhooks.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    event: text({ enum: appWebhookEvents }).notNull(),
+    dedupe: text().notNull(),
+    occurredAt: timestamp("occurred_at").notNull(),
+    version: integer(),
+    submission: text(),
+    operation: text(),
+    values: text({ mode: "json" }).$type<Json>(),
+    valuesLeftOut: integer("values_left_out", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    attempts: integer().notNull().default(0),
+    deliveryAt: timestamp("delivery_at"),
+    deliveredAt: timestamp("delivered_at"),
+    /** `delivered`, or why it was given up on: a refusal or the last failure. */
+    outcome: text(),
+    personId: text("person_id"),
+  },
+  (table) => [
+    index("app_webhook_deliveries_person").on(table.personId),
+    uniqueIndex("app_webhook_deliveries_dedupe").on(
+      table.webhookId,
+      table.dedupe
+    ),
+    index("app_webhook_deliveries_due")
+      .on(table.deliveryAt)
+      .where(sql`delivered_at IS NULL`),
+    index("app_webhook_deliveries_settled")
+      .on(table.deliveredAt)
+      .where(sql`delivered_at IS NOT NULL`),
+  ]
+);
+
+/**
+ * The forms an App's screens sent that its webhooks were told of
+ * (src/app-webhook-queue.ts): one per submission, whoever sent it to
+ * whichever function under whichever key, in whichever run (`id`, a hash
+ * of all of it), so each run is told once. `told_at` is when; `claim`
+ * is the batch's that told it, which alone counts what it told.
+ */
+export const appFormSubmissions = sqliteTable(
+  "app_form_submissions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    toldAt: timestamp("told_at").notNull(),
+    claim: text().notNull(),
+  },
+  (table) => [index("app_form_submissions_told").on(table.toldAt)]
 );
 
 /**
@@ -1897,18 +2006,10 @@ export const runLineageAttempts = sqliteTable(
      */
     hostCalls: integer("host_calls").notNull().default(0),
     /**
-     * Who the attempt's run acts for (a user ID) and its App: whose shares
-     * of the attempts running at once it takes while it holds
-     * (src/workflows/admission.ts).
+     * The attempt's App: whose slots of the attempts running at once it
+     * takes while it holds (src/workflows/admission.ts).
      */
-    subject: text().notNull().default(""),
     resource: text().notNull().default(""),
-    /**
-     * The SHA-256 of the attempt's step name: whose place in the queue its
-     * lease ends, and an older attempt of the step's late refusal may not
-     * put back (src/workflows/admission.ts).
-     */
-    stepHash: text("step_hash").notNull().default(""),
     /**
      * Whether the attempt's own settle gave back the host calls it
      * reserved and didn't make (src/workflows/quotas.ts): once only, also
@@ -1928,14 +2029,11 @@ export const runLineageAttempts = sqliteTable(
     index("run_lineage_attempts_held_idx")
       .on(table.rootRunId, table.admittedAt)
       .where(sql`settled_at IS NULL`),
-    // The attempts running at once, in all, for a person and of an App:
-    // what fair admission counts (src/workflows/admission.ts), each until
-    // its hold ends, an attempt's wall time at most after its admission.
+    // The attempts running at once, in all and of an App: what admission
+    // counts (src/workflows/admission.ts), each until its hold ends, an
+    // attempt's wall time at most after its admission.
     index("run_lineage_attempts_running_idx")
       .on(table.admittedAt)
-      .where(sql`settled_at IS NULL`),
-    index("run_lineage_attempts_subject_idx")
-      .on(table.subject, table.admittedAt)
       .where(sql`settled_at IS NULL`),
     index("run_lineage_attempts_resource_idx")
       .on(table.resource, table.admittedAt)
@@ -1944,79 +2042,18 @@ export const runLineageAttempts = sqliteTable(
 );
 
 /**
- * The client's queue of workflow attempts waiting for a share of the
- * attempts running at once (src/workflows/admission.ts): one entry per
- * step of a run refused for want of one, by the SHA-256 of the step's
- * name (a keyed step's name holds the run's data), with who the run acts
- * for, its App, its turn (one past the latest turn of the places of the
- * same person and App waiting as it joined), when it joined and when it last asked. Places
- * are served by turn, then by when they joined: round-robin between the
- * people waiting in an App, first come, first served within each. An
- * entry that hasn't asked for a while is no longer waiting, and goes; the
- * step's next attempt joins at the back.
- */
-export const workflowAdmissionQueue = sqliteTable(
-  "workflow_admission_queue",
-  {
-    runId: text("run_id").notNull(),
-    stepHash: text("step_hash").notNull(),
-    subject: text().notNull(),
-    resource: text().notNull(),
-    enqueuedAt: timestamp("enqueued_at").notNull(),
-    seenAt: timestamp("seen_at").notNull(),
-    /** Which share it waits for: `client`, `person` or `app`. */
-    waitingFor: text("waiting_for", {
-      enum: ["client", "person", "app"],
-    }).notNull(),
-    /** When it asks again at the latest: the run's summary shows it. */
-    retryAt: timestamp("retry_at").notNull(),
-    turn: integer().notNull(),
-    /**
-     * The deadline of the step's attempt that last wrote the place: which
-     * attempt owns it. An older attempt of the step (an earlier deadline)
-     * neither writes nor gives up a place a newer one wrote.
-     */
-    attemptDeadline: timestamp("attempt_deadline").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.runId, table.stepHash] }),
-    // The places still asking, in the order they are served.
-    index("workflow_admission_queue_order_idx").on(
-      table.seenAt,
-      table.turn,
-      table.enqueuedAt
-    ),
-    // The places of a person, and of an App: their caps, and their turns.
-    index("workflow_admission_queue_subject_idx").on(
-      table.subject,
-      table.resource,
-      table.seenAt
-    ),
-    index("workflow_admission_queue_resource_idx").on(
-      table.resource,
-      table.seenAt
-    ),
-  ]
-);
-
-/**
- * The build jobs building now, a lease each (src/build-admission.ts): the
- * client's share of build jobs at once, and each App's, held to the quota
- * limits (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
+ * The build jobs building now, a lease each (src/build-admission.ts): at
+ * most a fixed number build at once. A lease counts while it is
  * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
- * of the step that took it. One row per lease a job's step took, in the
- * order of the job's own sequence (`seq`): its step, the round it waited
- * and the engine's attempt.
+ * of the step that took it. One row per lease a job's step took, by the
+ * job's own sequence (`seq`): its step, the round it waited and the
+ * engine's attempt.
  */
 export const buildLeases = sqliteTable(
   "build_leases",
   {
     jobId: text("job_id").notNull(),
     seq: integer().notNull(),
-    /** The person the job's chat is: whose turn among an App's places it takes. */
-    subject: text().notNull(),
-    /** The job's App: its key, of which one job builds at once. */
-    resource: text().notNull(),
     admittedAt: timestamp("admitted_at").notNull(),
     reservedMs: integer("reserved_ms").notNull(),
     settledAt: timestamp("settled_at"),
@@ -2027,72 +2064,6 @@ export const buildLeases = sqliteTable(
     // what a lease checks it still holds by (any taken since it ended),
     // and what retention drops.
     index("build_leases_admitted_idx").on(table.admittedAt),
-    index("build_leases_resource_idx")
-      .on(table.resource, table.admittedAt)
-      .where(sql`settled_at IS NULL`),
-  ]
-);
-
-/**
- * A build job's commit, fenced by its lease (src/build-admission.ts): a
- * row written first in the commit's own transaction, and removed last.
- * The database refuses the row, and so the whole commit, unless the lease
- * named still holds as the transaction runs (the trigger in migration
- * 0091): a commit whose step stalled past its lease never lands beside
- * another job of its App.
- */
-export const buildCommitFences = sqliteTable(
-  "build_commit_fences",
-  {
-    jobId: text("job_id").notNull(),
-    seq: integer().notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.jobId, table.seq] })]
-);
-
-/**
- * The build jobs waiting for a lease (src/build-admission.ts), one place
- * per job, served as workflow attempts' places are (src/workflows/
- * admission.ts): by turn, then first come, first served, never behind an
- * App whose own share is full. A place lasts while its job asks again.
- */
-export const buildAdmissionQueue = sqliteTable(
-  "build_admission_queue",
-  {
-    jobId: text("job_id").primaryKey(),
-    subject: text().notNull(),
-    resource: text().notNull(),
-    enqueuedAt: timestamp("enqueued_at").notNull(),
-    seenAt: timestamp("seen_at").notNull(),
-    /** Which share it waits for: the client's, its person's, or its App's (`key`). */
-    waitingFor: text("waiting_for", {
-      enum: ["client", "person", "key"],
-    }).notNull(),
-    /** When it asks again at the latest: the job's view shows it. */
-    retryAt: timestamp("retry_at").notNull(),
-    turn: integer().notNull(),
-    /**
-     * The job's sequence as it last wrote the place: an older step or
-     * attempt of the job neither writes nor gives up a place a newer one
-     * wrote.
-     */
-    ownerSeq: integer("owner_seq").notNull(),
-  },
-  (table) => [
-    index("build_admission_queue_order_idx").on(
-      table.seenAt,
-      table.turn,
-      table.enqueuedAt
-    ),
-    index("build_admission_queue_subject_idx").on(
-      table.subject,
-      table.resource,
-      table.seenAt
-    ),
-    index("build_admission_queue_resource_idx").on(
-      table.resource,
-      table.seenAt
-    ),
   ]
 );
 
@@ -2137,13 +2108,11 @@ export const workflowModelWaits = sqliteTable(
     /** The call of the step that wrote it: only it clears it (model-waits.ts). */
     owner: text().notNull(),
     /**
-     * Which share its call waits for: `client`, `person` or `app`; null
+     * Which limit its call waits for: `client` or `person`; null
      * once the call that owns the row stopped waiting (a tombstone, so an
      * older call's late note can't bring the wait back: model-waits.ts).
      */
-    waitingFor: text("waiting_for", {
-      enum: ["client", "person", "app"],
-    }),
+    waitingFor: text("waiting_for", { enum: ["client", "person"] }),
     /** When its call asks again at the latest. */
     retryAt: timestamp("retry_at").notNull(),
     /** When its call last asked: it lapses a while after. */
@@ -2274,12 +2243,18 @@ export const runLineageAccounts = sqliteTable(
     rootRunId: text("root_run_id")
       .notNull()
       .references(() => runLineages.rootRunId),
+    /**
+     * The App whose runs it is charged; for a `triggered` account, the
+     * independent workflow's ID instead.
+     */
     appId: text("app_id").notNull(),
     /**
      * `joined` for an App's runs in a lineage another App started,
-     * `rejoined` for the root's App's runs under another App's run.
+     * `rejoined` for the root's App's runs under another App's run,
+     * `triggered` for an independent workflow's runs its triggers started
+     * in the lineage (quotas.ts, `triggeredAccountClaimed`).
      */
-    kind: text({ enum: ["joined", "rejoined"] }).notNull(),
+    kind: text({ enum: ["joined", "rejoined", "triggered"] }).notNull(),
     accountRunId: text("account_run_id").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
@@ -3548,6 +3523,107 @@ export const guestChats = sqliteTable(
   ]
 );
 
+/**
+ * Who may open a published App without being a member (app-visitors.ts):
+ * each address its builders listed, and each domain whose every address
+ * may. Only these can ask for a code.
+ */
+export const appVisitorEntries = sqliteTable(
+  "app_visitor_entries",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    kind: text({ enum: ["address", "domain"] }).notNull(),
+    /** Lower case, ASCII (`appVisitorEntrySchema`). */
+    value: text().notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.kind, table.value] })]
+);
+
+/**
+ * The functions each version of an App grants its visitors
+ * (app-visitor-calls.ts), as its builders chose them: the App's own
+ * queries and mutations, by path. A version starts with none, so a new
+ * current version grants nothing until a builder grants it again.
+ */
+export const appVisitorGrants = sqliteTable(
+  "app_visitor_grants",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    version: integer().notNull(),
+    function: text().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version, table.function] }),
+  ]
+);
+
+/**
+ * The codes sent to visitors (app-visitors.ts), each kept as its SHA-256
+ * only, with how many tries it took. A row outlives its code (signed in,
+ * used up or expired) for an hour, so the hour's codes per address and
+ * per App are counted from it, then the sweep deletes it.
+ */
+export const appVisitorCodes = sqliteTable(
+  "app_visitor_codes",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    codeHash: text("code_hash").notNull(),
+    tries: integer().notNull(),
+    /** When it was used, or ran out of tries: it takes nothing after. */
+    usedAt: timestamp("used_at"),
+    sentAt: timestamp("sent_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // An address's codes for an App, newest first: the one to check, and
+    // the hour's count.
+    index("app_visitor_codes_address_idx").on(
+      table.appId,
+      table.address,
+      table.sentAt
+    ),
+    // The hour's count for the App.
+    index("app_visitor_codes_sent_idx").on(table.appId, table.sentAt),
+    // What the sweep deletes, oldest first.
+    index("app_visitor_codes_sweep_idx").on(table.sentAt),
+  ]
+);
+
+/**
+ * Signed-in visitors (app-visitors.ts): each session opens one App, until
+ * it expires or the visitor signs out. Kept as its token's SHA-256 only.
+ */
+export const appVisitorSessions = sqliteTable(
+  "app_visitor_sessions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_visitor_sessions_token_idx").on(table.tokenHash),
+    // What the sweep deletes.
+    index("app_visitor_sessions_expires_idx").on(table.expiresAt),
+  ]
+);
+
 /** A guest chat's messages, in order: the guest's, and the model's answers. */
 export const guestMessages = sqliteTable(
   "guest_messages",
@@ -3777,8 +3853,8 @@ export const workflowResourceMembers = sqliteTable(
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
  * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule), owned by whoever created it,
- * never by the workflow's owner or an App. `current_version` names the
+ * connector event, a webhook, a schedule, mail to its address), owned by
+ * whoever created it, never by the workflow's owner or an App. `current_version` names the
  * version (`trigger_resource_versions`) future starts use; `enabled` false,
  * or `deleted_at`, stops future starts, never runs already started. Its
  * starts need a permission of its own (`start` on the workflow) like any
@@ -3788,12 +3864,19 @@ export const triggerResources = sqliteTable("trigger_resources", {
   id: text().primaryKey(),
   ownerId: text("owner_id").notNull(),
   kind: text({
-    enum: ["system", "connector", "webhook", "schedule"],
+    enum: ["system", "connector", "webhook", "schedule", "email"],
   }).notNull(),
   currentVersion: integer("current_version").notNull(),
   enabled: integer({ mode: "boolean" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * For an email trigger: the part before the `@` of the address it
+   * receives mail at (`trigger-<token>`, 128 random bits), set as it is
+   * created and never changed; null for any other kind. Unlike its ID,
+   * shown only to whoever may see the trigger, never logged or audited.
+   */
+  emailAddress: text("email_address").unique(),
 });
 
 /**
@@ -3842,7 +3925,9 @@ export const triggerResourceVersions = sqliteTable(
      * how each event becomes its run's input (canonical JSON: input fields
      * to JSON Pointers into the event, and literal defaults), checked as
      * the version was written (trigger-resources.ts). Its event type is
-     * `event_type`, with no `event_contract`. Null for any other kind.
+     * `event_type`, with no `event_contract`. An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
      */
     connectionId: text("connection_id"),
     connectionResource: text("connection_resource"),
@@ -3953,10 +4038,11 @@ export const agentHeldStarts = sqliteTable(
 );
 
 /**
- * Where an event stands for a connector trigger that didn't start its run
- * (src/workflows/connector-triggers.ts), by the trigger and the event's
- * key: held back at its hourly limit since `held_since` (`settled` null),
- * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * Where an event stands for a connector trigger, or a message for an email
+ * trigger, that didn't start its run (src/workflows/connector-triggers.ts,
+ * `startOnce`), by the trigger and the event's key: held back at its
+ * hourly limit since `held_since` (`settled` null), or settled for it for
+ * good: `dropped`, held past a day, or `refused`,
  * refused for good. A settled row is a tombstone, so the same event
  * delivered again for another trigger's sake is known and starts nothing
  * here. The clock sweeps both past their retention.
@@ -3973,6 +4059,34 @@ export const connectorTriggerHolds = sqliteTable(
     settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
+);
+
+/**
+ * The places taken in each trigger's hourly room (src/workflows/
+ * connector-triggers.ts, `startOnce`): one per event (or message) the
+ * trigger started or refused for good, taken in one conditional insert
+ * before either, so no more than `triggeredRunsPerHour` are taken an hour
+ * however many arrive at once, and an event held back for want of one
+ * writes no audit row. A place counts only within its hour: delivered
+ * again within it, an event takes no other; after it, it takes its place
+ * anew under the limit. The clock sweeps places past their hour.
+ */
+export const triggerHourSlots = sqliteTable(
+  "trigger_hour_slots",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.eventKey] }),
+    // A trigger's places this hour.
+    index("trigger_hour_slots_taken").on(table.triggerId, table.takenAt),
+    // The places past their hour, for the sweep.
+    index("trigger_hour_slots_taken_at").on(table.takenAt),
+  ]
 );
 
 /**
@@ -4134,7 +4248,8 @@ export const workflowResourceRuns = sqliteTable(
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
      * start admitted, the root of its own lineage. A run an emitted event's
      * trigger started (workflows/event-delivery.ts) has a root and a depth
-     * but no parent: it joins the emitting run's lineage, not its life.
+     * but no parent: it joins the emitting run's lineage, not its life, and
+     * is charged to its workflow's account there (`accountRunId`).
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -4145,6 +4260,13 @@ export const workflowResourceRuns = sqliteTable(
      * later pass while the engine ends it.
      */
     stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * When the stop an erasure claimed for it (`stopRequestedAt`) was taken
+     * (person-erasure.ts, `stopRunsFor`): the erasure's runs are done only
+     * once each has this or has ended. Null while a claim's sender may
+     * have died before it sent the stop.
+     */
+    stopTakenAt: timestamp("stop_taken_at"),
     /**
      * The newest control generation a screen's pause, resume or cancel took
      * (screen-workflows.ts): each admitted one takes the next, and goes to
@@ -4164,6 +4286,14 @@ export const workflowResourceRuns = sqliteTable(
      * of its compensation (spec 10.7.3); kept once it ended.
      */
     compensation: text(),
+    /**
+     * The run whose allowances its work is charged to (quotas.ts,
+     * `triggeredAccountClaimed`), pinned with it: for a run a trigger
+     * started in another run's lineage, its workflow's account there; for
+     * a child, its parent's. Null for a run charged to its lineage's root,
+     * or a root itself.
+     */
+    accountRunId: text("account_run_id"),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
@@ -4179,6 +4309,14 @@ export const workflowResourceRuns = sqliteTable(
     index("workflow_resource_runs_starting_idx")
       .on(table.createdAt)
       .where(sql`${table.status} = 'starting'`),
+    // Runs across workflows ended in a window, by how they ended: the
+    // Workflows page's counts, as an App's runs are read
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_status_ended_idx").on(
+      table.status,
+      table.endedAt,
+      table.id
+    ),
     // A workflow's runs, newest first, for its page (`listResourceRuns`).
     index("workflow_resource_runs_newest_idx").on(
       table.workflowResourceId,
@@ -4194,8 +4332,10 @@ export const workflowResourceRuns = sqliteTable(
       table.id
     ),
     // Runs across workflows since a moment: how many ran today, of
-    // workflows the reader may see or not (workflows/today.ts).
-    index("workflow_resource_runs_created_idx").on(table.createdAt),
+    // workflows the reader may see or not (workflows/today.ts); and newest
+    // first, as an App's runs are read, its ID breaking a tie
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_created_idx").on(table.createdAt, table.id),
   ]
 );
 

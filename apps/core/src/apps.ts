@@ -41,7 +41,6 @@ import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -56,6 +55,7 @@ import {
 import type { Person } from "./app-access.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
+import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import {
   auditedBatch,
   outboxed,
@@ -177,6 +177,7 @@ export const toApp = (row: AppRow): App => ({
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
   status: row.status,
+  link: row.link,
   process: storedProcessOf(row.process),
   createdAt: row.createdAt.toISOString(),
 });
@@ -611,6 +612,7 @@ export const createApp = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: new Date(),
+    link: null,
     removedAt: null,
     removedBy: null,
     ...provisionalColumns(provisional),
@@ -1133,13 +1135,7 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>,
-  /**
-   * Statements the write's own transaction opens and closes with: one the
-   * database refuses fails the whole write (a build job's lease, build-
-   * admission.ts).
-   */
-  fence?: { open: BatchItem<"sqlite">; close: BatchItem<"sqlite"> }
+  admit?: () => Promise<void>
 ): Promise<AppVersion> => {
   const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -1212,11 +1208,9 @@ export const proposeDraft = async (
         sql`NOT ${archivedNow(appId)}`
       ),
     ] as const;
-    const results: readonly unknown[] = await (fence === undefined
-      ? auditedBatch(env, db, write)
-      : auditedBatch(env, db, [fence.open, ...write, fence.close]));
+    const results: readonly unknown[] = await auditedBatch(env, db, write);
     // The delete's rows: what an archive took back.
-    undone = results.at(fence === undefined ? 1 : 2);
+    undone = results.at(1);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");
@@ -1780,6 +1774,17 @@ export const makeCurrent = async (
           keep: previous === null && approved === 1,
         }),
         ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
+        // Its webhooks told of the version, with the change or not at all.
+        ...queuedWebhookDeliveries(
+          db,
+          {
+            app: appId,
+            event: "changed",
+            dedupe: `changed:${event.id}`,
+            version: number,
+          },
+          storedEvent(event.id)
+        ),
         // The store the arriving version's release binds now serves its
         // definition, and one the leaving version's bound and the arriving
         // one's doesn't serves none (each subquery finds no binding): core's

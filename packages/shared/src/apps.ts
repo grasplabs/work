@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
+import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
@@ -126,12 +128,77 @@ export interface App {
   /** Where it is in its life (`appStatusSchema`). */
   status: AppStatus;
   /**
+   * The last part of the App's own address under the workspace's
+   * (`appLinkSchema`), which opens it for whoever may use it while it is
+   * published; null while its builders gave it none.
+   */
+  link: string | null;
+  /**
    * The business process it serves, if one was set: what the UI shows its
    * icon for and groups it by. It grants nothing.
    */
   process: BusinessProcess | null;
   createdAt: string;
 }
+
+/** The longest an App's link may be, in characters. */
+export const appLinkMaxLength = 48;
+
+/**
+ * Every address's first part the workspace already has, its pages' and
+ * core's own: no App's link may take one, so a link never stands for a
+ * page, nor a page for a link. Each new top-level page joins it, which
+ * its test holds the web app's routes to (web's app-own-links.test.ts).
+ */
+export const reservedAppLinks: ReadonlySet<string> = new Set([
+  "activity",
+  "api",
+  "apps",
+  "assets",
+  "brain",
+  "chat",
+  "chat-link",
+  "connect-microsoft",
+  "connections",
+  "dashboard",
+  "decisions",
+  "domains",
+  "engines",
+  "guest",
+  "inbox",
+  "integrations",
+  "interview",
+  "kit",
+  "knowledge",
+  "links",
+  "members",
+  "models",
+  "notifications",
+  "onboarding",
+  "package-artifacts",
+  "projects",
+  "rpc",
+  "screen-frame",
+  "screen-modules",
+  "settings",
+  "setup",
+  "sign-in",
+  "staff",
+  "workflows",
+]);
+
+/**
+ * An App's link, the last part of its address: lower-case letters and
+ * digits, single dashes between them, at most {@link appLinkMaxLength},
+ * and none the workspace already has (`reservedAppLinks`).
+ */
+export const appLinkSchema = z
+  .string()
+  .max(appLinkMaxLength)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+  .refine((link) => !reservedAppLinks.has(link), {
+    message: "The workspace has a page at that address.",
+  });
 
 /**
  * Why an integration is one of an App's: it holds a permission on a
@@ -646,6 +713,18 @@ export interface AppMembersApi {
    * once, or within a few seconds, as every push checks their role again.
    */
   remove: (app: string, member: AppMemberRef) => Promise<void>;
+  /**
+   * Whom its builders may share the App with: the organization's people
+   * and teams, by name and ID alone (no address, no role, no team's
+   * members). For whoever may share it (`add`).
+   */
+  candidates: (app: string) => Promise<ShareCandidates>;
+}
+
+/** The organization's people and teams, by name, to share an App with. */
+export interface ShareCandidates {
+  people: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
 }
 
 /**
@@ -794,6 +873,52 @@ export interface AppsApi {
    */
   publish: (app: string) => Promise<App>;
   /**
+   * Gives the App its own link (`appLinkSchema`), or takes it off with
+   * `null`, for its builders: refused with `app.link_taken` when another
+   * App has it, and `app.invalid_link` for one it can't be. Audited. The
+   * link opens the App only while it is published.
+   */
+  setLink: (app: string, link: string | null) => Promise<App>;
+  /**
+   * The App link `link` opens, for the person: only one that is published
+   * and that they may use; any other is answered as no App at all
+   * (`app.not_found`), so a link tells nothing of an App they can't open.
+   */
+  openLink: (link: string) => Promise<{ app: AppId }>;
+  /**
+   * Who may open the App without being a member (`@grasp-os/shared/app-
+   * visitors`): the addresses and domains its builders listed. For its
+   * builders.
+   */
+  visitors: (app: string) => Promise<AppVisitorEntry[]>;
+  /**
+   * Sets who may open the App without being a member, the whole list at
+   * once, for its builders: `visitor.invalid` for an address or domain it
+   * can't be, or more than 50. Audited. Whoever leaves the list can't open
+   * it from their next request on.
+   */
+  setVisitors: (
+    app: string,
+    list: AppVisitorEntry[]
+  ) => Promise<AppVisitorEntry[]>;
+  /**
+   * The functions the App's current version grants its visitors, by path,
+   * for its builders: visitors call these as the App itself, and nothing
+   * else.
+   */
+  visitorGrants: (app: string) => Promise<AppVisitorGrants>;
+  /**
+   * Grants visitors these functions of the App's current version, the
+   * whole set at once, for its builders: public queries and mutations
+   * only (`visitor.invalid` otherwise). Audited. A version starts with
+   * none, and taking one away stops calls already running before they
+   * commit.
+   */
+  setVisitorGrants: (
+    app: string,
+    functions: string[]
+  ) => Promise<AppVisitorGrants>;
+  /**
    * Takes a published App back to a draft, for its builders: the people
    * it is shared with as users lose it, their open screens cleared.
    */
@@ -838,6 +963,7 @@ export interface AppsApi {
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
+  readonly webhooks: AppWebhooksApi;
 }
 
 /**
@@ -909,6 +1035,9 @@ export const appErrors = defineErrorFamily({
   "app.not_running": "The domain has no current version to run yet.",
   "app.no_version":
     "Make a version of the domain current before publishing it.",
+  "app.link_taken": "Another domain has that link. Choose another.",
+  "app.invalid_link":
+    "A link is lower-case letters and digits with single dashes between them, at most 48, and none the workspace already has a page at.",
   "app.archived": "The domain is archived. A builder can restore it.",
   "app.remove_unarchived": "Archive the domain before removing it.",
   "app.remove_forbidden":

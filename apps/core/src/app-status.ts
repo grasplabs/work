@@ -7,13 +7,14 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import { appFor, toApp } from "./apps.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { apps } from "./db/core/schema.ts";
+import { apps, appVisitorSessions } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
 import { stopsUnsettled } from "./workflows/resource-runs.ts";
@@ -239,6 +240,30 @@ export const changeStatus = async (
         ? storedEvent(event.id)
         : sql`0`
     ),
+    // Every visitor's session ends with a published App (app-visitors.ts),
+    // in the same batch and only if the change won: a status changed with
+    // sessions left over would let a republish revive them.
+    db
+      .delete(appVisitorSessions)
+      .where(
+        and(
+          eq(appVisitorSessions.appId, found.id),
+          found.status === "published" ? storedEvent(event.id) : sql`0`
+        )
+      ),
+    // Its webhooks told it was published, with the change or not at all.
+    ...(to === "published"
+      ? queuedWebhookDeliveries(
+          db,
+          {
+            app: found.id,
+            event: "published",
+            dedupe: `published:${event.id}`,
+            version: "current",
+          },
+          storedEvent(event.id)
+        )
+      : []),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");

@@ -113,6 +113,12 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
+   * When core erased them (person-erasure.ts): their link is closed for
+   * good. No code is made for it again, so nothing is saved under the
+   * entry that stays on the list, until an admin takes them off it.
+   */
+  erasedAt: text("erased_at"),
+  /**
    * The team they led when their link went out; none when they led none.
    * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
    * making someone a lead afterwards tells nobody about their interview.
@@ -262,6 +268,9 @@ export const interviewStates = sqliteTable("interview_states", {
  * The interviewer's texts each interview was held with, by their mark
  * (onboarding/interviewer-text.ts), and when each first spoke in it: so
  * staff, and the lab, know which Stephen they read. Gone with what was said.
+ * No longer written, as nothing reads it: it stays while the release
+ * before still writes it (expand, then contract), and goes with the
+ * interview until a later release drops it.
  */
 export const interviewTexts = sqliteTable(
   "interview_texts",
@@ -320,8 +329,9 @@ export const events = sqliteTable("events", {
 });
 
 /**
- * Grasp's staff's own notes on the onboarding: who wrote them and when.
- * Only staff read them.
+ * Grasp's staff's own notes on the onboarding, which nothing reads or
+ * writes any more. Kept while the release before still uses it (expand,
+ * then contract); dropped in a follow-up once this one is deployed.
  */
 export const notes = sqliteTable("notes", {
   id: integer().primaryKey({ autoIncrement: true }),
@@ -572,7 +582,9 @@ export const interviewSettings = sqliteTable("interview_settings", {
  * How long people waited for Stephen's voice, from the end of what they
  * said to his first sound, as their page measured it: by day, how many
  * answers took up to each tenth of a second (`upTo`, in ms). Whose
- * answers they were isn't kept.
+ * answers they were isn't kept. No longer written, as nothing reads it: it
+ * stays while the release before still writes it (expand, then contract),
+ * until a later release drops it.
  */
 export const answerWaits = sqliteTable(
   "answer_waits",

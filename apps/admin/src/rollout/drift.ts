@@ -10,8 +10,8 @@ import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import type { CloudflareApi } from "../cloudflare/api.ts";
-import { listDeployments } from "../cloudflare/workers.ts";
+import { coreAddressOf } from "../clients/core-address.ts";
+import type { ClientDispatcher } from "../clients/core-address.ts";
 import type { WorkerDeployment } from "../cloudflare/workers.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -25,9 +25,10 @@ import type { importedManifest } from "../deploy/release.ts";
 import { answeringVersion } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
-import { clientInventory, destinationOf } from "../hosting/inventory.ts";
+import { clientInventory } from "../hosting/inventory.ts";
 import { connectVersionOf } from "../hosting/probe.ts";
 import type { ProbeRequest } from "../hosting/probe.ts";
+import { stoppedBy } from "../live-reads.ts";
 
 /**
  * A Worker's drift: `in_sync` (all its traffic on the version the admin
@@ -67,20 +68,6 @@ export interface ClientDrift {
   workers: WorkerDrift[];
 }
 
-/** The drift of a Worker whose current deployment is `live`. */
-const stateOf = (
-  recorded: string | null,
-  live: WorkerDeployment["versions"]
-): DriftState => {
-  const [only, ...others] = live;
-  if (others.length > 0) {
-    return "split";
-  }
-  return only?.version_id === recorded && only.percentage === 100
-    ? "in_sync"
-    : "drifted";
-};
-
 /** A client's drift is the worst it has, in this order. */
 const severity: readonly ClientDriftState[] = [
   "drifted",
@@ -103,7 +90,14 @@ export type ManifestOf = (
  * namespace, whose versions Cloudflare's API doesn't list.
  */
 export interface HealthReads {
-  fetch: typeof fetch;
+  /**
+   * The dispatch namespace the router binds (`DISPATCHER`): core is asked
+   * through it, never over the internet (src/clients/core-address.ts).
+   * Without it, every Worker is `unknown`.
+   */
+  dispatcher: ClientDispatcher | undefined;
+  /** Stops its requests to core once it aborts: a caller's deadline. */
+  signal?: AbortSignal;
   /**
    * The keys the client's router secret and auth secret are derived from:
    * the router's, for every request to core, and the client key, which
@@ -204,7 +198,7 @@ export const coreOriginOf = async (
  */
 const healthDrift = async (
   worker: { worker: string; scriptName: string; versionId: string | null },
-  origin: string | null,
+  core: { origin: string; fetch: typeof fetch } | undefined,
   health: HealthReads | undefined,
   client: { clientId: string; generation: number }
 ): Promise<WorkerDrift> => {
@@ -216,12 +210,15 @@ const healthDrift = async (
     state: "unknown",
   };
   const read = namespaceReads[worker.worker];
-  if (origin === null || health === undefined || read === undefined) {
+  if (core === undefined || health === undefined || read === undefined) {
     return unknown;
   }
   const version = await read({
-    fetch: health.fetch,
-    origin,
+    fetch:
+      health.signal === undefined
+        ? core.fetch
+        : stoppedBy(health.signal, core.fetch),
+    origin: core.origin,
     routerSecret: await deriveRouterSecret(
       health.secrets.routerKey,
       client.clientId,
@@ -246,16 +243,14 @@ const healthDrift = async (
 
 /**
  * Client `clientId`'s drift, read live from its destination; null when the
- * admin has no such client, or it isn't placed. Each Worker the admin
- * recorded is read: in an account's own Workers, from its deployments; in
- * a Workers for Platforms namespace, core and connect, from the version
- * core names for each through its origin (`health`), as its probe found
- * it, and `unknown` without `health`. A Worker of its inventory the admin has no
+ * admin has no such client, or it isn't placed. Core and connect are
+ * read from the version core names for each, asked through the
+ * namespace's binding at the origin its probe passed at (`health`), and
+ * `unknown` without it. A Worker of its inventory the admin has no
  * record of (an operation that stopped part way) is never in sync. A
  * Worker that can't be read is `unknown`, and logged.
  */
 export const driftOf = async (
-  api: CloudflareApi,
   db: AdminDatabase,
   clientId: string,
   health?: HealthReads
@@ -264,7 +259,6 @@ export const driftOf = async (
     .select({
       pinnedReleaseId: clients.pinnedReleaseId,
       generation: clients.generation,
-      destinationId: clientPlacements.destinationId,
     })
     .from(clients)
     .innerJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
@@ -272,9 +266,6 @@ export const driftOf = async (
   if (client === undefined) {
     return null;
   }
-  const destination = await destinationOf(db, client.destinationId);
-  const accountId = destination.accountId ?? "";
-  const inNamespace = destination.kind === "workers_for_platforms";
   const recorded = await db
     .select({
       worker: clientWorkers.worker,
@@ -298,31 +289,31 @@ export const driftOf = async (
       scriptName: physicalName,
       versionId: null,
     }));
-  // In a namespace the admin reads only what core names.
-  const read = [...recorded, ...unrecorded].filter(
-    ({ worker }) => !inNamespace || Object.hasOwn(namespaceReads, worker)
+  // The admin reads only what core names.
+  const read = [...recorded, ...unrecorded].filter(({ worker }) =>
+    Object.hasOwn(namespaceReads, worker)
   );
-  const origin = inNamespace ? await coreOriginOf(db, clientId) : null;
+  const origin = await coreOriginOf(db, clientId);
+  const coreScript = recorded.find(
+    ({ worker }) => worker === "core"
+  )?.scriptName;
+  const core =
+    origin === null || coreScript === undefined
+      ? undefined
+      : coreAddressOf(
+          { kind: "dispatch", script: coreScript },
+          new URL(origin).hostname,
+          health?.dispatcher
+        );
   const workers = await Promise.all(
     read.map(async ({ worker, scriptName, versionId }) => {
       try {
-        if (inNamespace) {
-          return await healthDrift(
-            { worker, scriptName, versionId },
-            origin,
-            health,
-            { clientId, generation: client.generation }
-          );
-        }
-        const [current] = await listDeployments(api, accountId, scriptName);
-        const live = current?.versions ?? [];
-        return {
-          worker,
-          scriptName,
-          recorded: versionId,
-          live,
-          state: stateOf(versionId, live),
-        };
+        return await healthDrift(
+          { worker, scriptName, versionId },
+          core,
+          health,
+          { clientId, generation: client.generation }
+        );
       } catch (error) {
         log.warn("drift.unread", {
           clientId,

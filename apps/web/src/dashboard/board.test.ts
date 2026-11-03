@@ -4,7 +4,7 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import { byState, enginesOf, signalKinds, stateOf } from "./board.ts";
@@ -18,6 +18,7 @@ const workflow = (
   change: Partial<WorkflowSummary> = {},
   app = "invoices"
 ): WorkflowSummary => ({
+  type: "app",
   app: appIdSchema.parse(app),
   appName: app,
   workflow: workflowIdSchema.parse(name),
@@ -50,6 +51,7 @@ const engine = (id: string): App => ({
   currentVersion: 1,
   pendingVersion: null,
   status: "published",
+  link: null,
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 

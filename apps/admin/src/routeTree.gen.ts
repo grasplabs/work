@@ -16,7 +16,6 @@ import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
-import { Route as PlatformAiRouteImport } from './routes/platform/ai'
 import { Route as PlatformOffboardedRouteImport } from './routes/platform/offboarded'
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
 import { Route as OrganizationsClientIdAiUseRouteImport } from './routes/organizations/$clientId/ai-use'
@@ -35,9 +34,6 @@ import { Route as OrganizationsClientIdStepsRouteImport } from './routes/organiz
 import { Route as OrganizationsClientIdWorkflowsRouteImport } from './routes/organizations/$clientId/workflows'
 import { Route as PlatformReleasesIndexRouteImport } from './routes/platform/releases/index'
 import { Route as PlatformReleasesReleaseIdRouteImport } from './routes/platform/releases/$releaseId'
-import { Route as PlatformReleasesDiffRouteImport } from './routes/platform/releases/diff'
-import { Route as PlatformRolloutsIndexRouteImport } from './routes/platform/rollouts/index'
-import { Route as PlatformRolloutsRolloutIdRouteImport } from './routes/platform/rollouts/$rolloutId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -72,11 +68,6 @@ const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
 const PlatformIndexRoute = PlatformIndexRouteImport.update({
   id: '/platform/',
   path: '/platform/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformAiRoute = PlatformAiRouteImport.update({
-  id: '/platform/ai',
-  path: '/platform/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformOffboardedRoute = PlatformOffboardedRouteImport.update({
@@ -185,22 +176,6 @@ const PlatformReleasesReleaseIdRoute =
     path: '/platform/releases/$releaseId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const PlatformReleasesDiffRoute = PlatformReleasesDiffRouteImport.update({
-  id: '/platform/releases/diff',
-  path: '/platform/releases/diff',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformRolloutsIndexRoute = PlatformRolloutsIndexRouteImport.update({
-  id: '/platform/rollouts/',
-  path: '/platform/rollouts/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformRolloutsRolloutIdRoute =
-  PlatformRolloutsRolloutIdRouteImport.update({
-    id: '/platform/rollouts/$rolloutId',
-    path: '/platform/rollouts/$rolloutId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -209,7 +184,6 @@ export interface FileRoutesByFullPath {
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
-  '/platform/ai': typeof PlatformAiRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -227,11 +201,8 @@ export interface FileRoutesByFullPath {
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
-  '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId/': typeof OrganizationsClientIdIndexRoute
   '/platform/releases/': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts/': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -239,7 +210,6 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/platform/ai': typeof PlatformAiRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -257,11 +227,8 @@ export interface FileRoutesByTo {
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
-  '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId': typeof OrganizationsClientIdIndexRoute
   '/platform/releases': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -271,7 +238,6 @@ export interface FileRoutesById {
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
-  '/platform/ai': typeof PlatformAiRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -289,11 +255,8 @@ export interface FileRoutesById {
   '/organizations/$clientId/steps': typeof OrganizationsClientIdStepsRoute
   '/organizations/$clientId/workflows': typeof OrganizationsClientIdWorkflowsRoute
   '/platform/releases/$releaseId': typeof PlatformReleasesReleaseIdRoute
-  '/platform/releases/diff': typeof PlatformReleasesDiffRoute
-  '/platform/rollouts/$rolloutId': typeof PlatformRolloutsRolloutIdRoute
   '/organizations/$clientId/': typeof OrganizationsClientIdIndexRoute
   '/platform/releases/': typeof PlatformReleasesIndexRoute
-  '/platform/rollouts/': typeof PlatformRolloutsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -304,7 +267,6 @@ export interface FileRouteTypes {
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
-    | '/platform/ai'
     | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -322,11 +284,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
-    | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId/'
     | '/platform/releases/'
-    | '/platform/rollouts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -334,7 +293,6 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/platform/ai'
     | '/platform/offboarded'
     | '/platform'
     | '/organizations/$clientId/ai-use'
@@ -352,11 +310,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
-    | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId'
     | '/platform/releases'
-    | '/platform/rollouts'
   id:
     | '__root__'
     | '/'
@@ -365,7 +320,6 @@ export interface FileRouteTypes {
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
-    | '/platform/ai'
     | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -383,11 +337,8 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/steps'
     | '/organizations/$clientId/workflows'
     | '/platform/releases/$releaseId'
-    | '/platform/releases/diff'
-    | '/platform/rollouts/$rolloutId'
     | '/organizations/$clientId/'
     | '/platform/releases/'
-    | '/platform/rollouts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -397,14 +348,10 @@ export interface RootRouteChildren {
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
-  PlatformAiRoute: typeof PlatformAiRoute
   PlatformOffboardedRoute: typeof PlatformOffboardedRoute
   PlatformIndexRoute: typeof PlatformIndexRoute
   PlatformReleasesReleaseIdRoute: typeof PlatformReleasesReleaseIdRoute
-  PlatformReleasesDiffRoute: typeof PlatformReleasesDiffRoute
-  PlatformRolloutsRolloutIdRoute: typeof PlatformRolloutsRolloutIdRoute
   PlatformReleasesIndexRoute: typeof PlatformReleasesIndexRoute
-  PlatformRolloutsIndexRoute: typeof PlatformRolloutsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -456,13 +403,6 @@ declare module '@tanstack/react-router' {
       path: '/platform'
       fullPath: '/platform/'
       preLoaderRoute: typeof PlatformIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform/ai': {
-      id: '/platform/ai'
-      path: '/platform/ai'
-      fullPath: '/platform/ai'
-      preLoaderRoute: typeof PlatformAiRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform/offboarded': {
@@ -591,27 +531,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlatformReleasesReleaseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/platform/releases/diff': {
-      id: '/platform/releases/diff'
-      path: '/platform/releases/diff'
-      fullPath: '/platform/releases/diff'
-      preLoaderRoute: typeof PlatformReleasesDiffRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform/rollouts/': {
-      id: '/platform/rollouts/'
-      path: '/platform/rollouts'
-      fullPath: '/platform/rollouts/'
-      preLoaderRoute: typeof PlatformRolloutsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform/rollouts/$rolloutId': {
-      id: '/platform/rollouts/$rolloutId'
-      path: '/platform/rollouts/$rolloutId'
-      fullPath: '/platform/rollouts/$rolloutId'
-      preLoaderRoute: typeof PlatformRolloutsRolloutIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -665,14 +584,10 @@ const rootRouteChildren: RootRouteChildren = {
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,
-  PlatformAiRoute: PlatformAiRoute,
   PlatformOffboardedRoute: PlatformOffboardedRoute,
   PlatformIndexRoute: PlatformIndexRoute,
   PlatformReleasesReleaseIdRoute: PlatformReleasesReleaseIdRoute,
-  PlatformReleasesDiffRoute: PlatformReleasesDiffRoute,
-  PlatformRolloutsRolloutIdRoute: PlatformRolloutsRolloutIdRoute,
   PlatformReleasesIndexRoute: PlatformReleasesIndexRoute,
-  PlatformRolloutsIndexRoute: PlatformRolloutsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

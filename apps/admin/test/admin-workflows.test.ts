@@ -36,12 +36,12 @@ const db = adminDatabase(env.DB);
 const liveClient = async () => {
   const release = await placedRelease("feat(core): workflows");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 const day = "2026-10-14";
@@ -89,7 +89,7 @@ describe("an organization's workflows", () => {
 
   it("says none is named yet before a lead names the team's work", async () => {
     const acme = await liveClient();
-    acme.account.admin = { ...emptyAdminSnapshot("Acme"), told: true };
+    acme.core.admin = { ...emptyAdminSnapshot("Acme"), told: true };
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/workflows`

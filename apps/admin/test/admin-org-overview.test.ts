@@ -17,12 +17,12 @@ mockAccess();
 const liveClient = async () => {
   const release = await placedRelease("feat(core): the overview");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { core } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
   });
-  return { clientId, account };
+  return { clientId, core };
 };
 
 /**
@@ -155,7 +155,7 @@ describe("an organization's overview", () => {
 
   it("says how the company is doing, each signal opening its section, and what core doesn't hold as not found yet rather than none", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
     const { status, html } = await page(base);
@@ -193,7 +193,7 @@ describe("an organization's overview", () => {
 
   it("briefs the next call: where the company stands, and the most pressing of what to bring up, each opening where it is settled", async () => {
     const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
+    acme.core.admin = readySnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
     const { html } = await page(base);
@@ -223,7 +223,7 @@ describe("an organization's overview", () => {
 
   it("once the company is open, briefs it as open and sends its workflows to the hours they free, without calling none live a worry", async () => {
     const acme = await liveClient();
-    acme.account.admin = openSnapshot("Acme");
+    acme.core.admin = openSnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
     const { html } = await page(base);
@@ -239,7 +239,7 @@ describe("an organization's overview", () => {
 
   it("says the sign-in is connected once the company's people are in, before its team leads are named", async () => {
     const acme = await liveClient();
-    acme.account.admin = peopleInSnapshot("Acme");
+    acme.core.admin = peopleInSnapshot("Acme");
 
     const { html } = await page(`/organizations/${acme.clientId}`);
 
@@ -250,7 +250,7 @@ describe("an organization's overview", () => {
 
   it("counts the interviews' days to the company's own plan", async () => {
     const acme = await liveClient();
-    acme.account.admin = toldSnapshot("Acme");
+    acme.core.admin = toldSnapshot("Acme");
 
     const { html } = await page(`/organizations/${acme.clientId}`);
 

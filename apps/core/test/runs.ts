@@ -288,13 +288,9 @@ const seenEnded = new Set<string>();
  * would go on in the background of whatever runs next: a decision's
  * week-long wait, a run paused, or one waiting while a feature was off.
  * Work that outlives its test is how a test file came to wait forever in
- * CI (see apps/core/vite.config.ts), so each test ends its runs. Their
- * places in the admission queue go first, and again once they are ended:
- * a share their ending gives back wakes no run of theirs as the test
- * file closes (share-wakes.ts), only to start work it can't finish.
+ * CI (see apps/core/vite.config.ts), so each test ends its runs.
  */
 export const endLiveRuns = async (): Promise<void> => {
-  await env.DB.prepare("DELETE FROM workflow_admission_queue").run();
   // Only rows that may still have a live run: one that ended otherwise
   // (completed or failed) ended in the engine first. A cancelled one may
   // have a live run left, whose termination failed.
@@ -320,7 +316,6 @@ export const endLiveRuns = async (): Promise<void> => {
         seenEnded.add(id);
       })
   );
-  await env.DB.prepare("DELETE FROM workflow_admission_queue").run();
 };
 
 /** Removes a person from the organization; returns how to bring them back. */
@@ -363,3 +358,61 @@ export const admittedFreely = async (): Promise<AttemptAdmission> =>
       await Promise.resolve();
     },
   });
+
+/**
+ * The rows of an App's workflows or runs among `rows`, which list
+ * independent workflows' too.
+ */
+export const ofApps = <Row extends { type: "app" | "resource" }>(
+  rows: readonly Row[]
+): Extract<Row, { type: "app" }>[] =>
+  rows.filter(
+    (row): row is Extract<Row, { type: "app" }> => row.type === "app"
+  );
+
+/** A run of an independent workflow, as core keeps it. */
+export interface SeededResourceRun {
+  workflow: string;
+  principal: string;
+  status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  createdAt: number;
+  /** When it ended; when it started, for one that ended, unless given. */
+  endedAt?: number | null;
+}
+
+/**
+ * A run of an independent workflow, with the start receipt it was admitted
+ * on, as core keeps them: its ID.
+ */
+export const seedResourceRun = async (
+  run: SeededResourceRun
+): Promise<string> => {
+  const id = crypto.randomUUID();
+  const ended =
+    run.status === "starting" || run.status === "running"
+      ? null
+      : run.createdAt;
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?)"
+    ).bind(
+      id,
+      run.principal,
+      `key-${id}`,
+      run.workflow,
+      run.principal,
+      run.createdAt
+    ),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, ended_at) VALUES (?, ?, 1, 'm', 'b', ?, ?, ?, ?)"
+    ).bind(
+      id,
+      run.workflow,
+      run.principal,
+      run.status,
+      run.createdAt,
+      run.endedAt === undefined ? ended : run.endedAt
+    ),
+  ]);
+  return id;
+};

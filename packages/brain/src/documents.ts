@@ -395,6 +395,12 @@ export interface Write {
    */
   purge?: true;
   /**
+   * Set only by a restore (restore.ts): its text is checked as a purge's
+   * is (`parseBaseFields`), as the Brain it came from saved it, or a
+   * purge rewrote it. Nothing else of a purge's save applies.
+   */
+  restored?: true;
+  /**
    * The version's transcript (transcripts.ts), as its producer gives it:
    * saved in the same batch, and served while this version is current.
    * Left out, the document has none from this version on.
@@ -467,6 +473,14 @@ const savedRow = (
 });
 
 /**
+ * Whether `write`'s text is checked for the fields every type has alone
+ * (`parseBaseFields`): a purge's, or a restore's of what a Brain saved or
+ * a purge rewrote.
+ */
+const checkedAsPurged = (write: Write): boolean =>
+  write.purge === true || write.restored === true;
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -486,7 +500,7 @@ export const writeVersion = async <C>(
     path,
     text,
     sync,
-    write.purge === true
+    checkedAsPurged(write)
   );
   const transcript =
     write.transcript === undefined

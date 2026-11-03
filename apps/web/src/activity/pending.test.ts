@@ -2,8 +2,10 @@ import {
   agentIdSchema,
   appIdSchema,
   permissionIdSchema,
+  storeIdSchema,
+  workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { Permission } from "@grasp-os/shared/permissions";
+import type { Permission, StoreReach } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
 import { objectOf } from "./pending.tsx";
@@ -40,6 +42,52 @@ describe("a pending request on an App", () => {
       expect.stringMatching(/^Queries of /u),
       expect.stringMatching(/^Mutations and actions of /u),
       expect.stringMatching(/^Queries, mutations and actions of /u),
+    ]);
+  });
+});
+
+const store = "22222222-2222-4222-8222-222222222222";
+
+/** A workflow's request for a workflow's store, its operations reaching `reach`. */
+const onStore = (reach: StoreReach[]): Permission => ({
+  ...onApp([]),
+  subject: {
+    type: "workflow",
+    workflowId: workflowResourceIdSchema.parse(
+      "33333333-3333-4333-8333-333333333333"
+    ),
+  },
+  object: { type: "store", storeId: storeIdSchema.parse(store) },
+  actions: reach.map(({ operation }) => operation),
+  reach,
+});
+
+describe("a pending request on a workflow's store", () => {
+  it("says what its operations do to the records: read them, add to them, or read and change them", () => {
+    const get: StoreReach = {
+      operation: "getOrder",
+      table: "orders",
+      access: "reads",
+    };
+    const add: StoreReach = {
+      operation: "addOrder",
+      table: "orders",
+      access: "adds",
+    };
+    const settle: StoreReach = {
+      operation: "settle",
+      table: "orders",
+      access: "changes",
+    };
+    expect(
+      [[add], [get, add], [settle], [get, add, settle]].map((reach) =>
+        objectOf(onStore(reach), directory)
+      )
+    ).toStrictEqual([
+      `Store ${store}, a workflow's. This can add records to orders`,
+      `Store ${store}, a workflow's. Whoever owns the records, this can read every record of orders and add records to orders`,
+      `Store ${store}, a workflow's. Whoever owns the records, this can read and change every record of orders`,
+      `Store ${store}, a workflow's. Whoever owns the records, this can read every record of orders, read and change every record of orders, and add records to orders`,
     ]);
   });
 });

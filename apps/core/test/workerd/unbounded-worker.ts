@@ -1,23 +1,15 @@
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-
 import type { Acting } from "../../src/auth/identity.ts";
 import { buildDependencies } from "../../src/packages/build.ts";
 import { resolveDependencies } from "../../src/packages/resolve.ts";
 import { buildScreens } from "../../src/screens.ts";
-import {
-  declaredParams,
-  dryRunTests,
-  loadRun,
-  workflowTestFailures,
-} from "../../src/workflows/code.ts";
+import { runCompute } from "../../src/workflow-modules.ts";
+import { loadRunIsolate } from "../../src/workflows/code.ts";
 
-// A workflow's code, a draft's preview, an App's server object, the
-// App compiler and the package builder on plain workerd
-// with no sandbox and no `SANDBOX_IN_PROCESS=unbounded`
-// (scripts/workerd-unbounded-loaders.test.ts): core loads none of them, as
-// no sandbox bounds them here. Those the sandbox host runs (a workflow's
-// code, the compiler, the builder) are asked for with `SANDBOX_HOST`
-// unbound, as by a deployment that forgot it.
+// An independent JSON workflow's run and its calculations, the App
+// compiler and the package builder on plain workerd with no sandbox and no
+// `SANDBOX_IN_PROCESS=unbounded` (scripts/workerd-unbounded-loaders.test.ts):
+// core loads none of them, as no sandbox bounds them here. Each is asked
+// for with `SANDBOX_HOST` unbound, as by a deployment that forgot it.
 
 /** An App's builder, as far as a package resolve or build reads one first. */
 const builder: Acting = {
@@ -43,61 +35,37 @@ export default {
     if (pathname === "/run") {
       return new Response(
         await refusal(() =>
-          // Run in a sandbox session where one is bound: here, none is.
-          loadRun(
+          // A JSON run's build, in a sandbox session where one is bound:
+          // here, none is.
+          loadRunIsolate(
             { ...env, SANDBOX_HOST: undefined },
             {
-              app: appIdSchema.parse(crypto.randomUUID()),
-              version: 1,
-              workflow: workflowIdSchema.parse("intake"),
-              files: {},
+              owner: `workflow-resource:${crypto.randomUUID()}`,
+              mainModule: "run.js",
+              modules: async () => await Promise.resolve({}),
+              attemptMethods: [],
             }
           )
         )
       );
     }
-    if (pathname === "/metadata") {
+    if (pathname === "/compute") {
       return new Response(
         await refusal(
           async () =>
-            // Run in a sandbox session where one is bound: here, none is.
-            await declaredParams(
+            // A JSON workflow's calculation, on the sandbox host where one
+            // is bound: here, none is.
+            await runCompute(
               { ...env, SANDBOX_HOST: undefined },
-              appIdSchema.parse(crypto.randomUUID()),
-              1,
-              workflowIdSchema.parse("intake"),
-              {}
-            )
-        )
-      );
-    }
-    if (pathname === "/tests") {
-      return new Response(
-        await refusal(
-          async () =>
-            await workflowTestFailures(
-              { ...env, SANDBOX_HOST: undefined },
-              appIdSchema.parse(crypto.randomUUID()),
-              1,
               {
-                "workflows/intake.ts": "export default {};",
-                "workflows/intake.workflow-tests.ts": "export default {};",
-              }
-            )
-        )
-      );
-    }
-    if (pathname === "/dry-run") {
-      return new Response(
-        await refusal(
-          async () =>
-            await dryRunTests(
-              { ...env, SANDBOX_HOST: undefined },
-              appIdSchema.parse(crypto.randomUUID()),
-              1,
-              workflowIdSchema.parse("intake"),
-              {},
-              {}
+                modules: {},
+                sdk: {},
+                paths: ["code/count.ts"],
+                module: "code/count.ts",
+                export: "count",
+                input: [1],
+              },
+              1024
             )
         )
       );

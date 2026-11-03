@@ -35,12 +35,33 @@ export const releases = sqliteTable("releases", {
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**
-   * Whether its note is a feature, which starts the next major version
-   * (src/releases/version.ts): kept on import, so versions are counted
-   * without reading every manifest. Null only for one imported before it.
+   * When its bundle files left the releases bucket: a release never
+   * promoted past Edge, 14 days on (src/releases/retention.ts). Null while
+   * they're kept; the record itself is kept for good.
    */
-  feature: integer({ mode: "boolean" }),
+  bundleDeletedAt: timestamp("bundle_deleted_at"),
 });
+
+/**
+ * Which blobs each published release names (src/releases/blobs.ts): one
+ * row a blob, written when the import reads the release's manifest,
+ * imported yet or not, and replaced when that manifest is. Blobs are content-addressed and shared, so a blob
+ * may leave the releases bucket only once no release still holding its
+ * bundle names it (src/releases/retention.ts): an indexed look-up, never
+ * a read of every manifest. No foreign key: a release still being
+ * imported has no record yet, and its blobs are kept all the same.
+ */
+export const releaseBlobs = sqliteTable(
+  "release_blobs",
+  {
+    releaseId: text("release_id").notNull(),
+    blobKey: text("blob_key").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.releaseId, table.blobKey] }),
+    index("release_blobs_blob_idx").on(table.blobKey),
+  ]
+);
 
 /**
  * A published release that didn't verify, and when the import tries it
@@ -84,6 +105,20 @@ export const channels = sqliteTable("channels", {
 });
 
 /**
+ * Who runs the reconciler's tick now (src/rollout/reconciler.ts): one
+ * row while a tick runs, taken with a compare-and-set, so ticks that
+ * overlap never act side by side. Taken over only once it expired, from
+ * a tick that died before giving it back.
+ */
+export const reconcilerLease = sqliteTable("reconciler_lease", {
+  /** Always `reconciler`: the one lease. */
+  id: text().primaryKey(),
+  /** The tick holding it: a random id of its own. */
+  holder: text().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+/**
  * A client: one deployment of Grasp OS, placed in a hosting destination
  * (src/hosting/), where its operation provisions and releases it.
  */
@@ -108,8 +143,6 @@ export const clients = sqliteTable(
      * keys are kept for a window from here (src/deploy/secrets.ts).
      */
     rotationLiveAt: timestamp("rotation_live_at"),
-    /** The rollout ring it's in: 0 first. */
-    ring: integer().notNull().default(1),
     /**
      * The release channel it follows (src/rollout/channels.ts): a release
      * promoted to it is deployed to it, unless it's pinned.
@@ -178,17 +211,14 @@ export const clients = sqliteTable(
      * are read each time (src/crm/attio.ts). Null until it is linked.
      */
     attioCompanyId: text("attio_company_id"),
-    /** The release it stays on while pinned, whatever the rollouts. */
+    /** The release it stays on while pinned: promotions skip it. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
-  // What a rollout reaches: the active clients of a ring or two
-  // (src/rollout/targets.ts).
+  // What a promotion reaches: the active clients of a channel
+  // (src/rollout/channels.ts).
   (table) => [
-    index("clients_status_ring_idx").on(table.status, table.ring),
-    // What the reconciler reads: the active clients of a channel
-    // (src/rollout/reconciler.ts).
     index("clients_status_channel_idx").on(table.status, table.channel),
   ]
 );
@@ -196,8 +226,8 @@ export const clients = sqliteTable(
 /**
  * The runner that's a client's current one (src/runners.ts): the
  * only one that may change what its account runs. A provisioning run (a
- * run per attempt), a rollout while it deploys the client
- * (its run), or a rollback of the client (its run).
+ * run per attempt), a rollout while it deploys the client (its run), or
+ * applying its settings (its run).
  * Each claims it with one conditional write naming the runner it
  * replaces, so however many act at once, one wins: the single runner a
  * client's deploy relies on. No foreign key: a provisioning run is
@@ -208,8 +238,8 @@ export const clientRuns = sqliteTable("client_runs", {
   clientId: text("client_id").primaryKey(),
   /**
    * The runner's id: a provisioning attempt's run
-   * (`<clientId>-<random>`), a rollout's (the rollout's id), a
-   * rollback's (`rollback-<random>`), or applying the client's settings
+   * (`<clientId>-<random>`), a rollout's (the rollout's id), or applying
+   * the client's settings
    * (`apply-<random>`, src/clients/apply.ts).
    */
   runId: text("run_id").notNull(),
@@ -221,7 +251,7 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/hosting/workflow.ts).
    */
   kind: text({
-    enum: ["rollout", "rollback", "apply", "provision_placed"],
+    enum: ["deploy", "apply", "provision_placed"],
   }).notNull(),
   /**
    * The runner's attempt that holds the client, for a runner on Workerflow
@@ -256,99 +286,6 @@ export const clientWorkers = sqliteTable(
     deployedAt: timestamp("deployed_at"),
   },
   (table) => [primaryKey({ columns: [table.clientId, table.worker] })]
-);
-
-/** Rolling a release (or only new secrets) out to clients, ring by ring. */
-export const rollouts = sqliteTable(
-  "rollouts",
-  {
-    id: text().primaryKey(),
-    /** A release's code, or only new secrets on what runs. */
-    kind: text({ enum: ["release", "secrets"] }).notNull(),
-    releaseId: text("release_id").references(() => releases.id),
-    /**
-     * For a secrets rollout, the fingerprint of the shared secrets Secrets
-     * Store held for each app when it started: JSON, `{"connect": "<hex>"}`
-     * (src/rollout/shared-secrets.ts). What proves a rotation reached its
-     * clients; null for a release rollout.
-     */
-    sharedSecrets: text("shared_secrets"),
-    /** `waiting`: for a staff member's approval of the next ring. */
-    status: text({
-      enum: ["running", "waiting", "done", "failed", "cancelled"],
-    }).notNull(),
-    /** The ring it's rolling out to, or waiting after. */
-    ring: integer().notNull().default(0),
-    /** The staff member who started it. */
-    startedBy: text("started_by").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    index("rollouts_status_idx").on(table.status),
-    // The rollouts page lists the latest first (src/rollout/queries.ts).
-    index("rollouts_created_idx").on(table.createdAt),
-  ]
-);
-
-/** One client in a rollout, and how far it got. */
-export const rolloutTargets = sqliteTable(
-  "rollout_targets",
-  {
-    rolloutId: text("rollout_id")
-      .notNull()
-      .references(() => rollouts.id),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    ring: integer().notNull(),
-    /**
-     * `pending` until its first step starts, claimed or not; `skipped`: on
-     * the release already, pinned to another, or the rollout cancelled
-     * before anything of it started; `stopped`: the rollout cancelled
-     * after something had.
-     */
-    status: text({
-      enum: [
-        "pending",
-        "deploying",
-        "done",
-        "failed",
-        "rolled_back",
-        "skipped",
-        "stopped",
-      ],
-    })
-      .notNull()
-      .default("pending"),
-    /** Why it failed or was skipped: a code, never a token or a response body. */
-    error: text(),
-    /** The client's deploy of the release, once the rollout started it. */
-    deployId: text("deploy_id"),
-    /**
-     * The client's change the rollout started (`client_provisions.change`):
-     * a rollback of it may go only while that is still the client's latest.
-     */
-    change: integer(),
-    /**
-     * The client's change a rollback of the client from the rollout
-     * started: one that failed is retried while it's still the latest.
-     */
-    rollbackChange: integer("rollback_change"),
-    /**
-     * What the client ran before the rollout reached it, which a rollback
-     * restores: JSON (`PreviousRun`, src/rollout/targets.ts). For a
-     * retry of a rollout that never finished the client, or a client left
-     * between releases, what it ran before that one
-     * (`unfinishedPrevious`).
-     */
-    previous: text(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.rolloutId, table.clientId] }),
-    index("rollout_targets_client_idx").on(table.clientId),
-  ]
 );
 
 /**
@@ -466,20 +403,17 @@ export const auditEvents = sqliteTable(
 );
 
 /**
- * Where clients run: a Cloudflare account (a Workers for Platforms
- * namespace in it, or ordinary Workers) or a host running plain workerd
- * (src/hosting/). Several clients may share one; their resources stay
- * apart (`clientResources`). Never a secret or a credential.
+ * Where clients run: a Workers for Platforms namespace in a Cloudflare
+ * account, one per stage (src/hosting/placement.ts,
+ * `ensureStageDestination`). Every client of the stage shares it; their
+ * resources stay apart (`clientResources`). Never a secret or a credential.
  */
 export const hostingDestinations = sqliteTable("hosting_destinations", {
-  /** Staff's name for it, such as `eu-production`. */
+  /** Its name, such as `workers-for-platforms-production`. */
   id: text().primaryKey(),
-  kind: text({
-    enum: ["workers_for_platforms", "dedicated", "workerd"],
-  }).notNull(),
-  /** Its Cloudflare account; null for workerd. */
+  /** Its Cloudflare account. */
   accountId: text("account_id"),
-  /** Its Workers for Platforms dispatch namespace; null otherwise. */
+  /** Its Workers for Platforms dispatch namespace. */
   namespace: text(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
@@ -639,19 +573,6 @@ export const clientProvisions = sqliteTable("client_provisions", {
   /** The staff member who started it. */
   startedBy: text("started_by").notNull(),
   createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
-
-/**
- * Unused: Ask Grasp calls Grasp's own AI directly, so nothing reads or
- * writes this table any more. It stays for one release because "Deploy
- * platform" applies migrations before the new admin is live, and the admin
- * still running needs it (expand, then contract). A later release drops it.
- */
-export const platformSettings = sqliteTable("platform_settings", {
-  id: integer().primaryKey(),
-  graspClientId: text("grasp_client_id"),
-  updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 

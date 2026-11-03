@@ -11,7 +11,7 @@
  * - Every resource deleted is one its inventory records for its own
  *   deployment, named for it, in its own destination; every database is
  *   checked against the provider before anything is deleted. Nothing here
- *   runs by itself: no retry, clock or rollout ever deletes.
+ *   runs by itself: no retry, clock or deploy ever deletes.
  * - Each resource deleted is audited as it's recorded deleted, so a
  *   deletion that stops part way leaves a record of what it did.
  *
@@ -378,7 +378,7 @@ const resolveDatabases = async (
 interface Where {
   api: CloudflareApi;
   accountId: string;
-  namespace: string | null;
+  namespace: string;
 }
 
 /**
@@ -476,19 +476,16 @@ export const deletePlacedClient = async (
   await assertIdle(env, clientId);
   const { placement } = client;
   const destination = await destinationOf(db, placement.destinationId);
-  if (destination.accountId === null || destination.kind === "workerd") {
+  if (destination.accountId === null || destination.namespace === null) {
     throw new OffboardingError(
       "destination_unsupported",
-      `${destination.id} isn't a Cloudflare destination the admin deletes in`
+      `${destination.id} has no Cloudflare account and namespace recorded`
     );
   }
   const where: Where = {
     api: await deployerApi(env),
     accountId: destination.accountId,
-    namespace:
-      destination.kind === "workers_for_platforms"
-        ? destination.namespace
-        : null,
+    namespace: destination.namespace,
   };
   const recorded = await clientInventory(db, clientId);
   const inventory = recorded

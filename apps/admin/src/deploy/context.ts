@@ -64,9 +64,8 @@ type SharedSecret =
  * Grasp's AI provider keys go to connect alone, which makes every
  * provider call (connect's src/ai-providers.ts): never to core, which
  * holds no key, and never into the admin's database. And only ever to
- * Grasp Cloud: a deploy runs only in a Cloudflare destination the admin's
- * own deployer reaches (hosting/operation.ts refuses a workerd one,
- * `destination_unsupported`, before it delivers anything). On-prem never
+ * Grasp Cloud: a deploy runs only in the stage's Workers for Platforms
+ * destination, which the admin's own deployer reaches. On-prem never
  * gets them: its operator leaves them unset, and its platform features run
  * locally or not at all.
  */
@@ -256,30 +255,6 @@ export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
   };
 };
 
-/**
- * The shared secrets, and the key their fingerprints are made with
- * (`sharedSecretPrints`), read from Secrets Store: only these, so a
- * rollback's check of them (src/rollout/rollback.ts) needs nothing else.
- */
-export const sharedStoreSecrets = async (
-  env: Env
-): Promise<Pick<DeploySecrets, "clientKey" | "shared">> => {
-  const shared = await sharedValues(env);
-  return { clientKey: await storeSecret(env, "CLIENT_KEY"), shared };
-};
-
-/**
- * The keys telling a client's core of a platform update needs, read from
- * Secrets Store (src/rollout/activity.ts): only these, so nothing else
- * missing stops it.
- */
-export const activityKeys = async (
-  env: Env
-): Promise<Pick<DeploySecrets, "routerKey" | "clientKey">> => ({
-  routerKey: await storeSecret(env, "ROUTER_KEY"),
-  clientKey: await storeSecret(env, "CLIENT_KEY"),
-});
-
 /** The admin var `value`, trimmed; undefined while it's unset or empty. */
 const varOf = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim() ?? "";
@@ -321,7 +296,7 @@ export interface DeployContext {
     hosts: RouterHosts;
     /** The domain clients are served under: a client is `<id>.<domain>`. */
     domain: string;
-    /** How the probe reaches core. */
+    /** How long the smoke check waits between tries, and for each. */
     smoke?: SmokeOptions;
     /**
      * The clients' dispatch namespace, as the router binds it: how a core

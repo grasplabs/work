@@ -29,6 +29,7 @@ import {
   appMembers,
   appVersions,
   appResourceBindings,
+  appWebhookDeliveries,
   appWorkflowBindings,
   apps,
   permissions,
@@ -168,6 +169,16 @@ const endedWith = (
     db
       .delete(appIntegrations)
       .where(and(eq(appIntegrations.appId, appId), gone)),
+    // Nothing more of it leaves for its webhooks.
+    db
+      .delete(appWebhookDeliveries)
+      .where(
+        and(
+          eq(appWebhookDeliveries.appId, appId),
+          isNull(appWebhookDeliveries.deliveredAt),
+          gone
+        )
+      ),
   ] as const;
 };
 
@@ -225,6 +236,9 @@ export const removeApp = async (
         // Retention reaps its releases, but what a live run still pins.
         currentVersion: null,
         pendingVersion: null,
+        // Its link (app-own-links.ts) is free for another App: a tombstone
+        // opens nothing.
+        link: null,
       })
       .where(
         and(

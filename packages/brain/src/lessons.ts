@@ -1125,19 +1125,43 @@ export const retireLesson = async <C>(
  * place in their scope, for a personal purge: a shared session's lessons
  * lose their episodes' evidence with those episodes.
  */
-export const forgetPersonLessons = (db: Brain<unknown>["db"], userId: string) =>
+export const forgetPersonLessons = (
+  db: Brain<unknown>["db"],
+  userId: string,
+  condition: SQL = sql`1`
+) =>
   [
     db
       .delete(brainLessons)
       .where(
-        and(eq(brainLessons.scope, "person"), eq(brainLessons.scopeId, userId))
+        and(
+          eq(brainLessons.scope, "person"),
+          eq(brainLessons.scopeId, userId),
+          condition
+        )
       ),
     db
       .delete(brainConsolidationMarks)
       .where(
-        eq(
-          brainConsolidationMarks.scopeKey,
-          scopeKeyOf({ scope: "person", scopeId: userId })
+        and(
+          eq(
+            brainConsolidationMarks.scopeKey,
+            scopeKeyOf({ scope: "person", scopeId: userId })
+          ),
+          condition
+        )
+      ),
+    // A job would clear their scope as having nothing to read, but not
+    // before the clock sweeps it: their ID goes now, with the rest.
+    db
+      .delete(brainConsolidationDue)
+      .where(
+        and(
+          eq(
+            brainConsolidationDue.scopeKey,
+            scopeKeyOf({ scope: "person", scopeId: userId })
+          ),
+          condition
         )
       ),
   ] as const;

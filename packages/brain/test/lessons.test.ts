@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createBrain } from "../src/brain.ts";
@@ -322,10 +323,17 @@ describe("consolidating episodes into lesson candidates", () => {
     );
     const job = await consolidate(brain, person(ann));
     const [annLesson] = await lessonsOf(brain, person(ann));
+    // Another of theirs since: their scope is due again when they go.
+    await recorded(brain, [run(cas, "failed")]);
     await brain.db.batch(forgetPerson(brain.db, cas, brain.ports.clock()));
     const { results: stored } = await env.BRAIN.prepare(
       "SELECT content FROM brain_lesson_versions"
     ).all<{ content: string }>();
+    const casScopes = await env.BRAIN.prepare(
+      "SELECT (SELECT count(*) FROM brain_consolidation_due WHERE scope_key = ?1) + (SELECT count(*) FROM brain_consolidation_marks WHERE scope_key = ?1) AS n"
+    )
+      .bind(scopeKeyOf(person(cas)))
+      .first<number>("n");
 
     expect({
       job,
@@ -340,6 +348,7 @@ describe("consolidating episodes into lesson candidates", () => {
         anns.some(({ eventId }) => content.includes(eventId))
       ),
       cas: await lessonCount(brain, person(cas)),
+      casScopes,
     }).toStrictEqual({
       // Two of three failures left: retired by the erasure itself.
       job: { read: 0, patched: 0 },
@@ -348,7 +357,42 @@ describe("consolidating episodes into lesson candidates", () => {
       erasedStillEvidence: false,
       versionsNameEpisodes: false,
       cas: 0,
+      // Nothing left in the consolidation's own rows names them.
+      casScopes: 0,
     });
+  });
+
+  it("leaves a person's lessons and queued consolidation to a purge whose hold no longer holds", async () => {
+    const { brain } = testHost();
+    const cas = `cas-${crypto.randomUUID()}`;
+    await recorded(brain, [
+      run(cas, "failed"),
+      run(cas, "failed"),
+      run(cas, "failed"),
+    ]);
+    await consolidate(brain, person(cas));
+    // Another of theirs since: their scope is due again.
+    await recorded(brain, [run(cas, "failed")]);
+    const due = async () =>
+      await env.BRAIN.prepare(
+        "SELECT count(*) AS n FROM brain_consolidation_due WHERE scope_key = ?"
+      )
+        .bind(scopeKeyOf(person(cas)))
+        .first<number>("n");
+    const before = {
+      lessons: await lessonCount(brain, person(cas)),
+      due: await due(),
+    };
+
+    // An attempt another took over from, or superseded: its hold is false.
+    await brain.db.batch(
+      forgetPerson(brain.db, cas, brain.ports.clock(), sql`0`)
+    );
+
+    expect({
+      lessons: await lessonCount(brain, person(cas)),
+      due: await due(),
+    }).toStrictEqual(before);
   });
 
   it("does bounded work a job, and leaves the rest of a scope's episodes to the next", async () => {

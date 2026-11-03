@@ -7,11 +7,11 @@ import {
   pinClient,
   promoteRelease,
   promotionHistory,
-  releaseToEdge,
   setClientChannel,
 } from "../src/rollout/channels.ts";
 import { RolloutError } from "../src/rollout/errors.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
+import { releaseToEdge } from "./edge.ts";
 import { client, db, staff } from "./hosting.ts";
 import { placedRelease } from "./placed.ts";
 
@@ -106,7 +106,9 @@ describe("changing the desired state", () => {
     await releaseToEdge(env, [second]);
     await promoteRelease(env, staff, { channel: "edge", releaseId: first });
 
-    const [latest, before] = await promotionHistory(db, [first, second]);
+    const [latest, before] = await promotionHistory(db, {
+      releaseIds: [first, second],
+    });
     const { edge } = await channelReleases(db);
 
     expect({

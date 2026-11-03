@@ -336,6 +336,173 @@ export const searchRebuilds = sqliteTable("search_rebuilds", {
 });
 
 /**
+ * Each purge, as a durable erasure (GRA-1122, ../purge-ledger.ts): who ran
+ * it, when, and, while it isn't finished, a keyed digest of exactly what
+ * it purges (`key`: an HMAC under the Brain's own key, never a plain hash,
+ * so a guessed term can't be checked against it), by which running the
+ * same purge again resumes it. Never a term or anything it erased.
+ */
+export const brainPurges = sqliteTable(
+  "brain_purges",
+  {
+    /** The purge's ID, as its audit event names it. */
+    id: text().primaryKey(),
+    kind: text({ enum: ["personal", "content"] }).notNull(),
+    key: text().notNull(),
+    /** User ID of the admin who first ran it. */
+    by: text().notNull(),
+    /** What it counted as it began, as JSON: documents and versions. */
+    counts: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** When its last step completed; null while any hasn't. */
+    completedAt: timestamp("completed_at"),
+    /**
+     * The purge an admin started fresh in its place, unfinished (kept as
+     * it stood, as history); null otherwise.
+     */
+    supersededBy: text("superseded_by"),
+    /**
+     * The run of it under way (an attempt), random: only that run changes
+     * the purge or its steps, so a trailing one never does. Null once it
+     * completed.
+     */
+    attempt: text(),
+    /**
+     * When its attempt last renewed its hold, with each step's own writes
+     * (a lease): another run takes the purge over only once it lapsed.
+     */
+    attemptAt: timestamp("attempt_at"),
+  },
+  (table) => [
+    // One open purge of the same input: running it again resumes it.
+    uniqueIndex("brain_purges_open_key_idx")
+      .on(table.key)
+      .where(
+        sql`${table.completedAt} IS NULL AND ${table.supersededBy} IS NULL`
+      ),
+    index("brain_purges_created_idx").on(table.createdAt),
+  ]
+);
+
+/**
+ * Each projection a purge reaches, as one step of it (../purge-ledger.ts):
+ * where it stands, why it is blocked as a stable code (never an error's
+ * message, which might repeat a term), and what it changed, as counts.
+ */
+export const brainPurgeSteps = sqliteTable(
+  "brain_purge_steps",
+  {
+    purgeId: text("purge_id")
+      .notNull()
+      .references(() => brainPurges.id, { onDelete: "cascade" }),
+    /** Which projection, such as `search` or `document:<ID>`. */
+    step: text().notNull(),
+    /** Its place among the purge's steps, from 0. */
+    position: integer().notNull(),
+    state: text({ enum: ["queued", "running", "complete", "blocked"] })
+      .notNull()
+      .default("queued"),
+    /** Why it is blocked: an error code or name; null otherwise. */
+    reason: text(),
+    /** What it changed, as JSON counts; null before it completed. */
+    counts: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.purgeId, table.step] })]
+);
+
+/**
+ * Each export of the company's Brain (GRA-335, ../exports.ts): who asked,
+ * where it stands, and until when its files may be downloaded. Its files
+ * are written one by one (`brain_export_files`), the manifest last: an
+ * export without one isn't complete, however far it got.
+ */
+export const brainExports = sqliteTable(
+  "brain_exports",
+  {
+    id: text().primaryKey(),
+    /** User ID of the admin who asked for it. */
+    by: text().notNull(),
+    state: text({ enum: ["running", "complete", "failed", "expired"] })
+      .notNull()
+      .default("running"),
+    /** Why it failed, as a stable code; null otherwise. */
+    reason: text(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    completedAt: timestamp("completed_at"),
+    /** Until when its files may be downloaded; null before it completed. */
+    expiresAt: timestamp("expires_at"),
+    /** The manifest's SHA-256 (hex); null before it is written. */
+    manifestSha256: text("manifest_sha256"),
+    /** Where the manifest is kept in the bucket; null before it is written. */
+    manifestObject: text("manifest_object"),
+    /**
+     * JSON array: the collections it holds, frozen as it began, so every
+     * file of it reads the same ones.
+     */
+    collectionIds: text("collection_ids").notNull(),
+    /**
+     * The newest purge record as it began (`brain_purges` rowid): a purge
+     * past it ran during the export (../exports.ts, `purgedSince`).
+     */
+    purgeMark: integer("purge_mark").notNull(),
+    /** A run's claim while it writes, and when: one writer at a time. */
+    claim: text(),
+    claimedAt: timestamp("claimed_at"),
+    /**
+     * When it stopped running, complete or failed: no run writes for it
+     * after, and no upload of one runs past `exportUploadWindowMs` from
+     * then (../exports.ts).
+     */
+    endedAt: timestamp("ended_at"),
+    /**
+     * When its files were found gone from the bucket, after it expired or
+     * failed and no upload could still land: it leaves the sweep that
+     * deletes them (../exports.ts).
+     */
+    filesRemovedAt: timestamp("files_removed_at"),
+  },
+  (table) => [
+    index("brain_exports_state_idx").on(table.state),
+    // One export being written at a time.
+    uniqueIndex("brain_exports_running_idx")
+      .on(table.state)
+      .where(sql`${table.state} = 'running'`),
+  ]
+);
+
+/**
+ * The files an export wrote, in order (../exports.ts): each one's name,
+ * SHA-256, size and object, and, for a part of a long list, where the
+ * next part goes on from (`cursor`).
+ */
+export const brainExportFiles = sqliteTable(
+  "brain_export_files",
+  {
+    exportId: text("export_id")
+      .notNull()
+      .references(() => brainExports.id, { onDelete: "cascade" }),
+    name: text().notNull(),
+    position: integer().notNull(),
+    sha256: text().notNull(),
+    bytes: integer().notNull(),
+    rows: integer().notNull(),
+    cursor: text(),
+    /**
+     * Where it is kept in the bucket: a key of its own each time it is
+     * written, recorded before it is uploaded, so no upload outlives its
+     * record unnoticed and no stale writer overwrites another's file.
+     */
+    object: text().notNull(),
+    /** Whether its upload finished: one that didn't is written again. */
+    stored: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.exportId, table.name] })]
+);
+
+/**
  * The Brain's memory records (../memories.ts): what a person, or
  * later an App or agent acting for one, asked the Brain to remember, as
  * they said it. A record starts `proposed`, never an accepted fact.
@@ -590,6 +757,12 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
 export const brainErasedDocuments = sqliteTable(
   "brain_erased_documents",
   {
+    /**
+     * Its place in the order records were written: a copy's mark
+     * (../erasures.ts). AUTOINCREMENT, so a sequence once used is never
+     * used again, also after the records of an attempt before go.
+     */
+    seq: integer().primaryKey({ autoIncrement: true }),
     purgeId: text("purge_id").notNull(),
     documentId: text("document_id").notNull(),
     /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
@@ -602,8 +775,11 @@ export const brainErasedDocuments = sqliteTable(
     doneAt: timestamp("done_at"),
   },
   (table) => [
-    primaryKey({ columns: [table.purgeId, table.documentId] }),
-    // A copy's check, by the place it read (and the rowid, as its mark).
+    uniqueIndex("brain_erased_documents_purge_document_idx").on(
+      table.purgeId,
+      table.documentId
+    ),
+    // A copy's check, by the place it read (and the sequence, as its mark).
     index("brain_erased_documents_place_idx").on(table.place),
   ]
 );
