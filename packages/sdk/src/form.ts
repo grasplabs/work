@@ -710,6 +710,14 @@ const nativeDescriptorOf = (
   }
 };
 
+/** A field's upload, as the form holds it while it runs. */
+export interface UploadHold {
+  /** Whether the draft it was started for is still the form's. */
+  readonly current: () => boolean;
+  /** It ended: the form may submit once every one has. */
+  readonly end: () => void;
+}
+
 /** Whether two drafts hold the same edits, whenever each was written. */
 const sameDraft = (one: FormDraft, other: FormDraft): boolean => {
   try {
@@ -1206,6 +1214,7 @@ export class FormBinding {
         ? pick(this.#baseline, target.fields)
         : this.initialValues;
     this.#savedValues = undefined;
+    this.#cancelUploads();
     this.#formOf().reset(values, { keepDefaultValues: true });
     this.#set({
       attempted: false,
@@ -1234,6 +1243,7 @@ export class FormBinding {
     }
     // Discarded: no draft of the record is kept, here or in the page.
     this.#draft?.store.discardFor(this.#draft.key, this.#owner);
+    this.#cancelUploads();
     this.#adopt(this.#latest);
   }
 
@@ -1308,29 +1318,45 @@ export class FormBinding {
     });
   }
 
-  /** How many of the form's fields have an upload under way. */
-  #uploads = 0;
+  /** The uploads under way, each by how to cancel it. */
+  readonly #uploads = new Map<object, () => void>();
 
   /**
-   * A field's upload started: the form refuses to submit until every one
-   * ended. Answers how to say this one ended, once.
+   * A field's upload started, `cancel` stopping it: the form refuses to
+   * submit until every one ended. Discarding the draft (`reset`,
+   * `reload`) cancels them: an upload that still finishes belongs to a
+   * draft that is gone, and `current` says so, so its file isn't written
+   * into the one that replaced it.
    */
-  startUpload(): () => void {
-    this.#uploads += 1;
+  startUpload(cancel: () => void): UploadHold {
+    const hold = {};
+    this.#uploads.set(hold, cancel);
     this.#set({ uploading: true });
-    let ended = false;
-    return () => {
-      if (!ended) {
-        ended = true;
-        this.#uploads -= 1;
-        this.#set({ uploading: this.#uploads > 0 });
-      }
+    return {
+      current: () => this.#uploads.has(hold),
+      end: () => {
+        if (this.#uploads.delete(hold)) {
+          this.#set({ uploading: this.#uploads.size > 0 });
+        }
+      },
     };
+  }
+
+  /** Cancels every upload under way: what they upload goes with the draft. */
+  #cancelUploads(): void {
+    const cancels = [...this.#uploads.values()];
+    this.#uploads.clear();
+    for (const cancel of cancels) {
+      cancel();
+    }
+    if (this.#status.uploading) {
+      this.#set({ uploading: false });
+    }
   }
 
   /** See `GraspForm.submit`. */
   async submit(): Promise<unknown> {
-    if (this.#uploads > 0) {
+    if (this.#uploads.size > 0) {
       throw clientError("form.uploading");
     }
     this.#pending ??= this.#run();

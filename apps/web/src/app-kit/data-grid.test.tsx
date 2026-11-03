@@ -43,6 +43,9 @@ const person = v.object({
   joined: v.timestamp(),
   score: v.number().nullable(),
   renews: v.timestamp(),
+  tenure: v.duration(),
+  address: v.object({ city: v.string(), country: v.enum(["nl", "de"]) }),
+  bonus: v.number().optional(),
 });
 
 const listPeople = reference(
@@ -68,6 +71,13 @@ const movePerson = reference(
   "mutation",
   "people.move",
   v.object({ id: v.id("people"), team: v.enum(["sales", "support"]) }),
+  v.null()
+);
+
+const rewardPerson = reference(
+  "mutation",
+  "people.reward",
+  v.object({ id: v.id("people"), bonus: v.number().optional() }),
   v.null()
 );
 
@@ -109,6 +119,10 @@ const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
     joined,
     renews,
     score: index === 0 ? 7 : null,
+    // Two and a half hours.
+    tenure: 9_000_000,
+    address: { city: "Utrecht", country: "nl" as const },
+    bonus: 3,
   })
 );
 
@@ -151,6 +165,7 @@ const PeopleGrid = ({
   const score = useMutation(scorePerson);
   const move = useMutation(movePerson);
   const renew = useMutation(renewPerson);
+  const reward = useMutation(rewardPerson);
   return (
     <DataGrid
       args={argsOf}
@@ -185,6 +200,12 @@ const PeopleGrid = ({
           field: "score",
           edit: async (row, value) =>
             await score({ id: row._id, score: value }),
+        },
+        "tenure",
+        "address",
+        {
+          field: "bonus",
+          edit: async (row, bonus) => await reward({ id: row._id, bonus }),
         },
       ]}
       label="People"
@@ -294,6 +315,9 @@ describe("a data grid", () => {
         timeZone: "UTC",
       }).format(renews),
       "7",
+      `${new Intl.NumberFormat(undefined, { style: "unit", unit: "hour", unitDisplay: "short" }).format(2)} ${new Intl.NumberFormat(undefined, { style: "unit", unit: "minute", unitDisplay: "short" }).format(30)}`,
+      "city: Utrecht, country: nl",
+      "3",
     ]);
   });
 
@@ -397,6 +421,37 @@ describe("a data grid", () => {
     });
   });
 
+  it("leaves out an optional number the person cleared, where a required one says it needs a value", async () => {
+    const { client, calls } = hostOf();
+    await rendered(client, grid);
+    await click(named("Edit Bonus for Ada"));
+    await typeInto(named("Edit Bonus for Ada"), "");
+    await press(named("Edit Bonus for Ada"), "Enter");
+    await click(named("Edit Renews for Ada"));
+    await typeInto(named("Edit Renews for Ada"), "");
+    await press(named("Edit Renews for Ada"), "Enter");
+    expect({
+      sent: calls.map(({ input }) => input),
+      problem: find('[role="alert"]').textContent,
+    }).toStrictEqual({
+      sent: [{ id: idOf(0) }],
+      problem: "Enter a value.",
+    });
+  });
+
+  it("starts the selection afresh when the list is read for other arguments", async () => {
+    const { client } = hostOf();
+    await rendered(client, grid);
+    await click(named("Select Ada"));
+    await typeInto(named("Team"), "support");
+    await typeInto(named("Team"), "");
+    expect(document.querySelector('[aria-label="Selected rows"]')).toBeNull();
+    expect(
+      named("Select Ada").getAttribute("aria-checked") ??
+        named("Select Ada").dataset.checked
+    ).not.toBe("true");
+  });
+
   it("keeps a choice's failed save open, its reason shown, after the person leaves it", async () => {
     const { client } = hostOf(() => ({
       failed: "people.full",
@@ -460,7 +515,9 @@ describe("a data grid", () => {
     await click(find("button", "Columns"));
     await click(find('[role="menuitemcheckbox"]', "Active"));
     expect(before).toContain("Active");
-    expect(find("thead").textContent).toBe("NameTeamJoinedRenewsScoreActions");
+    expect(find("thead").textContent).toBe(
+      "NameTeamJoinedRenewsScoreTenureAddressBonusActions"
+    );
   });
 
   it("says when there is nothing, and when nothing matches", async () => {

@@ -87,6 +87,129 @@ const shownUndeclared = (value: unknown, text: DataGridText): string => {
   return "";
 };
 
+/** The units a duration is said in, largest first, and how many milliseconds each is. */
+const durationUnits = [
+  ["day", 86_400_000],
+  ["hour", 3_600_000],
+  ["minute", 60_000],
+  ["second", 1000],
+] as const;
+
+/**
+ * A duration (whole milliseconds) as a person reads it: its two largest
+ * units, `2 hr 30 min`, or milliseconds under a second.
+ */
+const shownDuration = (ms: number, language: string): string => {
+  const parts: string[] = [];
+  let rest = Math.abs(ms);
+  for (const [unit, size] of durationUnits) {
+    const count = Math.floor(rest / size);
+    rest -= count * size;
+    if (count > 0 && parts.length < 2) {
+      parts.push(
+        new Intl.NumberFormat(localeOf(language), {
+          style: "unit",
+          unit,
+          unitDisplay: "short",
+        }).format(count)
+      );
+    }
+  }
+  if (parts.length === 0) {
+    return new Intl.NumberFormat(localeOf(language), {
+      style: "unit",
+      unit: "millisecond",
+      unitDisplay: "short",
+    }).format(ms);
+  }
+  return parts.join(" ");
+};
+
+/**
+ * An object's fields as a cell shows them, compactly, each as its own
+ * kind shows: `city: Utrecht, country: nl`. Empty fields are left out.
+ */
+const shownFields = (
+  value: unknown,
+  fieldOf: (name: string) => ValueDescriptor | undefined,
+  text: DataGridText,
+  language: string
+): string =>
+  isRecord(value)
+    ? Object.entries(value)
+        .map(([name, field]) => [
+          name,
+          // oxlint-disable-next-line no-use-before-define -- the two recurse into each other
+          shownCell(field, fieldOf(name), text, language),
+        ])
+        .filter(([, shown]) => shown !== "")
+        .map(([name, shown]) => `${name}: ${shown}`)
+        .join(", ")
+    : "";
+
+/** How a cell shows a value of one kind of field: what it is shown with. */
+interface Showing {
+  readonly descriptor: ValueDescriptor;
+  readonly text: DataGridText;
+  readonly language: string;
+  readonly day: boolean;
+}
+
+/** How a cell shows each kind of field, beside text, which shows as it is. */
+const showers: Readonly<
+  Partial<
+    Record<ValueDescriptor["kind"], (value: unknown, how: Showing) => string>
+  >
+> = {
+  timestamp: (value, { language, day }) =>
+    typeof value === "number" ? shownMoment(value, language, day) : "",
+  boolean: (value, { text }) => (value === true ? text.yes : text.no),
+  number: (value, { language }) =>
+    typeof value === "number"
+      ? new Intl.NumberFormat(localeOf(language)).format(value)
+      : "",
+  money: (value, { language }) => shownMoney(value, language),
+  file: (_value, { text }) => text.file,
+  duration: (value, { language }) =>
+    typeof value === "number" ? shownDuration(value, language) : "",
+  schedule: (value) =>
+    isRecord(value) &&
+    typeof value.cron === "string" &&
+    typeof value.timeZone === "string"
+      ? `${value.cron} (${value.timeZone})`
+      : "",
+  object: (value, { descriptor, text, language }) => {
+    const fields = descriptor.kind === "object" ? descriptor.fields : {};
+    return shownFields(
+      value,
+      (name) => (Object.hasOwn(fields, name) ? fields[name] : undefined),
+      text,
+      language
+    );
+  },
+  record: (value, { descriptor, text, language }) =>
+    descriptor.kind === "record"
+      ? shownFields(value, () => descriptor.value, text, language)
+      : "",
+  array: (value, { descriptor, text, language }) => {
+    if (descriptor.kind !== "array" || !Array.isArray(value)) {
+      return "";
+    }
+    const { item } = descriptor;
+    // Objects in a list each read as one, apart from the next.
+    const separator =
+      item.kind === "object" || item.kind === "record" ? "; " : ", ";
+    return (
+      value
+        // oxlint-disable-next-line no-use-before-define -- each item shows as its own kind does
+        .map((each: unknown) => shownCell(each, item, text, language))
+        .join(separator)
+    );
+  },
+  literal: (value, { text }) => shownUndeclared(value, text),
+  union: (value, { text }) => shownUndeclared(value, text),
+};
+
 /** A field's value as a cell shows it, by what the query declares of the field. */
 export const shownCell = (
   value: unknown,
@@ -98,34 +221,14 @@ export const shownCell = (
   if (value === null || value === undefined) {
     return "";
   }
-  const kind = descriptor?.kind;
-  if (kind === "timestamp") {
-    return typeof value === "number" ? shownMoment(value, language, day) : "";
-  }
-  if (kind === "boolean") {
-    return value === true ? text.yes : text.no;
-  }
-  if (kind === "number") {
-    return typeof value === "number"
-      ? new Intl.NumberFormat(localeOf(language)).format(value)
-      : "";
-  }
-  if (kind === "money") {
-    return shownMoney(value, language);
-  }
-  if (kind === "file") {
-    return text.file;
-  }
-  if (descriptor?.kind === "array") {
-    const { item } = descriptor;
-    return Array.isArray(value)
-      ? value
-          .map((each: unknown) => shownCell(each, item, text, language))
-          .join(", ")
-      : "";
-  }
-  if (kind === undefined || kind === "union") {
+  if (descriptor === undefined) {
     return shownUndeclared(value, text);
+  }
+  const show = Object.hasOwn(showers, descriptor.kind)
+    ? showers[descriptor.kind]
+    : undefined;
+  if (show !== undefined) {
+    return show(value, { descriptor, text, language, day });
   }
   // Text of any kind: a string, an enum's value, an ID, a reference.
   return typeof value === "string" ? value : "";
@@ -206,7 +309,14 @@ export const parsedDraft = (
     return { value: draft };
   }
   if (draft.trim() === "") {
-    return nullable ? { value: null } : { problem: text.required };
+    if (nullable) {
+      return { value: null };
+    }
+    // A field that may be left out (or filled in by its default) is,
+    // cleared; one that needs a value says so.
+    return descriptor !== undefined && descriptor.presence !== "required"
+      ? { value: undefined }
+      : { problem: text.required };
   }
   if (kind === "choice") {
     return { value: draft };

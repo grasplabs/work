@@ -140,15 +140,31 @@ interface GridState {
  */
 type EditValue<Value> = Value extends { readonly __tableName: string }
   ? never
-  : Value extends string
-    ? Value
-    : Value extends number
-      ? number
-      : Value extends boolean
-        ? boolean
-        : Value extends null
-          ? null
-          : never;
+  : Value extends undefined
+    ? undefined
+    : Value extends string
+      ? Value
+      : Value extends number
+        ? number
+        : Value extends boolean
+          ? boolean
+          : Value extends null
+            ? null
+            : never;
+
+/** A record the grid can tell apart from the others whatever moves: one with an `_id`. */
+interface KeyedRow {
+  readonly _id: string;
+}
+
+/**
+ * How a column saves an inline edit: only of records with an `_id`, so a
+ * draft is always saved to the record it was typed for, however the list
+ * moves while it is open.
+ */
+type EditOf<Row, Name extends FieldOf<Row>> = [Row] extends [KeyedRow]
+  ? (row: Row, value: EditValue<Row[Name]>) => Promise<unknown>
+  : never;
 
 /** One column, showing one field of the record. */
 interface ColumnOf<Row, Name extends FieldOf<Row>> {
@@ -184,7 +200,7 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
    * renders something interactive (a link, a button): the cell is the
    * edit button, and can't hold another.
    */
-  readonly edit?: (row: Row, value: EditValue<Row[Name]>) => Promise<unknown>;
+  readonly edit?: EditOf<Row, Name>;
 }
 
 /** A column: a field's name alone, or how it shows. */
@@ -529,9 +545,13 @@ const RowCell = <Row,>({
   text: DataGridText;
 }): React.JSX.Element => {
   const kind = editorKindOf(column.descriptor, column.day);
+  // Only a record with an `_id` is edited: one without has no key that
+  // holds still while the list moves.
   return (
     <TableCell>
-      {column.edit === undefined || kind === undefined ? (
+      {column.edit === undefined ||
+      kind === undefined ||
+      idOf(row) === undefined ? (
         <CellValue column={column} row={row} text={text} />
       ) : (
         <EditableCell
@@ -645,8 +665,13 @@ const GridRows = <Reference extends AnyQuery>({
     label: rowLabelOf(row, index, first, text),
     row,
   }));
-  // The selection is of the rows shown now, by ID: one gone drops out.
+  // The selection is of the rows shown now, by ID: one that left the list
+  // is dropped, never selected again should it come back.
   const selectableRows = rows.filter(({ id }) => id !== undefined);
+  const shownIds = new Set(selectableRows.map(({ id }) => id));
+  if ([...selected].some((id) => !shownIds.has(id))) {
+    setSelected(new Set([...selected].filter((id) => shownIds.has(id))));
+  }
   const chosen = selectableRows.filter(
     ({ id }) => id !== undefined && selected.has(id)
   );
@@ -730,7 +755,10 @@ const GridRows = <Reference extends AnyQuery>({
             text={text}
           />
         ))}
-        {rowActions.length > 0 ? (
+        {rowActions.length > 0 && id === undefined ? (
+          <TableCell variant="end" />
+        ) : null}
+        {rowActions.length > 0 && id !== undefined ? (
           <TableCell variant="end">
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -930,8 +958,13 @@ const GridFailure = ({
 const searchSettleMs = 300;
 
 /** The bulk actions a grid of `Row` takes: only of rows it can select by `_id`. */
-type BulkActionsOf<Row> = [Row] extends [{ readonly _id: string }]
+type BulkActionsOf<Row> = [Row] extends [KeyedRow]
   ? readonly DataGridBulkAction<Row>[]
+  : never;
+
+/** The row actions a grid of `Row` takes: only of rows it knows by `_id`. */
+type RowActionsOf<Row> = [Row] extends [KeyedRow]
+  ? readonly DataGridRowAction<Row>[]
   : never;
 
 /** What a data grid takes. */
@@ -956,8 +989,8 @@ export interface DataGridProps<Reference extends AnyQuery> {
   readonly search?: string;
   /** The sort it starts with. */
   readonly initialSort?: DataGridState<PageItemOf<Reference>>["sort"];
-  /** What a row's menu offers. */
-  readonly rowActions?: readonly DataGridRowAction<PageItemOf<Reference>>[];
+  /** What a row's menu offers: the records must have an `_id`. */
+  readonly rowActions?: RowActionsOf<PageItemOf<Reference>>;
   /**
    * What the selected rows can have done to them: rows become selectable,
    * by their `_id`, which the records must have.
@@ -1008,17 +1041,23 @@ export const DataGrid = <Reference extends AnyQuery>({
   pageSize = 25,
   search: searchPlaceholder,
   initialSort,
-  rowActions = noActions,
+  rowActions,
   bulkActions,
   empty,
   text: ownText,
 }: DataGridProps<Reference>): React.JSX.Element => {
-  // SAFETY: `BulkActionsOf` admits bulk actions only of rows with an `_id`,
-  // which are the rows these are.
+  // SAFETY: `BulkActionsOf` and `RowActionsOf` admit actions only of rows
+  // with an `_id`, which are the rows these are.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const bulk = (bulkActions ?? noActions) as readonly DataGridBulkAction<
     PageItemOf<Reference>
   >[];
+  // SAFETY: as above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const menu = (rowActions ?? noActions) as readonly DataGridRowAction<
+    PageItemOf<Reference>
+  >[];
+
   const text: DataGridText = { ...pageText(dataGridTexts), ...ownText };
   const fields = recordFieldsOf(query.returns);
   const columns = specs.map((spec) => readColumn(spec, fields));
@@ -1125,6 +1164,8 @@ export const DataGrid = <Reference extends AnyQuery>({
       >
         <GridRows
           args={listArgs}
+          // Other arguments, another list: its selection starts empty.
+          key={JSON.stringify(listArgs)}
           bulkActions={bulk}
           columns={shown}
           empty={empty}
@@ -1135,7 +1176,7 @@ export const DataGrid = <Reference extends AnyQuery>({
           }}
           pageSize={pageSize}
           query={query}
-          rowActions={rowActions}
+          rowActions={menu}
           state={state}
           text={text}
         />

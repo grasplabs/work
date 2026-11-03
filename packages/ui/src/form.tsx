@@ -1248,6 +1248,17 @@ const FileUpload = <Reference extends FilesReference>({
       ? control.value.id
       : undefined;
   const busy = upload.status === "uploading" || upload.status === "verifying";
+  /** Cancels the upload, which then fails as cancelled and so ends. */
+  const stopUpload = (): void => {
+    const stop = async (): Promise<void> => {
+      try {
+        await upload.cancel();
+      } catch {
+        // Nothing to cancel any more: it ended on its own.
+      }
+    };
+    void stop();
+  };
   if (held !== undefined) {
     return (
       <div className="flex items-center gap-2">
@@ -1289,13 +1300,17 @@ const FileUpload = <Reference extends FilesReference>({
             return;
           }
           setFailure(undefined);
-          // The form doesn't submit until the upload ends.
-          const ended = bindingOf(form).startUpload();
+          // The form doesn't submit until the upload ends; discarding the
+          // draft cancels it.
+          const hold = bindingOf(form).startUpload(stopUpload);
           const send = async (): Promise<void> => {
             try {
               const ref = await upload.upload(file);
-              setUploaded({ id: ref.id, name: file.name });
-              control.handleChange(ref);
+              // A draft discarded meanwhile: the file isn't the new one's.
+              if (hold.current()) {
+                setUploaded({ id: ref.id, name: file.name });
+                control.handleChange(ref);
+              }
             } catch (error) {
               // Cancelled by the person: nothing went wrong to say.
               const cancelled =
@@ -1308,8 +1323,11 @@ const FileUpload = <Reference extends FilesReference>({
                 );
               }
             }
-            ended();
-            control.handleBlur();
+            const current = hold.current();
+            hold.end();
+            if (current) {
+              control.handleBlur();
+            }
           };
           void send();
         }}
@@ -1328,8 +1346,7 @@ const FileUpload = <Reference extends FilesReference>({
           />
           <Button
             onClick={() => {
-              // The upload then fails as cancelled, which ends it.
-              void upload.cancel();
+              stopUpload();
             }}
             size="sm"
             type="button"
