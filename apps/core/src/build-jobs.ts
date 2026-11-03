@@ -11,19 +11,12 @@ import { z } from "zod";
 import {
   afterProposal,
   buildingAs,
-  buildsApps,
   checkFiles,
   draftOf,
   maxFailedChecks,
 } from "./agent-builds.ts";
 import type { DraftCheck, Proposal } from "./agent-builds.ts";
-import { readDenied } from "./agent-person.ts";
-import {
-  auditAgentCall,
-  auditedCall,
-  chatAuthority,
-  revokedSince,
-} from "./agent-scope.ts";
+import { auditAgentCall, auditedCall, revokedSince } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import {
   draftFiles,
@@ -45,7 +38,6 @@ import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
-import { grantedPermissions } from "./permissions.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import type { RunStep } from "./workflows/host.ts";
@@ -71,10 +63,10 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //
 // - Ambient authority: its input is the workspace, the chat and the job,
 //   nothing else. Each step reads the chat's agent and person from the
-//   Workspace object and checks again what a build call does: the agent's
-//   own permission to build Apps, the person still a member and a builder
-//   of the App, the chat not restricted. Its last step checks all of it
-//   once more before it hands on what the job came to.
+//   Workspace object and checks again what a build call does: the person
+//   still a member and a builder of the App, the chat not restricted. Its
+//   last step checks all of it once more before it hands on what the job
+//   came to.
 // - Revocation: it acts on the authority of the code run that submitted
 //   it, granted when that run opened. Each step, and each write right
 //   before it commits, reads revocations since then (`admitJob`): one
@@ -258,18 +250,14 @@ const seqOf = ({ step, context }: Pick<Asking, "step" | "context">): number => {
 /**
  * The chat's person as the job acts for them, and the job's App, once the
  * agent may still build it for them, as a build call checks it: the
- * agent's own permission to build Apps, the person still a member and a
- * builder of the App, and the chat not restricted.
+ * person still a member and a builder of the App, and the chat not
+ * restricted.
  */
 const authorize = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
   job: BuildJob
 ): Promise<{ by: Acting; app: AppId }> => {
-  const permissions = await grantedPermissions(env, chatAuthority(scope));
-  if (!buildsApps(permissions)) {
-    throw readDenied("write");
-  }
   const person = await memberOf(env.DB, scope.personId);
   if (person === undefined) {
     throw permissionErrors.create("permission.person_inactive");

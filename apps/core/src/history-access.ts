@@ -18,7 +18,6 @@ import { memberOf } from "./auth/identity.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
 import { collectionsAllowed } from "./knowledge/access.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -26,7 +25,7 @@ import { grantedPermissions } from "./permissions.ts";
 // What a chat's earlier code results may still send to the model (GRA-690).
 // A result rests on what its run read, each recorded with the run:
 // collections and each connection call, with the action and resource its
-// grant allowed (`recordSources`), and an App's answer, exports or files
+// grant allowed (`recordSources`), and an App's answer or files
 // and the Knowledge catalog's collections (`recordRunReads`). Before every
 // model request the chat asks which of those its agent may still read for
 // its person, as a read made now would be decided, and withholds the
@@ -157,9 +156,7 @@ const appReads = {
   query: "app-query",
   /** A mutation or action answered: the agent's `write` grant, the person's role. */
   write: "app-write",
-  /** Its exports: the Apps collection granted, the person's role. */
-  exports: "app-exports",
-  /** Its files or versions: the Apps collection granted, the person builds it. */
+  /** Its files or versions: the person builds it, as `env.apps` reads them. */
   build: "app-build",
 } as const;
 
@@ -172,7 +169,7 @@ export const appRead = (read: AppRead, appId: string): string =>
 const appReadOf = (
   source: string
 ): { read: AppRead; appId: string } | undefined => {
-  for (const read of ["query", "write", "exports", "build"] as const) {
+  for (const read of ["query", "write", "build"] as const) {
     const prefix = `${appReads[read]}:`;
     if (source.startsWith(prefix)) {
       return { read, appId: source.slice(prefix.length) };
@@ -187,27 +184,21 @@ const appReadNeeds = (
   appId: string,
   permissions: readonly Permission[]
 ): { granted: boolean; role: AppRole } => {
-  if (read === "query" || read === "write") {
-    // The action the call itself needed (`actionFor` in agent-apps.ts).
-    const action = read === "query" ? "read" : "write";
-    return {
-      granted: permissions.some(
-        ({ object, actions }) =>
-          object.type === "app" &&
-          object.appId === appId &&
-          actions.includes(action)
-      ),
-      role: "user",
-    };
+  if (read === "build") {
+    // The person's own Apps, which the agent reads as them with no
+    // permission of its own (agent-apps.ts).
+    return { granted: true, role: "builder" };
   }
+  // The action the call itself needed (`actionFor` in agent-apps.ts).
+  const action = read === "query" ? "read" : "write";
   return {
     granted: permissions.some(
       ({ object, actions }) =>
-        object.type === "collection" &&
-        object.collectionId === appsCollectionId &&
-        actions.includes("read")
+        object.type === "app" &&
+        object.appId === appId &&
+        actions.includes(action)
     ),
-    role: read === "build" ? "builder" : "user",
+    role: "user",
   };
 };
 

@@ -102,10 +102,6 @@ const setUp = async (
   return { admin, builder, person, app, chat, grant };
 };
 
-const denied = permissionErrors.create("permission.denied", {
-  action: "write",
-}).message;
-
 const unavailable = workflowResourceErrors.create(
   "workflow.resource_unavailable"
 ).message;
@@ -431,26 +427,26 @@ describe("the agent building an independent workflow", () => {
     ]);
   });
 
-  it("builds nothing without the agent's permission, nor for a person who doesn't build", async () => {
+  it("builds for a builder with no permission of the agent's own, and nothing for a person who doesn't build", async () => {
     const calls = tryEach({
-      create: `(await env.workflowBuild.create("refused-${unique()}")).id`,
+      create: `typeof (await env.workflowBuild.create("made-${unique()}")).id`,
     });
-    const unpermitted = await setUp([codeStep(calls), says("No.")]);
-    await unpermitted.chat.ask("Build a workflow");
+    const ungranted = await setUp([codeStep(calls), says("Made.")]);
+    await ungranted.chat.ask("Build a workflow");
     const user = await setUp([codeStep(calls), says("No.")], "user");
     await user.grant();
     await user.chat.ask("Build a workflow");
 
-    const [refused] = await codeResults(
-      unpermitted.chat.stub,
-      unpermitted.chat.chat.id
+    const [made] = await codeResults(
+      ungranted.chat.stub,
+      ungranted.chat.chat.id
     );
     const [forUser] = await codeResults(user.chat.stub, user.chat.chat.id);
     expect({
-      unpermitted: returned(refused?.text),
+      ungranted: returned(made?.text),
       user: returned(forUser?.text),
     }).toStrictEqual({
-      unpermitted: { create: denied },
+      ungranted: { create: "string" },
       user: { create: roleErrors.create("role.forbidden").message },
     });
   });
