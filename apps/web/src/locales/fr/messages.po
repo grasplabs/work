@@ -8000,6 +8000,10 @@ msgid "Lessons"
 msgstr "Leçons"
 
 #: src/activity/audit-words.ts
+msgid "Let a domain's visitors use one of its functions"
+msgstr "A autorisé les visiteurs d’un domaine à utiliser l’une de ses fonctions"
+
+#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "A réadmis l'ancienne adresse d'un membre effacé"
 
@@ -13601,6 +13605,10 @@ msgid "Stopped"
 msgstr "Arrêtée"
 
 #: src/activity/audit-words.ts
+msgid "Stopped a domain's visitors using one of its functions"
+msgstr "A retiré aux visiteurs d’un domaine l’une de ses fonctions"
+
+#: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "A arrêté une planification qui échouait sans cesse"
 
@@ -15946,6 +15954,10 @@ msgstr "Utilisez le compte de votre organisation pour continuer."
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "A utilisé un outil connecté"
+
+#: src/activity/audit-words.ts
+msgid "Used a domain's function as a visitor"
+msgstr "A utilisé une fonction d’un domaine en tant que visiteur"
 
 #: src/engines/resource-bindings.tsx
 #: src/knowledge/document.tsx

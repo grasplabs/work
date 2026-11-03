@@ -15,6 +15,9 @@ describe("an audit entry's words", () => {
       "app.visitor_refused",
       "app.visitor_listed",
       "app.visitor_unlisted",
+      "app.visitor_granted",
+      "app.visitor_ungranted",
+      "app.visitor_called",
     ];
     expect({
       signedIn: said("app.visitor_signed_in"),

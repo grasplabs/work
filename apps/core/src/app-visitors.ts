@@ -24,7 +24,9 @@ import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 import {
   and,
@@ -40,6 +42,9 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { callVisitorFunction } from "./app-functions.ts";
+import type { FunctionAnswer } from "./app-functions.ts";
+import { grantHeld } from "./app-visitor-calls.ts";
 import { editableApp, toApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -55,10 +60,13 @@ import {
   appVisitorEntries,
   appVisitorSessions,
 } from "./db/core/schema.ts";
+import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { escapeHtml } from "./mail-outbox.ts";
 import { sendMail } from "./mail.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
+import { deliveryOf, leasedBuild, standingOf } from "./screen-trust.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import { visitorScreen } from "./screens-rpc.ts";
 import { requireNotStaff } from "./sharing.ts";
 
@@ -98,15 +106,16 @@ import { requireNotStaff } from "./sharing.ts";
 //   App's own code. A visitor never holds a member's session, so `/rpc`
 //   and every member's route refuse them.
 // - The screen reaching past the App. The screen runs in the frame core
-//   serves for every screen (screen-frame.ts), and no App function is
-//   called for a visitor: function calls need a member's session
-//   (app-function-route.ts), and the lease a visitor's screen gets is for
-//   `visitor:<session>`, which no member's is. Nothing runs as a member,
-//   or as anyone: what a screen shows a visitor is what its code holds.
-// - Access that outlives its reason. On every open, the session must be
-//   unexpired (8 hours at most), the App still published, and the address
-//   still listed; removing it from the list, or unpublishing, ends it at
-//   once. Signing out deletes the session.
+//   serves for every screen (screen-frame.ts). Its calls come here, never
+//   through a member's route (which needs a member's session; the lease a
+//   visitor's screen gets is for `visitor:<session>`, which no member's
+//   is), and run as the App itself, only for the functions its builders
+//   granted visitors (app-visitor-calls.ts): never as a member.
+// - Access that outlives its reason. On every open and call, the session
+//   must be unexpired (8 hours at most), the App still published, and the
+//   address still listed; removing it from the list ends it at once, and
+//   unpublishing deletes every visitor's session (app-status.ts). Signing
+//   out deletes the session.
 // - Unseen. Every code sent and every refusal (an address not listed,
 //   too many codes, a wrong or used-up code), every sign-in and sign-out
 //   is audited as the visitor; setting the list is audited as the
@@ -120,11 +129,20 @@ import { requireNotStaff } from "./sharing.ts";
 const minuteMs = 60 * 1000;
 const hourMs = 60 * minuteMs;
 
-/** The most a visitor's request may carry: an address and a code. */
-const requestMaxLength = 4 * 1024;
+/**
+ * The most bytes a visitor's request may carry: a call's request
+ * (`functionRequestMaxBytes`, as a member's screen may send) written as a
+ * JSON string, where escaping can at most double it, and room for the
+ * rest (the action, a session and a lease). Every other request is far
+ * smaller, and checked field by field once it is parsed.
+ */
+const requestMaxLength = 2 * functionRequestMaxBytes + 4 * 1024;
 
 /** Most rows the sweep deletes of each, a run. */
 const sweptPerRun = 500;
+
+/** The App host's bucket all of an App's visitors' calls share. */
+const visitorsBucket = "visitors";
 
 /** A visitor as the audit log names them. */
 const visitorActor = (app: AppId, sessionId?: string): AuditActor => ({
@@ -495,7 +513,10 @@ const signIn = async (
   const token = randomToken();
   const sessionId = crypto.randomUUID();
   const expiresAt = now + appVisitorSessionHours * hourMs;
-  // The code is used once: the session goes in only if this took it.
+  // The code is used once: the session goes in only if this took it, and
+  // only while the App is still published as it goes in, so an unpublish
+  // that ended every session meanwhile leaves none behind it.
+  const stillPublished = sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${eq(apps.id, found.id)} AND ${eq(apps.status, "published")})`;
   const [, inserted] = await auditedBatch(env, db, [
     db
       .update(appVisitorCodes)
@@ -506,7 +527,7 @@ const signIn = async (
     db
       .insert(appVisitorSessions)
       .select(
-        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0`
+        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0 AND ${stillPublished}`
       )
       .returning({ id: appVisitorSessions.id }),
     outboxedIfChanged(db, {
@@ -517,7 +538,9 @@ const signIn = async (
     }),
   ]);
   if (inserted.length === 0) {
-    return await codeRefused(env, found.id, address.data, "used");
+    const reason =
+      (await publishedAt(env, link)) === undefined ? "not_published" : "used";
+    return await codeRefused(env, found.id, address.data, reason);
   }
   return { token, expiresAt: new Date(expiresAt).toISOString() };
 };
@@ -596,6 +619,179 @@ const signOut = async (env: Env, token: string): Promise<void> => {
   ]);
 };
 
+/** How long a visitor's call may take, as a member's screen call may. */
+const visitorCallMs = 30_000;
+
+/** The session `id`, unexpired, or undefined. */
+const sessionById = async (env: Env, id: string) =>
+  await drizzle(env.DB)
+    .select()
+    .from(appVisitorSessions)
+    .where(
+      and(
+        eq(appVisitorSessions.id, id),
+        gt(appVisitorSessions.expiresAt, new Date())
+      )
+    )
+    .get();
+
+/** Whose screen build a visitor's call runs for (`deliveredToVisitor`). */
+interface VisitorDeliveryTarget {
+  app: AppId;
+  sessionId: string;
+  build: LeasedBuild | undefined;
+}
+
+/**
+ * Refuses, with `screen.revoked` or `screen.unreviewed`, unless `build`
+ * gets the App's data now; the refusal is audited as the visitor, with
+ * the stage it came at.
+ */
+const requireVisitorDelivery = async (
+  env: Env,
+  { app, sessionId, build }: VisitorDeliveryTarget,
+  stage: "admission" | "delivery"
+): Promise<void> => {
+  const delivery = deliveryOf(await standingOf(env, app, build));
+  if (delivery === "open") {
+    return;
+  }
+  await audited(
+    env,
+    app,
+    "app.visitor_refused",
+    { reason: `screen_${delivery}`, stage },
+    sessionId
+  );
+  throw screenErrors.create(
+    delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+  );
+};
+
+/**
+ * `run`'s answer for a visitor's screen running `target.build`, as
+ * `delivering` (screen-trust.ts) is for a member's: trust is read before
+ * `run`, so code nobody approved starts nothing, and again before
+ * whatever `run` ends with is handed over, its answer or its error, so an
+ * approval taken back while it ran keeps both here. What `run` already
+ * changed stays changed.
+ */
+export const deliveredToVisitor = async <Answer>(
+  env: Env,
+  target: VisitorDeliveryTarget,
+  run: () => Promise<Answer>
+): Promise<Answer> => {
+  await requireVisitorDelivery(env, target, "admission");
+  let answer: Answer;
+  try {
+    answer = await run();
+  } catch (error) {
+    await requireVisitorDelivery(env, target, "delivery");
+    throw error;
+  }
+  await requireVisitorDelivery(env, target, "delivery");
+  return answer;
+};
+
+/**
+ * A call of one of the App's functions by a visitor, from its screen
+ * (app-visitor-calls.ts): run as the App itself, only for a function the
+ * App's current version grants visitors, while the session is live, the
+ * App published and the address listed, each read again before every
+ * commit. Counted per visitor and per App before anything runs.
+ */
+const callAsVisitor = async (
+  env: Env,
+  token: string,
+  lease: string,
+  request: string
+): Promise<FunctionAnswer> => {
+  const session = await sessionOf(env, token);
+  if (session === undefined) {
+    throw appVisitorErrors.create("visitor.signed_out");
+  }
+  const appId = appIdSchema.parse(session.appId);
+  const found = await publishedApp(env, appId);
+  if (
+    found === undefined ||
+    found.currentVersion === null ||
+    !(await isListed(env, appId, session.address))
+  ) {
+    throw appVisitorErrors.create("visitor.signed_out");
+  }
+  const version = found.currentVersion;
+  const principal = `visitor:${session.id}`;
+  const host = appHost(env, appId);
+  // One visitor's calls, then all the App's visitors' together.
+  if (
+    !(await host.admitRequest(principal)) ||
+    !(await host.admitRequest(visitorsBucket))
+  ) {
+    await audited(
+      env,
+      appId,
+      "app.visitor_refused",
+      { reason: "too_many_calls" },
+      session.id
+    );
+    throw appVisitorErrors.create("visitor.too_many");
+  }
+  const notGranted = async (path: string): Promise<never> => {
+    await audited(
+      env,
+      appId,
+      "app.visitor_refused",
+      { reason: "not_granted", function: path, version },
+      session.id
+    );
+    throw appVisitorErrors.create("visitor.not_granted");
+  };
+  // Only a build whose code gets the App's data, as for a member's call:
+  // before it runs, and again before its answer or error is handed over.
+  const build = await leasedBuild(env, principal, appId, lease);
+  const target = { app: appId, sessionId: session.id, build };
+  return await deliveredToVisitor(
+    env,
+    target,
+    async () =>
+      await callVisitorFunction(
+        env,
+        {
+          app: appId,
+          version,
+          principal,
+          stillAllowed: async (path) => {
+            const live = await sessionById(env, session.id);
+            const now = await publishedApp(env, appId);
+            if (
+              live === undefined ||
+              now === undefined ||
+              now.currentVersion !== version ||
+              !(await isListed(env, appId, session.address))
+            ) {
+              throw appVisitorErrors.create("visitor.signed_out");
+            }
+            if (!(await grantHeld(env, appId, version, path))) {
+              await notGranted(path);
+            }
+          },
+          notGranted,
+          admitted: async (path) => {
+            await audited(
+              env,
+              appId,
+              "app.visitor_called",
+              { function: path, version },
+              session.id
+            );
+          },
+        },
+        request,
+        Date.now() + visitorCallMs
+      )
+  );
+};
+
 /** The HTTP status of each refusal a visitor meets. */
 const statusFor: Record<string, number> = {
   "visitor.invalid": 400,
@@ -668,6 +864,11 @@ export const appVisitorResponse = async (
       case "sign_out": {
         await signOut(env, body.token);
         return Response.json({ signedOut: true });
+      }
+      case "call": {
+        return Response.json(
+          await callAsVisitor(env, body.token, body.lease, body.request)
+        );
       }
       default: {
         return body satisfies never;

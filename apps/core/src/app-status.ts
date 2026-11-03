@@ -13,7 +13,7 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { apps } from "./db/core/schema.ts";
+import { apps, appVisitorSessions } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
 import { stopsUnsettled } from "./workflows/resource-runs.ts";
@@ -239,6 +239,17 @@ export const changeStatus = async (
         ? storedEvent(event.id)
         : sql`0`
     ),
+    // Every visitor's session ends with a published App (app-visitors.ts),
+    // in the same batch and only if the change won: a status changed with
+    // sessions left over would let a republish revive them.
+    db
+      .delete(appVisitorSessions)
+      .where(
+        and(
+          eq(appVisitorSessions.appId, found.id),
+          found.status === "published" ? storedEvent(event.id) : sql`0`
+        )
+      ),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");

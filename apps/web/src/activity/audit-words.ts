@@ -174,6 +174,18 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "app.visitor_refused",
     text: msg`Was refused as a domain's visitor`,
   },
+  {
+    action: "app.visitor_granted",
+    text: msg`Let a domain's visitors use one of its functions`,
+  },
+  {
+    action: "app.visitor_ungranted",
+    text: msg`Stopped a domain's visitors using one of its functions`,
+  },
+  {
+    action: "app.visitor_called",
+    text: msg`Used a domain's function as a visitor`,
+  },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
   {

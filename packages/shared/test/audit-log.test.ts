@@ -204,4 +204,14 @@ describe("audit event types", () => {
       "action",
     ]);
   });
+
+  it("files granting visitors a function under permissions, and a visitor's call as an action", () => {
+    expect(
+      [
+        "app.visitor_granted",
+        "app.visitor_ungranted",
+        "app.visitor_called",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["permission", "permission", "action"]);
+  });
 });
