@@ -10,6 +10,8 @@ import { peopleIn } from "./people.ts";
 // core checks each save against the profile and says what to fix at its
 // task and JSON Pointer, only a revision that passes publishes, and of two
 // people saving the same revision, the second is told and keeps their text.
+// The page opens on its Flow, the revision that passed drawn, where a step
+// is changed too; the JSON is behind it, on Definition.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -71,8 +73,14 @@ const create = async (page: Page, name: string): Promise<void> => {
   await page.getByRole("button", { name: "Create" }).click();
 };
 
+/** Shows the definition's JSON on `page`, behind its Flow. */
+const definitionOf = async (page: Page): Promise<void> => {
+  await page.getByRole("tab", { name: "Definition" }).click();
+};
+
 /** Saves `text` as the draft on `page`. */
 const save = async (page: Page, text: string): Promise<void> => {
+  await definitionOf(page);
   await page.getByLabel("workflow.json").fill(text);
   await page.getByRole("button", { name: "Check and save" }).click();
 };
@@ -168,6 +176,7 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await create(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // The definition it starts from saves as it is.
+  await definitionOf(page);
   await page.getByRole("button", { name: "Check and save" }).click();
   await expect(
     page.getByText("Revision 1 passes the profile and can be published.")
@@ -176,6 +185,7 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   // Another tab publishes it first.
   const other = await pageOf(builder);
   await other.goto(page.url());
+  await definitionOf(other);
   await other.getByRole("button", { name: "Publish revision 1" }).click();
   await expect(other.getByText("Version 1", { exact: true })).toBeVisible();
 
@@ -247,6 +257,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(
     page.getByText("Revision 1 passes the profile and can be published.")
   ).toBeVisible();
+  await page.getByRole("tab", { name: "Flow" }).click();
   const diagram = page.getByRole("region", { name: "Diagram", exact: true });
   const route = diagram.getByRole("listitem", { name: "route" });
   await expect(route.getByText("Case ada, when it holds")).toBeVisible();
@@ -258,14 +269,20 @@ test("a builder sees every declared branch of the checked definition, and a test
     await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
   }
 
-  // Text that doesn't pass leaves the diagram on the revision that did.
+  // Text that doesn't pass leaves the diagram on the revision that did,
+  // and no step to change on it.
   await save(page, "{ not yet");
+  await page.getByRole("tab", { name: "Flow" }).click();
+  await expect(page.getByText("Diagram of revision 1")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Diagram of revision 1" })
-  ).toBeVisible();
+    diagram.getByRole("button", { name: "Change step route" })
+  ).toHaveCount(0);
   await save(page, routing(name));
   await page.getByRole("button", { name: "Publish revision 3" }).click();
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+
+  // A test run of the current version, under its Flow.
+  await page.getByRole("tab", { name: "Flow" }).click();
 
   await page.getByLabel("Input").fill('{ "who": "Ada" }');
   await page.getByRole("button", { name: "Start a run", exact: true }).click();
@@ -298,6 +315,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   );
   await page.getByRole("button", { name: "Publish revision 4" }).click();
   await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Flow" }).click();
   await page.getByLabel("Input").fill("{}");
   await page.getByRole("button", { name: "Start a run", exact: true }).click();
   await expect(
@@ -351,6 +369,45 @@ test("a builder sees every declared branch of the checked definition, and a test
     decides.getByRole("button", { name: /^Live since .*\. Change whether/u })
   ).toBeVisible(pageRead);
   await expect(decides.getByText("Version 2 waits to go live")).toBeHidden();
+});
+
+test("a builder changes one step on the Flow, saved as the draft's next revision, which the JSON then holds", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowDiagram");
+  const page = await pageOf(builder);
+  const name = `stepped-${crypto.randomUUID().slice(0, 8)}`;
+  await page.goto("/workflows");
+  await create(page, name);
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  // It opens on its Flow; nothing passed yet, so nothing is drawn.
+  await expect(page.getByRole("tab", { name: "Flow" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await save(page, routing(name));
+  await expect(
+    page.getByText("Revision 1 passes the profile and can be published.")
+  ).toBeVisible();
+
+  await page.getByRole("tab", { name: "Flow" }).click();
+  await page.getByRole("button", { name: "Change step greet-ada" }).click();
+  const step = page.getByRole("dialog");
+  await expect(step.getByLabel("The step, as JSON")).toHaveValue(
+    JSON.stringify({ set: { status: "ada" }, then: "finished" }, null, 2)
+  );
+  await step
+    .getByLabel("The step, as JSON")
+    .fill(JSON.stringify({ set: { status: "hi ada" }, then: "finished" }));
+  await step.getByRole("button", { name: "Check and save" }).click();
+  await expect(step).toBeHidden();
+  await expect(page.getByText("Diagram of revision 2")).toBeVisible();
+
+  await definitionOf(page);
+  await expect(page.getByLabel("workflow.json")).toHaveValue(/hi ada/u);
+  await expect(
+    page.getByText("Revision 2 passes the profile and can be published.")
+  ).toBeVisible();
 });
 
 /** A module whose `total` sums whole numbers, as a calculation. */
