@@ -36,9 +36,20 @@ import { directoryProviderId } from "./config.ts";
 // - An admin made from the directory: members made here are users, never
 //   admins, and take up no invitation (invitations are by email).
 
+/** The domain of the address a member made from the directory has until they sign in. */
+const placeholderDomain = "@directory.invalid";
+
 /** The address a member made from the directory has until they sign in: none. */
 const placeholderEmail = (oid: string): string =>
-  `${oid.toLowerCase()}@directory.invalid`;
+  `${oid.toLowerCase()}${placeholderDomain}`;
+
+/** Whether `email` is such a placeholder: an address no mail reaches. */
+export const isPlaceholderEmail = (email: string): boolean =>
+  email.endsWith(placeholderDomain);
+
+/** `email`, or null for a placeholder (`isPlaceholderEmail`). */
+export const realEmail = (email: string): string | null =>
+  isPlaceholderEmail(email) ? null : email;
 
 /**
  * Makes the person the directory holds under `oid` a member, unless the

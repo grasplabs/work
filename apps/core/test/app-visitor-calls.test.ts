@@ -1,3 +1,4 @@
+import { peopleReferences } from "@grasp-os/sdk/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -103,6 +104,26 @@ export const kick = mutation({
   },
 });
 
+/** Who calls, as the function sees it. */
+export const who = query({
+  args: {},
+  returns: v.string(),
+  handler: (ctx) => JSON.stringify(ctx.caller),
+});
+
+/** A search of the organization's people, or the code it was refused with. */
+export const look = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    try {
+      return JSON.stringify(await ctx.people.search("a"));
+    } catch (error) {
+      return String(Reflect.get(Object(error), "code"));
+    }
+  },
+});
+
 export const shout = action({
   args: { text: v.string() },
   returns: v.string(),
@@ -110,7 +131,7 @@ export const shout = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, followUp, keep, kick, mine, secrets, shout } from "./operations/portal.ts";
+import { add, followUp, keep, kick, look, mine, secrets, who, shout } from "./operations/portal.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -122,7 +143,7 @@ export default app({
       secrets: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { portal: { add, mine, keep, secrets, kick, shout } },
+  operations: { portal: { add, mine, keep, secrets, look, who, kick, shout } },
   internalOperations: {},
   screens: [],
   uses: [followUp],
@@ -286,6 +307,62 @@ const call = async (
   return result.ok ? result.value : result.error.code;
 };
 
+/**
+ * What a visitor's screen reads through `useCaller` or `usePeople`
+ * (`reference`) answers: its value, or the code it was refused with.
+ */
+const read = async (
+  who: { token: string; lease: string },
+  reference: (typeof peopleReferences)[keyof typeof peopleReferences],
+  input: unknown
+): Promise<unknown> => {
+  const response = await post({
+    action: "call",
+    token: who.token,
+    lease: who.lease,
+    request: JSON.stringify({
+      reference: {
+        resourceId: reference.resourceId,
+        resourceVersion: reference.resourceVersion,
+        contractId: reference.contractId,
+        fingerprint: reference.fingerprint,
+        kind: reference.kind,
+      },
+      input,
+    }),
+  });
+  if (!response.ok) {
+    return errorPayloadSchema.parse(await response.json()).code;
+  }
+  const { result } = answerSchema.parse(await response.json());
+  return result.ok ? result.value : result.error.code;
+};
+
+/** A visitor caller a function answered as JSON text, its session left out. */
+const visitorCallerOf = (answer: unknown): unknown => {
+  const parsed: unknown =
+    typeof answer === "string" && answer.startsWith("{")
+      ? JSON.parse(answer)
+      : answer;
+  if (typeof parsed !== "object" || parsed === null) {
+    return parsed;
+  }
+  const caller = z
+    .object({ kind: z.string(), id: z.string(), email: z.string() })
+    .parse(parsed);
+  return { ...caller, id: caller.id.replace(/:.*$/u, ":") };
+};
+
+/** The visitor's ID a function or screen was told, or null. */
+const visitorIdOf = (answer: unknown): string | null => {
+  const parsed: unknown =
+    typeof answer === "string" && answer.startsWith("{")
+      ? JSON.parse(answer)
+      : answer;
+  const found = z.object({ id: z.string() }).safeParse(parsed);
+  return found.success ? found.data.id : null;
+};
+
 /** Whether a call was refused, by any code, or answered. */
 const refusal = (answer: unknown): string =>
   typeof answer === "string" ? "refused" : "answered";
@@ -376,6 +453,52 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     });
   });
 
+  it("are told who they are, and refused the organization's people, from the server and the screen, each refusal audited", async () => {
+    const domain = newDomain();
+    const { builder, app, link, version } = await portal(domain);
+    const mail = await mailbox();
+    await builder.api.apps.setVisitorGrants(app, ["portal.who", "portal.look"]);
+    const ana = await visitor(mail, link, `ana@${domain}`);
+
+    let server: unknown;
+    let looked: unknown;
+    let screen: { caller: unknown; search: unknown } | undefined;
+    const events = await auditedDuring(async () => {
+      server = await call(app, version, ana, "portal.who");
+      looked = await call(app, version, ana, "portal.look");
+      screen = {
+        caller: await read(ana, peopleReferences.caller, {}),
+        search: await read(ana, peopleReferences.search, { query: "a" }),
+      };
+    });
+    expect({
+      server: visitorCallerOf(server),
+      looked,
+      screen: screen && {
+        caller: visitorCallerOf(screen.caller),
+        search: screen.search,
+      },
+      sameVisitor:
+        visitorIdOf(server) !== null &&
+        visitorIdOf(server) === visitorIdOf(screen?.caller),
+      refused: events
+        .filter(({ action }) => action === "app.visitor_refused")
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      server: { kind: "visitor", id: "visitor:", email: `ana@${domain}` },
+      looked: "visitor.not_granted",
+      sameVisitor: true,
+      screen: {
+        caller: { kind: "visitor", id: "visitor:", email: `ana@${domain}` },
+        search: "visitor.not_granted",
+      },
+      refused: [
+        expect.objectContaining({ function: "people.search" }),
+        expect.objectContaining({ function: "people.search" }),
+      ],
+    });
+  });
+
   it("escalate through nothing: a function that starts a workflow commits nothing, and the call holds no resource at all", async () => {
     const domain = newDomain();
     const { builder, app, link, version } = await portal(domain);
@@ -395,6 +518,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         app: appIdSchema.parse(app),
         version,
         principal: "visitor:test",
+        email: "test@example.test",
         stillAllowed: async () => {
           await Promise.resolve();
         },

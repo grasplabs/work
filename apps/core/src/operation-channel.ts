@@ -34,7 +34,8 @@ import {
 //   reads anything short of a whole commit. Nor are a streaming action's
 //   progress snapshots (`emit`), which have a budget of their own
 //   (`streamMaxEmits`, operations.ts): a run that streams 1000 of them
-//   still has its 100 calls. This holds an App's functions (queries,
+//   still has its 100 calls. Nor is the runner's one read of who calls
+//   (`people`), which every invocation makes as it starts. This holds an App's functions (queries,
 //   mutations, actions); Code Mode counts its own;
 // - its methods take only what a request is (no scope, principal, role,
 //   schema hash or receipt): who the invocation is for was resolved by
@@ -49,7 +50,13 @@ import {
 // a function this one called passes through as the `AppError` it was.
 
 /** What a channel can be asked to do. */
-type CapabilityName = "read" | "write" | "call" | "resource" | "emit";
+type CapabilityName =
+  | "read"
+  | "write"
+  | "call"
+  | "resource"
+  | "emit"
+  | "people";
 
 /** One capability of a channel: how the host answers it. */
 type Capability = (...args: unknown[]) => Promise<unknown>;
@@ -65,6 +72,8 @@ export interface ChannelCapabilities {
   readonly resource?: Capability;
   /** A streaming action's progress snapshot (operations.ts `runAction`). */
   readonly emit?: Capability;
+  /** Who calls, and the organization's people (app-people.ts). */
+  readonly people?: Capability;
   /** Brands an expected error the channel raised as the host's. */
   readonly trust: (error: Error) => void;
   /**
@@ -183,10 +192,19 @@ class Channel extends ChannelTarget implements OperationChannel {
     return await this.#use("emit", [progress]);
   }
 
+  async people(name: unknown, args: unknown): Promise<unknown> {
+    return await this.#use("people", [name, args]);
+  }
+
   async #use(name: CapabilityName, args: unknown[]): Promise<unknown> {
     const capability = this.#capabilities[name];
     try {
-      const counted = name !== "write" && name !== "emit";
+      // The runner reads who calls once, as every call starts: that read
+      // takes none of the function's own calls.
+      const counted =
+        name !== "write" &&
+        name !== "emit" &&
+        !(name === "people" && args[0] === "caller");
       if (counted) {
         this.#state.uses += 1;
       }

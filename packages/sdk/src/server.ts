@@ -1,6 +1,7 @@
 import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
+import type { Caller, PeopleDirectory } from "./people.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
 import type {
   ArgsOf,
@@ -240,8 +241,32 @@ export type Resources<Uses extends readonly Use[]> = {
   ]: ResourceClient<Resource>;
 };
 
+/**
+ * What every handler has, whatever its kind: who is calling, and the
+ * organization's people (people.ts). Both come from core's own record of
+ * who is signed in, never from the caller's request.
+ */
+export interface CallerCtx {
+  /**
+   * Who the call is for: a member of the organization (`kind: "person"`),
+   * with their roles and teams, or a visitor the App was shared with
+   * (`kind: "visitor"`, whose `id` is their session's and changes each
+   * time they sign in: key a visitor by `email`). A workflow run's call is
+   * for the person the run acts for. Read as the call starts.
+   */
+  readonly caller: Caller;
+  /**
+   * The organization's members, read-only, for an App that declares it
+   * (`app({ people: true })`; `permission.denied` otherwise): by ID, by
+   * name or email, or by team, at most 100 a read, each with only their
+   * name, email and teams. A visitor's call is refused it
+   * (`visitor.not_granted`).
+   */
+  readonly people: PeopleDirectory;
+}
+
 /** What a query's handler has: reads, and nothing else. */
-export interface QueryCtx<Tables extends AnyTables> {
+export interface QueryCtx<Tables extends AnyTables> extends CallerCtx {
   readonly db: DatabaseReader<Tables>;
 }
 
@@ -253,7 +278,7 @@ export interface QueryCtx<Tables extends AnyTables> {
 export interface MutationCtx<
   Tables extends AnyTables,
   Uses extends readonly Use[] = readonly [],
-> {
+> extends CallerCtx {
   readonly db: DatabaseWriter<Tables>;
   readonly runQuery: RunQuery<Uses>;
   readonly afterCommit: AfterCommit<Uses>;
@@ -291,7 +316,9 @@ export interface MutationCtx<
  * anew. Keep what an action changes, and in what order, a function of its
  * input.
  */
-export interface ActionCtx<Uses extends readonly Use[] = readonly []> {
+export interface ActionCtx<
+  Uses extends readonly Use[] = readonly [],
+> extends CallerCtx {
   readonly runQuery: RunQuery<Uses>;
   readonly runMutation: RunMutation<Uses>;
   readonly runAction: RunAction<Uses>;

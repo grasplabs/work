@@ -1340,6 +1340,24 @@ const buildDeclaration = `/**
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
  * when the person can't read that table. Read the SDK's types for the rest.
+ *
+ * Every server function's \`ctx.caller\` is who calls, from Grasp's
+ * sign-in, with no permission:
+ * \`{ kind: "person", id, name, email, orgRole, appRole, teams: { id, name }[] }\`
+ * (\`email\` null for someone who never signed in) or, for a visitor the
+ * App was shared with, \`{ kind: "visitor", id, email }\`, whose \`id\`
+ * changes each session: key a visitor's records by \`email\`. Decide who
+ * may see or do what with it, on the server (\`ctx.caller.id\` for "my
+ * requests", "assigned to me"). Reading other members needs the App to
+ * declare it, \`app({ ..., people: true })\`, which its reviewer sees;
+ * only then \`ctx.people\` reads them: \`find(ids)\`,
+ * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
+ * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
+ * person \`{ id, name, email, teams }\`; a visitor is refused it. Screens
+ * get the same from \`@grasp-os/sdk/react\`: \`useCaller()\` (undefined
+ * while loading; for showing, never deciding) and \`usePeople()\` (the same
+ * three reads). The top-level \`people\` path is the platform's: no
+ * function registers there.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */
@@ -1468,6 +1486,8 @@ build: {
         sideEffect: boolean;
       }[];
       permissions: { id: string; object: Record<string, unknown>; actions: string[]; binding: string }[];
+      /** It reads the organization's people (\`people: true\`); null when that can't be read. */
+      readsPeople: boolean | null;
       /** What the App holds, and which making it current asks an admin for again. */
       grants: { permission: { id: string; binding: string; actions: string[] }; askedAgain: boolean }[];
       tests: { status: "passed" | "failed" | "none"; failures: string[] };

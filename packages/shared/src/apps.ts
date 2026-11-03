@@ -432,6 +432,13 @@ export interface VersionReview {
    */
   handsFilesToWorkflows: boolean | null;
   /**
+   * Whether its server code and screens read the organization's people
+   * (`app({ people: true })`, GRA-1474): every member's name, email and
+   * teams, for whoever uses it. No admin approves it; its reviewer sees
+   * it. Null when its manifest can't be read.
+   */
+  readsPeople: boolean | null;
+  /**
    * What the App asks for that no admin has granted yet: each waits for
    * an admin, whether the version is made current or not.
    */

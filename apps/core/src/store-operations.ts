@@ -14,6 +14,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { memberPeople } from "./app-people.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
@@ -588,6 +589,17 @@ export const callStoreOperation = async (
       // builder: what only its builders may read or write stays theirs.
       return { appMember: true, appBuilder: false };
     },
+    // Who calls: the person the consumer acts for, a user of the store's
+    // App, as the gate above has them.
+    people: memberPeople(env, {
+      app: owner,
+      userId: caller.principal,
+      roles: async () =>
+        await Promise.resolve({ appMember: true, appBuilder: false }),
+      declared: release.app.people === true,
+      actor: caller.actor,
+      requestId: caller.requestId,
+    }),
   };
   const result = await callOperation(
     hostedRelease(env, release),

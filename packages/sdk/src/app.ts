@@ -160,6 +160,13 @@ export interface AppDefinition<
   /** Where the host places its screens besides their routes (spec 34.1). */
   readonly surfaces?: readonly SurfaceDefinition[];
   /**
+   * Whether it reads the organization's people (`ctx.people`,
+   * `usePeople`): names, emails and teams of every member. Shown to whoever
+   * reviews its versions; no admin approves it. Without it, every read is
+   * refused. Who calls (`ctx.caller`) needs nothing.
+   */
+  readonly people?: boolean;
+  /**
    * The resources it needs, each by a distinct alias: those its actions
    * use, those its screens use (files, links), and the workflows its
    * actions start and its mutations start after they commit.
@@ -264,6 +271,8 @@ export interface AppManifest {
   readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
+  /** Present when it reads the organization's people (`people: true`). */
+  readonly people?: true;
   /** Its migrations, by name, in the order declared. */
   readonly migrations: Readonly<Record<string, MigrationManifest>>;
 }
@@ -315,14 +324,16 @@ const appKeys: ReadonlySet<string> = new Set([
   "screens",
   "surfaces",
   "preferences",
+  "people",
   "uses",
   "migrations",
 ]);
 
 /**
  * The top-level path segments the platform keeps, with what each is for:
- * `preferences` for an App's preferences (spec 10.7.7) and `workflows` for
- * its generated workflow references (`workflows.<alias>.queries.*`), which
+ * `preferences` for an App's preferences (spec 10.7.7), `workflows` for
+ * its generated workflow references (`workflows.<alias>.queries.*`) and
+ * `people` for who calls and the organization's people (people.ts), which
  * the host answers itself. No function registers under either, whether or
  * not the App declares preferences or workflows now, so declaring one
  * later never shadows or is shadowed by a function.
@@ -330,6 +341,7 @@ const appKeys: ReadonlySet<string> = new Set([
 export const reservedSegments: ReadonlyMap<string, string> = new Map([
   ["preferences", "the App's preferences"],
   ["workflows", "the App's workflow references"],
+  ["people", "the organization's people"],
 ]);
 
 /**
@@ -1081,6 +1093,14 @@ const checkRegistration = (definition: unknown): void => {
       refuse(`An App's registration declares \`${key}\`.`);
     }
   }
+  if (
+    definition.people !== undefined &&
+    typeof definition.people !== "boolean"
+  ) {
+    refuse(
+      "An App's `people` is `true` when it reads the organization's people."
+    );
+  }
   const { name } = definition;
   if (typeof name !== "string" || name.length === 0 || name.length > 100) {
     refuse("An App's `name` is 1 to 100 characters.");
@@ -1231,6 +1251,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       screens,
       surfaces,
       preferences,
+      ...(definition.people === true ? { people: true } : {}),
       migrations,
     }),
     functions,

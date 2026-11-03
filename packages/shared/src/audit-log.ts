@@ -148,6 +148,12 @@ const typeRules: readonly {
   // (core's src/operations.ts): a function, resource or workflow it
   // doesn't list, or a request its declaration doesn't allow.
   { action: "app.use.refused", type: "permission" },
+  // An App reading the organization's people for the person using it
+  // (core's src/app-people.ts): which read, and how many people it
+  // answered, never whom; and a read refused to an App that doesn't
+  // declare it reads them.
+  { action: "app.people.read", type: "read" },
+  { action: "app.people.refused", type: "permission" },
   { action: "app.call", access: "read", type: "read" },
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },

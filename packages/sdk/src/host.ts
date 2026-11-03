@@ -170,6 +170,22 @@ export {
 } from "./preference-operations.ts";
 export type { PreferenceOperationName } from "./preference-operations.ts";
 export { planPreferenceChange } from "./preference-plan.ts";
+// Who calls an App, and the organization's people, which core answers
+// itself (people.ts).
+export {
+  isPeopleOperationName,
+  peopleFingerprints,
+  peopleLimits,
+  peopleOperations,
+  peopleReferences,
+} from "./people.ts";
+export type {
+  Caller,
+  PeopleOperationName,
+  PeoplePage,
+  Person,
+  TeamRef,
+} from "./people.ts";
 export type {
   PreferencePlan,
   PreferenceRefusal,

@@ -5,6 +5,8 @@ import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { migrationHandler } from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
+import { peopleDirectory } from "./people.ts";
+import type { PeopleOperationName } from "./people.ts";
 import { eventReferenceData, referenceData } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
 import { isResource, isWorkflowResource } from "./resources.ts";
@@ -59,6 +61,15 @@ export interface OperationChannel {
    * screen that runs it: a streaming action's only.
    */
   readonly emit: (progress: unknown) => Promise<unknown>;
+  /**
+   * One read of who calls (`caller`) or of the organization's people
+   * (people.ts), which the host answers from its own record of the
+   * caller, whatever the arguments say about anyone.
+   */
+  readonly people: (
+    name: PeopleOperationName,
+    args: object
+  ) => Promise<unknown>;
 }
 
 /** Why the runner couldn't run what it was asked to. */
@@ -242,6 +253,17 @@ const resourcesOf = (
   return Object.freeze(clients);
 };
 
+/** `read`'s answer, or its failure, as data. */
+const settledRead = async (
+  read: () => Promise<unknown>
+): Promise<{ ok: true; value: unknown } | { ok: false; error: unknown }> => {
+  try {
+    return { ok: true, value: await read() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+};
+
 /**
  * Runs the function registered at `path` in `registered` (an App `app`
  * made) with `args`, as the host validated them, over `channel`: its
@@ -282,13 +304,20 @@ export const runFunction = async (
         throw asAppError(error);
       }
     };
+  // The directory, each read of which the host answers on its own.
+  const common = {
+    people: peopleDirectory(
+      async (name, readArgs) => await channel.people(name, readArgs)
+    ),
+  };
   let ctx: object;
   let notifications: ReturnType<typeof notificationsOf> | undefined;
   if (fn.kind === "query") {
-    ctx = { db: databaseReader(schema, read) };
+    ctx = { ...common, db: databaseReader(schema, read) };
   } else if (fn.kind === "mutation") {
     notifications = notificationsOf(fn, channel);
     ctx = {
+      ...common,
       db: databaseWriter(
         schema,
         read,
@@ -304,6 +333,7 @@ export const runFunction = async (
     };
   } else {
     ctx = {
+      ...common,
       runQuery: caller("query"),
       runMutation: caller("mutation"),
       runAction: caller("action"),
@@ -324,6 +354,20 @@ export const runFunction = async (
   // arguments are what the host validated against its `args`.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const handler = fn.handler as (ctx: object, args: unknown) => unknown;
+  // Who calls, read once as the call starts, for every kind. A host that
+  // tells it nothing fails only the function that reads it, with why.
+  const whoCalls = await settledRead(
+    async () => await channel.people("caller", {})
+  );
+  Object.defineProperty(ctx, "caller", {
+    enumerable: true,
+    get: (): unknown => {
+      if (!whoCalls.ok) {
+        throw whoCalls.error;
+      }
+      return whoCalls.value;
+    },
+  });
   const answer = await handler(Object.freeze(ctx), args);
   await notifications?.flush();
   return answer;

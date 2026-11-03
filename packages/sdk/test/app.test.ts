@@ -1028,6 +1028,7 @@ describe("the runner", () => {
       call: async () => await Promise.reject(crossed),
       resource: async () => await Promise.resolve(null),
       emit: async () => await Promise.resolve(null),
+      people: async () => await Promise.resolve(null),
     };
     await expect(
       runFunction(registered, "notes.recover", {}, channel)
