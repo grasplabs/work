@@ -23,7 +23,8 @@ import { ToolPermissions } from "./tool-permissions.tsx";
 // against core's connections as the page reaches them over RPC, faked:
 // each switch and badge sends the whole new choice of tools, the last tool
 // allowed can't be switched off, a tool no longer offered can only be
-// removed, and Grasp's staff change nothing.
+// removed, and Grasp's staff change nothing. A change ends with the page
+// read again at the address it then has.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -65,6 +66,7 @@ const connection: ListedConnection = {
 };
 
 let root: Root | undefined;
+let history: ReturnType<typeof createMemoryHistory> | undefined;
 
 /** Lets every pending promise and render settle. */
 const settled = async (): Promise<void> => {
@@ -84,16 +86,24 @@ interface Sent {
   expected: (string | ComposioToolRule)[];
 }
 
-/** The switches for `shown`, recording each change of tools sent to core. */
+/**
+ * The switches for `shown` at `address`, recording each change of tools
+ * sent to core, which answers once `answered` settles.
+ */
 const shown = async (
   listed: ListedConnection,
-  staff = false
+  {
+    staff = false,
+    address = "/",
+    answered = Promise.resolve(true),
+  }: { staff?: boolean; address?: string; answered?: Promise<boolean> } = {}
 ): Promise<Sent[]> => {
   const sent: Sent[] = [];
   const connections = {
     changeTools: async (request: Sent): Promise<{ tools: string[] }> => {
       sent.push(request);
-      return await Promise.resolve({ tools: [] });
+      await answered;
+      return { tools: [] };
     },
   };
   const core = {
@@ -106,9 +116,10 @@ const shown = async (
       <ToolPermissions connection={listed} staff={staff} tools={tools} />
     ),
   });
+  history = createMemoryHistory({ initialEntries: [address] });
   const router = createRouter({
     routeTree: rootRoute,
-    history: createMemoryHistory(),
+    history,
     context: { core },
   });
   const host = document.createElement("div");
@@ -157,6 +168,7 @@ describe("changing what Grasp may do in a connected app", () => {
       root?.unmount();
     });
     root = undefined;
+    history = undefined;
     document.body.innerHTML = "";
   });
 
@@ -272,7 +284,7 @@ describe("changing what Grasp may do in a connected app", () => {
       root?.unmount();
     });
     document.body.innerHTML = "";
-    await shown(connection, true);
+    await shown(connection, { staff: true });
     const staffLocked = tools.map(
       ({ name }) => switchOf(name)?.getAttribute("aria-disabled") ?? null
     );
@@ -282,5 +294,23 @@ describe("changing what Grasp may do in a connected app", () => {
       lastLocked: "true",
       staffLocked: ["true", "true", "true"],
     });
+  });
+
+  it("keeps a search or filter changed while a change is sent, and drops only the flow's notice", async () => {
+    const { promise: answered, resolve: answer } =
+      Promise.withResolvers<boolean>();
+    await shown(connection, {
+      address: "/?q=hub&connection=connection-1",
+      answered,
+    });
+    await press(switchOf("HUBSPOT_DELETE_NOTE"));
+    act(() => {
+      history?.push("/?q=notes&show=connected&connection=connection-1");
+    });
+    await settled();
+    answer(true);
+    await settled();
+
+    expect(history?.location.search).toBe("?q=notes&show=connected");
   });
 });

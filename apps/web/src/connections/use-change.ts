@@ -1,4 +1,4 @@
-import { useLocation, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
@@ -8,7 +8,9 @@ import { useCoreAction } from "../use-core-action.ts";
  * A change on an Integrations page (see changeThenRefresh), then the page
  * read again, without the `connection` and `connectionError` a flow came
  * back with: their notice was about that flow, not about what the page
- * shows now. Other search (the list's filters) stays.
+ * shows now. Other search (the list's filters) stays as it is when the
+ * change ends, not as it was when it started: the admin may have searched
+ * or filtered while it ran.
  */
 export const useChange = ({
   leave = false,
@@ -17,7 +19,6 @@ export const useChange = ({
   leave?: boolean;
 } = {}) => {
   const router = useRouter();
-  const { pathname, searchStr } = useLocation();
   const action = useCoreAction();
   const change = async (
     make: (session: Session) => Promise<unknown>
@@ -26,6 +27,7 @@ export const useChange = ({
       await changeThenRefresh(
         async () => await make(session),
         async () => {
+          const { pathname, searchStr } = router.state.location;
           const params = new URLSearchParams(searchStr);
           params.delete("connection");
           params.delete("connectionError");
