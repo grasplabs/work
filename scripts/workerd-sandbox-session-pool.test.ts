@@ -16,7 +16,15 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
+import {
+  callIdHeader,
+  cpuHeader,
+  deadlineHeader,
+  nativeWorkerd,
+  ownerHeader,
+  startSandboxSupervisor,
+  waitHeader,
+} from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import { runIn } from "./workerd-session-cases.ts";
 import { serveStandIn } from "./workerd-stand-in.ts";
@@ -214,6 +222,49 @@ describe("a session on the on-prem sandbox", () => {
       } finally {
         await small.stop();
       }
+    }
+  );
+
+  it(
+    "keeps serving once core leaves a session that waits for its owner's room",
+    { timeout: 30_000 },
+    async () => {
+      const holding = run("holds", "app-one");
+      await expect
+        .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+        .toBe(1);
+      // A session of app-one's, opened as core opens one, waiting for its
+      // room; core gives up on it (a run cancelled meanwhile) before its
+      // wait is over, so its refusal finds core's end of the socket gone.
+      const left = connect(supervisor.socket);
+      left.on("error", () => {});
+      left.write(
+        [
+          "GET /session HTTP/1.1",
+          "host: sandbox",
+          "connection: upgrade",
+          "upgrade: websocket",
+          "sec-websocket-version: 13",
+          "sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==",
+          `${deadlineHeader}: 20000`,
+          `${cpuHeader}: 5000`,
+          `${waitHeader}: 500`,
+          `${callIdHeader}: ${crypto.randomUUID()}`,
+          `${ownerHeader}: app-one`,
+          "\r\n",
+        ].join("\r\n")
+      );
+      await expect
+        .poll(() => supervisor.stats().waitingForOwners, { timeout: 2000 })
+        .toBe(1);
+      left.destroy();
+      await expect
+        .poll(() => supervisor.stats().waitingForOwners, { timeout: 2000 })
+        .toBe(0);
+      await expect(run("capabilities", "app-two")).resolves.toMatchObject({
+        status: "ok",
+      });
+      await expect(holding).resolves.toMatchObject({ status: "ok" });
     }
   );
 
