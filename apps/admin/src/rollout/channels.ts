@@ -104,13 +104,16 @@ export const promotionHistory = async (
   });
 };
 
-/** Release `releaseId` refused unless the admin imported it. */
+/**
+ * Release `releaseId` refused unless the admin imported it and still has
+ * its bundle to deploy (src/releases/retention.ts).
+ */
 const assertDeployable = async (
   db: AdminDatabase,
   releaseId: string
 ): Promise<void> => {
   const release = await db
-    .select({ id: releases.id })
+    .select({ bundleDeletedAt: releases.bundleDeletedAt })
     .from(releases)
     .where(eq(releases.id, releaseId))
     .get();
@@ -120,7 +123,21 @@ const assertDeployable = async (
       `Release ${releaseId} isn't imported`
     );
   }
+  if (release.bundleDeletedAt !== null) {
+    throw new RolloutError(
+      "bundle_deleted",
+      `Release ${releaseId}'s bundle was deleted`
+    );
+  }
 };
+
+/**
+ * Whether release `releaseId` still has its bundle, as SQL: checked in the
+ * write that points a channel or pins a client at it, so retention's claim
+ * (src/releases/retention.ts) and that write never both land.
+ */
+const bundleKept = (releaseId: string) =>
+  sql`EXISTS (SELECT 1 FROM ${releases} WHERE ${releases.id} = ${releaseId} AND ${releases.bundleDeletedAt} IS NULL)`;
 
 /**
  * Points `channel` at `releaseId`, as `actor`, audited with what it
@@ -149,7 +166,9 @@ const pointChannel = async (
       actor,
       db
         .insert(channels)
-        .values({ id: channel, releaseId, updatedAt: now })
+        .select(
+          sql`SELECT ${channel}, ${releaseId}, ${now.getTime()} WHERE ${bundleKept(releaseId)}`
+        )
         .onConflictDoNothing(),
       event
     );
@@ -160,7 +179,13 @@ const pointChannel = async (
     db
       .update(channels)
       .set({ releaseId, updatedAt: now })
-      .where(and(eq(channels.id, channel), eq(channels.releaseId, from))),
+      .where(
+        and(
+          eq(channels.id, channel),
+          eq(channels.releaseId, from),
+          bundleKept(releaseId)
+        )
+      ),
     event
   );
 };
@@ -177,8 +202,9 @@ export type PromoteInput = z.infer<typeof promoteSchema>;
  * promotion from the channel before it (Edge to Beta, Beta to Stable), or
  * a rollback to a release the channel had before. Refused for any other
  * move (`promotion_not_allowed`), for the release it has already
- * (`promotion_not_allowed`), for a release the admin doesn't have, and
- * when the channel changed as it was set (`channel_changed`).
+ * (`promotion_not_allowed`), for a release the admin doesn't have or no
+ * longer has the bundle of, and when the channel changed as it was set
+ * (`channel_changed`).
  */
 export const promoteRelease = async (
   env: Env,
@@ -206,6 +232,8 @@ export const promoteRelease = async (
     back,
   });
   if (!changed) {
+    // Its bundle claimed since it was checked, or the channel moved.
+    await assertDeployable(db, releaseId);
     throw new RolloutError(
       "channel_changed",
       `${channel} changed as it was promoted`
@@ -394,7 +422,7 @@ export const pinClient = async (
     await assertDeployable(db, releaseId);
   }
   const pinned = clients.pinnedReleaseId;
-  await actIfChanged(
+  const changed = await actIfChanged(
     db,
     staff,
     db
@@ -405,11 +433,19 @@ export const pinClient = async (
           eq(clients.id, clientId),
           releaseId === null
             ? isNotNull(pinned)
-            : or(isNull(pinned), ne(pinned, releaseId))
+            : and(
+                or(isNull(pinned), ne(pinned, releaseId)),
+                bundleKept(releaseId)
+              )
         )
       ),
     releaseId === null
       ? { action: "client.unpin", clientId }
       : { action: "client.pin", clientId, target: releaseId }
   );
+  // Unchanged: pinned to it already, or its bundle claimed since it was
+  // checked, which is refused.
+  if (!changed && releaseId !== null) {
+    await assertDeployable(db, releaseId);
+  }
 };

@@ -49,6 +49,7 @@ import {
   releases,
 } from "../db/schema.ts";
 import { toEdge } from "../rollout/channels.ts";
+import { recordBlobs } from "./blobs.ts";
 import { startsMajor } from "./version.ts";
 
 /**
@@ -101,6 +102,12 @@ export interface ImportResult {
   imported: string[];
   /** Published, but didn't verify: tried again after a wait. */
   failed: string[];
+  /**
+   * Whether it read every release published and not yet imported (those
+   * waiting after a failure were read before): each one's blobs are on
+   * record (src/releases/blobs.ts), so retention may run.
+   */
+  caughtUp: boolean;
 }
 
 /** The id of every release with a manifest in `store`. */
@@ -206,6 +213,10 @@ const importRelease = async (
       `Release ${id} names ${blobs} blobs; at most ${MAX_BLOBS_PER_RELEASE} are read`
     );
   }
+  // Before anything is checked: retention keeps the blobs of a release
+  // that's still being imported, over however many runs it takes, as the
+  // manifest it has now names them.
+  await recordBlobs(db, id, manifest);
   const manifestSha256 = await sha256OfBytes(manifestBytes);
   // Where an earlier run got to, for this very manifest: another (a broken
   // upload put right) is checked from its start.
@@ -349,7 +360,8 @@ export const importReleases = async (
     .toSorted(newestFirst);
 
   const reader = new Reader(store);
-  const result: ImportResult = { imported: [], failed: [] };
+  const result: ImportResult = { imported: [], failed: [], caughtUp: false };
+  let read = 0;
   // One release at a time, to bound the blobs read at once.
   for (const id of pending) {
     if (
@@ -358,6 +370,7 @@ export const importReleases = async (
     ) {
       break;
     }
+    read += 1;
     let outcome: Awaited<ReturnType<typeof importRelease>>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
@@ -380,5 +393,6 @@ export const importReleases = async (
       result.imported.push(id);
     }
   }
+  result.caughtUp = read === pending.length;
   return result;
 };

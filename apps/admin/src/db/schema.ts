@@ -34,10 +34,37 @@ export const releases = sqliteTable("releases", {
   manifestSha256: text("manifest_sha256").notNull(),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
+  /**
+   * When its bundle files left the releases bucket: a release never
+   * promoted past Edge, 14 days on (src/releases/retention.ts). Null while
+   * they're kept; the record itself is kept for good.
+   */
+  bundleDeletedAt: timestamp("bundle_deleted_at"),
   /** Read by nothing since release channels (src/rollout/): dropped once
    * the admin that stopped reading it is live (expand, then contract). */
   feature: integer({ mode: "boolean" }),
 });
+
+/**
+ * Which blobs each published release names (src/releases/blobs.ts): one
+ * row a blob, written when the import reads the release's manifest,
+ * imported yet or not, and replaced when that manifest is. Blobs are content-addressed and shared, so a blob
+ * may leave the releases bucket only once no release still holding its
+ * bundle names it (src/releases/retention.ts): an indexed look-up, never
+ * a read of every manifest. No foreign key: a release still being
+ * imported has no record yet, and its blobs are kept all the same.
+ */
+export const releaseBlobs = sqliteTable(
+  "release_blobs",
+  {
+    releaseId: text("release_id").notNull(),
+    blobKey: text("blob_key").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.releaseId, table.blobKey] }),
+    index("release_blobs_blob_idx").on(table.blobKey),
+  ]
+);
 
 /**
  * A published release that didn't verify, and when the import tries it

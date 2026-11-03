@@ -401,6 +401,8 @@ CREATE TABLE t (id TEXT);`,
     const first = await runImport();
 
     expect(first.imported).toStrictEqual(newest.toReversed());
+    // One left unread: retention waits for it (src/releases/retention.ts).
+    expect(first.caughtUp).toBeFalsy();
     await expect(releaseRow(oldest ?? "")).resolves.toBeUndefined();
 
     const second = await runImport();
@@ -660,7 +662,8 @@ CREATE TABLE t (id TEXT);`,
       },
       get: async (key: string) => await env.RELEASES.get(key),
     };
-    // The run dies once its first batch has landed: nothing after it runs.
+    // The run dies once the batch that saves the release has landed:
+    // nothing after it runs.
     let dead = false;
     const dying = new Proxy(env.DB, {
       get: (target, property) => {
@@ -671,7 +674,7 @@ CREATE TABLE t (id TEXT);`,
         if (property === "batch") {
           return async (statements: D1PreparedStatement[]) => {
             const results = await target.batch(statements);
-            dead = true;
+            dead = (await releaseRow(release.id)) !== undefined;
             return results;
           };
         }
