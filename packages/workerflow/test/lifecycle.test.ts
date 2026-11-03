@@ -692,6 +692,55 @@ describe("terminate", () => {
   });
 });
 
+describe("steps a deploy changed under a run", () => {
+  it("end a run with a journaled step, rolling back nothing", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({ id });
+    await suspendedOn("redeployed", id, "go");
+    // A deploy renames the step after the wait; the event wakes the run.
+    redeployedSteps.names = ["dispatch"];
+    const run = await instance("redeployed", id);
+    await run.sendEvent({ type: "go", payload: null });
+
+    const status = await ended("redeployed", id);
+
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
+    // Charge registered a rollback, which the new code can't be trusted to
+    // give back: none ran, and nothing after the wait did either.
+    expect(effectsOf(id).map(({ label }) => label)).toStrictEqual(["charge"]);
+  });
+
+  it("leave a run that has journaled no step yet to run the steps it finds", async () => {
+    const id = newId();
+    redeployedSteps.names = ["ship"];
+    const first = hold(id, "redeployed", 1);
+    await workflow("redeployed").create({ id });
+    await first.held;
+    // The deploy lands while the first activation is out before any step,
+    // and a later one (the watchdog's) takes the run over.
+    redeployedSteps.names = ["dispatch"];
+    await deliverAlarm("redeployed", id);
+    first.release();
+    await suspendedOn("redeployed", id, "go");
+    const run = await instance("redeployed", id);
+    await run.sendEvent({ type: "go", payload: null });
+
+    const status = await ended("redeployed", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: [
+        seen(id, "charge").receipts[0],
+        seen(id, "dispatch").receipts[0],
+      ],
+    });
+  });
+});
+
 describe("restart", () => {
   it("runs an ended run again from its start, each step under a new key", async () => {
     const id = newId();

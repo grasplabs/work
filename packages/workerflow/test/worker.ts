@@ -163,16 +163,22 @@ const rollbackShapes: Record<string, unknown> = {
  */
 export const redeployedSteps = { names: ["ship"] };
 
-/** A step, a wait for "go", then `redeployedSteps` as they are now. */
+/**
+ * A step with a rollback, a wait for "go", then `redeployedSteps` as they
+ * are now.
+ */
 const redeployed = (): WorkflowDefinition => {
   const { names } = redeployedSteps;
   return {
     fingerprint: names.join(" > "),
-    run: async ({ instanceId }, step) => {
+    run: async ({ instanceId, payload }, step) => {
+      // Before any step: a test can hold the run's first activation here.
+      await checkpoint(instanceId, "redeployed");
       const receipts = [
         await step.do(
           "charge",
-          async (context) => await effect(instanceId, "charge", context)
+          async (context) => await effect(instanceId, "charge", context),
+          undoing(instanceId, payload, "charge", step)
         ),
       ];
       await step.waitForEvent("go", { type: "go" });

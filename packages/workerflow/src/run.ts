@@ -584,6 +584,29 @@ const errorOf = (settlement: Settlement): Error => {
   return error instanceof Error ? error : new Error(String(error));
 };
 
+/**
+ * Ends a run its activation has no definition to run: none, so nothing
+ * to get its rollbacks back from either; or one whose steps changed under
+ * it (a halt, `#matching`), whose forward steps and rollbacks alike can't
+ * be replayed on the new ones. Either way it rolls back nothing.
+ */
+const endUnresolved = async (
+  activation: Activation,
+  resolved: Settlement | { halt: Error },
+  compensating: boolean
+): Promise<void> => {
+  if (compensating) {
+    await activation.endCompensation({
+      status: "errored",
+      error: "halt" in resolved ? resolved.halt : errorOf(resolved),
+    });
+    return;
+  }
+  await ("halt" in resolved
+    ? activation.settle({ ok: false, error: resolved.halt }, true)
+    : activation.settle(resolved));
+};
+
 const hasEnded = (run: RunRow): boolean =>
   run.status === "complete" ||
   run.status === "errored" ||
@@ -1435,17 +1458,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#ensureWake(existing);
       return "existing";
     }
-    // Read before the write: the host's code runs outside it.
-    const fingerprint = this.#fingerprintOf(command);
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, fingerprint, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
       command.version,
-      fingerprint,
       command.instanceId,
       command.key,
       command.params,
@@ -1860,55 +1880,53 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * The fingerprint of the steps of the definition the run `identity`
-   * names, as the host resolves it now (contracts.ts,
-   * `WorkflowDefinition.fingerprint`), or null: none, or no definition.
-   * One the host can't resolve now fails the run as its activation
-   * resolves it (`#resolve`), not here.
+   * `definition`, if its steps are the ones the run's journal was made on;
+   * otherwise a halt (`#resolve`).
    */
-  #fingerprintOf(identity: {
-    definition: string;
-    version: string | null;
-  }): string | null {
-    try {
-      return (
-        this.definition({
-          definition: identity.definition,
-          version: identity.version ?? undefined,
-        })?.fingerprint ?? null
-      );
-    } catch {
-      return null;
+  #matching(
+    run: RunRow,
+    definition: WorkflowDefinition
+  ): WorkflowDefinition | { halt: Error } {
+    const fingerprint = definition.fingerprint ?? null;
+    if (fingerprint === run.fingerprint) {
+      return definition;
     }
+    const { sql } = this.ctx.storage;
+    if (sql.exec("SELECT 1 FROM steps LIMIT 1").toArray().length === 0) {
+      sql.exec("UPDATE run SET fingerprint = ?", fingerprint);
+      return definition;
+    }
+    return {
+      halt: namedError(
+        "WorkflowReplayMismatchError",
+        `The run's definition no longer replays as its journal recorded: its steps were made on ${fingerprintText(run.fingerprint)}, and the definition's steps are now ${fingerprintText(fingerprint)}`
+      ),
+    };
   }
 
   /**
-   * The definition, or why there is none, as the run's end: also when its
-   * steps aren't the ones the run was created on (`fingerprint`).
+   * The definition, or why there is none, as the run's end; or, as a halt,
+   * that its steps aren't the ones the run's journal was made on
+   * (`#matching`). A run whose journal holds no step yet (never run, or
+   * restarted from its start) has nothing to replay: it takes the
+   * definition's fingerprint as it is now, in this activation's write.
    */
-  #resolve(run: RunRow): WorkflowDefinition | Settlement {
+  #resolve(run: RunRow): WorkflowDefinition | Settlement | { halt: Error } {
     const identity = {
       definition: run.definition,
       version: run.version ?? undefined,
     };
+    let definition: WorkflowDefinition | undefined;
     try {
-      const definition = this.definition(identity);
-      if (definition !== undefined) {
-        const fingerprint = definition.fingerprint ?? null;
-        if (fingerprint === run.fingerprint) {
-          return definition;
-        }
-        return {
-          ok: false,
-          error: namedError(
-            "WorkflowReplayMismatchError",
-            `The run's definition no longer replays as its journal recorded: the run was created on steps ${fingerprintText(run.fingerprint)}, and its definition's steps are now ${fingerprintText(fingerprint)}`
-          ),
-        };
-      }
+      definition = this.definition(identity);
     } catch (error) {
       const { name, message } = errorRecord(error);
       return { ok: false, error: namedError(name, message) };
+    }
+    if (definition !== undefined) {
+      // Outside the try: a failed journal write is the engine's fault,
+      // not the host's.
+      return this.#matching(run, definition);
     }
     const version =
       identity.version === undefined
@@ -2214,14 +2232,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
-      // No definition to run, nor to get its rollbacks back from: the run
-      // ends, rolling back nothing.
-      await (compensating
-        ? activation.endCompensation({
-            status: "errored",
-            error: errorOf(resolved),
-          })
-        : activation.settle(resolved));
+      await endUnresolved(activation, resolved, compensating);
       return;
     }
     if (compensating) {
@@ -2523,11 +2534,6 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // with the events of the steps before it.
       forgetHistoryIn(sql, command.from === null);
       forgetIn(sql, forget);
-      if (command.from === null) {
-        // Nothing of the run is replayed: it is created anew on the
-        // definition's steps as they are now.
-        sql.exec("UPDATE run SET fingerprint = ?", this.#fingerprintOf(run));
-      }
       sql.exec(
         "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, executions = executions + 1, wake_at = ?",
         crypto.randomUUID(),

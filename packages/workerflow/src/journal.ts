@@ -144,9 +144,9 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   definition: string;
   version: string | null;
   /**
-   * The fingerprint of its definition's steps when the run was created
-   * (contracts.ts, `WorkflowDefinition.fingerprint`), or null when it had
-   * none; a restart from the start takes the one it has then.
+   * The fingerprint of the definition's steps its journal's steps were
+   * made on (contracts.ts, `WorkflowDefinition.fingerprint`), or null when
+   * it had none: taken by an activation that finds no step journaled.
    */
   fingerprint: string | null;
   instance_id: string;

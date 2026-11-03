@@ -500,10 +500,8 @@ describe("a run on disk-backed workerd", () => {
         status: "errored",
         error: { name: "WorkflowReplayMismatchError" },
       });
-      // The error names the steps the run was created on, and the new ones.
-      expect(errorMessageOf(status)).toContain(
-        'created on steps "reserve > charge > ship", and its definition\'s steps are now'
-      );
+      // The error names the steps the journal was made on.
+      expect(errorMessageOf(status)).toContain('"reserve > charge > ship"');
       // Nothing answered from another step's record, and nothing ran
       // again or for the first time: the effects are the first deploy's.
       expect(timeline(id)).toStrictEqual([

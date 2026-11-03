@@ -363,11 +363,13 @@ export interface WorkflowDefinition<Params = unknown> {
    * What identifies the steps `run` calls and their order, as the host
    * computes it from the code it resolved (a hash of a sealed JSON
    * workflow's steps, say); opaque to the engine. A run keeps the one its
-   * definition had when it was created, and an activation whose
-   * definition has another (absent counts as one too) ends the run with
-   * a WorkflowReplayMismatchError before any of it runs: a deploy that
-   * renamed, reordered or removed a step under a running run, though its
-   * version stayed, never has the run's journal answer another step.
+   * definition had when it first ran (taken again once a restart forgot
+   * every step), and an activation whose definition has another (absent
+   * counts as one too) ends the run with a WorkflowReplayMismatchError
+   * before any of it runs, rolling back nothing: a deploy that renamed,
+   * reordered or removed a step under a running run, though its version
+   * stayed, never has the run's journal answer another step, nor runs its
+   * rollbacks from the new code.
    *
    * Replay matches steps by name and count only: their order may
    * legitimately differ between replays where it rests on the
