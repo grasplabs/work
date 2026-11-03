@@ -265,7 +265,8 @@ export interface ChatDraft {
   /** When it was last written (ISO 8601). */
   updatedAt: string;
   /**
-   * The code step (`ChatCode.callId`) whose code wrote this revision:
+   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
+   * that wrote this revision:
    * where the thread shows the draft's preview. Null when core doesn't
    * know it (a revision written before it kept one).
    */
@@ -295,7 +296,8 @@ export interface ChatDraftVersion {
   /** The SHA-256 of what it holds: two versions alike hold the same. */
   contentHash: string;
   /**
-   * The code step (`ChatCode.callId`) whose code wrote it, when the
+   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
+   * that wrote it, when the
    * chat's agent did; null when the person restored an earlier one.
    */
   callId: string | null;
@@ -593,9 +595,12 @@ export type ChatMessage =
   | {
       id: number;
       role: "result";
-      /** The code step this is the result of (`ChatCode.callId`). */
+      /**
+       * The code step or tool call this is the result of (`ChatCode.callId`,
+       * `ChatToolCall.callId`).
+       */
       callId: string;
-      /** What the code returned, logged or threw, as the agent read it. */
+      /** What the code or tool returned, logged or threw, as the agent read it. */
       text: string;
       failed: boolean;
       at: string;

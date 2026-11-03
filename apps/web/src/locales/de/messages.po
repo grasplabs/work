@@ -444,6 +444,14 @@ msgstr "{count, plural, one {Die Geschäftsleitung hat # Ziel für den Sprint ge
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Von # Workflow genutzt} other {Von # Workflows genutzt}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Writing # file} other {Writing # files}}"
+msgstr "{count, plural, one {# Datei wird geschrieben} other {# Dateien werden geschrieben}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Wrote # file} other {Wrote # files}}"
+msgstr "{count, plural, one {# Datei geschrieben} other {# Dateien geschrieben}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, other {# not counted yet}}"
 msgstr "{count, plural, other {# noch nicht gezählt}}"
@@ -15379,8 +15387,8 @@ msgid "Writing “{title}”…"
 msgstr "„{title}“ wird geschrieben …"
 
 #: src/chat/thread.tsx
-msgid "Writing {path}"
-msgstr "{path} wird geschrieben"
+msgid "Writing {file}"
+msgstr "{file} wird geschrieben"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Writing the widget…"
@@ -15409,8 +15417,8 @@ msgid "Written in a document"
 msgstr "In einem Dokument geschrieben"
 
 #: src/chat/thread.tsx
-msgid "Wrote {path}"
-msgstr "{path} geschrieben"
+msgid "Wrote {file}"
+msgstr "{file} geschrieben"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"

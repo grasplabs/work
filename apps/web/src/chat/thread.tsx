@@ -32,6 +32,7 @@ import {
   TraceLine,
   TraceTitle,
 } from "@grasp-os/ui/components/trace";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
 import {
@@ -163,12 +164,29 @@ const fieldOf = (input: Record<string, unknown>, field: string): string => {
   return typeof value === "string" ? value : "…";
 };
 
+/** The paths of the files a call writes (`files`, by path), as far as they came. */
+const pathsOf = (input: Record<string, unknown>): string[] => {
+  const { files } = input;
+  return typeof files === "object" && files !== null ? Object.keys(files) : [];
+};
+
 /**
  * What a call of one of Grasp's tools did, in a line: in the past once it
  * is done, as it goes while it is written, runs, failed or was stopped.
  */
 const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
   const { t } = useLingui();
+  /** What a `writeFile` call wrote: its file, or how many. */
+  const wrote = (input: Record<string, unknown>, done: boolean): string => {
+    const [file, ...others] = pathsOf(input);
+    if (file !== undefined && others.length === 0) {
+      return done ? t`Wrote ${file}` : t`Writing ${file}`;
+    }
+    const count = others.length + (file === undefined ? 0 : 1);
+    return done
+      ? t`${plural(count, { one: "Wrote # file", other: "Wrote # files" })}`
+      : t`${plural(count, { one: "Writing # file", other: "Writing # files" })}`;
+  };
   return ({ tool, input }, done) => {
     const name = fieldOf(input, "name");
     const path = fieldOf(input, "path");
@@ -183,7 +201,7 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
         return done ? t`Read ${path}` : t`Reading ${path}`;
       }
       case "writeFile": {
-        return done ? t`Wrote ${path}` : t`Writing ${path}`;
+        return wrote(input, done);
       }
       case "editFile": {
         return done ? t`Edited ${path}` : t`Editing ${path}`;

@@ -785,10 +785,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       editing(app),
       toolStep("readFile", { app, path: "AGENTS.md" }),
       editing(app),
-      toolStep("writeFile", { app, path: "screens/desk.tsx", content: fixed }),
+      toolStep("writeFile", {
+        app,
+        files: { "screens/desk.tsx": fixed, "notes.md": "Desk notes" },
+      }),
       codeStep(`export default async (self, env) => {
         const { files } = await env.build.files(${JSON.stringify(app)});
-        return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"] };
+        return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"], notes: files["notes.md"] };
       };`),
       says("Done."),
       // The next question's edit, which the person's discard overtakes.
@@ -827,7 +830,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       read: ["readFile", false, true],
       edited: ["editFile", false],
       written: ["writeFile", false],
-      draft: { agents: "# Ledger desk\n", desk: fixed },
+      draft: { agents: "# Ledger desk\n", desk: fixed, notes: "Desk notes" },
       writes: Array.from({ length: 2 }, () => [
         {
           type: "agent",
@@ -879,10 +882,60 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("searches a draft's files in a folder or all of them, ignoring case, up to a hundred lines and how many more", async () => {
+    const many = Array.from({ length: 105 }, () => "an alpha line").join("\n");
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: {
+          "screens/a.tsx": "Alpha\nbeta\nalphabet",
+          "screens/b.tsx": "ALPHA",
+          "screensaver.md": "alpha",
+          "operations/x.ts": "alpha",
+          "many.md": many,
+        },
+      }),
+      toolStep("searchFiles", { app, text: "aLpHa", path: "screens" }),
+      toolStep("searchFiles", { app, text: "an alpha" }),
+      toolStep("readFile", { app, path: "screens/a.tsx" }),
+      toolStep("readFile", { app, path: "many.md", fromLine: 104 }),
+      says("Found."),
+    ]);
+
+    await chat.ask("Where does alpha come up?");
+
+    const [, inFolder, everywhere, whole, end] = await toolResults(
+      chat.stub,
+      chat.chat.id
+    );
+    const capped = z
+      .object({ matches: z.array(z.string()), leftOut: z.number() })
+      .parse(returned(everywhere?.text));
+    expect({
+      inFolder: returned(inFolder?.text),
+      capped: [capped.matches.length, capped.leftOut, capped.matches[0]],
+      // A file as its own text, whole or in part, saying which part.
+      whole: whole?.text,
+      end: end?.text,
+    }).toStrictEqual({
+      // Not `screensaver.md`, which only starts like the folder.
+      inFolder: {
+        matches: [
+          "screens/a.tsx:1:Alpha",
+          "screens/a.tsx:3:alphabet",
+          "screens/b.tsx:1:ALPHA",
+        ],
+      },
+      capped: [100, 5, "many.md:1:an alpha line"],
+      whole: "Returned:\nAlpha\nbeta\nalphabet",
+      end: "Returned:\nan alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]",
+    });
+  });
+
   it("refuses a file write for someone who doesn't build the App, as it refuses their code", async () => {
     const { chat } = await setUp(
       (app) => [
-        toolStep("writeFile", { app, path: "a.md", content: "a" }),
+        toolStep("writeFile", { app, files: { "a.md": "a" } }),
         codeStep(
           tryEach({
             write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" })`,
@@ -954,8 +1007,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, existing } = await setUp((app) => [
       toolStep("writeFile", {
         app,
-        path: "screens/late.tsx",
-        content: "export default () => null;",
+        files: { "screens/late.tsx": "export default () => null;" },
       }),
       says("Never asked."),
     ]);

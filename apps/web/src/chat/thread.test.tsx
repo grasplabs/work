@@ -253,8 +253,7 @@ describe(ChatThread, () => {
             codeBefore: 0,
             input: {
               app: "app_1",
-              path: "screens/desk.tsx",
-              content: "export default",
+              files: { "screens/desk.tsx": "export default" },
             },
           },
           {
@@ -287,7 +286,7 @@ describe(ChatThread, () => {
 
     expect({
       lines,
-      given: opened?.includes('"path": "screens/desk.tsx"'),
+      given: opened?.includes('"screens/desk.tsx": "export default"'),
       came: opened?.includes('{"changed":["screens/desk.tsx"]}'),
       code: document.body.textContent.includes("Code step"),
     }).toStrictEqual({
@@ -325,7 +324,10 @@ describe(ChatThread, () => {
             callId: "write",
             tool: "writeFile",
             codeBefore: 0,
-            input: { app: "app_1", path: "screens/desk.tsx", content: "" },
+            input: {
+              app: "app_1",
+              files: { "screens/desk.tsx": "", "app.ts": "" },
+            },
           },
           {
             callId: "edit",
@@ -346,11 +348,7 @@ describe(ChatThread, () => {
       [...document.querySelectorAll("button[aria-expanded]")].map(
         (line) => line.textContent
       )
-    ).toStrictEqual([
-      "Wrote screens/desk.tsx",
-      "Code stepDone",
-      "Edited app.ts",
-    ]);
+    ).toStrictEqual(["Wrote 2 files", "Code stepDone", "Edited app.ts"]);
   });
 
   it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
