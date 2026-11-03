@@ -9,6 +9,7 @@ import { ensureCollection } from "./collections.ts";
 import { brainSourceRefSchema } from "./contract.ts";
 import type { BrainSourceRef } from "./contract.ts";
 import {
+  brainEntities,
   brainErasedEvidence,
   brainForgottenPeople,
   brainMemories,
@@ -21,6 +22,7 @@ import {
 import { checkedText, writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { sha256Hex } from "./encoding.ts";
+import { memoryLinkIntentWhere } from "./entities.ts";
 import {
   exportFormat,
   exportFormatVersion,
@@ -41,8 +43,8 @@ import { citedCollectionsOf, citesWrite } from "./memories.ts";
 //   is written: a bundle that doesn't match is refused whole. Each part's
 //   files are read in name order, one at a time, twice (checked, then
 //   written, checked again as read): never the whole bundle at once.
-// - Only into an empty Brain, holding no collection nor memory record:
-//   never over another company's.
+// - Only into an empty Brain, holding no collection, memory record nor
+//   entity: never over another company's.
 // - The erasure records are replayed before anything is readable: the
 //   people a purge forgot are forgotten again (their records go, and
 //   captures of them stay out), erased evidence stays erased, and the
@@ -50,9 +52,12 @@ import { citedCollectionsOf, citesWrite } from "./memories.ts";
 // - Only what the export holds: a document in a collection it doesn't
 //   name, or a Personal or Grasp collection, refuses the bundle; a memory
 //   record resting on what isn't restored is left out.
-// - What is derived (sections, search, links, entities) is derived again
-//   by indexing and linking, from the restored text: the export holds no
-//   index, so nothing it left out can return through one.
+// - What is derived (sections, search, links, entities and their
+//   relations) is derived again by indexing and linking, from the restored
+//   documents' text and memory records: the export holds no index and no
+//   entity, so nothing it left out can return through one. Each restored
+//   document's save queues its linking; each memory record's is queued as
+//   a remember's is.
 //
 // Documents get new IDs, as any saved document does; the records that
 // cite them are pointed at the new ones. Each version keeps its author and
@@ -721,17 +726,32 @@ const restoreMemories = async <C>(
       break;
     }
   }
-  // What each rests on, once all of them are there, a page at a time.
+  // What each rests on, once all of them are there, and its linking
+  // queued at its revision as a remember's is (`memoryLinkIntentWhere`):
+  // the export holds no entity, so linking makes them again. A page at a
+  // time, its linking in one batch.
   let restored = 0;
   let after = "";
+  const now = brain.ports.clock();
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
     const page = await db
-      .select({ id: brainMemories.id, sourceRefs: brainMemories.sourceRefs })
+      .select({
+        id: brainMemories.id,
+        revision: brainMemories.revision,
+        sourceRefs: brainMemories.sourceRefs,
+      })
       .from(brainMemories)
       .where(gt(brainMemories.id, after))
       .orderBy(asc(brainMemories.id))
       .limit(citesPerPage);
+    const [firstLink, ...moreLinks] = page.map(({ id, revision }) =>
+      memoryLinkIntentWhere(db, id, revision, now, sql`1`)
+    );
+    if (firstLink !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await db.batch([firstLink, ...moreLinks]);
+    }
     for (const record of page) {
       const refs = z
         .array(brainSourceRefSchema)
@@ -767,7 +787,12 @@ export const restoreExport = async <C>(
   await checkBundle(brain, read, manifest);
   const [heldCollections] = await db.select({ n: count() }).from(collections);
   const [heldMemories] = await db.select({ n: count() }).from(brainMemories);
-  if ((heldCollections?.n ?? 0) > 0 || (heldMemories?.n ?? 0) > 0) {
+  const [heldEntities] = await db.select({ n: count() }).from(brainEntities);
+  if (
+    (heldCollections?.n ?? 0) > 0 ||
+    (heldMemories?.n ?? 0) > 0 ||
+    (heldEntities?.n ?? 0) > 0
+  ) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
   const now = brain.ports.clock();

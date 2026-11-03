@@ -14,6 +14,7 @@ import {
 } from "../src/db/schema.ts";
 import { versionText, writeVersion } from "../src/documents.ts";
 import { sha256Hex, toBase64Url } from "../src/encoding.ts";
+import { runLinking, settleMs, sweepLinking } from "../src/entities.ts";
 import {
   advanceExport,
   exportFile,
@@ -132,6 +133,26 @@ const signedBundle = async (files: Map<string, string>): Promise<void> => {
     )
   );
   files.set("manifest.json", JSON.stringify({ ...body, signature }));
+};
+
+/**
+ * Empties the restore target of what a restore before wrote: a restore
+ * takes only an empty Brain.
+ */
+const emptied = async (
+  target: ReturnType<typeof testHost>["brain"]
+): Promise<void> => {
+  await env.RESTORED.batch(
+    [
+      "DELETE FROM brain_mentions",
+      "DELETE FROM brain_entity_matches",
+      "DELETE FROM brain_entity_keys",
+      "DELETE FROM brain_entities",
+    ].map((statement) => env.RESTORED.prepare(statement))
+  );
+  await target.db.delete(brainMemoryCites);
+  await target.db.delete(brainMemories);
+  await target.db.delete(collections);
 };
 
 /** A refusal's code, or `ok`. */
@@ -266,8 +287,34 @@ describe("restoring an export of the company's Brain", () => {
     const exportId = await exported(source);
     const bundle = await bundleOf(source, exportId);
 
-    const target = testHost(undefined, {}, env.RESTORED).brain;
+    // The model names what the handbook keeps, as linking asks it.
+    const restoredHost = testHost(
+      async (text) =>
+        await Promise.resolve({
+          entities: text.includes(`keep${u}`)
+            ? [{ kind: "Process", name: `keep${u}` }]
+            : [],
+        }),
+      {},
+      env.RESTORED
+    );
+    const target = restoredHost.brain;
     const restored = await restoreExport(target, admin, readerOf(bundle));
+    // Linking, as the clock sweeps it and the host runs its jobs.
+    await sweepLinking(target, new Date(Date.now() + settleMs + 60_000));
+    for (const { job } of restoredHost.started) {
+      if ("source" in job) {
+        // oxlint-disable-next-line no-await-in-loop -- one job after another
+        await runLinking(target, job, {
+          do: async (_name, _config, fn) => await fn(),
+        });
+      }
+    }
+    const memoryMentions = await env.RESTORED.prepare(
+      "SELECT count(*) AS n FROM brain_mentions WHERE memory_id = ? AND entity_id IS NOT NULL"
+    )
+      .bind(memoryId)
+      .first<{ n: number }>();
     const [document] = await target.db
       .select()
       .from(documents)
@@ -305,6 +352,8 @@ describe("restoring an export of the company's Brain", () => {
         pointsAtRestored: memory?.sourceRefs.includes(document?.id ?? "-"),
       },
       cites: cites.map(({ collectionId }) => collectionId),
+      // Its entities linked again, as the export holds none.
+      memoryLinked: (memoryMentions?.n ?? 0) > 0,
       personal: JSON.stringify(
         await target.db.select().from(documents)
       ).includes(`own${u}`),
@@ -325,6 +374,7 @@ describe("restoring an export of the company's Brain", () => {
         pointsAtRestored: true,
       },
       cites: [handbook.id],
+      memoryLinked: true,
       personal: false,
       forgotten: [`leaver-${u}`],
       result: { documents: 1, versions: 2, memories: 1, memoriesLeftOut: 2 },
@@ -477,9 +527,7 @@ describe("restoring an export of the company's Brain", () => {
     const bundle = await bundleOf(source, exportId);
 
     const target = testHost(undefined, {}, env.RESTORED).brain;
-    await target.db.delete(brainMemoryCites);
-    await target.db.delete(brainMemories);
-    await target.db.delete(collections);
+    await emptied(target);
     const restored = await codeOf(
       restoreExport(target, admin, readerOf(bundle))
     );
@@ -546,9 +594,7 @@ describe("restoring an export of the company's Brain", () => {
     ]);
     await signedBundle(files);
     const target = testHost(undefined, {}, env.RESTORED).brain;
-    await target.db.delete(brainMemoryCites);
-    await target.db.delete(brainMemories);
-    await target.db.delete(collections);
+    await emptied(target);
     const refused = await codeOf(
       restoreExport(
         target,
@@ -611,10 +657,7 @@ describe("restoring an export of the company's Brain", () => {
       ).length;
 
       const target = testHost(undefined, {}, env.RESTORED).brain;
-      // Emptied of what a restore before this one wrote.
-      await target.db.delete(brainMemoryCites);
-      await target.db.delete(brainMemories);
-      await target.db.delete(collections);
+      await emptied(target);
       await restoreExport(target, admin, readerOf(bundle));
       const [document] = await target.db
         .select()
@@ -680,9 +723,7 @@ describe("restoring an export of the company's Brain", () => {
       ).length;
 
       const target = testHost(undefined, {}, env.RESTORED).brain;
-      await target.db.delete(brainMemoryCites);
-      await target.db.delete(brainMemories);
-      await target.db.delete(collections);
+      await emptied(target);
       await restoreExport(target, admin, readerOf(bundle));
       const [document] = await target.db
         .select()
@@ -769,9 +810,7 @@ describe("restoring an export of the company's Brain", () => {
           .length;
 
       const target = testHost(undefined, {}, env.RESTORED).brain;
-      await target.db.delete(brainMemoryCites);
-      await target.db.delete(brainMemories);
-      await target.db.delete(collections);
+      await emptied(target);
       await restoreExport(target, admin, readerOf(bundle));
       const restoredCollections = await target.db
         .select({ id: collections.id, description: collections.description })
