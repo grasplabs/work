@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "64708d12-5e1c-4001-bdb0-aafbcf7f8fb9",
+  "id": "3f507f0a-8ce7-4fba-9cab-9c711dac4b7c",
   "prevId": "9ea47a8c-234d-4228-883a-ae280c1daa3b",
   "tables": {
     "audit_outbox": {
@@ -1091,6 +1091,13 @@
         },
         "claimed_at": {
           "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
