@@ -487,6 +487,10 @@ export const defaultSubscriptionWaitMs = 60_000;
 /** The longest a host may let a subscription wait: 10 minutes. */
 export const maxSubscriptionWaitMs = 10 * 60_000;
 
+/** A fingerprint of a definition's steps as an error names it. */
+const fingerprintText = (fingerprint: string | null): string =>
+  fingerprint === null ? "with no fingerprint" : JSON.stringify(fingerprint);
+
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
   from: { name: string; count: number; type: StepType } | null;
@@ -1431,14 +1435,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#ensureWake(existing);
       return "existing";
     }
+    // Read before the write: the host's code runs outside it.
+    const fingerprint = this.#fingerprintOf(command);
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, fingerprint, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
       command.version,
+      fingerprint,
       command.instanceId,
       command.key,
       command.params,
@@ -1852,7 +1859,33 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     return row?.count ?? 0;
   }
 
-  /** The definition, or why there is none, as the run's end. */
+  /**
+   * The fingerprint of the steps of the definition the run `identity`
+   * names, as the host resolves it now (contracts.ts,
+   * `WorkflowDefinition.fingerprint`), or null: none, or no definition.
+   * One the host can't resolve now fails the run as its activation
+   * resolves it (`#resolve`), not here.
+   */
+  #fingerprintOf(identity: {
+    definition: string;
+    version: string | null;
+  }): string | null {
+    try {
+      return (
+        this.definition({
+          definition: identity.definition,
+          version: identity.version ?? undefined,
+        })?.fingerprint ?? null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The definition, or why there is none, as the run's end: also when its
+   * steps aren't the ones the run was created on (`fingerprint`).
+   */
   #resolve(run: RunRow): WorkflowDefinition | Settlement {
     const identity = {
       definition: run.definition,
@@ -1861,7 +1894,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     try {
       const definition = this.definition(identity);
       if (definition !== undefined) {
-        return definition;
+        const fingerprint = definition.fingerprint ?? null;
+        if (fingerprint === run.fingerprint) {
+          return definition;
+        }
+        return {
+          ok: false,
+          error: namedError(
+            "WorkflowReplayMismatchError",
+            `The run's definition no longer replays as its journal recorded: the run was created on steps ${fingerprintText(run.fingerprint)}, and its definition's steps are now ${fingerprintText(fingerprint)}`
+          ),
+        };
       }
     } catch (error) {
       const { name, message } = errorRecord(error);
@@ -2480,6 +2523,11 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // with the events of the steps before it.
       forgetHistoryIn(sql, command.from === null);
       forgetIn(sql, forget);
+      if (command.from === null) {
+        // Nothing of the run is replayed: it is created anew on the
+        // definition's steps as they are now.
+        sql.exec("UPDATE run SET fingerprint = ?", this.#fingerprintOf(run));
+      }
       sql.exec(
         "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, executions = executions + 1, wake_at = ?",
         crypto.randomUUID(),

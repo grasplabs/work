@@ -30,6 +30,7 @@ import {
   warningsDuring,
 } from "./outside.ts";
 import { slowStreamFirst, slowStreamRest } from "./result-definitions.ts";
+import { redeployedSteps } from "./worker.ts";
 
 const instance = async (
   definition: string,
@@ -743,6 +744,43 @@ describe("restart", () => {
     ).toStrictEqual([
       ["charge", "succeeded", keys[0]],
       ["ship", "succeeded", keys[2]],
+    ]);
+  });
+
+  it("from its start takes the steps its definition has now; from a step keeps the ones it was created on", async () => {
+    const id = newId();
+    const other = newId();
+    redeployedSteps.names = ["ship"];
+    await workflow("redeployed").create({ id });
+    await workflow("redeployed").create({ id: other });
+    await suspendedOn("redeployed", id, "go");
+    await suspendedOn("redeployed", other, "go");
+    // A deploy renames the step after the wait under both runs.
+    redeployedSteps.names = ["dispatch"];
+
+    const run = await instance("redeployed", id);
+    await run.restart();
+    await suspendedOn("redeployed", id, "go");
+    await run.sendEvent({ type: "go", payload: null });
+    const restarted = await ended("redeployed", id);
+    const kept = await instance("redeployed", other);
+    await kept.restart({ from: { name: "go", type: "waitForEvent" } });
+    const stray = await ended("redeployed", other);
+
+    expect(restarted).toStrictEqual({
+      status: "complete",
+      output: [
+        seen(id, "charge").receipts[1],
+        seen(id, "dispatch").receipts[0],
+      ],
+    });
+    expect(stray).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
+    // The kept run's step before the wait ran once, and nothing after it.
+    expect(effectsOf(other).map(({ label }) => label)).toStrictEqual([
+      "charge",
     ]);
   });
 

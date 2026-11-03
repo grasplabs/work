@@ -205,6 +205,18 @@ const sha256Of = (bytes: Uint8Array): string =>
 const keysOf = (id: string, label: string): Set<string> =>
   new Set(outside.of(id, label).map((effect) => effect.key));
 
+/** The message of a run's error, as its status shows it. */
+const errorMessageOf = (status: unknown): string | undefined =>
+  typeof status === "object" &&
+  status !== null &&
+  "error" in status &&
+  typeof status.error === "object" &&
+  status.error !== null &&
+  "message" in status.error &&
+  typeof status.error.message === "string"
+    ? status.error.message
+    : undefined;
+
 /** The run row of a journal, as far as these tests read it. */
 const runOf = (
   journal: unknown
@@ -467,6 +479,66 @@ describe("a run on disk-backed workerd", () => {
         { ordinal: 2, attempt: 1, generation: 1, ended: null },
         { ordinal: 2, attempt: 2, generation: 2, ended: "succeeded" },
       ],
+    });
+  });
+
+  it.each(["renamed", "reordered"])(
+    "fails a run whose steps a deploy %s while the process was dead mid-step, running no step again and none it never ran",
+    async (definition) => {
+      const id = `redeployed-${definition}`;
+      const chargeHeld = outside.hold(id, "charge", 1);
+      await workerd.request("/start", startOf(definition, id));
+      await chargeHeld;
+      // Killed after reserve's commit, with charge out at its effect.
+      const cutOff = await journalOf(definition, id);
+      await workerd.redeploy("2");
+
+      // The run resumes under the new code with no request reaching it.
+      const status = await ended(definition, id);
+
+      expect(status).toMatchObject({
+        status: "errored",
+        error: { name: "WorkflowReplayMismatchError" },
+      });
+      // The error names the steps the run was created on, and the new ones.
+      expect(errorMessageOf(status)).toContain(
+        'created on steps "reserve > charge > ship", and its definition\'s steps are now'
+      );
+      // Nothing answered from another step's record, and nothing ran
+      // again or for the first time: the effects are the first deploy's.
+      expect(timeline(id)).toStrictEqual([
+        ["reserve", 1],
+        ["charge", 1],
+      ]);
+      expect(stepsOf(cutOff)).toMatchObject([
+        { name: "reserve", state: "succeeded" },
+        { name: "charge", state: "running" },
+      ]);
+      expect(stepsOf(await journalOf(definition, id))).toStrictEqual(
+        stepsOf(cutOff)
+      );
+    }
+  );
+
+  it("goes on after a deploy that left its steps as they were, with no step run again but the one cut off", async () => {
+    const id = "redeployed-kept";
+    const chargeHeld = outside.hold(id, "charge", 1);
+    await workerd.request("/start", startOf("kept", id));
+    await chargeHeld;
+    await workerd.redeploy("2");
+
+    const status = await ended("kept", id);
+
+    const [reserve, , charge, ship] = outside.of(id);
+    expect(timeline(id)).toStrictEqual([
+      ["reserve", 1],
+      ["charge", 1],
+      ["charge", 2],
+      ["ship", 1],
+    ]);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: [reserve?.receipt, charge?.receipt, ship?.receipt],
     });
   });
 

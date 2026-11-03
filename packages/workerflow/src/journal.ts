@@ -52,7 +52,7 @@ export class JournalSchemaError extends Error {
  * The journal's own layout. A change to it is a new version; a journal of
  * any other version is refused as it is read, never upgraded.
  */
-export const journalSchemaVersion = 13;
+export const journalSchemaVersion = 14;
 
 /** The index each sender's share of the inbox is counted by. */
 const senderIndex =
@@ -143,6 +143,12 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   run_uid: string;
   definition: string;
   version: string | null;
+  /**
+   * The fingerprint of its definition's steps when the run was created
+   * (contracts.ts, `WorkflowDefinition.fingerprint`), or null when it had
+   * none; a restart from the start takes the one it has then.
+   */
+  fingerprint: string | null;
   instance_id: string;
   start_key: string;
   params: string;
@@ -430,6 +436,7 @@ export const createJournal = (sql: SqlStorage): void => {
       run_uid TEXT NOT NULL,
       definition TEXT NOT NULL,
       version TEXT,
+      fingerprint TEXT,
       instance_id TEXT NOT NULL,
       start_key TEXT NOT NULL,
       params TEXT NOT NULL,
@@ -718,7 +725,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures, control_fence FROM run"
+      "SELECT schema, run_uid, definition, version, fingerprint, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures, control_fence FROM run"
     )
     .toArray()[0];
 };
