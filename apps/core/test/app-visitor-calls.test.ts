@@ -703,56 +703,68 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
   });
 
   it("hand over neither answer nor error once the screen's approval is taken back while the call runs, and audit it", async () => {
-    const domain = newDomain();
-    const { admin, app, link } = await portal(domain);
-    const mail = await mailbox();
-    const ana = await visitor(mail, link, `ana@${domain}`);
-    const sessions = await env.DB.prepare(
-      "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
-    )
-      .bind(app)
-      .all<{ id: string }>();
-    const sessionId = sessions.results[0]?.id ?? "";
-    const appId = appIdSchema.parse(app);
-    const build = await leasedBuild(
-      env,
-      `visitor:${sessionId}`,
-      appId,
-      ana.lease
-    );
-    const revoked = async (run: () => Promise<string>) =>
-      await outcome(
-        deliveredToVisitor(env, { app: appId, sessionId, build }, run)
+    // Each on a fresh, approved Portal: the approval is taken back inside
+    // the run, after it was admitted, so only the check before handing
+    // over can refuse it.
+    const revokedWhile = async (ends: "answer" | "error") => {
+      const domain = newDomain();
+      const { admin, app, link } = await portal(domain);
+      const mail = await mailbox();
+      const ana = await visitor(mail, link, `ana@${domain}`);
+      const sessions = await env.DB.prepare(
+        "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
+      )
+        .bind(app)
+        .all<{ id: string }>();
+      const sessionId = sessions.results[0]?.id ?? "";
+      const appId = appIdSchema.parse(app);
+      const build = await leasedBuild(
+        env,
+        `visitor:${sessionId}`,
+        appId,
+        ana.lease
       );
-
-    let answered = "";
-    const events = await auditedDuring(async () => {
-      answered = await revoked(async () => {
-        await admin.api.screenTrust.revoke(app, build?.artifact ?? "");
-        return "the answer";
+      let ran = false;
+      let refused = "";
+      const events = await auditedDuring(async () => {
+        refused = await outcome(
+          deliveredToVisitor(
+            env,
+            { app: appId, sessionId, build },
+            async () => {
+              ran = true;
+              await admin.api.screenTrust.revoke(app, build?.artifact ?? "");
+              if (ends === "error") {
+                throw new Error("what the App read");
+              }
+              return "the answer";
+            }
+          )
+        );
       });
-    });
-    const failed = await revoked(async () => {
-      await Promise.resolve();
-      throw new Error("what the App read");
-    });
+      return {
+        leased: build !== undefined,
+        ran,
+        refused,
+        audited: events
+          .filter(
+            (event) =>
+              event.target?.id === app && event.action === "app.visitor_refused"
+          )
+          .map(({ detail }) => detail),
+      };
+    };
+    const expected = {
+      leased: true,
+      ran: true,
+      refused: "screen.revoked",
+      audited: [{ reason: "screen_revoked", stage: "delivery" }],
+    };
 
     expect({
-      leased: build !== undefined,
-      answered,
-      failed,
-      audited: events
-        .filter(
-          (event) =>
-            event.target?.id === app && event.action === "app.visitor_refused"
-        )
-        .map(({ detail }) => detail),
-    }).toStrictEqual({
-      leased: true,
-      answered: "screen.revoked",
-      failed: "screen.revoked",
-      audited: [{ reason: "screen_revoked", stage: "delivery" }],
-    });
+      answer: await revokedWhile("answer"),
+      error: await revokedWhile("error"),
+    }).toStrictEqual({ answer: expected, error: expected });
   });
 
   it("are granted only by the App's builders, never staff or its users", async () => {
