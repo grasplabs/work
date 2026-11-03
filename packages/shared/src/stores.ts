@@ -6,6 +6,7 @@ import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import { platformLimits } from "./platform-limits.ts";
 import {
+  queryMaxGroups,
   queryMaxResults,
   queryMaxScannedBytes,
   queryMaxScannedEntries,
@@ -534,6 +535,7 @@ export const dataErrors = defineErrorFamily({
   "data.invalid_query": "That query isn't valid for this table.",
   "data.scan_limit": `A query reads at most ${queryMaxScannedEntries} entries and ${queryMaxScannedBytes} bytes. Narrow it with an index range, or page through it.`,
   "data.result_limit": `This query matches more than ${queryMaxResults} records. Page through them instead.`,
+  "data.group_limit": `This grouped read has more than ${queryMaxGroups} groups. Narrow it with a filter or an index range, or group by fewer fields.`,
   "data.not_unique": "More than one record matches.",
   "data.incompatible_record":
     "A stored record doesn't fit the schema this read is pinned to.",

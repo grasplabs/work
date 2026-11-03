@@ -3,7 +3,12 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { DatabaseReader, Doc, PaginationResult } from "../src/database.ts";
+import type {
+  DatabaseReader,
+  Doc,
+  PaginationResult,
+  Withheld,
+} from "../src/database.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 import type { Id, Infer, paginationOptionsValidator } from "../src/values.ts";
 
@@ -152,3 +157,43 @@ void db.query("notes").aggregate({ operation: "count", field: "rank" });
 void db.query("notes").aggregate({ operation: "sum", field: "title" });
 // @ts-expect-error -- `sum` names its field
 void db.query("notes").aggregate({ operation: "sum" });
+
+// A search reads a table that declares a search index, in order of
+// relevance: no order, index, unique or aggregates of its own.
+const searchSchema = defineSchema({
+  people: defineTable({ name: v.string(), age: v.number() }).searchIndex([
+    "name",
+  ]),
+  posts: defineTable({ title: v.string(), author: v.id("people") }),
+});
+declare const searchDb: DatabaseReader<(typeof searchSchema)["tables"]>;
+type Person = Doc<(typeof searchSchema)["tables"]["people"], "people">;
+expectTypeOf(
+  searchDb
+    .search("people", "ada")
+    .filter({ age: { gt: 3 } })
+    .take(5)
+).resolves.toEqualTypeOf<Person[]>();
+expectTypeOf(searchDb.search("people", "ada")).not.toHaveProperty("order");
+expectTypeOf(searchDb.search("people", "ada")).not.toHaveProperty("unique");
+// @ts-expect-error -- `posts` has no search index
+searchDb.search("posts", "x");
+// @ts-expect-error -- a search index covers text fields
+defineTable({ age: v.number() }).searchIndex(["age"]);
+
+// `with` follows `v.id` fields to their tables' records.
+const firstWithAuthor = async () =>
+  await searchDb.query("posts").with("author").first();
+type Author = NonNullable<
+  Awaited<ReturnType<typeof firstWithAuthor>>
+>["_with"]["author"];
+expectTypeOf<Author>().toEqualTypeOf<Person | null | Withheld>();
+// @ts-expect-error -- `title` holds no record ID
+searchDb.query("posts").with("title");
+
+// `group` groups by scalar fields and aggregates numeric ones.
+expectTypeOf(
+  searchDb.query("people").group({ by: ["name"], sum: ["age"] })
+).resolves.items.toHaveProperty("sum");
+// @ts-expect-error -- `name` isn't numeric
+void searchDb.query("people").group({ by: ["age"], avg: ["name"] });

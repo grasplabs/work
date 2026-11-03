@@ -23,7 +23,7 @@ import {
 // by its author's name: a changed definition is a new index beside the
 // old, so a consumer pinned to an older schema keeps reading through its
 // own. Nothing here drops an index; contracting them is schema
-// activation's (GRA-246), under its retention gates.
+// activation's (GRA-1480), under its retention gates.
 //
 // Installing is idempotent and checks what SQLite actually holds: an
 // index that exists under its name with any other definition is refused,

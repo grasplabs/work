@@ -1,5 +1,6 @@
 import {
   indexMaxFields,
+  searchIndexMaxFields,
   storeMaxTables,
   storeNameMaxLength,
   storeNamePattern,
@@ -63,6 +64,8 @@ export const schemaLimits = Object.freeze({
   indexesPerTable: 32,
   /** Fields in one index. */
   fieldsPerIndex: indexMaxFields,
+  /** Text fields in a table's search index. */
+  fieldsPerSearchIndex: searchIndexMaxFields,
 } as const);
 
 /**
@@ -133,6 +136,20 @@ export type IndexField<Fields extends ValueShape> =
         : never;
     }[keyof Fields & string];
 
+/**
+ * The fields a search index may cover: those whose values are text (a
+ * string, an enum of strings, a template), null and absence allowed.
+ */
+export type SearchField<Fields extends ValueShape> = {
+  [Key in keyof Fields & string]: [NonNullable<Infer<Fields[Key]>>] extends [
+    never,
+  ]
+    ? never
+    : [NonNullable<Infer<Fields[Key]>>] extends [string]
+      ? Key
+      : never;
+}[keyof Fields & string];
+
 /** Names a table's indexes by the fields they order by. */
 export type IndexMap = Readonly<Record<string, readonly string[]>>;
 
@@ -140,12 +157,14 @@ export type IndexMap = Readonly<Record<string, readonly string[]>>;
 export type NoIndexes = Readonly<Record<never, readonly string[]>>;
 
 /**
- * A table: its fields and its indexes, immutable. `.index` answers a new
- * table with one more index.
+ * A table: its fields, its indexes and its search index, immutable.
+ * `.index` answers a new table with one more index, `.searchIndex` one
+ * with its search index.
  */
 export interface TableDefinition<
   Fields extends ValueShape = ValueShape,
   Indexes extends IndexMap = NoIndexes,
+  Searchable extends boolean = false,
 > {
   readonly fields: Fields;
   /** In the order they were declared. */
@@ -160,9 +179,39 @@ export interface TableDefinition<
   >(
     name: Name,
     fields: Keys
-  ) => TableDefinition<Fields, Indexes & Readonly<Record<Name, Keys>>>;
+  ) => TableDefinition<
+    Fields,
+    Indexes & Readonly<Record<Name, Keys>>,
+    Searchable
+  >;
+  /**
+   * The same table with a full-text search index over its text `fields`
+   * (at most 8), which `ctx.db.search(table, text)` reads: the store keeps
+   * it in step with every write, and builds it over the records already
+   * there when a version declaring it is applied. A table has one.
+   *
+   * ```ts
+   * defineTable({ name: v.string(), notes: v.string().optional() })
+   *   .searchIndex(["name", "notes"]);
+   * ```
+   */
+  readonly searchIndex: Searchable extends true
+    ? never
+    : <
+        // Generic, as `index` is, so a manifest's table, declared from
+        // data (schema-manifest.ts), takes its fields as a list of anything.
+        // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- see above
+        const Keys extends readonly [
+          SearchField<Fields>,
+          ...SearchField<Fields>[],
+        ],
+      >(
+        fields: Keys
+      ) => TableDefinition<Fields, Indexes, true>;
   /** Its indexes, by name, for types only: never set. */
   readonly "~indexes"?: Indexes;
+  /** Whether it has a search index, for types only: never set. */
+  readonly "~searchable"?: Searchable;
 }
 
 /** Any table, as a schema holds it. */
@@ -247,6 +296,8 @@ type KnownReferences<Tables> = [
 export interface TableState {
   readonly fields: Readonly<Record<string, ValueDescriptor>>;
   readonly indexes: readonly IndexDefinition[];
+  /** The text fields its search index covers, in order; none without one. */
+  readonly searchIndex?: readonly string[];
 }
 
 /** Every table `defineTable` made; nothing else is one. */
@@ -356,6 +407,24 @@ export const indexBase = (
   return scalarBases[descriptor.kind];
 };
 
+/**
+ * The table a field of this descriptor relates to, and whether it holds a
+ * list of IDs: a `v.id(table)`, or a `v.array(v.id(table))`, null and
+ * absence allowed. Undefined for any other field, which `.with` can't
+ * follow.
+ */
+export const relationOf = (
+  descriptor: ValueDescriptor
+): { readonly table: string; readonly many: boolean } | undefined => {
+  if (descriptor.kind === "id") {
+    return { table: descriptor.tableName, many: false };
+  }
+  if (descriptor.kind === "array" && descriptor.item.kind === "id") {
+    return { table: descriptor.item.tableName, many: true };
+  }
+  return undefined;
+};
+
 /** Whether a field of this descriptor may hold an explicit null. */
 export const allowsNull = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.nullable || isNullOnly(descriptor)) {
@@ -417,6 +486,48 @@ const checkedIndexFields = (
   return Object.freeze(fields);
 };
 
+/** The fields of a table's search index, checked against its table. */
+const checkedSearchFields = (
+  state: TableState,
+  keys: unknown
+): readonly string[] => {
+  if (
+    !Array.isArray(keys) ||
+    keys.length === 0 ||
+    keys.length > schemaLimits.fieldsPerSearchIndex
+  ) {
+    return refuse(
+      "schema.invalid_index",
+      `A search index covers between 1 and ${schemaLimits.fieldsPerSearchIndex} text fields.`
+    );
+  }
+  const fields: string[] = [];
+  for (const key of keys) {
+    const field =
+      typeof key === "string" && Object.hasOwn(state.fields, key)
+        ? state.fields[key]
+        : undefined;
+    if (
+      typeof key !== "string" ||
+      field === undefined ||
+      indexBase(field) !== "string"
+    ) {
+      return refuse(
+        "schema.invalid_index",
+        "A search index covers text fields of the table: strings, enums of strings or templates."
+      );
+    }
+    if (fields.includes(key)) {
+      return refuse(
+        "schema.invalid_index",
+        `A search index names \`${key}\` twice.`
+      );
+    }
+    fields.push(key);
+  }
+  return Object.freeze(fields);
+};
+
 /**
  * A table of these fields and indexes, registered as genuine. Typed as any
  * table: what `.index` answers is typed by `TableDefinition`.
@@ -439,11 +550,23 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
       }
       const fields = checkedIndexFields(state, indexName, keys);
       return tableOf(shape, {
-        fields: state.fields,
+        ...state,
         indexes: Object.freeze([
           ...state.indexes,
           Object.freeze({ name: indexName, fields }),
         ]),
+      });
+    },
+    searchIndex: (keys: unknown) => {
+      if (state.searchIndex !== undefined) {
+        refuse(
+          "schema.invalid_index",
+          "A table has one search index, over all the text fields it searches."
+        );
+      }
+      return tableOf(shape, {
+        ...state,
+        searchIndex: checkedSearchFields(state, keys),
       });
     },
   });

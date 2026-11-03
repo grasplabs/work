@@ -91,10 +91,14 @@ export interface ManifestIndex {
   readonly fields: readonly string[];
 }
 
-/** A table as a manifest holds it. */
+/**
+ * A table as a manifest holds it. `searchIndex` is there only for a table
+ * that declares one, so a table without keeps the manifest it had.
+ */
 export interface ManifestTable {
   readonly fields: Readonly<Record<string, ValueDescriptor>>;
   readonly indexes: Readonly<Record<string, ManifestIndex>>;
+  readonly searchIndex?: ManifestIndex;
   readonly access: ManifestAccess;
 }
 
@@ -264,6 +268,9 @@ export const schemaManifest = (
           indexes: mapOf(
             table.indexes.map((index) => [index.name, { fields: index.fields }])
           ),
+          ...(table.searchIndex === undefined
+            ? {}
+            : { searchIndex: { fields: table.searchIndex } }),
           // Every table has its own entry: `accessOf` made one for each.
           access: (Object.hasOwn(accesses, name)
             ? accesses[name]
@@ -297,6 +304,7 @@ const invalid = (message: string): never =>
 /** A table being declared from a manifest, whose index fields are data. */
 interface ReadTable extends AnyTable {
   readonly index: (name: string, fields: readonly unknown[]) => ReadTable;
+  readonly searchIndex: (fields: readonly unknown[]) => ReadTable;
 }
 
 // SAFETY: `defineTable` and a table's `index` check at run time all that
@@ -312,12 +320,20 @@ const readTable = (
   name: string,
   input: unknown
 ): { table: AnyTable; access: ManifestAccess } => {
-  if (!hasExactly(input, ["fields", "indexes", "access"])) {
+  const searched = isPlainObject(input) && Object.hasOwn(input, "searchIndex");
+  if (
+    !hasExactly(
+      input,
+      searched
+        ? ["fields", "indexes", "searchIndex", "access"]
+        : ["fields", "indexes", "access"]
+    )
+  ) {
     return invalid(
-      `${quoted(name, "Table")} is \`{ fields, indexes, access }\` and nothing else.`
+      `${quoted(name, "Table")} is \`{ fields, indexes, searchIndex?, access }\` and nothing else.`
     );
   }
-  const { fields, indexes, access } = input;
+  const { fields, indexes, searchIndex, access } = input;
   if (!(isPlainObject(fields) && isPlainObject(indexes))) {
     return invalid(`${quoted(name, "Table")}'s fields and indexes are maps.`);
   }
@@ -352,6 +368,20 @@ const readTable = (
       );
     }
     table = table.index(index, definition.fields);
+  }
+  if (searched) {
+    if (
+      !(
+        hasExactly(searchIndex, ["fields"]) &&
+        Array.isArray(searchIndex.fields) &&
+        searchIndex.fields.length <= schemaLimits.fieldsPerSearchIndex
+      )
+    ) {
+      return invalid(
+        `${quoted(name, "Table")}'s search index is \`{ fields }\`, a short list.`
+      );
+    }
+    table = table.searchIndex(searchIndex.fields);
   }
   if (!hasExactly(access, ["read", "write"])) {
     return invalid(`${quoted(name, "Table")}'s access is \`{ read, write }\`.`);
