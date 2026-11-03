@@ -925,7 +925,7 @@ export const fakeCloudflareApi = (token: string) => {
       lifecycles: new Map(),
       scripts: new Map(),
       namespaces: new Map(),
-      assets: new Set(),
+      assets: new Map(),
       sessions: new Map(),
       completions: new Set(),
       scriptUploads: [],

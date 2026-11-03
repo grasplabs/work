@@ -28,6 +28,7 @@
     "fflate": "catalog:",
     "jose": "catalog:",
     "lucide-react": "catalog:",
+    "mime": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"

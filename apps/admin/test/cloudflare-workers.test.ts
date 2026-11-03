@@ -125,7 +125,7 @@ describe("static assets", () => {
     );
   });
 
-  it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256), dot-files included", async () => {
+  it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256) bound to its type, dot-files included", async () => {
     const account = namespaced();
     await uploadTargetScript(
       api,
@@ -143,16 +143,17 @@ describe("static assets", () => {
     );
     // Wrangler's key with SHA-256 in place of BLAKE3: base64 of the
     // contents, then the extension as Node's path.extname finds it (none
-    // for a dot-file, the last for a.tar.gz). Worked out with Node.
+    // for a dot-file, the last for a.tar.gz); then that key, a newline and
+    // the file's type, hashed again and cut to 32. Worked out with Node.
     expect(session?.body).toStrictEqual({
       manifest: {
-        "/index.html": { hash: "d4c01ae8630098078a961cef6cb9e3b3", size: 13 },
-        "/.hidden": { hash: "5e21d86b709b6aa2d5fff6d7cfed56ab", size: 1 },
+        "/index.html": { hash: "19e91371c32f3214fc69ea207074a888", size: 13 },
+        "/.hidden": { hash: "fb6b5177c1a39410e400a12a2f3c0b00", size: 1 },
         "/.well-known/security.txt": {
-          hash: "18bc01c2f3ff74fee5bf89429d922436",
+          hash: "f945fe61bad9a4aa7c8540c88c5cea3a",
           size: 1,
         },
-        "/a.tar.gz": { hash: "c1a6faede032be6f91315fcad5b29e55", size: 1 },
+        "/a.tar.gz": { hash: "321c5b73a6f69713cfb2cec1c7f50077", size: 1 },
       },
     });
     expect(account.assets.size).toBe(4);
@@ -171,11 +172,44 @@ describe("static assets", () => {
       )
     );
     expect(uploaded).toStrictEqual({
-      d4c01ae8630098078a961cef6cb9e3b3: btoa("<html></html>"),
-      "5e21d86b709b6aa2d5fff6d7cfed56ab": btoa("x"),
-      "18bc01c2f3ff74fee5bf89429d922436": btoa("x"),
-      c1a6faede032be6f91315fcad5b29e55: btoa("x"),
+      "19e91371c32f3214fc69ea207074a888": btoa("<html></html>"),
+      fb6b5177c1a39410e400a12a2f3c0b00: btoa("x"),
+      f945fe61bad9a4aa7c8540c88c5cea3a: btoa("x"),
+      "321c5b73a6f69713cfb2cec1c7f50077": btoa("x"),
     });
+  });
+
+  it("uploads a file the account holds again when its type changes, and the account serves it with the new one", async () => {
+    const account = namespaced();
+    const wasm = (type: string): AssetFile => ({
+      path: "/_compiler/v1/esbuild.wasm",
+      content: encoder.encode("\0asm"),
+      type,
+    });
+    await uploadTargetScript(
+      api,
+      core(account.id),
+      release("26.01.1", [wasm("application/octet-stream")])
+    );
+    await uploadTargetScript(
+      api,
+      core(account.id),
+      release("26.01.2", [wasm("application/wasm")])
+    );
+
+    const uploads = cloudflare.calls.filter(({ path }) =>
+      path.endsWith("/workers/assets/upload")
+    );
+    const sessions = cloudflare.calls.filter(({ path }) =>
+      path.endsWith("/assets-upload-session")
+    );
+    const served = z
+      .object({
+        manifest: z.record(z.string(), z.object({ hash: z.string() })),
+      })
+      .parse(sessions.at(-1)?.body).manifest["/_compiler/v1/esbuild.wasm"];
+    expect(uploads).toHaveLength(2);
+    expect(account.assets.get(served?.hash ?? "")).toBe("application/wasm");
   });
 
   it("names files the account already holds by the session's token", async () => {

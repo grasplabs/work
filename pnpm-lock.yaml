@@ -217,6 +217,9 @@ catalogs:
     lucide-react:
       specifier: 1.47.0
       version: 1.47.0
+    mime:
+      specifier: 4.1.2
+      version: 4.1.2
     motion:
       specifier: 14.3.0
       version: 14.3.0
@@ -446,6 +449,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.47.0(react@19.3.0)
+      mime:
+        specifier: 'catalog:'
+        version: 4.1.2
       react:
         specifier: 'catalog:'
         version: 19.3.0
@@ -6646,6 +6652,11 @@ packages:
   mime-types@3.0.2:
     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
     engines: {node: '>=18'}
+
+  mime@4.1.2:
+    resolution: {integrity: sha512-ikRzZ2RwbUVDyL9SsU0f2Phcmav4yq5r8faH5ZZKHtOZrMBLnrQOrj0uvqZ5R1uQnj+RO7Wcklw/lAf81mP9LQ==}
+    engines: {node: '>=16'}
+    hasBin: true
 
   mimic-fn@2.1.0:
     resolution: {integrity: sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==}
@@ -13343,6 +13354,8 @@ snapshots:
   mime-types@3.0.2:
     dependencies:
       mime-db: 1.54.0
+
+  mime@4.1.2: {}
 
   mimic-fn@2.1.0: {}
 

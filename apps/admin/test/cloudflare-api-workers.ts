@@ -347,7 +347,7 @@ const uploadAssetFiles = (account: AccountState, call: ApiCall): Response => {
   }
   for (const [hash, part] of call.body.entries()) {
     if (part instanceof Blob && pending.delete(hash)) {
-      account.assets.add(hash);
+      account.assets.set(hash, part.type);
     }
   }
   if (pending.size > 0) {
