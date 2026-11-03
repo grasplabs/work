@@ -842,4 +842,77 @@ describe("projects", { timeout: 120_000 }, () => {
       held: 0,
     });
   });
+
+  it("records on each App and workflow the end of its share when the project is deleted, a share added meanwhile included", async () => {
+    const owner = await personApi("builder");
+    const by = await owner.api.whoami();
+    const project = await projectOf(owner);
+    const [workflow, lateWorkflow, app] = await Promise.all([
+      workflowOf(owner),
+      workflowOf(owner),
+      owner.api.apps.create({ name: `Desk ${unique()}` }),
+    ]);
+    await owner.api.projects.file(project, {
+      item: { type: "workflow", id: workflow },
+      share: true,
+    });
+    await owner.api.projects.file(project, {
+      item: { type: "app", id: app.id },
+      share: true,
+    });
+    const toProject = { type: "project", id: project, role: "user" } as const;
+
+    const events = await auditedDuring(async () => {
+      // Another share lands after the deletion read the project's shares,
+      // before its batch runs: it reads them again.
+      await removeProject(
+        {
+          ...env,
+          DB: racingDb(async () => {
+            await shareWorkflowResource(env, by, lateWorkflow, toProject);
+          }, /update "projects" set "icon"/u),
+        },
+        by,
+        project
+      );
+    });
+    const ended = events
+      .filter(({ action }) => action.endsWith(".member.removed"))
+      .map(({ action, target, detail }) => ({
+        action,
+        target: target?.id,
+        member: detail.member,
+        memberType: detail.memberType,
+      }))
+      .toSorted((one, other) =>
+        `${one.action}${one.target}`.localeCompare(
+          `${other.action}${other.target}`
+        )
+      );
+    const lateShares = await owner.api.workflowResources.members(lateWorkflow);
+
+    expect({
+      ended,
+      deleted: events.filter(({ action }) => action === "project.deleted")
+        .length,
+      lateShares: lateShares.length,
+    }).toStrictEqual({
+      ended: [
+        {
+          action: "app.member.removed",
+          target: app.id,
+          member: project,
+          memberType: "project",
+        },
+        ...[workflow, lateWorkflow].toSorted().map((id) => ({
+          action: "workflow.member.removed",
+          target: id,
+          member: project,
+          memberType: "project",
+        })),
+      ],
+      deleted: 1,
+      lateShares: 0,
+    });
+  });
 });

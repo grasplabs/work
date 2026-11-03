@@ -210,5 +210,7 @@ export const projectErrors = defineErrorFamily({
   "project.not_found": "There's no such project.",
   "project.member_invalid": "They can't be added to the project like that.",
   "project.item_not_found": "There's no such App or workflow you can open.",
+  "project.conflict":
+    "The project's sharing changed while it was being deleted. Try again.",
   "project.full": `A project holds at most ${projectItemsMax} apps and workflows, and ${projectMembersMax} people and teams besides its owner. Take one out to add another.`,
 });

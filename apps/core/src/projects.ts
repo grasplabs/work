@@ -40,6 +40,7 @@ import {
   revocationsOf,
   tellKept,
 } from "./access-revocations.ts";
+import { appsReadableBy } from "./app-access.ts";
 import { addMember } from "./app-members.ts";
 import { appFor, listApps } from "./apps.ts";
 import {
@@ -47,6 +48,7 @@ import {
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
@@ -106,8 +108,9 @@ import {
 //   (`app.share_unreadable` for each person the project reaches).
 // - A project's people seeing what they weren't shared: its page and its
 //   counts list only what the asker opens anyway (`listApps`,
-//   `listWorkflowResources`), so an item filed but not shared with them is
-//   neither named nor counted.
+//   `listWorkflowResources`, less the Apps `appsReadableBy` would refuse
+//   them), so an item filed but not shared with them, or one that read
+//   data they can't read, is neither named nor counted.
 // - Access kept after it is taken away: a `project` row is read against
 //   `project_members` and `team_members` in the statement that decides
 //   (sharing.ts, `projectsOfSql`). Taking someone out of a project, an item
@@ -154,14 +157,22 @@ interface Visible {
 }
 
 /**
- * What `by` may open, as their own lists of Apps and workflows decide it:
- * a project shows nothing beyond it.
+ * What `by` may open, as their own lists of Apps and workflows decide it,
+ * less the Apps they would be refused on opening, having read data they
+ * can't read where it comes from (`appsReadableBy`, app-provenance.ts): a
+ * project shows nothing beyond it, named or counted.
  */
 const visibleTo = async (env: Env, by: Identity): Promise<Visible> => {
-  const [openApps, openWorkflows] = await Promise.all([
+  const [listed, openWorkflows] = await Promise.all([
     listApps(env, by),
     listWorkflowResources(env, by),
   ]);
+  const readable = await appsReadableBy(
+    env,
+    by,
+    listed.map(({ id }) => id)
+  );
+  const openApps = listed.filter(({ id }) => readable.has(id));
   return {
     apps: new Map(openApps.map(({ id, name, role }) => [id, { name, role }])),
     workflows: new Map(
@@ -573,10 +584,131 @@ export const updateProject = async (
 const workflowsSharedWithProject = (id: string) =>
   sql`${workflowResources.id} IN (SELECT ${workflowResourceMembers.workflowResourceId} FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id})`;
 
+/** How many times a deletion reads the project's shares again when they change under it. */
+const deletionTries = 3;
+
+/**
+ * A batch's statement that fails it (NOT NULL on `projects.icon`) unless
+ * the items shared with project `id`, and their roles, are exactly
+ * `shared` (keys
+ * `app:<id>` and `workflow:<id>`, as `sharedWithProject` reads them) when
+ * it runs: so a deletion records the end of every share it drops, and a
+ * share added since it read them makes it read again.
+ */
+const sharesStill = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  shared: ReadonlyMap<string, ProjectRole>
+) => {
+  // Each share as `<id>:<role>`, so a role changed since counts too.
+  const appShares = [...shared].flatMap(([key, role]) =>
+    key.startsWith("app:") ? [`${key.slice("app:".length)}:${role}`] : []
+  );
+  const workflowShares = [...shared].flatMap(([key, role]) =>
+    key.startsWith("workflow:")
+      ? [`${key.slice("workflow:".length)}:${role}`]
+      : []
+  );
+  const same = sql`(SELECT count(*) FROM ${appMembers} WHERE ${appMembers.memberType} = 'project' AND ${appMembers.memberId} = ${id}) = ${appShares.length}
+    AND NOT EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.memberType} = 'project' AND ${appMembers.memberId} = ${id} AND NOT ${inList(sql`${appMembers.appId} || ':' || ${appMembers.role}`, appShares)})
+    AND (SELECT count(*) FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id}) = ${workflowShares.length}
+    AND NOT EXISTS (SELECT 1 FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.memberType} = 'project' AND ${workflowResourceMembers.memberId} = ${id} AND NOT ${inList(sql`${workflowResourceMembers.workflowResourceId} || ':' || ${workflowResourceMembers.role}`, workflowShares)})`;
+  return db
+    .update(projects)
+    .set({
+      icon: sql`CASE WHEN ${same} THEN ${projects.icon} ELSE NULL END`,
+    })
+    .where(eq(projects.id, id));
+};
+
+/**
+ * The audit entries of the shares a deletion of `project` drops, one for
+ * each App and workflow, as unsharing one records it: whom each item
+ * reached changes, so its own history says so.
+ */
+const droppedShares = (
+  by: Identity,
+  project: string,
+  shared: ReadonlyMap<string, ProjectRole>
+): AuditEntry[] =>
+  [...shared].map(([key, role]) => {
+    const [type = "", item = ""] = key.split(":", 2);
+    return type === "app"
+      ? memberEntry(
+          by,
+          "app.member.removed",
+          { type: "app", id: item },
+          { type: "project", id: project, role }
+        )
+      : memberEntry(
+          by,
+          "workflow.member.removed",
+          { type: "workflow_resource", id: item },
+          { type: "project", id: project, role }
+        );
+  });
+
+/** One try of `removeProject`, against the shares read now. */
+const deleteOnce = async (
+  env: Env,
+  by: Identity,
+  id: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const shared = await sharedWithProject(env, id);
+  const event = createAuditEvent(entry(by, "project.deleted", id), "core");
+  const results = await guarded(
+    env,
+    id,
+    by,
+    async () =>
+      await auditedBatch(env, db, [
+        stillBuilds(db, id, by),
+        sharesStill(db, id, shared),
+        // Read before the shares go: the Apps whose screens look again.
+        revocationsOf(db, appsSharedWithProject(id), null, sql`1 = 1`),
+        nextGenerationWhere(db, workflowsSharedWithProject(id)),
+        // Each share's end on its item, while the project is there to
+        // delete (a deletion that lost a race to another records nothing).
+        ...droppedShares(by, id, shared).map((dropped) =>
+          outboxedWhere(
+            db,
+            dropped,
+            sql`EXISTS (SELECT 1 FROM ${projects} WHERE ${projects.id} = ${id})`
+          )
+        ),
+        db
+          .delete(appMembers)
+          .where(
+            and(
+              eq(appMembers.memberType, "project"),
+              eq(appMembers.memberId, id)
+            )
+          ),
+        db
+          .delete(workflowResourceMembers)
+          .where(
+            and(
+              eq(workflowResourceMembers.memberType, "project"),
+              eq(workflowResourceMembers.memberId, id)
+            )
+          ),
+        db.delete(projectItems).where(eq(projectItems.projectId, id)),
+        db.delete(projectMembers).where(eq(projectMembers.projectId, id)),
+        db.delete(projects).where(eq(projects.id, id)),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+      ])
+  );
+  await tellKept(env, results[2]);
+};
+
 /**
  * Deletes project `id`, for its builders: its rows, its members and what
  * is filed in it, and every share with it, so nobody keeps what it
- * reached. Nothing filed in it is deleted.
+ * reached, each share's end audited on its item as unsharing it would
+ * be. Nothing filed in it is deleted. A share added while the deletion
+ * runs makes it read the shares again (`sharesStill`), so none goes
+ * unrecorded.
  */
 export const removeProject = async (
   env: Env,
@@ -585,46 +717,20 @@ export const removeProject = async (
 ): Promise<void> => {
   requireNotStaff(by);
   const { project } = await requireProjectRole(env, by, id, "builder");
-  const db = drizzle(env.DB);
-  const event = createAuditEvent(
-    entry(by, "project.deleted", project.id),
-    "core"
-  );
-  const [, revocations] = await guarded(
-    env,
-    project.id,
-    by,
-    async () =>
-      await auditedBatch(env, db, [
-        stillBuilds(db, project.id, by),
-        // Read before the shares go: the Apps whose screens look again.
-        revocationsOf(db, appsSharedWithProject(project.id), null, sql`1 = 1`),
-        nextGenerationWhere(db, workflowsSharedWithProject(project.id)),
-        db
-          .delete(appMembers)
-          .where(
-            and(
-              eq(appMembers.memberType, "project"),
-              eq(appMembers.memberId, project.id)
-            )
-          ),
-        db
-          .delete(workflowResourceMembers)
-          .where(
-            and(
-              eq(workflowResourceMembers.memberType, "project"),
-              eq(workflowResourceMembers.memberId, project.id)
-            )
-          ),
-        db.delete(projectItems).where(eq(projectItems.projectId, project.id)),
-        db
-          .delete(projectMembers)
-          .where(eq(projectMembers.projectId, project.id)),
-        db.delete(projects).where(eq(projects.id, project.id)),
-        outboxedEventWhere(db, event, sql`changes() > 0`),
-      ])
-  );
-  await tellKept(env, revocations);
+  for (let tried = 1; ; tried += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- read again only after a change
+      await deleteOnce(env, by, project.id);
+      return;
+    } catch (error) {
+      if (!notNullFailed(error, "projects.icon")) {
+        throw error;
+      }
+      if (tried >= deletionTries) {
+        throw projectErrors.create("project.conflict");
+      }
+    }
+  }
 };
 
 /** The rows of project `id` that are `member`. */
