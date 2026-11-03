@@ -32,7 +32,6 @@ import type { RolloutErrorCode } from "./errors.ts";
 import { reconcile } from "./reconciler.ts";
 import {
   checkRevocation,
-  rollOutSecrets,
   sharedSecretsStatus,
   storeCheck,
 } from "./shared-secrets.ts";
@@ -111,13 +110,6 @@ export const setChannelFn = createServerFn({ method: "POST" })
       })
   );
 
-export const rollOutSecretsFn = createServerFn({ method: "POST" }).handler(
-  async ({ context }) =>
-    await change(async () => {
-      await rollOutSecrets(env, context.staff);
-    })
-);
-
 /**
  * A client's drift, read live from its account, with whether it runs the
  * shared secrets in Secrets Store now: null when that can't be told, the
@@ -159,7 +151,7 @@ export const fetchDrift = createServerFn({ method: "GET" })
   });
 
 /**
- * Whether the last secrets rollout's old shared secrets can be revoked,
+ * Which shared secrets' old values can be revoked: checked now,
  * read live from every active client's account when staff ask, a few at a
  * time, each within a deadline.
  */

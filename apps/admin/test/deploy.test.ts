@@ -11,14 +11,10 @@ import {
   clientRuns,
   clients,
   clientWorkers,
-  rolledOutSecrets,
 } from "../src/db/schema.ts";
 import { retryChannel } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
-import {
-  checkRevocation,
-  rollOutSecrets,
-} from "../src/rollout/shared-secrets.ts";
+import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import { deliveredShared } from "../src/rollout/targets.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
@@ -52,12 +48,10 @@ import {
 // - an attempt that timed out, or lost its step's result, acting twice or
 //   counted failed;
 // - a deploy whose run was terminated left deploying for good;
-// - shared secrets rolled out never reaching a client, or an old one
-//   called revocable while a client still runs it;
-// - a client deployed again and again once Secrets Store moved on from
-//   what staff rolled out;
-// - a provider key added to the store and rolled out never reaching a
-//   client that didn't have it.
+// - a change in Secrets Store (a value changed, put back, added or
+//   removed) never reaching a client, or reaching it again and again;
+// - a secrets deploy that failed never tried again once staff retry;
+// - an old secret called revocable while a client still runs it.
 
 const token = "test-deployer-token-deploy-8c4e1b";
 const cloudflare = mockCloudflareApi(token);
@@ -212,8 +206,8 @@ const followRuns = () => {
 };
 
 /**
- * Sets aside what earlier tests left: their clients offboarded, no
- * release on any channel, and no shared secrets rolled out.
+ * Sets aside what earlier tests left: their clients offboarded, and no
+ * release on any channel.
  */
 const setAsideEarlierTests = async (): Promise<void> => {
   await db
@@ -221,7 +215,6 @@ const setAsideEarlierTests = async (): Promise<void> => {
     .set({ status: "offboarded" })
     .where(inArray(clients.status, ["active", "provisioning"]));
   await db.delete(channels);
-  await db.delete(rolledOutSecrets);
 };
 
 describe("a client's deploy", () => {
@@ -452,20 +445,31 @@ describe("a client's deploy", () => {
   });
 });
 
-describe("rolling shared secrets out", () => {
+/** The shared-secret fingerprints client `clientId`'s operation last delivered, by Worker. */
+const printsOf = async (clientId: string) => {
+  const row = await db
+    .select({ progress: clientProvisions.progress })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  return deliveredShared(row?.progress ?? null);
+};
+
+describe("shared secrets as desired state", () => {
   useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
-  it("deploys each client again whose shared secrets differ from the ones rolled out, then calls the rotated secret revocable", async () => {
+  it("deploys each client once when Secrets Store changes, then calls the changed secret revocable", async () => {
     const release = await placedRelease("feat(core): runs");
     await releaseToEdge(env, [release]);
     const first = await live(release);
     const second = await live(release);
     await using runs = followRuns();
+    // Given what the store holds by their deploys: nothing to do.
     await runs.converge();
     const before = [
-      await deployOf(first.clientId),
-      await deployOf(second.clientId),
+      await startedOf(first.clientId),
+      await startedOf(second.clientId),
     ];
     // Deploy platform copied a new Composio key into the store.
     await setStoreSecret(
@@ -473,65 +477,104 @@ describe("rolling shared secrets out", () => {
       "COMPOSIO_API_KEY",
       "composio-key-rotated"
     );
-    const beforeRollOut = await checkRevocation(env);
 
-    await rollOutSecrets(env, staff);
     await runs.converge();
+    // Settled: further ticks start nothing more.
+    await runs.converge();
+    const revocation = await checkRevocation(env);
 
     expect({
       before,
-      beforeRollOut,
+      started: [
+        await startedOf(first.clientId),
+        await startedOf(second.clientId),
+      ],
       deploys: [
         await deployOf(first.clientId),
         await deployOf(second.clientId),
       ],
-      revocation: await checkRevocation(env),
+      revocable:
+        typeof revocation === "string"
+          ? revocation
+          : revocation.revocable.includes("COMPOSIO_API_KEY"),
+      behind:
+        typeof revocation === "string"
+          ? revocation
+          : revocation.behind.COMPOSIO_API_KEY,
     }).toStrictEqual({
-      // Up to date on their release: nothing deployed them.
-      before: [null, null],
-      beforeRollOut: "nothing_rolled_out",
+      before: [0, 0],
+      started: [1, 1],
       deploys: [
         { releaseId: release, status: "done", error: null },
         { releaseId: release, status: "done", error: null },
       ],
-      revocation: {
-        revocable: ["COMPOSIO_API_KEY"],
-        rotated: ["COMPOSIO_API_KEY"],
-        storeChanged: [],
-        behind: { COMPOSIO_API_KEY: [] },
-      },
+      revocable: true,
+      behind: [],
     });
   });
 
-  it("deploys a client once when Secrets Store moved on from what was rolled out, never again for it", async () => {
-    const before = await placedRelease("feat(core): before");
-    await releaseToEdge(env, [before]);
-    const client = await live(before);
-    await rollOutSecrets(env, staff);
-    // Deploy platform copied a new Composio key in; staff haven't rolled
-    // it out, but a deploy delivers what the store holds.
+  it("deploys a client again when the store's earlier value is put back", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    const original = await printsOf(client.clientId);
+    await using runs = followRuns();
     await setStoreSecret(
       env.COMPOSIO_API_KEY,
       "COMPOSIO_API_KEY",
-      "composio-key-moved"
+      "composio-key-new"
     );
-    await using runs = followRuns();
-    const release = await placedRelease("feat(core): after the store moved");
+    await runs.converge();
+    const changed = await printsOf(client.clientId);
 
-    await releaseToEdge(env, [release]);
+    // Put back as it was.
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key"
+    );
     await runs.converge();
     await runs.converge();
 
     expect({
+      changedAway:
+        changed.connect?.COMPOSIO_API_KEY !==
+        original.connect?.COMPOSIO_API_KEY,
+      restored: await printsOf(client.clientId),
+      started: await startedOf(client.clientId),
+    }).toStrictEqual({ changedAway: true, restored: original, started: 2 });
+  });
+
+  it("delivers a provider key added to the store to a client that didn't have it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    const before = await deliveredNames(client.clientId);
+    await setStoreSecret(
+      env.ANTHROPIC_API_KEY,
+      "ANTHROPIC_API_KEY",
+      "anthropic-key"
+    );
+
+    await runs.converge();
+    await runs.converge();
+    const after = await deliveredNames(client.clientId);
+
+    expect({
+      before: before.includes("ANTHROPIC_API_KEY"),
+      after: after.includes("ANTHROPIC_API_KEY"),
       started: await startedOf(client.clientId),
       deploy: await deployOf(client.clientId),
     }).toStrictEqual({
+      before: false,
+      after: true,
       started: 1,
       deploy: { releaseId: release, status: "done", error: null },
     });
   });
 
-  it("takes a provider key removed from the store and rolled out off a client that had it", async () => {
+  it("takes a provider key removed from the store off a client that had it", async () => {
     const release = await placedRelease("feat(core): runs");
     await releaseToEdge(env, [release]);
     await setStoreSecret(
@@ -540,14 +583,12 @@ describe("rolling shared secrets out", () => {
       "anthropic-key"
     );
     const client = await live(release);
-    await rollOutSecrets(env, staff);
     await using runs = followRuns();
-    await runs.converge();
     const before = await deliveredNames(client.clientId);
-    // Staff take the key out of the store, and roll that out.
+    // Staff take the key out of the store.
     await emptyStoreSecret(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
 
-    await rollOutSecrets(env, staff);
+    await runs.converge();
     await runs.converge();
     const after = await deliveredNames(client.clientId);
 
@@ -564,12 +605,11 @@ describe("rolling shared secrets out", () => {
     });
   });
 
-  it("deploys rolled-out secrets again once staff retry a deploy of them that failed before delivering", async () => {
+  it("leaves a client whose secrets deploy failed until staff retry, then deploys it again", async () => {
     const release = await placedRelease("feat(core): runs");
     await releaseToEdge(env, [release]);
     const client = await live(release);
     await using runs = followRuns();
-    await runs.converge();
     await setStoreSecret(
       env.COMPOSIO_API_KEY,
       "COMPOSIO_API_KEY",
@@ -579,10 +619,13 @@ describe("rolling shared secrets out", () => {
     cloudflare.failNext(await uploadOf(client), 400);
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     let failed: Awaited<ReturnType<typeof deployOf>> = null;
+    let whileFailed = 0;
     try {
-      await rollOutSecrets(env, staff);
       await runs.converge();
       failed = await deployOf(client.clientId);
+      // Failed: ticks leave it for staff.
+      await runs.converge();
+      whileFailed = await startedOf(client.clientId);
     } finally {
       errors.mockRestore();
     }
@@ -592,39 +635,13 @@ describe("rolling shared secrets out", () => {
 
     expect({
       failed: failed?.status,
+      whileFailed,
       started: await startedOf(client.clientId),
       deploy: await deployOf(client.clientId),
     }).toStrictEqual({
       failed: "failed",
+      whileFailed: 1,
       started: 2,
-      deploy: { releaseId: release, status: "done", error: null },
-    });
-  });
-
-  it("delivers a provider key added to the store and rolled out to a client that didn't have it", async () => {
-    const release = await placedRelease("feat(core): runs");
-    await releaseToEdge(env, [release]);
-    const client = await live(release);
-    await using runs = followRuns();
-    await runs.converge();
-    const before = await deliveredNames(client.clientId);
-    await setStoreSecret(
-      env.ANTHROPIC_API_KEY,
-      "ANTHROPIC_API_KEY",
-      "anthropic-key"
-    );
-
-    await rollOutSecrets(env, staff);
-    await runs.converge();
-    const after = await deliveredNames(client.clientId);
-
-    expect({
-      before: before.includes("ANTHROPIC_API_KEY"),
-      after: after.includes("ANTHROPIC_API_KEY"),
-      deploy: await deployOf(client.clientId),
-    }).toStrictEqual({
-      before: false,
-      after: true,
       deploy: { releaseId: release, status: "done", error: null },
     });
   });
@@ -653,7 +670,7 @@ describe("rolling shared secrets out", () => {
       held: true,
     },
   ])(
-    "revokes a namespace connect's rotated secret only while core's health says connect $connect",
+    "calls a namespace connect's secret revocable only while core's health says connect $connect",
     async ({ answering, held }) => {
       const release = await placedRelease("feat(core): runs");
       const internal = await live(release);
@@ -669,16 +686,9 @@ describe("rolling shared secrets out", () => {
         })
         .parse(JSON.parse(operation?.progress ?? "{}"));
       // Its connect in the namespace: drift reads it, as its core, through
-      // core's health, which names the version connect answers as.
-      // A secrets rollout that rotated connect's Composio key: its operation
-      // delivered the store's value, as on record.
-      await db.insert(rolledOutSecrets).values({
-        id: 1,
-        prints: JSON.stringify({ ...shared.core, ...shared.connect }),
-        rotated: JSON.stringify(["COMPOSIO_API_KEY"]),
-        rolledOutBy: staff.email,
-        rolledOutAt: new Date(),
-      });
+      // core's health, which names the version connect answers as. Its
+      // operation delivered the store's Composio key, as on record.
+      expect(shared.connect).toHaveProperty("COMPOSIO_API_KEY");
 
       const connect = await db
         .select({ scriptName: clientWorkers.scriptName })
@@ -709,11 +719,15 @@ describe("rolling shared secrets out", () => {
         internal.core.connectAnswering = null;
       }
 
-      await expect(checkRevocation(env)).resolves.toMatchObject({
-        rotated: ["COMPOSIO_API_KEY"],
-        revocable: held ? [] : ["COMPOSIO_API_KEY"],
-        behind: { COMPOSIO_API_KEY: held ? [clientId] : [] },
-      });
+      const revocation = await checkRevocation(env);
+      expect(
+        typeof revocation === "string"
+          ? revocation
+          : {
+              revocable: revocation.revocable.includes("COMPOSIO_API_KEY"),
+              behind: revocation.behind.COMPOSIO_API_KEY,
+            }
+      ).toStrictEqual({ revocable: !held, behind: held ? [clientId] : [] });
     }
   );
 });

@@ -147,46 +147,28 @@ describe("a channel's plan", () => {
 });
 
 describe("shared secrets behind", () => {
-  const before = new Date("2026-11-01T10:00:00Z");
-  const at = new Date("2026-11-01T11:00:00Z");
-  const after = new Date("2026-11-01T12:00:00Z");
+  const desired = { connect: { A: "1", B: "2" }, core: { A: "1" } };
 
-  it("is a rolled-out secret delivered with another fingerprint, or not at all, and never before a rollout", () => {
-    const delivered = { connect: { A: "1", B: "2" }, core: { A: "1" } };
-    expect(isSecretsBehind(delivered, before, null)).toBeFalsy();
-    expect(
-      isSecretsBehind(delivered, before, { prints: { A: "1", B: "2" }, at })
-    ).toBeFalsy();
-    expect(
-      isSecretsBehind(delivered, before, { prints: { A: "1", B: "9" }, at })
-    ).toBeTruthy();
-    expect(
-      isSecretsBehind(delivered, before, {
-        prints: { A: "1", B: "2", C: "3" },
-        at,
-      })
-    ).toBeTruthy();
+  it("is nothing while what was delivered is what the store holds, or the store can't be read", () => {
+    expect(isSecretsBehind(desired, desired)).toBeFalsy();
+    expect(isSecretsBehind({ connect: { A: "9" } }, null)).toBeFalsy();
   });
 
-  it("is a secret delivered that the rollout no longer has", () => {
-    expect(
-      isSecretsBehind(
-        { connect: { A: "1", B: "2" }, core: { A: "1" } },
-        before,
-        {
-          prints: { A: "1" },
-          at,
-        }
-      )
-    ).toBeTruthy();
-  });
-
-  it("is never a change done since the rollout, whatever it delivered", () => {
-    expect(
-      isSecretsBehind({ connect: { A: "2" } }, after, {
-        prints: { A: "1", C: "3" },
-        at,
-      })
-    ).toBeFalsy();
+  it("is another fingerprint, a name missing, or a name the store no longer has, on any Worker", () => {
+    expect({
+      other: isSecretsBehind(
+        { connect: { A: "1", B: "9" }, core: { A: "1" } },
+        desired
+      ),
+      missing: isSecretsBehind(
+        { connect: { A: "1" }, core: { A: "1" } },
+        desired
+      ),
+      extra: isSecretsBehind(
+        { connect: { A: "1", B: "2", C: "3" }, core: { A: "1" } },
+        desired
+      ),
+      worker: isSecretsBehind({ connect: { A: "1", B: "2" } }, desired),
+    }).toStrictEqual({ other: true, missing: true, extra: true, worker: true });
   });
 });

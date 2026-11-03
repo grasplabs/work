@@ -2,7 +2,8 @@
  * The one reconciler: on the admin's cron (src/server.ts), every minute,
  * it deploys each active client whose Workers run something other than
  * its target (src/rollout/desired.ts): another release, or shared secrets
- * other than the ones staff rolled out. Nothing else deploys a release.
+ * other than the ones Secrets Store holds now. Nothing else deploys a
+ * release.
  *
  * Per channel, at most `parallelDeploys` deploys are out at once, each a
  * run of its own (src/rollout/deploy.ts). Once a client following the
@@ -59,8 +60,12 @@ import {
   stateOf,
   targetOf,
 } from "./desired.ts";
-import type { ChannelReleases, ClientFacts, RolledOut } from "./desired.ts";
-import { rolledOutPrints } from "./shared-secrets.ts";
+import type {
+  ChannelReleases,
+  ClientFacts,
+  SharedByWorker,
+} from "./desired.ts";
+import { desiredShared } from "./shared-secrets.ts";
 import { channelReleases, deliveredShared } from "./targets.ts";
 
 /** How many clients a tick reads at once. */
@@ -88,8 +93,6 @@ const factColumns = {
   pinnedReleaseId: clients.pinnedReleaseId,
   running: runningSql,
   progress: clientProvisions.progress,
-  operationStartedAt: clientProvisions.createdAt,
-  operationStatus: clientProvisions.status,
   deployRelease: clientDeploys.releaseId,
   deployStatus: clientDeploys.status,
   deployError: clientDeploys.error,
@@ -110,7 +113,7 @@ const clientPage = async (
   db: AdminDatabase,
   channel: Channel,
   after: string | null,
-  rolledOut: RolledOut | null,
+  desired: SharedByWorker | null,
   limit: number = pageSize
 ): Promise<ClientRow[]> => {
   const rows = await db
@@ -133,12 +136,7 @@ const clientPage = async (
     channel: row.channel,
     pinnedReleaseId: row.pinnedReleaseId,
     running: row.running,
-    secretsBehind: isSecretsBehind(
-      deliveredShared(row.progress),
-      // A change counts only once it delivered: done, never just started.
-      row.operationStatus === "done" ? row.operationStartedAt : null,
-      rolledOut
-    ),
+    secretsBehind: isSecretsBehind(deliveredShared(row.progress), desired),
     deploy:
       row.deployRelease === null ||
       row.deployStatus === null ||
@@ -164,13 +162,13 @@ const clientPage = async (
 export const eachPage = async (
   db: AdminDatabase,
   channel: Channel,
-  rolledOut: RolledOut | null,
+  desired: SharedByWorker | null,
   visit: (page: ClientRow[]) => Promise<"stop" | "next"> | "stop" | "next"
 ): Promise<void> => {
   let after: string | null = null;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
-    const page = await clientPage(db, channel, after, rolledOut);
+    const page = await clientPage(db, channel, after, desired);
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
     if (page.length === 0 || (await visit(page)) === "stop") {
       return;
@@ -416,12 +414,12 @@ const reconcileChannel = async (
   env: Env,
   channel: Channel,
   releases: ChannelReleases,
-  rolledOut: RolledOut | null
+  desired: SharedByWorker | null
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   let deploying = 0;
   let failed = false;
-  await eachPage(db, channel, rolledOut, async (page): Promise<"next"> => {
+  await eachPage(db, channel, desired, async (page): Promise<"next"> => {
     const rows = await Promise.all(
       page.map(async (row) => await settled(env, db, row))
     );
@@ -434,7 +432,7 @@ const reconcileChannel = async (
   if (failed) {
     return;
   }
-  await eachPage(db, channel, rolledOut, async (page) => {
+  await eachPage(db, channel, desired, async (page) => {
     deploying = await startWaiting(env, db, page, releases, deploying);
     return deploying >= parallelDeploys ? "stop" : "next";
   });
@@ -495,11 +493,11 @@ export const reconcile = async (env: Env): Promise<void> => {
   }
   try {
     const releases = await channelReleases(db);
-    const rolledOut = await rolledOutPrints(db);
+    const desired = await desiredShared(env);
     for (const channel of channelIds) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one channel at a time
-        await reconcileChannel(env, channel, releases, rolledOut);
+        await reconcileChannel(env, channel, releases, desired);
       } catch (error) {
         log.error("reconcile.channel_failed", {
           channel,

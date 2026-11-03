@@ -1113,7 +1113,7 @@ const sharedSecretsWords = (current: boolean | null): string => {
   }
   return current
     ? "It runs the shared secrets in Secrets Store now."
-    : "It doesn’t run the shared secrets in Secrets Store now: a secrets rollout brings it up to date.";
+    : "It doesn’t run the shared secrets in Secrets Store now: its next deploy, which the reconciler starts by itself, brings it up to date.";
 };
 
 /** What its account runs, read from Cloudflare when staff ask. */

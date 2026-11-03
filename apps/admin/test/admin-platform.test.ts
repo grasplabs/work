@@ -244,10 +244,11 @@ describe("the Platform page's data", () => {
         clientId: `acme-${tag}`,
       },
       {
-        id: `secrets-${tag}`,
+        id: `retry-${tag}`,
         at: later(6),
         actor: "ops@grasp.test",
-        action: "secrets.roll_out",
+        action: "client.retry",
+        clientId: `acme-${tag}`,
       },
     ]);
 
@@ -261,7 +262,7 @@ describe("the Platform page's data", () => {
       system: events.some(({ id }) => id === `system-${tag}`),
     }).toStrictEqual({
       words: [
-        "ops@grasp.test rolled out the shared secrets",
+        "ops@grasp.test retried acme's failed deploy",
         "ops@grasp.test set a channel to r2",
         "ops@grasp.test pinned acme to r1",
       ],

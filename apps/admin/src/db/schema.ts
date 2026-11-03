@@ -295,26 +295,6 @@ export const clientDeploys = sqliteTable("client_deploys", {
 });
 
 /**
- * The shared secrets staff last rolled out (src/rollout/shared-secrets.ts): one
- * row, `id` 1. The reconciler deploys again every client whose Workers
- * run other ones. Fingerprints only: keyed hashes that tell nothing of a
- * secret.
- */
-export const rolledOutSecrets = sqliteTable("rolled_out_secrets", {
-  /** Always 1: one set of shared secrets. */
-  id: integer().primaryKey(),
-  /** Each shared secret's fingerprint in Secrets Store then, by name: JSON. */
-  prints: text().notNull(),
-  /**
-   * The secrets it rotated: those some active client ran another value of
-   * then, as JSON names. Only these may have an old value to revoke.
-   */
-  rotated: text().notNull(),
-  rolledOutBy: text("rolled_out_by").notNull(),
-  rolledOutAt: timestamp("rolled_out_at").notNull(),
-});
-
-/**
  * The old rollout jobs. Read by nothing since release channels (src/rollout/): dropped once
  * the admin that stopped reading it is live (expand, then contract).
  */

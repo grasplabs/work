@@ -1,8 +1,8 @@
 {
+  "id": "a17573e7-7536-4c72-b79f-259c69d4b304",
+  "prevId": "94b3ba65-94e3-40d3-8d67-2e322a25b6fa",
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff739159-0d98-489f-a397-f038b7dda450",
-  "prevId": "94b3ba65-94e3-40d3-8d67-2e322a25b6fa",
   "tables": {
     "audit_events": {
       "name": "audit_events",
@@ -117,15 +117,15 @@
         "channels_release_id_releases_id_fk": {
           "name": "channels_release_id_releases_id_fk",
           "tableFrom": "channels",
-          "tableTo": "releases",
           "columnsFrom": [
             "release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -169,15 +169,15 @@
         "client_admin_reads_client_id_clients_id_fk": {
           "name": "client_admin_reads_client_id_clients_id_fk",
           "tableFrom": "client_admin_reads",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -242,28 +242,28 @@
         "client_deploys_client_id_clients_id_fk": {
           "name": "client_deploys_client_id_clients_id_fk",
           "tableFrom": "client_deploys",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_deploys_release_id_releases_id_fk": {
           "name": "client_deploys_release_id_releases_id_fk",
           "tableFrom": "client_deploys",
-          "tableTo": "releases",
           "columnsFrom": [
             "release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -322,28 +322,28 @@
         "client_placements_client_id_clients_id_fk": {
           "name": "client_placements_client_id_clients_id_fk",
           "tableFrom": "client_placements",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_placements_destination_id_hosting_destinations_id_fk": {
           "name": "client_placements_destination_id_hosting_destinations_id_fk",
           "tableFrom": "client_placements",
-          "tableTo": "hosting_destinations",
           "columnsFrom": [
             "destination_id"
           ],
+          "tableTo": "hosting_destinations",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -473,41 +473,41 @@
         "client_provisions_client_id_clients_id_fk": {
           "name": "client_provisions_client_id_clients_id_fk",
           "tableFrom": "client_provisions",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_provisions_release_id_releases_id_fk": {
           "name": "client_provisions_release_id_releases_id_fk",
           "tableFrom": "client_provisions",
-          "tableTo": "releases",
           "columnsFrom": [
             "release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_provisions_previous_release_id_releases_id_fk": {
           "name": "client_provisions_previous_release_id_releases_id_fk",
           "tableFrom": "client_provisions",
-          "tableTo": "releases",
           "columnsFrom": [
             "previous_release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -632,28 +632,28 @@
         "client_resources_client_id_clients_id_fk": {
           "name": "client_resources_client_id_clients_id_fk",
           "tableFrom": "client_resources",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_resources_destination_id_hosting_destinations_id_fk": {
           "name": "client_resources_destination_id_hosting_destinations_id_fk",
           "tableFrom": "client_resources",
-          "tableTo": "hosting_destinations",
           "columnsFrom": [
             "destination_id"
           ],
+          "tableTo": "hosting_destinations",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -765,15 +765,15 @@
         "client_sealed_secrets_client_id_clients_id_fk": {
           "name": "client_sealed_secrets_client_id_clients_id_fk",
           "tableFrom": "client_sealed_secrets",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -818,15 +818,15 @@
         "client_watch_client_id_clients_id_fk": {
           "name": "client_watch_client_id_clients_id_fk",
           "tableFrom": "client_watch",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -884,28 +884,28 @@
         "client_workers_client_id_clients_id_fk": {
           "name": "client_workers_client_id_clients_id_fk",
           "tableFrom": "client_workers",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "client_workers_release_id_releases_id_fk": {
           "name": "client_workers_release_id_releases_id_fk",
           "tableFrom": "client_workers",
-          "tableTo": "releases",
           "columnsFrom": [
             "release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1092,15 +1092,15 @@
         "clients_pinned_release_id_releases_id_fk": {
           "name": "clients_pinned_release_id_releases_id_fk",
           "tableFrom": "clients",
-          "tableTo": "releases",
           "columnsFrom": [
             "pinned_release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1356,51 +1356,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "rolled_out_secrets": {
-      "name": "rolled_out_secrets",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "prints": {
-          "name": "prints",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rotated": {
-          "name": "rotated",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rolled_out_by": {
-          "name": "rolled_out_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rolled_out_at": {
-          "name": "rolled_out_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "rollout_targets": {
       "name": "rollout_targets",
       "columns": {
@@ -1489,28 +1444,28 @@
         "rollout_targets_rollout_id_rollouts_id_fk": {
           "name": "rollout_targets_rollout_id_rollouts_id_fk",
           "tableFrom": "rollout_targets",
-          "tableTo": "rollouts",
           "columnsFrom": [
             "rollout_id"
           ],
+          "tableTo": "rollouts",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "rollout_targets_client_id_clients_id_fk": {
           "name": "rollout_targets_client_id_clients_id_fk",
           "tableFrom": "rollout_targets",
-          "tableTo": "clients",
           "columnsFrom": [
             "client_id"
           ],
+          "tableTo": "clients",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1613,15 +1568,15 @@
         "rollouts_release_id_releases_id_fk": {
           "name": "rollouts_release_id_releases_id_fk",
           "tableFrom": "rollouts",
-          "tableTo": "releases",
           "columnsFrom": [
             "release_id"
           ],
+          "tableTo": "releases",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1670,9 +1625,9 @@
   "views": {},
   "enums": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
+    "tables": {}
   },
   "internal": {
     "indexes": {}

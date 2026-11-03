@@ -84,7 +84,7 @@ export const eventWords = (
   const what: Record<StaffEvent["action"], string> = {
     "channel.promote": `set a channel to ${target}`,
     "channel.retry": "retried a channel's failed deploys",
-    "secrets.roll_out": "rolled out the shared secrets",
+    "client.retry": `retried ${company}'s failed deploy`,
     "client.create": `added ${company}`,
     "client.discard": `discarded ${company}, which was never placed`,
     "client.channel": `moved ${company} to another channel`,

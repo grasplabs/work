@@ -1,67 +1,54 @@
+import { log } from "@grasp-os/shared/log";
 /**
- * Rolling shared secrets out, and which old ones can be revoked.
+ * Shared secrets as desired state, and which old ones can be revoked.
  *
- * Deploy platform copies a rotated shared secret into Secrets Store; staff
- * then roll it out here (`rollOutSecrets`): the store's fingerprints are
- * recorded as the desired state (`rolled_out_secrets`), and the
- * reconciler (src/rollout/reconciler.ts) deploys again every active
- * client whose Workers run other ones, as it deploys a release, 25 at a
- * time per channel and stopping a channel at its first failure.
+ * What clients should run is what Secrets Store holds now: Deploy
+ * platform copies a rotated shared secret in, and the reconciler
+ * (src/rollout/reconciler.ts) deploys again every active client whose
+ * Workers were given anything else (`desiredShared`, src/rollout/desired.ts),
+ * as it deploys a release, 25 at a time per channel and stopping a
+ * channel at its first failure. Nothing is saved of the store: a deploy
+ * delivers its values as they are, so one that succeeds settles the
+ * client, whatever the store held before.
  *
  * Each version a deploy uploads records a keyed fingerprint of each shared
  * secret it runs with, by name (`sharedSecretPrints`: they tell nothing of
- * the values). A secret's old value can be revoked when all of:
- * - the rollout rotated it: some active client ran another value when
- *   staff rolled it out (none did: the store held what they ran, so
- *   Deploy platform may not have copied a new value in, and there's
- *   nothing to revoke yet);
- * - Secrets Store still holds what it held then;
- * - every active client runs the store's value on every Worker of its
- *   release that holds the secret, read live from its account as drift
- *   reads it (src/rollout/drift.ts): a Worker that's unrecorded, split,
- *   unreadable, or live on a version without fingerprints is behind on
- *   every secret it holds, and so is a client whose account doesn't
- *   answer in time;
- * - no client is still being provisioned: it may hold the store's
- *   earlier values for the Workers it has yet to upload, so it counts as
- *   behind on every secret, unread.
- * A secret the rollout didn't rotate is never called revocable.
+ * the values). A secret's old value can be revoked once every active
+ * client runs the store's value on every Worker of its release that holds
+ * the secret, read live from its account as drift reads it
+ * (src/rollout/drift.ts): a Worker that's unrecorded, split, unreadable,
+ * or live on a version without fingerprints is behind on every secret it
+ * holds, and so is a client whose account doesn't answer in time. No
+ * client may still be being provisioned: it may hold the store's earlier
+ * values for the Workers it has yet to upload, so it counts as behind on
+ * every secret, unread.
  *
  * Read on demand: it reads every active client's account, a few at a
  * time, each within a deadline (src/live-reads.ts).
  */
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import type { Staff } from "../access.ts";
-import { actIfChanged, adminDatabase } from "../db/act.ts";
+import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   clientPlacements,
   clientProvisions,
   clients,
   clientWorkers,
-  rolledOutSecrets,
 } from "../db/schema.ts";
-import {
-  clientDomain,
-  deploySecrets,
-  MissingStoreSecretError,
-} from "../deploy/context.ts";
+import { deploySecrets, MissingStoreSecretError } from "../deploy/context.ts";
 import { sharedSecretPrints } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
-import type { RolledOut } from "./desired.ts";
+import type { SharedByWorker } from "./desired.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
-import { RolloutError } from "./errors.ts";
 import { deliveredShared } from "./targets.ts";
 
 /** Shared-secret fingerprints, by secret name. */
 export type SharedPrints = Record<string, string>;
-
-const sharedPrintsSchema = z.record(z.string(), z.string());
 
 /** A Worker the admin deploys, as `client_workers` names it. */
 const workerSchema = z.enum(clientWorkers.worker.enumValues);
@@ -237,115 +224,42 @@ export const sharedSecretsStatus = async (
   return [...matches.values()].every(Boolean);
 };
 
-/** The shared secrets staff last rolled out, and when; null before any rollout. */
-export const rolledOutPrints = async (
-  db: AdminDatabase
-): Promise<RolledOut | null> => {
-  const row = await db
-    .select({
-      prints: rolledOutSecrets.prints,
-      at: rolledOutSecrets.rolledOutAt,
-    })
-    .from(rolledOutSecrets)
-    .get();
-  if (row === undefined) {
-    return null;
-  }
-  const parsed = sharedPrintsSchema.safeParse(JSON.parse(row.prints));
-  return parsed.success ? { prints: parsed.data, at: row.at } : null;
-};
-
 /**
- * The secrets of `prints` some active client runs another value of now,
- * by name, as its operation last delivered them.
+ * What a deploy would give each Worker now: the fingerprint of each
+ * shared secret Secrets Store holds for it, by Worker, then name. Null
+ * while the store can't be read, as a deploy can't run then either.
  */
-const rotatedFrom = async (
-  db: AdminDatabase,
-  prints: SharedPrints
-): Promise<string[]> => {
-  const rows = await db
-    .select({ progress: clientProvisions.progress })
-    .from(clientProvisions)
-    .innerJoin(clients, eq(clients.id, clientProvisions.clientId))
-    .where(eq(clients.status, "active"));
-  const rotated = new Set<string>();
-  for (const { progress } of rows) {
-    for (const delivered of Object.values(deliveredShared(progress))) {
-      for (const [name, print] of Object.entries(delivered)) {
-        if (prints[name] !== undefined && prints[name] !== print) {
-          rotated.add(name);
-        }
-      }
-    }
-  }
-  return [...rotated].toSorted();
-};
-
-/**
- * Rolls the shared secrets in Secrets Store now out to every active
- * client, as `staff`, audited (`secrets.roll_out`): their fingerprints
- * become what the reconciler deploys. Nothing when they're what was
- * rolled out already. Refused while the admin has no CLIENT_DOMAIN
- * (`domain_not_set`), or Secrets Store is missing a shared secret
- * (`secrets_store_incomplete`).
- */
-export const rollOutSecrets = async (env: Env, staff: Staff): Promise<void> => {
-  if (clientDomain(env) === null) {
-    throw new RolloutError(
-      "domain_not_set",
-      "Set CLIENT_DOMAIN on the admin before rolling out"
-    );
-  }
+export const desiredShared = async (
+  env: Env
+): Promise<SharedByWorker | null> => {
   let secrets: DeploySecrets;
   try {
     secrets = await deploySecrets(env);
   } catch (error) {
     if (error instanceof MissingStoreSecretError) {
-      throw new RolloutError("secrets_store_incomplete", error.message);
+      log.warn("secrets.store_unreadable", { secret: error.secret });
+      return null;
     }
     throw error;
   }
-  const db = adminDatabase(env.DB);
-  const prints = await storePrints(secrets);
-  const rotated = await rotatedFrom(db, prints);
-  const json = JSON.stringify(prints);
-  const now = new Date();
-  await actIfChanged(
-    db,
-    staff,
-    db
-      .insert(rolledOutSecrets)
-      .values({
-        id: 1,
-        prints: json,
-        rotated: JSON.stringify(rotated),
-        rolledOutBy: staff.email,
-        rolledOutAt: now,
-      })
-      .onConflictDoUpdate({
-        target: rolledOutSecrets.id,
-        set: {
-          prints: json,
-          rotated: JSON.stringify(rotated),
-          rolledOutBy: staff.email,
-          rolledOutAt: now,
-        },
-        setWhere: ne(rolledOutSecrets.prints, json),
-      }),
-    { action: "secrets.roll_out", detail: { rotated: rotated.length } }
+  return Object.fromEntries(
+    await Promise.all(
+      Object.keys(secrets.shared).map(
+        async (app) => [app, await sharedSecretPrints(secrets, app)] as const
+      )
+    )
   );
 };
 
 /** Which old shared secrets can be revoked, and why not the rest. */
 export interface RevocationCheck {
-  /** Secrets whose old values can be revoked, by name: rotated, and everywhere. */
-  revocable: string[];
-  /** Secrets the last rollout changed for some client, by name. */
-  rotated: string[];
-  /** Secrets Secrets Store changed since the last rollout, by name. */
-  storeChanged: string[];
   /**
-   * Per rotated secret, the clients not known to run the store's value:
+   * Secrets every client runs Secrets Store's value of, by name: an older
+   * value of one is no longer run anywhere.
+   */
+  revocable: string[];
+  /**
+   * Per secret in the store, the clients not known to run its value:
    * active ones that don't, read live, or whose account didn't answer in
    * time, and every client still being provisioned.
    */
@@ -353,7 +267,7 @@ export interface RevocationCheck {
 }
 
 /** What a revocation check can't be made for. */
-export type RevocationRefusal = "nothing_rolled_out" | "store_unreadable";
+export type RevocationRefusal = "store_unreadable";
 
 /**
  * The clients still being provisioned: what a revocation check counts as
@@ -367,30 +281,17 @@ const provisioningClients = async (db: AdminDatabase): Promise<string[]> => {
   return rows.map(({ id }) => id);
 };
 
-const rotatedSchema = z.array(z.string());
-
 /**
- * Which of the last rollout's old shared secrets can be revoked
- * (`RevocationCheck`); a refusal before any rollout, or while Secrets
- * Store can't be read. Active clients are read `limits.concurrency` at a
- * time, each within `limits.rowDeadlineMs`; one that doesn't answer by
- * then is behind on every secret.
+ * Which shared secrets' old values can be revoked (`RevocationCheck`); a
+ * refusal while Secrets Store can't be read. Active clients are read
+ * `limits.concurrency` at a time, each within `limits.rowDeadlineMs`; one
+ * that doesn't answer by then is behind on every secret.
  */
 export const checkRevocation = async (
   env: Env,
   limits: LiveReadLimits = defaultLiveReadLimits
 ): Promise<RevocationCheck | RevocationRefusal> => {
   const db = adminDatabase(env.DB);
-  const row = await db.select().from(rolledOutSecrets).get();
-  const started = sharedPrintsSchema.safeParse(
-    JSON.parse(row?.prints ?? "null")
-  );
-  const rotatedNames = rotatedSchema.safeParse(
-    JSON.parse(row?.rotated ?? "null")
-  );
-  if (!started.success || !rotatedNames.success) {
-    return "nothing_rolled_out";
-  }
   let secrets: DeploySecrets;
   try {
     secrets = await deploySecrets(env);
@@ -402,10 +303,6 @@ export const checkRevocation = async (
   }
   const now = await storePrints(secrets);
   const holders = holdersOf(secrets);
-  const rotated = rotatedNames.data;
-  const storeChanged = Object.keys({ ...started.data, ...now }).filter(
-    (name) => started.data[name] !== now[name]
-  );
   // Every active placed client: what its operation delivered is read
   // back from where it runs.
   const active = await db
@@ -438,8 +335,9 @@ export const checkRevocation = async (
       ] as const
   );
   const provisioning = await provisioningClients(db);
+  const names = Object.keys(now).toSorted();
   const behind = Object.fromEntries(
-    rotated.map((name) => [
+    names.map((name) => [
       name,
       [
         ...live
@@ -450,14 +348,7 @@ export const checkRevocation = async (
     ])
   );
   return {
-    revocable: rotated
-      .filter(
-        (name) =>
-          !storeChanged.includes(name) && (behind[name] ?? []).length === 0
-      )
-      .toSorted(),
-    rotated: rotated.toSorted(),
-    storeChanged: storeChanged.toSorted(),
+    revocable: names.filter((name) => (behind[name] ?? []).length === 0),
     behind,
   };
 };

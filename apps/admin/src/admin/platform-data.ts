@@ -16,15 +16,15 @@ import type { PlatformCounts } from "./platform.ts";
 
 /**
  * What someone at Grasp does to the platform by hand, as the admin's
- * audit log names it: promoting a release, retrying a channel, rolling
- * out secrets, and adding, moving, pinning or rotating a client. The
+ * audit log names it: promoting a release, retrying a channel or a
+ * client's deploy, and adding, moving, pinning or rotating a client. The
  * admin's own jobs (actor `system`) and each deploy's steps aren't "done
  * here".
  */
 export const staffActions = [
   "channel.promote",
   "channel.retry",
-  "secrets.roll_out",
+  "client.retry",
   "client.create",
   "client.discard",
   "client.channel",

@@ -701,7 +701,7 @@ const sharedWords = (current: boolean | null): string => {
   if (current === null) {
     return "Not known";
   }
-  return current ? "Current" : "Behind: a secrets rollout brings it up";
+  return current ? "Current" : "Behind: its next deploy brings it up";
 };
 
 /** Its account read live, or not: still reading (null), or it failed. */
