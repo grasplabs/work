@@ -25,7 +25,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { signedInSession } from "../src/auth/identity.ts";
 import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
-import { runObject } from "./runs.ts";
+import { liveStatus, runObject } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 
@@ -262,7 +262,11 @@ export const decidingWorkflow = async (
 
 /**
  * The decision run `runId` asks `recipient`, once it waits in their inbox
- * (`decisions.waiting`): its ID, as the decision's link names it.
+ * (`decisions.waiting`) and the engine has the run waiting on it: its ID,
+ * as the decision's link names it. The inbox lists a decision as soon as
+ * it is opened, before the run has asked its people or started to wait,
+ * so a test that stops, answers or times it out from there would race
+ * the ask.
  */
 export const decisionOf = async (
   recipient: Person,
@@ -273,6 +277,9 @@ export const decisionOf = async (
     const asked = waiting.find(({ run }) => run === runId);
     if (asked === undefined) {
       throw new Error("No decision yet");
+    }
+    if ((await liveStatus(runId)) !== "waiting") {
+      throw new Error("Not waiting on its decision yet");
     }
     return asked.id;
   }, settles);
