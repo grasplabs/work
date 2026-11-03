@@ -151,6 +151,10 @@ const clientErrors = {
     message: "This couldn't be submitted.",
     category: "operational",
   },
+  "form.uploading": {
+    message: "A file is still uploading: wait for it, or cancel it.",
+    category: "operational",
+  },
   "contract.invalid_snapshot": {
     message:
       "The platform sent a run that doesn't fit its workflow's contract, so it isn't shown.",

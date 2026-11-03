@@ -885,9 +885,15 @@ export const list = query({
 });
 
 export const people = query({
-  args: { search: v.string(), id: v.id("people").optional() },
+  args: { search: v.string() },
   returns: v.array(doc("people")),
   handler: async (ctx) => await ctx.db.query("people").take(20),
+});
+
+export const person = query({
+  args: { id: v.id("people") },
+  returns: doc("people").nullable(),
+  handler: async (ctx, args) => await ctx.db.get("people", args.id),
 });
 
 export const create = mutation({
@@ -906,7 +912,7 @@ export const rename = mutation({
 });
 `,
       "app.ts": `import { app, resource } from "@grasp-os/sdk";
-import { create, list, people, rename } from "./operations/tasks.ts";
+import { create, list, people, person, rename } from "./operations/tasks.ts";
 import schema from "./schema.ts";
 
 export const briefs = resource.files("briefs", { operations: ["upload", "read"] });
@@ -915,7 +921,7 @@ export default app({
   name: "Tasks",
   schema,
   access: { tables: { tasks: { read: "appMembers", write: "appMembers" }, people: { read: "appMembers", write: "appBuilders" } } },
-  operations: { tasks: { list, people, create, rename } },
+  operations: { tasks: { list, people, person, create, rename } },
   internalOperations: {},
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
   uses: [briefs],
@@ -924,6 +930,7 @@ export default app({
     };
     const tasksScreen = `import { useForm, useMutation } from "@grasp-os/sdk/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
+import { RichText } from "@grasp-os/ui/components/rich-text";
 import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
 import { api, resources } from "#grasp";
 
@@ -942,8 +949,8 @@ export default function Tasks() {
         columns={[
           { field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) },
           { field: "status", filter: { open: "Open", done: "Done" } },
-          "due",
-          { field: "notes", richText: true },
+          { field: "notes", cell: (task) => <RichText value={task.notes} /> },
+          { field: "due", day: true },
         ]}
         search="Search tasks"
         bulkActions={[{ label: "Archive", onSelect: (rows) => rows.length }]}
@@ -956,7 +963,7 @@ export default function Tasks() {
         <NumberField form={form} label="Estimate" name="estimate" />
         <DateField form={form} label="Due" name="due" />
         <CheckboxField form={form} label="Urgent" name="urgent" />
-        <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} lookup={(id) => ({ search: "", id })} optionLabel={(person) => person.name} />
+        <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} lookup={{ query: api.tasks.person, args: (id) => ({ id }) }} optionLabel={(person) => person.name} />
         <RichTextField form={form} label="Notes" name="notes" />
         <FileField form={form} label="Brief" name="brief" resource={resources.briefs} />
         <FormError form={form} />

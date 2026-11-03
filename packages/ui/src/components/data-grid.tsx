@@ -34,7 +34,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import { RichText } from "@grasp-os/ui/components/rich-text";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -137,17 +136,19 @@ interface GridState {
 /**
  * What an inline edit of a value of type `Value` saves: text (an enum's
  * value among them), a number (a moment's too), a yes or no, or null for a
- * field that allows it, cleared.
+ * field that allows it, cleared. Never a record's ID, which isn't typed in.
  */
-type EditValue<Value> = Value extends string
-  ? Value
-  : Value extends number
-    ? number
-    : Value extends boolean
-      ? boolean
-      : Value extends null
-        ? null
-        : never;
+type EditValue<Value> = Value extends { readonly __tableName: string }
+  ? never
+  : Value extends string
+    ? Value
+    : Value extends number
+      ? number
+      : Value extends boolean
+        ? boolean
+        : Value extends null
+          ? null
+          : never;
 
 /** One column, showing one field of the record. */
 interface ColumnOf<Row, Name extends FieldOf<Row>> {
@@ -161,17 +162,25 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
   /** Whether it starts hidden; the person can show it. */
   readonly hidden?: boolean;
   /**
-   * Whether the field is formatted text, as a rich text field keeps it
-   * (Markdown): shown formatted, with `RichText`.
+   * Whether the field, a moment (`v.timestamp()`), holds a day, as a date
+   * field keeps it (the moment the day starts in UTC): shown and edited as
+   * that day, wherever the person is. A moment shows its date and time
+   * otherwise.
    */
-  readonly richText?: boolean;
-  /** How a cell shows the record; as the query declares the field otherwise. */
+  readonly day?: boolean;
+  /**
+   * How a cell shows the record; as the query declares the field
+   * otherwise. Formatted text (Markdown) shows with `RichText`:
+   * `cell: (row) => <RichText value={row.notes} />`.
+   */
   readonly cell?: (row: Row) => ReactNode;
   /**
    * Saves a new value the person gave in the cell, with a mutation of the
    * App's: the cell becomes editable, as the query declares the field
-   * (text, an enum's values, a number, a moment, a yes or no). Its
-   * rejection is shown in the cell.
+   * (text, an enum's values, a number, a moment or a day, a yes or no).
+   * Its rejection is shown in the cell. Other fields stay read-only, their
+   * `edit` never called: a record's ID (typed `never`), a file, money, a
+   * duration, a list or an object.
    */
   readonly edit?: (row: Row, value: EditValue<Row[Name]>) => Promise<unknown>;
 }
@@ -207,7 +216,7 @@ interface ReadColumn<Row> {
   readonly sortable: boolean;
   readonly filter: Readonly<Partial<Record<string, string>>> | undefined;
   readonly hidden: boolean;
-  readonly richText: boolean;
+  readonly day: boolean;
   readonly cell: ((row: Row) => ReactNode) | undefined;
   readonly edit: ((row: Row, value: unknown) => Promise<unknown>) | undefined;
   /** What the query declares of the field. */
@@ -241,7 +250,7 @@ const readColumn = <Row,>(
       sortable: false,
       filter: undefined,
       hidden: false,
-      richText: false,
+      day: false,
       cell: undefined,
       edit: undefined,
       descriptor,
@@ -253,7 +262,7 @@ const readColumn = <Row,>(
     sortable: spec.sortable === true,
     filter: spec.filter,
     hidden: spec.hidden === true,
-    richText: spec.richText === true,
+    day: spec.day === true,
     cell: spec.cell,
     // SAFETY: an editor hands `edit` a value of the type the query
     // declares the field holds (`parsedDraft`), as `EditValue` types it.
@@ -308,11 +317,13 @@ const CellValue = <Row,>({
   if (column.cell !== undefined) {
     return column.cell(row);
   }
-  const value = valueOf(row, column.field);
-  if (column.richText && typeof value === "string") {
-    return <RichText value={value} />;
-  }
-  return shownCell(value, column.descriptor, text, documentLanguage());
+  return shownCell(
+    valueOf(row, column.field),
+    column.descriptor,
+    text,
+    documentLanguage(),
+    column.day
+  );
 };
 
 /** The input an editor types into, by what it edits. */
@@ -322,6 +333,7 @@ const inputTypes: Readonly<Record<EditorKind, string>> = {
   number: "number",
   boolean: "checkbox",
   moment: "datetime-local",
+  day: "date",
 };
 
 /** A cell the person can edit in place, saving through its column's `edit`. */
@@ -451,7 +463,11 @@ const EditableCell = <Row,>({
             autoFocus
             disabled={saving}
             onBlur={() => {
-              setDraft(undefined);
+              refocus.current = false;
+              // A failed save stays open, its reason shown, to choose again.
+              if (!pending.current && failure === undefined) {
+                setDraft(undefined);
+              }
             }}
             onChange={(event) => {
               setDraft(event.target.value);
@@ -477,6 +493,10 @@ const EditableCell = <Row,>({
             autoFocus
             disabled={saving}
             onBlur={() => {
+              // Left for elsewhere: the cell doesn't take focus back.
+              if (!pending.current) {
+                refocus.current = false;
+              }
               commit(draft);
             }}
             onChange={(event) => {
@@ -506,7 +526,7 @@ const RowCell = <Row,>({
   column: ReadColumn<Row>;
   text: DataGridText;
 }): React.JSX.Element => {
-  const kind = editorKindOf(column.descriptor);
+  const kind = editorKindOf(column.descriptor, column.day);
   return (
     <TableCell>
       {column.edit === undefined || kind === undefined ? (
@@ -588,7 +608,8 @@ const rowLabelOf = <Row,>(
           valueOf(row, first.field),
           first.descriptor,
           text,
-          documentLanguage()
+          documentLanguage(),
+          first.day
         );
   return shown === "" ? `#${index + 1}` : shown;
 };
@@ -967,7 +988,8 @@ const noActions: readonly never[] = [];
  *   columns={[
  *     { field: "name", sortable: true, edit: async (row, name) => await rename({ id: row._id, name }) },
  *     { field: "status", filter: { active: "Active", archived: "Archived" } },
- *     { field: "notes", richText: true },
+ *     { field: "notes", cell: (row) => <RichText value={row.notes} /> },
+ *     { field: "renewsOn", day: true },
  *     "_createdAt",
  *   ]}
  *   search="Search customers"

@@ -56,7 +56,6 @@ import type { DeepKeys, DeepValue } from "@tanstack/react-form";
 import {
   BoldIcon,
   ItalicIcon,
-  LinkIcon,
   ListIcon,
   ListOrderedIcon,
   PaperclipIcon,
@@ -66,11 +65,6 @@ import type * as React from "react";
 
 import { changesTexts, shownValue } from "./internal/form-changes-text.ts";
 import type { ChangesText } from "./internal/form-changes-text.ts";
-import {
-  isUploading,
-  subscribeUploads,
-  uploadStarted,
-} from "./internal/form-uploads.ts";
 import { pageText } from "./internal/language.ts";
 import type { Texts } from "./internal/language.ts";
 import { QueryBoundary } from "./internal/query-boundary.tsx";
@@ -121,8 +115,8 @@ const submitFrom = async (
   form: AnyForm,
   element: HTMLFormElement | null
 ): Promise<void> => {
-  // Not while a file field uploads: it would save without the file.
-  if (isUploading(form)) {
+  // Not while a file field uploads: the form refuses it (`form.uploading`).
+  if (bindingOf(form).status().uploading) {
     return;
   }
   try {
@@ -220,7 +214,8 @@ interface FieldText {
   readonly italic: string;
   readonly bullets: string;
   readonly numbers: string;
-  readonly link: string;
+  /** Stops a file's upload that is taking too long. */
+  readonly cancelUpload: string;
 }
 
 const fieldTexts: Texts<FieldText> = {
@@ -240,7 +235,7 @@ const fieldTexts: Texts<FieldText> = {
     italic: "Italic",
     bullets: "Bulleted list",
     numbers: "Numbered list",
-    link: "Link",
+    cancelUpload: "Cancel upload",
   },
   de: {
     choose: "Auswählen…",
@@ -258,7 +253,7 @@ const fieldTexts: Texts<FieldText> = {
     italic: "Kursiv",
     bullets: "Aufzählung",
     numbers: "Nummerierte Liste",
-    link: "Link",
+    cancelUpload: "Hochladen abbrechen",
   },
   nl: {
     choose: "Kiezen…",
@@ -276,7 +271,7 @@ const fieldTexts: Texts<FieldText> = {
     italic: "Cursief",
     bullets: "Opsomming",
     numbers: "Genummerde lijst",
-    link: "Link",
+    cancelUpload: "Upload annuleren",
   },
   es: {
     choose: "Elegir…",
@@ -294,7 +289,7 @@ const fieldTexts: Texts<FieldText> = {
     italic: "Cursiva",
     bullets: "Lista con viñetas",
     numbers: "Lista numerada",
-    link: "Enlace",
+    cancelUpload: "Cancelar subida",
   },
   fr: {
     choose: "Choisir…",
@@ -312,7 +307,7 @@ const fieldTexts: Texts<FieldText> = {
     italic: "Italique",
     bullets: "Liste à puces",
     numbers: "Liste numérotée",
-    link: "Lien",
+    cancelUpload: "Annuler l’envoi",
   },
 };
 
@@ -999,18 +994,30 @@ const standIn = Symbol("standIn");
 /** How long typing settles before a search is read: one query, not one per key. */
 const searchSettleMs = 250;
 
+/**
+ * How a relation field reads the record it holds, by its ID: a query of
+ * one record (`api.people.get`), and its arguments for the ID.
+ */
+interface RelationLookup<Reference, Lookup extends AnyQuery> {
+  readonly query: Lookup;
+  readonly args: (id: IdOf<Reference>) => ArgsOf<Lookup>;
+}
+
 /** What a relation field's picker takes. */
-interface RelationProps<Reference extends AnyQuery> {
+interface RelationProps<
+  Reference extends AnyQuery,
+  Lookup extends AnyQuery = AnyQuery,
+> {
   /** The query that answers the records to choose from: a list, or a page. */
   query: Reference;
   /** The query's arguments for what the person typed (empty at first). */
   args: (search: string) => ArgsOf<Reference>;
   /**
-   * The query's arguments that answer the record the field holds, by its
-   * ID: how the field names a value it started with, which a search
-   * needn't list.
+   * How the field reads the record it holds by its ID, to name a value it
+   * started with, which a search needn't list: without it, that value
+   * shows as its ID until the person picks another.
    */
-  lookup: (id: IdOf<Reference>) => ArgsOf<Reference>;
+  lookup?: RelationLookup<Reference, Lookup>;
   /** How a record is named in the list and once chosen. */
   optionLabel: (record: RecordOf<Reference>) => string;
   /** What the input shows while nothing is typed. */
@@ -1020,7 +1027,10 @@ interface RelationProps<Reference extends AnyQuery> {
 }
 
 /** The searchable list a relation field picks a record from. */
-const RelationPicker = <Reference extends AnyQuery>({
+const RelationPicker = <
+  Reference extends AnyQuery,
+  Lookup extends AnyQuery = AnyQuery,
+>({
   control,
   query,
   args,
@@ -1028,7 +1038,7 @@ const RelationPicker = <Reference extends AnyQuery>({
   optionLabel,
   placeholder,
   text,
-}: RelationProps<Reference> & {
+}: RelationProps<Reference, Lookup> & {
   control: Control;
   text: FieldText;
 }): React.JSX.Element => {
@@ -1052,18 +1062,28 @@ const RelationPicker = <Reference extends AnyQuery>({
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     unlisted = chosenId as IdOf<Reference>;
   }
-  const looked = useQuery(query, unlisted === null ? "skip" : lookup(unlisted));
+  const looked = useQuery(
+    lookup?.query ?? query,
+    unlisted === null || lookup === undefined ? "skip" : lookup.args(unlisted)
+  );
+  // The lookup's answer: the record, or a list holding it.
+  const lookedUp =
+    idOf(looked) === chosenId
+      ? looked
+      : recordsOf(looked).find((record) => idOf(record) === chosenId);
   let chosen: unknown = null;
   if (chosenId !== null) {
     chosen = listed ??
-      recordsOf(looked).find((record) => idOf(record) === chosenId) ?? {
+      lookedUp ?? {
         _id: chosenId,
         [standIn]: true,
       };
   }
   const labelOf = (record: unknown): string => {
     if (typeof record === "object" && record !== null && standIn in record) {
-      return looked === undefined ? text.loading : (idOf(record) ?? "");
+      return lookup !== undefined && looked === undefined
+        ? text.loading
+        : (idOf(record) ?? "");
     }
     // SAFETY: every other record here came from the query's answer.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -1154,9 +1174,15 @@ const RelationFailure = ({
  * A field of `form` that holds a record's ID (`v.id("table")`): a
  * searchable list of the records `query` answers for what the person
  * types (`args`), each named by `optionLabel`, and the record the field
- * holds read by its ID (`lookup`). A failed query shows in its place.
+ * holds read by its ID through a query of one record (`lookup`, optional:
+ * without it a value the search doesn't list shows as its ID). A failed
+ * query shows in its place.
  */
-const RelationField = <Values, Reference extends AnyQuery>({
+const RelationField = <
+  Values,
+  Reference extends AnyQuery,
+  Lookup extends AnyQuery = AnyQuery,
+>({
   form,
   name,
   label,
@@ -1164,7 +1190,7 @@ const RelationField = <Values, Reference extends AnyQuery>({
   text,
   ...picker
 }: FieldProps<Values, ChoiceFieldName<Values>> &
-  RelationProps<Reference>): React.JSX.Element => {
+  RelationProps<Reference, Lookup>): React.JSX.Element => {
   const said = { ...pageText(fieldTexts), ...text };
   return (
     <FieldShell
@@ -1264,7 +1290,7 @@ const FileUpload = <Reference extends FilesReference>({
           }
           setFailure(undefined);
           // The form doesn't submit until the upload ends.
-          const ended = uploadStarted(form);
+          const ended = bindingOf(form).startUpload();
           const send = async (): Promise<void> => {
             try {
               const ref = await upload.upload(file);
@@ -1281,14 +1307,28 @@ const FileUpload = <Reference extends FilesReference>({
         type="file"
       />
       {busy ? (
-        <Progress
-          aria-label={text.uploading}
-          value={
-            upload.bytesTotal === 0
-              ? null
-              : (upload.bytesUploaded / upload.bytesTotal) * 100
-          }
-        />
+        <div className="flex items-center gap-2">
+          <Progress
+            aria-label={text.uploading}
+            className="flex-1"
+            value={
+              upload.bytesTotal === 0
+                ? null
+                : (upload.bytesUploaded / upload.bytesTotal) * 100
+            }
+          />
+          <Button
+            onClick={() => {
+              // The upload then fails as cancelled, which ends it.
+              void upload.cancel();
+            }}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {text.cancelUpload}
+          </Button>
+        </div>
       ) : null}
       {failure === undefined ? null : (
         <p className="text-destructive text-sm" role="alert">
@@ -1342,12 +1382,12 @@ const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
   italic: ItalicIcon,
   bullets: ListIcon,
   numbers: ListOrderedIcon,
-  link: LinkIcon,
 };
 
 /**
- * A field of `form` that holds formatted text, as Markdown: bold, italic,
- * lists and links, which its toolbar puts around what is selected. It
+ * A field of `form` that holds formatted text, as Markdown: bold, italic
+ * and lists, which its toolbar puts around what is selected (a link the
+ * person types in Markdown is kept). It
  * holds text alone, never HTML: show it with `RichText`
  * (`@grasp-os/ui/components/rich-text`), which renders the Markdown and
  * drops any HTML in it.
@@ -1690,11 +1730,7 @@ const SubmitButton = ({
   form: AnyForm;
 }): React.JSX.Element => {
   const status = useFormStatus(form);
-  const uploading = useSyncExternalStore(
-    (onChange) => subscribeUploads(form, onChange),
-    () => isUploading(form)
-  );
-  const busy = status.phase === "submitting" || uploading;
+  const busy = status.phase === "submitting" || status.uploading;
   return (
     <Button
       {...props}

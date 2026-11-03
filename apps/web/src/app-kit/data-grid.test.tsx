@@ -42,6 +42,7 @@ const person = v.object({
   active: v.boolean(),
   joined: v.timestamp(),
   score: v.number().nullable(),
+  renews: v.timestamp(),
 });
 
 const listPeople = reference(
@@ -63,6 +64,20 @@ const renamePerson = reference(
   v.null()
 );
 
+const movePerson = reference(
+  "mutation",
+  "people.move",
+  v.object({ id: v.id("people"), team: v.enum(["sales", "support"]) }),
+  v.null()
+);
+
+const renewPerson = reference(
+  "mutation",
+  "people.renew",
+  v.object({ id: v.id("people"), renews: v.timestamp() }),
+  v.null()
+);
+
 const scorePerson = reference(
   "mutation",
   "people.score",
@@ -75,8 +90,14 @@ const idOf = (index: number): Id<"people"> =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   `01890000-0000-7000-8000-00000000000${index}` as Id<"people">;
 
-/** When the first person joined: a moment, not the start of a day. */
-const joined = Date.UTC(2026, 2, 14, 15, 30);
+/**
+ * When each person joined: a moment, which happens to be midnight UTC; a
+ * moment all the same, shown with its time.
+ */
+const joined = Date.UTC(2026, 2, 14);
+
+/** The day each person's contract renews, as a date field keeps a day. */
+const renews = Date.UTC(2026, 11, 1);
 
 const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
   (name, index) => ({
@@ -86,6 +107,7 @@ const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
     team: index % 2 === 0 ? ("sales" as const) : ("support" as const),
     active: index !== 2,
     joined,
+    renews,
     score: index === 0 ? 7 : null,
   })
 );
@@ -127,6 +149,8 @@ const PeopleGrid = ({
 }) => {
   const rename = useMutation(renamePerson);
   const score = useMutation(scorePerson);
+  const move = useMutation(movePerson);
+  const renew = useMutation(renewPerson);
   return (
     <DataGrid
       args={argsOf}
@@ -145,9 +169,18 @@ const PeopleGrid = ({
           sortable: true,
           edit: async (row, name) => await rename({ id: row._id, name }),
         },
-        { field: "team", filter: { sales: "Sales", support: "Support" } },
+        {
+          field: "team",
+          filter: { sales: "Sales", support: "Support" },
+          edit: async (row, team) => await move({ id: row._id, team }),
+        },
         "active",
         "joined",
+        {
+          field: "renews",
+          day: true,
+          edit: async (row, day) => await renew({ id: row._id, renews: day }),
+        },
         {
           field: "score",
           edit: async (row, value) =>
@@ -256,6 +289,10 @@ describe("a data grid", () => {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(joined),
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeZone: "UTC",
+      }).format(renews),
       "7",
     ]);
   });
@@ -346,6 +383,33 @@ describe("a data grid", () => {
     });
   });
 
+  it("edits a day as that day, in UTC, wherever the person is", async () => {
+    const { client, calls } = hostOf();
+    await rendered(client, grid);
+    await click(named("Edit Renews for Ada"));
+    const editor = valueOf(named("Edit Renews for Ada"));
+    const shown = { type: editor.getAttribute("type"), value: editor.value };
+    await typeInto(editor, "2027-01-05");
+    await press(named("Edit Renews for Ada"), "Enter");
+    expect({ shown, sent: calls.map(({ input }) => input) }).toStrictEqual({
+      shown: { type: "date", value: "2026-12-01" },
+      sent: [{ id: idOf(0), renews: Date.UTC(2027, 0, 5) }],
+    });
+  });
+
+  it("keeps a choice's failed save open, its reason shown, after the person leaves it", async () => {
+    const { client } = hostOf(() => ({
+      failed: "people.full",
+      message: "Support is full.",
+    }));
+    await rendered(client, grid);
+    await click(named("Edit Team for Ada"));
+    await typeInto(named("Edit Team for Ada"), "support");
+    await leave(named("Edit Team for Ada"));
+    expect(find('[role="alert"]').textContent).toBe("Support is full.");
+    expect(valueOf(named("Edit Team for Ada")).value).toBe("support");
+  });
+
   it("acts on the rows selected, and on one row from its menu", async () => {
     const selected: string[][] = [];
     const opened: string[] = [];
@@ -396,7 +460,7 @@ describe("a data grid", () => {
     await click(find("button", "Columns"));
     await click(find('[role="menuitemcheckbox"]', "Active"));
     expect(before).toContain("Active");
-    expect(find("thead").textContent).toBe("NameTeamJoinedScoreActions");
+    expect(find("thead").textContent).toBe("NameTeamJoinedRenewsScoreActions");
   });
 
   it("says when there is nothing, and when nothing matches", async () => {

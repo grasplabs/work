@@ -28,19 +28,17 @@ export const recordFieldsOf = (
   return {};
 };
 
-/** How long a day is, in the milliseconds a moment counts. */
-const dayMs = 86_400_000;
-
 /** The page's language, as `Intl` takes it: the browser's when the page says none. */
 const localeOf = (language: string): string | undefined =>
   language === "" ? undefined : language;
 
 /**
- * A moment as a person reads it: a day where it is the start of one in
- * UTC (how a date field keeps a day), a day and a time otherwise.
+ * A moment as a person reads it: the day, in UTC, for a field that holds
+ * days (as a date field keeps them); its date and time where they are
+ * otherwise. Never guessed from the value: midnight UTC is a moment too.
  */
-const shownMoment = (moment: number, language: string): string =>
-  moment % dayMs === 0
+const shownMoment = (moment: number, language: string, day: boolean): string =>
+  day
     ? new Intl.DateTimeFormat(localeOf(language), {
         dateStyle: "medium",
         timeZone: "UTC",
@@ -94,14 +92,15 @@ export const shownCell = (
   value: unknown,
   descriptor: ValueDescriptor | undefined,
   text: DataGridText,
-  language: string
+  language: string,
+  day = false
 ): string => {
   if (value === null || value === undefined) {
     return "";
   }
   const kind = descriptor?.kind;
   if (kind === "timestamp") {
-    return typeof value === "number" ? shownMoment(value, language) : "";
+    return typeof value === "number" ? shownMoment(value, language, day) : "";
   }
   if (kind === "boolean") {
     return value === true ? text.yes : text.no;
@@ -133,7 +132,13 @@ export const shownCell = (
 };
 
 /** How a cell's field is edited in place, if it can be. */
-export type EditorKind = "text" | "choice" | "number" | "boolean" | "moment";
+export type EditorKind =
+  | "text"
+  | "choice"
+  | "number"
+  | "boolean"
+  | "moment"
+  | "day";
 
 /** How each kind of field is edited in place: the others aren't. */
 const editors: Readonly<Partial<Record<ValueDescriptor["kind"], EditorKind>>> =
@@ -147,11 +152,16 @@ const editors: Readonly<Partial<Record<ValueDescriptor["kind"], EditorKind>>> =
 
 /** How a field `descriptor` declares is edited in place; undefined if it isn't. */
 export const editorKindOf = (
-  descriptor: ValueDescriptor | undefined
-): EditorKind | undefined =>
-  descriptor !== undefined && Object.hasOwn(editors, descriptor.kind)
+  descriptor: ValueDescriptor | undefined,
+  day: boolean
+): EditorKind | undefined => {
+  if (descriptor?.kind === "timestamp" && day) {
+    return "day";
+  }
+  return descriptor !== undefined && Object.hasOwn(editors, descriptor.kind)
     ? editors[descriptor.kind]
     : undefined;
+};
 
 /** Pads a part of a date to two digits. */
 const twoDigits = (part: number): string => String(part).padStart(2, "0");
@@ -167,6 +177,11 @@ export const momentText = (value: unknown): string => {
 
 /** What an editor's text is to start from, for the value it edits. */
 export const draftOf = (value: unknown, kind: EditorKind): string => {
+  if (kind === "day") {
+    return typeof value === "number" && Number.isFinite(value)
+      ? new Date(value).toISOString().slice(0, "yyyy-mm-dd".length)
+      : "";
+  }
   if (kind === "moment") {
     return momentText(value);
   }
@@ -196,6 +211,13 @@ export const parsedDraft = (
   if (kind === "choice") {
     return { value: draft };
   }
-  const value = kind === "moment" ? new Date(draft).getTime() : Number(draft);
+  let value = Number(draft);
+  if (kind === "day") {
+    // The day, as the moment it starts in UTC.
+    value = Date.parse(`${draft}T00:00:00Z`);
+  } else if (kind === "moment") {
+    // Read in the person's own time zone: no `Z`.
+    value = new Date(draft).getTime();
+  }
   return Number.isFinite(value) ? { value } : { problem: text.notANumber };
 };

@@ -67,7 +67,7 @@ export const dataGridTexts: Texts<DataGridText> = {
     columns: "Spalten",
     loadMore: "Mehr laden",
     empty: "Hier ist noch nichts.",
-    noMatches: "Nichts passt.",
+    noMatches: "Keine Treffer.",
     failed: "Diese Liste konnte nicht geladen werden",
     tryAgain: "Erneut versuchen",
     all: "Alle",

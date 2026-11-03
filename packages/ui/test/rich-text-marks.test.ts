@@ -30,10 +30,4 @@ describe("a rich text mark", () => {
     );
     expect(applyMark("Plan\nShip", 7, 7, "numbers").text).toBe("Plan\n1. Ship");
   });
-
-  it("links what is selected, its address selected to type over", () => {
-    const linked = applyMark("See the plan", 8, 12, "link");
-    expect(linked.text).toBe("See the [plan](https://)");
-    expect(linked.text.slice(linked.start, linked.end)).toBe("https://");
-  });
 });

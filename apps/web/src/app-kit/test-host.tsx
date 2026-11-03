@@ -112,12 +112,18 @@ export const testHost = (
       };
     },
     files: {
-      upload: async (resource, _file, name) => {
+      upload: async (resource, _file, name, { cancel }) => {
         uploads.push({ resource, name });
         await Promise.resolve();
         if (holdUploads) {
-          // Never ends: the upload is still under way.
-          await Promise.withResolvers<never>().promise;
+          // Still under way, until it is cancelled.
+          const { promise, reject } = Promise.withResolvers<never>();
+          cancel.addEventListener("abort", () => {
+            reject(
+              Object.assign(new Error("Cancelled."), { code: "file.cancelled" })
+            );
+          });
+          await promise;
         }
         return uploadedFileId;
       },

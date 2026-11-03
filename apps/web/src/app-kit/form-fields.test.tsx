@@ -61,8 +61,15 @@ type Task = InferInput<typeof task>;
 const searchPeople = reference(
   "query",
   "people.search",
-  v.object({ search: v.string(), id: v.id("people").optional() }),
+  v.object({ search: v.string() }),
   v.array(v.object({ _id: v.id("people"), name: v.string() }))
+);
+
+const getPerson = reference(
+  "query",
+  "people.get",
+  v.object({ id: v.id("people") }),
+  v.object({ _id: v.id("people"), name: v.string() }).nullable()
 );
 
 const briefs: FilesReference<"briefs", readonly ["upload"]> = {
@@ -118,7 +125,6 @@ const TaskForm = ({ saved }: { saved: unknown[] }) => {
       <SwitchField form={form} label="Notify the team" name="notify" />
       <RelationField
         args={(search) => ({ search })}
-        lookup={(id) => ({ search: "", id })}
         form={form}
         label="Owner"
         name="owner"
@@ -162,16 +168,17 @@ const control = (label: string): HTMLElement => {
   return found;
 };
 
-/** A host whose people search answers the directory, by name or by ID. */
+/** A host whose people search answers the directory by name, and its lookup by ID. */
 const hostOf = (options?: { readonly holdUploads?: boolean }) =>
   testHost(
-    ({ input }) => ({
-      value: directory.filter(({ _id, name }) =>
-        input.id === undefined
-          ? name.toLowerCase().includes(String(input.search).toLowerCase())
-          : _id === input.id
-      ),
-    }),
+    ({ contractId, input }) =>
+      contractId === "people.get"
+        ? { value: directory.find(({ _id }) => _id === input.id) ?? null }
+        : {
+            value: directory.filter(({ name }) =>
+              name.toLowerCase().includes(String(input.search).toLowerCase())
+            ),
+          },
     options
   );
 
@@ -185,7 +192,13 @@ const review = v.object({
 /** When the review was done: a day, as a date field keeps it. */
 const reviewedOn = Date.UTC(2026, 10, 3);
 
-const ReviewForm = ({ saved }: { saved: unknown[] }) => {
+const ReviewForm = ({
+  saved,
+  lookup = true,
+}: {
+  saved: unknown[];
+  lookup?: boolean;
+}) => {
   const form = useForm(review, {
     defaultValues: {
       rank: "high",
@@ -206,7 +219,9 @@ const ReviewForm = ({ saved }: { saved: unknown[] }) => {
         args={(search) => ({ search })}
         form={form}
         label="Reviewer"
-        lookup={(id) => ({ search: "", id })}
+        lookup={
+          lookup ? { query: getPerson, args: (id) => ({ id }) } : undefined
+        }
         name="reviewer"
         optionLabel={(person) => person.name}
         query={searchPeople}
@@ -379,7 +394,20 @@ describe("the form fields", () => {
     await rendered(client, <ReviewForm saved={[]} />);
     await settle(300);
     expect(valueOf(control("Reviewer")).value).toBe("Grace");
-    expect(reads.some(({ input }) => input.id === grace)).toBeTruthy();
+    const lookups = reads.filter(
+      ({ contractId }) => contractId === "people.get"
+    );
+    expect(new Set(lookups.map(({ input }) => input.id))).toStrictEqual(
+      new Set([grace])
+    );
+  });
+
+  it("show a relation's starting record by its ID without a lookup, while no search lists it", async () => {
+    // A search that answers no one: the record the field holds isn't listed.
+    const { client } = testHost(() => ({ value: [] }));
+    await rendered(client, <ReviewForm lookup={false} saved={[]} />);
+    await settle(300);
+    expect(valueOf(control("Reviewer")).value).toBe(grace);
   });
 
   it("don't submit while a file uploads", async () => {
@@ -405,5 +433,8 @@ describe("the form fields", () => {
       // Not even checked: no submit was tried.
       title: errorOf("Title"),
     }).toStrictEqual({ uploads: 1, disabled: true, saved: [], title: "" });
+    // A stalled upload can be cancelled: the form submits again.
+    await click(find("button", "Cancel upload"));
+    expect(save.hasAttribute("disabled")).toBeFalsy();
   });
 });

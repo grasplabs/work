@@ -170,6 +170,11 @@ export interface FormStatus {
   readonly newer: boolean;
   /** The save committed, but `onSuccess` failed: what it said. */
   readonly applicationError: string | undefined;
+  /**
+   * Whether a field's upload is under way: the form doesn't submit until
+   * it ends (`form.uploading`), or it would save without the file.
+   */
+  readonly uploading: boolean;
 }
 
 const initialStatus: FormStatus = Object.freeze({
@@ -181,6 +186,7 @@ const initialStatus: FormStatus = Object.freeze({
   conflict: false,
   newer: false,
   applicationError: undefined,
+  uploading: false,
 });
 
 /** A Grasp form: TanStack's typed fields and state, and its submission. */
@@ -1302,8 +1308,31 @@ export class FormBinding {
     });
   }
 
+  /** How many of the form's fields have an upload under way. */
+  #uploads = 0;
+
+  /**
+   * A field's upload started: the form refuses to submit until every one
+   * ended. Answers how to say this one ended, once.
+   */
+  startUpload(): () => void {
+    this.#uploads += 1;
+    this.#set({ uploading: true });
+    let ended = false;
+    return () => {
+      if (!ended) {
+        ended = true;
+        this.#uploads -= 1;
+        this.#set({ uploading: this.#uploads > 0 });
+      }
+    };
+  }
+
   /** See `GraspForm.submit`. */
   async submit(): Promise<unknown> {
+    if (this.#uploads > 0) {
+      throw clientError("form.uploading");
+    }
     this.#pending ??= this.#run();
     return await this.#pending;
   }

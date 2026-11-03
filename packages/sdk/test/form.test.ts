@@ -856,3 +856,36 @@ describe("what a form declares of its fields", () => {
     });
   });
 });
+
+describe("a form with a file uploading", () => {
+  it("refuses to submit until every upload ended, and sends nothing", async () => {
+    const { client, sent } = host(() => ({ value: 1 }));
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    const first = binding.startUpload();
+    const second = binding.startUpload();
+    const whileUploading = await settle(binding.submit());
+    const refusal =
+      typeof whileUploading === "object" &&
+      whileUploading !== null &&
+      "rejected" in whileUploading &&
+      whileUploading.rejected instanceof GraspError
+        ? whileUploading.rejected.code
+        : undefined;
+    first();
+    // Ending it twice ends it once: the other still holds the form.
+    first();
+    const whileOneUploads = binding.status().uploading;
+    second();
+    expect({
+      refusal,
+      whileOneUploads,
+      after: await settle(binding.submit()),
+      sent: sent.length,
+    }).toStrictEqual({
+      refusal: "form.uploading",
+      whileOneUploads: true,
+      after: { resolved: 1 },
+      sent: 1,
+    });
+  });
+});
