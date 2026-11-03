@@ -123,6 +123,7 @@ const interviewOf = (facts: AdminInterviewFacts): AdminInterview => {
     rating: facts.rating,
     typed: facts.typed,
     interviewer: facts.interviewer,
+    version: facts.version,
   };
 };
 

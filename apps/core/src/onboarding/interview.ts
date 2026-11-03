@@ -36,6 +36,7 @@ import type { ModelCall } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewerText } from "./interviewer-text.ts";
+import { stephenVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
@@ -586,6 +587,7 @@ export const interviewTurnResponse = async (
         mark,
         interviewer: turn.interviewer,
         locale: turn.locale,
+        version: stephenVersion,
       });
     },
   });

@@ -15,7 +15,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { asClaire } from "../src/onboarding/claire.ts";
 import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
-import { labMarks } from "../src/onboarding/lab-marks.ts";
+import {
+  everyLabMark,
+  labMarks,
+  stephenVersion,
+} from "../src/onboarding/lab-marks.ts";
 
 // What the model that holds an interview is told (src/onboarding/): the
 // same text the Stephen Lab measures, in five languages, for Stephen and
@@ -209,6 +213,19 @@ describe("the interview", () => {
       expect(text).toContain('set wants to "readback"');
     }
   );
+});
+
+describe("the version", () => {
+  it("names every mark at once, and changes with any of them", async () => {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(everyLabMark().join("\n"))
+    );
+    expect(everyLabMark()).toHaveLength(
+      interviewers.length * interviewKinds.length * interviewLocales.length
+    );
+    expect(toHex(new Uint8Array(digest)).slice(0, 12)).toBe(stephenVersion);
+  });
 });
 
 describe("the mark", () => {

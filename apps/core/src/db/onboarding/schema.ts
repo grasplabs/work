@@ -576,6 +576,13 @@ export const interviewSettings = sqliteTable("interview_settings", {
   mark: text().notNull(),
   interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
   locale: text().notNull(),
+  /**
+   * Which Stephen that was, as one name for every text of a release
+   * (`stephenVersion` in onboarding/lab-marks.ts), so Grasp's admin can set
+   * the interviews of one version side by side; none for turns from before
+   * it was kept.
+   */
+  version: text(),
 });
 
 /**

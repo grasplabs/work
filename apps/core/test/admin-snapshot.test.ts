@@ -14,6 +14,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import worker from "../src/index.ts";
+import { labMarks, stephenVersion } from "../src/onboarding/lab-marks.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
@@ -436,6 +437,8 @@ describe("the admin snapshot", () => {
           rating: 4,
           typed: true,
           interviewer: null,
+          // No turn of Stephen's ran in it yet.
+          version: null,
           started: true,
           updated: today,
         },
@@ -456,6 +459,29 @@ describe("the admin snapshot", () => {
     expect(text).not.toContain(sentinel);
     expect(text).not.toContain("Their own sheet");
     expect(text).not.toContain("What does your team do all week?");
+  });
+
+  it("says which Stephen held each interview's last turn, in every language, and never the text", async () => {
+    const { ids, secret } = await running();
+    const store = onboardingStore(env);
+    const mark = await sha256Hex(secret);
+    const versionOf = async () => {
+      const response = await askAsConsole();
+      const snapshot = adminSnapshotSchema.parse(
+        JSON.parse(await response.text())
+      );
+      return snapshot.interviews.find(({ person }) => person === ids.lea)
+        ?.version;
+    };
+
+    await expect(versionOf()).resolves.toBeNull();
+    await store.turnRan(mark, {
+      mark: labMarks.claire.lead.nl,
+      interviewer: "claire",
+      locale: "nl",
+      version: stephenVersion,
+    });
+    await expect(versionOf()).resolves.toBe(stephenVersion);
   });
 
   it("counts every interview of a large roster, page after page", async () => {

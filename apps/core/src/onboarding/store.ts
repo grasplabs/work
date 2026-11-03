@@ -692,6 +692,8 @@ export interface AdminInterviewFacts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+  /** Which Stephen held its last turn (`stephenVersion`); null before that was kept. */
+  version: string | null;
 }
 
 /** `text` as JSON, or undefined when it isn't JSON, for a schema to refuse. */
@@ -4497,12 +4499,20 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ id }) => id),
       links: sent,
       interviews: this.#db
-        .select()
+        .select({
+          state: interviewStates,
+          version: interviewSettings.version,
+        })
         .from(interviewStates)
+        .leftJoin(
+          interviewSettings,
+          eq(interviewSettings.person, interviewStates.person)
+        )
         .all()
-        .map((state) => ({
+        .map(({ state, version }) => ({
           ...state,
           ...(countsBy.get(state.person) ?? noCounts),
+          version: version ?? null,
         })),
     };
   }
