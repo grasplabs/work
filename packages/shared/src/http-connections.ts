@@ -136,16 +136,23 @@ const notInRequest =
   // oxlint-disable-next-line no-control-regex -- controls are what it refuses
   /[\u0000- \u007F-\u009F#]/u;
 
-/** What a path, before its query, may not hold either: a backslash, read as a slash. */
-const notInPathname = /\\/u;
+/**
+ * What a path, before its query, may not hold either: a backslash, read as
+ * a slash, and a `;`, after which servers such as Tomcat, Jetty and Spring
+ * drop a segment's parameters before resolving it, so `/v1/..;/admin`
+ * reaches `/admin`.
+ */
+const notInPathname = /[\\;]/u;
 
 /**
  * Escapes a server may decode into a dot or a separator after the path was
- * checked (`/api/..%2fadmin`): refused outright in the path, whatever the
- * server does. Never in the query, which no prefix is matched against: a
- * query such as `?callback=https%3A%2F%2Fexample.com%2Fdone` is sent as it is.
+ * checked (`/api/..%2fadmin`), and an escaped `%`, which a server decoding
+ * twice turns into one (`%252e%252e`): refused outright in the path,
+ * whatever the server does. Never in the query, which no prefix is matched
+ * against: a query such as `?callback=https%3A%2F%2Fexample.com%2Fdone` is
+ * sent as it is.
  */
-const decodedSeparators = /%(?:2e|2f|5c|00)/iu;
+const decodedSeparators = /%(?:2e|2f|5c|00|25)/iu;
 
 /** A base nobody reaches: only the path and query of a parse are read. */
 const pathBase = "https://path.invalid";

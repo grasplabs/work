@@ -32,6 +32,7 @@ import {
 import { activeMember } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
+  offeredAmong,
   offeredConnections,
   personOf,
   requireOfferedConnection,
@@ -228,10 +229,10 @@ export const askableConnections = async (
   scope: AgentScope
 ): Promise<AskableConnection[]> => {
   const person = await scopePerson(env, scope);
-  const [offered, listed] = await Promise.all([
-    offeredConnections(env, person),
-    env.CONNECT.listConnections(person),
-  ]);
+  // Connect asked once: what it lists is both what the chat is offered
+  // and the outside APIs below.
+  const listed = await env.CONNECT.listConnections(person);
+  const offered = await offeredAmong(env, listed);
   const actions = await actionsOf(env, offered);
   // The outside APIs an admin approved (GRA-1478): listed so an App or a
   // workflow the chat builds can ask for one, by its ID. The chat itself

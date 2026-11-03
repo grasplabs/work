@@ -115,6 +115,13 @@ const answer = (
         headers: { location: "https://collector.example/steal" },
       });
     }
+    case "/v1/semicolon": {
+      // On the origin, but to a `..;` segment that leads off the paths.
+      return new Response(null, {
+        status: 302,
+        headers: { location: "/v1/..;/admin" },
+      });
+    }
     case "/v1/hop": {
       return new Response(null, {
         status: 302,
@@ -477,6 +484,12 @@ describe("HTTP connections", () => {
       { action: "get", input: { path: "/v1/../admin" } },
       { action: "get", input: { path: "/v1/%2e%2e/admin" } },
       { action: "get", input: { path: "/v1%2F..%2Fadmin" } },
+      // A segment's `;params`, which servers drop before resolving `..`.
+      { action: "get", input: { path: "/v1/..;/admin" } },
+      { action: "get", input: { path: "/v1/invoices;jsessionid=x" } },
+      // Encoded twice, for a server that decodes twice.
+      { action: "get", input: { path: "/v1/%252e%252e/admin" } },
+      { action: "get", input: { path: "/v1%252f..%252fadmin" } },
       // A query beside them changes nothing.
       { action: "get", input: { path: "/v1/%2e%2e/admin?next=%2Fv1" } },
       { action: "get", input: { path: "/v1/../admin?next=1" } },
@@ -541,6 +554,13 @@ describe("HTTP connections", () => {
     const moved = await outcome(
       callAs(app, { connectionId, action: "get", input: { path: "/v1/moved" } })
     );
+    const semicolon = await outcome(
+      callAs(app, {
+        connectionId,
+        action: "get",
+        input: { path: "/v1/semicolon" },
+      })
+    );
     // A read of a context that read restricted data is held for its
     // person and carried out under a key, as a change is: refused once
     // confirmed, it did nothing, so it is refused, not of unknown outcome.
@@ -576,14 +596,16 @@ describe("HTTP connections", () => {
       input: { path: "/v1/hop" },
     });
 
-    expect({ moved, held, confirmed }).toStrictEqual({
+    expect({ moved, semicolon, held, confirmed }).toStrictEqual({
       moved: "connect.http_refused",
+      semicolon: "connect.http_refused",
       held: "connect.held",
       confirmed: "connect.http_refused",
     });
     expect(JSON.parse(hopped.output)).toMatchObject({ status: 200 });
     expect(sent.map(({ url }) => url)).toStrictEqual([
       "https://api.billing.example/v1/moved",
+      "https://api.billing.example/v1/semicolon",
       "https://api.billing.example/v1/moved",
       "https://api.billing.example/v1/hop",
       "https://api.billing.example/v1/invoices?from=hop",
