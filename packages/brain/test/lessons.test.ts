@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createBrain } from "../src/brain.ts";
@@ -359,6 +360,39 @@ describe("consolidating episodes into lesson candidates", () => {
       // Nothing left in the consolidation's own rows names them.
       casScopes: 0,
     });
+  });
+
+  it("leaves a person's lessons and queued consolidation to a purge whose hold no longer holds", async () => {
+    const { brain } = testHost();
+    const cas = `cas-${crypto.randomUUID()}`;
+    await recorded(brain, [
+      run(cas, "failed"),
+      run(cas, "failed"),
+      run(cas, "failed"),
+    ]);
+    await consolidate(brain, person(cas));
+    // Another of theirs since: their scope is due again.
+    await recorded(brain, [run(cas, "failed")]);
+    const due = async () =>
+      await env.BRAIN.prepare(
+        "SELECT count(*) AS n FROM brain_consolidation_due WHERE scope_key = ?"
+      )
+        .bind(scopeKeyOf(person(cas)))
+        .first<number>("n");
+    const before = {
+      lessons: await lessonCount(brain, person(cas)),
+      due: await due(),
+    };
+
+    // An attempt another took over from, or superseded: its hold is false.
+    await brain.db.batch(
+      forgetPerson(brain.db, cas, brain.ports.clock(), sql`0`)
+    );
+
+    expect({
+      lessons: await lessonCount(brain, person(cas)),
+      due: await due(),
+    }).toStrictEqual(before);
   });
 
   it("does bounded work a job, and leaves the rest of a scope's episodes to the next", async () => {

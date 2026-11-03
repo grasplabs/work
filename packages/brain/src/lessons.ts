@@ -1156,9 +1156,12 @@ export const forgetPersonLessons = (
     db
       .delete(brainConsolidationDue)
       .where(
-        eq(
-          brainConsolidationDue.scopeKey,
-          scopeKeyOf({ scope: "person", scopeId: userId })
+        and(
+          eq(
+            brainConsolidationDue.scopeKey,
+            scopeKeyOf({ scope: "person", scopeId: userId })
+          ),
+          condition
         )
       ),
   ] as const;
