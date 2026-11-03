@@ -8086,6 +8086,10 @@ msgstr "Er is nog geen model ingesteld voor deze omgeving."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Nog geen modules. Een module bevat berekeningen die een taak via een lokale binding aanroept."
 
+#: src/engines/app-code.tsx
+msgid "No newline at end of file"
+msgstr "Geen regeleinde aan het einde van het bestand"
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Geen volgende run"

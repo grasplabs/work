@@ -18,7 +18,7 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { changedLines } from "./line-diff.ts";
-import type { DiffGap, DiffLine } from "./line-diff.ts";
+import type { DiffPart } from "./line-diff.ts";
 
 // An App's code on its page, for its builders (app-page.tsx's Code tab):
 // the files of its current version as a tree, the one picked shown
@@ -288,11 +288,7 @@ const GapText = ({ unchanged }: { unchanged: number }) => (
 );
 
 /** A file's changed lines, as a diff prints them. */
-const ChangedLines = ({
-  shown,
-}: {
-  shown: readonly (DiffLine | DiffGap)[];
-}) => (
+const ChangedLines = ({ shown }: { shown: readonly DiffPart[] }) => (
   <pre className="overflow-x-auto py-2 font-mono text-xs leading-relaxed">
     {shown.map((line, index) => {
       if (line.kind === "gap") {
@@ -303,6 +299,17 @@ const ChangedLines = ({
             key={`gap-${index}`}
           >
             <GapText unchanged={line.lines} />
+          </div>
+        );
+      }
+      if (line.kind === "no-newline") {
+        return (
+          <div
+            className="text-muted-foreground px-4 italic"
+            // It belongs to the line before it, and has no place of its own.
+            key={`no-newline-${index}`}
+          >
+            <Trans>No newline at end of file</Trans>
           </div>
         );
       }

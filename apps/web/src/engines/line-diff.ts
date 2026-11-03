@@ -22,6 +22,18 @@ export interface DiffGap {
   lines: number;
 }
 
+/**
+ * That the line above it is the last of its file, with no newline after
+ * it: jsdiff's `\ No newline at end of file`. Without it, a change of the
+ * final newline alone shows the same line removed and added.
+ */
+export interface DiffNoNewline {
+  kind: "no-newline";
+}
+
+/** What the view shows of a file's change, in order. */
+export type DiffPart = DiffLine | DiffGap | DiffNoNewline;
+
 /** Unchanged lines kept around each change. */
 const contextLines = 3;
 
@@ -48,9 +60,7 @@ const maxEditLength = 2000;
  * each hunk's unchanged lines around them and gaps for the unchanged
  * lines between, or none when it changes more lines than `maxEditLength`.
  */
-export const changedLines = (
-  diff: FileDiff
-): (DiffLine | DiffGap)[] | undefined => {
+export const changedLines = (diff: FileDiff): DiffPart[] | undefined => {
   if (diff.change === "added") {
     return linesOf(diff.after).map((text, index) => ({
       kind: "added",
@@ -74,7 +84,7 @@ export const changedLines = (
     return undefined;
   }
   const { hunks } = patch;
-  const shown: (DiffLine | DiffGap)[] = [];
+  const shown: DiffPart[] = [];
   // The next old line no hunk has shown yet, from 1.
   let next = 1;
   for (const hunk of hunks) {
@@ -96,8 +106,10 @@ export const changedLines = (
         shown.push({ kind: "same", text, before: old, after: fresh });
         old += 1;
         fresh += 1;
+      } else if (line.startsWith("\\")) {
+        // "\ No newline at end of file", of the line before it.
+        shown.push({ kind: "no-newline" });
       }
-      // "\ No newline at end of file" is no line of either file.
     }
     next = Math.max(old, 1);
   }

@@ -8086,6 +8086,10 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Noch keine Module. Ein Modul enthält Berechnungen, die eine Aufgabe über eine lokale Bindung aufruft."
 
+#: src/engines/app-code.tsx
+msgid "No newline at end of file"
+msgstr "Kein Zeilenumbruch am Dateiende"
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Kein nächster Lauf"

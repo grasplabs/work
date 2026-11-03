@@ -343,6 +343,27 @@ describe("An App's Code tab", () => {
     });
   });
 
+  it("says so when a change only takes away the final newline", async () => {
+    await shown("builder", 1, {
+      1: { "app.ts": "export const done = true;\n" },
+      2: { "app.ts": "export const done = true;" },
+    });
+    await press(named("button", "Changes"));
+
+    expect(
+      changesShown().map(({ file, lines }) => ({ file, lines }))
+    ).toStrictEqual([
+      {
+        file: "app.ts",
+        lines: [
+          "- export const done = true;",
+          "+ export const done = true;",
+          "No newline at end of file",
+        ],
+      },
+    ]);
+  });
+
   it("says a file rewritten past what is worked out has too many changes, and shows a large new file whole", async () => {
     await shown("builder", 1, largeVersions);
     await press(named("button", "Changes"));

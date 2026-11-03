@@ -8086,6 +8086,10 @@ msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Aucun module pour l'instant. Un module contient des calculs qu'une tâche appelle par une liaison locale."
 
+#: src/engines/app-code.tsx
+msgid "No newline at end of file"
+msgstr "Pas de saut de ligne en fin de fichier"
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Aucune prochaine exécution"
