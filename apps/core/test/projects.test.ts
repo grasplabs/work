@@ -559,10 +559,19 @@ describe("projects", { timeout: 120_000 }, () => {
           "INSERT INTO project_items (project_id, item_type, item_id, added_by, added_at) VALUES (?, 'workflow', ?, ?, ?)"
         ).bind(project, crypto.randomUUID(), owner.userId, now)
       ),
-      ...Array.from({ length: 100 }, () =>
-        env.DB.prepare(
-          "INSERT INTO project_members (project_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-        ).bind(project, crypto.randomUUID(), owner.userId, now)
+      // People of the organization, as the old limit counted them.
+      ...Array.from({ length: 100 }, () => crypto.randomUUID()).flatMap(
+        (person) => [
+          env.DB.prepare(
+            "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Person', ?, 1, ?, ?)"
+          ).bind(person, `${person}@acme.test`, now, now),
+          env.DB.prepare(
+            "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
+          ).bind(crypto.randomUUID(), person, now),
+          env.DB.prepare(
+            "INSERT INTO project_members (project_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+          ).bind(project, person, owner.userId, now),
+        ]
       ),
     ]);
 

@@ -601,6 +601,9 @@ export const removeProject = async (
   requireNotStaff(by);
   const { project } = await requireProjectRole(env, by, id, "builder");
   const db = drizzle(env.DB);
+  // Counted just before the deletion: an item or member added in between
+  // goes with it uncounted, which the event's purpose (who deleted it, and
+  // when) doesn't need exact.
   const [held, [inIt]] = await Promise.all([
     itemsIn(env, [project.id]),
     db
