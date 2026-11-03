@@ -301,20 +301,34 @@ export interface Arrival {
   also?: SQL;
   /** Noted with its start. */
   noted: Readonly<Record<string, string>>;
-  /** The audit actions of a refusal and a drop, and the detail of both. */
+  /**
+   * The audit actions of a refusal and a drop, and the detail of both. An
+   * arrival `answered` is never held back, so never dropped: it has none.
+   */
   audited: {
     refused: string;
-    dropped: string;
+    dropped?: string;
     detail: Readonly<Record<string, string | number>>;
   };
   /** What its log lines say of it. */
   logged: Readonly<Record<string, string>>;
   /** Refused for good, as this, without a try (mail that may loop). */
   refusedAs?: string;
+  /**
+   * Its sender is answered at once and tries again on its own (a webhook
+   * trigger's delivery): without a place in the hour's room it is told to
+   * try again, holding nothing back; and when what `also` requires no
+   * longer holds as it is admitted, it is told so (`stale`), settling
+   * nothing, so the same arrival sent again as `also` now requires starts.
+   */
+  answered?: true;
 }
 
-/** What became of one trigger's turn at an event. */
-export type Outcome = "started" | "gone" | "retry" | "unavailable";
+/**
+ * What became of one trigger's turn at an event: `stale` only for an
+ * arrival `answered`, whose `also` no longer held as it was admitted.
+ */
+export type Outcome = "started" | "gone" | "retry" | "unavailable" | "stale";
 
 /**
  * `taker` at its hourly limit for `arrival`: held back since its first
@@ -374,7 +388,7 @@ const settle = async (
       actor: { type: "system" },
       action:
         settled === "dropped"
-          ? arrival.audited.dropped
+          ? (arrival.audited.dropped ?? arrival.audited.refused)
           : arrival.audited.refused,
       target: { type: "trigger", id: taker.id },
       detail: { ...arrival.audited.detail, version: taker.version, ...detail },
@@ -448,6 +462,9 @@ const refusalOf = async (
     );
     if (now.hears === 1) {
       return "retry";
+    }
+    if (arrival.answered === true) {
+      return "stale";
     }
     code = "permission.revoked";
   } else if (!refusedForGood.has(code)) {
@@ -538,6 +555,10 @@ export const startOnce = async (
     });
   }
   if (!(await tookPlace(env, taker, same))) {
+    if (arrival.answered === true) {
+      log.warn("workflow.trigger_rate_limited", arrival.logged);
+      return "retry";
+    }
     return await heldBack(env, taker, arrival);
   }
   if (arrival.refusedAs !== undefined) {

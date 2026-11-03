@@ -90,6 +90,11 @@ import {
   runFileResponse,
   runFileRouteOf,
 } from "./workflows/run-file-downloads.ts";
+import {
+  webhookTokenAt,
+  withoutWebhookToken,
+  workflowWebhookResponse,
+} from "./workflows/webhook-triggers.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -377,6 +382,31 @@ const adminSignedHandlers: ReadonlyMap<
   [connectVersionPath, connectVersionResponse],
 ]);
 
+/**
+ * The answer to a webhook core takes, if `pathname` is one's: a chat
+ * platform's (src/channels/door.ts), which only the platform's own signed
+ * requests get through, or a webhook trigger's deliveries
+ * (src/workflows/webhook-triggers.ts), which only those signed with its
+ * secret get through.
+ */
+const webhookResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
+): Promise<Response | undefined> => {
+  const platform = channelPlatformOf(pathname);
+  if (platform !== undefined) {
+    const { channelResponse } = await import("./channels/door.ts");
+    return await channelResponse(request, env, platform, requestId, ctx);
+  }
+  const token = webhookTokenAt(pathname);
+  return token === undefined
+    ? undefined
+    : await workflowWebhookResponse(request, env, token, requestId);
+};
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -439,12 +469,9 @@ const route = async (
   if (linked !== undefined) {
     return linked;
   }
-  // A chat platform's webhook (src/channels/door.ts), which only the
-  // platform's own signed requests get through.
-  const platform = channelPlatformOf(pathname);
-  if (platform !== undefined) {
-    const { channelResponse } = await import("./channels/door.ts");
-    return await channelResponse(request, env, platform, requestId, ctx);
+  const hooked = await webhookResponse(pathname, request, env, requestId, ctx);
+  if (hooked !== undefined) {
+    return hooked;
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
@@ -541,11 +568,11 @@ export const handleRequest = async (
     requestId
   );
   // One line per request. Only the path: query strings can carry tokens,
-  // and so can an artifact's path, without it.
+  // and so can an artifact's path and a webhook trigger's, without them.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: withoutArtifactToken(url.pathname),
+    path: withoutWebhookToken(withoutArtifactToken(url.pathname)),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,

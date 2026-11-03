@@ -252,6 +252,41 @@ describe("guest chat rate limit", () => {
     expect(statuses).toStrictEqual([200, 200, 429, 200]);
   });
 
+  it("limits a webhook trigger's URL per client address and per URL, by its own limit, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const before = cores.received.length;
+    const deliver = async (ip: string, token: string) =>
+      await worker.fetch(
+        new Request(`https://acme.guest.test/api/workflow-webhooks/${token}`, {
+          method: "POST",
+          headers: { "cf-connecting-ip": ip },
+          body: "{}",
+        }),
+        { ...env, WEBHOOK_RATE_LIMIT: limiter }
+      );
+    const one = "a".repeat(32);
+    const responses = [
+      // One address guessing URLs: its own budget runs out.
+      await deliver("192.0.2.41", "b".repeat(32)),
+      await deliver("192.0.2.41", "c".repeat(32)),
+      await deliver("192.0.2.41", "d".repeat(32)),
+      // One URL from many addresses: its budget runs out too.
+      await deliver("192.0.2.42", one),
+      await deliver("192.0.2.43", one),
+      await deliver("192.0.2.44", one),
+    ];
+    const refused = responses.at(2);
+    expect({
+      statuses: responses.map(({ status }) => status),
+      retryAfter: refused?.headers.get("retry-after"),
+      reached: cores.received.length - before,
+    }).toStrictEqual({
+      statuses: [200, 200, 429, 200, 200, 429],
+      retryAfter: "60",
+      reached: 4,
+    });
+  });
+
   it("refuses a limited endpoint whose limiter a stage doesn't bind, never letting it through unlimited", async () => {
     const before = cores.received.length;
     // A stage whose config left the visitor's limit out.

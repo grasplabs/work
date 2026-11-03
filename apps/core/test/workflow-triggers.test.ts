@@ -133,6 +133,7 @@ describe("an independent workflow's triggers over /rpc", () => {
         config: nightly,
         nextAt: "",
         address: null,
+        webhook: null,
         stopped: false,
       },
       nextAtIsAhead: true,
